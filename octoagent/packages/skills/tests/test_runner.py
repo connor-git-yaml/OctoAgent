@@ -12,7 +12,7 @@ from octoagent.skills.models import (
     SkillRunStatus,
 )
 from octoagent.skills.runner import SkillRunner
-from octoagent.tooling.models import ToolResult
+from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolResult
 from pydantic import BaseModel
 
 from .conftest import EchoInput, QueueModelClient
@@ -171,6 +171,81 @@ async def test_runner_disallowed_tool(
 
     assert result.status == SkillRunStatus.FAILED
     assert result.error_category == ErrorCategory.TOOL_EXECUTION_ERROR
+
+
+async def test_runner_mcp_tool_exempt_from_allowlist(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    """Feature 077: LiteLLM schema 层放行 mcp.* 工具后，runner 执行层也必须
+    同步放行（is_runtime_exempt_tool），否则 LLM 看得见但调不动，且会在
+    history 留下孤立 function_call 触发 Responses API 400。"""
+    tool_broker.set_tool_meta(
+        "mcp.servers.list",
+        ToolMeta(
+            name="mcp.servers.list",
+            description="列出已注册的 MCP 服务",
+            parameters_json_schema={"type": "object", "properties": {}},
+            side_effect_level=SideEffectLevel.NONE,
+            tool_group="mcp",
+        ),
+    )
+    outputs = [
+        SkillOutputEnvelope(
+            content="check mcp",
+            complete=False,
+            tool_calls=[{"tool_name": "mcp.servers.list", "arguments": {}}],
+        ),
+        SkillOutputEnvelope(content="done", complete=True),
+    ]
+    client = QueueModelClient(outputs)
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+
+    result = await runner.run(
+        manifest=echo_manifest,  # tools_allowed=["system.echo", "system.file_read"]，不含 mcp.*
+        execution_context=execution_context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    assert result.status == SkillRunStatus.SUCCEEDED
+    assert any(call[0] == "mcp.servers.list" for call in tool_broker.calls)
+
+
+async def test_runner_non_mcp_tool_not_exempted(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    """Feature 077 回归保护：豁免仅针对 tool_group=='mcp'，其他 tool_group
+    即使名字看似符合格式也不放行。"""
+    tool_broker.set_tool_meta(
+        "danger.exec",
+        ToolMeta(
+            name="danger.exec",
+            description="执行命令",
+            parameters_json_schema={"type": "object"},
+            side_effect_level=SideEffectLevel.IRREVERSIBLE,
+            tool_group="system",  # 非 mcp
+        ),
+    )
+    outputs = [
+        SkillOutputEnvelope(
+            content="attempt danger",
+            complete=False,
+            tool_calls=[{"tool_name": "danger.exec", "arguments": {"cmd": "rm -rf /"}}],
+        ),
+    ] * 4  # 连续触发超过 max_attempts=3
+    client = QueueModelClient(outputs)
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+
+    result = await runner.run(
+        manifest=echo_manifest,
+        execution_context=execution_context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    assert result.status == SkillRunStatus.FAILED
+    assert result.error_category == ErrorCategory.TOOL_EXECUTION_ERROR
+    assert all(call[0] != "danger.exec" for call in tool_broker.calls)
 
 
 async def test_runner_inherit_mode_uses_runtime_mounted_tools(

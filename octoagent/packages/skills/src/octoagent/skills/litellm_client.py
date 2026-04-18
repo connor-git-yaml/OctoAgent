@@ -19,6 +19,7 @@ from .models import (
     SkillOutputEnvelope,
     ToolCallSpec,
     ToolFeedbackMessage,
+    is_runtime_exempt_tool,
     resolve_effective_tool_allowlist,
 )
 
@@ -150,7 +151,7 @@ class LiteLLMSkillClient:
         filtered_out = []
         for tool_meta in all_tools:
             # MCP 动态工具额外放行（不受静态 tools_allowed 白名单限制）
-            is_mcp = getattr(tool_meta, "tool_group", "") == "mcp" and tool_meta.name.startswith("mcp.") and "." in tool_meta.name[4:]
+            is_mcp = is_runtime_exempt_tool(tool_meta.name, getattr(tool_meta, "tool_group", ""))
             if is_mcp and tool_meta.name not in allowed_tool_names:
                 mcp_extra.append(tool_meta.name)
             if tool_meta.name not in allowed_tool_names and not is_mcp:
@@ -317,6 +318,22 @@ class LiteLLMSkillClient:
         - assistant (有 tool_calls) → 多个 {type: "function_call", call_id, name, arguments}
         - tool → {type: "function_call_output", call_id, output}
         """
+        # 预扫 known_call_ids：收集所有 function_call（assistant.tool_calls 以及旧
+        # type-based 格式）的 call_id。用于在转换 Responses API input 时过滤孤立
+        # 的 function_call_output——防止历史片段重组、权限拒绝、压缩路径等造成的
+        # tool 消息无对应 function_call，触发 Responses API 400。
+        known_call_ids: set[str] = set()
+        for message in history:
+            if str(message.get("role", "")).strip() == "assistant":
+                for tc in message.get("tool_calls") or []:
+                    cid = str(tc.get("id", "")).strip()
+                    if cid:
+                        known_call_ids.add(cid)
+            elif str(message.get("type", "")).strip() == "function_call":
+                cid = str(message.get("call_id", "")).strip()
+                if cid:
+                    known_call_ids.add(cid)
+
         items: list[dict[str, Any]] = []
         for message in history:
             role = str(message.get("role", "")).strip()
@@ -326,12 +343,18 @@ class LiteLLMSkillClient:
 
             if role == "tool":
                 call_id = str(message.get("tool_call_id", "")).strip()
-                if call_id:
+                if call_id and call_id in known_call_ids:
                     items.append({
                         "type": "function_call_output",
                         "call_id": call_id,
                         "output": str(message.get("content", "")),
                     })
+                elif call_id:
+                    log.warning(
+                        "orphan_tool_message_skipped",
+                        call_id=call_id,
+                        known_count=len(known_call_ids),
+                    )
                 continue
 
             if role == "assistant":
@@ -376,12 +399,18 @@ class LiteLLMSkillClient:
                     })
             elif message_type == "function_call_output":
                 call_id = str(message.get("call_id", "")).strip()
-                if call_id:
+                if call_id and call_id in known_call_ids:
                     items.append({
                         "type": "function_call_output",
                         "call_id": call_id,
                         "output": str(message.get("output", "")),
                     })
+                elif call_id:
+                    log.warning(
+                        "orphan_legacy_function_call_output_skipped",
+                        call_id=call_id,
+                        known_count=len(known_call_ids),
+                    )
 
         return items
 

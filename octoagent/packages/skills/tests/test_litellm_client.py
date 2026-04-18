@@ -470,3 +470,75 @@ async def test_litellm_skill_client_inherit_mode_uses_runtime_mounted_tools(
             },
         }
     ]
+
+
+# ────────────────────────────────────────────────────────────────────
+# Feature 077: _history_to_responses_input 孤立 function_call_output 过滤
+# ────────────────────────────────────────────────────────────────────
+
+
+def test_history_to_responses_input_paired_tool_included() -> None:
+    """正常场景：tool 消息有对应的 assistant.tool_calls 时，正常转换为 function_call_output。"""
+    history = [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_abc",
+                    "type": "function",
+                    "function": {"name": "mcp.servers.list", "arguments": "{}"},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": "call_abc",
+            "content": "[server_a, server_b]",
+        },
+    ]
+
+    items = LiteLLMSkillClient._history_to_responses_input(history)
+
+    output_items = [item for item in items if item.get("type") == "function_call_output"]
+    assert len(output_items) == 1
+    assert output_items[0]["call_id"] == "call_abc"
+    assert output_items[0]["output"] == "[server_a, server_b]"
+
+
+def test_history_to_responses_input_orphan_tool_filtered() -> None:
+    """Feature 077 防御：tool 消息无对应 assistant.tool_calls 时，过滤掉该 function_call_output，
+    避免 Responses API 返回 'No tool call found for function call output' 400。"""
+    history = [
+        {"role": "user", "content": "前一轮问题"},
+        # 注意：没有对应的 assistant.tool_calls，但 tool 消息留下
+        {
+            "role": "tool",
+            "tool_call_id": "call_orphan",
+            "content": "残留的结果",
+        },
+    ]
+
+    items = LiteLLMSkillClient._history_to_responses_input(history)
+
+    assert not any(
+        item.get("type") == "function_call_output" and item.get("call_id") == "call_orphan"
+        for item in items
+    ), "孤立的 function_call_output 必须被过滤"
+
+
+def test_history_to_responses_input_legacy_orphan_filtered() -> None:
+    """兼容旧 type-based 格式：孤立的 function_call_output 也应被过滤。"""
+    history = [
+        {
+            "type": "function_call_output",
+            "call_id": "call_legacy_orphan",
+            "output": "没有对应 function_call 的旧格式 output",
+        },
+    ]
+
+    items = LiteLLMSkillClient._history_to_responses_input(history)
+
+    assert not any(
+        item.get("type") == "function_call_output" for item in items
+    ), "旧格式的孤立 function_call_output 也必须被过滤"

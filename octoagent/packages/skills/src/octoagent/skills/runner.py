@@ -38,6 +38,7 @@ from .models import (
     ToolTargetTracker,
     UsageLimits,
     UsageTracker,
+    is_runtime_exempt_tool,
     resolve_effective_tool_allowlist,
 )
 from .litellm_client import LLMCallError
@@ -409,6 +410,12 @@ class SkillRunner:
         )
         for call in tool_calls:
             if allowed_tool_names and call.tool_name not in allowed_tool_names:
+                # MCP 动态工具豁免：与 LiteLLM schema 层放行策略保持一致，
+                # 避免 LLM 在 schema 中看得见 mcp.* 但执行层拒绝导致孤立 tool_call。
+                tool_meta = await self._tool_broker.get_tool_meta(call.tool_name)
+                tool_group = tool_meta.tool_group if tool_meta else ""
+                if is_runtime_exempt_tool(call.tool_name, tool_group):
+                    continue
                 raise SkillToolExecutionError(
                     f"工具 '{call.tool_name}' 不在当前 skill 可用工具集合中"
                 )

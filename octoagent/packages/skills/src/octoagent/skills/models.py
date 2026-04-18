@@ -452,3 +452,17 @@ def resolve_effective_tool_allowlist(
     if inherited:
         return inherited
     return [str(item).strip() for item in tools_allowed if str(item).strip()]
+
+
+def is_runtime_exempt_tool(tool_name: str, tool_group: str) -> bool:
+    """判断工具是否属于 runtime 豁免类别（不受静态白名单限制）。
+
+    当前豁免类别：MCP 动态工具（tool_group == "mcp"）。MCP 工具在注册时
+    不可预知具体名称，由 LiteLLM schema 层动态放行给 LLM；执行层通过本
+    函数保持与 schema 层一致的豁免判断，避免 LLM 看得见但调不动。
+    """
+    return (
+        tool_group == "mcp"
+        and tool_name.startswith("mcp.")
+        and "." in tool_name[4:]
+    )
