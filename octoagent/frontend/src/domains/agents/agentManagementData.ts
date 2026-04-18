@@ -90,6 +90,13 @@ export interface AgentEditorDraft {
   defaultToolGroups: string[];
   selectedTools: string[];
   capabilitySelection: Record<string, boolean>;
+  /**
+   * 隐藏态：保留 runtime_kinds 原样 round-trip。Feature 076 已删除 UI，
+   * 但后端 WorkerProfileDomainService._review_worker_profile_draft 在 raw 缺失时
+   * 会 fallback 到 builtin.runtime_kinds（general → 4 runtime），
+   * 前端仍需原样提交以避免新建/克隆被静默放宽为全量 runtime。
+   */
+  runtimeKinds: string[];
   originKind: "custom" | "cloned" | "extracted";
 }
 
@@ -112,6 +119,8 @@ const DEFAULT_TOOL_PROFILE = "standard";
 /** Feature 061: 默认权限 Preset */
 const DEFAULT_PERMISSION_PRESET = "normal";
 const DEFAULT_MODEL_ALIAS = "main";
+/** Feature 076: 新建 Agent 的默认 runtime，防止后端 fallback 到 general builtin 的四种 runtime */
+const DEFAULT_RUNTIME_KINDS = ["worker"];
 
 function toRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -445,6 +454,8 @@ function buildDraftFromProfileLike(
     defaultToolGroups: profile?.static_config.default_tool_groups ?? [],
     selectedTools: profile?.static_config.selected_tools ?? [],
     capabilitySelection: buildCapabilitySelectionState(capabilityProviderEntries, metadata),
+    runtimeKinds:
+      profile?.static_config.runtime_kinds?.length ? profile.static_config.runtime_kinds : DEFAULT_RUNTIME_KINDS,
     originKind:
       profile?.origin_kind === "cloned" || profile?.origin_kind === "extracted"
         ? profile.origin_kind
@@ -519,6 +530,7 @@ export function buildAgentPayload(
     role_card: draft.roleCard,
     default_tool_groups: uniqueStrings(draft.defaultToolGroups),
     selected_tools: uniqueStrings(draft.selectedTools),
+    runtime_kinds: uniqueStrings(draft.runtimeKinds),
     metadata: mergeCapabilitySelectionMetadata({}, capabilityProviderEntries, draft.capabilitySelection),
     origin_kind: draft.originKind,
   };

@@ -5051,6 +5051,98 @@ class TestControlPlaneApi:
         assert review_payload["ready"] is False
         assert any("model_alias 必须引用已存在的模型别名" in item for item in review_payload["save_errors"])
 
+    async def test_worker_profile_create_round_trips_runtime_kinds(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        """Feature 076 regression: Web 创建 Agent 时 draft 携带的 runtime_kinds 必须原样落库，
+        不能被后端的 builtin fallback 静默放宽。"""
+        project = await control_plane_app.state.store_group.project_store.get_default_project()
+        assert project is not None
+        draft = {
+            "scope": "project",
+            "project_id": project.project_id,
+            "name": "Runtime Round-Trip Agent",
+            "summary": "验证 runtime_kinds round-trip。",
+            "model_alias": "main",
+            "tool_profile": "standard",
+            "default_tool_groups": ["project"],
+            "runtime_kinds": ["worker"],
+        }
+
+        create_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker_profile.create",
+                "surface": "web",
+                "actor": {"actor_id": "user:web", "actor_label": "Owner"},
+                "params": {"draft": draft},
+            },
+        )
+        assert create_resp.status_code == 200
+        profile_id = create_resp.json()["result"]["data"]["profile_id"]
+
+        profiles_resp = await control_plane_client.get(
+            "/api/control/resources/worker-profiles"
+        )
+        assert profiles_resp.status_code == 200
+        created = next(
+            item for item in profiles_resp.json()["profiles"] if item["profile_id"] == profile_id
+        )
+        assert created["static_config"]["runtime_kinds"] == ["worker"]
+
+    async def test_worker_profile_create_falls_back_when_runtime_kinds_missing(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_memory_control_plane,
+    ) -> None:
+        """Feature 076 regression guard: 若 draft 缺失 runtime_kinds 字段，后端会 fallback 到
+        general builtin 的全量 runtime（worker + subagent + acp_runtime + graph_agent）。
+        此测试锁定该行为，提醒前端必须原样携带 runtime_kinds。"""
+        project = await control_plane_app.state.store_group.project_store.get_default_project()
+        assert project is not None
+        draft_without_runtime_kinds = {
+            "scope": "project",
+            "project_id": project.project_id,
+            "name": "Runtime Fallback Agent",
+            "summary": "验证 runtime_kinds 缺失时的 fallback 行为。",
+            "model_alias": "main",
+            "tool_profile": "standard",
+            "default_tool_groups": ["project"],
+            # 故意不带 runtime_kinds
+        }
+
+        create_resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "worker_profile.create",
+                "surface": "web",
+                "actor": {"actor_id": "user:web", "actor_label": "Owner"},
+                "params": {"draft": draft_without_runtime_kinds},
+            },
+        )
+        assert create_resp.status_code == 200
+        profile_id = create_resp.json()["result"]["data"]["profile_id"]
+
+        profiles_resp = await control_plane_client.get(
+            "/api/control/resources/worker-profiles"
+        )
+        assert profiles_resp.status_code == 200
+        created = next(
+            item for item in profiles_resp.json()["profiles"] if item["profile_id"] == profile_id
+        )
+        assert set(created["static_config"]["runtime_kinds"]) == {
+            "worker",
+            "subagent",
+            "acp_runtime",
+            "graph_agent",
+        }
+
     async def test_worker_profile_spawn_and_extract_actions(
         self,
         control_plane_app,
