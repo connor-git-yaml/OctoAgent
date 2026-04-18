@@ -90,7 +90,6 @@ export interface AgentEditorDraft {
   defaultToolGroups: string[];
   selectedTools: string[];
   capabilitySelection: Record<string, boolean>;
-  runtimeKinds: string[];
   originKind: "custom" | "cloned" | "extracted";
 }
 
@@ -113,7 +112,6 @@ const DEFAULT_TOOL_PROFILE = "standard";
 /** Feature 061: 默认权限 Preset */
 const DEFAULT_PERMISSION_PRESET = "normal";
 const DEFAULT_MODEL_ALIAS = "main";
-const DEFAULT_RUNTIME_KINDS = ["worker"];
 
 function toRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -447,8 +445,6 @@ function buildDraftFromProfileLike(
     defaultToolGroups: profile?.static_config.default_tool_groups ?? [],
     selectedTools: profile?.static_config.selected_tools ?? [],
     capabilitySelection: buildCapabilitySelectionState(capabilityProviderEntries, metadata),
-    runtimeKinds:
-      profile?.static_config.runtime_kinds?.length ? profile.static_config.runtime_kinds : DEFAULT_RUNTIME_KINDS,
     originKind:
       profile?.origin_kind === "cloned" || profile?.origin_kind === "extracted"
         ? profile.origin_kind
@@ -523,7 +519,6 @@ export function buildAgentPayload(
     role_card: draft.roleCard,
     default_tool_groups: uniqueStrings(draft.defaultToolGroups),
     selected_tools: uniqueStrings(draft.selectedTools),
-    runtime_kinds: uniqueStrings(draft.runtimeKinds),
     metadata: mergeCapabilitySelectionMetadata({}, capabilityProviderEntries, draft.capabilitySelection),
     origin_kind: draft.originKind,
   };

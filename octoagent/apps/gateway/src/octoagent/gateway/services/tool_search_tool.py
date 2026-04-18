@@ -83,7 +83,6 @@ def create_tool_search_handler(
         manifest_ref="builtin://tool_search",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def tool_search(

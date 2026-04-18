@@ -297,7 +297,6 @@ class CapabilityPackService:
                 availability_reason=self._resolve_tool_availability_reason(meta.name),
                 install_hint=self._resolve_tool_install_hint(meta.name),
                 entrypoints=self._resolve_tool_entrypoints(meta.name),
-                runtime_kinds=self._resolve_tool_runtime_kinds(meta.name),
                 metadata=self._enrich_mcp_metadata(
                     dict(meta.metadata), mcp_install_source_map
                 ),
@@ -651,7 +650,6 @@ class CapabilityPackService:
                         recommended_action=bundled.install_hint,
                         metadata={
                             "entrypoints": list(bundled.entrypoints),
-                            "runtime_kinds": [item.value for item in bundled.runtime_kinds],
                         },
                     )
                 )
@@ -697,7 +695,6 @@ class CapabilityPackService:
                             recommended_action=bundled.install_hint,
                             metadata={
                                 "entrypoints": list(bundled.entrypoints),
-                                "runtime_kinds": [item.value for item in bundled.runtime_kinds],
                             },
                         )
                     )
@@ -794,8 +791,6 @@ class CapabilityPackService:
             "{{worker_capabilities}}": ", ".join(worker_profile.capabilities) or "none",
             "{{default_tool_profile}}": worker_profile.default_tool_profile,
             "{{default_tool_groups}}": ", ".join(worker_profile.default_tool_groups) or "none",
-            "{{runtime_kinds}}": ", ".join(item.value for item in worker_profile.runtime_kinds)
-            or "none",
         }
         rendered: list[dict[str, Any]] = []
         for file in self._bootstrap_templates.values():
@@ -1077,7 +1072,6 @@ class CapabilityPackService:
                     "Surface: {{surface}}\n"
                     "Worker Type: {{worker_type}}\n"
                     "Capabilities: {{worker_capabilities}}\n"
-                    "Runtime Kinds: {{runtime_kinds}}\n"
                     "Ambient Degraded Reasons: {{ambient_degraded_reasons}}\n"
                     "必须继续走 ToolBroker / Policy / audit，不得绕过治理面。"
                 ),
@@ -1710,30 +1704,6 @@ class CapabilityPackService:
         if tool_name.startswith("mcp."):
             return ["agent_runtime", "web"]
         return explicit.get(tool_name, ["agent_runtime"])
-
-    @staticmethod
-    def _resolve_tool_runtime_kinds(tool_name: str) -> list[RuntimeKind]:
-        if tool_name == "subagents.spawn":
-            return [RuntimeKind.SUBAGENT, RuntimeKind.GRAPH_AGENT]
-        if tool_name in {"subagents.list", "subagents.kill", "subagents.steer", "work.plan"}:
-            return [RuntimeKind.WORKER, RuntimeKind.SUBAGENT, RuntimeKind.GRAPH_AGENT]
-        if tool_name in {"gateway.inspect", "cron.list", "nodes.list", "runtime.inspect"}:
-            return [RuntimeKind.WORKER, RuntimeKind.ACP_RUNTIME]
-        if tool_name in {"mcp.servers.list", "mcp.tools.list", "mcp.tools.refresh"}:
-            return [
-                RuntimeKind.WORKER,
-                RuntimeKind.SUBAGENT,
-                RuntimeKind.GRAPH_AGENT,
-                RuntimeKind.ACP_RUNTIME,
-            ]
-        if tool_name.startswith("mcp."):
-            return [
-                RuntimeKind.WORKER,
-                RuntimeKind.SUBAGENT,
-                RuntimeKind.GRAPH_AGENT,
-                RuntimeKind.ACP_RUNTIME,
-            ]
-        return [RuntimeKind.WORKER, RuntimeKind.SUBAGENT, RuntimeKind.GRAPH_AGENT]
 
     @staticmethod
     def _validate_remote_url(url: str) -> str:

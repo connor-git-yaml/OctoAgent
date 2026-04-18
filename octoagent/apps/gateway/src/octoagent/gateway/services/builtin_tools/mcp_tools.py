@@ -34,7 +34,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://mcp.servers.list",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
         },
     )
     async def mcp_servers_list() -> str:
@@ -61,7 +60,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://mcp.tools.list",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
         },
     )
     async def mcp_tools_list(server_name: str = "", limit: int = 50) -> str:
@@ -89,7 +87,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://mcp.tools.refresh",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
         },
     )
     async def mcp_tools_refresh() -> str:
@@ -118,7 +115,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://mcp.install",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
         },
     )
     async def mcp_install(
@@ -290,7 +286,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://mcp.install_status",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
         },
     )
     async def mcp_install_status(task_id: str) -> str:
@@ -342,7 +337,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://mcp.uninstall",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
         },
     )
     async def mcp_uninstall(server_id: str) -> str:

@@ -149,11 +149,6 @@ function buildBehaviorScopeGroups(summary: BehaviorSystemSummary | undefined): B
 }
 
 
-function toggleStringValue(values: string[], value: string): string[] {
-  return values.includes(value) ? values.filter((item) => item !== value) : [...values, value];
-}
-
-
 function renderAgentCard(
   agent: AgentCardViewModel,
   options: {
@@ -536,23 +531,6 @@ export default function AgentCenter() {
     );
   }
 
-  function updateDraftList(
-    key: "runtimeKinds",
-    value: string
-  ) {
-    setEditorState((current) =>
-      current
-        ? {
-            ...current,
-            draft: {
-              ...current.draft,
-              [key]: toggleStringValue(current.draft[key], value),
-            },
-          }
-        : current
-    );
-  }
-
   async function handleSave() {
     if (!editorState) {
       return;
@@ -785,7 +763,6 @@ export default function AgentCenter() {
                 approvalOverrides={approvalOverrides}
                 approvalOverridesLoading={approvalOverridesLoading}
                 onChangeDraft={updateDraft}
-                onToggleRuntimeKind={(value) => updateDraftList("runtimeKinds", value)}
                 onOpenBehaviorFile={(path, fileId) => void handleOpenBehaviorFile(path, fileId)}
                 onRevokeOverride={(agentRuntimeId, toolName) => void handleRevokeOverride(agentRuntimeId, toolName)}
                 onSave={() => void handleSave()}

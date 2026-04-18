@@ -74,7 +74,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://pdf.inspect",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def pdf_inspect(path: str) -> str:
@@ -91,7 +90,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://image.inspect",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def image_inspect(path: str) -> str:
@@ -108,7 +106,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://tts.speak",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def tts_speak(text: str, voice: str = "") -> str:
@@ -138,7 +135,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://canvas.write",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def canvas_write(name: str, content: str, description: str = "") -> str:
@@ -171,7 +167,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://behavior.write_file",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def behavior_write_file(
@@ -320,7 +315,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://skills",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent"],
         },
     )
     async def skills(action: str, name: str = "") -> str:

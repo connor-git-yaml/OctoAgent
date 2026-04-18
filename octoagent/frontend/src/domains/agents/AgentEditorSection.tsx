@@ -7,13 +7,6 @@ const BEHAVIOR_FILE_META: Record<string, { title: string; description: string }>
   "HEARTBEAT.md": { title: "节奏", description: "运行策略和自检。" },
 };
 
-const RUNTIME_KIND_OPTIONS: Array<{ value: string; label: string; description: string }> = [
-  { value: "worker", label: "Worker", description: "日常任务拆分和持续推进。" },
-  { value: "subagent", label: "Subagent", description: "短链路专项协助。" },
-  { value: "acp_runtime", label: "ACP Runtime", description: "需要工具 runtime 的执行场景。" },
-  { value: "graph_agent", label: "Graph Agent", description: "固定步骤的流程处理。" },
-];
-
 interface AgentEditorSectionProps {
   title: string;
   description: string;
@@ -27,7 +20,6 @@ interface AgentEditorSectionProps {
   approvalOverrides: ApprovalOverrideDisplay[];
   approvalOverridesLoading: boolean;
   onChangeDraft: <Key extends keyof AgentEditorDraft>(key: Key, value: AgentEditorDraft[Key]) => void;
-  onToggleRuntimeKind: (value: string) => void;
   onOpenBehaviorFile: (path: string, fileId: string) => void;
   onRevokeOverride: (agentRuntimeId: string, toolName: string) => void;
   onSave: () => void;
@@ -61,7 +53,6 @@ export default function AgentEditorSection({
   approvalOverrides,
   approvalOverridesLoading,
   onChangeDraft,
-  onToggleRuntimeKind,
   onOpenBehaviorFile,
   onRevokeOverride,
   onSave,
@@ -243,30 +234,6 @@ export default function AgentEditorSection({
         </div>
       )}
 
-      {/* 高级设置 */}
-      <details className="wb-agent-details">
-        <summary>高级设置</summary>
-        <div className="wb-agent-editor-grid">
-          <div className="wb-field">
-            <span>运行形态</span>
-            <div className="wb-agent-check-grid wb-agent-check-grid--compact">
-              {RUNTIME_KIND_OPTIONS.map((option) => (
-                <label key={option.value} className="wb-agent-option-card wb-agent-option-card--compact">
-                  <div className="wb-agent-option-copy">
-                    <strong>{option.label}</strong>
-                    <p>{option.description}</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={draft.runtimeKinds.includes(option.value)}
-                    onChange={() => onToggleRuntimeKind(option.value)}
-                  />
-                </label>
-              ))}
-            </div>
-          </div>
-        </div>
-      </details>
     </section>
   );
 }

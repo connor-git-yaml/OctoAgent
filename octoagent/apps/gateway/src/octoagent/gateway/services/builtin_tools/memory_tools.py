@@ -61,7 +61,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://memory.read",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def memory_read(
@@ -90,7 +89,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://memory.browse",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def memory_browse(
@@ -127,7 +125,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://memory.search",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def memory_search(
@@ -180,7 +177,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://memory.citations",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def memory_citations(
@@ -221,7 +217,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://memory.recall",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def memory_recall(
@@ -301,7 +296,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://memory.write",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def memory_write(

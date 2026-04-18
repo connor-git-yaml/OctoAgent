@@ -21,7 +21,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://web.fetch",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def web_fetch(
@@ -58,7 +57,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://web.search",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def web_search(

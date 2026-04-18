@@ -30,7 +30,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://browser.open",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def browser_open(url: str, timeout_seconds: float = 30.0) -> str:
@@ -53,7 +52,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://browser.status",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
         },
     )
     async def browser_status() -> str:
@@ -81,7 +79,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://browser.navigate",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def browser_navigate(url: str, timeout_seconds: float = 30.0) -> str:
@@ -104,7 +101,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://browser.snapshot",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def browser_snapshot(max_chars: int = 100_000, link_limit: int = 20) -> str:
@@ -129,7 +125,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://browser.act",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def browser_act(
@@ -167,7 +162,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://browser.close",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def browser_close() -> str:

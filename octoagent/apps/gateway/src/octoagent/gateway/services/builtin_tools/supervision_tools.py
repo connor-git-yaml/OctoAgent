@@ -30,7 +30,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://subagents.list",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def subagents_list(limit: int = 20, include_terminal: bool = False) -> str:
@@ -83,7 +82,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://work.plan",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def work_plan(objective: str = "") -> str:

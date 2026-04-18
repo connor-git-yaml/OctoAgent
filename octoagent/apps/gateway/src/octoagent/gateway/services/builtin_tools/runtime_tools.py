@@ -24,7 +24,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://project.inspect",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def project_inspect(project_id: str | None = None) -> str:
@@ -47,7 +46,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://artifact.list",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def artifact_list(task_id: str) -> str:
@@ -70,7 +68,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://runtime.inspect",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "acp_runtime"],
         },
     )
     async def runtime_inspect() -> str:
@@ -99,7 +96,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://gateway.inspect",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "acp_runtime"],
         },
     )
     async def gateway_inspect() -> str:
@@ -134,7 +130,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://nodes.list",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "acp_runtime"],
         },
     )
     async def nodes_list() -> str:
@@ -163,7 +158,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://cron.list",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "acp_runtime"],
         },
     )
     async def cron_list(limit: int = 20) -> str:

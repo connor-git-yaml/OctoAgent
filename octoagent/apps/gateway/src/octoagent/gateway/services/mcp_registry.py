@@ -429,7 +429,6 @@ class McpRegistryService:
                 else tool.annotations.model_dump(mode="json", by_alias=True),
                 "mount_policy": self.get_mount_policy(config.name),
                 "entrypoints": ["agent_runtime", "web"],
-                "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
                 "output_schema": tool.outputSchema,
             },
         )

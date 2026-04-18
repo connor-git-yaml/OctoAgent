@@ -39,7 +39,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://work.inspect",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def work_inspect(work_id: str) -> str:
@@ -71,7 +70,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://subagents.spawn",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["subagent", "graph_agent"],
         },
     )
     async def subagents_spawn(
@@ -121,7 +119,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://subagents.kill",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def subagents_kill(
@@ -163,7 +160,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://subagents.steer",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def subagents_steer(
@@ -212,7 +208,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://work.merge",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def work_merge(summary: str = "merged by builtin tool") -> str:
@@ -249,7 +244,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://work.delete",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def work_delete(reason: str = "deleted by builtin tool") -> str:

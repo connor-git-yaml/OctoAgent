@@ -45,7 +45,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://config.inspect",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def config_inspect(section: str = "") -> str:
@@ -75,7 +74,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://config.add_provider",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def config_add_provider(
@@ -170,7 +168,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://config.set_model_alias",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def config_set_model_alias(
@@ -237,7 +234,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://config.sync",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def config_sync() -> str:
@@ -285,7 +281,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://setup.review",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def setup_review(draft_json: str = "{}") -> str:
@@ -328,7 +323,6 @@ async def register(broker, deps: ToolDeps) -> None:
         manifest_ref="builtin://setup.quick_connect",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def setup_quick_connect(draft_json: str) -> str:

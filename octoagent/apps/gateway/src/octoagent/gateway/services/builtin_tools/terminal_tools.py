@@ -25,7 +25,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://terminal.exec",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def terminal_exec(

@@ -24,7 +24,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://task.inspect",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def task_inspect(task_id: str) -> str:
@@ -59,7 +58,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://runtime.now",
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
         },
     )
     async def runtime_now(timezone: str = "", locale: str = "") -> str:
@@ -103,7 +101,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://agents.list",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent", "acp_runtime"],
         },
     )
     async def agents_list() -> str:
@@ -128,7 +125,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://sessions.list",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def sessions_list(limit: int = 20, status: str = "") -> str:
@@ -161,7 +157,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         manifest_ref="builtin://session.status",
         metadata={
             "entrypoints": ["agent_runtime", "web"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def session_status(task_id: str) -> str:

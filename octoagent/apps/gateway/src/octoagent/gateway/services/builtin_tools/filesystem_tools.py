@@ -22,7 +22,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         path_escalation=True,
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def filesystem_list_dir(
@@ -78,7 +77,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         path_escalation=True,
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def filesystem_read_text(
@@ -120,7 +118,6 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         path_escalation=True,
         metadata={
             "entrypoints": ["agent_runtime"],
-            "runtime_kinds": ["worker", "subagent", "graph_agent"],
         },
     )
     async def filesystem_write_text(
