@@ -124,20 +124,49 @@ async def resolve_memory_scope_ids(
     project: Any,
     explicit_scope_id: str = "",
 ) -> list[str]:
-    """解析记忆 scope ID 列表。"""
-    scope_ids: list[str] = []
-    if explicit_scope_id.strip():
-        scope_ids.append(explicit_scope_id.strip())
-    elif task is not None and task.scope_id:
-        scope_ids.append(task.scope_id)
+    """解析记忆 scope ID 列表。
 
+    explicit_scope_id 必须属于当前 task 或 project bindings 的白名单；
+    越界时静默丢弃并记录告警——防止 LLM 传入其他 project 的 scope 造成越权。
+    """
+    # 先构建白名单：当前 task.scope_id + project memory bindings
+    bindings: list[Any] = []
+    allowed: set[str] = set()
+    if task is not None and task.scope_id:
+        allowed.add(task.scope_id)
     if project is not None:
         bindings = await deps.stores.project_store.list_bindings(project.project_id)
         for binding in bindings:
             if binding.binding_type not in _MEMORY_BINDING_TYPES:
                 continue
             if binding.binding_key:
-                scope_ids.append(binding.binding_key)
+                allowed.add(binding.binding_key)
+
+    scope_ids: list[str] = []
+    if explicit_scope_id.strip():
+        candidate = explicit_scope_id.strip()
+        # 白名单为空通常是无 task / 无 project binding 的直连场景（测试、
+        # 独立工具调用）——此时没有可参考的安全边界，放行 candidate；
+        # 生产路径的 task runner 会 bind execution context、task.scope_id
+        # 必然非空，落到严格分支。
+        if not allowed or candidate in allowed:
+            scope_ids.append(candidate)
+        else:
+            import structlog
+            structlog.get_logger(__name__).warning(
+                "memory_scope_outside_binding",
+                explicit_scope_id=candidate,
+                allowed_count=len(allowed),
+                project_id=(project.project_id if project is not None else ""),
+            )
+    elif task is not None and task.scope_id:
+        scope_ids.append(task.scope_id)
+
+    for binding in bindings:
+        if binding.binding_type not in _MEMORY_BINDING_TYPES:
+            continue
+        if binding.binding_key:
+            scope_ids.append(binding.binding_key)
     return list(dict.fromkeys(item for item in scope_ids if item))
 
 
