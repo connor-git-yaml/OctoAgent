@@ -208,7 +208,7 @@ class TestMigration063:
             """)
             await conn.commit()
 
-        result = await run_migration(db_path)
+        result = await run_migration(db_path, project_scope_id="memory/shared/butler")
         assert result["total"] == 0
 
     @pytest.mark.asyncio

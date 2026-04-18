@@ -51,13 +51,19 @@ async def run_migration(
 
     Args:
         db_path: SQLite 数据库文件路径。
-        project_scope_id: 目标 PROJECT_SHARED scope_id。
-            如果为空，将自动检测（从 memory_sor 中找到含 /shared/ 或非 /private/ 的 scope）。
+        project_scope_id: 目标 PROJECT_SHARED scope_id。**必填**——多 project 场景
+            下自动检测会随机取一个 shared scope，可能把 A 项目的私有记忆迁到
+            B 项目，因此不再支持 auto-detect。
         dry_run: 仅统计受影响行数，不实际执行。
 
     Returns:
         包含迁移统计信息的字典。
     """
+    if not project_scope_id.strip() and not dry_run:
+        raise ValueError(
+            "project_scope_id 必填：多 project 数据库下自动探测 shared scope 会"
+            "导致跨 project 数据污染。请显式通过 --project-scope-id 指定目标 scope。"
+        )
     async with aiosqlite.connect(db_path) as conn:
         conn.row_factory = aiosqlite.Row
 
@@ -73,7 +79,7 @@ async def run_migration(
 
         # 查找所有 WORKER_PRIVATE scope 的 SoR 记录（scope_id 含 /private/）
         cursor = await conn.execute(
-            "SELECT memory_id, scope_id, partition, content, status "
+            "SELECT memory_id, scope_id, subject_key, partition, content, status, version "
             "FROM memory_sor WHERE scope_id LIKE '%/private/%'"
         )
         private_records = await cursor.fetchall()
@@ -82,28 +88,36 @@ async def run_migration(
             print("[信息] 没有找到 WORKER_PRIVATE scope 的 SoR 记录，无需迁移。")
             return {"total": 0, "migrated": 0, "repartitioned": 0}
 
-        # 自动检测 PROJECT_SHARED scope_id
+        # dry-run 下允许不填 project_scope_id，仅做 partition 预览
         if not project_scope_id:
-            # 尝试找到已有的非 private scope
-            cursor = await conn.execute(
-                "SELECT DISTINCT scope_id FROM memory_sor "
-                "WHERE scope_id NOT LIKE '%/private/%' LIMIT 1"
-            )
-            row = await cursor.fetchone()
-            if row:
-                project_scope_id = row["scope_id"]
-            else:
-                # 从 private scope 推导出 project scope
-                # memory/private/{owner}/runtime:{id} -> memory/shared/{owner}
-                sample_scope = private_records[0]["scope_id"]
-                parts = sample_scope.split("/")
-                if len(parts) >= 3:
-                    owner = parts[2]
-                    project_scope_id = f"memory/shared/{owner}"
-                else:
-                    project_scope_id = "memory/shared/default"
+            project_scope_id = "<unspecified>"
 
         print(f"[信息] 将 {len(private_records)} 条记录从 WORKER_PRIVATE 迁移到 scope: {project_scope_id}")
+
+        # 冲突预检：目标 scope 下是否已存在同 subject_key 的 CURRENT 记录
+        conflicts: list[str] = []
+        for record in private_records:
+            subject_key = record["subject_key"] or ""
+            if not subject_key or record["status"] != "current":
+                continue
+            conflict_cursor = await conn.execute(
+                "SELECT memory_id FROM memory_sor "
+                "WHERE scope_id = ? AND subject_key = ? AND status = 'current' "
+                "AND memory_id != ?",
+                (project_scope_id, subject_key, record["memory_id"]),
+            )
+            conflict_row = await conflict_cursor.fetchone()
+            if conflict_row is not None:
+                conflicts.append(
+                    f"{subject_key} 已在 {project_scope_id} 存在 CURRENT (memory_id={conflict_row['memory_id']})"
+                )
+        if conflicts and not dry_run:
+            print(f"[拒绝] 目标 scope 存在 {len(conflicts)} 条冲突的 CURRENT 记录：")
+            for msg in conflicts[:10]:
+                print(f"  - {msg}")
+            if len(conflicts) > 10:
+                print(f"  ... 还有 {len(conflicts) - 10} 条")
+            return {"total": len(private_records), "conflicts": len(conflicts)}
 
         if dry_run:
             # 统计 partition 重分配结果
@@ -112,11 +126,14 @@ async def run_migration(
                 new_part = _infer_partition_str(record["content"])
                 partition_counts[new_part] = partition_counts.get(new_part, 0) + 1
             print(f"[Dry Run] 分区重分配预览: {partition_counts}")
+            if conflicts:
+                print(f"[Dry Run] 发现 {len(conflicts)} 条 CURRENT 冲突——正式执行前需人工解决")
             return {
                 "total": len(private_records),
                 "dry_run": True,
                 "target_scope": project_scope_id,
                 "partition_preview": partition_counts,
+                "conflicts": len(conflicts),
             }
 
         # 在显式事务中执行迁移，防止并发写入干扰
@@ -125,12 +142,15 @@ async def run_migration(
         now_iso = datetime.now(tz=UTC).isoformat()
         migrated_count = 0
         repartitioned_count = 0
+        fragment_update_count = 0
         partition_stats: dict[str, int] = {}
+        migrated_scope_ids: set[str] = set()
 
         for record in private_records:
             memory_id = record["memory_id"]
             old_partition = record["partition"]
             new_partition = _infer_partition_str(record["content"])
+            migrated_scope_ids.add(record["scope_id"])
 
             await conn.execute(
                 "UPDATE memory_sor SET scope_id = ?, partition = ? WHERE memory_id = ?",
@@ -140,6 +160,21 @@ async def run_migration(
             partition_stats[new_partition] = partition_stats.get(new_partition, 0) + 1
             if old_partition != new_partition:
                 repartitioned_count += 1
+
+        # 同步迁移 memory_fragments 的 scope_id——否则 SoR.evidence_refs 里
+        # 指向的 fragment 在新 scope 下会 miss，导致证据链断裂。
+        frag_table_cursor = await conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_fragments'"
+        )
+        if await frag_table_cursor.fetchone() is not None:
+            for old_scope in migrated_scope_ids:
+                frag_cursor = await conn.execute(
+                    "UPDATE memory_fragments SET scope_id = ? WHERE scope_id = ?",
+                    (project_scope_id, old_scope),
+                )
+                fragment_update_count += frag_cursor.rowcount or 0
+        else:
+            print("[警告] memory_fragments 表不存在，跳过 fragment scope 同步")
 
         # 记录审计信息到 memory_maintenance_runs
         await conn.execute(
@@ -159,6 +194,7 @@ async def run_migration(
                     "total_records": len(private_records),
                     "migrated_count": migrated_count,
                     "repartitioned_count": repartitioned_count,
+                    "fragment_update_count": fragment_update_count,
                     "target_scope": project_scope_id,
                     "partition_stats": partition_stats,
                 }),
@@ -172,6 +208,7 @@ async def run_migration(
             "total": len(private_records),
             "migrated": migrated_count,
             "repartitioned": repartitioned_count,
+            "fragment_updated": fragment_update_count,
             "target_scope": project_scope_id,
             "partition_stats": partition_stats,
             "run_id": run_id,
@@ -188,7 +225,7 @@ def main() -> None:
     parser.add_argument(
         "--project-scope-id",
         default="",
-        help="目标 PROJECT_SHARED scope_id（留空自动检测）",
+        help="目标 PROJECT_SHARED scope_id（dry-run 可留空；正式执行必填）",
     )
     parser.add_argument(
         "--dry-run",
