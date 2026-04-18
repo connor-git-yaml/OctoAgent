@@ -289,6 +289,26 @@ export default function WorkbenchLayout() {
     );
   }
 
+  // 防御：实例重启期间 snapshot 可能为 null 且不在 loading/error 状态
+  if (workbench.snapshot === null) {
+    return (
+      <div className="wb-boot">
+        <div className="wb-boot-card">
+          <p className="wb-kicker">OctoAgent Workbench</p>
+          <h1>正在重新连接</h1>
+          <p>系统正在重启中，请稍候…</p>
+          <button
+            type="button"
+            className="wb-button wb-button-primary"
+            onClick={() => void workbench.refreshSnapshot()}
+          >
+            重新加载
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const snapshot = workbench.snapshot!;
   const diagnostics = snapshot.resources.diagnostics;
   const sessions = snapshot.resources.sessions;
