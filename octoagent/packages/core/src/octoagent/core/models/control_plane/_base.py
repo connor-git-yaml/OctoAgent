@@ -112,4 +112,7 @@ class ControlPlaneState(BaseModel):
     new_conversation_token: str = Field(default="")
     new_conversation_project_id: str = Field(default="")
     new_conversation_agent_profile_id: str = Field(default="")
+    new_conversation_agent_runtime_id: str = Field(default="")
+    new_conversation_agent_session_id: str = Field(default="")
+    new_conversation_thread_id: str = Field(default="")
     updated_at: datetime = Field(default_factory=_utc_now)

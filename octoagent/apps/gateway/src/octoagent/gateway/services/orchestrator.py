@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -79,8 +80,6 @@ from .agent_context import (
     _SESSION_TRANSCRIPT_LIMIT_DEFAULT,
     _dynamic_transcript_limit,
     AgentContextService,
-    build_agent_runtime_id,
-    build_agent_session_id,
     build_scope_aware_session_id,
 )
 from .agent_decision import (
@@ -2970,16 +2969,20 @@ class OrchestratorService:
         worker_profile_id: str,
         worker_capability: str,
     ) -> AgentRuntime:
-        runtime_id = agent_runtime_id.strip() or build_agent_runtime_id(
-            role=role,
-            project_id=project_id,
-            agent_profile_id=agent_profile_id,
-            worker_profile_id=worker_profile_id,
-            worker_capability=worker_capability,
-        )
-        existing = await self._stores.agent_context_store.get_agent_runtime(runtime_id)
+        runtime_id = agent_runtime_id.strip()
+        existing: AgentRuntime | None = None
+        if runtime_id:
+            existing = await self._stores.agent_context_store.get_agent_runtime(runtime_id)
+        if existing is None:
+            existing = await self._stores.agent_context_store.find_active_runtime(
+                project_id=project_id,
+                role=role,
+                worker_profile_id=worker_profile_id,
+                agent_profile_id=agent_profile_id,
+            )
         if existing is not None:
             return existing
+        runtime_id = f"runtime-{ULID()}"
         agent_profile = (
             await self._stores.agent_context_store.get_agent_profile(agent_profile_id)
             if agent_profile_id
@@ -3020,7 +3023,18 @@ class OrchestratorService:
                 "worker_capability": worker_capability,
             },
         )
-        await self._stores.agent_context_store.save_agent_runtime(runtime)
+        try:
+            await self._stores.agent_context_store.save_agent_runtime(runtime)
+        except sqlite3.IntegrityError:
+            refreshed = await self._stores.agent_context_store.find_active_runtime(
+                project_id=project_id,
+                role=role,
+                worker_profile_id=worker_profile_id,
+                agent_profile_id=agent_profile_id,
+            )
+            if refreshed is not None:
+                return refreshed
+            raise
         return runtime
 
     async def _ensure_a2a_agent_session(
@@ -3038,18 +3052,13 @@ class OrchestratorService:
         a2a_conversation_id: str,
         parent_agent_session_id: str,
     ) -> AgentSession:
-        session_id = agent_session_id.strip() or build_agent_session_id(
-            agent_runtime_id=agent_runtime.agent_runtime_id,
-            kind=kind,
-            legacy_session_id=legacy_session_id,
-            work_id=work_id,
-            task_id=task_id,
-        )
-        existing = await self._stores.agent_context_store.get_agent_session(session_id)
-        if existing is not None:
-            return existing
-        # MAIN_BOOTSTRAP session 对 project 唯一：优先复用已有的活跃 session，
-        # 避免重复创建导致 UNIQUE constraint 冲突
+        session_id = agent_session_id.strip()
+        existing: AgentSession | None = None
+        if session_id:
+            existing = await self._stores.agent_context_store.get_agent_session(session_id)
+            if existing is not None:
+                return existing
+        # 按 (project, kind, runtime/work) 反查已有 active session，避免 composite-key 双写
         if kind is AgentSessionKind.MAIN_BOOTSTRAP and project_id:
             active_for_project = (
                 await self._stores.agent_context_store.get_active_session_for_project(
@@ -3058,6 +3067,29 @@ class OrchestratorService:
             )
             if active_for_project is not None:
                 return active_for_project
+        elif kind is AgentSessionKind.DIRECT_WORKER and project_id:
+            active_for_project = (
+                await self._stores.agent_context_store.get_active_session_for_project(
+                    project_id, kind=AgentSessionKind.DIRECT_WORKER
+                )
+            )
+            if active_for_project is not None:
+                return active_for_project
+        elif kind is AgentSessionKind.WORKER_INTERNAL and work_id:
+            # 同一 task / work 的多次 a2a dispatch（重启 / 重试）必须复用同一
+            # WORKER_INTERNAL session，否则 worker_runtime 的 execution session
+            # 也跟着翻新（worker_runtime.session_id 优先用 envelope.metadata.agent_session_id）。
+            candidates = await self._stores.agent_context_store.list_agent_sessions(
+                agent_runtime_id=agent_runtime.agent_runtime_id,
+                project_id=project_id or None,
+                kind=AgentSessionKind.WORKER_INTERNAL,
+                limit=20,
+            )
+            for candidate in candidates:
+                if candidate.work_id and candidate.work_id == work_id:
+                    return candidate
+        if not session_id:
+            session_id = f"session-{ULID()}"
         session = AgentSession(
             agent_session_id=session_id,
             agent_runtime_id=agent_runtime.agent_runtime_id,
@@ -3071,7 +3103,17 @@ class OrchestratorService:
             a2a_conversation_id=a2a_conversation_id,
             metadata={"created_by": "orchestrator.wave2"},
         )
-        await self._stores.agent_context_store.save_agent_session(session)
+        try:
+            await self._stores.agent_context_store.save_agent_session(session)
+        except sqlite3.IntegrityError:
+            # 并发 race：partial unique index 拒绝同 project 同 kind 第二条 active session。
+            if kind in (AgentSessionKind.MAIN_BOOTSTRAP, AgentSessionKind.DIRECT_WORKER) and project_id:
+                refreshed = await self._stores.agent_context_store.get_active_session_for_project(
+                    project_id, kind=kind,
+                )
+                if refreshed is not None:
+                    return refreshed
+            raise
         return session
 
     @staticmethod

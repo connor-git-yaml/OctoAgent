@@ -4,7 +4,10 @@ PRAGMA 配置 + 三张表 DDL + 索引创建。
 使用 aiosqlite 异步操作。
 """
 
+from datetime import UTC, datetime
+
 import aiosqlite
+from ulid import ULID
 
 # tasks 表 DDL
 _TASKS_DDL = """
@@ -733,6 +736,24 @@ _AGENT_CONTEXT_INDEXES = [
         "CREATE INDEX IF NOT EXISTS idx_agent_runtimes_role_project "
         "ON agent_runtimes(role, project_id, updated_at DESC);"
     ),
+    # 逻辑身份单写约束（防并发 race 双写）：同一 (project, role, profile) 在 active
+    # 状态下只能有一条 runtime row。worker 按 worker_profile_id 区分，main 按
+    # agent_profile_id 区分；profile_id 为空时不参与（兼容历史脏数据）。
+    # 排除 `subagent-%`：subagent 是 worker spawn 的独立 child runtime，与 parent
+    # 共享 worker_profile_id 是合法语义（subagent_lifecycle.spawn_subagent 已经
+    # 用 `subagent-{ULID}` 作为 PK 前缀来区分）。
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runtimes_active_worker_unique "
+        "ON agent_runtimes(project_id, worker_profile_id) "
+        "WHERE status = 'active' AND role = 'worker' "
+        "AND worker_profile_id != '' AND agent_runtime_id NOT LIKE 'subagent-%';"
+    ),
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runtimes_active_main_unique "
+        "ON agent_runtimes(project_id, agent_profile_id) "
+        "WHERE status = 'active' AND role = 'main' "
+        "AND agent_profile_id != '' AND agent_runtime_id NOT LIKE 'subagent-%';"
+    ),
     (
         "CREATE INDEX IF NOT EXISTS idx_agent_sessions_runtime_updated "
         "ON agent_sessions(agent_runtime_id, updated_at DESC);"
@@ -745,6 +766,12 @@ _AGENT_CONTEXT_INDEXES = [
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_project_active "
         "ON agent_sessions(project_id) "
         "WHERE status = 'active' AND project_id != '' AND kind = 'main_bootstrap';"
+    ),
+    # DIRECT_WORKER 同样要求 project 内唯一 active session（与 main_bootstrap 对齐）。
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_direct_worker_active "
+        "ON agent_sessions(project_id) "
+        "WHERE status = 'active' AND project_id != '' AND kind = 'direct_worker';"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_agent_sessions_parent_worker "
@@ -1025,6 +1052,376 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
             )
         except Exception:
             pass  # 旧索引可能已被 CREATE TABLE 阶段正确创建
+
+    # 历史双写清理：把 composite-key 的 agent_runtimes / agent_sessions row 合并到
+    # ULID canonical row（如没有就地 rename 成新 ULID），消除侧栏会话重复、删除后残留等问题。
+    if agent_runtime_columns and agent_session_columns:
+        await _merge_composite_agent_identity_rows(conn)
+
+
+_COMPOSITE_RUNTIME_ID_PATTERN = "role:%"
+_COMPOSITE_SESSION_ID_PATTERN = "runtime:%"
+
+# (table_name, column_name) pairs storing agent_runtime_id values
+_RUNTIME_FOREIGN_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("agent_sessions", "agent_runtime_id"),
+    ("agent_sessions", "parent_worker_runtime_id"),
+    ("memory_namespaces", "agent_runtime_id"),
+    ("recall_frames", "agent_runtime_id"),
+    ("context_frames", "agent_runtime_id"),
+    ("session_context_states", "agent_runtime_id"),
+    ("a2a_conversations", "source_agent_runtime_id"),
+    ("a2a_conversations", "target_agent_runtime_id"),
+    ("a2a_messages", "source_agent_runtime_id"),
+    ("a2a_messages", "target_agent_runtime_id"),
+    ("projects", "primary_agent_id"),
+    # 用户「always」授权按 agent_runtime_id 精确查询（Feature 061），
+    # 迁移时漏改这里会导致 runtime rename / merge 后历史授权静默失联。
+    ("approval_overrides", "agent_runtime_id"),
+)
+
+# (table_name, column_name) pairs storing agent_session_id values
+_SESSION_FOREIGN_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("agent_session_turns", "agent_session_id"),
+    ("recall_frames", "agent_session_id"),
+    ("context_frames", "agent_session_id"),
+    ("session_context_states", "agent_session_id"),
+    ("a2a_conversations", "source_agent_session_id"),
+    ("a2a_conversations", "target_agent_session_id"),
+    ("a2a_messages", "source_agent_session_id"),
+    ("a2a_messages", "target_agent_session_id"),
+    ("agent_sessions", "parent_agent_session_id"),
+)
+
+
+async def _merge_composite_agent_identity_rows(conn: aiosqlite.Connection) -> None:
+    """合并历史 composite-key agent_runtimes / agent_sessions 到 ULID canonical。
+
+    执行流程（整体在 FK 临时关闭 + 单事务下完成）：
+    1. 扫 composite runtime（`agent_runtime_id LIKE 'role:%'`）。
+    2. 按 (project_id, role, worker_profile_id / agent_profile_id) 找 canonical ULID。
+       - 有 canonical：把所有外键列从 composite 改指向 canonical，删 composite。
+       - 无 canonical：就地 rename 到 `runtime-{ULID}`（同步 UPDATE 所有外键列）。
+    3. 对 agent_sessions 同样处理（`agent_session_id LIKE 'runtime:%'`），
+       canonical 按 (project_id, kind, status=active) 优先；dedupe_key 冲突时
+       先删 composite 侧重复 turn 再迁移。
+    4. 收尾：对每个逻辑身份分组只保留最新的 1 条 active，其余 archive，让后续
+       partial unique index 能创建（含历史脏数据兼容）。
+    """
+    cursor = await conn.execute("PRAGMA foreign_keys")
+    row = await cursor.fetchone()
+    fk_was_on = bool(row and int(row[0]) == 1)
+    if fk_was_on:
+        await conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        await _merge_composite_runtimes(conn)
+        await _merge_composite_sessions(conn)
+        await _archive_extra_active_rows(conn)
+    finally:
+        if fk_was_on:
+            await conn.execute("PRAGMA foreign_keys = ON")
+
+
+async def _archive_extra_active_rows(conn: aiosqlite.Connection) -> None:
+    """对违反单写约束的历史脏数据做 archive，让 partial unique index 能创建。
+
+    保留每组最新一条 active：
+    - agent_runtimes by (project_id, role='worker', worker_profile_id)
+    - agent_runtimes by (project_id, role='main', agent_profile_id)
+    - agent_sessions by (project_id, kind='direct_worker')
+    """
+    now_iso = datetime.now(UTC).isoformat()
+    # 排除 subagent runtime：与 parent 同 worker_profile_id 是合法的，不参与单写约束。
+    await conn.execute(
+        """
+        UPDATE agent_runtimes
+        SET status = 'archived', archived_at = ?, updated_at = ?
+        WHERE status = 'active'
+          AND role = 'worker'
+          AND worker_profile_id != ''
+          AND agent_runtime_id NOT LIKE 'subagent-%'
+          AND agent_runtime_id NOT IN (
+              SELECT agent_runtime_id FROM (
+                  SELECT agent_runtime_id,
+                         ROW_NUMBER() OVER (
+                             PARTITION BY project_id, worker_profile_id
+                             ORDER BY updated_at DESC, created_at DESC
+                         ) AS rn
+                  FROM agent_runtimes
+                  WHERE status = 'active' AND role = 'worker'
+                    AND worker_profile_id != ''
+                    AND agent_runtime_id NOT LIKE 'subagent-%'
+              ) WHERE rn = 1
+          )
+        """,
+        (now_iso, now_iso),
+    )
+    await conn.execute(
+        """
+        UPDATE agent_runtimes
+        SET status = 'archived', archived_at = ?, updated_at = ?
+        WHERE status = 'active'
+          AND role = 'main'
+          AND agent_profile_id != ''
+          AND agent_runtime_id NOT LIKE 'subagent-%'
+          AND agent_runtime_id NOT IN (
+              SELECT agent_runtime_id FROM (
+                  SELECT agent_runtime_id,
+                         ROW_NUMBER() OVER (
+                             PARTITION BY project_id, agent_profile_id
+                             ORDER BY updated_at DESC, created_at DESC
+                         ) AS rn
+                  FROM agent_runtimes
+                  WHERE status = 'active' AND role = 'main'
+                    AND agent_profile_id != ''
+                    AND agent_runtime_id NOT LIKE 'subagent-%'
+              ) WHERE rn = 1
+          )
+        """,
+        (now_iso, now_iso),
+    )
+    await conn.execute(
+        """
+        UPDATE agent_sessions
+        SET status = 'closed', closed_at = ?, updated_at = ?
+        WHERE status = 'active'
+          AND kind = 'direct_worker'
+          AND project_id != ''
+          AND agent_session_id NOT IN (
+              SELECT agent_session_id FROM (
+                  SELECT agent_session_id,
+                         ROW_NUMBER() OVER (
+                             PARTITION BY project_id
+                             ORDER BY updated_at DESC, created_at DESC
+                         ) AS rn
+                  FROM agent_sessions
+                  WHERE status = 'active' AND kind = 'direct_worker' AND project_id != ''
+              ) WHERE rn = 1
+          )
+        """,
+        (now_iso, now_iso),
+    )
+
+
+async def _fetchall(conn: aiosqlite.Connection, sql: str, args: tuple = ()) -> list:
+    cursor = await conn.execute(sql, args)
+    return list(await cursor.fetchall())
+
+
+async def _update_runtime_id_references(
+    conn: aiosqlite.Connection, *, old_id: str, new_id: str
+) -> None:
+    existing_tables = await _fetchall(
+        conn, "SELECT name FROM sqlite_master WHERE type='table'"
+    )
+    table_names = {str(r[0]) for r in existing_tables}
+    for table, column in _RUNTIME_FOREIGN_COLUMNS:
+        if table not in table_names:
+            continue
+        cols = await _table_columns(conn, table)
+        if column not in cols:
+            continue
+        if table == "approval_overrides" and column == "agent_runtime_id":
+            # UNIQUE(agent_runtime_id, tool_name)：合并到 canonical 时若 tool_name
+            # 已经在 canonical 上存在，先删 composite 侧重复 row 避免 UNIQUE 冲突
+            # （canonical 上的 always 授权权威优先）。
+            await conn.execute(
+                """
+                DELETE FROM approval_overrides
+                WHERE agent_runtime_id = ?
+                  AND tool_name IN (
+                      SELECT tool_name FROM approval_overrides
+                      WHERE agent_runtime_id = ?
+                  )
+                """,
+                (old_id, new_id),
+            )
+        await conn.execute(
+            f"UPDATE {table} SET {column} = ? WHERE {column} = ?",
+            (new_id, old_id),
+        )
+
+
+async def _update_session_id_references(
+    conn: aiosqlite.Connection, *, old_id: str, new_id: str
+) -> None:
+    existing_tables = await _fetchall(
+        conn, "SELECT name FROM sqlite_master WHERE type='table'"
+    )
+    table_names = {str(r[0]) for r in existing_tables}
+    for table, column in _SESSION_FOREIGN_COLUMNS:
+        if table not in table_names:
+            continue
+        cols = await _table_columns(conn, table)
+        if column not in cols:
+            continue
+        if table == "agent_session_turns" and column == "agent_session_id":
+            # dedupe_key 唯一索引 (agent_session_id, dedupe_key)：冲突时丢弃 composite turn
+            await conn.execute(
+                """
+                DELETE FROM agent_session_turns
+                WHERE agent_session_id = ?
+                  AND dedupe_key != ''
+                  AND dedupe_key IN (
+                      SELECT dedupe_key FROM agent_session_turns
+                      WHERE agent_session_id = ? AND dedupe_key != ''
+                  )
+                """,
+                (old_id, new_id),
+            )
+        await conn.execute(
+            f"UPDATE {table} SET {column} = ? WHERE {column} = ?",
+            (new_id, old_id),
+        )
+
+
+async def _merge_composite_runtimes(conn: aiosqlite.Connection) -> None:
+    rows = await _fetchall(
+        conn,
+        """
+        SELECT agent_runtime_id, project_id, role,
+               agent_profile_id, worker_profile_id
+        FROM agent_runtimes
+        WHERE agent_runtime_id LIKE ?
+        """,
+        (_COMPOSITE_RUNTIME_ID_PATTERN,),
+    )
+    for composite_id, project_id, role, agent_profile_id, worker_profile_id in rows:
+        composite_id = str(composite_id)
+        role = str(role or "").strip() or "main"
+        project_id = str(project_id or "")
+        agent_profile_id = str(agent_profile_id or "")
+        worker_profile_id = str(worker_profile_id or "")
+        # 找 canonical ULID runtime
+        if role == "worker" and worker_profile_id:
+            canonical_row = await _fetchall(
+                conn,
+                """
+                SELECT agent_runtime_id FROM agent_runtimes
+                WHERE agent_runtime_id LIKE 'runtime-%'
+                  AND project_id = ? AND role = ? AND worker_profile_id = ?
+                ORDER BY updated_at DESC, created_at DESC LIMIT 1
+                """,
+                (project_id, role, worker_profile_id),
+            )
+        elif role != "worker" and agent_profile_id:
+            canonical_row = await _fetchall(
+                conn,
+                """
+                SELECT agent_runtime_id FROM agent_runtimes
+                WHERE agent_runtime_id LIKE 'runtime-%'
+                  AND project_id = ? AND role = ? AND agent_profile_id = ?
+                ORDER BY updated_at DESC, created_at DESC LIMIT 1
+                """,
+                (project_id, role, agent_profile_id),
+            )
+        else:
+            canonical_row = await _fetchall(
+                conn,
+                """
+                SELECT agent_runtime_id FROM agent_runtimes
+                WHERE agent_runtime_id LIKE 'runtime-%'
+                  AND project_id = ? AND role = ?
+                ORDER BY updated_at DESC, created_at DESC LIMIT 1
+                """,
+                (project_id, role),
+            )
+        if canonical_row:
+            canonical_id = str(canonical_row[0][0])
+            await _update_runtime_id_references(
+                conn, old_id=composite_id, new_id=canonical_id
+            )
+            await conn.execute(
+                "DELETE FROM agent_runtimes WHERE agent_runtime_id = ?",
+                (composite_id,),
+            )
+        else:
+            new_id = f"runtime-{ULID()}"
+            await _update_runtime_id_references(
+                conn, old_id=composite_id, new_id=new_id
+            )
+            await conn.execute(
+                "UPDATE agent_runtimes SET agent_runtime_id = ? WHERE agent_runtime_id = ?",
+                (new_id, composite_id),
+            )
+
+
+async def _merge_composite_sessions(conn: aiosqlite.Connection) -> None:
+    rows = await _fetchall(
+        conn,
+        """
+        SELECT agent_session_id, project_id, kind, agent_runtime_id,
+               thread_id, legacy_session_id
+        FROM agent_sessions
+        WHERE agent_session_id LIKE ?
+        """,
+        (_COMPOSITE_SESSION_ID_PATTERN,),
+    )
+    for (
+        composite_id,
+        project_id,
+        kind,
+        agent_runtime_id,
+        thread_id,
+        legacy_session_id,
+    ) in rows:
+        composite_id = str(composite_id)
+        project_id = str(project_id or "")
+        kind = str(kind or "").strip() or "direct_worker"
+        # 找 canonical ULID session
+        canonical_row: list = []
+        if kind in ("direct_worker", "main_bootstrap") and project_id:
+            canonical_row = await _fetchall(
+                conn,
+                """
+                SELECT agent_session_id FROM agent_sessions
+                WHERE agent_session_id LIKE 'session-%'
+                  AND project_id = ? AND kind = ?
+                ORDER BY
+                    CASE status WHEN 'active' THEN 0 ELSE 1 END,
+                    updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (project_id, kind),
+            )
+        elif kind == "worker_internal" and agent_runtime_id:
+            canonical_row = await _fetchall(
+                conn,
+                """
+                SELECT agent_session_id FROM agent_sessions
+                WHERE agent_session_id LIKE 'session-%'
+                  AND agent_runtime_id = ? AND kind = ?
+                  AND (legacy_session_id = ? OR thread_id = ?)
+                ORDER BY
+                    CASE status WHEN 'active' THEN 0 ELSE 1 END,
+                    updated_at DESC, created_at DESC
+                LIMIT 1
+                """,
+                (
+                    str(agent_runtime_id),
+                    kind,
+                    str(legacy_session_id or ""),
+                    str(thread_id or ""),
+                ),
+            )
+        if canonical_row:
+            canonical_id = str(canonical_row[0][0])
+            await _update_session_id_references(
+                conn, old_id=composite_id, new_id=canonical_id
+            )
+            await conn.execute(
+                "DELETE FROM agent_sessions WHERE agent_session_id = ?",
+                (composite_id,),
+            )
+        else:
+            new_id = f"session-{ULID()}"
+            await _update_session_id_references(
+                conn, old_id=composite_id, new_id=new_id
+            )
+            await conn.execute(
+                "UPDATE agent_sessions SET agent_session_id = ? WHERE agent_session_id = ?",
+                (new_id, composite_id),
+            )
 
 
 async def init_db(conn: aiosqlite.Connection) -> None:

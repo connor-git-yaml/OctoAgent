@@ -9,6 +9,7 @@ from octoagent.core.models import (
     AgentProfileScope,
     AgentRuntime,
     AgentRuntimeRole,
+    AgentRuntimeStatus,
     AgentSession,
     AgentSessionKind,
     BootstrapSession,
@@ -291,5 +292,64 @@ async def test_worker_profile_and_revision_roundtrip(tmp_path: Path) -> None:
     assert len(stored_revisions) == 1
     assert stored_revisions[0].change_summary == "首次发布"
     assert stored_revisions[0].snapshot_payload["selected_tools"] == ["filesystem.read"]
+
+    await store_group.conn.close()
+
+
+async def test_find_active_runtime_selects_active_ulid_and_skips_closed(
+    tmp_path: Path,
+) -> None:
+    """find_active_runtime 按 (project, role, worker_profile) 命中 active ULID runtime。
+
+    这是消除 composite-key 双写根因的关键 lookup：Path B 在 request.agent_runtime_id
+    为空时应优先走这个反查复用 Path A 预建的 ULID，而不是再建一条 composite row。
+    """
+    store_group = await create_store_group(
+        str(tmp_path / "find-active-runtime.db"),
+        str(tmp_path / "artifacts"),
+    )
+    active_runtime = AgentRuntime(
+        agent_runtime_id="runtime-01TESTACTIVE",
+        project_id="project-alpha",
+        worker_profile_id="worker-profile-a",
+        role=AgentRuntimeRole.WORKER,
+        name="Active Worker",
+        status=AgentRuntimeStatus.ACTIVE,
+    )
+    closed_runtime = AgentRuntime(
+        agent_runtime_id="runtime-01TESTCLOSED",
+        project_id="project-alpha",
+        worker_profile_id="worker-profile-a",
+        role=AgentRuntimeRole.WORKER,
+        name="Closed Worker",
+        status=AgentRuntimeStatus.ARCHIVED,
+    )
+    other_project_runtime = AgentRuntime(
+        agent_runtime_id="runtime-01TESTOTHER",
+        project_id="project-beta",
+        worker_profile_id="worker-profile-a",
+        role=AgentRuntimeRole.WORKER,
+        name="Other Project",
+        status=AgentRuntimeStatus.ACTIVE,
+    )
+    await store_group.agent_context_store.save_agent_runtime(active_runtime)
+    await store_group.agent_context_store.save_agent_runtime(closed_runtime)
+    await store_group.agent_context_store.save_agent_runtime(other_project_runtime)
+    await store_group.conn.commit()
+
+    hit = await store_group.agent_context_store.find_active_runtime(
+        project_id="project-alpha",
+        role=AgentRuntimeRole.WORKER,
+        worker_profile_id="worker-profile-a",
+    )
+    assert hit is not None
+    assert hit.agent_runtime_id == "runtime-01TESTACTIVE"
+
+    miss = await store_group.agent_context_store.find_active_runtime(
+        project_id="project-alpha",
+        role=AgentRuntimeRole.WORKER,
+        worker_profile_id="worker-profile-unknown",
+    )
+    assert miss is None
 
     await store_group.conn.close()

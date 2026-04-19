@@ -93,11 +93,21 @@ async def _resolve_chat_scope_snapshot(
     body: ChatSendRequest,
     request: Request,
     store_group,
-) -> tuple[str, str, str]:
-    """解析聊天请求的 scope 快照，返回 (new_conversation_token, project_id, agent_profile_id)。"""
+) -> tuple[str, str, str, str, str, str]:
+    """解析聊天请求的 scope 快照。
+
+    返回 (new_conversation_token, project_id, agent_profile_id,
+          agent_runtime_id, agent_session_id, thread_id)。
+
+    后三个在消费 new_conversation_token 时透传 Path A 写入的 ids，
+    让 Path B 的 ContextResolveRequest 能直接复用，避免双写。
+    """
     project_id = str(body.project_id or "").strip()
     new_conversation_token = str(body.new_conversation_token or "").strip()
     requested_agent_profile_id = str(body.agent_profile_id or "").strip()
+    new_conversation_agent_runtime_id = ""
+    new_conversation_agent_session_id = ""
+    new_conversation_thread_id = ""
 
     cp_store = ControlPlaneStateStore(_resolve_project_root(request))
     state = cp_store.load()
@@ -106,26 +116,58 @@ async def _resolve_chat_scope_snapshot(
         requested_agent_profile_id = (
             requested_agent_profile_id or state.new_conversation_agent_profile_id.strip()
         )
-        # 消费后立即清除 token，防止 stale token 被后续请求重复使用
-        cp_store.save(
-            state.model_copy(
-                update={
-                    "new_conversation_token": "",
-                    "new_conversation_project_id": "",
-                    "new_conversation_agent_profile_id": "",
-                }
-            )
-        )
+        new_conversation_agent_runtime_id = state.new_conversation_agent_runtime_id.strip()
+        new_conversation_agent_session_id = state.new_conversation_agent_session_id.strip()
+        new_conversation_thread_id = state.new_conversation_thread_id.strip()
+        # token 消费推迟到 task 创建 + 入队成功后再清；否则首条消息中途失败用户
+        # 重试时拿不到 Path A 预创建的 ids，会退化到新 thread_id 路径并留下孤儿绑定。
     elif not body.task_id:
         project_id = project_id or state.selected_project_id.strip()
 
     project = await store_group.project_store.get_project(project_id) if project_id else None
     if project is None:
-        return new_conversation_token, "", requested_agent_profile_id
+        return (
+            new_conversation_token,
+            "",
+            requested_agent_profile_id,
+            "",
+            "",
+            "",
+        )
     return (
         new_conversation_token,
         project.project_id,
         requested_agent_profile_id,
+        new_conversation_agent_runtime_id,
+        new_conversation_agent_session_id,
+        new_conversation_thread_id,
+    )
+
+
+def _consume_new_conversation_token(request: Request, token: str) -> None:
+    """task 入队成功后才真正清掉 new_conversation_token。
+
+    chat.py `_resolve_chat_scope_snapshot` 仅 *读* state，不再立即写空；
+    这里在 send 成功路径末尾调用，保证：
+    - task 创建/入队失败 → token 仍然有效，前端重试时能再次拿到 Path A ids；
+    - task 真正进入执行链 → 老 token 失效，避免 stale token 被复用。
+    清空时仍然 re-load state，避免覆盖 send 期间其它 control 入口写入的字段。
+    """
+    cp_store = ControlPlaneStateStore(_resolve_project_root(request))
+    current = cp_store.load()
+    if current.new_conversation_token != token:
+        return
+    cp_store.save(
+        current.model_copy(
+            update={
+                "new_conversation_token": "",
+                "new_conversation_project_id": "",
+                "new_conversation_agent_profile_id": "",
+                "new_conversation_agent_runtime_id": "",
+                "new_conversation_agent_session_id": "",
+                "new_conversation_thread_id": "",
+            }
+        )
     )
 
 
@@ -285,14 +327,24 @@ async def send_chat_message(
     if not requested_thread_id:
         requested_thread_id = parsed_thread_id
     requested_agent_profile_id = str(body.agent_profile_id or "").strip()
-    new_conversation_token, project_id, requested_agent_profile_id = (
-        await _resolve_chat_scope_snapshot(
-            body,
-            request,
-            store_group,
-        )
+    (
+        new_conversation_token,
+        project_id,
+        requested_agent_profile_id,
+        new_conversation_agent_runtime_id,
+        new_conversation_agent_session_id,
+        new_conversation_thread_id,
+    ) = await _resolve_chat_scope_snapshot(
+        body,
+        request,
+        store_group,
     )
     project_id = project_id or parsed_project_id
+    # Path A 创建的新会话里 thread_id_seed 是真身，不能被后面 `requested_thread_id or task_id`
+    # fallback 成 task_id，否则 session_state 索引不回来、runtime/session ids 的 lookup key
+    # 漂移，又会触发 Path B 建第二条 row。
+    if new_conversation_thread_id and not requested_thread_id:
+        requested_thread_id = new_conversation_thread_id
     if body.task_id and not requested_agent_profile_id:
         requested_agent_profile_id = await _resolve_session_owner_profile_id(
             store_group, body.task_id
@@ -368,6 +420,16 @@ async def send_chat_message(
         if created:
             task_id = created_task_id
             dispatch_metadata = dict(chat_control_metadata)
+            runtime_metadata: dict[str, Any] = {}
+            if new_conversation_token:
+                runtime_metadata["new_conversation_token"] = new_conversation_token
+            # 把 Path A 写到 state 的 ids 透传给 Path B（_ensure_agent_runtime/
+            # _ensure_agent_session 会优先用 request.agent_runtime_id / agent_session_id,
+            # 从而直接复用 Path A 创建的 ULID row 而不是建第二条）。
+            if new_conversation_agent_runtime_id:
+                runtime_metadata["agent_runtime_id"] = new_conversation_agent_runtime_id
+            if new_conversation_agent_session_id:
+                runtime_metadata["agent_session_id"] = new_conversation_agent_session_id
             dispatch_metadata[RUNTIME_CONTEXT_JSON_KEY] = encode_runtime_context(
                 RuntimeControlContext(
                     task_id=task_id,
@@ -378,11 +440,7 @@ async def send_chat_message(
                     session_owner_profile_id=requested_agent_profile_id,
                     turn_executor_kind=owner_turn_executor_kind,
                     agent_profile_id=requested_agent_profile_id,
-                    metadata=(
-                        {"new_conversation_token": new_conversation_token}
-                        if new_conversation_token
-                        else {}
-                    ),
+                    metadata=runtime_metadata,
                 )
             )
             try:
@@ -402,6 +460,9 @@ async def send_chat_message(
                     message="任务已创建但未能进入执行主链。",
                     task_id=task_id,
                 ) from exc
+            # task 已成功入队 → token 才正式失效，前序步骤失败时 token 仍可被重试。
+            if new_conversation_token:
+                _consume_new_conversation_token(request, new_conversation_token)
     else:
         try:
             existing_task = await store_group.task_store.get_task(task_id)

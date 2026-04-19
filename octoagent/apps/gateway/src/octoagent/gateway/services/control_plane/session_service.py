@@ -573,7 +573,12 @@ class SessionDomainService(DomainServiceBase):
             )
         # ── 第二遍：从 agent_sessions 补充没有 task 的会话 ──
         existing_session_ids = {item.session_id for item in session_items}
-        # 二级去重：按 (thread_id, project_id) 对防止格式差异导致的重复（075-fix）
+        # 防御性去重：按 (thread_id, project_id) 对兜底。
+        # 历史背景：075-fix 之前 Path A（session_service 创建 ULID）+ Path B（agent_context
+        # fallback composite key）会写出两条逻辑等价的 agent_sessions row，导致同一 project
+        # 在侧栏出现两条重复。根因已由 agent_runtime/agent_session 的单写策略（find_active_runtime
+        # + get_active_session_for_project）消除，此处保留仅为抵御迁移期残留 / 回归风险，
+        # 正常情况下不应命中。
         existing_thread_project_pairs = {
             (item.thread_id, item.project_id)
             for item in session_items
@@ -1437,6 +1442,34 @@ class SessionDomainService(DomainServiceBase):
         )
         await self._stores.agent_context_store.save_agent_session(session)
 
+        # 同步写 session_context_states：让 Path B（/api/chat/send 触发的 task 执行）
+        # 通过 projected_session_id 反查就能拿到 Path A 创建的 agent_runtime/session ids，
+        # 从而避免 _ensure_agent_runtime/_ensure_agent_session 再 fallback 建一条新 row。
+        existing_session_state = await self._stores.agent_context_store.get_session_context(
+            projected_session_id
+        )
+        initial_session_state = (
+            existing_session_state.model_copy(
+                update={
+                    "agent_runtime_id": agent_runtime_id,
+                    "agent_session_id": session_id,
+                    "thread_id": thread_id_seed,
+                    "project_id": project_id,
+                    "updated_at": now,
+                }
+            )
+            if existing_session_state is not None
+            else SessionContextState(
+                session_id=projected_session_id,
+                agent_runtime_id=agent_runtime_id,
+                agent_session_id=session_id,
+                thread_id=thread_id_seed,
+                project_id=project_id,
+                updated_at=now,
+            )
+        )
+        await self._stores.agent_context_store.save_session_context(initial_session_state)
+
         token = str(ULID())
         state = self._ctx.state_store.load().model_copy(
             update={
@@ -1445,6 +1478,9 @@ class SessionDomainService(DomainServiceBase):
                 "new_conversation_token": token,
                 "new_conversation_project_id": project_id,
                 "new_conversation_agent_profile_id": worker_profile_id,
+                "new_conversation_agent_runtime_id": agent_runtime_id,
+                "new_conversation_agent_session_id": session_id,
+                "new_conversation_thread_id": thread_id_seed,
                 "selected_project_id": project_id,
                 "selected_workspace_id": "",
                 "updated_at": now,

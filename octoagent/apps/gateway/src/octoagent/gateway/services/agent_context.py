@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import sqlite3
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1093,6 +1094,16 @@ class AgentContextService:
             project=project,
             session_id_hint=request.session_id or "",
         )
+        # 从 durable session_state 反查 Path A 写入的 agent_runtime_id：
+        # 如果 request 没带（例如 new_conversation_token 已被消费、第二条消息只带 task_id），
+        # 从 session_state 补齐，避免 _ensure_agent_runtime 再走防御性 lookup。
+        # 不注入 agent_session_id：DIRECT_WORKER / MAIN_BOOTSTRAP 已由 _ensure_agent_session
+        # 的 get_active_session_for_project 兜底，且注入会通过 a2a runtime_metadata 覆盖
+        # worker_runtime 的 resumed_session_id 优先级，破坏 restart 场景的 execution session 稳定性。
+        if session_state.agent_runtime_id and not (request.agent_runtime_id or "").strip():
+            request = request.model_copy(
+                update={"agent_runtime_id": session_state.agent_runtime_id}
+            )
         agent_runtime = await self._ensure_agent_runtime(
             request=request,
             project=project,
@@ -2011,40 +2022,6 @@ class AgentContextService:
         return AgentRuntimeRole.MAIN
 
     @staticmethod
-    def _build_agent_runtime_id(
-        *,
-        role: AgentRuntimeRole,
-        project_id: str,
-        agent_profile_id: str,
-        worker_profile_id: str,
-        worker_capability: str,
-    ) -> str:
-        return build_agent_runtime_id(
-            role=role,
-            project_id=project_id,
-            agent_profile_id=agent_profile_id,
-            worker_profile_id=worker_profile_id,
-            worker_capability=worker_capability,
-        )
-
-    @staticmethod
-    def _build_agent_session_id(
-        *,
-        agent_runtime_id: str,
-        kind: AgentSessionKind,
-        legacy_session_id: str,
-        work_id: str,
-        task_id: str,
-    ) -> str:
-        return build_agent_session_id(
-            agent_runtime_id=agent_runtime_id,
-            kind=kind,
-            legacy_session_id=legacy_session_id,
-            work_id=work_id,
-            task_id=task_id,
-        )
-
-    @staticmethod
     def _build_memory_namespace_id(
         *,
         kind: MemoryNamespaceKind,
@@ -2078,16 +2055,23 @@ class AgentContextService:
             or str(request.delegation_metadata.get("selected_worker_type", "")).strip()
             or str(request.delegation_metadata.get("worker_capability", "")).strip()
         )
-        runtime_id = (
-            request.agent_runtime_id or ""
-        ).strip() or self._build_agent_runtime_id(
-            role=role,
-            project_id=project_id,
-            agent_profile_id=agent_profile.profile_id,
-            worker_profile_id=worker_profile_id,
-            worker_capability=worker_capability,
-        )
-        existing = await self._stores.agent_context_store.get_agent_runtime(runtime_id)
+        runtime_id = (request.agent_runtime_id or "").strip()
+        existing: AgentRuntime | None = None
+        if runtime_id:
+            existing = await self._stores.agent_context_store.get_agent_runtime(runtime_id)
+        if existing is None:
+            # 无显式 runtime_id 或该 id 不存在：按 (project, role, profile) 反查已有 active
+            # runtime，避免对同一逻辑 runtime 产生 composite-key 第二条 row。
+            existing = await self._stores.agent_context_store.find_active_runtime(
+                project_id=project_id,
+                role=role,
+                worker_profile_id=worker_profile_id,
+                agent_profile_id=agent_profile.profile_id,
+            )
+            if existing is not None:
+                runtime_id = existing.agent_runtime_id
+        if not runtime_id:
+            runtime_id = f"runtime-{ULID()}"
         worker_profile = (
             await self._stores.agent_context_store.get_worker_profile(worker_profile_id)
             if worker_profile_id
@@ -2149,8 +2133,71 @@ class AgentContextService:
                 },
             )
         )
-        await self._stores.agent_context_store.save_agent_runtime(runtime)
+        try:
+            await self._stores.agent_context_store.save_agent_runtime(runtime)
+        except sqlite3.IntegrityError:
+            # 并发 race：另一个协程在我们 lookup 之后、save 之前抢先写入。
+            # partial unique index (project, role, profile) WHERE status='active' 拒绝
+            # 第二条插入。回头按逻辑身份重读对方写入的 row 并复用。
+            refreshed = await self._stores.agent_context_store.find_active_runtime(
+                project_id=project_id,
+                role=role,
+                worker_profile_id=worker_profile_id,
+                agent_profile_id=agent_profile.profile_id,
+            )
+            if refreshed is not None:
+                return refreshed
+            raise
         return runtime
+
+    async def _find_existing_session_for_ensure(
+        self,
+        *,
+        project: Project | None,
+        runtime: AgentRuntime,
+        kind: AgentSessionKind,
+        thread_id: str,
+        legacy_session_id: str,
+        work_id: str,
+        parent_agent_session_id: str,
+    ) -> AgentSession | None:
+        """按逻辑身份查找已有活跃 session，用于消除 composite-key fallback。
+
+        - DIRECT_WORKER：project 内活跃 DIRECT_WORKER 唯一；先按 project 查，
+          再退到按 (thread_id / legacy_session_id, project) list。
+        - MAIN_BOOTSTRAP：project 内活跃 MAIN_BOOTSTRAP 唯一（partial unique index）。
+        - WORKER_INTERNAL / SUBAGENT_INTERNAL：每个 (parent_agent_session_id, work_id)
+          组合是独立的 session，不做 lookup 复用；caller 要么显式传 agent_session_id，
+          要么走新建 ULID 路径，否则不同 work 会被错误合并。
+        """
+        store = self._stores.agent_context_store
+        project_id = project.project_id if project is not None else ""
+        if kind is AgentSessionKind.DIRECT_WORKER:
+            if project_id:
+                existing = await store.get_active_session_for_project(
+                    project_id, kind=AgentSessionKind.DIRECT_WORKER
+                )
+                if existing is not None:
+                    return existing
+            lookup_thread = thread_id or legacy_session_id
+            if lookup_thread:
+                candidates = await store.list_agent_sessions(
+                    legacy_session_id=lookup_thread,
+                    project_id=project_id or None,
+                    kind=AgentSessionKind.DIRECT_WORKER,
+                    limit=4,
+                )
+                for candidate in candidates:
+                    if candidate.status.value == "active":
+                        return candidate
+            return None
+        if kind is AgentSessionKind.MAIN_BOOTSTRAP:
+            if project_id:
+                return await store.get_active_session_for_project(
+                    project_id, kind=AgentSessionKind.MAIN_BOOTSTRAP
+                )
+            return None
+        return None
 
     async def _ensure_agent_session(
         self,
@@ -2180,16 +2227,28 @@ class AgentContextService:
                 else AgentSessionKind.MAIN_BOOTSTRAP
             )
         )
-        agent_session_id = (
-            request.agent_session_id or ""
-        ).strip() or self._build_agent_session_id(
-            agent_runtime_id=agent_runtime.agent_runtime_id,
-            kind=kind,
-            legacy_session_id=session_state.session_id,
-            work_id=request.work_id or "",
-            task_id=task.task_id,
-        )
-        existing = await self._stores.agent_context_store.get_agent_session(agent_session_id)
+        agent_session_id = (request.agent_session_id or "").strip()
+        existing: AgentSession | None = None
+        if agent_session_id:
+            existing = await self._stores.agent_context_store.get_agent_session(
+                agent_session_id
+            )
+        if existing is None:
+            # 按 (project, kind, thread/work) 反查已有 active session，
+            # 避免 Path A 创建 ULID + Path B 没拿到 id 时再建一条 composite row。
+            existing = await self._find_existing_session_for_ensure(
+                project=project,
+                runtime=agent_runtime,
+                kind=kind,
+                thread_id=(request.thread_id or task.thread_id or "").strip(),
+                legacy_session_id=session_state.session_id,
+                work_id=(request.work_id or "").strip(),
+                parent_agent_session_id=parent_agent_session_id,
+            )
+            if existing is not None:
+                agent_session_id = existing.agent_session_id
+        if not agent_session_id:
+            agent_session_id = f"session-{ULID()}"
         session = (
             existing.model_copy(
                 update={
@@ -2266,7 +2325,23 @@ class AgentContextService:
                     closed_count=closed,
                     new_session_id=session.agent_session_id,
                 )
-        await self._stores.agent_context_store.save_agent_session(session)
+        try:
+            await self._stores.agent_context_store.save_agent_session(session)
+        except sqlite3.IntegrityError:
+            # 并发 race：partial unique index 拒绝同 project 同 kind 第二条 active session。
+            # 重新按 (project, kind) 反查对方刚写入的 row 复用。
+            refreshed = await self._find_existing_session_for_ensure(
+                project=project,
+                runtime=agent_runtime,
+                kind=session.kind,
+                thread_id=session.thread_id,
+                legacy_session_id=session.legacy_session_id,
+                work_id=session.work_id,
+                parent_agent_session_id=session.parent_agent_session_id,
+            )
+            if refreshed is not None:
+                return refreshed
+            raise
         return session
 
     async def _ensure_memory_namespaces(

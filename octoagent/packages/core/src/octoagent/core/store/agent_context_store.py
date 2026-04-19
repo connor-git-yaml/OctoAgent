@@ -507,6 +507,41 @@ class SqliteAgentContextStore:
         )
         return [self._row_to_agent_runtime(row) for row in rows]
 
+    async def find_active_runtime(
+        self,
+        *,
+        project_id: str,
+        role: AgentRuntimeRole,
+        worker_profile_id: str = "",
+        agent_profile_id: str = "",
+    ) -> AgentRuntime | None:
+        """按 (project, role, worker/agent profile) 查找最新活跃 Runtime。
+
+        用于消除 composite-key fallback：Path B 在 request 没带 agent_runtime_id
+        时走这里反查 Path A 已创建的 ULID runtime，而不是再建一条 composite row。
+        """
+        clauses = ["project_id = ?", "role = ?", "status = 'active'"]
+        args: list[object] = [project_id, role.value]
+        if role is AgentRuntimeRole.WORKER:
+            if worker_profile_id:
+                clauses.append("worker_profile_id = ?")
+                args.append(worker_profile_id)
+        else:
+            if agent_profile_id:
+                clauses.append("agent_profile_id = ?")
+                args.append(agent_profile_id)
+        where = " AND ".join(clauses)
+        row = await self._fetchone(
+            f"""
+            SELECT * FROM agent_runtimes
+            WHERE {where}
+            ORDER BY updated_at DESC, created_at DESC
+            LIMIT 1
+            """,
+            tuple(args),
+        )
+        return self._row_to_agent_runtime(row) if row is not None else None
+
     async def save_agent_session(self, session: AgentSession) -> AgentSession:
         # 防护 partial UNIQUE index: 同一 project 只允许一个 active main_bootstrap session。
         # 如果要创建新的 active main_bootstrap，先关闭旧的。

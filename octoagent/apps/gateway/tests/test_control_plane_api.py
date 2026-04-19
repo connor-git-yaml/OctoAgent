@@ -3618,20 +3618,13 @@ class TestControlPlaneApi:
         assert item["delegation_target_profile_id"] == ""
         assert item["runtime_kind"] == AgentSessionKind.DIRECT_WORKER.value
 
-        internal_runtime = AgentRuntime(
-            agent_runtime_id="runtime-internal-worker",
-            project_id=project_id,
-            worker_profile_id=profile_id,
-            role=AgentRuntimeRole.WORKER,
-            name="internal worker",
-        )
-        await control_plane_app.state.store_group.agent_context_store.save_agent_runtime(
-            internal_runtime
-        )
+        # 复用 direct worker 的 runtime（不再硬塞第二条同 profile 的 active row，
+        # 那会触发 (project, role=worker, worker_profile_id) 的 partial unique 约束；
+        # 真实场景下 worker_internal session 也是挂在同一 worker runtime 之下）。
         await control_plane_app.state.store_group.agent_context_store.save_agent_session(
             AgentSession(
                 agent_session_id="session-worker-internal",
-                agent_runtime_id=internal_runtime.agent_runtime_id,
+                agent_runtime_id=agent_session.agent_runtime_id,
                 kind=AgentSessionKind.WORKER_INTERNAL,
                 project_id=project_id,
                 surface="web",

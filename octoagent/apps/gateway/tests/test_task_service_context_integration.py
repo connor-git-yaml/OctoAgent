@@ -42,6 +42,7 @@ from octoagent.gateway.services.agent_context import (
     build_agent_session_id,
     build_ambient_runtime_facts,
     build_private_memory_scope_ids,
+    build_projected_session_id,
     build_scope_aware_session_id,
 )
 from octoagent.gateway.services.sse_hub import SSEHub
@@ -2593,3 +2594,308 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
     )
 
     await store_group.conn.close()
+
+
+async def test_session_create_with_project_does_not_double_write_agent_rows(
+    tmp_path: Path,
+) -> None:
+    """端到端验证：Path A 预写 ULID runtime/session/session_state 后，
+    Path B（chat 触发的 task 执行）多轮消息不会再产生 composite-key 双写。
+
+    曾经的根因：session_service `_handle_session_create_with_project` 写 ULID row 后，
+    agent_context._ensure_agent_runtime / _ensure_agent_session 在 request 没带 ids 时
+    用 composite key 作 PK 又建一条，导致同一逻辑会话在 agent_runtimes / agent_sessions
+    各有两条 row（侧栏出现重复 / 删除后残留）。修复后：lookup-first 严格按
+    (project, role, worker_profile) / (project, kind=DIRECT_WORKER active) 反查复用
+    Path A 的 ULID row。
+    """
+    store_group = await create_store_group(
+        str(tmp_path / "f077-no-double-write.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+
+    worker_profile = WorkerProfile(
+        profile_id="worker-profile-alpha-direct",
+        scope=AgentProfileScope.PROJECT,
+        project_id="project-alpha",
+        name="Alpha Direct Worker",
+        summary="负责 Alpha 项目的直接对话。",
+        model_alias="main",
+        tool_profile="standard",
+        runtime_kinds=["worker"],
+        status=WorkerProfileStatus.ACTIVE,
+        origin_kind=WorkerProfileOriginKind.BUILTIN,
+        active_revision=1,
+    )
+    await store_group.agent_context_store.save_worker_profile(worker_profile)
+
+    # 模拟 Path A：预写 ULID runtime + session + session_state
+    path_a_thread = "thread-path-a"
+    path_a_scope = f"project:project-alpha:chat:web:{path_a_thread}"
+    path_a_projected_session_id = build_projected_session_id(
+        thread_id=path_a_thread,
+        surface="web",
+        scope_id=path_a_scope,
+        project_id="project-alpha",
+    )
+    path_a_runtime_id = "runtime-01PATHAPRESEED00000000000"
+    path_a_session_id = "session-01PATHAPRESEED00000000000"
+    await store_group.agent_context_store.save_agent_runtime(
+        AgentRuntime(
+            agent_runtime_id=path_a_runtime_id,
+            project_id="project-alpha",
+            worker_profile_id=worker_profile.profile_id,
+            role=AgentRuntimeRole.WORKER,
+            name=worker_profile.name,
+        )
+    )
+    await store_group.agent_context_store.save_agent_session(
+        AgentSession(
+            agent_session_id=path_a_session_id,
+            agent_runtime_id=path_a_runtime_id,
+            project_id="project-alpha",
+            kind=AgentSessionKind.DIRECT_WORKER,
+            surface="web",
+            thread_id=path_a_thread,
+            legacy_session_id=path_a_thread,
+        )
+    )
+    await store_group.agent_context_store.save_session_context(
+        SessionContextState(
+            session_id=path_a_projected_session_id,
+            agent_runtime_id=path_a_runtime_id,
+            agent_session_id=path_a_session_id,
+            thread_id=path_a_thread,
+            project_id="project-alpha",
+        )
+    )
+    await store_group.conn.commit()
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = RecordingLLMService()
+
+    async def _send_message(text: str, idem: str) -> str:
+        message = NormalizedMessage(
+            channel="web",
+            thread_id=path_a_thread,
+            scope_id=path_a_scope,
+            text=text,
+            idempotency_key=idem,
+            control_metadata={
+                "session_owner_profile_id": worker_profile.profile_id,
+                "agent_profile_id": worker_profile.profile_id,
+                "requested_worker_profile_id": worker_profile.profile_id,
+                "project_id": "project-alpha",
+                "thread_id": path_a_thread,
+                "session_id": path_a_projected_session_id,
+            },
+        )
+        task_id, created = await service.create_task(message)
+        assert created is True
+        latest_metadata = await service.get_latest_user_metadata(task_id)
+        # 模拟 chat.py 把 Path A 的 ids 透传到 dispatch_metadata（消除 composite-key fallback 触发条件）
+        dispatch_metadata = {
+            **latest_metadata,
+            "agent_runtime_id": path_a_runtime_id,
+            "agent_session_id": path_a_session_id,
+        }
+        await service.process_task_with_llm(
+            task_id=task_id,
+            user_text=message.text,
+            llm_service=llm_service,
+            dispatch_metadata=dispatch_metadata,
+        )
+        return task_id
+
+    # 第一条消息后断言：复用 Path A 的 ULID row，不产生 composite 双写
+    await _send_message("Path B 第一条消息", "f077-msg-1")
+
+    runtimes = await store_group.agent_context_store.list_agent_runtimes(
+        project_id="project-alpha", role=AgentRuntimeRole.WORKER,
+    )
+    assert [r.agent_runtime_id for r in runtimes] == [path_a_runtime_id], (
+        f"Path B should reuse Path A's ULID runtime; got {[r.agent_runtime_id for r in runtimes]}"
+    )
+
+    direct_worker_sessions = await store_group.agent_context_store.list_agent_sessions(
+        project_id="project-alpha",
+        kind=AgentSessionKind.DIRECT_WORKER,
+        limit=10,
+    )
+    assert [s.agent_session_id for s in direct_worker_sessions] == [path_a_session_id]
+
+    # 第二条消息：应继续复用同一 row
+    await _send_message("Path B 第二条消息", "f077-msg-2")
+
+    runtimes = await store_group.agent_context_store.list_agent_runtimes(
+        project_id="project-alpha", role=AgentRuntimeRole.WORKER,
+    )
+    direct_worker_sessions = await store_group.agent_context_store.list_agent_sessions(
+        project_id="project-alpha",
+        kind=AgentSessionKind.DIRECT_WORKER,
+        limit=10,
+    )
+    assert [r.agent_runtime_id for r in runtimes] == [path_a_runtime_id]
+    assert [s.agent_session_id for s in direct_worker_sessions] == [path_a_session_id]
+
+    # 关键反向断言：不存在任何 composite-key 格式的 row（含 `|` 分隔符 / `role:` / `runtime:` 前缀）
+    all_runtimes = await store_group.agent_context_store.list_agent_runtimes(
+        project_id="project-alpha",
+    )
+    for runtime in all_runtimes:
+        assert not runtime.agent_runtime_id.startswith("role:"), (
+            f"composite-key runtime leaked: {runtime.agent_runtime_id}"
+        )
+        assert "|" not in runtime.agent_runtime_id, (
+            f"composite-key runtime leaked: {runtime.agent_runtime_id}"
+        )
+    all_sessions = await store_group.agent_context_store.list_agent_sessions(
+        project_id="project-alpha", limit=20,
+    )
+    for sess in all_sessions:
+        assert not sess.agent_session_id.startswith("runtime:"), (
+            f"composite-key session leaked: {sess.agent_session_id}"
+        )
+        assert "|" not in sess.agent_session_id, (
+            f"composite-key session leaked: {sess.agent_session_id}"
+        )
+
+    await store_group.conn.close()
+
+
+async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> None:
+    """验证 _migrate_composite_agent_identity_rows：
+
+    DB 启动时若发现历史 composite-key agent_runtimes / agent_sessions row，应：
+    1. 当存在对应 ULID canonical 时，把外键迁移到 canonical 并删除 composite。
+    2. 当 composite 是孤儿时，就地 rename 为新 `runtime-{ULID}` / `session-{ULID}`。
+    """
+    db_path = str(tmp_path / "f077-migration.db")
+    artifacts_dir = str(tmp_path / "artifacts")
+    store_group = await create_store_group(db_path, artifacts_dir)
+
+    # 准备 worker_profile 和 project 的最小依赖
+    project = Project(project_id="project-mig", slug="mig", name="Mig Project")
+    await store_group.project_store.save_project(project)
+    await store_group.agent_context_store.save_worker_profile(
+        WorkerProfile(
+            profile_id="worker-profile-mig",
+            scope=AgentProfileScope.PROJECT,
+            project_id=project.project_id,
+            name="Mig Worker",
+            summary="",
+            tool_profile="standard",
+            status=WorkerProfileStatus.ACTIVE,
+            origin_kind=WorkerProfileOriginKind.BUILTIN,
+            active_revision=1,
+        )
+    )
+
+    # 模拟"老库脏数据"：当时还没有 partial unique index，允许同 (project, role, profile)
+    # 多条 active row 共存。直接 DROP 新的 unique index 后插入，重启时 init_db
+    # 会重新跑迁移并恢复 index。
+    await store_group.conn.execute(
+        "DROP INDEX IF EXISTS idx_agent_runtimes_active_worker_unique"
+    )
+    await store_group.conn.execute(
+        "DROP INDEX IF EXISTS idx_agent_sessions_direct_worker_active"
+    )
+
+    # canonical ULID + 同 (project, role, worker_profile) 的 composite 双写
+    canonical_runtime_id = "runtime-01CANONICALMIG0000000000"
+    composite_runtime_id = (
+        f"role:worker|project:{project.project_id}|worker_profile:worker-profile-mig"
+    )
+    await store_group.agent_context_store.save_agent_runtime(
+        AgentRuntime(
+            agent_runtime_id=canonical_runtime_id,
+            project_id=project.project_id,
+            worker_profile_id="worker-profile-mig",
+            role=AgentRuntimeRole.WORKER,
+            name="canonical",
+        )
+    )
+    await store_group.agent_context_store.save_agent_runtime(
+        AgentRuntime(
+            agent_runtime_id=composite_runtime_id,
+            project_id=project.project_id,
+            worker_profile_id="worker-profile-mig",
+            role=AgentRuntimeRole.WORKER,
+            name="composite-leftover",
+        )
+    )
+
+    # composite session 引用 composite runtime；canonical session 引用 canonical runtime
+    canonical_session_id = "session-01CANONICALMIG0000000000"
+    composite_session_id = (
+        f"runtime:{composite_runtime_id}|kind:direct_worker|legacy:thread-mig"
+    )
+    await store_group.agent_context_store.save_agent_session(
+        AgentSession(
+            agent_session_id=canonical_session_id,
+            agent_runtime_id=canonical_runtime_id,
+            project_id=project.project_id,
+            kind=AgentSessionKind.DIRECT_WORKER,
+            surface="web",
+            thread_id="thread-mig",
+            legacy_session_id="thread-mig",
+        )
+    )
+    await store_group.agent_context_store.save_agent_session(
+        AgentSession(
+            agent_session_id=composite_session_id,
+            agent_runtime_id=composite_runtime_id,
+            project_id=project.project_id,
+            kind=AgentSessionKind.DIRECT_WORKER,
+            surface="web",
+            thread_id="thread-mig",
+            legacy_session_id="thread-mig",
+        )
+    )
+
+    # 孤儿 composite runtime（无 canonical 对应），应被 rename
+    orphan_composite_runtime_id = (
+        f"role:worker|project:{project.project_id}|worker_profile:worker-profile-orphan"
+    )
+    await store_group.agent_context_store.save_agent_runtime(
+        AgentRuntime(
+            agent_runtime_id=orphan_composite_runtime_id,
+            project_id=project.project_id,
+            worker_profile_id="worker-profile-orphan",
+            role=AgentRuntimeRole.WORKER,
+            name="orphan",
+        )
+    )
+    await store_group.conn.commit()
+    await store_group.conn.close()
+
+    # 重新打开 → 触发 init_db → _migrate_composite_agent_identity_rows
+    store_group_2 = await create_store_group(db_path, artifacts_dir)
+
+    runtimes = await store_group_2.agent_context_store.list_agent_runtimes(
+        project_id=project.project_id, role=AgentRuntimeRole.WORKER,
+    )
+    runtime_ids = sorted(r.agent_runtime_id for r in runtimes)
+    # 期望：canonical 保留 + composite 合并到 canonical 后被删 + orphan 就地 rename 为新 ULID
+    assert canonical_runtime_id in runtime_ids
+    assert composite_runtime_id not in runtime_ids
+    for rid in runtime_ids:
+        assert not rid.startswith("role:"), f"composite runtime not migrated: {rid}"
+        assert "|" not in rid, f"composite runtime not migrated: {rid}"
+    # 应正好两条 (canonical + 改名后的 orphan)，没新增 / 重复
+    assert len(runtime_ids) == 2
+
+    sessions = await store_group_2.agent_context_store.list_agent_sessions(
+        project_id=project.project_id,
+        kind=AgentSessionKind.DIRECT_WORKER,
+        limit=20,
+    )
+    session_ids = sorted(s.agent_session_id for s in sessions)
+    assert canonical_session_id in session_ids
+    assert composite_session_id not in session_ids
+    for sid in session_ids:
+        assert not sid.startswith("runtime:"), f"composite session not migrated: {sid}"
+        assert "|" not in sid, f"composite session not migrated: {sid}"
+
+    await store_group_2.conn.close()
