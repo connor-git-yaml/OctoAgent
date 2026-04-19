@@ -105,6 +105,10 @@ class SkillRunner:
         target_tracker = ToolTargetTracker(
             target_repeat_threshold=limits.repeat_signature_threshold,
         )
+        # Feature 079: 连续 N 步 LLM 只发 tool_calls 没 user-facing content 的计数。
+        # 任何一步 output.content 非空 / output.complete=True 即重置；超过
+        # limits.no_progress_steps_threshold 触发 LOOP_DETECTED 熔断。
+        no_progress_steps = 0
 
         try:
             self._coerce_input(manifest, skill_input)
@@ -205,6 +209,50 @@ class SkillRunner:
             output = raw_output
 
             await self._call_hook("after_llm_call", manifest, output)
+
+            # Feature 079: no-progress 检测 —— 连续 N 步 LLM 只发 tool_calls
+            # 没产生 user-facing content 且未 complete，判定为"无进展循环"，
+            # 立即熔断。覆盖 exact-signature / semantic-target 两个维度抓
+            # 不到的"参数微变 + 工具反复成功但 LLM 不收尾"场景。典型案例：
+            # 用户问"MCP 可以用了吗"，LLM 把 ask_model 当 connectivity probe
+            # 反复发 "Reply with exactly: OK"，每次 message 微调 → signature
+            # 不重复 → target 不重复 → 现有维度全部绕过，直到 step_limit
+            # 兜底（30 轮约 1-3 min）。本检测在 8 轮内即可终止。
+            no_progress_threshold = limits.no_progress_steps_threshold
+            if no_progress_threshold is not None and not output.complete:
+                if output.content and output.content.strip():
+                    no_progress_steps = 0
+                elif output.tool_calls:
+                    no_progress_steps += 1
+                    if no_progress_steps >= no_progress_threshold:
+                        tool_names = ", ".join(
+                            sorted({call.tool_name for call in output.tool_calls})
+                        )
+                        logger.warning(
+                            "no_progress_loop_detected",
+                            consecutive_steps=no_progress_steps,
+                            threshold=no_progress_threshold,
+                            tool_names=tool_names,
+                            step=steps,
+                        )
+                        result = await self._fail_result(
+                            manifest=manifest,
+                            execution_context=execution_context,
+                            start_time=start_time,
+                            attempts=attempts,
+                            steps=steps,
+                            category=ErrorCategory.LOOP_DETECTED,
+                            error=SkillLoopDetectedError(
+                                f"无进展循环：连续 {no_progress_steps} 步只调用工具 "
+                                f"[{tool_names}]，未产生任何回复内容。"
+                                f"可能 LLM 误用工具做反复验证而非正常使用。"
+                            ),
+                        )
+                        await self._call_hook(
+                            "skill_end", manifest, execution_context, result
+                        )
+                        self._try_clear_history(history_key)
+                        return result
 
             if output.tool_calls:
                 signature = self._tool_signature(output.tool_calls)

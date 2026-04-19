@@ -552,6 +552,135 @@ async def test_runner_restrict_mode_does_not_expand_from_runtime_metadata(
     assert tool_broker.calls == []
 
 
+async def test_runner_no_progress_loop_breaks_when_content_always_empty(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    """Feature 079: 连续 N 步只发 tool_calls 没 content 也不 complete →
+    LOOP_DETECTED 熔断。覆盖"参数微变 + 工具反复成功但 LLM 不收尾"场景。
+
+    构造 8 步全部 content="" + tool_calls 但每步 args 微变（避免 exact
+    signature 重复）。no_progress_steps_threshold 默认 8 应在第 8 步熔断。
+    """
+    from octoagent.skills.models import UsageLimits
+
+    context = execution_context.model_copy(deep=True)
+    context.usage_limits = UsageLimits(
+        max_steps=50,  # 故意远大于 no_progress 阈值，确保是 no_progress 触发
+        no_progress_steps_threshold=8,
+    )
+    # 每步 args 微变（text 数字递增），signature 都不同；content 全空
+    outputs = [
+        SkillOutputEnvelope(
+            content="",
+            complete=False,
+            tool_calls=[
+                {"tool_name": "system.echo", "arguments": {"text": f"probe-{i}"}}
+            ],
+        )
+        for i in range(20)
+    ]
+    client = QueueModelClient(outputs)
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+
+    result = await runner.run(
+        manifest=echo_manifest,
+        execution_context=context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    assert result.status == SkillRunStatus.FAILED
+    assert result.error_category == ErrorCategory.LOOP_DETECTED
+    assert "无进展循环" in (result.error_message or "")
+    # 第 8 步触发
+    assert result.steps == 8
+
+
+async def test_runner_no_progress_resets_when_content_appears(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    """Feature 079: 任意一步 content 非空即重置计数，正常 multi-step
+    research 不会被误杀。模拟 7 步只 tool_calls + 第 8 步带 content。
+    """
+    from octoagent.skills.models import UsageLimits
+
+    context = execution_context.model_copy(deep=True)
+    context.usage_limits = UsageLimits(
+        max_steps=50,
+        no_progress_steps_threshold=8,
+    )
+    # 前 7 步只 tool_calls 没 content；第 8 步 LLM 给 content（重置计数）；
+    # 第 9 步 complete
+    outputs = [
+        SkillOutputEnvelope(
+            content="",
+            complete=False,
+            tool_calls=[
+                {"tool_name": "system.echo", "arguments": {"text": f"step-{i}"}}
+            ],
+        )
+        for i in range(7)
+    ] + [
+        SkillOutputEnvelope(
+            content="阶段性发现：xxx",
+            complete=False,
+            tool_calls=[
+                {"tool_name": "system.echo", "arguments": {"text": "step-7"}}
+            ],
+        ),
+        SkillOutputEnvelope(content="完成", complete=True),
+    ]
+    client = QueueModelClient(outputs)
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+
+    result = await runner.run(
+        manifest=echo_manifest,
+        execution_context=context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    assert result.status == SkillRunStatus.SUCCEEDED
+
+
+async def test_runner_no_progress_disabled_when_threshold_none(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    """Feature 079: no_progress_steps_threshold=None（API 契约"显式不限制"）
+    时不启用本检测，向后兼容旧用法。靠 max_steps 兜底。
+    """
+    from octoagent.skills.models import UsageLimits
+
+    context = execution_context.model_copy(deep=True)
+    context.usage_limits = UsageLimits(
+        max_steps=5,  # max_steps 兜底
+        no_progress_steps_threshold=None,  # 显式禁用 no_progress
+    )
+    outputs = [
+        SkillOutputEnvelope(
+            content="",
+            complete=False,
+            tool_calls=[
+                {"tool_name": "system.echo", "arguments": {"text": f"probe-{i}"}}
+            ],
+        )
+        for i in range(20)
+    ]
+    client = QueueModelClient(outputs)
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+
+    result = await runner.run(
+        manifest=echo_manifest,
+        execution_context=context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    # max_steps=5 兜底而非 LOOP_DETECTED
+    assert result.status == SkillRunStatus.FAILED
+    assert result.error_category == ErrorCategory.STEP_LIMIT_EXCEEDED
+
+
 async def test_runner_loop_detected(
     echo_manifest, execution_context, tool_broker, event_store
 ) -> None:

@@ -28,6 +28,7 @@ _ENV_FIELD_MAP: dict[str, tuple[str, type]] = {
     f"{_ENV_PREFIX}MAX_REQUEST_TOKENS": ("max_request_tokens", int),
     f"{_ENV_PREFIX}MAX_RESPONSE_TOKENS": ("max_response_tokens", int),
     f"{_ENV_PREFIX}MAX_TOOL_CALLS": ("max_tool_calls", int),
+    f"{_ENV_PREFIX}NO_PROGRESS_STEPS": ("no_progress_steps_threshold", int),
 }
 
 # Runtime 兜底默认：UsageLimits 类签名层 max_steps=None（"不限制"语义，对齐
@@ -38,6 +39,13 @@ _ENV_FIELD_MAP: dict[str, tuple[str, type]] = {
 # 用户可以通过 OCTOAGENT_DEFAULT_MAX_STEPS / WorkerProfile.resource_limits /
 # SKILL.md resource_limits 任一层覆盖。
 _RUNTIME_FALLBACK_MAX_STEPS = 30
+
+# 连续 N 步 LLM 只发 tool_calls 没 user-facing content 且未 complete →
+# 判定为"无进展循环"。比 max_steps=30 更早触发，专门覆盖"工具调用都成功但
+# LLM 不收尾"场景。8 是经验值：典型 multi-step research（list_dir/read/grep/
+# read/read/read + 总结）通常 5-7 步内会出 content；超过 8 大概率是 LLM
+# 误用工具或无限"验证"。
+_RUNTIME_FALLBACK_NO_PROGRESS_STEPS = 8
 
 
 def _read_env_defaults() -> dict[str, Any]:
@@ -72,6 +80,7 @@ def get_global_defaults() -> UsageLimits:
     """
     base_dict = UsageLimits().model_dump()
     base_dict["max_steps"] = _RUNTIME_FALLBACK_MAX_STEPS
+    base_dict["no_progress_steps_threshold"] = _RUNTIME_FALLBACK_NO_PROGRESS_STEPS
     env_overrides = _read_env_defaults()
     for key, value in env_overrides.items():
         if key in base_dict:

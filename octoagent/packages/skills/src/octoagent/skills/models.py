@@ -93,6 +93,13 @@ class UsageLimits(BaseModel):
     # feedback，引导 LLM 停止无效重复调用（如枚举类工具反复 poll）。
     # 默认 3 表示"第 3 轮相同 tool_calls signature 即提醒"。
     repeat_warning_threshold: int = Field(default=3, ge=1, le=50)
+    # Feature 079: 连续 N 轮 LLM 只发 tool_calls 没 user-facing content（且
+    # 未 complete）即判定为"无进展循环"，触发熔断。覆盖 exact-signature /
+    # semantic-target 两个维度抓不到的"参数微变 + 工具反复成功但 LLM 不收尾"
+    # 场景（如把 ask_model 当 connectivity probe 反复跑的案例）。
+    # 默认 None（API 契约：不限制）；runtime 入口由 get_global_defaults
+    # 注入兜底值。
+    no_progress_steps_threshold: int | None = Field(default=None, ge=2, le=50)
 
 
 @dataclass
