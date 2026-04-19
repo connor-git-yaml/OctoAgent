@@ -110,11 +110,11 @@ def _make_integration_extractor(store, llm_response_json=None):
     """构造带 mock LLM 和 mock memory_service 的 extractor。"""
     llm_service = AsyncMock()
     if llm_response_json is not None:
-        llm_service.call_with_fallback = AsyncMock(
+        llm_service.call = AsyncMock(
             return_value=json.dumps(llm_response_json)
         )
     else:
-        llm_service.call_with_fallback = AsyncMock(return_value="[]")
+        llm_service.call = AsyncMock(return_value="[]")
 
     memory_service = AsyncMock()
     proposal_mock = MagicMock()
@@ -129,6 +129,7 @@ def _make_integration_extractor(store, llm_response_json=None):
     commit_mock = MagicMock()
     commit_mock.sor_id = "sor-int-001"
     memory_service.commit_memory = AsyncMock(return_value=commit_mock)
+    memory_service.fast_commit = AsyncMock(return_value=commit_mock)
 
     run_mock = MagicMock()
     run_mock.run_id = "run-int-001"
@@ -197,12 +198,12 @@ async def test_full_conversation_auto_extract(
     assert updated_session.memory_cursor_seq == 6
 
     # 验证 LLM 被调用
-    llm_service.call_with_fallback.assert_called_once()
+    llm_service.call.assert_called_once()
 
-    # 验证 propose-validate-commit 链被调用
-    memory_service.propose_write.assert_called()
-    memory_service.validate_proposal.assert_called()
-    memory_service.commit_memory.assert_called()
+    # 高置信度（>=0.75）ADD + 非敏感 partition 走 fast_commit 快速路径，不经过
+    # propose-validate-commit；本测试 mock 数据 confidence=0.9 + partition="work"
+    # 满足快速路径条件，直接验证 fast_commit 被调用即可。
+    memory_service.fast_commit.assert_called()
 
     # 验证 Fragment 溯源被创建
     memory_service.run_memory_maintenance.assert_called()
@@ -221,7 +222,7 @@ async def test_tool_calls_compressed_in_extraction_input(
         captured_messages.append(kwargs.get("messages", args[0] if args else []))
         return "[]"
 
-    llm_service.call_with_fallback = capture_llm_call
+    llm_service.call = capture_llm_call
 
     memory_service = AsyncMock()
     async def memory_service_factory(project=None):

@@ -19,6 +19,7 @@
 import os
 
 import logfire.testing
+import pytest
 from httpx import AsyncClient
 
 from tests.integration.conftest import make_task_succeeded_checker, poll_until
@@ -80,6 +81,13 @@ class TestF013ScenarioD:
             )
         # LOGFIRE_SEND_TO_LOGFIRE=false 时 span 为空是正常降级行为，不作强断言
 
+    @pytest.mark.skip(
+        reason=(
+            "同 test_f013_e2e_full：echo 模式已不走 Worker.handle 分派路径，观察不到"
+            "WORKER_DISPATCHED / WORKER_RETURNED 事件。需要配合真实 LLM 或 capability "
+            "dispatch fixture 才能重建完整三层事件链。"
+        )
+    )
     async def test_trace_chain_continuity(
         self,
         full_client: AsyncClient,

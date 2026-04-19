@@ -31,13 +31,13 @@ class TestSC4Artifact:
         assert resp.status_code == 200
         data = resp.json()
 
-        # 验证 Artifact 存在
+        # 验证 Artifact 存在：task_service 先存 llm-request-context 再存 llm-response，
+        # 按创建时间升序返回，不能用 [0]。
         artifacts = data["artifacts"]
         assert len(artifacts) >= 1
 
-        # 验证 Artifact 内容
-        artifact = artifacts[0]
-        assert artifact["name"] == "llm-response"
+        # 验证 llm-response Artifact 内容
+        artifact = next(a for a in artifacts if a["name"] == "llm-response")
         assert artifact["size"] > 0
         assert len(artifact["parts"]) >= 1
 
