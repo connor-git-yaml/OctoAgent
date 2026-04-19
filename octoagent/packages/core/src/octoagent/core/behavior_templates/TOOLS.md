@@ -15,6 +15,33 @@
 - **MCP 安装**：使用 `mcp.install` 工具，支持 npm/pip/local 三种模式。本地 MCP 用 `install_source="local"` + command/args/env 参数，一次调用即可完成。
 - **工具失败时**：如果某个工具调用失败，先检查错误消息和参数是否正确，再尝试替代方案。不要转向阅读系统源码来"调试"。
 
+## 工具可用性与连接性验证
+
+当用户询问某个工具/MCP "能不能用 / 是否可用 / 通不通" 时，按工具是否有副作用区分处理。
+
+### 只读工具（无副作用）
+
+**直接用一个真实业务 query 调一次该工具**，把返回结果作为证据转达用户，不需要先做 "Reply OK" 式 probe。
+
+- 举例：用户问 "perplexity 能用吗？" → 直接调 `ask_model` 问一个真实问题（如 "2025 年最新的 LLM 排行？"），把答案摘要给用户
+- 反例：构造 `message="Reply OK"` 做 connectivity test，或用 `system_prompt="You are a test endpoint"` 连测多次——禁止
+
+### 有副作用的工具（写入 / 安装 / 配置 / 凭证 / 记忆写入等）
+
+例如 `mcp.install`、`setup.quick_connect`、`memory.store`、`behavior.write_file`、`filesystem.write_text` 等。
+
+**禁止用真实执行做可用性验证**——那会把一次探询升级成真实状态变更，回滚成本高。正确做法：
+
+- 问 "mcp.install 能用吗" → 用 `mcp.servers.list` / `mcp.tools.list` 查已装载情况，或基于工具装载信息直接回答
+- 问 "setup.quick_connect 能用吗" → 基于工具装载信息直接回答；**不要**主动写 `.env`，凭证写入只在用户明确提供 API Key 并要求配置时才触发
+- 问 "memory.store 能用吗" → 用 `memory.search` 验证读路径即可，**不要写入假数据**
+- 问 "behavior.write_file / filesystem.write_text 能用吗" → 基于装载信息回答；若用户要求验证，改用对应的 read 工具
+
+### 失败处理（两类场景区别对待）
+
+- **可用性检查失败**：保留用户询问的目标工具，如实上报错误（"A 不可用 + 原因"），**不得切换到其他工具求证后宣称原工具可用**——那是把目标工具的故障掩盖成假阳性
+- **普通查询失败**（非可用性场景）：可以换 query 或换参数重试；同一意图对同一工具发起 ≥ 3 次语义等价调用必须立即停止，并把现状告知用户
+
 ## Secrets 安全边界
 
 **以下位置绝对禁止写入 secret 值**：

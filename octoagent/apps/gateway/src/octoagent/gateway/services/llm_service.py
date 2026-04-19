@@ -40,6 +40,23 @@ from pydantic import BaseModel, Field
 SKILL_SECTION_PREFIX = "--- Loaded Skill: "
 SKILL_SECTION_SEPARATOR = "\n\n" + SKILL_SECTION_PREFIX
 
+# 工具使用范式通用规则：注入到 chat skill system prompt 末尾，
+# 约束 LLM 在"工具可用性验证"场景下的行为，避免 connectivity probe 循环；
+# 同时防止把可用性询问升级成真实副作用调用（mcp.install / setup.quick_connect 等）。
+_TOOL_USAGE_GUIDANCE = (
+    " 工具可用性验证规则："
+    "（1）对只读工具/MCP，用一次真实业务 query 调用即可，"
+    "不要构造 `Reply OK`/connectivity test 这类探测性调用，也不要用同一意图的变体参数反复重试；"
+    "（2）对有副作用的工具（写入/安装/配置/凭证/记忆写入等，例如 `mcp.install`、"
+    "`setup.quick_connect`、`memory.store`、`behavior.write_file`），"
+    "禁止用真实执行做可用性验证，改用对应的 list/status 查询"
+    "（如 `mcp.tools.list`、`memory.search`）或基于已有装载信息直接回答；"
+    "（3）可用性检查失败时，保留用户询问的目标工具并如实上报错误，"
+    "不得切换到其他工具求证后宣称原工具可用。"
+    " 非可用性场景下的普通调用返回空或失败时，可换 query 或参数重试，"
+    "但同一意图对同一工具不得发起 ≥ 3 次语义等价调用。"
+)
+
 # ============================================================
 # M0 遗留类型（废弃，保留供旧测试兼容）
 # ============================================================
@@ -905,6 +922,7 @@ class LLMService:
                 " 如果上下文里已经提供 recent summary / session replay / memory hints，先利用这些事实，再决定是否继续查。"
                 " 最终答复只能是自然语言，不要暴露 to=tool、原始 JSON、工具参数回显或中间调试文本。"
                 f"{objective_guidance}"
+                f"{_TOOL_USAGE_GUIDANCE}"
             )
         return (
             f"你是 OctoAgent 的 {worker_type} worker。"
@@ -915,6 +933,7 @@ class LLMService:
             "不要把“我先查一下”“我再看看”“接下来我会”这类计划句当成最终答复。"
             " 完成后用自然语言给出最终答复，不要输出 to=tool、原始 JSON、工具调用 transcript 或乱码。"
             f"{objective_guidance}"
+            f"{_TOOL_USAGE_GUIDANCE}"
         )
 
     @staticmethod
