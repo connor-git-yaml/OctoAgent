@@ -24,6 +24,7 @@ dev = [
     "octoagent-policy",
     "octoagent-memory",
     "octoagent-protocol",
+    "octoagent-sdk",
     "pytest-xdist>=3.8.0",
 ]
 
@@ -36,6 +37,7 @@ octoagent-skills = { workspace = true }
 octoagent-policy = { workspace = true }
 octoagent-memory = { workspace = true }
 octoagent-protocol = { workspace = true }
+octoagent-sdk = { workspace = true }
 
 [tool.uv.workspace]
 members = [
