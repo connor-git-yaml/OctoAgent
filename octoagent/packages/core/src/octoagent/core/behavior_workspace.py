@@ -58,7 +58,7 @@ BEHAVIOR_FILE_BUDGETS = {
     "USER.md": 1800,
     "PROJECT.md": 2400,
     "KNOWLEDGE.md": 2200,
-    "TOOLS.md": 3200,
+    "TOOLS.md": 4000,
     "BOOTSTRAP.md": 2200,
     "SOUL.md": 1600,
     "IDENTITY.md": 1600,

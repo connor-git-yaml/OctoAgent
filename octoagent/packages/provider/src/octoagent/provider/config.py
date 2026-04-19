@@ -72,7 +72,10 @@ def _load_from_yaml(project_root: Path, kwargs: dict) -> bool:
         return False
 
     try:
-        from .dx.config_wizard import load_config
+        # config_wizard 已从 provider.dx 迁移到 gateway.services.config；保留旧 import
+        # 会静默踩 ModuleNotFoundError 然后走 env fallback 分支，让 yaml 配置被
+        # "悄悄忽略"。显式指向新位置。
+        from octoagent.gateway.services.config.config_wizard import load_config
 
         cfg = load_config(project_root)
         if cfg is None:

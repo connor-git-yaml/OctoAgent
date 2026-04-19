@@ -53,7 +53,7 @@ async def test_rerank_model_not_loaded_degraded():
 @pytest.mark.asyncio
 async def test_rerank_model_loaded_returns_scores():
     """模型正常加载后 rerank 返回与 candidates 对应的 scores。"""
-    import octoagent.provider.dx.model_reranker_service as reranker_mod
+    import octoagent.gateway.services.inference.model_reranker_service as reranker_mod
     from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
 
     svc = ModelRerankerService(auto_load=False)
@@ -89,7 +89,7 @@ async def test_rerank_model_loaded_returns_scores():
 @pytest.mark.asyncio
 async def test_rerank_inference_error_degraded():
     """推理异常时返回 degraded=True。"""
-    import octoagent.provider.dx.model_reranker_service as reranker_mod
+    import octoagent.gateway.services.inference.model_reranker_service as reranker_mod
     from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
 
     svc = ModelRerankerService(auto_load=False)

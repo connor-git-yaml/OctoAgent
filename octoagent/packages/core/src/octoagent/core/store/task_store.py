@@ -18,6 +18,12 @@ class SqliteTaskStore:
 
     def __init__(self, conn: aiosqlite.Connection) -> None:
         self._conn = conn
+        # 防御性设置 row_factory：_row_to_task 走 name-based access（row["requester"]
+        # 等），若连接由调用方 raw 打开没设过，拿到的就是 raw tuple，字符串索引
+        # 会直接踩 TypeError。这里强制 idempotent 设置一次，任何 caller
+        # （tests / 旧 fixture / 集成脚本）都不再需要显式记得配置。
+        if getattr(self._conn, "row_factory", None) is not aiosqlite.Row:
+            self._conn.row_factory = aiosqlite.Row
 
     async def create_task(self, task: Task) -> None:
         """创建任务记录"""

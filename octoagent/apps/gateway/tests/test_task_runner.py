@@ -899,7 +899,8 @@ class TestTaskRunner:
         session = await runner.get_execution_session(task_id)
         assert session is not None
         assert session.state == ExecutionSessionState.WAITING_INPUT
-        assert session.backend == ExecutionBackend.DOCKER
+        # c55dd77 删除 DockerRuntimeBackend 空壳后统一回 INLINE
+        assert session.backend == ExecutionBackend.INLINE
         assert session.can_attach_input is True
 
         job = await store_group.task_job_store.get_job(task_id)

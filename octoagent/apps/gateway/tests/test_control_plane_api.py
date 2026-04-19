@@ -5,6 +5,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from octoagent.core.models import (
@@ -802,7 +803,7 @@ class TestControlPlaneApi:
         owner_resp = await control_plane_client.get("/api/control/resources/owner-profile")
         bootstrap_resp = await control_plane_client.get("/api/control/resources/bootstrap-session")
         context_resp = await control_plane_client.get("/api/control/resources/context-frames")
-        policy_resp = await control_plane_client.get("/api/control/resources/policy-profiles")
+        # commit b6a1556 连同 /advanced 页面一起删了 policy-profiles / wizard / pipelines / automation / import-workbench 的独立资源端点；保留 skill-governance / setup-governance。
         skill_resp = await control_plane_client.get("/api/control/resources/skill-governance")
         setup_resp = await control_plane_client.get("/api/control/resources/setup-governance")
         assert profiles_resp.status_code == 200
@@ -821,7 +822,6 @@ class TestControlPlaneApi:
         )
         assert context_payload["a2a_messages"][1]["message_type"] == "RESULT"
         assert context_payload["frames"][0]["source_refs"][1]["ref_id"] == "memory-1"
-        assert policy_resp.status_code == 200
         assert skill_resp.status_code == 200
         assert setup_resp.status_code == 200
         worker_profiles_payload = worker_profiles_resp.json()
@@ -2525,12 +2525,13 @@ class TestControlPlaneApi:
         pack = payload["resources"]["capability_pack"]["pack"]
         tool_names = {item["tool_name"] for item in pack["tools"]}
         assert len(pack["tools"]) >= 20
+        # commit c48a46d 删除 work.split 内置工具（批量能力并入 subagents.spawn），
+        # 仅保留为 control-plane action；所以这里不检查 work.split 在 tool_names。
         assert {
             "subagents.spawn",
             "subagents.list",
             "subagents.kill",
             "subagents.steer",
-            "work.split",
             "work.merge",
             "work.delete",
             "web.fetch",
@@ -4708,6 +4709,13 @@ class TestControlPlaneApi:
         )
         assert run_resp.status_code in {200, 202}
 
+    @pytest.mark.skip(
+        reason=(
+            "commit b6a1556 连同 /advanced + /work 页面一起删除了 import-workbench 的全部"
+            "资源端点（/api/control/resources/import-sources/{id}、import-runs/{id} 等）。"
+            "本测试依赖这些已移除的 resource 路径，需要整体重写或废弃。"
+        )
+    )
     async def test_import_details_and_actions_reject_cross_project_access(
         self,
         control_plane_app,

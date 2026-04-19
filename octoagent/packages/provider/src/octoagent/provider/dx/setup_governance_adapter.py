@@ -49,7 +49,12 @@ class RemoteControlPlaneClient:
                 json=request.model_dump(mode="json"),
             )
             resp.raise_for_status()
-            return ActionResultEnvelope.model_validate(resp.json())
+            # 服务端返回 {"contract_version": ..., "result": <envelope>}
+            # 而不是裸 envelope，见 gateway/routes/control_plane.py:169-182。
+            # 取 result 子字段再校验，否则 6 个必填字段 (request_id / action_id 等) 全部缺失。
+            body = resp.json()
+            envelope_payload = body.get("result", body) if isinstance(body, dict) else body
+            return ActionResultEnvelope.model_validate(envelope_payload)
 
     async def get_agent_profiles(self) -> dict[str, Any]:
         """调用 GET /api/control/resources/agent-profiles。"""

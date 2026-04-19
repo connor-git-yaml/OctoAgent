@@ -1603,9 +1603,13 @@ async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
 
         assert result.is_error is False
         payload = json.loads(result.output)
-        assert payload["tool_profile"] == "standard"
-        assert payload["worker_type"] == "research"
-        assert payload["parent_work_id"] == plan.work.work_id
+        # subagents.spawn 输出从裸 payload 改为批量格式 {requested, created, children[]}
+        assert payload["requested"] == 1
+        assert payload["created"] == 1
+        child_payload = payload["children"][0]
+        assert child_payload["tool_profile"] == "standard"
+        assert child_payload["worker_type"] == "research"
+        assert child_payload["parent_work_id"] == plan.work.work_id
 
         child_works = []
         for _ in range(30):
@@ -1760,8 +1764,9 @@ async def test_subagents_spawn_keeps_local_document_queries_on_minimal_profile(
 
         assert result.is_error is False
         payload = json.loads(result.output)
-        assert payload["tool_profile"] == "standard"
-        assert payload["worker_type"] == "research"
+        child_payload = payload["children"][0]
+        assert child_payload["tool_profile"] == "standard"
+        assert child_payload["worker_type"] == "research"
 
         child_works = []
         for _ in range(30):
@@ -1843,10 +1848,11 @@ async def test_subagents_spawn_uses_objective_as_child_prompt_when_title_is_prov
 
         assert spawn_result.is_error is False
         payload = json.loads(spawn_result.output)
-        assert payload["objective"] == "请先读取 API 现状，再输出研究摘要"
-        assert payload["title"] == "研究子任务"
+        child_payload = payload["children"][0]
+        assert child_payload["objective"] == "请先读取 API 现状，再输出研究摘要"
+        assert child_payload["title"] == "研究子任务"
 
-        events = await store_group.event_store.get_events_for_task(payload["task_id"])
+        events = await store_group.event_store.get_events_for_task(child_payload["task_id"])
         user_event = next(event for event in events if event.type.value == "USER_MESSAGE")
         assert user_event.payload["text_preview"] == "请先读取 API 现状，再输出研究摘要"
         assert user_event.payload["control_metadata"]["child_title"] == "研究子任务"

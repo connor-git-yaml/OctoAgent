@@ -143,7 +143,8 @@ class TestExecutionApi:
                 session = session_resp.json()["session"]
                 assert session["task_id"] == task_id
                 assert session["state"] == "WAITING_INPUT"
-                assert session["backend"] == "docker"
+                # c55dd77 删除 DockerRuntimeBackend 空壳后统一回 INLINE
+                assert session["backend"] == "inline"
                 assert session["can_attach_input"] is True
 
                 events_resp = await client.get(f"/api/tasks/{task_id}/execution/events")
