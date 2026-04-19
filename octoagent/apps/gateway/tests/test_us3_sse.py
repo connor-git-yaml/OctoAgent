@@ -17,7 +17,7 @@ from httpx import ASGITransport, AsyncClient
 from octoagent.core.models import ActorType, Event, EventType, TaskStatus
 from octoagent.core.models.payloads import StateTransitionPayload
 from octoagent.core.store import create_store_group
-from octoagent.core.store.transaction import append_event_and_update_task
+from octoagent.core.store.transaction import append_event_and_update_task, append_event_only
 from octoagent.gateway.services.sse_hub import SSEHub
 
 
@@ -278,6 +278,251 @@ class TestSSE:
 
         await sse_hub.unsubscribe("test-task-sub", queue)
         assert "test-task-sub" not in sse_hub._subscribers
+
+    async def test_sse_dedups_events_present_in_history_and_queue(
+        self, client: AsyncClient, test_app
+    ):
+        """回归：历史快照与订阅队列重叠的 event 只能推送一次。
+
+        修复 publish-before-subscribe 竞态后，stream 层改为先订阅再读历史，
+        一旦 broadcast 发生在读历史期间，同一个 event 可能同时出现在
+        历史快照和订阅队列里。验证 dedup 生效，不会向前端推两次。
+        """
+        from ulid import ULID
+
+        resp = await client.post(
+            "/api/message",
+            json={
+                "text": "SSE dedup 测试",
+                "idempotency_key": "sse-dedup-001",
+            },
+        )
+        task_id = resp.json()["task_id"]
+        store_group = test_app.state.store_group
+        sse_hub = test_app.state.sse_hub
+
+        now = datetime.now(UTC)
+        running_event = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=3,
+            ts=now,
+            type=EventType.STATE_TRANSITION,
+            actor=ActorType.SYSTEM,
+            payload=StateTransitionPayload(
+                from_status=TaskStatus.CREATED,
+                to_status=TaskStatus.RUNNING,
+            ).model_dump(),
+            trace_id=f"trace-{task_id}",
+        )
+        await append_event_and_update_task(
+            store_group.conn,
+            store_group.event_store,
+            store_group.task_store,
+            running_event,
+            "RUNNING",
+        )
+
+        # 模拟一个在订阅建立之后、读历史之前 broadcast 的事件：
+        # 它已经写进 store（会出现在历史快照里），又会通过 sse_hub 进订阅队列。
+        overlap_event = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=4,
+            ts=now,
+            type=EventType.MODEL_CALL_COMPLETED,
+            actor=ActorType.SYSTEM,
+            payload={"response_summary": "dedup 测试回复"},
+            trace_id=f"trace-{task_id}",
+        )
+        await append_event_only(
+            store_group.conn,
+            store_group.event_store,
+            overlap_event,
+        )
+
+        succeeded_event = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=5,
+            ts=now,
+            type=EventType.STATE_TRANSITION,
+            actor=ActorType.SYSTEM,
+            payload=StateTransitionPayload(
+                from_status=TaskStatus.RUNNING,
+                to_status=TaskStatus.SUCCEEDED,
+            ).model_dump(),
+            trace_id=f"trace-{task_id}",
+        )
+
+        events_received: list[dict] = []
+
+        async def reader() -> None:
+            async with client.stream(
+                "GET", f"/api/stream/task/{task_id}"
+            ) as response:
+                assert response.status_code == 200
+                async for line in response.aiter_lines():
+                    if line.startswith("data:"):
+                        data = json.loads(line[len("data:") :].strip())
+                        events_received.append(data)
+
+        read_task = asyncio.create_task(reader())
+        # 给 SSE 连接、subscribe、读历史一点窗口
+        await asyncio.sleep(0.1)
+
+        # 订阅建立后主动广播 overlap_event：它此刻也已经在历史里，dedup 应只推一次
+        await sse_hub.broadcast(task_id, overlap_event)
+
+        # 推进到终态触发 final
+        await append_event_and_update_task(
+            store_group.conn,
+            store_group.event_store,
+            store_group.task_store,
+            succeeded_event,
+            "SUCCEEDED",
+        )
+        await sse_hub.broadcast(task_id, succeeded_event)
+
+        await asyncio.wait_for(read_task, timeout=5.0)
+
+        overlap_hits = [
+            e for e in events_received if e["event_id"] == overlap_event.event_id
+        ]
+        assert len(overlap_hits) == 1, (
+            f"overlap event should be yielded exactly once, got {len(overlap_hits)}"
+        )
+        assert overlap_hits[0]["type"] == "MODEL_CALL_COMPLETED"
+
+        succeeded_hits = [
+            e for e in events_received if e["event_id"] == succeeded_event.event_id
+        ]
+        assert len(succeeded_hits) == 1
+        assert succeeded_hits[0]["final"] is True
+
+    async def test_sse_marks_final_when_terminal_event_landed_after_snapshot(
+        self, client: AsyncClient, test_app
+    ):
+        """回归 Codex 指出的终态 overlap bug：
+
+        task 在进入 SSE 路由时状态是 RUNNING（入口快照非终态），但在
+        subscribe 之后、读历史期间终态 STATE_TRANSITION 落库。新路由必须
+        按事件本身判断 final，否则终态事件会被标成 final=false 并在订阅
+        侧 drain 时被 dedup 跳过，前端永远收不到 final=true。
+        """
+        from ulid import ULID
+
+        resp = await client.post(
+            "/api/message",
+            json={
+                "text": "SSE terminal overlap 测试",
+                "idempotency_key": "sse-terminal-overlap-001",
+            },
+        )
+        task_id = resp.json()["task_id"]
+        store_group = test_app.state.store_group
+
+        now = datetime.now(UTC)
+        running_event = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=3,
+            ts=now,
+            type=EventType.STATE_TRANSITION,
+            actor=ActorType.SYSTEM,
+            payload=StateTransitionPayload(
+                from_status=TaskStatus.CREATED,
+                to_status=TaskStatus.RUNNING,
+            ).model_dump(),
+            trace_id=f"trace-{task_id}",
+        )
+        await append_event_and_update_task(
+            store_group.conn,
+            store_group.event_store,
+            store_group.task_store,
+            running_event,
+            "RUNNING",
+        )
+
+        # 关键：只 append event、不更新 task.status，模拟 task projection
+        # 还没来得及落表就被 SSE 路由读了"旧"快照的竞态。
+        succeeded_event = Event(
+            event_id=str(ULID()),
+            task_id=task_id,
+            task_seq=4,
+            ts=now,
+            type=EventType.STATE_TRANSITION,
+            actor=ActorType.SYSTEM,
+            payload=StateTransitionPayload(
+                from_status=TaskStatus.RUNNING,
+                to_status=TaskStatus.SUCCEEDED,
+            ).model_dump(),
+            trace_id=f"trace-{task_id}",
+        )
+        await append_event_only(
+            store_group.conn,
+            store_group.event_store,
+            succeeded_event,
+        )
+
+        events_received: list[dict] = []
+
+        async def reader() -> None:
+            async with client.stream(
+                "GET", f"/api/stream/task/{task_id}"
+            ) as response:
+                assert response.status_code == 200
+                async for line in response.aiter_lines():
+                    if line.startswith("data:"):
+                        events_received.append(
+                            json.loads(line[len("data:") :].strip())
+                        )
+
+        # 若 SSE 层没正确处理终态 overlap，reader 会永远挂着心跳，
+        # 这里用超时守住回归
+        await asyncio.wait_for(reader(), timeout=3.0)
+
+        terminal_hits = [
+            e for e in events_received if e["event_id"] == succeeded_event.event_id
+        ]
+        assert len(terminal_hits) == 1
+        assert terminal_hits[0]["type"] == "STATE_TRANSITION"
+        assert terminal_hits[0]["final"] is True
+
+    async def test_sse_default_hub_queue_size_absorbs_burst(self):
+        """默认 SSEHub 的 queue 容量足以缓冲一次典型失败 task 的 event 爆发。
+
+        历史 bug：queue_maxsize=100 时，失败链路喷几百个 event 瞬间塞满队列，
+        sse_hub 直接把订阅者 discard，前端永远等不到终态事件。
+        """
+        hub = SSEHub()
+        task_id = "01JTESTSSEHUBBURSTDEFAULT01"
+        queue = await hub.subscribe(task_id)
+
+        now = datetime.now(UTC)
+        events = [
+            Event(
+                event_id=f"01JTESTSSEEVT{idx:015d}",
+                task_id=task_id,
+                task_seq=idx + 1,
+                ts=now,
+                type=EventType.TOOL_CALL_STARTED,
+                actor=ActorType.SYSTEM,
+                payload={"tool_name": f"tool_{idx}"},
+                trace_id=f"trace-{task_id}",
+            )
+            for idx in range(500)
+        ]
+        for event in events:
+            await hub.broadcast(task_id, event)
+
+        assert queue in hub._subscribers.get(task_id, set()), (
+            "500 个 event 突发下订阅者不应被踢掉，"
+            "证明 queue_maxsize 默认值足以缓冲短时爆发"
+        )
+        assert queue.qsize() == 500
+
+        await hub.unsubscribe(task_id, queue)
 
     async def test_sse_hub_removes_full_queue_subscriber(self):
         """慢订阅者队列满时自动移除，避免内存膨胀"""

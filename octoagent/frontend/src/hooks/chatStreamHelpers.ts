@@ -295,6 +295,31 @@ export function extractFailureMessage(
   return "本次回复没有成功完成，请稍后重试。";
 }
 
+/**
+ * 在"当前轮次"内找到最近一条非空 agent 回复。
+ *
+ * 续聊场景下同一个 task 会累积多轮消息，直接取整条历史的最后一条 agent
+ * 会在当前轮无新回复时把上一轮的答复误贴到新问题下面。限定"最后一条
+ * USER_MESSAGE 之后"可以保证只读当前轮次的 agent 输出；若当前轮还没有
+ * agent 产出就返回空串，由调用方决定是否保留 placeholder。
+ */
+export function findLastAgentContentInCurrentTurn(messages: ChatMessage[]): string {
+  let lastUserIdx = -1;
+  for (let idx = messages.length - 1; idx >= 0; idx -= 1) {
+    if (messages[idx].role === "user") {
+      lastUserIdx = idx;
+      break;
+    }
+  }
+  for (let idx = messages.length - 1; idx > lastUserIdx; idx -= 1) {
+    const msg = messages[idx];
+    if (msg.role === "agent" && typeof msg.content === "string" && msg.content.trim()) {
+      return msg.content;
+    }
+  }
+  return "";
+}
+
 export function buildMessagesFromTaskDetail(detail: TaskDetailResponse): ChatMessage[] {
   const llmArtifacts = detail.artifacts.filter((artifact) => artifact.name === "llm-response");
   const llmArtifactsById = new Map(llmArtifacts.map((artifact) => [artifact.artifact_id, artifact]));

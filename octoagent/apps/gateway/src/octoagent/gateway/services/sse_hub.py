@@ -14,7 +14,7 @@ from octoagent.core.models.event import Event
 class SSEHub:
     """SSE 事件广播器 -- 基于 asyncio.Queue 的发布/订阅模式"""
 
-    def __init__(self, queue_maxsize: int = 100) -> None:
+    def __init__(self, queue_maxsize: int = 1024) -> None:
         # task_id -> set of asyncio.Queue
         self._subscribers: dict[str, set[asyncio.Queue]] = defaultdict(set)
         self._queue_maxsize = queue_maxsize

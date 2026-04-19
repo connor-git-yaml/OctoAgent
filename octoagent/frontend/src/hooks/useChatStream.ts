@@ -20,6 +20,7 @@ import {
   buildRestoreCandidateTaskIds,
   extractAgentMessage,
   extractFailureMessage,
+  findLastAgentContentInCurrentTurn,
   isUserVisibleModelEvent,
   persistTaskId,
   readStoredTaskId,
@@ -167,9 +168,14 @@ export function useChatStream(
   );
   const eventSourceRef = useRef<EventSource | null>(null);
   const activeAgentMessageIdRef = useRef<string | null>(null);
+  const taskIdRef = useRef<string | null>(taskId);
   const attemptedRestoreSignatureRef = useRef<string | null>(null);
   const restoreTaskIdSignature = (restoreTarget?.taskIds ?? []).join("|");
   const prevRestoreSignatureRef = useRef(restoreTaskIdSignature);
+
+  useEffect(() => {
+    taskIdRef.current = taskId;
+  }, [taskId]);
 
   // Session 切换时清空旧状态，让 restore effect 能重新加载新会话消息
   useEffect(() => {
@@ -224,14 +230,49 @@ export function useChatStream(
     return spawnAgentPlaceholder();
   }, [spawnAgentPlaceholder]);
 
-  /** 关闭 EventSource */
+  /** 关闭 EventSource
+   *
+   * 兜底策略：若关闭时 placeholder 仍未被替换（典型成因是 SSE 链路丢了关键的
+   * MODEL_CALL_COMPLETED / FAILED 事件，或队列溢出被踢），主动拉一次任务详情
+   * 从 artifact 里把最终 agent 回复补上，避免用户必须刷新页面才能看到结果。
+   */
   const closeStream = useCallback(() => {
+    const msgId = activeAgentMessageIdRef.current;
+    const currentTaskId = taskIdRef.current;
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
     }
     activeAgentMessageIdRef.current = null;
     setStreaming(false);
+
+    if (!msgId || !currentTaskId) {
+      return;
+    }
+    void fetchTaskDetail(currentTaskId)
+      .then((detail) => {
+        const restored = buildMessagesFromTaskDetail(detail);
+        // 限定在"最后一条 USER_MESSAGE 之后"，避免续聊时把上一轮 agent 回复
+        // 错贴到当前占位消息上（CANCELLED/REJECTED 或当前轮无 agent 输出时）
+        const lastAgentContent = findLastAgentContentInCurrentTurn(restored);
+        if (!lastAgentContent) {
+          return;
+        }
+        setMessages((prev) =>
+          prev.map((msg) => {
+            if (msg.id !== msgId) {
+              return msg;
+            }
+            if (msg.isStreaming || msg.content === AGENT_STREAM_PLACEHOLDER) {
+              return { ...msg, content: lastAgentContent, isStreaming: false };
+            }
+            return msg;
+          })
+        );
+      })
+      .catch(() => {
+        // 兜底失败保持当前状态即可，不再冒泡错误
+      });
   }, []);
 
   const requestSessionFocus = useCallback(async (nextTaskId: string) => {
@@ -488,6 +529,9 @@ export function useChatStream(
 
   const resetConversation = useCallback(async () => {
     const currentTaskId = taskId;
+    // 主动切换会话时，先清掉 placeholder 引用，抑制 closeStream 的兜底拉详情，
+    // 避免无谓地对旧 taskId 发请求
+    activeAgentMessageIdRef.current = null;
     closeStream();
     attemptedRestoreSignatureRef.current = null;
     setSuppressedRestoreSignature(restoreTaskIdSignature);
@@ -495,7 +539,6 @@ export function useChatStream(
     setError(null);
     setRestoring(false);
     setTaskId(null);
-    activeAgentMessageIdRef.current = null;
     persistTaskId(null);
     try {
       const result = await requestNewConversation(currentTaskId);
@@ -596,6 +639,8 @@ export function useChatStream(
 
   useEffect(() => {
     return () => {
+      // 卸载时抑制 closeStream 的兜底拉详情，避免在已卸载组件上 setMessages
+      activeAgentMessageIdRef.current = null;
       closeStream();
     };
   }, [closeStream]);
