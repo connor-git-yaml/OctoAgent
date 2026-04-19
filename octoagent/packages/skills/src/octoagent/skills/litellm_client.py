@@ -441,18 +441,17 @@ class LiteLLMSkillClient:
     def _history_to_responses_input(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """将统一的 Chat Completions 格式 history 转换为 Responses API input。
 
-        内部 history 统一存 Chat Completions 格式，只在发送 Responses API 时转换。
-        转换规则：
+        内部 history 统一存 Chat Completions role-based 格式，只在发送 Responses API
+        时转换。转换规则：
         - system → 跳过（已由 instructions 处理）
         - user → {role: "user", content: [{type: "input_text", text}]}
         - assistant (无 tool_calls) → {role: "assistant", content: [{type: "output_text", text}]}
         - assistant (有 tool_calls) → 多个 {type: "function_call", call_id, name, arguments}
         - tool → {type: "function_call_output", call_id, output}
         """
-        # 预扫 known_call_ids：收集所有 function_call（assistant.tool_calls 以及旧
-        # type-based 格式）的 call_id。用于在转换 Responses API input 时过滤孤立
-        # 的 function_call_output——防止历史片段重组、权限拒绝、压缩路径等造成的
-        # tool 消息无对应 function_call，触发 Responses API 400。
+        # 预扫 known_call_ids：收集所有 assistant.tool_calls 的 id。用于过滤孤立
+        # 的 tool message —— 防止历史片段重组、权限拒绝、压缩路径等造成的 tool
+        # 消息无对应 function_call，触发 Responses API 400。
         known_call_ids: set[str] = set()
         for message in history:
             if str(message.get("role", "")).strip() == "assistant":
@@ -460,10 +459,6 @@ class LiteLLMSkillClient:
                     cid = str(tc.get("id", "")).strip()
                     if cid:
                         known_call_ids.add(cid)
-            elif str(message.get("type", "")).strip() == "function_call":
-                cid = str(message.get("call_id", "")).strip()
-                if cid:
-                    known_call_ids.add(cid)
 
         items: list[dict[str, Any]] = []
         for message in history:
@@ -516,32 +511,6 @@ class LiteLLMSkillClient:
                     "content": [{"type": "input_text", "text": str(message.get("content", ""))}],
                 })
                 continue
-
-            # 兼容旧格式：type-based messages（不应再出现）
-            message_type = str(message.get("type", "")).strip()
-            if message_type == "function_call":
-                call_id = str(message.get("call_id", "")).strip()
-                if call_id:
-                    items.append({
-                        "type": "function_call",
-                        "call_id": call_id,
-                        "name": str(message.get("name", "")),
-                        "arguments": str(message.get("arguments", "")),
-                    })
-            elif message_type == "function_call_output":
-                call_id = str(message.get("call_id", "")).strip()
-                if call_id and call_id in known_call_ids:
-                    items.append({
-                        "type": "function_call_output",
-                        "call_id": call_id,
-                        "output": str(message.get("output", "")),
-                    })
-                elif call_id:
-                    log.warning(
-                        "orphan_legacy_function_call_output_skipped",
-                        call_id=call_id,
-                        known_count=len(known_call_ids),
-                    )
 
         return items
 

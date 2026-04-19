@@ -618,23 +618,6 @@ def test_history_to_responses_input_orphan_tool_filtered() -> None:
     ), "孤立的 function_call_output 必须被过滤"
 
 
-def test_history_to_responses_input_legacy_orphan_filtered() -> None:
-    """兼容旧 type-based 格式：孤立的 function_call_output 也应被过滤。"""
-    history = [
-        {
-            "type": "function_call_output",
-            "call_id": "call_legacy_orphan",
-            "output": "没有对应 function_call 的旧格式 output",
-        },
-    ]
-
-    items = LiteLLMSkillClient._history_to_responses_input(history)
-
-    assert not any(
-        item.get("type") == "function_call_output" for item in items
-    ), "旧格式的孤立 function_call_output 也必须被过滤"
-
-
 def _make_function_call_stream(call_id: str, fn_name: str, args_json: str, input_tokens: int) -> list[str]:
     """生成一个 Responses API SSE 流，模拟 LLM 返回一个 function_call。"""
     return [
@@ -1429,3 +1412,88 @@ async def test_histories_evicts_only_truly_idle_keys(monkeypatch) -> None:
     assert "fresh:trace-fresh" in client._histories
     assert "old-0:trace-0" not in client._histories, "最久空闲的 key 应被淘汰"
     assert "old-1:trace-1" in client._histories, "较新空闲的 key 应保留"
+
+
+@pytest.mark.asyncio
+async def test_compacted_history_converts_to_responses_input() -> None:
+    """压缩后 history 仍应为 role-based 格式，并可被 _history_to_responses_input 正确转换。
+
+    回归保护：确保 ContextCompactor 不产出 type-based 消息（function_call /
+    function_call_output），避免与 Chat Completions canonical 格式混用。
+    """
+    from unittest.mock import AsyncMock, patch
+
+    from octoagent.skills.compactor import ContextCompactor
+
+    # 构造足以触发 Level 2 的多轮历史，且包含 assistant.tool_calls + tool 配对
+    history: list[dict[str, Any]] = [
+        {"role": "system", "content": "sys"},
+    ]
+    for i in range(4):
+        history.append({"role": "user", "content": f"q{i}: " + "Q" * 500})
+        history.append(
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": f"call_{i}",
+                        "type": "function",
+                        "function": {
+                            "name": "project__inspect",
+                            "arguments": '{"project_id": "p"}',
+                        },
+                    }
+                ],
+            }
+        )
+        history.append(
+            {
+                "role": "tool",
+                "tool_call_id": f"call_{i}",
+                "content": f"result{i}: " + "R" * 500,
+            }
+        )
+
+    compactor = ContextCompactor(
+        proxy_url="http://test",
+        master_key="sk-test",
+        recent_turns=1,
+    )
+
+    with patch(
+        "octoagent.skills.compactor._summarize_with_llm",
+        new_callable=AsyncMock,
+        return_value="early summary",
+    ):
+        result = await compactor.compact(
+            history=history,
+            max_tokens=800,
+            threshold_ratio=0.8,
+        )
+
+    # 实际触发了压缩
+    assert result.strategy_used != "none"
+
+    # 压缩后 history 里不得再出现 type-based 消息
+    for msg in history:
+        assert "type" not in msg or msg.get("type") is None, (
+            f"compacted history 出现了 type-based 消息: {msg}"
+        )
+
+    # 所有消息都应具备 role 字段（role-based canonical）
+    for msg in history:
+        assert msg.get("role"), f"压缩后消息缺少 role: {msg}"
+
+    # 转换为 Responses API input 不应报错，且 function_call / function_call_output
+    # 应成对出现（不产生孤立 output）
+    items = LiteLLMSkillClient._history_to_responses_input(history)
+    fc_ids = {
+        item["call_id"] for item in items if item.get("type") == "function_call"
+    }
+    fco_ids = {
+        item["call_id"] for item in items if item.get("type") == "function_call_output"
+    }
+    assert fco_ids.issubset(fc_ids), (
+        f"存在孤立的 function_call_output: {fco_ids - fc_ids}"
+    )

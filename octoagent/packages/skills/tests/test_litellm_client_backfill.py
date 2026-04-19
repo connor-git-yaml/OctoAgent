@@ -1,10 +1,9 @@
 """LiteLLMSkillClient 工具结果回填格式测试 (Feature 064 T-064-08)。
 
 覆盖：
-- Chat Completions 路径：tool_calls + tool results 使用标准格式
-- Responses API 路径：function_call + function_call_output 使用标准格式
+- history 统一 Chat Completions role-based 格式：tool_calls + tool role
+  messages（Responses API 路径由 _history_to_responses_input 在发送前转换）
 - 向后兼容：tool_call_id 为空时回退自然语言
-- 多轮工具调用：对话历史中格式一致
 - 错误结果：is_error=True 仍使用标准 tool role message
 """
 
@@ -197,57 +196,6 @@ class TestChatCompletionsBackfill:
         assert msg["tool_calls"][0]["id"] == "call_abc"
         assert msg["tool_calls"][0]["type"] == "function"
         assert msg["tool_calls"][0]["function"]["name"] == "test__tool"
-
-
-class TestResponsesAPIBackfill:
-    """Responses API 路径回填格式测试。"""
-
-    def test_function_call_output_backfill(self) -> None:
-        """验证 feedback 有 tool_call_id 时使用 function_call_output。"""
-        feedbacks = [
-            ToolFeedbackMessage(
-                tool_name="test.tool",
-                output='{"result": "ok"}',
-                is_error=False,
-                tool_call_id="call_resp_123",
-            )
-        ]
-
-        has_standard_ids = any(fb.tool_call_id for fb in feedbacks)
-        assert has_standard_ids is True
-
-        history: list[dict[str, Any]] = []
-        for fb in feedbacks:
-            history.append({
-                "type": "function_call_output",
-                "call_id": fb.tool_call_id,
-                "output": fb.output if not fb.is_error else f"ERROR: {fb.error}",
-            })
-
-        assert history[-1]["type"] == "function_call_output"
-        assert history[-1]["call_id"] == "call_resp_123"
-        assert history[-1]["output"] == '{"result": "ok"}'
-
-    def test_function_call_items(self) -> None:
-        """验证 assistant message 使用 function_call items。"""
-        tool_calls = [
-            {"id": "call_resp_abc", "tool_name": "test.tool", "arguments": {"key": "v"}},
-        ]
-
-        from octoagent.skills.litellm_client import _to_fn_name
-
-        history: list[dict[str, Any]] = []
-        for tc in tool_calls:
-            history.append({
-                "type": "function_call",
-                "call_id": tc["id"],
-                "name": _to_fn_name(tc["tool_name"]),
-                "arguments": json.dumps(tc["arguments"]),
-            })
-
-        assert history[-1]["type"] == "function_call"
-        assert history[-1]["call_id"] == "call_resp_abc"
-        assert history[-1]["name"] == "test__tool"
 
 
 class TestBackwardCompatibility:

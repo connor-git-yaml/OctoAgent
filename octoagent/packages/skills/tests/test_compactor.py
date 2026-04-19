@@ -54,10 +54,6 @@ def _tool_large(chars: int = 3000, tool_call_id: str = "tc_1") -> dict[str, Any]
     return {"role": "tool", "tool_call_id": tool_call_id, "content": "X" * chars}
 
 
-def _function_call_output(output: str, call_id: str = "fc_1") -> dict[str, Any]:
-    return {"type": "function_call_output", "call_id": call_id, "output": output}
-
-
 class RecordingEventEmitter:
     """记录所有事件调用的测试用 EventEmitter。"""
 
@@ -109,15 +105,6 @@ class TestEstimateTokens:
         ]
         tokens = _estimate_history_tokens(history, estimate_tokens_default)
         assert tokens > 0
-
-    def test_history_tokens_responses_api(self):
-        history = [
-            {"type": "function_call", "call_id": "fc_1", "name": "read_file", "arguments": "{}"},
-            {"type": "function_call_output", "call_id": "fc_1", "output": "file content"},
-        ]
-        tokens = _estimate_history_tokens(history, estimate_tokens_default)
-        assert tokens > 0
-
 
 class TestTurnBoundaries:
     def test_simple_turns(self):
@@ -230,28 +217,6 @@ class TestLevel1Truncation:
         tool_msg = history[2]
         assert tool_msg["content"].endswith("...[truncated]")
         assert len(tool_msg["content"]) <= _TOOL_OUTPUT_KEEP_CHARS + 20  # +20 for suffix
-
-    @pytest.mark.asyncio
-    async def test_truncate_responses_api_function_call_output(self):
-        """Responses API 的 function_call_output 也应被截断。"""
-        compactor = ContextCompactor(proxy_url="http://test", master_key="sk-test")
-        large_output = "B" * 4000
-        history = [
-            _system("sys"),
-            _user("first question"),
-            _function_call_output(large_output, call_id="fc_1"),
-            _assistant("first answer"),
-            _user("second question"),
-            _assistant("second answer"),
-        ]
-        result = await compactor.compact(
-            history=history,
-            max_tokens=1200,
-            threshold_ratio=0.8,
-        )
-        assert result.strategy_used == "level1"
-        fco_msg = history[2]
-        assert fco_msg["output"].endswith("...[truncated]")
 
     @pytest.mark.asyncio
     async def test_small_tool_output_not_truncated(self):
@@ -627,3 +592,85 @@ class TestEdgeCases:
             )
         # 由于 token 估算始终很高，应触发压缩
         assert result.strategy_used != "none"
+
+
+class TestSummaryArgumentsRedaction:
+    """安全边界：compaction 摘要提示词不得携带原始 tool_call arguments。
+
+    ContextCompactor 可能走独立的轻量 compaction alias；工具参数里常见的
+    path / url / command 可能含内部路径或凭据片段，不应扩散到另一条
+    模型调用链。
+    """
+
+    @pytest.mark.asyncio
+    async def test_summary_prompt_excludes_tool_arguments(self):
+        """_summarize_with_llm 发送的 body 必须只带工具名，不带原始 arguments。"""
+        from octoagent.skills.compactor import _summarize_with_llm
+
+        sensitive_path = "/tmp/secret-credentials.json"
+        sensitive_url = "https://internal.example.com/api/token?key=SUPER_SECRET"
+        messages: list[dict[str, Any]] = [
+            {"role": "user", "content": "read secrets"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "type": "function",
+                        "function": {
+                            "name": "fs__read",
+                            "arguments": f'{{"path": "{sensitive_path}"}}',
+                        },
+                    },
+                    {
+                        "id": "call_2",
+                        "type": "function",
+                        "function": {
+                            "name": "http__get",
+                            "arguments": f'{{"url": "{sensitive_url}"}}',
+                        },
+                    },
+                ],
+            },
+        ]
+
+        captured: dict[str, Any] = {}
+
+        class _FakeResp:
+            status_code = 200
+
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> dict[str, Any]:
+                return {
+                    "choices": [{"message": {"content": "summary"}}],
+                }
+
+        class _FakeClient:
+            async def post(self, url: str, *, json, headers):
+                captured["body"] = json
+                return _FakeResp()
+
+        await _summarize_with_llm(
+            messages=messages,
+            model_alias="compaction",
+            proxy_url="http://proxy",
+            master_key="sk-test",
+            http_client=_FakeClient(),
+        )
+
+        body_text = str(captured["body"])
+        assert sensitive_path not in body_text, (
+            "compaction prompt 泄露了 tool_call arguments (path)"
+        )
+        assert sensitive_url not in body_text, (
+            "compaction prompt 泄露了 tool_call arguments (url)"
+        )
+        assert "SUPER_SECRET" not in body_text, (
+            "compaction prompt 泄露了 tool_call arguments (凭据片段)"
+        )
+        # 工具名应保留（摘要需要调用序列信息）
+        assert "fs__read" in body_text
+        assert "http__get" in body_text

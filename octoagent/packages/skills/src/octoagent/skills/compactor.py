@@ -92,20 +92,19 @@ def _estimate_history_tokens(
     history: list[dict[str, Any]],
     token_estimator: Callable[[str], int],
 ) -> int:
-    """估算整个对话历史的 token 数。"""
+    """估算整个对话历史的 token 数（Chat Completions role-based 格式）。"""
     total = 0
     for msg in history:
-        # 处理常规 role-based 消息
         content = msg.get("content")
         if isinstance(content, str):
             total += token_estimator(content)
         elif isinstance(content, list):
-            # Responses API 的嵌套 content
+            # 兼容嵌套 content（极少数工具输出场景）
             for item in content:
                 if isinstance(item, dict):
                     total += token_estimator(str(item.get("text", "")))
 
-        # 处理 tool_calls 数组（assistant message）
+        # assistant.tool_calls 数组
         tool_calls = msg.get("tool_calls")
         if isinstance(tool_calls, list):
             for tc in tool_calls:
@@ -113,12 +112,6 @@ def _estimate_history_tokens(
                     fn = tc.get("function", {})
                     total += token_estimator(str(fn.get("name", "")))
                     total += token_estimator(str(fn.get("arguments", "")))
-
-        # 处理 function_call / function_call_output（Responses API）
-        if msg.get("type") in ("function_call", "function_call_output"):
-            total += token_estimator(str(msg.get("name", "")))
-            total += token_estimator(str(msg.get("arguments", "")))
-            total += token_estimator(str(msg.get("output", "")))
 
     return total
 
@@ -132,35 +125,24 @@ def _is_system_prompt(msg: dict[str, Any]) -> bool:
 
 
 def _is_tool_role_message(msg: dict[str, Any]) -> bool:
-    """判断是否是 tool role 消息。
-
-    Chat Completions: role=tool；Responses API: type=function_call_output。
-    """
-    if str(msg.get("role", "")).lower() == "tool":
-        return True
-    if str(msg.get("type", "")) == "function_call_output":
-        return True
-    return False
+    """判断是否是 Chat Completions tool role 消息。"""
+    return str(msg.get("role", "")).lower() == "tool"
 
 
 def _get_message_content_length(msg: dict[str, Any]) -> int:
     """获取消息内容长度。"""
-    content = msg.get("content") or msg.get("output") or ""
-    return len(str(content))
+    return len(str(msg.get("content") or ""))
 
 
 def _truncate_message_content(
     msg: dict[str, Any],
     keep_chars: int = _TOOL_OUTPUT_KEEP_CHARS,
 ) -> dict[str, Any]:
-    """截断消息内容，保留前 N 字符。"""
+    """截断 tool role message 的 content 字段，保留前 N 字符。"""
     result = dict(msg)
     content = result.get("content")
     if isinstance(content, str) and len(content) > keep_chars:
         result["content"] = content[:keep_chars] + "\n...[truncated]"
-    output = result.get("output")
-    if isinstance(output, str) and len(output) > keep_chars:
-        result["output"] = output[:keep_chars] + "\n...[truncated]"
     return result
 
 
@@ -168,7 +150,7 @@ def _identify_turn_boundaries(history: list[dict[str, Any]]) -> list[tuple[int, 
     """识别对话轮次边界。
 
     一轮 = user message 开始，到下一个 user message 之前结束。
-    system prompt 不计入轮次。tool/function_call/function_call_output 归入当前轮次。
+    system prompt 不计入轮次。assistant/tool 归入当前轮次。
 
     Returns:
         list of (start_index, end_index) tuples，左闭右开。
@@ -181,10 +163,9 @@ def _identify_turn_boundaries(history: list[dict[str, Any]]) -> list[tuple[int, 
             continue
 
         role = str(msg.get("role", "")).lower()
-        msg_type = str(msg.get("type", ""))
 
         # user message 开始新轮次
-        if role == "user" and msg_type not in ("function_call", "function_call_output"):
+        if role == "user":
             if turn_start is not None:
                 turns.append((turn_start, i))
             turn_start = i
@@ -211,16 +192,35 @@ async def _summarize_with_llm(
 
     Feature 064 P3 优化 4: 有外部 http_client 时复用，无则创建临时的。
     """
-    # 将消息列表序列化为文本
+    # 将消息列表序列化为文本（Chat Completions role-based 格式）
     text_parts: list[str] = []
     for msg in messages:
-        role = msg.get("role", msg.get("type", "unknown"))
-        content = msg.get("content") or msg.get("output") or msg.get("arguments") or ""
+        role = msg.get("role", "unknown")
+        content = msg.get("content") or ""
         if isinstance(content, list):
-            # Responses API 嵌套 content
+            # 兼容嵌套 content 结构
             content = " ".join(
                 str(item.get("text", "")) for item in content if isinstance(item, dict)
             )
+        # assistant.tool_calls：只带工具名到摘要提示词，**绝不**携带原始
+        # arguments。compaction 可能走独立 alias（通常是轻量模型），而工具
+        # 参数常常是 command/path/url 等，可能混入凭据/内部路径；把它们原样
+        # 送到另一条模型调用链会放大数据泄漏面（工具输出已由 tool role
+        # 消息的 content 参与摘要，工具名足够还原调用意图）。
+        tool_calls = msg.get("tool_calls")
+        if isinstance(tool_calls, list) and tool_calls:
+            names = [
+                str(tc.get("function", {}).get("name", ""))
+                for tc in tool_calls
+                if isinstance(tc, dict)
+            ]
+            names_text = ", ".join(n for n in names if n)
+            if names_text:
+                content = (
+                    f"{content} [tools: {names_text}]"
+                    if content
+                    else f"[tools: {names_text}]"
+                )
         text_parts.append(f"[{role}]: {content}")
 
     conversation_text = "\n".join(text_parts)
@@ -541,15 +541,21 @@ class ContextCompactor:
                     to_remove.extend(turn_indices)
                     break  # 一次只丢弃一整轮
 
-        # 确保 function_call 和 function_call_output 成对删除/保留，
-        # 避免孤立的 function_call_output 导致 Responses API 报
+        # 确保 assistant.tool_calls 与对应的 tool role message 成对删除/保留，
+        # 避免孤立的 tool message 导致 Responses API 报
         # "No tool call found for function call output"
         call_id_index: dict[str, list[int]] = {}
         for i, msg in enumerate(history):
-            msg_type = str(msg.get("type", ""))
-            if msg_type in ("function_call", "function_call_output"):
-                cid = str(msg.get("call_id", ""))
-                call_id_index.setdefault(cid, []).append(i)
+            role = str(msg.get("role", "")).lower()
+            if role == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    cid = str(tc.get("id", ""))
+                    if cid:
+                        call_id_index.setdefault(cid, []).append(i)
+            elif role == "tool":
+                cid = str(msg.get("tool_call_id", ""))
+                if cid:
+                    call_id_index.setdefault(cid, []).append(i)
         to_remove_set = set(to_remove)
         for cid, indices in call_id_index.items():
             # 如果配对中的任何一个被删除，就把整对都删除
@@ -624,11 +630,9 @@ class ContextCompactor:
         for i in range(len(history) - 1, -1, -1):
             msg = history[i]
             role = str(msg.get("role", "")).lower()
-            msg_type = str(msg.get("type", ""))
 
-            # 跳过 tool/function_call 类型
-            if role == "tool" or msg_type in ("function_call", "function_call_output"):
-                # 如果在最近一轮内（已找到 assistant 但还没找到 user），也保护
+            # 跳过 tool 消息：在最近一轮内（已找到 assistant 但还没找到 user）也保护
+            if role == "tool":
                 if found_assistant and not found_user:
                     protected.add(i)
                 continue
