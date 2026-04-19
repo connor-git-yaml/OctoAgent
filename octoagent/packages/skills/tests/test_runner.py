@@ -6,7 +6,11 @@ from typing import Any
 
 from octoagent.skills.manifest import SkillManifest
 from octoagent.skills.models import (
+    FEEDBACK_SENDER_LOOP_GUARD,
+    FEEDBACK_SENDER_RUNNER_ERROR,
+    FEEDBACK_SENDER_TOOL_ERROR,
     ErrorCategory,
+    FeedbackKind,
     SkillOutputEnvelope,
     SkillPermissionMode,
     SkillRunStatus,
@@ -783,3 +787,379 @@ async def test_runner_context_budget_guard(
     assert second_feedback
     tool_feedback = second_feedback[0]
     assert "artifact:artifact-1" in tool_feedback.output
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Agent 决策 / 规划 / 行动回归：防止循环 bug 再发生
+# ─────────────────────────────────────────────────────────────────────
+
+
+async def test_runner_feedback_buffer_only_carries_current_turn_tool_results(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    """回归 task 01KPGQGC... 无进展循环 bug：
+
+    feedback 必须是"下一轮要发给 LLM 的 buffer"，generate 成功消费后清空，
+    否则下一轮会把已送过的 tool_result 再送一次，LLM prompt 里混入重复
+    tool_result，误以为工具在返回相同答案，陷入"再调一次验证"循环。
+
+    步骤：3 步，每步各一个 tool_call。验证 step N 的 feedback 只含
+    step N-1 的 tool_result，不含更早的累积。
+    """
+    outputs = [
+        SkillOutputEnvelope(
+            content="",
+            complete=False,
+            tool_calls=[
+                {
+                    "tool_name": "system.echo",
+                    "arguments": {"text": "q1"},
+                    "tool_call_id": "call_1",
+                }
+            ],
+        ),
+        SkillOutputEnvelope(
+            content="",
+            complete=False,
+            tool_calls=[
+                {
+                    "tool_name": "system.echo",
+                    "arguments": {"text": "q2"},
+                    "tool_call_id": "call_2",
+                }
+            ],
+        ),
+        SkillOutputEnvelope(content="done", complete=True),
+    ]
+    client = CaptureFeedbackClient(outputs)
+    runner = SkillRunner(
+        model_client=client, tool_broker=tool_broker, event_store=event_store
+    )
+
+    result = await runner.run(
+        manifest=echo_manifest,
+        execution_context=execution_context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    assert result.status == SkillRunStatus.SUCCEEDED
+    assert len(client.feedback_snapshots) == 3
+
+    # step 1: 初始调用，feedback 为空
+    assert client.feedback_snapshots[0] == []
+
+    # step 2: 只带 step 1 的 tool_result（call_1），不能带更早的内容
+    step2_ids = [fb.tool_call_id for fb in client.feedback_snapshots[1]]
+    assert step2_ids == ["call_1"], (
+        f"step 2 feedback 应只含 step 1 的 tool_result，实际 ids={step2_ids}"
+    )
+
+    # step 3: 只带 step 2 的 tool_result（call_2），不能累积 call_1
+    step3_ids = [fb.tool_call_id for fb in client.feedback_snapshots[2]]
+    assert step3_ids == ["call_2"], (
+        f"step 3 feedback 必须只含 step 2 的 tool_result（call_2），"
+        f"不得重新包含已消费过的 call_1。实际 ids={step3_ids}。"
+        f"若 call_1 再次出现，说明 feedback buffer 未在 generate 成功后清空，"
+        f"LLM 会在下一轮 prompt 里看到重复 tool_result → 触发决策循环。"
+    )
+
+
+async def test_runner_feedback_preserved_across_model_call_failure(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    """回归：LLM 调用失败（网络波动 / 上游 500）时 feedback 必须保留，
+    下一次 retry 仍要把上一轮 tool_result 送给 LLM；否则 retry 的 LLM
+    会在空上下文下再决策一次，可能又发出同样的 tool_call 陷入无效循环。
+    """
+    outputs: list[Any] = [
+        SkillOutputEnvelope(
+            content="",
+            complete=False,
+            tool_calls=[
+                {
+                    "tool_name": "system.echo",
+                    "arguments": {"text": "only"},
+                    "tool_call_id": "call_once",
+                }
+            ],
+        ),
+        RuntimeError("上游 500"),  # step 2 失败
+        SkillOutputEnvelope(content="recovered", complete=True),
+    ]
+    client = CaptureFeedbackClient(outputs)
+    runner = SkillRunner(
+        model_client=client, tool_broker=tool_broker, event_store=event_store
+    )
+
+    result = await runner.run(
+        manifest=echo_manifest,
+        execution_context=execution_context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    assert result.status == SkillRunStatus.SUCCEEDED
+    # 3 次 generate：step1 成功 tool_call / step2 失败 / step3 重试成功
+    assert len(client.feedback_snapshots) == 3
+    # step 2 失败：应该已经收到 step 1 的 tool_result
+    assert [fb.tool_call_id for fb in client.feedback_snapshots[1]] == ["call_once"]
+    # step 3 retry：**必须**仍能看到 step 1 的 tool_result（因为 step 2 没成功消费）
+    assert [fb.tool_call_id for fb in client.feedback_snapshots[2]] == ["call_once"], (
+        "LLM 调用失败后，feedback 必须保留以便 retry 拿到上一轮 tool_result，"
+        "否则 retry 时 LLM 在'空上下文'下可能重复发起相同 tool_call"
+    )
+
+
+async def test_runner_loop_guard_warning_not_duplicated_across_rounds(
+    echo_manifest, tool_broker, event_store
+) -> None:
+    """回归：_loop_guard 提示只应作为"当轮警示"一次性发给 LLM，不得累积到后续
+    所有轮。否则 LLM 会在 prompt 里看到多条 _loop_guard，影响判断且膨胀上下文。
+    """
+    from octoagent.skills.models import (
+        SkillExecutionContext,
+        UsageLimits,
+    )
+
+    ctx = SkillExecutionContext(
+        task_id="task-loop-guard-single",
+        trace_id="trace-loop-guard-single",
+        caller="worker",
+        usage_limits=UsageLimits(repeat_warning_threshold=2, max_steps=10),
+    )
+
+    same_call = [
+        {"tool_name": "system.echo", "arguments": {"text": "poll"}, "tool_call_id": "x"}
+    ]
+    outputs = [
+        SkillOutputEnvelope(content="", complete=False, tool_calls=same_call),
+        # 第 2 轮相同 signature → runner 注入 _loop_guard，下一轮 generate 可见
+        SkillOutputEnvelope(content="", complete=False, tool_calls=same_call),
+        # 第 3 轮 LLM 收到警示后切换（但这里仍复用 same_call 仅为 mock，关键检查的是
+        # feedback 里 _loop_guard 只在 step=3 出现一次，step=4 不应再带）
+        SkillOutputEnvelope(
+            content="",
+            complete=False,
+            tool_calls=[
+                {
+                    "tool_name": "system.echo",
+                    "arguments": {"text": "different"},
+                    "tool_call_id": "y",
+                }
+            ],
+        ),
+        SkillOutputEnvelope(content="done", complete=True),
+    ]
+    client = CaptureFeedbackClient(outputs)
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+
+    await runner.run(
+        manifest=echo_manifest,
+        execution_context=ctx,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    loop_guard_hits_per_step = [
+        sum(1 for fb in snapshot if fb.tool_name == "_loop_guard")
+        for snapshot in client.feedback_snapshots
+    ]
+    # step=3 应该看到 1 条 _loop_guard（step=2 注入），再之后的轮不应还带着
+    assert loop_guard_hits_per_step.count(1) >= 1, (
+        f"_loop_guard 警示必须至少在注入后的那一轮可见。实际 per-step 计数="
+        f"{loop_guard_hits_per_step}"
+    )
+    assert all(count <= 1 for count in loop_guard_hits_per_step), (
+        f"_loop_guard 警示不得在多轮累积，实际 per-step 计数="
+        f"{loop_guard_hits_per_step}。累积会让 LLM 在 prompt 里反复看到同一警告，"
+        f"产生噪音。"
+    )
+
+
+async def test_runner_event_store_failure_does_not_abort_main_flow(
+    echo_manifest, execution_context, tool_broker
+) -> None:
+    """回归 Codex adversarial review #3：
+
+    事件写入是观测副作用，绝不能让 event_store 临时异常中断 skill 主链路。
+    之前 emit_task_event 在 runner 主 try 内抛错会被外层 except 误判为
+    模型调用失败 → retry 但 tool 还没执行 → 下一轮 history 里出现孤立
+    assistant.tool_calls，LLM 可能重放工具或基于不完整上下文推理。
+
+    现在 _emit_event 内部吞掉异常并降级为 warning，主流程按原轨迹推进。
+    """
+
+    class FlakyEventStore:
+        """会间歇性抛错的 event store，模拟 DB 锁、磁盘满等观测链路故障。"""
+
+        def __init__(self) -> None:
+            self.successful_events: list[Any] = []
+            self.calls = 0
+
+        async def append_event(self, event: Any) -> None:
+            self.calls += 1
+            if self.calls % 2 == 0:
+                # 偶数次失败，奇数次成功
+                raise RuntimeError("event store 临时故障")
+            self.successful_events.append(event)
+
+        async def get_next_task_seq(self, task_id: str) -> int:
+            return self.calls
+
+    flaky_store = FlakyEventStore()
+    client = QueueModelClient(
+        [
+            SkillOutputEnvelope(
+                content="call",
+                complete=False,
+                tool_calls=[
+                    {
+                        "tool_name": "system.echo",
+                        "arguments": {"text": "probe"},
+                        "tool_call_id": "call_observability",
+                    }
+                ],
+            ),
+            SkillOutputEnvelope(content="done", complete=True),
+        ]
+    )
+    runner = SkillRunner(
+        model_client=client, tool_broker=tool_broker, event_store=flaky_store
+    )
+
+    result = await runner.run(
+        manifest=echo_manifest,
+        execution_context=execution_context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    # 主流程不受观测故障影响，仍然成功完成
+    assert result.status == SkillRunStatus.SUCCEEDED, (
+        f"event_store 间歇性失败不得让 skill 失败，实际 status={result.status}"
+    )
+    # tool 必须正常执行
+    assert any(call[0] == "system.echo" for call in tool_broker.calls), (
+        "观测失败场景下，tool 仍必须按流程执行 —— 否则下一轮 LLM 会看到孤立的 "
+        "assistant.tool_calls 并可能重放工具"
+    )
+    # 验证 event_store 确实遇到过异常（否则测试不覆盖 bug 场景）
+    assert flaky_store.calls > 1
+
+
+async def test_runner_injected_feedback_uses_kind_enum_not_magic_tool_name(
+    echo_manifest, tool_broker, event_store
+) -> None:
+    """runner 内部三种 feedback（loop_guard / tool error / runner error）必须带
+    正确的 FeedbackKind，且 tool_name 必须用模块常量而非硬编码字符串。这样
+    下游 model_client 才能按 kind 分派写入策略，而不是靠 tool_name 启发式判断。
+    """
+    from octoagent.skills.models import SkillExecutionContext, UsageLimits
+
+    # 场景 1：触发 _loop_guard 注入
+    ctx = SkillExecutionContext(
+        task_id="task-kind",
+        trace_id="trace-kind",
+        caller="worker",
+        usage_limits=UsageLimits(repeat_warning_threshold=2, max_steps=10),
+    )
+    same_call = [
+        {"tool_name": "system.echo", "arguments": {"text": "poll"}, "tool_call_id": "id1"}
+    ]
+    client = CaptureFeedbackClient(
+        [
+            SkillOutputEnvelope(content="", complete=False, tool_calls=same_call),
+            SkillOutputEnvelope(content="", complete=False, tool_calls=same_call),
+            SkillOutputEnvelope(content="done", complete=True),
+        ]
+    )
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+    await runner.run(
+        manifest=echo_manifest,
+        execution_context=ctx,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+    for snap in client.feedback_snapshots:
+        for fb in snap:
+            if fb.tool_name == FEEDBACK_SENDER_LOOP_GUARD:
+                assert fb.kind == FeedbackKind.LOOP_GUARD, (
+                    f"_loop_guard feedback 必须标记 kind=LOOP_GUARD，实际 {fb.kind}"
+                )
+
+
+async def test_runner_no_progress_loop_detected_on_repeated_probe_pattern(
+    echo_manifest, tool_broker, event_store
+) -> None:
+    """端到端回归：LLM 误把 MCP 工具当 connectivity probe 反复调，每轮 content
+    为空，no_progress 熔断必须生效。对应 production task 01KPGQGC... 的场景。
+    """
+    from octoagent.skills.models import SkillExecutionContext, UsageLimits
+
+    ctx = SkillExecutionContext(
+        task_id="task-probe-loop",
+        trace_id="trace-probe-loop",
+        caller="worker",
+        usage_limits=UsageLimits(
+            max_steps=30, no_progress_steps_threshold=8
+        ),
+    )
+
+    # 模拟 LLM 反复用"每次略微不同的 message"调同一个 MCP 工具
+    outputs = [
+        SkillOutputEnvelope(
+            content="",  # 关键：每轮都没有给用户的 user-facing 文本
+            complete=False,
+            tool_calls=[
+                {
+                    "tool_name": "mcp.x.ask_model",
+                    "arguments": {"message": f"probe query variant {i}"},
+                    "tool_call_id": f"call_probe_{i}",
+                }
+            ],
+        )
+        for i in range(15)
+    ]
+    client = QueueModelClient(outputs)
+    # 让 mock tool 总是返回成功（模拟 production 里 is_error=false 的情况）
+    tool_broker.set_result(
+        "mcp.x.ask_model",
+        ToolResult(
+            output="probe success answer",
+            is_error=False,
+            error=None,
+            duration=0.01,
+            artifact_ref=None,
+            tool_name="mcp.x.ask_model",
+            truncated=False,
+        ),
+    )
+    manifest = SkillManifest(
+        skill_id="chat.general.inline",
+        version="0.1.0",
+        input_model=EchoInput,
+        output_model=EchoInput,
+        model_alias="main",
+        tools_allowed=["mcp.x.ask_model"],
+        permission_mode=SkillPermissionMode.INHERIT,
+    )
+    runner = SkillRunner(model_client=client, tool_broker=tool_broker, event_store=event_store)
+
+    result = await runner.run(
+        manifest=manifest,
+        execution_context=ctx,
+        skill_input={"text": "ping"},
+        prompt="MCP 可以用了吗？",
+    )
+
+    assert result.status == SkillRunStatus.FAILED
+    assert result.error_category == ErrorCategory.LOOP_DETECTED, (
+        f"LLM 反复 tool_call 不产生 user-facing content，必须在 no_progress_steps "
+        f"阈值（8）触及时熔断为 LOOP_DETECTED，实际 category={result.error_category}"
+    )
+    # 必须在 8~9 步内熔断，不能让 max_steps 兜底（那意味着 no_progress 检测漏掉了）
+    assert result.steps <= 10, (
+        f"no_progress 熔断应在 ~8 步内生效，实际消耗 {result.steps} 步。"
+        f"如果接近 30，说明 no_progress 检测没起作用，只是 max_steps 硬兜底。"
+    )

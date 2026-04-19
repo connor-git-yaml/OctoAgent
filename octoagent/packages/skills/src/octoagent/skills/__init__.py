@@ -13,8 +13,12 @@ from .exceptions import (
 from .hooks import NoopSkillRunnerHook, SkillRunnerHook
 from .manifest import SkillManifest
 from .models import (  # noqa: F401 -- SkillRunner 数据模型
+    FEEDBACK_SENDER_LOOP_GUARD,
+    FEEDBACK_SENDER_RUNNER_ERROR,
+    FEEDBACK_SENDER_TOOL_ERROR,
     ContextBudgetPolicy,
     ErrorCategory,
+    FeedbackKind,
     LoopGuardPolicy,
     RetryPolicy,
     SkillExecutionContext,
@@ -75,6 +79,10 @@ __all__ = [
     "ToolCallSpec",
     "SkillOutputEnvelope",
     "ToolFeedbackMessage",
+    "FeedbackKind",
+    "FEEDBACK_SENDER_LOOP_GUARD",
+    "FEEDBACK_SENDER_TOOL_ERROR",
+    "FEEDBACK_SENDER_RUNNER_ERROR",
     "SkillRunStatus",
     "ErrorCategory",
     "SkillRunResult",

@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import json
+import time
+from collections import OrderedDict
 from typing import Any
 
 import httpx
@@ -15,6 +17,7 @@ import structlog
 from .compactor import CompactionResult, ContextCompactor
 from .manifest import SkillManifest
 from .models import (
+    FeedbackKind,
     SkillExecutionContext,
     SkillOutputEnvelope,
     ToolCallSpec,
@@ -33,6 +36,10 @@ class LLMCallError(Exception):
         timeout       — API 超时，可重试（退避后）
         rate_limit    — 速率限制（429），应等待后重试
         context_overflow — 上下文超长（4xx），不可盲目重试，需压缩
+        empty_input   — 发送 Responses API 前 history 被全部过滤（孤立 call_id /
+                        压缩过度等），不可重试
+        conversation_state_lost — step>1 但 history 已丢失（进程重启 / 淘汰 /
+                        跨 client 实例），不可重试，需从 checkpoint 恢复
         api_error     — 其他 API 错误，可重试
     """
 
@@ -82,8 +89,13 @@ class LiteLLMSkillClient:
     每个 (task_id, trace_id) 维护独立的对话历史，跨 generate() 调用保持上下文。
     """
 
-    # Feature 064 P3 优化 5: 对话历史条目数上限，防止内存泄漏
-    _MAX_HISTORY_ENTRIES = 100
+    # 对话历史条目数软上限：超过阈值后尝试淘汰"空闲足够久"的 key；
+    # 如果所有 key 都处于活跃窗口内，则宁愿 memory 涨一点也不淘汰活跃会话
+    # （丢失活跃会话会让 LLM 看不到之前的 tool_calls，重放非幂等工具风险极高）。
+    _MAX_HISTORY_ENTRIES = 1024
+    # 仅当 key 最后访问时间超过此窗口才允许淘汰。Gateway 常规 skill run 通常
+    # 几秒到几分钟就结束，30 分钟内仍活跃的会话几乎可以确定是"仍在跑的 task"。
+    _HISTORY_IDLE_EVICT_SECONDS = 30 * 60
 
     def __init__(
         self,
@@ -103,8 +115,11 @@ class LiteLLMSkillClient:
         self._responses_model_aliases = set(responses_model_aliases or ())
         self._responses_reasoning_aliases = dict(responses_reasoning_aliases or {})
         self._responses_direct_params = dict(responses_direct_params or {})
-        # 对话历史：key = "{task_id}:{trace_id}"
-        self._histories: dict[str, list[dict[str, Any]]] = {}
+        # 对话历史：key = "{task_id}:{trace_id}"；OrderedDict 用来维护 LRU 顺序
+        self._histories: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
+        # 每个 conversation key 的最后一次 access 时间（monotonic），用于
+        # "仅淘汰足够空闲的 key"；避免 maxsize 误伤仍在跑的任务。
+        self._last_access: dict[str, float] = {}
         # Feature 064 P3 优化 4: per-instance 长生命周期 httpx.AsyncClient
         self._http_client = httpx.AsyncClient(
             timeout=httpx.Timeout(timeout_s, connect=10.0),
@@ -120,6 +135,119 @@ class LiteLLMSkillClient:
         Feature 064 P3 优化 5: Task 终态后由 SkillRunner 调用，释放已完成 task 的对话。
         """
         self._histories.pop(key, None)
+        self._last_access.pop(key, None)
+
+    def _evict_idle_histories_if_needed(self, *, protect_key: str) -> None:
+        """空间兜底：只淘汰"空闲时间超过阈值"的 conversation，绝不触碰活跃会话。
+
+        Gateway 启动时共用单例 LiteLLMSkillClient，`_histories` 被所有并发 task
+        共享。旧实现是"超 maxsize 就 pop(next(iter(...)))" 做 FIFO 淘汰 —— 即使
+        `move_to_end` 维护了 LRU 顺序，FIFO 仍然可能淘汰一个"最近才开始但本轮
+        恰好不是最活跃"的会话，被淘汰的 task 下一轮会走 conversation_state_lost
+        fail-fast 路径，等于用户任务被静默中断。
+
+        改为"仅淘汰 idle 超阈值的 key"：
+        - 若数量 ≤ maxsize，直接返回
+        - 按最后访问时间升序找出所有 idle 超过阈值的候选
+        - 如果没有候选（所有 key 都在活跃窗口内），log.warning 不淘汰
+        - 有候选就淘汰最久空闲那个（一次只淘汰一个，避免批量操作）
+        """
+        if len(self._histories) <= self._MAX_HISTORY_ENTRIES:
+            return
+
+        now = time.monotonic()
+        oldest_key: str | None = None
+        oldest_access = float("inf")
+        for k, access in self._last_access.items():
+            if k == protect_key:
+                continue
+            if (now - access) < self._HISTORY_IDLE_EVICT_SECONDS:
+                continue
+            if access < oldest_access:
+                oldest_access = access
+                oldest_key = k
+
+        if oldest_key is None:
+            # 所有 key 都在活跃窗口内，拒绝淘汰：宁愿短暂多占内存，也不能
+            # 丢任何活跃会话的 tool_call/tool_result 历史（丢了会让 LLM
+            # 重放已执行工具）。
+            log.warning(
+                "history_pressure_no_idle_to_evict",
+                current_count=len(self._histories),
+                max_entries=self._MAX_HISTORY_ENTRIES,
+                idle_window_seconds=self._HISTORY_IDLE_EVICT_SECONDS,
+            )
+            return
+
+        self._histories.pop(oldest_key, None)
+        self._last_access.pop(oldest_key, None)
+        log.info(
+            "history_evicted_idle",
+            evicted_key=oldest_key,
+            idle_seconds=int(now - oldest_access),
+        )
+
+    @staticmethod
+    def _append_feedback_to_history(
+        history: list[dict[str, Any]],
+        feedback: list[ToolFeedbackMessage],
+    ) -> None:
+        """将 runner 传来的 feedback 按 ``kind`` 分派写入 history。
+
+        三种 kind 对应三种写入策略：
+
+        - ``TOOL_RESULT``：若有 call_id，写 tool role 消息并与 function_call 配对；
+          若意外缺 call_id，降级为 user role 的"工具结果"提示（保留原始输出语义，
+          不再错误地把成功输出标记为"执行失败"）。
+        - ``LOOP_GUARD``：runner 注入的循环警示，以 user role 写入系统警告。
+        - ``SYSTEM_NOTICE``：runner/工具层内部异常，以 user role 写入系统提示。
+
+        同一个 call_id 的 tool_result 只会出现一次：runner 的 feedback buffer 虽然
+        已做单次清空，但 model_client 再做一层去重防御（即使调用方传了重复 feedback，
+        history 也不会膨胀或让 LLM 看到多份相同结果）。
+        """
+        already_emitted_call_ids = {
+            str(msg.get("tool_call_id", "")).strip()
+            for msg in history
+            if msg.get("role") == "tool"
+        }
+        for fb in feedback:
+            if fb.kind == FeedbackKind.TOOL_RESULT:
+                call_id = fb.tool_call_id or ""
+                if call_id and call_id in already_emitted_call_ids:
+                    continue
+                if call_id:
+                    history.append({
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "content": fb.output
+                        if not fb.is_error
+                        else f"ERROR: {fb.error}",
+                    })
+                    already_emitted_call_ids.add(call_id)
+                else:
+                    # tool_result 却没 call_id：通常是上游 LLM 响应解析失败或兼容路径。
+                    # 不能以 tool role 写入（Responses API 会因无匹配 function_call 报错），
+                    # 降级为 user role 但保留真实语义（不再错误地把成功输出标记为失败）。
+                    label = "执行出错" if fb.is_error else "执行结果"
+                    body = fb.error if fb.is_error else fb.output
+                    body = body or "（空输出）"
+                    history.append({
+                        "role": "user",
+                        "content": f"[工具 {fb.tool_name} {label}] {body}",
+                    })
+            elif fb.kind == FeedbackKind.LOOP_GUARD:
+                warning = fb.error or fb.output or "检测到重复工具调用"
+                history.append({
+                    "role": "user",
+                    "content": f"[循环警告] {warning}",
+                })
+            else:  # FeedbackKind.SYSTEM_NOTICE
+                notice = fb.error or fb.output or "系统内部异常"
+                history.append({
+                    "role": "user",
+                    "content": f"[系统提示] {fb.tool_name}: {notice}",
+                })
 
     def _key(self, ctx: SkillExecutionContext) -> str:
         return f"{ctx.task_id}:{ctx.trace_id}"
@@ -531,8 +659,21 @@ class LiteLLMSkillClient:
                 if event_type == "response.output_item.added":
                     item = event.get("item", {})
                     if isinstance(item, dict) and item.get("type") == "function_call":
+                        call_id = str(item.get("call_id", "")).strip()
+                        if not call_id:
+                            # Responses API 规范里 function_call 必须带 call_id，缺失
+                            # 说明上游异常。不再隐式 fallback 到 item.id —— item.id
+                            # 形如 `fc_xxx`，和 API 期望用于配对 function_call_output
+                            # 的 `call_xxx` 语义不同，混用会让后续轮的 tool result
+                            # 配对失败，陷入"LLM 看不到工具输出"的循环。保持 call_id
+                            # 为空，交给 tool feedback 降级分支处理。
+                            log.warning(
+                                "responses_api_function_call_missing_call_id",
+                                item_id=item.get("id"),
+                                name=item.get("name"),
+                            )
                         tool_calls_raw[str(item.get("id", ""))] = {
-                            "id": str(item.get("call_id") or item.get("id") or ""),
+                            "id": call_id,
                             "raw_name": str(item.get("name", "")),
                             "tool_name": _from_fn_name(str(item.get("name", ""))),
                             "arguments": str(item.get("arguments") or ""),
@@ -557,17 +698,23 @@ class LiteLLMSkillClient:
                     item = event.get("item", {})
                     if isinstance(item, dict) and item.get("type") == "function_call":
                         item_id = str(item.get("id", ""))
+                        call_id = str(item.get("call_id", "")).strip()
+                        if not call_id:
+                            log.warning(
+                                "responses_api_function_call_done_missing_call_id",
+                                item_id=item_id,
+                                name=item.get("name"),
+                            )
                         if item_id in tool_calls_raw:
                             # 已有记录（从 output_item.added 创建）——只补充 call_id，
                             # 不覆盖流式累积的 arguments
                             existing = tool_calls_raw[item_id]
-                            call_id = str(item.get("call_id") or item.get("id") or "")
                             if call_id and not existing.get("id"):
                                 existing["id"] = call_id
                         else:
                             # 没有 added 事件（异常路径）——用 done 的完整数据
                             tool_calls_raw[item_id] = {
-                                "id": str(item.get("call_id") or item.get("id") or ""),
+                                "id": call_id,
                                 "raw_name": str(item.get("name", "")),
                                 "tool_name": _from_fn_name(str(item.get("name", ""))),
                                 "arguments": str(item.get("arguments") or ""),
@@ -784,42 +931,50 @@ class LiteLLMSkillClient:
         key = self._key(execution_context)
         use_responses_api = manifest.model_alias in self._responses_model_aliases
 
-        if step == 1:
-            # 初始化对话历史
-            history = self._build_initial_history(
+        if key not in self._histories:
+            if step > 1:
+                # step>1 说明调用方认为 history 早已存在，但 dict 里找不到 ——
+                # 通常意味着：进程重启、maxsize 淘汰策略踢掉了本会话、或者跨
+                # client 实例传 key。绝不能静默用 initial history 重建：initial
+                # 只含 system + user，后续 feedback 里的 tool_result 会因为找
+                # 不到配对的 assistant.tool_calls 被 _history_to_responses_input
+                # 当成孤儿过滤。LLM 回到初态，大概率会重放之前的 tool_call，
+                # 对 write_file / send_message 这类非幂等工具是真实风险。
+                #
+                # 让主链路显式 fail，由上层（resume engine）从 checkpoint 恢复
+                # 完整 history 后再重试；比静默丢上下文安全。
+                log.error(
+                    "conversation_history_missing_on_resume",
+                    key=key,
+                    step=step,
+                    attempt=attempt,
+                    has_feedback=bool(feedback),
+                )
+                raise LLMCallError(
+                    "conversation_state_lost",
+                    (
+                        f"step={step} 但 conversation history (key={key}) 已丢失，"
+                        "可能是进程重启或活跃会话被淘汰；不能凭 initial history "
+                        "重建 tool_call 配对。请从 checkpoint 恢复完整对话轨迹后重试。"
+                    ),
+                    retriable=False,
+                )
+            self._histories[key] = self._build_initial_history(
                 manifest=manifest,
                 execution_context=execution_context,
                 prompt=prompt,
             )
-            self._histories[key] = history
 
-            # Feature 064 P3 优化 5: maxsize 兜底，清理最老条目防止内存泄漏
-            if len(self._histories) > self._MAX_HISTORY_ENTRIES:
-                oldest_key = next(iter(self._histories))
-                self._histories.pop(oldest_key, None)
+        # 进入前刷新 LRU 位置和最后访问时间，让 maxsize 淘汰走"最久未用优先"，
+        # 避免误伤活跃会话。
+        self._histories.move_to_end(key)
+        self._last_access[key] = time.monotonic()
+        self._evict_idle_histories_if_needed(protect_key=key)
 
         history = self._histories[key]
 
         if step > 1 and feedback:
-            # 统一使用 Chat Completions tool role 格式回填
-            # 如果 LLM 没提供 tool_call_id，合成一个（避免降级为自然语言 user message）
-            for fb in feedback:
-                call_id = fb.tool_call_id or ""
-                if call_id:
-                    history.append({
-                        "role": "tool",
-                        "tool_call_id": call_id,
-                        "content": fb.output if not fb.is_error else f"ERROR: {fb.error}",
-                    })
-                else:
-                    # 系统错误 feedback（如 _tool/_runner）没有对应的 function_call，
-                    # 不能作为 tool role 发送，否则 Responses API 会因找不到 call_id 报 400。
-                    # 降级为 user role 的错误提示。
-                    error_text = fb.error or fb.output or "工具执行异常"
-                    history.append({
-                        "role": "user",
-                        "content": f"[系统提示] 工具 {fb.tool_name} 执行失败: {error_text}",
-                    })
+            self._append_feedback_to_history(history, feedback)
 
         # ---- Feature 064 P2-A: 上下文压缩 ----
         # 在构建 LLM 请求前检测并压缩对话历史。

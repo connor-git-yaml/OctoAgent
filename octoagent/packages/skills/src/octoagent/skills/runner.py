@@ -27,7 +27,11 @@ from .exceptions import (
 from .hooks import NoopSkillRunnerHook, SkillRunnerHook
 from .manifest import SkillManifest
 from .models import (
+    FEEDBACK_SENDER_LOOP_GUARD,
+    FEEDBACK_SENDER_RUNNER_ERROR,
+    FEEDBACK_SENDER_TOOL_ERROR,
     ErrorCategory,
+    FeedbackKind,
     LoopGuardPolicy,
     SkillExecutionContext,
     SkillOutputEnvelope,
@@ -145,6 +149,12 @@ class SkillRunner:
                     attempt=attempts,
                     step=steps,
                 )
+                # feedback 是"待送给下一轮 generate 的 buffer"，模型调用成功后
+                # 视为已消费；若再保留，下一轮会把已发过的 tool_result / warning
+                # 再次送给 model_client（model_client 已做去重但 loop_guard / 错误
+                # feedback 降级为 user 消息那一支无法按 call_id 去重，会造成
+                # 重复噪音进入 prompt，加剧 Agent 无效决策循环）。
+                feedback.clear()
                 await self._emit_model_completed(
                     manifest, execution_context, raw_output, attempts, steps
                 )
@@ -172,33 +182,45 @@ class SkillRunner:
                         continue
                     if exc.error_type == "context_overflow":
                         # 上下文超长：不可盲目重试，直接标记失败
-                        result = await self._fail_result(
+                        return await self._terminate_with_failure(
                             manifest=manifest,
                             execution_context=execution_context,
+                            history_key=history_key,
                             start_time=start_time,
                             attempts=attempts,
                             steps=steps,
                             category=ErrorCategory.TOKEN_LIMIT_EXCEEDED,
                             error=SkillRepeatError(f"上下文超长: {exc}"),
                         )
-                        await self._call_hook("skill_end", manifest, execution_context, result)
-                        self._try_clear_history(history_key)
-                        return result
+                    if exc.error_type == "conversation_state_lost":
+                        # history 丢失（进程重启/淘汰策略误伤）：盲目重试会让
+                        # LLM 看不到已执行的 tool_call 配对，可能重放非幂等工具。
+                        # 必须由上层从 checkpoint 恢复后再发起，不在 runner 层重试。
+                        return await self._terminate_with_failure(
+                            manifest=manifest,
+                            execution_context=execution_context,
+                            history_key=history_key,
+                            start_time=start_time,
+                            attempts=attempts,
+                            steps=steps,
+                            category=ErrorCategory.REPEAT_ERROR,
+                            error=SkillRepeatError(
+                                f"对话状态已丢失，需从 checkpoint 恢复: {exc}"
+                            ),
+                        )
 
                 retry_failures += 1
                 if retry_failures > manifest.retry_policy.max_attempts:
-                    result = await self._fail_result(
+                    return await self._terminate_with_failure(
                         manifest=manifest,
                         execution_context=execution_context,
+                        history_key=history_key,
                         start_time=start_time,
                         attempts=attempts,
                         steps=steps,
                         category=ErrorCategory.REPEAT_ERROR,
                         error=SkillRepeatError(f"模型调用连续失败: {exc}"),
                     )
-                    await self._call_hook("skill_end", manifest, execution_context, result)
-                    self._try_clear_history(history_key)
-                    return result
                 await self._backoff(manifest)
                 continue
 
@@ -235,9 +257,10 @@ class SkillRunner:
                             tool_names=tool_names,
                             step=steps,
                         )
-                        result = await self._fail_result(
+                        return await self._terminate_with_failure(
                             manifest=manifest,
                             execution_context=execution_context,
+                            history_key=history_key,
                             start_time=start_time,
                             attempts=attempts,
                             steps=steps,
@@ -248,11 +271,6 @@ class SkillRunner:
                                 f"可能 LLM 误用工具做反复验证而非正常使用。"
                             ),
                         )
-                        await self._call_hook(
-                            "skill_end", manifest, execution_context, result
-                        )
-                        self._try_clear_history(history_key)
-                        return result
 
             if output.tool_calls:
                 signature = self._tool_signature(output.tool_calls)
@@ -274,7 +292,8 @@ class SkillRunner:
                     )
                     feedback.append(
                         ToolFeedbackMessage(
-                            tool_name="_loop_guard",
+                            tool_name=FEEDBACK_SENDER_LOOP_GUARD,
+                            kind=FeedbackKind.LOOP_GUARD,
                             is_error=True,
                             output="",
                             error=(
@@ -288,18 +307,16 @@ class SkillRunner:
                     )
 
                 if repeat_count >= limits.repeat_signature_threshold:
-                    result = await self._fail_result(
+                    return await self._terminate_with_failure(
                         manifest=manifest,
                         execution_context=execution_context,
+                        history_key=history_key,
                         start_time=start_time,
                         attempts=attempts,
                         steps=steps,
                         category=ErrorCategory.LOOP_DETECTED,
                         error=SkillLoopDetectedError("检测到重复 tool_calls 签名循环"),
                     )
-                    await self._call_hook("skill_end", manifest, execution_context, result)
-                    self._try_clear_history(history_key)
-                    return result
 
                 # 语义级循环检测：同一工具反复操作同一目标
                 loop_reason = target_tracker.record(output.tool_calls)
@@ -310,18 +327,16 @@ class SkillRunner:
                         step=steps,
                         target_summary=target_tracker.summary(),
                     )
-                    result = await self._fail_result(
+                    return await self._terminate_with_failure(
                         manifest=manifest,
                         execution_context=execution_context,
+                        history_key=history_key,
                         start_time=start_time,
                         attempts=attempts,
                         steps=steps,
                         category=ErrorCategory.LOOP_DETECTED,
                         error=SkillLoopDetectedError(loop_reason),
                     )
-                    await self._call_hook("skill_end", manifest, execution_context, result)
-                    self._try_clear_history(history_key)
-                    return result
             else:
                 last_signature = None
                 repeat_count = 0
@@ -339,7 +354,8 @@ class SkillRunner:
                     retry_failures += 1
                     feedback.append(
                         ToolFeedbackMessage(
-                            tool_name="_tool",
+                            tool_name=FEEDBACK_SENDER_TOOL_ERROR,
+                            kind=FeedbackKind.SYSTEM_NOTICE,
                             is_error=True,
                             output="",
                             error=str(exc),
@@ -347,17 +363,16 @@ class SkillRunner:
                         )
                     )
                     if retry_failures > manifest.retry_policy.max_attempts:
-                        result = await self._fail_result(
+                        return await self._terminate_with_failure(
                             manifest=manifest,
                             execution_context=execution_context,
+                            history_key=history_key,
                             start_time=start_time,
                             attempts=attempts,
                             steps=steps,
                             category=ErrorCategory.TOOL_EXECUTION_ERROR,
                             error=exc,
                         )
-                        await self._call_hook("skill_end", manifest, execution_context, result)
-                        return result
                     await self._backoff(manifest)
                     continue
 
@@ -367,17 +382,16 @@ class SkillRunner:
                 if any(item.is_error for item in tool_feedbacks):
                     retry_failures += 1
                     if retry_failures > manifest.retry_policy.max_attempts:
-                        result = await self._fail_result(
+                        return await self._terminate_with_failure(
                             manifest=manifest,
                             execution_context=execution_context,
+                            history_key=history_key,
                             start_time=start_time,
                             attempts=attempts,
                             steps=steps,
                             category=ErrorCategory.TOOL_EXECUTION_ERROR,
                             error=SkillToolExecutionError("工具执行连续失败"),
                         )
-                        await self._call_hook("skill_end", manifest, execution_context, result)
-                        return result
                     await self._backoff(manifest)
                     continue
 
@@ -423,7 +437,8 @@ class SkillRunner:
                 retry_failures += 1
                 feedback.append(
                     ToolFeedbackMessage(
-                        tool_name="_runner",
+                        tool_name=FEEDBACK_SENDER_RUNNER_ERROR,
+                        kind=FeedbackKind.SYSTEM_NOTICE,
                         is_error=True,
                         output="",
                         error="输出既未完成也未请求工具调用",
@@ -431,18 +446,16 @@ class SkillRunner:
                     )
                 )
                 if retry_failures > manifest.retry_policy.max_attempts:
-                    result = await self._fail_result(
+                    return await self._terminate_with_failure(
                         manifest=manifest,
                         execution_context=execution_context,
+                        history_key=history_key,
                         start_time=start_time,
                         attempts=attempts,
                         steps=steps,
                         category=ErrorCategory.REPEAT_ERROR,
                         error=SkillRepeatError("输出无进展，超过重试上限"),
                     )
-                    await self._call_hook("skill_end", manifest, execution_context, result)
-                    self._try_clear_history(history_key)
-                    return result
                 await self._backoff(manifest)
 
         # 获取具体的超限类别
@@ -748,6 +761,37 @@ class SkillRunner:
         await self._emit_skill_failed(manifest, execution_context, result)
         return result
 
+    async def _terminate_with_failure(
+        self,
+        *,
+        manifest: SkillManifest,
+        execution_context: SkillExecutionContext,
+        history_key: str,
+        start_time: float,
+        attempts: int,
+        steps: int,
+        category: ErrorCategory,
+        error: Exception,
+    ) -> SkillRunResult:
+        """统一的失败终止路径：emit SKILL_FAILED → skill_end hook → 清理 history。
+
+        历史问题：`run()` 内多处 fail 分支手写这三步，两处（TOOL_EXECUTION_ERROR
+        分支）漏掉 `_try_clear_history` 导致 `_histories` dict 残留。集中到一处
+        后所有失败路径行为一致，也少 4~5 行重复代码。
+        """
+        result = await self._fail_result(
+            manifest=manifest,
+            execution_context=execution_context,
+            start_time=start_time,
+            attempts=attempts,
+            steps=steps,
+            category=category,
+            error=error,
+        )
+        await self._call_hook("skill_end", manifest, execution_context, result)
+        self._try_clear_history(history_key)
+        return result
+
     async def _emit_event(
         self,
         *,
@@ -755,21 +799,37 @@ class SkillRunner:
         event_type: EventType,
         payload: dict[str, Any],
     ) -> None:
-        """发射事件到 Task 事件流。
+        """发射事件到 Task 事件流（best-effort）。
 
         Feature 064 P3: 委托给 core 层 emit_task_event()，消除重复逻辑。
+
+        关键不变量：emit 是观测副作用，不能让事件落盘失败中断主业务。具体
+        场景：MODEL_CALL_COMPLETED 写 event_store 抛异常时，如果异常冒到
+        run() 主循环的 try/except，会被误当作"模型调用失败"触发 retry，
+        但实际上 tool 还没来得及执行，下一轮 history 里会出现孤立的
+        assistant.tool_calls（没对应 tool_result），LLM 要么重放工具要么
+        基于不完整上下文继续决策。统一在此吞掉异常并降级为 warning，
+        保证主流程按原轨迹推进。
         """
         if self._event_store is None:
             return
 
-        await emit_task_event(
-            self._event_store,
-            task_id=execution_context.task_id,
-            event_type=event_type,
-            payload=payload,
-            actor=ActorType.WORKER,
-            trace_id=execution_context.trace_id,
-        )
+        try:
+            await emit_task_event(
+                self._event_store,
+                task_id=execution_context.task_id,
+                event_type=event_type,
+                payload=payload,
+                actor=ActorType.WORKER,
+                trace_id=execution_context.trace_id,
+            )
+        except Exception:
+            logger.warning(
+                "skill_event_emit_failed",
+                event_type=event_type.value if hasattr(event_type, "value") else str(event_type),
+                task_id=execution_context.task_id,
+                exc_info=True,
+            )
 
     async def _emit_skill_started(
         self,

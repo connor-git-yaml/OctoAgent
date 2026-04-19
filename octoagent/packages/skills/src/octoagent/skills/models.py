@@ -314,8 +314,39 @@ class SkillOutputEnvelope(BaseModel):
     # LLM 调用成本（美元），从 LiteLLM response 提取
 
 
+class FeedbackKind(StrEnum):
+    """feedback 来源分类。决定 model_client 如何把 feedback 写进 LLM prompt：
+
+    - ``TOOL_RESULT``: 真实工具执行结果，应以 tool role 配对 function_call 写入
+    - ``LOOP_GUARD``: runner 检测到重复工具调用时注入的提示，以 user role 的
+      系统警告形式写入
+    - ``SYSTEM_NOTICE``: runner 内部异常或工具层崩溃，没有对应 function_call，
+      以 user role 的系统提示形式写入
+
+    语义显式化能让 model_client 不再按"tool_name 是否以下划线开头"/"tool_call_id
+    是否空"这些脆弱启发式判断 feedback 的类型。
+    """
+
+    TOOL_RESULT = "tool_result"
+    LOOP_GUARD = "loop_guard"
+    SYSTEM_NOTICE = "system_notice"
+
+
+# runner 内部 "拟 tool_name"，用于在 LLM prompt 里标明系统级 feedback 的来源。
+# 避免散落在代码里的魔术字符串。
+FEEDBACK_SENDER_LOOP_GUARD = "_loop_guard"
+FEEDBACK_SENDER_TOOL_ERROR = "_tool"
+FEEDBACK_SENDER_RUNNER_ERROR = "_runner"
+
+
 class ToolFeedbackMessage(BaseModel):
-    """工具执行结果回灌模型。"""
+    """工具执行结果 / runner 系统提示回灌模型。
+
+    同一个类承担三种角色，由 ``kind`` 区分：真实 tool 结果、循环警告、系统提示。
+    旧版本按 ``tool_name.startswith('_')`` 或 ``tool_call_id == ''`` 推断类别，
+    容易误判（例如 tool_result 意外缺 call_id 会被当成执行失败）。新字段让
+    model_client 根据 ``kind`` 明确分派写入策略。
+    """
 
     tool_name: str = Field(min_length=1)
     is_error: bool = Field(default=False)
@@ -327,6 +358,13 @@ class ToolFeedbackMessage(BaseModel):
     tool_call_id: str = Field(
         default="",
         description="对应 ToolCallSpec.tool_call_id，用于回填标准 tool role message",
+    )
+    kind: FeedbackKind = Field(
+        default=FeedbackKind.TOOL_RESULT,
+        description=(
+            "feedback 来源分类，决定 model_client 如何写入 LLM prompt。"
+            "向后兼容：旧调用点不指定时默认 TOOL_RESULT（最常见语义）。"
+        ),
     )
 
 
