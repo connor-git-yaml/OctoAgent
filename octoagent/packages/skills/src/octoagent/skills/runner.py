@@ -169,8 +169,12 @@ class SkillRunner:
                 if hasattr(raw_output, "cost_usd"):
                     tracker.cost_usd += float(raw_output.cost_usd or 0.0)
             except Exception as exc:
+                # 观测性兜底：部分上游异常（httpx stream 中断、空响应、取消等）
+                # 的 str(exc) 为空字符串。直接写入会让 MODEL_CALL_FAILED 事件的
+                # error_message 为 ""，排查时无从下手。保证至少留下异常类型名。
+                error_msg = str(exc) or f"<empty message> ({type(exc).__name__})"
                 await self._emit_model_failed(
-                    manifest, execution_context, str(exc), attempts, steps
+                    manifest, execution_context, error_msg, attempts, steps
                 )
 
                 # Feature 064 Phase 3: 异常分类差异化处理

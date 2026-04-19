@@ -43,10 +43,21 @@ SKILL_SECTION_SEPARATOR = "\n\n" + SKILL_SECTION_PREFIX
 # 工具使用范式通用规则：注入到 chat skill system prompt 末尾，
 # 约束 LLM 在"工具可用性验证"场景下的行为，避免 connectivity probe 循环；
 # 同时防止把可用性询问升级成真实副作用调用（mcp.install / setup.quick_connect 等）。
+#
+# （0）条规则是用户 prompt "MCP 可以用了吗" 回归的正向流程——原版只有纯禁令，
+# LLM 被禁 "Reply OK" 后会换马甲（把 probe 伪装成 "请用一句话回答 <trivia>"）
+# 继续探测，导致 no-progress 熔断。把 meta 问题的正向路径写死为
+# "先查 registry → 直接答可用"，消除 LLM 自己编造 connectivity test 的动机。
 _TOOL_USAGE_GUIDANCE = (
     " 工具可用性验证规则："
-    "（1）对只读工具/MCP，用一次真实业务 query 调用即可，"
-    "不要构造 `Reply OK`/connectivity test 这类探测性调用，也不要用同一意图的变体参数反复重试；"
+    "（0）用户问\"X 能不能用 / 是否可用 / 通不通 / 可用了吗\"这类元问题时，"
+    "先调用 `mcp.servers.list` / `mcp.tools.list` 等 registry 查询确认工具是否已注册；"
+    "已注册就直接告诉用户\"可用\"并列出注册信息，不再做真实 MCP 调用做连通性测试；"
+    "只有用户明确要求\"跑一下试试 / 帮我测一次\"时才发起一次真实业务 query；"
+    "严禁构造 `Reply OK` / `Reply with exactly OK` / `请用一句话回答 <随机 trivia>` "
+    "这类与用户原问题无关的 connectivity test 探测调用。"
+    "（1）对只读工具/MCP，用户给出真实业务意图时，用一次真实业务 query 调用即可，"
+    "不要用同一意图的变体参数反复重试；"
     "（2）对有副作用的工具（写入/安装/配置/凭证/记忆写入等，例如 `mcp.install`、"
     "`setup.quick_connect`、`memory.store`、`behavior.write_file`），"
     "禁止用真实执行做可用性验证，改用对应的 list/status 查询"

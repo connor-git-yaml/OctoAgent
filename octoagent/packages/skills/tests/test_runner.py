@@ -201,6 +201,46 @@ async def test_runner_model_failure_retry_to_fail(
     assert result.error_category == ErrorCategory.REPEAT_ERROR
 
 
+async def test_runner_emits_fallback_error_message_for_empty_exception(
+    echo_manifest, execution_context, tool_broker, event_store
+) -> None:
+    """回归：httpx stream 中断/空响应这类 str(exc)==""  的异常不能写成 error_message=""。
+
+    现场案例：task 01KPGQGC1J447N1EV5JN9EBK9M 连续 4 条 MODEL_CALL_FAILED
+    的 error_message 都是空串，排查时完全不知道是哪类异常。兜底到
+    类型名（如 "ConnectError"）后，至少能从事件里看出异常种类。
+    """
+
+    class SilentFailure(Exception):
+        """str() 返回空串的异常——模拟 httpx 部分无消息异常。"""
+
+        def __str__(self) -> str:
+            return ""
+
+    client = QueueModelClient([SilentFailure(), SilentFailure(), SilentFailure(), SilentFailure()])
+    runner = SkillRunner(
+        model_client=client, tool_broker=tool_broker, event_store=event_store
+    )
+
+    await runner.run(
+        manifest=echo_manifest,
+        execution_context=execution_context,
+        skill_input={"text": "hi"},
+        prompt="prompt",
+    )
+
+    failed_events = [
+        e for e in event_store.events if e.type.value == "MODEL_CALL_FAILED"
+    ]
+    assert failed_events, "应至少发射一次 MODEL_CALL_FAILED"
+    for event in failed_events:
+        message = event.payload.get("error_message", "")
+        assert message, "空 str(exc) 必须走兜底，不能写成空串"
+        assert "SilentFailure" in message, (
+            f"兜底消息必须保留异常类型名便于排查，实际: {message!r}"
+        )
+
+
 async def test_runner_disallowed_tool(
     echo_manifest, execution_context, tool_broker, event_store
 ) -> None:

@@ -21,10 +21,11 @@
 
 ### 只读工具（无副作用）
 
-**直接用一个真实业务 query 调一次该工具**，把返回结果作为证据转达用户，不需要先做 "Reply OK" 式 probe。
+**默认路径**：先查 registry 确认是否注册，再基于 registry 结果直接回答，**不要**自行发起 probe。
 
-- 举例：用户问 "perplexity 能用吗？" → 直接调 `ask_model` 问一个真实问题（如 "2025 年最新的 LLM 排行？"），把答案摘要给用户
-- 反例：构造 `message="Reply OK"` 做 connectivity test，或用 `system_prompt="You are a test endpoint"` 连测多次——禁止
+- 第一步：用 `mcp.servers.list` / `mcp.tools.list` 查该工具是否已注册；已注册就告诉用户"可用"并附上简要注册信息，**无需**真实调用
+- 第二步（仅在用户明确要求"跑一下试试 / 帮我测一次"时）：用**一次**真实业务 query 调用该工具，把返回结果作为证据转达用户
+- 反例：构造 `message="Reply OK"` / `message="Reply with exactly OK"` 做 connectivity test；或用 `message="请用一句话回答 <随机 trivia>"` 伪装成正常查询实则反复探测——一律禁止
 
 ### 有副作用的工具（写入 / 安装 / 配置 / 凭证 / 记忆写入等）
 
