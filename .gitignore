@@ -51,6 +51,14 @@ data/vault/
 .specify/project-context.yaml
 .specify/project-context.md
 .specify/.spec-driver-path
+# Session runtime artifacts：workflow run registry 按月追加，
+# 如果被版本控制，多分支并发 append 会在 rebase / merge 时静默丢审计记录
+# （Codex adversarial review F2）。
+.specify/runs/
+# 插件默认 scorecard / 新增 template 属于插件自身的模板产物，不是业务配置
+# （Codex adversarial review F3）。
+.specify/scorecards/
+.specify/templates/project-context-template.yaml
 
 # ===== 密钥与敏感配置 =====
 .env
