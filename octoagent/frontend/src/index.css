@@ -4345,3 +4345,91 @@
   }
 
 }
+
+/* =======================================================================
+ * Feature 079 Phase 1 — Setup UX Recovery
+ * PendingChangesBar + SettingsErrorModal 独立样式
+ * ======================================================================= */
+
+.wb-pending-changes-bar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 0 1rem 0;
+  padding: 0.9rem 1.15rem;
+  border-radius: 10px;
+  background: rgba(246, 180, 86, 0.12);
+  border: 1px solid rgba(246, 180, 86, 0.45);
+  color: rgb(80, 54, 0);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.04);
+}
+
+.wb-pending-changes-bar-main {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 0;
+  flex: 1 1 300px;
+}
+
+.wb-pending-changes-bar-main strong {
+  font-size: 0.95rem;
+}
+
+.wb-pending-changes-bar-actions {
+  display: flex;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+
+:root:not(.light) .wb-pending-changes-bar {
+  background: rgba(246, 180, 86, 0.16);
+  border-color: rgba(246, 180, 86, 0.55);
+  color: rgb(255, 220, 160);
+}
+
+/* SettingsErrorModal 列表样式 */
+.wb-settings-error-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.wb-settings-error-item {
+  padding: 0.75rem 0.9rem;
+  border-radius: 8px;
+  background: rgba(225, 90, 90, 0.08);
+  border-left: 3px solid rgb(225, 90, 90);
+}
+
+.wb-settings-error-item strong {
+  display: block;
+  word-break: break-word;
+  margin-bottom: 0.25rem;
+}
+
+.wb-settings-error-detail,
+.wb-settings-error-action {
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  word-break: break-word;
+}
+
+.wb-settings-error-action em {
+  font-style: normal;
+  font-weight: 600;
+  margin-right: 0.3rem;
+}
+
+:root:not(.light) .wb-settings-error-item {
+  background: rgba(225, 90, 90, 0.15);
+  border-left-color: rgb(255, 130, 130);
+}

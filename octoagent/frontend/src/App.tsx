@@ -1,6 +1,7 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import RootErrorBoundary from "./components/shell/RootErrorBoundary";
+import RouteErrorBoundary from "./components/shell/RouteErrorBoundary";
 import WorkbenchLayout from "./components/shell/WorkbenchLayout";
 
 const AgentCenter = lazy(() => import("./pages/AgentCenter"));
@@ -31,8 +32,15 @@ function RouteFallback() {
   );
 }
 
-function withRouteSuspense(element: ReactNode) {
-  return <Suspense fallback={<RouteFallback />}>{element}</Suspense>;
+// Feature 079 Phase 1：lazy chunk 404 / 子树渲染异常只局限在单条 route 内，
+// 不再让 RootErrorBoundary 覆盖整棵 App（shell + banner 会一起被吞）。
+// ErrorBoundary 必须在 Suspense 外层，才能捕获 lazy() import 失败。
+function withRouteSuspense(element: ReactNode, pageLabel?: string) {
+  return (
+    <RouteErrorBoundary pageLabel={pageLabel}>
+      <Suspense fallback={<RouteFallback />}>{element}</Suspense>
+    </RouteErrorBoundary>
+  );
 }
 
 export default function App() {
@@ -41,20 +49,23 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<WorkbenchLayout />}>
-            <Route index element={withRouteSuspense(<ChatWorkbench />)} />
+            <Route index element={withRouteSuspense(<ChatWorkbench />, "聊天工作台")} />
             <Route path="chat" element={<Navigate to="/" replace />} />
-            <Route path="chat/:sessionId" element={withRouteSuspense(<ChatWorkbench />)} />
-            <Route path="agents" element={withRouteSuspense(<AgentCenter />)} />
-            <Route path="skills" element={withRouteSuspense(<SkillCenter />)} />
-            <Route path="mcp" element={withRouteSuspense(<McpProviderCenter />)} />
+            <Route
+              path="chat/:sessionId"
+              element={withRouteSuspense(<ChatWorkbench />, "聊天工作台")}
+            />
+            <Route path="agents" element={withRouteSuspense(<AgentCenter />, "Agent 中心")} />
+            <Route path="skills" element={withRouteSuspense(<SkillCenter />, "Skill 中心")} />
+            <Route path="mcp" element={withRouteSuspense(<McpProviderCenter />, "MCP 中心")} />
             {/* 兼容旧路径 */}
             <Route path="agents/skills" element={<Navigate to="/skills" replace />} />
             <Route path="agents/mcp" element={<Navigate to="/mcp" replace />} />
-            <Route path="work" element={withRouteSuspense(<TaskList />)} />
-            <Route path="memory" element={withRouteSuspense(<MemoryCenter />)} />
-            <Route path="settings" element={withRouteSuspense(<SettingsCenter />)} />
+            <Route path="work" element={withRouteSuspense(<TaskList />, "任务列表")} />
+            <Route path="memory" element={withRouteSuspense(<MemoryCenter />, "记忆中心")} />
+            <Route path="settings" element={withRouteSuspense(<SettingsCenter />, "设置中心")} />
           </Route>
-          <Route path="/tasks/:taskId" element={withRouteSuspense(<TaskDetail />)} />
+          <Route path="/tasks/:taskId" element={withRouteSuspense(<TaskDetail />, "任务详情")} />
         </Routes>
       </BrowserRouter>
     </RootErrorBoundary>

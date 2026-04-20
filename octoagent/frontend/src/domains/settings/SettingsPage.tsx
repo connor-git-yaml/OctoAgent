@@ -1,8 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
 import { categoryForHint, getValueAtPath } from "../../workbench/utils";
 import type { ConfigFieldHint, SetupReviewSummary } from "../../types";
+import PendingChangesBar from "./PendingChangesBar";
+import SettingsErrorModal, {
+  type SettingsErrorItem,
+  type SettingsErrorKind,
+} from "./SettingsErrorModal";
 import SettingsHintFields from "./SettingsHintFields";
 import SettingsOverview from "./SettingsOverview";
 import SettingsProviderSection from "./SettingsProviderSection";
@@ -47,7 +52,8 @@ const EMPTY_REVIEW: SetupReviewSummary = {
 };
 
 export default function SettingsPage() {
-  const { snapshot, submitAction, busyActionId } = useWorkbench();
+  const { snapshot, submitAction, busyActionId, error: workbenchError } =
+    useWorkbench();
   const location = useLocation();
   const config = snapshot!.resources.config;
   const selector = snapshot!.resources.project_selector;
@@ -63,6 +69,17 @@ export default function SettingsPage() {
   const [savedSecretEnvNames, setSavedSecretEnvNames] = useState<string[]>([]);
   const [pendingRuntimeRefresh, setPendingRuntimeRefresh] = useState(false);
 
+  // Feature 079 Phase 1：统一错误展示。buildSetupDraft 返回 null 时或后端
+  // submitAction 返回 null 时，都通过这个 modal 告诉用户具体原因。
+  // 不再依赖"偶尔被 ErrorBoundary 吞掉"的 inline banner 作为唯一提示。
+  const [errorModal, setErrorModal] = useState<{
+    open: boolean;
+    kind: SettingsErrorKind;
+    items: SettingsErrorItem[];
+  }>({ open: false, kind: "field", items: [] });
+  // 追踪最近一次保存动作的生命周期，用来判断 workbench.error 是哪个 action 触发的
+  const pendingSaveActionRef = useRef<string | null>(null);
+
   useEffect(() => {
     setFieldState(buildFieldState(config?.ui_hints ?? {}, config?.current_value ?? {}));
     setFieldErrors({});
@@ -75,6 +92,41 @@ export default function SettingsPage() {
   useEffect(() => {
     setSecretValues({});
   }, [setup.generated_at, config.generated_at]);
+
+  // Feature 079 Phase 1：保存类 action 失败时自动弹错误 modal。
+  // workbench.error 是 useWorkbenchData 在 action 抛异常时 setError 的结果；
+  // 用 pendingSaveActionRef 限定只有刚发过 setup.* 的 action 才会触发 modal，
+  // 避免展示其它 action（比如 agent_profile.update_resource_limits）的错误。
+  useEffect(() => {
+    if (!workbenchError) {
+      return;
+    }
+    if (!pendingSaveActionRef.current) {
+      return;
+    }
+    if (busyActionId === pendingSaveActionRef.current) {
+      // action 还没返回
+      return;
+    }
+    const rawMessage = String(workbenchError);
+    const kind: SettingsErrorKind = /review|blocking|SETUP_REVIEW_BLOCKED/i.test(
+      rawMessage
+    )
+      ? "review"
+      : "runtime";
+    const [head, ...rest] = rawMessage
+      .split(/[、;；]/)
+      .map((part) => part.trim())
+      .filter(Boolean);
+    const items: SettingsErrorItem[] = rest.length === 0
+      ? [{ id: "apply_error", title: head || rawMessage }]
+      : [
+          { id: "apply_error_head", title: head },
+          ...rest.map((entry, idx) => ({ id: `apply_error_${idx}`, title: entry })),
+        ];
+    setErrorModal({ open: true, kind, items });
+    pendingSaveActionRef.current = null;
+  }, [workbenchError, busyActionId]);
 
   useEffect(() => {
     if (!location.hash) {
@@ -105,6 +157,64 @@ export default function SettingsPage() {
   const providerRuntimeDetails = readProviderRuntimeDetails(setup.provider_runtime?.details ?? {});
   const providerDrafts = parseProviderDrafts(fieldState.providers);
   const aliasDrafts = normalizeAliasDrafts(parseAliasDrafts(fieldState.model_aliases));
+
+  // Feature 079 Phase 1：检测"当前 React state 与 snapshot.current_value 有没有
+  // 未保存差异"。两端都通过 stringifyProviderDrafts / stringifyAliasDrafts 过一道
+  // canonical 规范化，避免 key 顺序 / null vs "" 之类的伪差异产生误报。
+  const pendingChangeCategories: string[] = (() => {
+    const categories: string[] = [];
+
+    const savedProvidersRaw = getValueAtPath(config.current_value, "providers") ?? [];
+    const savedProvidersCanonical = stringifyProviderDrafts(
+      parseProviderDrafts(JSON.stringify(savedProvidersRaw)),
+    );
+    const draftProvidersCanonical = stringifyProviderDrafts(providerDrafts);
+    if (savedProvidersCanonical !== draftProvidersCanonical) {
+      categories.push("providers");
+    }
+
+    const savedAliasesRaw = getValueAtPath(config.current_value, "model_aliases") ?? {};
+    const savedAliasesCanonical = stringifyAliasDrafts(
+      normalizeAliasDrafts(parseAliasDrafts(JSON.stringify(savedAliasesRaw))),
+    );
+    const draftAliasesCanonical = stringifyAliasDrafts(aliasDrafts);
+    if (savedAliasesCanonical !== draftAliasesCanonical) {
+      categories.push("model_aliases");
+    }
+
+    const savedRuntimeRaw = getValueAtPath(config.current_value, "runtime") ?? {};
+    const savedRuntime =
+      savedRuntimeRaw && typeof savedRuntimeRaw === "object"
+        ? (savedRuntimeRaw as Record<string, unknown>)
+        : {};
+    // fieldState 里未设的 runtime 项回落到 snapshot 值，避免出现 undefined !== saved 的伪差异
+    const draftRuntime = {
+      llm_mode: fieldState["runtime.llm_mode"] ?? savedRuntime.llm_mode ?? "",
+      litellm_proxy_url:
+        fieldState["runtime.litellm_proxy_url"] ?? savedRuntime.litellm_proxy_url ?? "",
+      master_key_env:
+        fieldState["runtime.master_key_env"] ?? savedRuntime.master_key_env ?? "",
+    };
+    const canonicalSavedRuntime = {
+      llm_mode: savedRuntime.llm_mode ?? "",
+      litellm_proxy_url: savedRuntime.litellm_proxy_url ?? "",
+      master_key_env: savedRuntime.master_key_env ?? "",
+    };
+    if (JSON.stringify(canonicalSavedRuntime) !== JSON.stringify(draftRuntime)) {
+      categories.push("runtime");
+    }
+
+    const unsavedSecrets = Object.entries(secretValues).filter(
+      ([, value]) => String(value ?? "").trim(),
+    );
+    if (unsavedSecrets.length > 0) {
+      categories.push("secrets");
+    }
+    return categories;
+  })();
+  const hasPendingChanges = pendingChangeCategories.length > 0;
+  const saveBusy =
+    busyActionId === "setup.apply" || busyActionId === "setup.quick_connect";
   const activeProviders = providerDrafts.filter((item) => item.enabled);
   const defaultProvider =
     activeProviders[0] ?? providerDrafts[0] ?? buildProviderPreset("openrouter");
@@ -173,6 +283,17 @@ export default function SettingsPage() {
     );
     setFieldErrors(result.errors);
     if (Object.keys(result.errors).length > 0) {
+      // Feature 079 Phase 1：把 fieldErrors 强制弹 modal，避免 silent return
+      // 让用户以为"点了保存但没反应"。
+      setErrorModal({
+        open: true,
+        kind: "field",
+        items: Object.entries(result.errors).map(([path, msg]) => ({
+          id: path,
+          title: path,
+          detail: String(msg),
+        })),
+      });
       return null;
     }
     if (
@@ -241,6 +362,9 @@ export default function SettingsPage() {
     // 直接调 setup.apply——后端会内部执行 review 并在必要时 block。
     // 不在前端单独 gate review.ready，否则 secret_missing blocking
     // 会阻止用户首次保存密钥（密钥和 config 需要一起提交）。
+    // Feature 079 Phase 1：标记"下一次 workbench.error 变化是 setup.apply 触发的"，
+    // 让 useEffect 知道要把 error 映射到错误 modal。
+    pendingSaveActionRef.current = "setup.apply";
     const result = await submitAction("setup.apply", { draft });
     const appliedReview = result?.data.review;
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
@@ -320,6 +444,7 @@ export default function SettingsPage() {
     } else if (!review.ready) {
       return;
     }
+    pendingSaveActionRef.current = "setup.quick_connect";
     const result = await submitAction("setup.quick_connect", { draft });
     const appliedReview = result?.data.review;
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
@@ -505,6 +630,20 @@ export default function SettingsPage() {
 
   return (
     <div className="wb-page wb-settings-page">
+      {/* Feature 079 Phase 1：错误 modal 用 portal 渲染到 body，不受本子树异常影响 */}
+      <SettingsErrorModal
+        open={errorModal.open}
+        kind={errorModal.kind}
+        items={errorModal.items}
+        onClose={() => setErrorModal((prev) => ({ ...prev, open: false }))}
+      />
+      {/* Feature 079 Phase 1：未保存变更 sticky bar。授权完成但未 apply 时最显眼 */}
+      <PendingChangesBar
+        hasChanges={hasPendingChanges}
+        categories={pendingChangeCategories}
+        busy={saveBusy}
+        onSave={() => void handleApply()}
+      />
       <SettingsOverview
         usingEchoMode={usingEchoMode}
         review={review}
