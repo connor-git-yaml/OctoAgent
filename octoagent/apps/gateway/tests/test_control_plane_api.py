@@ -2123,6 +2123,279 @@ class TestControlPlaneApi:
         assert profile is not None
         assert profile.provider == "openai-codex"
 
+    # ────────────────────────── Feature 079 Phase 2 ──────────────────────────
+    async def test_setup_oauth_and_apply_atomic_persists_both_credential_and_config(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        monkeypatch,
+    ) -> None:
+        """Feature 079 Phase 2：一次 action 完成授权 + providers/aliases 保存。
+
+        之前授权只写 auth-profiles.json；要让 provider 真正被主 Agent 使用，必须
+        再点一次保存。该断层是"OAuth 成功但 main 模型没切换" 的主因。这里验证
+        合并 action 一次完成两步。
+        """
+        from octoagent.gateway.services import control_plane as control_plane_module
+
+        async def fake_run_auth_code_pkce_flow(**_kwargs):
+            return OAuthCredential(
+                provider="openai-codex",
+                access_token=SecretStr("oauth-at-new"),
+                refresh_token=SecretStr("oauth-rt-new"),
+                expires_at=datetime(2026, 6, 1, tzinfo=UTC),
+                account_id="acct-new",
+            )
+
+        monkeypatch.setattr(
+            control_plane_module,
+            "detect_environment",
+            lambda: EnvironmentContext(
+                is_remote=False,
+                can_open_browser=True,
+                force_manual=False,
+                detection_details="test",
+            ),
+        )
+        monkeypatch.setattr(
+            control_plane_module,
+            "run_auth_code_pkce_flow",
+            fake_run_auth_code_pkce_flow,
+        )
+
+        class FakeActivationService:
+            def __init__(self, project_root: Path) -> None:
+                self.project_root = project_root
+
+            def has_managed_runtime(self) -> bool:
+                return True
+
+            async def start_proxy(self):
+                return type(
+                    "Activation",
+                    (),
+                    {
+                        "project_root": str(self.project_root),
+                        "source_root": str(self.project_root / "app" / "octoagent"),
+                        "compose_file": str(
+                            self.project_root / "app" / "octoagent" / "docker-compose.litellm.yml"
+                        ),
+                        "proxy_url": "http://localhost:4000",
+                        "managed_runtime": True,
+                        "warnings": [],
+                    },
+                )()
+
+        async def fake_restart_runtime_after_delay(*, delay_seconds, trigger_source):
+            return None
+
+        monkeypatch.setattr(
+            control_plane_module,
+            "RuntimeActivationService",
+            FakeActivationService,
+        )
+        monkeypatch.setattr(
+            control_plane_app.state.control_plane_service._mcp_service,
+            "_restart_runtime_after_delay",
+            fake_restart_runtime_after_delay,
+        )
+        # 防止 proxy_manager.restart 在 setup.apply 后触发真实网络
+        if control_plane_app.state.control_plane_service._proxy_manager is not None:
+            async def fake_restart(*args, **kwargs):
+                return None
+            monkeypatch.setattr(
+                control_plane_app.state.control_plane_service._proxy_manager,
+                "restart",
+                fake_restart,
+            )
+
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.oauth_and_apply",
+                "surface": "web",
+                "actor": {"actor_id": "user:web", "actor_label": "Owner"},
+                "params": {
+                    "provider_id": "openai-codex",
+                    "env_name": "OPENAI_API_KEY",
+                    "profile_name": "openai-codex-default",
+                    "draft": {
+                        "config": {
+                            "providers": [
+                                {
+                                    "id": "openai-codex",
+                                    "name": "OpenAI Codex",
+                                    "auth_type": "oauth",
+                                    "api_key_env": "OPENAI_API_KEY",
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {
+                                "main": {
+                                    "provider": "openai-codex",
+                                    "model": "gpt-5.4",
+                                },
+                                "cheap": {
+                                    "provider": "openai-codex",
+                                    "model": "gpt-4.1-mini",
+                                },
+                            },
+                        },
+                        "agent_profile": {
+                            "scope": "project",
+                            "name": "Codex 主 Agent",
+                            "persona_summary": "测试用",
+                            "tool_profile": "default",
+                            "model_alias": "main",
+                        },
+                    },
+                },
+            },
+        )
+
+        if resp.status_code != 200:
+            raise AssertionError(
+                f"setup.oauth_and_apply expected 200, got {resp.status_code}: {resp.text}"
+            )
+        result = resp.json()["result"]
+        assert result["code"] == "SETUP_OAUTH_AND_APPLIED"
+        assert result["data"]["apply_blocked"] is False
+        # OAuth 部分：credential 已写入 auth-profiles.json
+        store = CredentialStore(
+            control_plane_app.state.project_root / "auth-profiles.json"
+        )
+        profile = store.get_profile("openai-codex-default")
+        assert profile is not None
+        assert profile.provider == "openai-codex"
+        # Apply 部分：providers[] / model_aliases 进了 octoagent.yaml
+        config_doc = await control_plane_app.state.control_plane_service.get_config_schema()
+        assert config_doc.current_value["providers"][0]["id"] == "openai-codex"
+        assert (
+            config_doc.current_value["model_aliases"]["main"]["model"] == "gpt-5.4"
+        )
+
+    async def test_setup_oauth_and_apply_blocked_after_oauth_preserves_credential(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        monkeypatch,
+    ) -> None:
+        """OAuth 成功但 setup.apply 被 review blocking → 返回 OAUTH_OK_APPLY_BLOCKED。
+
+        credential 已落盘不回滚（用户修复 blocking 后再重试 setup.apply 即可）；
+        前端靠 code 区分"要怎么引导用户"。
+        """
+        from octoagent.gateway.services import control_plane as control_plane_module
+
+        async def fake_run_auth_code_pkce_flow(**_kwargs):
+            return OAuthCredential(
+                provider="openai-codex",
+                access_token=SecretStr("oauth-at-blocked"),
+                refresh_token=SecretStr("oauth-rt-blocked"),
+                expires_at=datetime(2026, 6, 1, tzinfo=UTC),
+                account_id="acct-blocked",
+            )
+
+        monkeypatch.setattr(
+            control_plane_module,
+            "detect_environment",
+            lambda: EnvironmentContext(
+                is_remote=False,
+                can_open_browser=True,
+                force_manual=False,
+                detection_details="test",
+            ),
+        )
+        monkeypatch.setattr(
+            control_plane_module,
+            "run_auth_code_pkce_flow",
+            fake_run_auth_code_pkce_flow,
+        )
+
+        class FakeActivationService:
+            def __init__(self, project_root: Path) -> None:
+                self.project_root = project_root
+
+            def has_managed_runtime(self) -> bool:
+                return True
+
+            async def start_proxy(self):
+                return type(
+                    "Activation",
+                    (),
+                    {
+                        "project_root": str(self.project_root),
+                        "source_root": str(self.project_root / "app" / "octoagent"),
+                        "compose_file": str(
+                            self.project_root / "app" / "octoagent" / "docker-compose.litellm.yml"
+                        ),
+                        "proxy_url": "http://localhost:4000",
+                        "managed_runtime": True,
+                        "warnings": [],
+                    },
+                )()
+
+        async def fake_restart_runtime_after_delay(*, delay_seconds, trigger_source):
+            return None
+
+        monkeypatch.setattr(
+            control_plane_module,
+            "RuntimeActivationService",
+            FakeActivationService,
+        )
+        monkeypatch.setattr(
+            control_plane_app.state.control_plane_service._mcp_service,
+            "_restart_runtime_after_delay",
+            fake_restart_runtime_after_delay,
+        )
+        if control_plane_app.state.control_plane_service._proxy_manager is not None:
+            async def fake_restart(*args, **kwargs):
+                return None
+            monkeypatch.setattr(
+                control_plane_app.state.control_plane_service._proxy_manager,
+                "restart",
+                fake_restart,
+            )
+
+        # 构造 draft 故意触发 blocking：main alias 引用了不存在的 provider "ghost"
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.oauth_and_apply",
+                "surface": "web",
+                "actor": {"actor_id": "user:web", "actor_label": "Owner"},
+                "params": {
+                    "provider_id": "openai-codex",
+                    "env_name": "OPENAI_API_KEY",
+                    "profile_name": "openai-codex-default",
+                    "draft": {
+                        "config": {
+                            # 注意：providers 为空 → main alias 的 provider 指向不存在
+                            "providers": [],
+                            "model_aliases": {
+                                "main": {"provider": "ghost", "model": "nonexistent"},
+                            },
+                        },
+                    },
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SETUP_OAUTH_OK_APPLY_BLOCKED"
+        assert result["data"]["apply_blocked"] is True
+        assert result["data"]["apply_error_message"]
+        # 关键：OAuth credential 已保留（不会因为 apply blocking 就丢掉）
+        store = CredentialStore(
+            control_plane_app.state.project_root / "auth-profiles.json"
+        )
+        profile = store.get_profile("openai-codex-default")
+        assert profile is not None
+        assert profile.credential.access_token.get_secret_value() == "oauth-at-blocked"
+
     async def test_setup_apply_rejects_blocking_review(
         self,
         control_plane_client: AsyncClient,

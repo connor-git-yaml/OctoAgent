@@ -389,23 +389,82 @@ export default function SettingsPage() {
   }
 
   async function handleOpenAIOAuthConnect() {
+    // Feature 079 Phase 2：把"授权 + provider 入 config"合并成一次原子 action。
+    //
+    // 旧流程：updateProviders 只改 React state，后端只走 provider.oauth.openai_codex
+    // 写 auth-profiles.json；用户必须再点一次"保存配置"才能把 providers[] 写到
+    // octoagent.yaml。结果出现 octoagent.yaml 里 main 仍是旧 provider 的断层。
+    //
+    // 新流程：同步构造一份带 openai-codex provider 的 draft，调 setup.oauth_and_apply。
+    // 后端先 OAuth、再 setup.apply，一次完成。出现 review blocking 时返回
+    // SETUP_OAUTH_OK_APPLY_BLOCKED，credential 仍然保留，让用户继续修复。
     const existingIndex = providerDrafts.findIndex((item) => item.id === "openai-codex");
+    let nextProviders: ProviderDraftItem[];
     if (existingIndex >= 0) {
-      updateProviderAt(existingIndex, { auth_type: "oauth", enabled: true });
-      moveProviderToFront(existingIndex);
-    } else {
-      updateProviders([buildProviderPreset("openai-codex"), ...providerDrafts]);
-      if (aliasDrafts.length === 0) {
-        updateAliases(buildDefaultAliasDrafts("openai-codex"));
+      nextProviders = providerDrafts.map((item, idx) =>
+        idx === existingIndex
+          ? { ...item, auth_type: "oauth" as const, enabled: true }
+          : item
+      );
+      // 把 openai-codex 移到最前（与 moveProviderToFront 语义一致）
+      const [codex] = nextProviders.splice(existingIndex, 1);
+      if (codex) {
+        nextProviders = [codex, ...nextProviders];
       }
+    } else {
+      nextProviders = [buildProviderPreset("openai-codex"), ...providerDrafts];
     }
-    const oauthProvider =
-      providerDrafts.find((item) => item.id === "openai-codex") ??
-      buildProviderPreset("openai-codex");
+    let nextAliases = aliasDrafts;
+    if (nextAliases.length === 0) {
+      nextAliases = buildDefaultAliasDrafts("openai-codex");
+    }
+    // 同步 React state，后续渲染 + 下次保存都能看到
+    updateProviders(nextProviders);
+    updateAliases(nextAliases);
+
+    const oauthProvider = nextProviders[0] ?? buildProviderPreset("openai-codex");
     const envName = oauthProvider.api_key_env || "OPENAI_API_KEY";
-    const result = await submitAction("provider.oauth.openai_codex", {
+
+    // 用"下一跳 state"显式构造一份 fieldState，避免 buildSetupDraft 读到 stale React state
+    const nextFieldState = {
+      ...fieldState,
+      providers: stringifyProviderDrafts(nextProviders),
+      model_aliases: stringifyAliasDrafts(nextAliases),
+      "runtime.llm_mode": "litellm",
+      "runtime.litellm_proxy_url": normalizedGatewayProxyUrl,
+      "runtime.master_key_env": gatewayMasterKeyEnv,
+    };
+    const payload = buildConfigPayload(
+      config.current_value,
+      config.ui_hints,
+      nextFieldState
+    );
+    if (Object.keys(payload.errors).length > 0) {
+      setFieldErrors(payload.errors);
+      setErrorModal({
+        open: true,
+        kind: "field",
+        items: Object.entries(payload.errors).map(([path, msg]) => ({
+          id: path,
+          title: path,
+          detail: String(msg),
+        })),
+      });
+      return false;
+    }
+    const draft = {
+      config: payload.config,
+      secret_values: Object.fromEntries(
+        Object.entries(secretValues).filter(([, value]) => String(value ?? "").trim())
+      ),
+    };
+
+    pendingSaveActionRef.current = "setup.oauth_and_apply";
+    const result = await submitAction("setup.oauth_and_apply", {
+      provider_id: "openai-codex",
       env_name: envName,
       profile_name: "openai-codex-default",
+      draft,
     });
     if (result) {
       setPendingRuntimeRefresh(false);
@@ -414,6 +473,36 @@ export default function SettingsPage() {
         delete next[envName];
         return next;
       });
+      // 如果后端返回 SETUP_OAUTH_OK_APPLY_BLOCKED，把 blocking message 弹到 modal
+      // 让用户知道"授权已完成，但配置还需修复 blocking 后再保存"
+      const code = result.code ?? "";
+      if (code === "SETUP_OAUTH_OK_APPLY_BLOCKED") {
+        const msg = String(result.data?.apply_error_message ?? result.message ?? "");
+        setErrorModal({
+          open: true,
+          kind: "review",
+          items: [
+            {
+              id: "oauth_ok_apply_blocked",
+              title: "授权已完成，但配置保存被风险检查拦下",
+              detail: msg,
+              recommendedAction:
+                "根据下方 blocking 项修正配置（通常在 Providers / Model Aliases / Secrets 区块），再点击保存即可。",
+            },
+          ],
+        });
+      }
+      // 同步 review（含 oauth 之后最新的 setup review）
+      const resultData = result.data as Record<string, unknown> | undefined;
+      const applySection = resultData?.apply as { review?: unknown } | undefined;
+      const appliedReview = applySection?.review ?? resultData?.review;
+      if (
+        appliedReview &&
+        typeof appliedReview === "object" &&
+        !Array.isArray(appliedReview)
+      ) {
+        setReview(appliedReview as SetupReviewSummary);
+      }
     }
     return result !== null;
   }

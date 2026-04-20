@@ -1393,6 +1393,17 @@ class ControlPlaneService:
                     risk_hint="medium",
                 ),
                 definition(
+                    "setup.oauth_and_apply",
+                    "授权并保存",
+                    category="setup",
+                    description=(
+                        "Feature 079 Phase 2：OAuth 授权 + setup.apply 原子操作，"
+                        "消除 auth-profiles 与 octoagent.yaml 之间的时序断层。"
+                    ),
+                    params_schema={"type": "object"},
+                    risk_hint="medium",
+                ),
+                definition(
                     "setup.quick_connect",
                     "连接并启用真实模型",
                     category="setup",

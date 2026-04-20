@@ -61,7 +61,7 @@ import octoagent.gateway.services.control_plane as _cp_pkg  # 通过 package 引
 from octoagent.provider.dx.secret_service import SecretService
 from pydantic import SecretStr, ValidationError
 
-from ._base import ControlPlaneContext, DomainServiceBase
+from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
 
 log = structlog.get_logger()
 
@@ -93,6 +93,9 @@ class SetupDomainService(DomainServiceBase):
             "project.select": self._handle_project_select,
             "setup.review": self._handle_setup_review,
             "setup.apply": self._handle_setup_apply,
+            # Feature 079 Phase 2：原子化 OAuth + setup.apply，闭合"授权但没入 config"
+            # 的 UX 断层。旧 provider.oauth.* 继续可用（CLI 路径 + 向后兼容）。
+            "setup.oauth_and_apply": self._handle_setup_oauth_and_apply,
             "setup.quick_connect": self._handle_setup_quick_connect,
             "skills.selection.save": self._handle_skills_selection_save,
             "config.apply": self._handle_config_apply,
@@ -1045,6 +1048,129 @@ class SetupDomainService(DomainServiceBase):
             code="SETUP_APPLIED",
             message="配置已保存，主 Agent 与系统设置已同步。",
             data=data,
+            resource_refs=self._dedupe_resource_refs(resource_refs),
+        )
+
+    async def _handle_setup_oauth_and_apply(
+        self,
+        request: ActionRequestEnvelope,
+    ) -> ActionResultEnvelope:
+        """Feature 079 Phase 2：原子化 "OAuth 授权 + setup.apply"。
+
+        背景：之前授权走 ``provider.oauth.openai_codex`` 只写 ``auth-profiles.json``
+        + ``.env.litellm``，不写 ``octoagent.yaml.providers[]``；用户还得再点一次
+        "保存配置" 才能让 main 这类 alias 真正指向该 provider。结果出现"授权成
+        功但配置没生效" 的断层（provider 没入 config，main 还是旧的 Qwen）。
+
+        本 action 把两步合并成一次原子操作：先跑 OAuth，再立即 setup.apply。
+        OAuth 成功后 credential 已落盘；若后续 apply 被 review blocking，credential
+        不回滚（没有风险，只是没被引用），由前端展示结构化 blocking 让用户修复
+        后再重试 setup.apply。
+
+        Params:
+        - ``provider_id``: 目前仅支持 "openai-codex"
+        - ``env_name``: 传给 OAuth handler 的 env 变量名（默认 OPENAI_API_KEY）
+        - ``profile_name``: auth-profiles.json 里的 profile 名（默认 openai-codex-default）
+        - ``draft``: 完整的 setup.apply draft（含 providers / aliases / secrets）
+
+        Returns:
+        - 成功：``code=SETUP_OAUTH_AND_APPLIED``，data 合并 OAuth + apply 结果
+        - OAuth 失败：原 OAuth error（不触达 apply）
+        - OAuth 成功但 apply blocking：``code=SETUP_OAUTH_OK_APPLY_BLOCKED``，
+          credential 已保留，前端应提示用户修复 blocking 后重试 setup.apply
+        """
+        provider_id = self._param_str(request.params, "provider_id", default="openai-codex")
+        if provider_id != "openai-codex":
+            raise self._action_error(
+                "OAUTH_PROVIDER_UNSUPPORTED",
+                f"setup.oauth_and_apply 暂只支持 openai-codex，收到 {provider_id!r}",
+            )
+        env_name = self._param_str(request.params, "env_name", default="OPENAI_API_KEY")
+        profile_name = self._param_str(
+            request.params,
+            "profile_name",
+            default="openai-codex-default",
+        )
+        draft = request.params.get("draft")
+        if draft is None or not isinstance(draft, dict):
+            raise self._action_error(
+                "SETUP_DRAFT_REQUIRED",
+                "setup.oauth_and_apply 需要 draft（与 setup.apply 同结构）",
+            )
+
+        # Step 1：调用现有 OAuth handler（保持不动，共用同一套 credential 写入逻辑）
+        oauth_request = request.model_copy(
+            update={
+                "action_id": "provider.oauth.openai_codex",
+                "params": {
+                    "env_name": env_name,
+                    "profile_name": profile_name,
+                },
+            }
+        )
+        oauth_result = await self._get_service("mcp")._handle_provider_oauth_openai_codex(
+            oauth_request
+        )
+        oauth_data: dict[str, Any] = dict(oauth_result.data) if oauth_result.data else {}
+
+        # Step 2：OAuth 成功 → 尝试 setup.apply。apply 内部会再做 review，一旦 blocking
+        # 由于我们已经写入了 credential，不能让整个 action 失败掉 —— 应该告诉前端
+        # "授权部分已完成，但配置保存被 review 拦了"，让用户能继续救火。
+        apply_request = request.model_copy(
+            update={
+                "action_id": "setup.apply",
+                "params": {"draft": draft},
+            }
+        )
+        apply_data: dict[str, Any] = {}
+        apply_blocked = False
+        apply_error_message = ""
+        try:
+            apply_result = await self._handle_setup_apply(apply_request)
+            apply_data = dict(apply_result.data) if apply_result.data else {}
+        except ControlPlaneActionError as exc:
+            # 区分 "review blocking"（可修复）和其他 runtime 错误（需要继续抛）
+            if exc.code == "SETUP_REVIEW_BLOCKED":
+                apply_blocked = True
+                apply_error_message = str(exc)
+                log.warning(
+                    "setup_oauth_and_apply_blocked_after_oauth",
+                    error=apply_error_message,
+                )
+            else:
+                raise
+
+        merged_data: dict[str, Any] = {
+            "oauth": oauth_data,
+            "apply": apply_data,
+            "apply_blocked": apply_blocked,
+        }
+        if apply_blocked:
+            merged_data["apply_error_message"] = apply_error_message
+
+        resource_refs = [
+            *oauth_result.resource_refs,
+            self._resource_ref("config_schema", "config:octoagent"),
+            self._resource_ref("diagnostics_summary", "diagnostics:runtime"),
+            self._resource_ref("setup_governance", "setup:governance"),
+        ]
+
+        if apply_blocked:
+            return self._completed_result(
+                request=request,
+                code="SETUP_OAUTH_OK_APPLY_BLOCKED",
+                message=(
+                    "授权已完成并写入凭证；但保存配置被风险检查拦下。"
+                    "修复下方风险项后，再点击保存即可。"
+                ),
+                data=merged_data,
+                resource_refs=self._dedupe_resource_refs(resource_refs),
+            )
+        return self._completed_result(
+            request=request,
+            code="SETUP_OAUTH_AND_APPLIED",
+            message="授权已完成，配置已保存。",
+            data=merged_data,
             resource_refs=self._dedupe_resource_refs(resource_refs),
         )
 

@@ -573,11 +573,21 @@ describe("SettingsPage", () => {
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI Auth" }));
     await userEvent.click(screen.getByRole("button", { name: "连接 OpenAI Auth" }));
 
+    // Feature 079 Phase 2：授权动作改走原子的 setup.oauth_and_apply
+    // 保证 OAuth 成功后 providers[] 和 model_aliases 也一起写到 octoagent.yaml。
     await waitFor(() =>
-      expect(submitAction).toHaveBeenCalledWith("provider.oauth.openai_codex", {
-        env_name: "OPENAI_API_KEY",
-        profile_name: "openai-codex-default",
-      })
+      expect(submitAction).toHaveBeenCalledWith(
+        "setup.oauth_and_apply",
+        expect.objectContaining({
+          provider_id: "openai-codex",
+          env_name: "OPENAI_API_KEY",
+          profile_name: "openai-codex-default",
+          draft: expect.objectContaining({
+            config: expect.any(Object),
+            secret_values: expect.any(Object),
+          }),
+        })
+      )
     );
   });
 
