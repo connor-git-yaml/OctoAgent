@@ -30,7 +30,7 @@ describe("RouteErrorBoundary", () => {
     vi.restoreAllMocks();
   });
 
-  it("chunk 404 时显示刷新提示 + 刷新按钮", () => {
+  it("chunk 404 时显示刷新提示 + 倒计时刷新按钮", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     render(
       <RouteErrorBoundary pageLabel="设置中心">
@@ -41,7 +41,11 @@ describe("RouteErrorBoundary", () => {
     expect(
       screen.getByRole("heading", { name: /设置中心需要刷新才能加载/ })
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "刷新页面" })).toBeInTheDocument();
+    // Feature 079 Phase 3：chunk 404 进入自动刷新倒计时
+    expect(
+      screen.getByRole("button", { name: /刷新页面/ })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /取消自动刷新/ })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "重试本页" })).not.toBeInTheDocument();
   });
 

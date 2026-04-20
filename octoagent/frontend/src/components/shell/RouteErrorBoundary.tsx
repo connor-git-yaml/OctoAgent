@@ -32,7 +32,11 @@ interface RouteErrorBoundaryState {
   error: Error | null;
   isChunkMismatch: boolean;
   retryCount: number;
+  /** Feature 079 Phase 3：自动刷新倒计时（秒），chunk 404 时启动 */
+  autoReloadSecondsLeft: number | null;
 }
+
+const AUTO_RELOAD_SECONDS = 3;
 
 function isChunkMismatchError(error: Error): boolean {
   const lower = (error.message ?? "").toLowerCase();
@@ -53,12 +57,17 @@ export default class RouteErrorBoundary extends React.Component<
     error: null,
     isChunkMismatch: false,
     retryCount: 0,
+    autoReloadSecondsLeft: null,
   };
 
+  private autoReloadIntervalHandle: ReturnType<typeof setInterval> | null = null;
+
   static getDerivedStateFromError(error: Error): Partial<RouteErrorBoundaryState> {
+    const isChunkMismatch = isChunkMismatchError(error);
     return {
       error,
-      isChunkMismatch: isChunkMismatchError(error),
+      isChunkMismatch,
+      autoReloadSecondsLeft: isChunkMismatch ? AUTO_RELOAD_SECONDS : null,
     };
   }
 
@@ -72,12 +81,60 @@ export default class RouteErrorBoundary extends React.Component<
     });
   }
 
-  componentDidUpdate(prev: RouteErrorBoundaryProps) {
+  componentDidUpdate(prev: RouteErrorBoundaryProps, prevState: RouteErrorBoundaryState) {
     // 路由切换时重置 state，确保上一个 route 的错误不会影响新 route 的渲染
     if (prev.routeKey !== this.props.routeKey && this.state.error) {
-      this.setState({ error: null, isChunkMismatch: false, retryCount: 0 });
+      this.clearAutoReload();
+      this.setState({
+        error: null,
+        isChunkMismatch: false,
+        retryCount: 0,
+        autoReloadSecondsLeft: null,
+      });
+      return;
+    }
+    // Feature 079 Phase 3：chunk 404 被捕获时启动 3s 自动刷新倒计时
+    const justEnteredAutoReload =
+      this.state.autoReloadSecondsLeft !== null &&
+      prevState.autoReloadSecondsLeft === null;
+    if (justEnteredAutoReload) {
+      this.startAutoReload();
     }
   }
+
+  componentWillUnmount() {
+    this.clearAutoReload();
+  }
+
+  private startAutoReload() {
+    this.clearAutoReload();
+    this.autoReloadIntervalHandle = setInterval(() => {
+      this.setState((prev) => {
+        if (prev.autoReloadSecondsLeft === null) {
+          return prev;
+        }
+        if (prev.autoReloadSecondsLeft <= 1) {
+          this.clearAutoReload();
+          // 在下一个 tick reload，避免 setState 里直接触发 navigation
+          queueMicrotask(() => this.handleReload());
+          return { ...prev, autoReloadSecondsLeft: 0 };
+        }
+        return { ...prev, autoReloadSecondsLeft: prev.autoReloadSecondsLeft - 1 };
+      });
+    }, 1000);
+  }
+
+  private clearAutoReload() {
+    if (this.autoReloadIntervalHandle !== null) {
+      clearInterval(this.autoReloadIntervalHandle);
+      this.autoReloadIntervalHandle = null;
+    }
+  }
+
+  private cancelAutoReload = () => {
+    this.clearAutoReload();
+    this.setState({ autoReloadSecondsLeft: null });
+  };
 
   private handleRetry = () => {
     // 仅 reset boundary state。如果是 chunk 404，需要用户刷新整个页面才能拿到新
@@ -98,7 +155,7 @@ export default class RouteErrorBoundary extends React.Component<
   };
 
   render() {
-    const { error, isChunkMismatch, retryCount } = this.state;
+    const { error, isChunkMismatch, retryCount, autoReloadSecondsLeft } = this.state;
     if (!error) {
       return this.props.children;
     }
@@ -108,9 +165,10 @@ export default class RouteErrorBoundary extends React.Component<
       ? `${pageLabel}需要刷新才能加载`
       : `${pageLabel}没有正常加载`;
     const message = isChunkMismatch
-      ? "系统刚更新过，这一块的前端资源已经是旧版本。点下方按钮刷新，就能拿到最新界面。"
+      ? "系统刚更新过，这一块的前端资源已经是旧版本。马上会自动刷新，也可以直接点刷新拿到最新界面。"
       : "这次渲染出了点问题。你可以重试本页，或者切到其他页面继续操作——其他页面和未保存的内容都还在。";
     const allowInBoundaryRetry = !isChunkMismatch && retryCount < 2;
+    const autoReloadActive = autoReloadSecondsLeft !== null && autoReloadSecondsLeft > 0;
 
     return (
       <div className="wb-route-fallback" role="alert">
@@ -134,12 +192,24 @@ export default class RouteErrorBoundary extends React.Component<
                 className="wb-button wb-button-primary"
                 onClick={this.handleReload}
               >
-                刷新页面
+                {autoReloadActive
+                  ? `刷新页面（${autoReloadSecondsLeft}s 后自动刷新）`
+                  : "刷新页面"}
               </button>
             )}
-            <a href="/" className="wb-button wb-button-secondary">
-              回到首页
-            </a>
+            {autoReloadActive ? (
+              <button
+                type="button"
+                className="wb-button wb-button-secondary"
+                onClick={this.cancelAutoReload}
+              >
+                取消自动刷新
+              </button>
+            ) : (
+              <a href="/" className="wb-button wb-button-secondary">
+                回到首页
+              </a>
+            )}
           </div>
           <span className="wb-route-fallback-note">
             其他页面不会受影响，shell 和左侧导航仍然可用。

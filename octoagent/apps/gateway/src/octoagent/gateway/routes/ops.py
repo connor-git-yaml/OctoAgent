@@ -235,6 +235,93 @@ async def get_auth_diagnostics():
     return _build_auth_diagnostics(profiles, cli_available=cli_cred is not None)
 
 
+# ─── Feature 079 Phase 3：前端 build-id 漂移检测 ──────────────────────
+
+_FRONTEND_VERSION_CACHE: dict[str, Any] = {
+    "build_id": "",
+    "mtime_ns": 0,
+    "checked_at": "",
+}
+
+
+def _resolve_frontend_index_path() -> Any:
+    """定位 frontend/dist/index.html；未构建时返回 None。"""
+    from pathlib import Path
+
+    # 与 main.py SpaStaticFiles 的挂载逻辑对齐
+    gateway_root = Path(__file__).resolve()
+    for candidate in (
+        gateway_root.parents[4] / "frontend" / "dist" / "index.html",
+        gateway_root.parents[5] / "frontend" / "dist" / "index.html",
+    ):
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _parse_build_id(html: str) -> str:
+    """从 index.html 提取 <meta name="app-build-id" content="..."> 的 content。
+
+    做 bare substring 解析，避免引入 beautifulsoup 这类重依赖。meta 由 Vite
+    build 时的 transformIndexHtml 注入，格式稳定。
+    """
+    marker = 'name="app-build-id"'
+    idx = html.find(marker)
+    if idx < 0:
+        return ""
+    tail = html[idx : idx + 256]
+    content_marker = 'content="'
+    content_idx = tail.find(content_marker)
+    if content_idx < 0:
+        return ""
+    start = content_idx + len(content_marker)
+    end = tail.find('"', start)
+    if end < 0:
+        return ""
+    return tail[start:end]
+
+
+@router.get("/api/ops/frontend-version")
+async def get_frontend_version():
+    """Feature 079 Phase 3：前端当前正在 serve 的 build-id。
+
+    客户端在启动时记下 ``__BUILD_ID__``，之后周期性拉此端点比对。mismatch
+    意味着 "我的页面是旧版本；后端已经在 serve 新 dist"。用于驱动前端非侵
+    入式 toast 提示 "有新版本，点击刷新"。
+
+    行为：
+    - 缓存 build_id；通过 index.html 的 mtime_ns 做 cache invalidation
+    - dist 不存在（dev 模式 / 未构建）→ 返回 build_id="dev"
+    - meta 解析失败 → build_id="unknown"，客户端理应 no-op 避免误告警
+    """
+    from datetime import datetime, timezone
+
+    path = _resolve_frontend_index_path()
+    now_iso = datetime.now(tz=timezone.utc).isoformat()
+    if path is None:
+        return {"build_id": "dev", "served_at": now_iso}
+    try:
+        mtime_ns = path.stat().st_mtime_ns
+    except OSError:
+        return {"build_id": "unknown", "served_at": now_iso}
+
+    cached_mtime = _FRONTEND_VERSION_CACHE.get("mtime_ns", 0)
+    if mtime_ns != cached_mtime or not _FRONTEND_VERSION_CACHE.get("build_id"):
+        try:
+            html = path.read_text(encoding="utf-8")
+        except OSError:
+            return {"build_id": "unknown", "served_at": now_iso}
+        build_id = _parse_build_id(html) or "unknown"
+        _FRONTEND_VERSION_CACHE["build_id"] = build_id
+        _FRONTEND_VERSION_CACHE["mtime_ns"] = mtime_ns
+        _FRONTEND_VERSION_CACHE["checked_at"] = now_iso
+
+    return {
+        "build_id": _FRONTEND_VERSION_CACHE["build_id"],
+        "served_at": now_iso,
+    }
+
+
 @router.get("/api/ops/tool-registry/diagnostics")
 async def get_tool_registry_diagnostics(request: Request):
     """ToolBroker 注册失败明细。

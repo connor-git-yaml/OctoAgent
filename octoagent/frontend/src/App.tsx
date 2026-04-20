@@ -1,5 +1,6 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import BuildVersionWatcher from "./components/shell/BuildVersionWatcher";
 import RootErrorBoundary from "./components/shell/RootErrorBoundary";
 import RouteErrorBoundary from "./components/shell/RouteErrorBoundary";
 import WorkbenchLayout from "./components/shell/WorkbenchLayout";
@@ -46,6 +47,8 @@ function withRouteSuspense(element: ReactNode, pageLabel?: string) {
 export default function App() {
   return (
     <RootErrorBoundary>
+      {/* Feature 079 Phase 3：build-id 漂移检测，事前告警替代事后 chunk 404 灾难 */}
+      <BuildVersionWatcher />
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<WorkbenchLayout />}>
