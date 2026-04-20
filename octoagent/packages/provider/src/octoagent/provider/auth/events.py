@@ -147,6 +147,95 @@ async def emit_oauth_event(
             )
 
 
+# ─────────────────── Feature 078 Phase 4：refresh 事件 helpers ───────────────────
+
+
+async def emit_refresh_triggered(
+    event_store: EventStoreProtocol | None,
+    provider_id: str,
+    *,
+    mode: str,
+    force: bool = False,
+) -> None:
+    """refresh 开始之前触发。``mode`` ∈ {preemptive, reactive}。"""
+    await emit_oauth_event(
+        event_store=event_store,
+        event_type=EventType.OAUTH_REFRESH_TRIGGERED,
+        provider_id=provider_id,
+        payload={"mode": mode, "force": force},
+    )
+
+
+async def emit_refresh_failed(
+    event_store: EventStoreProtocol | None,
+    provider_id: str,
+    *,
+    error_type: str,
+    retry_count: int = 0,
+) -> None:
+    """refresh 失败（单次尝试，未经过 recovery）。"""
+    await emit_oauth_event(
+        event_store=event_store,
+        event_type=EventType.OAUTH_REFRESH_FAILED,
+        provider_id=provider_id,
+        payload={"error_type": error_type, "retry_count": retry_count},
+    )
+
+
+async def emit_refresh_recovered(
+    event_store: EventStoreProtocol | None,
+    provider_id: str,
+    *,
+    via: str,
+) -> None:
+    """refresh 失败后通过某种 recovery 路径成功。``via`` ∈ {store_reload, external_cli}。"""
+    await emit_oauth_event(
+        event_store=event_store,
+        event_type=EventType.OAUTH_REFRESH_RECOVERED,
+        provider_id=provider_id,
+        payload={"via": via},
+    )
+
+
+async def emit_refresh_exhausted(
+    event_store: EventStoreProtocol | None,
+    provider_id: str,
+    *,
+    attempt_count: int,
+    last_error: str,
+) -> None:
+    """所有 refresh fallback（含 store reload + CLI adopt）都失败。"""
+    await emit_oauth_event(
+        event_store=event_store,
+        event_type=EventType.OAUTH_REFRESH_EXHAUSTED,
+        provider_id=provider_id,
+        payload={
+            "attempt_count": attempt_count,
+            # 截断防止超长 stack trace 进入事件；敏感字段仍由 _SENSITIVE_FIELDS 过滤
+            "last_error": str(last_error)[:300],
+        },
+    )
+
+
+async def emit_adopted_from_external_cli(
+    event_store: EventStoreProtocol | None,
+    provider_id: str,
+    *,
+    source_path: str,
+    gate_reason: str,
+) -> None:
+    """从 ~/.codex/auth.json 接管凭证成功。"""
+    await emit_oauth_event(
+        event_store=event_store,
+        event_type=EventType.OAUTH_ADOPTED_FROM_EXTERNAL_CLI,
+        provider_id=provider_id,
+        payload={
+            "source_path": source_path,
+            "gate_reason": gate_reason,
+        },
+    )
+
+
 async def _append_system_event(
     *,
     event_store: EventStoreProtocol,

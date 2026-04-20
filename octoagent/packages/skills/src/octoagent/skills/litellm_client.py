@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import time
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import httpx
@@ -84,12 +85,14 @@ class LiteLLMSkillClient:
         responses_model_aliases: set[str] | None = None,
         responses_reasoning_aliases: dict[str, Any] | None = None,
         responses_direct_params: dict[str, dict[str, Any]] | None = None,
+        auth_refresh_callback: Callable[..., Awaitable[Any]] | None = None,
     ) -> None:
         self._proxy_url = proxy_url.rstrip("/")
         self._master_key = master_key
         self._tool_broker = tool_broker
         self._timeout_s = timeout_s
         self._responses_model_aliases = set(responses_model_aliases or ())
+        self._auth_refresh_callback = auth_refresh_callback
         # 对话历史：key = "{task_id}:{trace_id}"；OrderedDict 用来维护 LRU 顺序
         self._histories: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
         # 每个 conversation key 的最后一次 access 时间（monotonic），用于
@@ -103,12 +106,14 @@ class LiteLLMSkillClient:
         self._chat_provider: LLMProviderProtocol = ChatCompletionsProvider(
             proxy_url=self._proxy_url,
             master_key=self._master_key,
+            auth_refresh_callback=auth_refresh_callback,
         )
         self._responses_provider: LLMProviderProtocol = ResponsesApiProvider(
             proxy_url=self._proxy_url,
             master_key=self._master_key,
             responses_direct_params=responses_direct_params,
             responses_reasoning_aliases=responses_reasoning_aliases,
+            auth_refresh_callback=auth_refresh_callback,
         )
 
     async def close(self) -> None:

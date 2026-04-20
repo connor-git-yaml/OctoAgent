@@ -151,9 +151,16 @@ class TestBuildAuthRefreshCallback:
         assert result.credential_value == "fresh-token"
         assert os.environ.get("CODEX_API_KEY") == "fresh-token"
 
-    async def test_invalid_grant_removes_profile_returns_none(
+    async def test_invalid_grant_preserves_profile_returns_none(
         self, tmp_path: Path, tmp_store: CredentialStore
     ) -> None:
+        """Codex adversarial review F1：invalid_grant 下 profile 不被 adapter 自动删除。
+
+        之前 adapter 在 invalid_grant 时会立刻 ``store.remove_profile``，导致 Phase 2
+        的 ``~/.codex/auth.json`` adopt 兜底永远无法生效（adopt_from_external 对
+        已删 profile 返回 False）。现在 adapter 只返回 None，清理决策权交给 callback，
+        由后者在完整 waterfall（refresh + CLI adopt）都失败后再决定是否清理。
+        """
         from octoagent.provider.exceptions import OAuthFlowError
 
         _write_octoagent_yaml(tmp_path)
@@ -176,8 +183,8 @@ class TestBuildAuthRefreshCallback:
             result = await callback()
 
         assert result is None
-        # profile 被清理
-        assert tmp_store.get_profile("openai-codex-default") is None
+        # 新契约：profile 保留（给 CLI adopt / 手动重登留机会）
+        assert tmp_store.get_profile("openai-codex-default") is not None
 
     async def test_api_key_profile_is_skipped(
         self, tmp_path: Path, tmp_store: CredentialStore

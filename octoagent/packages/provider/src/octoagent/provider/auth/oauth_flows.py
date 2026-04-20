@@ -24,7 +24,7 @@ import structlog
 from octoagent.core.models.enums import EventType
 from pydantic import BaseModel, Field, SecretStr
 
-from ..exceptions import OAuthFlowError
+from ..exceptions import OAuthFlowError, OAuthRefreshTimeoutError
 from .callback_server import (
     CallbackResult,
     ensure_relay_server,
@@ -163,6 +163,7 @@ def _curl_post(
     *,
     error_prefix: str,
     max_retries: int = 3,
+    timeout_s: float = 30.0,
 ) -> dict:
     """通过 subprocess 调用 curl 发送 POST 请求
 
@@ -174,12 +175,15 @@ def _curl_post(
         form_data: form-urlencoded 表单数据
         error_prefix: 错误消息前缀
         max_retries: 最大重试次数（默认 3）
+        timeout_s: 单次 curl 请求的硬超时（秒）。双保险：
+            - ``--max-time`` 传给 curl，让 curl 内部超时
+            - ``subprocess.run(timeout=timeout_s + 5)`` 防止 curl 进程挂住
 
     Returns:
         解析后的 JSON 响应字典
 
     Raises:
-        OAuthFlowError: 请求失败
+        OAuthFlowError: 请求失败或超时
     """
     import json
     import subprocess
@@ -187,9 +191,11 @@ def _curl_post(
     import urllib.parse
 
     payload = urllib.parse.urlencode(form_data)
+    curl_max_time = str(int(max(1, timeout_s)))
+    subprocess_timeout = timeout_s + 5.0  # 给 curl 一点 buffer 自行退出
     cmd = [
         "curl", "-s", "-S",
-        "--max-time", "30",
+        "--max-time", curl_max_time,
         "-X", "POST",
         "-H", "Content-Type: application/x-www-form-urlencoded",
         "-d", payload,
@@ -205,7 +211,7 @@ def _curl_post(
 
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=35,
+                cmd, capture_output=True, text=True, timeout=subprocess_timeout,
             )
         except FileNotFoundError as exc:
             raise OAuthFlowError(
@@ -213,8 +219,9 @@ def _curl_post(
                 provider="",
             ) from exc
         except subprocess.TimeoutExpired as exc:
-            raise OAuthFlowError(
-                f"{error_prefix}超时",
+            # 超时明确归类为 OAuthRefreshTimeoutError，上游可识别
+            raise OAuthRefreshTimeoutError(
+                f"{error_prefix}超时（{timeout_s}s）",
                 provider="",
             ) from exc
 
@@ -225,6 +232,12 @@ def _curl_post(
         # curl exit 35 = SSL 连接错误，可重试
         if result.returncode == 35 and attempt < max_retries - 1:
             continue
+        # curl exit 28 = operation timeout（自身触发 --max-time）
+        if result.returncode == 28:
+            raise OAuthRefreshTimeoutError(
+                f"{error_prefix}超时（curl --max-time={curl_max_time}s）",
+                provider="",
+            )
 
         raise OAuthFlowError(
             f"{error_prefix}失败: curl 错误 - {last_error}",
@@ -324,6 +337,8 @@ async def refresh_access_token(
     token_endpoint: str,
     refresh_token: str,
     client_id: str,
+    *,
+    timeout_s: float = 15.0,
 ) -> OAuthTokenResponse:
     """使用 refresh_token 获取新的 access_token
 
@@ -334,18 +349,27 @@ async def refresh_access_token(
         token_endpoint: Token 端点 URL
         refresh_token: 刷新令牌值
         client_id: OAuth Client ID
+        timeout_s: 硬超时（默认 15s）。auth endpoint 挂起时防止整条业务线程
+            被拖住 —— 正常刷新 < 1s，15s 已经是 15x 安全边际。
 
     Returns:
         OAuthTokenResponse 实例
 
     Raises:
         OAuthFlowError: 刷新失败（如 invalid_grant）
+        OAuthRefreshTimeoutError: 超时（由 _curl_post 抛出）
     """
-    data = _curl_post(token_endpoint, {
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token,
-        "client_id": client_id,
-    }, error_prefix="Token 刷新")
+    data = _curl_post(
+        token_endpoint,
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+        },
+        error_prefix="Token 刷新",
+        timeout_s=timeout_s,
+        max_retries=1,  # refresh 路径内部不重试；reused recovery 由 PkceOAuthAdapter 统一处理
+    )
 
     try:
         access_token_str = data["access_token"]

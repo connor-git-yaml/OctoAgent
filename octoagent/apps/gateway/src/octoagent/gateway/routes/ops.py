@@ -151,6 +151,90 @@ async def get_recovery_summary(store_group=Depends(get_store_group)):
     return service.get_recovery_summary().model_dump(mode="json")
 
 
+def _build_auth_diagnostics(
+    profiles: list[Any],
+    *,
+    cli_available: bool,
+    now: Any | None = None,
+) -> dict[str, Any]:
+    """构建诊断响应（可独立测试）。
+
+    所有字段都是脱敏元信息：access_token / refresh_token / account_id 不会出现。
+    """
+    from datetime import UTC, datetime
+
+    from octoagent.provider import OAuthCredential
+    from octoagent.provider.auth.pkce_oauth_adapter import REFRESH_BUFFER_SECONDS
+
+    ts_now = now or datetime.now(tz=UTC)
+    items: list[dict[str, Any]] = []
+    for profile in profiles:
+        entry: dict[str, Any] = {
+            "name": profile.name,
+            "provider": profile.provider,
+            "auth_mode": profile.auth_mode,
+            "is_default": profile.is_default,
+            "last_refresh_at": profile.updated_at.isoformat() if profile.updated_at else None,
+            "codex_cli_external_available": (
+                cli_available if profile.provider == "openai-codex" else False
+            ),
+        }
+        if profile.auth_mode == "oauth" and isinstance(profile.credential, OAuthCredential):
+            expires_at = profile.credential.expires_at
+            remaining = (expires_at - ts_now).total_seconds()
+            entry.update(
+                {
+                    "expires_at": expires_at.isoformat(),
+                    "expires_in_seconds": int(remaining),
+                    # 5-min buffer gate 触发即 is_expired=true（与 PkceOAuthAdapter 一致）
+                    "is_expired": remaining <= REFRESH_BUFFER_SECONDS,
+                }
+            )
+        else:
+            entry.update(
+                {
+                    "expires_at": None,
+                    "expires_in_seconds": None,
+                    "is_expired": False,
+                }
+            )
+        items.append(entry)
+    return {"profiles": items}
+
+
+@router.get("/api/ops/auth/diagnostics")
+async def get_auth_diagnostics():
+    """OAuth 凭证只读诊断 -- Feature 078 Phase 4。
+
+    返回所有 profile 的过期状态 / 外部 CLI 可用性等元信息。
+    **绝对不**返回 access_token / refresh_token / account_id 原值，仅脱敏后的元数据。
+    """
+    from octoagent.provider import CredentialStore
+    from octoagent.provider.auth.codex_cli_bridge import read_codex_cli_auth
+
+    store = CredentialStore()
+    try:
+        profiles = store.list_profiles()
+    except Exception as exc:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "CREDENTIAL_STORE_UNREADABLE",
+                    "message": f"无法读取凭证存储: {type(exc).__name__}",
+                }
+            },
+        )
+
+    # 只在本次请求尝试一次外挂 CLI 读取，避免每个 profile 都 stat
+    try:
+        cli_cred = read_codex_cli_auth()
+    except Exception:
+        cli_cred = None
+
+    return _build_auth_diagnostics(profiles, cli_available=cli_cred is not None)
+
+
 @router.get("/api/ops/tool-registry/diagnostics")
 async def get_tool_registry_diagnostics(request: Request):
     """ToolBroker 注册失败明细。

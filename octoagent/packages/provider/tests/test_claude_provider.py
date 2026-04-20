@@ -159,8 +159,11 @@ class TestClaudeAccountIdNone:
 class TestClaudeAnthropicPolicyRejection:
     """Anthropic 403 政策拒绝"""
 
-    async def test_invalid_grant_clears_credential(self, tmp_path: Path) -> None:
-        """invalid_grant 错误清除凭证并返回 None"""
+    async def test_invalid_grant_preserves_profile_for_fallback(self, tmp_path: Path) -> None:
+        """invalid_grant 返回 None 但保留 profile（Feature 078 Codex review F1）。
+
+        adapter 不再自动删除 profile，清理决策权下放到 callback 层完成完整 fallback 后。
+        """
         adapter, store = _make_claude_adapter(tmp_path, expired=True)
 
         with patch(
@@ -175,7 +178,7 @@ class TestClaudeAnthropicPolicyRejection:
 
         assert result is None
         profile = store.get_profile("anthropic-claude-default")
-        assert profile is None
+        assert profile is not None
 
     async def test_network_error_preserves_credential(self, tmp_path: Path) -> None:
         """网络错误不清除凭证"""

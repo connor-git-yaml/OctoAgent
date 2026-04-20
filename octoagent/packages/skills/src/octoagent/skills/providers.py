@@ -11,6 +11,7 @@ Provider 类可独立 import 使用；未来加第三个 provider 只需新增 P
 from __future__ import annotations
 
 import json
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
@@ -263,15 +264,74 @@ class ChatCompletionsProvider:
     走 OpenAI Chat Completions 兼容协议 + SSE 流式，从最终 chunk（由
     stream_options.include_usage=true 驱动）提取 token usage。成本由 LiteLLM
     账单统一结算，这里不回传 cost。
+
+    401 重试：若收到 401 且配置了 ``auth_refresh_callback``，会以 ``force=True``
+    触发一次强制刷新（同步写回 ``os.environ[api_key_env]``），Proxy 在重试
+    请求时会重新解析 env 引用，拿到新 token。每个 ``call()`` 内最多 1 次
+    reactive refresh，避免递归风暴。
     """
 
     uses_responses_tool_format = False
 
-    def __init__(self, proxy_url: str, master_key: str) -> None:
+    def __init__(
+        self,
+        proxy_url: str,
+        master_key: str,
+        *,
+        auth_refresh_callback: Callable[..., Awaitable[Any]] | None = None,
+    ) -> None:
         self._proxy_url = proxy_url.rstrip("/")
         self._master_key = master_key
+        self._auth_refresh_callback = auth_refresh_callback
 
     async def call(
+        self,
+        *,
+        manifest: SkillManifest,
+        history: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        http_client: httpx.AsyncClient,
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+        try:
+            return await self._call_once(
+                manifest=manifest,
+                history=history,
+                tools=tools,
+                http_client=http_client,
+            )
+        except LLMCallError as exc:
+            if exc.status_code != 401 or self._auth_refresh_callback is None:
+                raise
+            log.info(
+                "chat_completions_401_triggering_refresh",
+                model=manifest.model_alias,
+            )
+            try:
+                # Chat/Proxy 路径无法在 call 时确定 provider（alias→provider 在 Proxy 侧解析），
+                # 不传 provider_hint；callback 走遍历所有 OAuth profile 的旧行为（幂等：
+                # 未过期的 profile resolve() 直接返回不触发实际刷新）。
+                refreshed = await self._auth_refresh_callback(force=True)
+            except Exception:
+                log.warning(
+                    "chat_completions_auth_refresh_failed",
+                    model=manifest.model_alias,
+                    exc_info=True,
+                )
+                raise exc from None
+            if refreshed is None:
+                raise
+            log.info(
+                "chat_completions_401_retry_after_refresh",
+                model=manifest.model_alias,
+            )
+            return await self._call_once(
+                manifest=manifest,
+                history=history,
+                tools=tools,
+                http_client=http_client,
+            )
+
+    async def _call_once(
         self,
         *,
         manifest: SkillManifest,
@@ -419,6 +479,14 @@ class ResponsesApiProvider:
       直连 Codex backend，绕过 Proxy 防止误 fallback；alias 无此配置则回落到 Proxy。
     - responses_reasoning_aliases[model_alias]: reasoning 配置对象
       （需有 .to_responses_api_param()）。
+
+    401 重试：若收到 401 且配置了 ``auth_refresh_callback``，会以 ``force=True``
+    触发一次强制刷新。
+    - 直连 Codex Backend 路径：用 callback 返回的 ``HandlerChainResult.credential_value``
+      作为新 api_key 重试（``responses_direct_params`` 的 api_key 是启动快照，
+      不会自动感知 refresh，必须显式覆盖）。
+    - Proxy 路径：仅重试，Proxy 会在 request 时自行重新解析 os.environ 引用。
+    每个 ``call()`` 内最多 1 次 reactive refresh。
     """
 
     uses_responses_tool_format = True
@@ -430,11 +498,13 @@ class ResponsesApiProvider:
         *,
         responses_direct_params: dict[str, dict[str, Any]] | None = None,
         responses_reasoning_aliases: dict[str, Any] | None = None,
+        auth_refresh_callback: Callable[..., Awaitable[Any]] | None = None,
     ) -> None:
         self._proxy_url = proxy_url.rstrip("/")
         self._master_key = master_key
         self._responses_direct_params = dict(responses_direct_params or {})
         self._responses_reasoning_aliases = dict(responses_reasoning_aliases or {})
+        self._auth_refresh_callback = auth_refresh_callback
 
     async def call(
         self,
@@ -443,6 +513,76 @@ class ResponsesApiProvider:
         history: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         http_client: httpx.AsyncClient,
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+        try:
+            return await self._call_once(
+                manifest=manifest,
+                history=history,
+                tools=tools,
+                http_client=http_client,
+            )
+        except LLMCallError as exc:
+            if exc.status_code != 401 or self._auth_refresh_callback is None:
+                raise
+            # Codex adversarial review F2/F3：直连路径明确目标 provider = openai-codex，
+            # 让 callback 只刷新该 profile；若 callback 返回的 credential 属于其他 provider
+            # （多 profile 场景下可能 latest_result 被覆盖），直接视为"refresh 没拿到目标凭证"
+            # 抛原 401，避免用错 provider 的 token 重试。
+            direct_active = (
+                self._responses_direct_params.get(manifest.model_alias) is not None
+            )
+            provider_hint = "openai-codex" if direct_active else None
+            log.info(
+                "responses_api_401_triggering_refresh",
+                model=manifest.model_alias,
+                provider_hint=provider_hint,
+            )
+            try:
+                refreshed = await self._auth_refresh_callback(
+                    force=True, provider=provider_hint,
+                )
+            except Exception:
+                log.warning(
+                    "responses_api_auth_refresh_failed",
+                    model=manifest.model_alias,
+                    exc_info=True,
+                )
+                raise exc from None
+            if refreshed is None:
+                raise
+            # Codex adversarial review F2：即便 callback 没有 provider 过滤（或者传了空 hint），
+            # 这里再做一层"返回值 provider 必须匹配"的硬校验，作为多 OAuth profile 环境下的
+            # 防御：避免 latest_result 覆盖导致 wrong-provider token 污染直连重试。
+            if direct_active:
+                refreshed_provider = getattr(refreshed, "provider", None)
+                if refreshed_provider != "openai-codex":
+                    log.warning(
+                        "responses_api_refresh_provider_mismatch",
+                        model=manifest.model_alias,
+                        expected="openai-codex",
+                        got=refreshed_provider,
+                    )
+                    raise exc from None
+            log.info(
+                "responses_api_401_retry_after_refresh",
+                model=manifest.model_alias,
+            )
+            return await self._call_once(
+                manifest=manifest,
+                history=history,
+                tools=tools,
+                http_client=http_client,
+                refresh_result=refreshed,
+            )
+
+    async def _call_once(
+        self,
+        *,
+        manifest: SkillManifest,
+        history: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        http_client: httpx.AsyncClient,
+        refresh_result: Any = None,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         # Responses API 直连 Codex Backend（绕过 Proxy 避免误 fallback）
         direct = self._responses_direct_params.get(manifest.model_alias)
@@ -485,11 +625,28 @@ class ResponsesApiProvider:
 
         if direct:
             target_url = _build_responses_url(direct["api_base"])
-            target_key = direct.get("api_key", self._master_key)
+            # Codex adversarial review F3：401 重试时优先使用 callback 返回的完整
+            # HandlerChainResult —— token 用 credential_value；headers 用 extra_headers
+            # （模板里的 {account_id} 已由 callback 用刷新后的 account_id 替换），
+            # 覆盖启动快照里可能过期的 chatgpt-account-id 等字段。
+            if refresh_result is not None:
+                target_key = (
+                    getattr(refresh_result, "credential_value", None)
+                    or direct.get("api_key", self._master_key)
+                )
+                refreshed_headers = dict(
+                    getattr(refresh_result, "extra_headers", None) or {}
+                )
+            else:
+                target_key = direct.get("api_key", self._master_key)
+                refreshed_headers = {}
             target_headers = {
                 "Authorization": f"Bearer {target_key}",
                 "Content-Type": "application/json",
+                # 基础：启动快照（含 OpenAI-Beta、originator 等非账户相关头）
                 **direct.get("headers", {}),
+                # 覆盖：refresh 后重新计算的 account-scoped 头（chatgpt-account-id 等）
+                **refreshed_headers,
             }
         else:
             target_url = _build_responses_url(self._proxy_url)

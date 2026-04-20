@@ -11,10 +11,21 @@ from datetime import UTC, datetime, timedelta
 import structlog
 from octoagent.core.models.enums import EventType
 
-from ..exceptions import CredentialExpiredError, CredentialNotFoundError, OAuthFlowError
+from ..exceptions import (
+    CredentialExpiredError,
+    CredentialNotFoundError,
+    OAuthFlowError,
+    OAuthRefreshTimeoutError,
+)
 from .adapter import AuthAdapter
 from .credentials import OAuthCredential
-from .events import EventStoreProtocol, emit_oauth_event
+from .events import (
+    EventStoreProtocol,
+    emit_oauth_event,
+    emit_refresh_failed,
+    emit_refresh_recovered,
+    emit_refresh_triggered,
+)
 from .oauth_flows import refresh_access_token
 from .oauth_provider import OAuthProviderConfig
 from .store import CredentialStore
@@ -58,17 +69,22 @@ class PkceOAuthAdapter(AuthAdapter):
         self._profile_name = profile_name
         self._event_store = event_store
 
-    async def resolve(self) -> str:
+    async def resolve(self, *, force_refresh: bool = False) -> str:
         """返回 access_token
 
         如果 token 已过期且有 refresh_token，自动尝试刷新。
+        若 ``force_refresh=True``，即使 ``expires_at`` 未到也会强制刷新；
+        用于上游（如 providers.py）收到 401 后强制绕开预检查 gate。
+
+        Args:
+            force_refresh: True → 无视 ``is_expired()`` 直接 refresh
 
         Returns:
             可直接用于 API 调用的 access_token
 
         Raises:
             CredentialNotFoundError: access_token 为空
-            CredentialExpiredError: Token 已过期且刷新失败
+            CredentialExpiredError: 需要刷新但失败（force_refresh 情况下也会抛）
         """
         value = self._credential.access_token.get_secret_value()
         if not value:
@@ -77,9 +93,10 @@ class PkceOAuthAdapter(AuthAdapter):
                 provider=self._credential.provider,
             )
 
-        if self.is_expired():
-            # 尝试自动刷新
-            refreshed = await self.refresh()
+        if force_refresh or self.is_expired():
+            # Feature 078 P4：mode 字段让观察者区分"预过期主动刷新"与"401 反应式刷新"
+            mode = "reactive" if force_refresh else "preemptive"
+            refreshed = await self.refresh(mode=mode)
             if refreshed is not None:
                 return refreshed
             raise CredentialExpiredError(
@@ -89,17 +106,22 @@ class PkceOAuthAdapter(AuthAdapter):
 
         return value
 
-    async def refresh(self) -> str | None:
+    async def refresh(self, *, mode: str = "preemptive") -> str | None:
         """使用 refresh_token 刷新 access_token
 
         刷新成功后:
         1. 更新内存中的 credential 实例
         2. 写回 credential store（并发安全、原子写入）
-        3. 发射 OAUTH_REFRESHED 事件
+        3. 发射 OAUTH_REFRESHED 事件（payload 含 mode）
 
         刷新失败时:
-        - invalid_grant: 清除过期凭证，返回 None
-        - 网络错误: 记录日志，返回 None
+        - invalid_grant: 先尝试 store reload recovery，仍失败则清除凭证
+        - 超时：保留凭证，返回 None（等下次重试）
+        - 其他网络错误：保留凭证，返回 None
+
+        Args:
+            mode: ``preemptive``（expires_at 预过期主动刷）或 ``reactive``（401 后强制刷）。
+                仅用于可观测事件 payload，不影响刷新逻辑。
 
         Returns:
             刷新后的 access_token；不支持刷新或刷新失败时返回 None
@@ -129,29 +151,75 @@ class PkceOAuthAdapter(AuthAdapter):
             )
             return None
 
+        # 发射 OAUTH_REFRESH_TRIGGERED（所有路径均记录，便于统计 refresh QPS）
+        await emit_refresh_triggered(
+            event_store=self._event_store,
+            provider_id=self._credential.provider,
+            mode=mode,
+            force=(mode == "reactive"),
+        )
+
+        recovered_via_store_reload = False
         try:
             token_resp = await refresh_access_token(
                 token_endpoint=self._provider_config.token_endpoint,
                 refresh_token=refresh_value,
                 client_id=client_id,
             )
+        except OAuthRefreshTimeoutError as exc:
+            # Feature 078 Phase 3：超时不等同 invalid_grant，保留凭证供下次重试。
+            log.warning(
+                "pkce_oauth_refresh_timeout",
+                provider=self._credential.provider,
+                error=str(exc),
+            )
+            await emit_refresh_failed(
+                event_store=self._event_store,
+                provider_id=self._credential.provider,
+                error_type="timeout",
+            )
+            return None
         except OAuthFlowError as exc:
             error_msg = str(exc)
             if "invalid_grant" in error_msg:
-                # refresh_token 已失效，清除凭证
-                log.warning(
-                    "pkce_oauth_refresh_invalid_grant",
-                    provider=self._credential.provider,
+                await emit_refresh_failed(
+                    event_store=self._event_store,
+                    provider_id=self._credential.provider,
+                    error_type="invalid_grant",
                 )
-                self._store.remove_profile(self._profile_name)
+                # Feature 078 Phase 3：reused recovery —— 可能是另一个进程/协程刚刚
+                # 刷新过 refresh_token，当前内存态是旧的，导致 OpenAI 判为 "reused"。
+                # 从 store 重新加载一次，若磁盘上确实有更新的 refresh_token 就用它再试 1 次。
+                recovered = await self._try_refresh_with_store_reload(
+                    stale_refresh=refresh_value,
+                    client_id=client_id,
+                )
+                if recovered is not None:
+                    token_resp = recovered
+                    recovered_via_store_reload = True
+                else:
+                    # Feature 078 Codex adversarial review F1：
+                    # adapter 层不再直接删 profile，也不发 EXHAUSTED —— 把清理决策权交给
+                    # 外层 callback，让 CLI adopt / 其他 fallback 有机会继续救援。
+                    # 只发单次 FAILED 事件，EXHAUSTED 由全局 waterfall 完成后的 caller 发。
+                    log.warning(
+                        "pkce_oauth_refresh_invalid_grant",
+                        provider=self._credential.provider,
+                    )
+                    return None
+            else:
+                # 其他错误（如网络问题）
+                log.warning(
+                    "pkce_oauth_refresh_failed",
+                    provider=self._credential.provider,
+                    error=error_msg,
+                )
+                await emit_refresh_failed(
+                    event_store=self._event_store,
+                    provider_id=self._credential.provider,
+                    error_type="network_or_server_error",
+                )
                 return None
-            # 其他错误（如网络问题）
-            log.warning(
-                "pkce_oauth_refresh_failed",
-                provider=self._credential.provider,
-                error=error_msg,
-            )
-            return None
 
         # 刷新成功：更新内存中的 credential
         new_credential = OAuthCredential(
@@ -171,23 +239,92 @@ class PkceOAuthAdapter(AuthAdapter):
             profile.updated_at = datetime.now(tz=UTC)
             self._store.set_profile(profile)
 
-        # 发射 OAUTH_REFRESHED 事件
+        # 发射 OAUTH_REFRESHED（payload 带 mode）+ 可能的 RECOVERED
         await emit_oauth_event(
             event_store=self._event_store,
             event_type=EventType.OAUTH_REFRESHED,
             provider_id=self._credential.provider,
             payload={
                 "new_expires_in": token_resp.expires_in,
+                "mode": mode,
             },
         )
+        if recovered_via_store_reload:
+            await emit_refresh_recovered(
+                event_store=self._event_store,
+                provider_id=self._credential.provider,
+                via="store_reload",
+            )
 
         log.info(
             "pkce_oauth_token_refreshed",
             provider=self._credential.provider,
             expires_in=token_resp.expires_in,
+            mode=mode,
         )
 
         return token_resp.access_token.get_secret_value()
+
+    async def _try_refresh_with_store_reload(
+        self,
+        *,
+        stale_refresh: str,
+        client_id: str,
+    ) -> object | None:
+        """reused recovery：从 store 重新 load profile，若 refresh_token 比内存态新就再试一次。
+
+        适用场景：
+        - 另一个进程/协程刚刚完成 refresh 后写回 store
+        - 本进程 PkceOAuthAdapter 内存中的 refresh_token 还是旧的
+        - OpenAI 收到旧 refresh_token → 判为 ``refresh_token_reused`` (报为 invalid_grant)
+
+        Returns:
+            成功时返回 OAuthTokenResponse；无法 recover 时返回 None
+            （上层会走原有 invalid_grant fallback 清除凭证）。
+        """
+        try:
+            reloaded = self._store.get_profile(self._profile_name)
+        except Exception as exc:
+            log.warning(
+                "pkce_oauth_store_reload_failed",
+                provider=self._credential.provider,
+                error_type=type(exc).__name__,
+            )
+            return None
+
+        if reloaded is None:
+            return None
+        reloaded_cred = reloaded.credential
+        if not isinstance(reloaded_cred, OAuthCredential):
+            return None
+        fresh_refresh = reloaded_cred.refresh_token.get_secret_value()
+        if not fresh_refresh or fresh_refresh == stale_refresh:
+            # 磁盘上 refresh_token 与内存一致 → 不是 concurrent refresh 场景，放弃
+            return None
+
+        log.info(
+            "pkce_oauth_refresh_reused_store_reload_retry",
+            provider=self._credential.provider,
+        )
+        try:
+            token_resp = await refresh_access_token(
+                token_endpoint=self._provider_config.token_endpoint,
+                refresh_token=fresh_refresh,
+                client_id=client_id,
+            )
+        except (OAuthFlowError, OAuthRefreshTimeoutError) as exc:
+            log.warning(
+                "pkce_oauth_refresh_reused_recovery_exhausted",
+                provider=self._credential.provider,
+                error=str(exc)[:200],
+            )
+            return None
+
+        # store reload 提供的 refresh_token 成功换到了新 access_token。
+        # 同步把本 adapter 的内存 credential 升级到 reloaded 的基线，
+        # 否则后续写回 store 会用 self._credential 作为 provider/account_id 基础。
+        self._credential = reloaded_cred
+        return token_resp
 
     def is_expired(self) -> bool:
         """基于 expires_at 判断 token 是否过期或即将过期

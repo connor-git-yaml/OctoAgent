@@ -584,6 +584,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 responses_model_aliases=_resolve_stream_model_aliases(project_root),
                 responses_reasoning_aliases=_resolve_responses_reasoning_aliases(project_root),
                 responses_direct_params=resolve_responses_api_direct_params(project_root),
+                # Feature 078: Skill 路径接入 OAuth 刷新回调，收到 401 时强制刷新并重试
+                auth_refresh_callback=auth_refresh_callback,
             ),
             tool_broker=tool_broker,
             event_store=store_group.event_store,

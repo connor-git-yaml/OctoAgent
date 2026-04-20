@@ -36,6 +36,8 @@ class TokenRefreshCoordinator:
         self,
         provider_id: str,
         refresh_fn: Callable[[], Awaitable[T | None]],
+        *,
+        timeout_s: float = 30.0,
     ) -> T | None:
         """在 provider 锁保护下执行刷新
 
@@ -45,12 +47,32 @@ class TokenRefreshCoordinator:
         Args:
             provider_id: Provider canonical_id（锁粒度）
             refresh_fn: 实际执行刷新的异步函数
+            timeout_s: 整体超时（秒，默认 30）。包含锁等待 + 实际 refresh。
+                超时后 CancelledError 通过 async with 释放锁，返回 None 不抛。
+                对齐 Feature 078 Phase 3：防止 refresh_fn hang 导致整条业务线程挂死。
 
         Returns:
-            refresh_fn 的返回值，失败返回 None
+            refresh_fn 的返回值；失败或超时返回 None
         """
-        lock = self._get_lock(provider_id)
+        try:
+            return await asyncio.wait_for(
+                self._run_under_lock(provider_id, refresh_fn),
+                timeout=timeout_s,
+            )
+        except TimeoutError:
+            log.error(
+                "refresh_coordinator_timeout",
+                provider_id=provider_id,
+                timeout_s=timeout_s,
+            )
+            return None
 
+    async def _run_under_lock(
+        self,
+        provider_id: str,
+        refresh_fn: Callable[[], Awaitable[T | None]],
+    ) -> T | None:
+        lock = self._get_lock(provider_id)
         async with lock:
             log.debug(
                 "refresh_coordinator_acquired_lock",

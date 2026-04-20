@@ -210,8 +210,13 @@ class TestRefresh:
             event_types.append(event.type.value)
         assert "OAUTH_REFRESHED" in event_types
 
-    async def test_invalid_grant_clears_credential(self, tmp_path: Path) -> None:
-        """invalid_grant 错误清除凭证"""
+    async def test_invalid_grant_preserves_profile_for_fallback(self, tmp_path: Path) -> None:
+        """invalid_grant 返回 None，但不再清除 profile（Feature 078 Codex review F1）。
+
+        adapter 不再自行清理 profile —— 清理决策权上移到 callback，让 ``~/.codex/auth.json``
+        adopt 之类的 fallback 有机会救回凭证。profile 保留也方便用户看到 broken 状态后
+        手动重登；诊断 API + 事件流能反映 refresh 失败。
+        """
         adapter, store = _make_adapter(tmp_path, expired=True, has_refresh=True)
 
         with patch(
@@ -222,9 +227,9 @@ class TestRefresh:
             result = await adapter.refresh()
 
         assert result is None
-        # 验证 profile 已被移除
+        # 新契约：profile 保留
         profile = store.get_profile("openai-codex-default")
-        assert profile is None
+        assert profile is not None
 
     async def test_no_refresh_token_returns_none(self, tmp_path: Path) -> None:
         """无 refresh_token 返回 None"""
@@ -423,8 +428,11 @@ class TestRefreshSuccess:
 class TestRefreshFailure:
     """[T006] refresh() 刷新失败测试"""
 
-    async def test_invalid_grant_clears_profile(self, tmp_path: Path) -> None:
-        """invalid_grant 错误导致 profile 被清除，返回 None"""
+    async def test_invalid_grant_preserves_profile_delegates_cleanup(self, tmp_path: Path) -> None:
+        """invalid_grant 时 adapter 不再直接清 profile（Feature 078 Codex review F1）。
+
+        清理权责下放到 callback 层，以便 CLI adopt 等 fallback 有救援窗口。
+        """
         adapter, store = _make_adapter(tmp_path, expired=True, has_refresh=True)
 
         with patch(
@@ -438,9 +446,9 @@ class TestRefreshFailure:
             result = await adapter.refresh()
 
         assert result is None
-        # profile 应被移除
+        # 新契约：profile 保留
         profile = store.get_profile("openai-codex-default")
-        assert profile is None
+        assert profile is not None
 
     async def test_network_error_returns_none_and_logs(self, tmp_path: Path) -> None:
         """网络错误返回 None 并记录 warning"""

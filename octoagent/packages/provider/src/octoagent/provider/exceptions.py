@@ -74,6 +74,15 @@ class OAuthFlowError(CredentialError):
     """OAuth 流程错误（授权超时、端点不可达等）"""
 
 
+class OAuthRefreshTimeoutError(OAuthFlowError):
+    """OAuth refresh_token 刷新超时 -- Feature 078 Phase 3
+
+    用于区分 invalid_grant（需要丢弃 profile）与 transient timeout（应保留
+    profile 等下次重试）。PkceOAuthAdapter.refresh() 识别此异常后不会调用
+    ``store.remove_profile``。
+    """
+
+
 class AuthenticationError(ProviderError):
     """认证失败错误（401/403 响应触发）
 

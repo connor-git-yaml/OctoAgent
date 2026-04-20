@@ -23,6 +23,7 @@ from filelock import FileLock
 from pydantic import SecretStr
 
 from ..exceptions import CredentialError
+from .credentials import OAuthCredential
 from .profile import CredentialStoreData, ProviderProfile
 
 log = structlog.get_logger()
@@ -206,6 +207,48 @@ class CredentialStore:
         if name not in store_data.profiles:
             return False
         del store_data.profiles[name]
+        self.save(store_data)
+        return True
+
+    def adopt_from_external(
+        self,
+        profile_name: str,
+        credential: OAuthCredential,
+    ) -> bool:
+        """从外部源（如 Codex CLI）接管 OAuth credential -- Feature 078 Phase 2
+
+        只覆盖 credential 字段（access_token / refresh_token / expires_at /
+        account_id），保留 name / provider / auth_mode / is_default / created_at。
+        ``updated_at`` 自动刷新为当前时间。
+
+        ``credential.provider`` 必须与 profile.provider 匹配，否则抛
+        ``CredentialError``（禁止通过此接口改 provider）。
+
+        Args:
+            profile_name: 目标 profile 名
+            credential: 新 OAuth 凭证（通常来自 ``read_codex_cli_auth``）
+
+        Returns:
+            True 表示 adopt 成功；False 表示 profile 不存在
+        """
+        store_data = self.load()
+        profile = store_data.profiles.get(profile_name)
+        if profile is None:
+            return False
+
+        if credential.provider != profile.provider:
+            raise CredentialError(
+                f"adopt_from_external 不允许改 provider："
+                f"profile={profile.provider} vs incoming={credential.provider}",
+            )
+        if profile.auth_mode != "oauth":
+            raise CredentialError(
+                f"adopt_from_external 仅适用于 oauth profile，当前 auth_mode={profile.auth_mode}",
+            )
+
+        profile.credential = credential
+        profile.updated_at = datetime.now(tz=credential.expires_at.tzinfo)
+        store_data.profiles[profile_name] = profile
         self.save(store_data)
         return True
 
