@@ -951,11 +951,24 @@ export interface SetupGovernanceSection {
   source_refs: ControlPlaneResourceRef[];
 }
 
+/** Feature 079 Phase 4：结构化的 blocking reason，用于前端 modal 渲染。
+ *  旧字段 blocking_reasons (string[]) 保留作向后兼容；前端优先用 detail。 */
+export interface BlockingReason {
+  risk_id: string;
+  title: string;
+  summary: string;
+  recommended_action: string;
+  severity: string;
+  field_path?: string;
+}
+
 export interface SetupReviewSummary {
   ready: boolean;
   risk_level: string;
   warnings: string[];
   blocking_reasons: string[];
+  /** Feature 079 Phase 4：新增字段；可能被老后端省略 */
+  blocking_reasons_detail?: BlockingReason[];
   next_actions: string[];
   provider_runtime_risks: SetupRiskItem[];
   channel_exposure_risks: SetupRiskItem[];

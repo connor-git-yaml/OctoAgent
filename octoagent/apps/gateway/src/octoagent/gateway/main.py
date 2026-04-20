@@ -623,6 +623,33 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     telegram_service.bind_task_runner(app.state.task_runner)
     await app.state.task_runner.startup()
 
+    # Feature 079 Phase 4：启动时对账 auth-profiles ↔ octoagent.yaml，
+    # 任何漂移 log.warning 出来；诊断 API 同时会暴露（用户可见）。
+    try:
+        from .services.config.drift_check import detect_auth_config_drift
+
+        drift_records = detect_auth_config_drift(project_root)
+        if drift_records:
+            log.warning(
+                "auth_config_drift_detected",
+                count=len(drift_records),
+                drift_types=[r.drift_type for r in drift_records],
+            )
+            for record in drift_records:
+                log.warning(
+                    "auth_config_drift_item",
+                    drift_type=record.drift_type,
+                    severity=record.severity,
+                    provider=record.provider,
+                    summary=record.summary,
+                )
+    except Exception as exc:
+        # 启动对账不能 block lifespan
+        log.warning(
+            "auth_config_drift_check_failed",
+            error_type=type(exc).__name__,
+        )
+
     # Feature 067: 创建 GraphPipelineTool 并挂载到 app.state + OrchestratorService
     try:
         from octoagent.skills.pipeline_tool import GraphPipelineTool

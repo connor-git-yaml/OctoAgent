@@ -21,6 +21,7 @@ from octoagent.core.models import (
     ActionRequestEnvelope,
     ActionResultEnvelope,
     AgentProfilesDocument,
+    BlockingReason,
     CapabilityPackDocument,
     ConfigFieldHint,
     ConfigSchemaDocument,
@@ -2080,6 +2081,19 @@ class SetupDomainService(DomainServiceBase):
             + secret_binding_risks
         )
         blocking_reasons = [item.risk_id for item in all_risks if item.blocking]
+        # Feature 079 Phase 4：同一组 blocking 项对应的结构化描述。前端 modal
+        # 用这条渲染可读标题/说明/建议操作，不再依赖解析 risk_id 字符串。
+        blocking_reasons_detail = [
+            BlockingReason(
+                risk_id=item.risk_id,
+                title=item.title,
+                summary=item.summary,
+                recommended_action=item.recommended_action,
+                severity=item.severity,
+            )
+            for item in all_risks
+            if item.blocking
+        ]
         warnings = [item.summary for item in all_risks if item.severity != "info"]
         if any(item.severity == "high" for item in all_risks):
             risk_level = "high"
@@ -2107,6 +2121,7 @@ class SetupDomainService(DomainServiceBase):
             risk_level=risk_level,
             warnings=warnings,
             blocking_reasons=blocking_reasons,
+            blocking_reasons_detail=blocking_reasons_detail,
             next_actions=next_actions,
             provider_runtime_risks=provider_runtime_risks,
             channel_exposure_risks=channel_exposure_risks,

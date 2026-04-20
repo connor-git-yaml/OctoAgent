@@ -203,14 +203,18 @@ def _build_auth_diagnostics(
 
 
 @router.get("/api/ops/auth/diagnostics")
-async def get_auth_diagnostics():
-    """OAuth 凭证只读诊断 -- Feature 078 Phase 4。
+async def get_auth_diagnostics(request: Request):
+    """OAuth 凭证只读诊断 -- Feature 078 Phase 4 + Feature 079 Phase 4。
 
     返回所有 profile 的过期状态 / 外部 CLI 可用性等元信息。
     **绝对不**返回 access_token / refresh_token / account_id 原值，仅脱敏后的元数据。
+
+    Feature 079 Phase 4：新增 ``config_drift`` 字段，暴露 auth-profiles 和
+    octoagent.yaml 之间的不一致（授权了但 provider 没入 config 等）。
     """
     from octoagent.provider import CredentialStore
     from octoagent.provider.auth.codex_cli_bridge import read_codex_cli_auth
+    from ..services.config.drift_check import detect_auth_config_drift
 
     store = CredentialStore()
     try:
@@ -232,7 +236,21 @@ async def get_auth_diagnostics():
     except Exception:
         cli_cred = None
 
-    return _build_auth_diagnostics(profiles, cli_available=cli_cred is not None)
+    payload = _build_auth_diagnostics(profiles, cli_available=cli_cred is not None)
+
+    # Feature 079 Phase 4：把 drift 作为附加字段加入诊断响应
+    project_root = getattr(request.app.state, "project_root", None)
+    if project_root is None:
+        project_root = resolve_project_root()
+    try:
+        drift_records = detect_auth_config_drift(project_root, credential_store=store)
+    except Exception as exc:  # 诊断路径不能因 drift 检测挂掉
+        return JSONResponse(
+            status_code=200,
+            content={**payload, "config_drift": [], "config_drift_error": type(exc).__name__},
+        )
+    payload["config_drift"] = [record.to_payload() for record in drift_records]
+    return payload
 
 
 # ─── Feature 079 Phase 3：前端 build-id 漂移检测 ──────────────────────

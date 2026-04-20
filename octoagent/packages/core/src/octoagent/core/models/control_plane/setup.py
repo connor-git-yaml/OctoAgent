@@ -101,11 +101,33 @@ class SetupGovernanceSection(BaseModel):
     source_refs: list[ControlPlaneResourceRef] = Field(default_factory=list)
 
 
+class BlockingReason(BaseModel):
+    """Feature 079 Phase 4：结构化的 blocking reason。
+
+    旧 ``blocking_reasons: list[str]`` 只有 ``risk_id`` 字符串，前端无法给用户
+    讲清楚"这条是什么 / 怎么修"。此模型承载 title / summary / recommended_action
+    让前端弹 modal 时给出完整引导。
+
+    不取代旧字段 —— 旧 list[str] 保留作向后兼容（测试和 CLI 仍在用）；
+    ``blocking_reasons_detail`` 仅作为**新增**字段。
+    """
+
+    risk_id: str = Field(min_length=1)
+    title: str = Field(default="")
+    summary: str = Field(default="")
+    recommended_action: str = Field(default="")
+    severity: str = Field(default="high")
+    # 可选：供前端"跳到相关字段"链接（如 "providers" / "model_aliases.main"）
+    field_path: str = Field(default="")
+
+
 class SetupReviewSummary(BaseModel):
     ready: bool = False
     risk_level: str = Field(default="info")
     warnings: list[str] = Field(default_factory=list)
     blocking_reasons: list[str] = Field(default_factory=list)
+    # Feature 079 Phase 4：结构化版本（新增；旧字段 blocking_reasons 保留）
+    blocking_reasons_detail: list[BlockingReason] = Field(default_factory=list)
     next_actions: list[str] = Field(default_factory=list)
     provider_runtime_risks: list[SetupRiskItem] = Field(default_factory=list)
     channel_exposure_risks: list[SetupRiskItem] = Field(default_factory=list)

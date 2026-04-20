@@ -43,6 +43,7 @@ const EMPTY_REVIEW: SetupReviewSummary = {
   risk_level: "unknown",
   warnings: [],
   blocking_reasons: [],
+  blocking_reasons_detail: [],
   next_actions: [],
   provider_runtime_risks: [],
   channel_exposure_risks: [],
@@ -97,6 +98,9 @@ export default function SettingsPage() {
   // workbench.error 是 useWorkbenchData 在 action 抛异常时 setError 的结果；
   // 用 pendingSaveActionRef 限定只有刚发过 setup.* 的 action 才会触发 modal，
   // 避免展示其它 action（比如 agent_profile.update_resource_limits）的错误。
+  //
+  // Feature 079 Phase 4：优先读 review.blocking_reasons_detail（结构化描述）
+  // 渲染 modal；无 detail 时降级到旧的字符串解析。
   useEffect(() => {
     if (!workbenchError) {
       return;
@@ -114,19 +118,31 @@ export default function SettingsPage() {
     )
       ? "review"
       : "runtime";
-    const [head, ...rest] = rawMessage
-      .split(/[、;；]/)
-      .map((part) => part.trim())
-      .filter(Boolean);
-    const items: SettingsErrorItem[] = rest.length === 0
-      ? [{ id: "apply_error", title: head || rawMessage }]
-      : [
-          { id: "apply_error_head", title: head },
-          ...rest.map((entry, idx) => ({ id: `apply_error_${idx}`, title: entry })),
-        ];
+    // Phase 4：若当前 review 有结构化 blocking detail，直接使用
+    const detail = review.blocking_reasons_detail ?? [];
+    let items: SettingsErrorItem[];
+    if (kind === "review" && detail.length > 0) {
+      items = detail.map((entry) => ({
+        id: entry.risk_id || entry.title,
+        title: entry.title || entry.risk_id,
+        detail: entry.summary || undefined,
+        recommendedAction: entry.recommended_action || undefined,
+      }));
+    } else {
+      const [head, ...rest] = rawMessage
+        .split(/[、;；]/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+      items = rest.length === 0
+        ? [{ id: "apply_error", title: head || rawMessage }]
+        : [
+            { id: "apply_error_head", title: head },
+            ...rest.map((entry, idx) => ({ id: `apply_error_${idx}`, title: entry })),
+          ];
+    }
     setErrorModal({ open: true, kind, items });
     pendingSaveActionRef.current = null;
-  }, [workbenchError, busyActionId]);
+  }, [workbenchError, busyActionId, review]);
 
   useEffect(() => {
     if (!location.hash) {

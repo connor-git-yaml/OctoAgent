@@ -88,6 +88,7 @@ from .session import (
     SessionProjectionSummary,
 )
 from .setup import (
+    BlockingReason,
     ConfigFieldHint,
     ConfigSchemaDocument,
     DiagnosticsFailureSummary,
@@ -188,6 +189,7 @@ __all__ = [
     "McpProviderItem",
     "ProjectOption",
     "ProjectSelectorDocument",
+    "BlockingReason",
     "SetupGovernanceDocument",
     "SetupGovernanceSection",
     "SetupReviewSummary",
