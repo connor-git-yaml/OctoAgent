@@ -314,3 +314,61 @@ async def test_lifespan_ensures_default_project_migration(
         default_project = await app.state.store_group.project_store.get_default_project()
         assert run.validation.ok is True
         assert default_project is not None
+
+
+async def test_lifespan_echo_mode_uses_pure_echo_no_skill_runner(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Feature 081 P4 修复（Codex F2）：echo mode 必须保持纯 echo 行为。
+
+    回归断言：
+    - FallbackManager.primary 是 EchoMessageAdapter（不是 ProviderRouterMessageAdapter）
+    - LLMService 没有 SkillRunner（避免 ProviderModelClient 绕过 fallback 直连 provider）
+    """
+    from octoagent.provider.echo_adapter import EchoMessageAdapter
+
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+    monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("OCTOAGENT_DB_PATH", str(tmp_path / "data" / "sqlite" / "test.db"))
+    monkeypatch.setenv("OCTOAGENT_ARTIFACTS_DIR", str(tmp_path / "data" / "artifacts"))
+    monkeypatch.setenv("OCTOAGENT_LLM_MODE", "echo")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+
+    app = FastAPI()
+    async with gateway_main.lifespan(app):
+        llm_service = app.state.llm_service
+        # 内部 _fallback_manager.primary 应该是 EchoMessageAdapter
+        primary = llm_service._fallback_manager._primary
+        assert isinstance(primary, EchoMessageAdapter), (
+            f"echo mode 期望 primary=EchoMessageAdapter，实际 {type(primary).__name__}"
+        )
+        # echo mode 不创建 SkillRunner（避免 ProviderModelClient 绕过 fallback）
+        assert llm_service._skill_runner is None
+
+
+async def test_lifespan_default_mode_uses_provider_router_with_skill_runner(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Feature 081 P4：默认（非 echo）模式应该用 ProviderRouterMessageAdapter +
+    SkillRunner 走 Provider 直连。
+    """
+    from octoagent.provider.router_message_adapter import ProviderRouterMessageAdapter
+
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+    monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("OCTOAGENT_DB_PATH", str(tmp_path / "data" / "sqlite" / "test.db"))
+    monkeypatch.setenv("OCTOAGENT_ARTIFACTS_DIR", str(tmp_path / "data" / "artifacts"))
+    # 不设置 OCTOAGENT_LLM_MODE → 默认 "litellm"（Provider 直连语义）
+    monkeypatch.delenv("OCTOAGENT_LLM_MODE", raising=False)
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+
+    app = FastAPI()
+    async with gateway_main.lifespan(app):
+        llm_service = app.state.llm_service
+        primary = llm_service._fallback_manager._primary
+        assert isinstance(primary, ProviderRouterMessageAdapter), (
+            f"default mode 期望 primary=ProviderRouterMessageAdapter，实际 {type(primary).__name__}"
+        )
+        assert llm_service._skill_runner is not None

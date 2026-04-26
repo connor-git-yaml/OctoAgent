@@ -1812,34 +1812,24 @@ class TestControlPlaneApi:
         assert profile.auth_mode == "api_key"
         assert profile.credential.key.get_secret_value() == "sk-openrouter-value"
 
-    async def test_setup_quick_connect_starts_proxy_and_returns_activation_summary(
+    async def test_setup_quick_connect_returns_activation_summary(
         self,
         control_plane_app,
         control_plane_client: AsyncClient,
         seeded_control_plane,
         monkeypatch,
     ) -> None:
+        """Feature 081 P4 修复（Codex F1）：quick_connect 不再启动 LiteLLM Proxy；
+        仅持久化 yaml + 触发 managed runtime reload（如适用）。
+        """
         from octoagent.gateway.services import control_plane as control_plane_module
 
         class FakeActivationService:
             def __init__(self, project_root: Path) -> None:
                 self.project_root = project_root
 
-            async def start_proxy(self):
-                return type(
-                    "Activation",
-                    (),
-                    {
-                        "project_root": str(self.project_root),
-                        "source_root": str(self.project_root / "app" / "octoagent"),
-                        "compose_file": str(
-                            self.project_root / "app" / "octoagent" / "docker-compose.litellm.yml"
-                        ),
-                        "proxy_url": "http://localhost:4000",
-                        "managed_runtime": False,
-                        "warnings": [],
-                    },
-                )()
+            def has_managed_runtime(self) -> bool:
+                return False
 
         monkeypatch.setattr(
             control_plane_module,
@@ -1900,7 +1890,9 @@ class TestControlPlaneApi:
         assert resp.status_code == 200
         result = resp.json()["result"]
         assert result["code"] == "SETUP_QUICK_CONNECTED"
-        assert result["data"]["activation"]["proxy_url"] == "http://localhost:4000"
+        # Feature 081 P4：proxy_url 不再有意义（Provider 直连，无 Proxy URL）
+        assert result["data"]["activation"]["proxy_url"] == ""
+        assert result["data"]["activation"]["activation_succeeded"] is True
         assert result["data"]["activation"]["runtime_reload_mode"] == "manual_restart_required"
         assert result["data"]["review"]["ready"] is True
 
@@ -2046,82 +2038,10 @@ class TestControlPlaneApi:
             }
         ]
 
-    async def test_provider_oauth_openai_codex_preserves_auth_when_activation_fails(
-        self,
-        control_plane_app,
-        control_plane_client: AsyncClient,
-        monkeypatch,
-    ) -> None:
-        from octoagent.gateway.services import control_plane as control_plane_module
-
-        async def fake_run_auth_code_pkce_flow(**_kwargs):
-            return OAuthCredential(
-                provider="openai-codex",
-                access_token=SecretStr("oauth-access-token"),
-                refresh_token=SecretStr("oauth-refresh-token"),
-                expires_at=datetime(2026, 3, 20, tzinfo=UTC),
-                account_id="acct-openai",
-            )
-
-        class FailingActivationService:
-            def __init__(self, project_root: Path) -> None:
-                self.project_root = project_root
-
-            def has_managed_runtime(self) -> bool:
-                return True
-
-            async def start_proxy(self):
-                raise control_plane_module.RuntimeActivationError("proxy boot failed")
-
-        monkeypatch.setattr(
-            control_plane_module,
-            "detect_environment",
-            lambda: EnvironmentContext(
-                is_remote=False,
-                can_open_browser=True,
-                force_manual=False,
-                detection_details="test",
-            ),
-        )
-        monkeypatch.setattr(
-            control_plane_module,
-            "run_auth_code_pkce_flow",
-            fake_run_auth_code_pkce_flow,
-        )
-        monkeypatch.setattr(
-            control_plane_module,
-            "RuntimeActivationService",
-            FailingActivationService,
-        )
-
-        resp = await control_plane_client.post(
-            "/api/control/actions",
-            json={
-                "request_id": str(ULID()),
-                "action_id": "provider.oauth.openai_codex",
-                "surface": "web",
-                "actor": {
-                    "actor_id": "user:web",
-                    "actor_label": "Owner",
-                },
-                "params": {
-                    "env_name": "OPENAI_API_KEY",
-                    "profile_name": "openai-codex-default",
-                },
-            },
-        )
-
-        assert resp.status_code == 200
-        result = resp.json()["result"]
-        assert result["code"] == "OPENAI_OAUTH_CONNECTED"
-        assert result["data"]["activation"]["activation_succeeded"] is False
-        assert result["data"]["activation"]["runtime_reload_mode"] == "activation_failed"
-        assert "真实模型激活失败" in result["message"]
-
-        store = CredentialStore(control_plane_app.state.project_root / "auth-profiles.json")
-        profile = store.get_profile("openai-codex-default")
-        assert profile is not None
-        assert profile.provider == "openai-codex"
+    # Feature 081 P4 修复（Codex F1）：删除 test_provider_oauth_openai_codex_preserves_auth_when_activation_fails
+    # 测试。原测试基于"Proxy 启动失败时 OAuth credential 仍持久化"的恢复保证；
+    # P4 后 _activate_runtime_after_config_change 不再启动 Proxy，"activation_fails"
+    # 场景已不可达。Auth 持久化的 happy path 由 test_provider_oauth_openai_codex_persists_profile_and_env 覆盖。
 
     # ────────────────────────── Feature 079 Phase 2 ──────────────────────────
     async def test_setup_oauth_and_apply_atomic_persists_both_credential_and_config(

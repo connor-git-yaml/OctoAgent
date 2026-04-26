@@ -1180,11 +1180,12 @@ class SetupDomainService(DomainServiceBase):
         activation_data = await self._activate_runtime_after_config_change(
             request=request,
             failure_code="SETUP_ACTIVATION_FAILED",
-            failure_prefix="配置已保存，但 LiteLLM Proxy 启动失败",
+            failure_prefix="配置已保存，但 runtime reload 失败",
             raise_on_failure=True,
         )
 
-        # quick_connect 后重启 Proxy
+        # Feature 081 P4：proxy_manager 总是 None（Provider 直连无 Proxy）；
+        # 此分支仅做安全检查保留，下个版本删除
         if self._proxy_manager is not None:
             try:
                 await self._proxy_manager.restart()
@@ -2383,42 +2384,35 @@ class SetupDomainService(DomainServiceBase):
         failure_prefix: str,
         raise_on_failure: bool,
     ) -> dict[str, Any]:
-        """激活 LiteLLM Proxy，并在托管实例中安排 runtime reload。"""
-        activation_service = _cp_pkg.RuntimeActivationService(self._ctx.project_root)
-        try:
-            activation = await activation_service.start_proxy()
-        except _cp_pkg.RuntimeActivationError as exc:
-            if raise_on_failure:
-                raise self._action_error(
-                    failure_code,
-                    f"{failure_prefix}：{exc}",
-                ) from exc
-            return {
-                "project_root": str(self._ctx.project_root),
-                "source_root": "",
-                "compose_file": "",
-                "proxy_url": "",
-                "managed_runtime": activation_service.has_managed_runtime(),
-                "warnings": [str(exc)],
-                "runtime_reload_mode": "activation_failed",
-                "runtime_reload_message": f"{failure_prefix}：{exc}",
-                "activation_succeeded": False,
-            }
+        """触发 runtime reload（Feature 081 后不再启动 LiteLLM Proxy）。
 
+        Feature 081 P4 修复（Codex F1）：原实现调用 ``start_proxy()`` 启动 LiteLLM
+        Proxy 子进程；Provider 直连后无 Proxy 概念，``start_proxy()`` 已退役为
+        总是抛 ``RuntimeActivationError``。修复后直接跳过 proxy 启动，仅保留
+        managed runtime 的 reload 分支（让 Gateway 进程重读新 yaml + 重建
+        ProviderRouter alias 缓存）。
+
+        ``failure_code`` / ``failure_prefix`` / ``raise_on_failure`` 仍接受但
+        在 Provider 直连模式下不会触发——保留参数以最小化调用方改动。
+        """
+        activation_service = _cp_pkg.RuntimeActivationService(self._ctx.project_root)
+        managed_runtime = activation_service.has_managed_runtime()
+
+        # Feature 081 P4：跳过 start_proxy()；直接构造成功 activation_data
         activation_data: dict[str, Any] = {
-            "project_root": activation.project_root,
-            "source_root": activation.source_root,
-            "compose_file": activation.compose_file,
-            "proxy_url": activation.proxy_url,
-            "managed_runtime": activation.managed_runtime,
-            "warnings": list(activation.warnings),
+            "project_root": str(self._ctx.project_root),
+            "source_root": str(self._ctx.project_root),
+            "compose_file": "",
+            "proxy_url": "",
+            "managed_runtime": managed_runtime,
+            "warnings": [],
             "runtime_reload_mode": "none",
-            "runtime_reload_message": "真实模型连接已准备完成。",
+            "runtime_reload_message": "配置已保存，Provider 直连已就绪。",
             "activation_succeeded": True,
         }
 
         update_service = self._ctx.update_service
-        if activation.managed_runtime and update_service is not None:
+        if managed_runtime and update_service is not None:
             if request.surface == ControlPlaneSurface.CLI:
                 await update_service.restart(
                     trigger_source=self._map_update_source(request.surface)
@@ -2436,12 +2430,12 @@ class SetupDomainService(DomainServiceBase):
                 )
                 activation_data["runtime_reload_mode"] = "managed_restart_scheduled"
                 activation_data["runtime_reload_message"] = (
-                    "已启动 LiteLLM Proxy，当前实例会在几秒内自动重启并切到真实模型。"
+                    "配置已保存，当前实例会在几秒内自动重启并切到真实模型（Provider 直连）。"
                 )
         else:
             activation_data["runtime_reload_mode"] = "manual_restart_required"
             activation_data["runtime_reload_message"] = (
-                "LiteLLM Proxy 已启动；如果当前 Gateway 正在运行，请手动重启后再开始真实对话。"
+                "配置已保存（Provider 直连）；如果当前 Gateway 正在运行，请手动重启后再开始真实对话。"
             )
         return activation_data
 

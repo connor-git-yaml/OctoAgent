@@ -538,42 +538,30 @@ class McpDomainService(DomainServiceBase):
         failure_prefix: str,
         raise_on_failure: bool,
     ) -> dict[str, Any]:
-        """激活 LiteLLM Proxy，并在托管实例中安排 runtime reload。"""
+        """触发 runtime reload（Feature 081 后不再启动 LiteLLM Proxy）。
+
+        Feature 081 P4 修复（Codex F1）：跳过 ``start_proxy()`` 调用；保留
+        managed runtime 的 reload 分支以让 Gateway 重读新 yaml + 重建
+        ProviderRouter alias 缓存。``failure_*`` 参数仍接受但不触发，保留
+        以最小化调用方改动。
+        """
         activation_service = _cp_pkg.RuntimeActivationService(self._ctx.project_root)
-        try:
-            activation = await activation_service.start_proxy()
-        except _cp_pkg.RuntimeActivationError as exc:
-            if raise_on_failure:
-                raise self._action_error(
-                    failure_code,
-                    f"{failure_prefix}：{exc}",
-                ) from exc
-            return {
-                "project_root": str(self._ctx.project_root),
-                "source_root": "",
-                "compose_file": "",
-                "proxy_url": "",
-                "managed_runtime": activation_service.has_managed_runtime(),
-                "warnings": [str(exc)],
-                "runtime_reload_mode": "activation_failed",
-                "runtime_reload_message": f"{failure_prefix}：{exc}",
-                "activation_succeeded": False,
-            }
+        managed_runtime = activation_service.has_managed_runtime()
 
         activation_data: dict[str, Any] = {
-            "project_root": activation.project_root,
-            "source_root": activation.source_root,
-            "compose_file": activation.compose_file,
-            "proxy_url": activation.proxy_url,
-            "managed_runtime": activation.managed_runtime,
-            "warnings": list(activation.warnings),
+            "project_root": str(self._ctx.project_root),
+            "source_root": str(self._ctx.project_root),
+            "compose_file": "",
+            "proxy_url": "",
+            "managed_runtime": managed_runtime,
+            "warnings": [],
             "runtime_reload_mode": "none",
-            "runtime_reload_message": "真实模型连接已准备完成。",
+            "runtime_reload_message": "凭证已写入，Provider 直连已就绪。",
             "activation_succeeded": True,
         }
 
         update_service = self._ctx.update_service
-        if activation.managed_runtime and update_service is not None:
+        if managed_runtime and update_service is not None:
             if request.surface == ControlPlaneSurface.CLI:
                 await update_service.restart(
                     trigger_source=self._map_update_source(request.surface)
@@ -591,12 +579,12 @@ class McpDomainService(DomainServiceBase):
                 )
                 activation_data["runtime_reload_mode"] = "managed_restart_scheduled"
                 activation_data["runtime_reload_message"] = (
-                    "已启动 LiteLLM Proxy，当前实例会在几秒内自动重启并切到真实模型。"
+                    "凭证已写入，当前实例会在几秒内自动重启并切到真实模型（Provider 直连）。"
                 )
         else:
             activation_data["runtime_reload_mode"] = "manual_restart_required"
             activation_data["runtime_reload_message"] = (
-                "LiteLLM Proxy 已启动；如果当前 Gateway 正在运行，请手动重启后再开始真实对话。"
+                "凭证已写入（Provider 直连）；如果当前 Gateway 正在运行，请手动重启后再开始真实对话。"
             )
         return activation_data
 

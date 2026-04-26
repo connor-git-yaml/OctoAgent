@@ -396,24 +396,40 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     app.state.provider_router = provider_router
 
-    # Feature 081 P1：FallbackManager.primary 改成 ProviderRouterMessageAdapter（直连
-    # provider）；EchoMessageAdapter 作为 fallback 兜底（无 alias 配置 / 离线时降级）。
-    # 这条路径覆盖 context_compaction.py 等直接 llm_service.call() 的入口
-    # （SkillRunner 路径在下文单独走 ProviderModelClient）。
-    fallback_manager = FallbackManager(
-        primary=ProviderRouterMessageAdapter(provider_router),
-        fallback=EchoMessageAdapter(),
-    )
+    # Feature 081 P4 修复（Codex F2）：保留 echo mode 安全语义。
+    # 老用户配 ``runtime.llm_mode: echo`` 或 ``OCTOAGENT_LLM_MODE=echo`` 时
+    # 必须保持纯 echo（绝不真实调 provider），避免 Provider 直连后变成静默
+    # 把离线/开发实例切到真实账单。
     alias_registry = _build_runtime_alias_registry(project_root)
-    llm_service = LLMService(
-        fallback_manager=fallback_manager,
-        alias_registry=alias_registry,
-    )
+    if provider_config.llm_mode == "echo":
+        # Echo mode：与 M0 行为一致，纯 echo primary，无 fallback
+        fallback_manager = FallbackManager(
+            primary=EchoMessageAdapter(),
+            fallback=None,
+        )
+        llm_service = LLMService(
+            fallback_manager=fallback_manager,
+            alias_registry=alias_registry,
+        )
+        log.info("llm_service_initialized", mode="echo")
+    else:
+        # Provider 直连：FallbackManager.primary = ProviderRouterMessageAdapter
+        # （直连 provider）；EchoMessageAdapter 作为 fallback 兜底（无 alias 配置 / 离线时降级）。
+        # 这条路径覆盖 context_compaction.py 等直接 llm_service.call() 的入口
+        # （SkillRunner 路径在下文单独走 ProviderModelClient）。
+        fallback_manager = FallbackManager(
+            primary=ProviderRouterMessageAdapter(provider_router),
+            fallback=EchoMessageAdapter(),
+        )
+        llm_service = LLMService(
+            fallback_manager=fallback_manager,
+            alias_registry=alias_registry,
+        )
+        log.info("llm_service_initialized", mode="provider_direct")
     # Feature 081 P1：保留这两个 attr 兼容现有 health/control_plane 引用，
-    # 都置为 None；P3 health.py / control_plane bind_proxy_manager 会清理。
+    # 都置为 None；下个版本随 control_plane bind_proxy_manager 一起清理。
     app.state.litellm_client = None
     app.state.proxy_manager = None
-    log.info("llm_service_initialized", mode="provider_direct")
 
     app.state.llm_service = llm_service
     # Feature 067: 注入 LLMService 到 AgentContextService，
@@ -481,8 +497,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await app.state.capability_pack_service.startup()
 
-    # Feature 081 P1：SkillRunner 无条件创建——LiteLLM Proxy 退役后统一走
-    # ProviderRouter 直连。Echo mode 由 FallbackManager 内部兜底，不在 Runner 层处理。
+    # Feature 081 P4 修复（Codex F2）：SkillRunner 仅在非 echo 模式下创建。
+    # echo 模式必须保持纯 echo 行为——ProviderModelClient 会绕过 FallbackManager
+    # 直连 provider，这违反了 echo 的离线/开发语义。
     # Feature 061: 创建 ApprovalBridge 用于 ask 信号桥接
     # Feature 072: tool_search 结果回调（late-binding，因为 llm_service 在 SkillRunner 之后创建）
     _llm_service_ref: list[Any] = []
@@ -495,27 +512,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 result_json, task_id=task_id, trace_id=trace_id,
             )
 
-    # Feature 080 Phase 3+5：SkillRunner 用 ProviderModelClient + ProviderRouter
-    # 直连 provider。router 已在上面 capability_pack 之前创建并存到
-    # app.state.provider_router，这里复用同一实例。
-    skill_runner = SkillRunner(
-        model_client=ProviderModelClient(
-            provider_router=app.state.provider_router,
+    if provider_config.llm_mode != "echo":
+        # Feature 080 Phase 3+5：SkillRunner 用 ProviderModelClient + ProviderRouter
+        # 直连 provider。router 已在上面 capability_pack 之前创建并存到
+        # app.state.provider_router，这里复用同一实例。
+        skill_runner = SkillRunner(
+            model_client=ProviderModelClient(
+                provider_router=app.state.provider_router,
+                tool_broker=tool_broker,
+            ),
             tool_broker=tool_broker,
-        ),
-        tool_broker=tool_broker,
-        event_store=store_group.event_store,
-        hooks=[AgentSessionTurnHook(store_group)],
-        on_tool_search_result=_on_tool_search_result,
-    )
-    app.state.llm_service = LLMService(
-        fallback_manager=fallback_manager,
-        alias_registry=alias_registry,
-        skill_runner=skill_runner,
-        skill_discovery=app.state.skill_discovery,
-    )
-    _llm_service_ref.append(app.state.llm_service)
-    AgentContextService.set_llm_service(app.state.llm_service)
+            event_store=store_group.event_store,
+            hooks=[AgentSessionTurnHook(store_group)],
+            on_tool_search_result=_on_tool_search_result,
+        )
+        app.state.llm_service = LLMService(
+            fallback_manager=fallback_manager,
+            alias_registry=alias_registry,
+            skill_runner=skill_runner,
+            skill_discovery=app.state.skill_discovery,
+        )
+        _llm_service_ref.append(app.state.llm_service)
+        AgentContextService.set_llm_service(app.state.llm_service)
+    else:
+        # echo 模式：保持上面已构造的 LLMService（无 SkillRunner，所有 call 走
+        # FallbackManager → EchoMessageAdapter，不会真实调 provider）
+        log.info("skill_runner_skipped", reason="echo_mode")
     app.state.delegation_plane_service = DelegationPlaneService(
         project_root=project_root,
         store_group=store_group,
