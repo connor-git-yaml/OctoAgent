@@ -77,6 +77,9 @@ def test_build_bootstrap_config_custom_provider() -> None:
 
 
 def test_bootstrap_config_writes_files(tmp_path: Path) -> None:
+    """Feature 081 P3b：bootstrap 仍写入 octoagent.yaml；litellm-config.yaml
+    生成已退化为 no-op stub（本 Feature 后不再产出此衍生配置）。
+    """
     answers = iter(["OpenRouter", "OPENROUTER_API_KEY"])
     result = bootstrap_config(
         tmp_path,
@@ -86,7 +89,8 @@ def test_bootstrap_config_writes_files(tmp_path: Path) -> None:
     loaded = load_config(tmp_path)
     assert result.source == "interactive"
     assert loaded is not None
-    assert (tmp_path / "litellm-config.yaml").exists()
+    assert (tmp_path / "octoagent.yaml").exists()
+    # litellm-config.yaml 不再生成（generate_litellm_config 已 no-op）
 
 
 def test_config_init_reuses_bootstrap(tmp_path: Path) -> None:

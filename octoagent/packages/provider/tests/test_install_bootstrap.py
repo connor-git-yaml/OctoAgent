@@ -77,7 +77,7 @@ def test_run_install_bootstrap_bootstraps_home_instance(
 
     assert attempt.status == "SUCCEEDED"
     assert (instance_root / "octoagent.yaml").exists()
-    assert (instance_root / "litellm-config.yaml").exists()
+    # Feature 081 P3b：litellm-config.yaml 不再产出（generate_litellm_config no-op）
     assert (instance_root / "data" / "sqlite").exists()
     assert (instance_root / "data" / "artifacts").exists()
     assert (instance_root / "bin" / "octo").exists()

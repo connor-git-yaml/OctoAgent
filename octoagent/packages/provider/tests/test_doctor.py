@@ -400,132 +400,13 @@ class TestDoctorChecks:
         result = await runner.check_db_writable()
         assert result.status == CheckStatus.PASS
 
-    async def test_live_ping_uses_codex_compatible_payload_for_oauth_alias(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _write_codex_runtime_config(
-            tmp_path,
-            proxy_url="http://yaml-proxy:4320",
-            master_key_env="CUSTOM_MASTER_KEY",
-        )
-        monkeypatch.setenv("CUSTOM_MASTER_KEY", "yaml-key")
-        calls: list[tuple[str, dict[str, object]]] = []
-
-        class FakeResponse:
-            status_code = 200
-            headers = {"content-type": "application/json"}
-            text = ""
-
-            def json(self) -> dict[str, object]:
-                return {"ok": True}
-
-        class FakeAsyncClient:
-            def __init__(self, *, timeout: float) -> None:
-                self.timeout = timeout
-
-            async def __aenter__(self) -> FakeAsyncClient:
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb) -> None:
-                del exc_type, exc, tb
-
-            async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
-                del headers
-                calls.append((url, json))
-                return FakeResponse()
-
-        monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
-        runner = DoctorRunner(project_root=tmp_path)
-
-        result = await runner.check_live_ping()
-
-        assert result.status == CheckStatus.PASS
-        assert calls == [
-            (
-                "http://yaml-proxy:4320/v1/responses",
-                {
-                    "model": "cheap",
-                    "instructions": "reply briefly",
-                    "input": [
-                        {
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": "ping"}],
-                        }
-                    ],
-                    "store": False,
-                },
-            )
-        ]
-
-    async def test_live_ping_uses_litellm_config_fallback_for_env_only_codex_alias(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _write_litellm_config(
-            tmp_path,
-            "\n".join(
-                [
-                    "model_list:",
-                    "  - model_name: cheap",
-                    "    litellm_params:",
-                    "      model: gpt-5.4",
-                    "      api_base: https://chatgpt.com/backend-api/codex",
-                ]
-            )
-            + "\n",
-        )
-        monkeypatch.setenv("LITELLM_PROXY_URL", "http://env-proxy:4010")
-        monkeypatch.setenv("LITELLM_PROXY_KEY", "env-key")
-        calls: list[tuple[str, dict[str, object]]] = []
-
-        class FakeResponse:
-            status_code = 200
-            headers = {"content-type": "application/json"}
-            text = ""
-
-            def json(self) -> dict[str, object]:
-                return {"ok": True}
-
-        class FakeAsyncClient:
-            def __init__(self, *, timeout: float) -> None:
-                self.timeout = timeout
-
-            async def __aenter__(self) -> FakeAsyncClient:
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb) -> None:
-                del exc_type, exc, tb
-
-            async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
-                del headers
-                calls.append((url, json))
-                return FakeResponse()
-
-        monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
-        runner = DoctorRunner(project_root=tmp_path)
-
-        result = await runner.check_live_ping()
-
-        assert result.status == CheckStatus.PASS
-        assert calls == [
-            (
-                "http://env-proxy:4010/v1/responses",
-                {
-                    "model": "cheap",
-                    "instructions": "reply briefly",
-                    "input": [
-                        {
-                            "role": "user",
-                            "content": [{"type": "input_text", "text": "ping"}],
-                        }
-                    ],
-                    "store": False,
-                },
-            )
-        ]
+    # Feature 081 P3b：删除两条 LiteLLM Proxy 路径专属的 doctor 测试
+    # （test_live_ping_uses_codex_compatible_payload_for_oauth_alias 和
+    # test_live_ping_uses_litellm_config_fallback_for_env_only_codex_alias）。
+    # 它们依赖 alias_uses_codex_backend 从 litellm-config.yaml 反推 Responses API
+    # 路径——Provider 直连后此分支由 ProviderEntry.transport 直接表达，doctor 不再
+    # 走 Proxy 路径，相关 endpoint 已不会再被 invoke。doctor 整体改造留到下个
+    # follow-up Feature。
 
     async def test_credential_valid_empty(self, tmp_path: Path) -> None:
         runner = DoctorRunner(project_root=tmp_path)
