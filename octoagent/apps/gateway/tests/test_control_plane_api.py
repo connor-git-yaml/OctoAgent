@@ -1812,6 +1812,98 @@ class TestControlPlaneApi:
         assert profile.auth_mode == "api_key"
         assert profile.credential.key.get_secret_value() == "sk-openrouter-value"
 
+    async def test_setup_apply_persists_secrets_for_v2_schema_provider(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        seeded_control_plane,
+    ) -> None:
+        """Feature 081 P4 修复（Codex F1）：v2 schema yaml（``auth: {kind: api_key, env: ...}``
+        而非 ``auth_type`` + ``api_key_env``）的 secret 必须能正确持久化到 .env + auth-profiles.json。
+
+        修复前：``_save_runtime_secret_values`` 用 ``provider.api_key_env`` 读字段；
+        v2 yaml 中 ``api_key_env`` 是 default ""，``litellm_targets`` 不含真实 env 名 →
+        提交的 secret 静默丢弃，profile 也不写入。
+        """
+        resp = await control_plane_client.post(
+            "/api/control/actions",
+            json={
+                "request_id": str(ULID()),
+                "action_id": "setup.apply",
+                "surface": "web",
+                "actor": {
+                    "actor_id": "user:web",
+                    "actor_label": "Owner",
+                },
+                "params": {
+                    "draft": {
+                        "config": {
+                            "config_version": 2,
+                            "runtime": {
+                                "llm_mode": "litellm",
+                                "litellm_proxy_url": "http://localhost:4000",
+                                "master_key_env": "LITELLM_MASTER_KEY",
+                            },
+                            "providers": [
+                                # v2 schema：仅用 transport / api_base / auth；不写 auth_type/api_key_env
+                                {
+                                    "id": "openrouter",
+                                    "name": "OpenRouter",
+                                    "transport": "openai_chat",
+                                    "api_base": "https://openrouter.ai/api/v1",
+                                    "auth": {
+                                        "kind": "api_key",
+                                        "env": "OPENROUTER_API_KEY",
+                                    },
+                                    "enabled": True,
+                                }
+                            ],
+                            "model_aliases": {
+                                "main": {
+                                    "provider": "openrouter",
+                                    "model": "openrouter/auto",
+                                }
+                            },
+                        },
+                        "secret_values": {
+                            "OPENROUTER_API_KEY": "sk-v2-secret",
+                            "LITELLM_MASTER_KEY": "sk-master-v2",
+                        },
+                        "agent_profile": {
+                            "scope": "project",
+                            "name": "v2 主 Agent",
+                            "persona_summary": "verify v2 schema secret 持久化",
+                            "tool_profile": "standard",
+                            "model_alias": "main",
+                        },
+                    }
+                },
+            },
+        )
+
+        assert resp.status_code == 200
+        result = resp.json()["result"]
+        assert result["code"] == "SETUP_APPLIED"
+
+        # 关键断言：v2 schema 下 secret 仍然落盘
+        saved = result["data"]["saved_secrets"]
+        assert "OPENROUTER_API_KEY" in saved["litellm_env_names"], (
+            f"v2 schema 下 OPENROUTER_API_KEY 应写入 .env(.litellm)；实际 saved={saved}"
+        )
+        assert "openrouter-default" in saved["profile_names"], (
+            f"v2 schema 下 openrouter-default profile 应写入 auth-profiles.json；实际 saved={saved}"
+        )
+
+        env_path = control_plane_app.state.project_root / ".env.litellm"
+        assert env_path.exists()
+        env_text = env_path.read_text(encoding="utf-8")
+        assert "OPENROUTER_API_KEY=sk-v2-secret" in env_text
+
+        store = CredentialStore(control_plane_app.state.project_root / "auth-profiles.json")
+        profile = store.get_profile("openrouter-default")
+        assert profile is not None, "v2 schema 下应该写出 openrouter-default profile"
+        assert profile.credential.key.get_secret_value() == "sk-v2-secret"
+
     async def test_setup_quick_connect_returns_activation_summary(
         self,
         control_plane_app,

@@ -1450,10 +1450,15 @@ class SetupDomainService(DomainServiceBase):
         if not normalized:
             return {"litellm_env_names": [], "runtime_env_names": [], "profile_names": []}
 
+        # Feature 081 P4 修复（Codex F1）：用 effective_api_key_env 读 v2 ``auth.env`` 优先，
+        # 兼容老 v1 ``api_key_env``。直接读 ``provider.api_key_env`` 在 v2 yaml 下永远是空，
+        # 会导致 setup.apply 提交的 secret 静默丢弃。
         litellm_targets = {config.runtime.master_key_env}
         runtime_targets: set[str] = set()
         for provider in config.providers:
-            litellm_targets.add(provider.api_key_env)
+            env_name = provider.effective_api_key_env
+            if env_name:
+                litellm_targets.add(env_name)
         if config.front_door.bearer_token_env:
             runtime_targets.add(config.front_door.bearer_token_env)
         if config.front_door.trusted_proxy_token_env:
@@ -1478,12 +1483,17 @@ class SetupDomainService(DomainServiceBase):
         self._write_env_values(self._ctx.project_root / ".env.litellm", litellm_updates)
         self._write_env_values(self._ctx.project_root / ".env", runtime_updates)
 
+        # Feature 081 P4 修复（Codex F1）：v2 ``auth.kind`` / ``auth.env`` 优先；
+        # 老 ``auth_type`` / ``api_key_env`` 仅作 fallback。
         store = self._credential_store()
         saved_profiles: list[str] = []
         for provider in config.providers:
-            if provider.auth_type != "api_key":
+            if provider.effective_auth_kind != "api_key":
                 continue
-            secret_value = litellm_updates.get(provider.api_key_env)
+            env_name = provider.effective_api_key_env
+            if not env_name:
+                continue
+            secret_value = litellm_updates.get(env_name)
             if not secret_value:
                 continue
             existing = store.get_profile(f"{provider.id}-default")

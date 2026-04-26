@@ -173,3 +173,79 @@ def test_drift_record_to_payload_structure() -> None:
     assert payload["drift_type"] == "oauth_profile_not_in_config"
     assert payload["provider"] == "openai-codex"
     assert payload["details"] == {"profile_name": "p-x"}
+
+
+# ────────────── Feature 081 P4 修复（Codex F2）：v2 schema 回归 ──────────────
+
+
+def test_v2_schema_oauth_provider_no_credential_reported(tmp_path: Path) -> None:
+    """Feature 081 P4 修复：v2 yaml 用 ``auth.kind: oauth`` 而非 ``auth_type``。
+    drift checker 必须依然能识别"声明了 OAuth provider 但凭证缺失"的情况。
+
+    （修复前：drift_check 用 ``auth_type == "oauth"`` 判定；v2 yaml 中 auth_type 为 None
+    → 永远不命中 → drift 漏报）
+    """
+    _write_config(
+        tmp_path,
+        """config_version: 2
+updated_at: "2026-04-26"
+providers:
+  - id: openai-codex
+    name: OpenAI Codex
+    transport: openai_responses
+    api_base: https://chatgpt.com/backend-api/codex
+    auth:
+      kind: oauth
+      profile: openai-codex-default
+    enabled: true
+model_aliases:
+  main:
+    provider: openai-codex
+    model: gpt-5.4
+""",
+    )
+    store = CredentialStore(store_path=tmp_path / "auth-profiles.json")
+    # 故意不 seed profile —— 模拟 OAuth 凭证缺失
+
+    records = detect_auth_config_drift(tmp_path, credential_store=store)
+    types = {r.drift_type for r in records}
+    assert "config_provider_no_credential" in types, (
+        f"v2 schema 下 drift checker 未能检测出 OAuth profile 缺失（types={types}）"
+    )
+    [item] = [r for r in records if r.drift_type == "config_provider_no_credential"]
+    assert item.provider == "openai-codex"
+    assert item.severity == "high"
+    # 新增：details 应包含 expected_profile（v2 修复加的）
+    assert item.details.get("expected_profile") == "openai-codex-default"
+
+
+def test_v2_schema_oauth_with_seeded_profile_no_drift(tmp_path: Path) -> None:
+    """Feature 081 P4：v2 yaml + 凭证齐全 → drift_check 不应误报。"""
+    _write_config(
+        tmp_path,
+        """config_version: 2
+updated_at: "2026-04-26"
+providers:
+  - id: openai-codex
+    name: OpenAI Codex
+    transport: openai_responses
+    api_base: https://chatgpt.com/backend-api/codex
+    auth:
+      kind: oauth
+      profile: openai-codex-default
+    enabled: true
+model_aliases:
+  main:
+    provider: openai-codex
+    model: gpt-5.4
+""",
+    )
+    store = CredentialStore(store_path=tmp_path / "auth-profiles.json")
+    _seed_oauth_profile(store)  # provider="openai-codex", name="openai-codex-default"
+
+    records = detect_auth_config_drift(tmp_path, credential_store=store)
+    types = {r.drift_type for r in records}
+    # config_provider_no_credential 不应出现（凭证已齐）
+    assert "config_provider_no_credential" not in types
+    # oauth_profile_not_in_config 也不应出现（profile 与 provider 配套）
+    assert "oauth_profile_not_in_config" not in types

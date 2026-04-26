@@ -267,6 +267,34 @@ class ProviderEntry(BaseModel):
                 self.auth = AuthOAuth(profile=f"{self.id}-default")
         return self
 
+    # ── Feature 081 P4 修复（Codex high finding F1+F2）：v2 优先 / v1 fallback 属性 ──
+    # 调用方应优先用这些属性而非直接读 auth_type / api_key_env，因为 v2 yaml 经过
+    # migrate-080 后 auth_type / api_key_env 字段被省略（仍可读但 default=None/""），
+    # 直接读旧字段会让 setup_service / drift_check 等在 v2 yaml 下漏检测。
+
+    @property
+    def effective_auth_kind(self) -> str:
+        """认证类型；v2 ``auth.kind`` 优先，v1 ``auth_type`` fallback；空串表示未配置。"""
+        if self.auth is not None:
+            return self.auth.kind
+        return self.auth_type or ""
+
+    @property
+    def effective_api_key_env(self) -> str:
+        """API key 环境变量名；v2 ``auth.env`` 优先，v1 ``api_key_env`` fallback；空串表示未配置。"""
+        if self.auth is not None and isinstance(self.auth, AuthApiKey):
+            return self.auth.env
+        return self.api_key_env or ""
+
+    @property
+    def effective_oauth_profile(self) -> str:
+        """OAuth profile 名；v2 ``auth.profile`` 优先；v1 按 ``{id}-default`` 推断。"""
+        if self.auth is not None and isinstance(self.auth, AuthOAuth):
+            return self.auth.profile
+        if self.auth_type == "oauth":
+            return f"{self.id}-default"
+        return ""
+
 
 # ---------------------------------------------------------------------------
 # ModelAlias — 模型别名

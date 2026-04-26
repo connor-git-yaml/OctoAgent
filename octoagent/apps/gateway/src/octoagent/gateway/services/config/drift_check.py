@@ -125,11 +125,27 @@ def detect_auth_config_drift(
                 )
             )
 
+    # Feature 081 P4 修复（Codex F2）：v2 yaml 经 migrate-080 后只有 ``auth.kind``，
+    # 老 ``auth_type`` 不再写入；用 ``effective_auth_kind`` 兼容 v1+v2 双形态。
+    # 同时校验 ``auth.profile`` 是否真的存在于 auth-profiles.json，避免 provider 配了
+    # OAuth 但实际指向不存在的 profile 时漏报。
     if config is not None:
+        # 收集 auth-profiles 中所有 OAuth profile 的名字（用于按 profile 名校验）
+        oauth_profile_names: set[str] = set()
+        for profile in profiles:
+            if profile.auth_mode == "oauth" and isinstance(profile.credential, OAuthCredential):
+                oauth_profile_names.add(profile.name)
+
         for provider_entry in config.providers:
-            if not provider_entry.enabled or provider_entry.auth_type != "oauth":
+            if not provider_entry.enabled:
                 continue
-            if provider_entry.id not in oauth_profile_providers:
+            if provider_entry.effective_auth_kind != "oauth":
+                continue
+            expected_profile = provider_entry.effective_oauth_profile
+            # 双重校验：(a) provider id 对得上某个 OAuth profile；(b) 配置的 profile 名实际存在
+            provider_has_credential = provider_entry.id in oauth_profile_providers
+            profile_name_exists = bool(expected_profile) and expected_profile in oauth_profile_names
+            if not provider_has_credential and not profile_name_exists:
                 records.append(
                     DriftRecord(
                         drift_type="config_provider_no_credential",
@@ -137,13 +153,15 @@ def detect_auth_config_drift(
                         provider=provider_entry.id,
                         summary=(
                             f"octoagent.yaml 声明了 OAuth provider {provider_entry.id}，"
-                            f"但 auth-profiles.json 没对应凭证。调用该 provider 会因为"
+                            f"但 auth-profiles.json 没对应凭证（期望 profile="
+                            f"{expected_profile or '<unset>'}）。调用该 provider 会因为"
                             f"缺 token 而失败。"
                         ),
                         recommended_action=(
                             "在 Settings 页面走一次 OAuth 授权，或者删除该 provider"
                             "条目以免主 Agent 误路由过去。"
                         ),
+                        details={"expected_profile": expected_profile},
                     )
                 )
 
