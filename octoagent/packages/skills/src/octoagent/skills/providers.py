@@ -6,6 +6,13 @@
 
 Provider 类可独立 import 使用；未来加第三个 provider 只需新增 Provider 类，
 不需要改 client。
+
+.. deprecated:: Feature 081 P0
+    此模块在 Feature 081 P4 中将被整文件删除。
+    替代实现：``octoagent.provider.provider_client.ProviderClient`` 通过
+    ``ProviderTransport`` 枚举派发到三种 transport（openai_chat / openai_responses /
+    anthropic_messages），覆盖原 ChatCompletionsProvider + ResponsesApiProvider 的功能。
+    P0-P3 期间保留作为兼容 shim；P1 完成时所有运行时引用已解耦。
 """
 
 from __future__ import annotations

@@ -4,6 +4,12 @@
 # 启动: docker compose -f docker-compose.litellm.yml up -d
 # 停止: docker compose -f docker-compose.litellm.yml down
 #
+# ⚠️ DEPRECATED Feature 081 P0
+#   Feature 080 完成 Provider 直连后，OctoAgent 不再需要 LiteLLM Proxy。
+#   此 compose 文件将在 Feature 081 P4 中删除。
+#   P3 期间 run-octo-home.sh / doctor-octo-home.sh / runtime_activation.py
+#   会从依赖此文件解耦。
+#
 # 前提条件:
 #   1. 复制 .env.litellm.example -> .env.litellm 并填入 LLM Provider API Keys
 #   2. 复制 .env.example -> .env 并调整配置（可选）

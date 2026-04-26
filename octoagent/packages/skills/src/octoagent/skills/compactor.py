@@ -7,6 +7,13 @@
   Level 1: 截断 > 2000 字符的 tool role message 为前 500 字符 + ``...[truncated]``
   Level 2: 保留最近 N 轮，早期轮次用 LLM 摘要替换
   Level 3: 丢弃最老的摘要块
+
+.. deprecated:: Feature 081 P0
+    此模块在 Feature 081 P4 中将被整文件删除。
+    真正的运行时压缩主线在 ``gateway/services/context_compaction.py:951-1028``，
+    走 ``llm_service.call(alias)``（Feature 080 后底层已切换到 ProviderRouter）。
+    本模块仅被旧 LiteLLMSkillClient 使用，P1 完成 LiteLLMSkillClient 解耦后
+    本模块就无运行时引用；P4 整文件删除。
 """
 
 from __future__ import annotations

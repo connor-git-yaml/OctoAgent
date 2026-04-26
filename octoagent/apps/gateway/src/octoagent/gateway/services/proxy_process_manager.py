@@ -2,6 +2,12 @@
 
 负责启动、停止、重启和健康检查 LiteLLM Proxy，
 支持 Docker Compose 和直接进程两种运行模式，遵循降级安全原则。
+
+.. deprecated:: Feature 081 P0
+    此模块在 Feature 081 P4 中将被整文件删除。
+    Feature 080 完成 Provider 直连后 LiteLLM Proxy 进程已不再启动。
+    P1 移除 main.py 内的 ProxyProcessManager 启动调用；P3 改造 runtime_activation.py
+    解耦 docker-compose.litellm.yml；P4 实际删除文件。
 """
 
 from __future__ import annotations

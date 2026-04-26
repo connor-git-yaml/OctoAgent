@@ -7,6 +7,13 @@
 - 原子写入（NFR-003）
 - api_key 格式：os.environ/{api_key_env}（与 init_wizard.py 一致）
 - 日志脱敏：API Key 明文不进入 structlog（NFR-004）
+
+.. deprecated:: Feature 081 P0
+    此模块在 Feature 081 P4 中将被整文件删除。
+    Feature 080 后不再需要生成 litellm-config.yaml；ProviderRouter 直接读取
+    octoagent.yaml 的 ProviderEntry。
+    P1 移除 setup_service / mcp_service / config_tools / dx/* 内对本模块的引用；
+    P2 引入 raw YAML legacy-key 检测和 migrate-080 命令；P4 实际删除。
 """
 
 from __future__ import annotations

@@ -2,6 +2,12 @@
 
 对齐 contracts/provider-api.md SS2。
 通过 litellm.acompletion() 调用 Proxy，内部集成 CostTracker。
+
+.. deprecated:: Feature 081 P0
+    此模块在 Feature 081 P4 中将被整文件删除。
+    替代实现：``octoagent.provider.provider_client.ProviderClient`` 直连 provider HTTP，
+    不再经过 LiteLLM Proxy。OAuth 401/403 重试由 ProviderClient 内部处理。
+    P0-P3 期间保留作为兼容 shim；P1 完成时所有运行时引用已解耦。
 """
 
 from __future__ import annotations

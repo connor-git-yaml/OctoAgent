@@ -1,4 +1,11 @@
-"""LiteLLM 运行时配置读取辅助。"""
+"""LiteLLM 运行时配置读取辅助。
+
+.. deprecated:: Feature 081 P0
+    此模块在 Feature 081 P4 中将被整文件删除。
+    Feature 080 后 alias→backend 推断由 ProviderRouter / ProviderEntry.transport
+    直接表达，不再需要从 litellm-config.yaml 反推。
+    P1 移除 main.py 和 dx/doctor.py 内对本模块的引用；P4 实际删除。
+"""
 
 from __future__ import annotations
 

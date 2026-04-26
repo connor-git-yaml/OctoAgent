@@ -5,6 +5,12 @@
 
 本模块只负责编排：history 管理、context compaction、tool schema 获取、provider 派发。
 具体的请求构建、流式解析、usage 提取在 .providers 模块的 Provider 类里。
+
+.. deprecated:: Feature 081 P0
+    此模块在 Feature 081 P4 中将被整文件删除。
+    所有调用方应改用 ``octoagent.skills.provider_model_client.ProviderModelClient``
+    （Feature 080 已就位的主路径）。
+    P0-P3 期间保留作为兼容 shim；P1 完成时所有运行时引用已解耦。
 """
 
 from __future__ import annotations
