@@ -343,21 +343,26 @@ CREATE TABLE IF NOT EXISTS worker_profile_revisions (
 
 _OWNER_PROFILES_DDL = """
 CREATE TABLE IF NOT EXISTS owner_profiles (
-    owner_profile_id         TEXT PRIMARY KEY,
-    display_name             TEXT NOT NULL DEFAULT 'Owner',
-    preferred_address        TEXT NOT NULL DEFAULT '你',
-    timezone                 TEXT NOT NULL DEFAULT 'UTC',
-    locale                   TEXT NOT NULL DEFAULT 'zh-CN',
-    working_style            TEXT NOT NULL DEFAULT '',
-    interaction_preferences  TEXT NOT NULL DEFAULT '[]',
-    boundary_notes           TEXT NOT NULL DEFAULT '[]',
-    main_session_only_fields TEXT NOT NULL DEFAULT '[]',
-    metadata                 TEXT NOT NULL DEFAULT '{}',
-    version                  INTEGER NOT NULL DEFAULT 1,
-    created_at               TEXT NOT NULL,
-    updated_at               TEXT NOT NULL
+    owner_profile_id              TEXT PRIMARY KEY,
+    display_name                  TEXT NOT NULL DEFAULT 'Owner',
+    preferred_address             TEXT NOT NULL DEFAULT '',
+    timezone                      TEXT NOT NULL DEFAULT 'UTC',
+    locale                        TEXT NOT NULL DEFAULT 'zh-CN',
+    working_style                 TEXT NOT NULL DEFAULT '',
+    interaction_preferences       TEXT NOT NULL DEFAULT '[]',
+    boundary_notes                TEXT NOT NULL DEFAULT '[]',
+    main_session_only_fields      TEXT NOT NULL DEFAULT '[]',
+    metadata                      TEXT NOT NULL DEFAULT '{}',
+    version                       INTEGER NOT NULL DEFAULT 1,
+    last_synced_from_profile_at   TEXT,
+    created_at                    TEXT NOT NULL,
+    updated_at                    TEXT NOT NULL
 );
 """
+# Feature 082 P0：
+# - preferred_address DEFAULT '你' → ''（伪默认值清理；Agent system prompt 层 fallback "Owner"）
+# - 新增 last_synced_from_profile_at（P2 用：ProfileGenerator 回填时间戳追踪）
+# - 历史已有 "你" 数据**不**在启动时静默清洗，留给 P4 `octo bootstrap migrate-082` 显式触发
 
 _OWNER_PROFILE_OVERLAYS_DDL = """
 CREATE TABLE IF NOT EXISTS owner_profile_overlays (
@@ -942,6 +947,13 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     if work_columns and "context_frame_id" not in work_columns:
         await conn.execute(
             "ALTER TABLE works ADD COLUMN context_frame_id TEXT NOT NULL DEFAULT ''"
+        )
+
+    # Feature 082 P0：owner_profiles 加 last_synced_from_profile_at 列（P2 用）
+    owner_profile_columns = await _table_columns(conn, "owner_profiles")
+    if owner_profile_columns and "last_synced_from_profile_at" not in owner_profile_columns:
+        await conn.execute(
+            "ALTER TABLE owner_profiles ADD COLUMN last_synced_from_profile_at TEXT"
         )
 
     session_context_columns = await _table_columns(conn, "session_context_states")

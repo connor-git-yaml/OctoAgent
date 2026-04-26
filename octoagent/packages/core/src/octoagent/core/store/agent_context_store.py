@@ -242,14 +242,16 @@ class SqliteAgentContextStore:
         return [self._row_to_worker_profile_revision(row) for row in rows]
 
     async def save_owner_profile(self, profile: OwnerProfile) -> OwnerProfile:
+        # Feature 082 P0：新增 last_synced_from_profile_at 字段（P2 ProfileGenerator 回填用）
         await self._conn.execute(
             """
             INSERT INTO owner_profiles (
                 owner_profile_id, display_name, preferred_address, timezone, locale,
                 working_style, interaction_preferences, boundary_notes,
-                main_session_only_fields, metadata, version, created_at, updated_at
+                main_session_only_fields, metadata, version,
+                last_synced_from_profile_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(owner_profile_id) DO UPDATE SET
                 display_name = excluded.display_name,
                 preferred_address = excluded.preferred_address,
@@ -261,6 +263,7 @@ class SqliteAgentContextStore:
                 main_session_only_fields = excluded.main_session_only_fields,
                 metadata = excluded.metadata,
                 version = excluded.version,
+                last_synced_from_profile_at = excluded.last_synced_from_profile_at,
                 updated_at = excluded.updated_at
             """,
             (
@@ -275,6 +278,9 @@ class SqliteAgentContextStore:
                 self._dump(profile.main_session_only_fields),
                 self._dump(profile.metadata),
                 profile.version,
+                profile.last_synced_from_profile_at.isoformat()
+                if profile.last_synced_from_profile_at is not None
+                else None,
                 profile.created_at.isoformat(),
                 profile.updated_at.isoformat(),
             ),
@@ -1427,6 +1433,12 @@ class SqliteAgentContextStore:
 
     @classmethod
     def _row_to_owner_profile(cls, row: aiosqlite.Row) -> OwnerProfile:
+        # Feature 082 P0：last_synced_from_profile_at 可能不存在于老表（迁移前）→ 用 keys() 兜底
+        last_synced_value = (
+            row["last_synced_from_profile_at"]
+            if "last_synced_from_profile_at" in row.keys()
+            else None
+        )
         return OwnerProfile(
             owner_profile_id=row["owner_profile_id"],
             display_name=row["display_name"],
@@ -1439,6 +1451,9 @@ class SqliteAgentContextStore:
             main_session_only_fields=cls._load(row["main_session_only_fields"], []),
             metadata=cls._load(row["metadata"], {}),
             version=row["version"],
+            last_synced_from_profile_at=(
+                datetime.fromisoformat(last_synced_value) if last_synced_value else None
+            ),
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

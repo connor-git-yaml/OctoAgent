@@ -353,3 +353,100 @@ async def test_find_active_runtime_selects_active_ulid_and_skips_closed(
     assert miss is None
 
     await store_group.conn.close()
+
+
+# ────────────── Feature 082 P0：OwnerProfile 默认值 + last_synced_from_profile_at ──────────────
+
+
+def test_owner_profile_default_preferred_address_is_empty() -> None:
+    """Feature 082 P0：preferred_address 默认值从 "你" 改为 ""。
+
+    避免 Profile 输出永远显示 "preferred_address: 你" 让用户误以为是脏数据；
+    Agent system prompt 层 fallback 到适当称呼（如 "Owner"）。
+    """
+    profile = OwnerProfile(owner_profile_id="test-owner")
+    assert profile.preferred_address == "", (
+        f"P0 期望默认 preferred_address 为空串，实际 {profile.preferred_address!r}"
+    )
+    assert profile.last_synced_from_profile_at is None
+
+
+def test_owner_profile_explicit_preferred_address_preserved() -> None:
+    """Feature 082 P0：用户显式赋值不受默认值变更影响。"""
+    profile = OwnerProfile(owner_profile_id="test-owner", preferred_address="Connor")
+    assert profile.preferred_address == "Connor"
+
+
+async def test_owner_profile_last_synced_field_persistence(tmp_path: Path) -> None:
+    """Feature 082 P0：last_synced_from_profile_at 字段能正确写入 + 读出。"""
+    from datetime import UTC, datetime
+
+    store_group = await create_store_group(
+        str(tmp_path / "p0-owner.db"),
+        str(tmp_path / "p0-owner-artifacts"),
+    )
+    try:
+        sync_time = datetime.now(tz=UTC).replace(microsecond=0)
+        profile = OwnerProfile(
+            owner_profile_id="owner-test",
+            preferred_address="Connor",
+            last_synced_from_profile_at=sync_time,
+        )
+        await store_group.agent_context_store.save_owner_profile(profile)
+        await store_group.conn.commit()
+
+        loaded = await store_group.agent_context_store.get_owner_profile("owner-test")
+        assert loaded is not None
+        assert loaded.preferred_address == "Connor"
+        assert loaded.last_synced_from_profile_at is not None
+        # 时区+秒一致即可（isoformat 往返）
+        assert loaded.last_synced_from_profile_at.replace(microsecond=0) == sync_time
+
+        # 用 None 重新写入
+        profile.last_synced_from_profile_at = None
+        await store_group.agent_context_store.save_owner_profile(profile)
+        await store_group.conn.commit()
+        loaded2 = await store_group.agent_context_store.get_owner_profile("owner-test")
+        assert loaded2.last_synced_from_profile_at is None
+    finally:
+        await store_group.conn.close()
+
+
+async def test_owner_profile_legacy_table_without_new_column_readable(tmp_path: Path) -> None:
+    """Feature 082 P0：老库（无 last_synced_from_profile_at 列）能继续读取。
+
+    模拟升级前已有数据库——此场景下 _migrate_legacy_tables 会 ALTER TABLE 加列；
+    本测试通过 store_group 创建后已自动 migrate，验证读取路径用 row.keys() 兜底
+    在迁移已发生的情况下也能正常工作（即使列存在但值为 NULL）。
+    """
+    store_group = await create_store_group(
+        str(tmp_path / "p0-legacy.db"),
+        str(tmp_path / "p0-legacy-artifacts"),
+    )
+    try:
+        # 直接用 SQL 插入一行（模拟未经 save_owner_profile 写入的老数据，列为 NULL）
+        await store_group.conn.execute(
+            """
+            INSERT INTO owner_profiles (
+                owner_profile_id, display_name, preferred_address,
+                timezone, locale, working_style,
+                interaction_preferences, boundary_notes, main_session_only_fields,
+                metadata, version, created_at, updated_at
+            ) VALUES (
+                'legacy-owner', 'Legacy', '你',
+                'UTC', 'zh-CN', '',
+                '[]', '[]', '[]', '{}', 1,
+                '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00'
+            )
+            """
+        )
+        await store_group.conn.commit()
+
+        loaded = await store_group.agent_context_store.get_owner_profile("legacy-owner")
+        assert loaded is not None
+        # 老数据 "你" 保留（不在启动时静默清洗——P4 migrate-082 显式触发）
+        assert loaded.preferred_address == "你"
+        # 新列在老行上为 None
+        assert loaded.last_synced_from_profile_at is None
+    finally:
+        await store_group.conn.close()

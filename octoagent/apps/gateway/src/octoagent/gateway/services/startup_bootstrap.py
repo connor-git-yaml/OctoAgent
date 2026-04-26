@@ -84,7 +84,12 @@ async def ensure_startup_records(
 
 
 async def _ensure_owner_profile(store_group: StoreGroup) -> OwnerProfile:
-    """确保默认 owner profile 存在。"""
+    """确保默认 owner profile 存在。
+
+    Feature 082 P0：所有偏好字段（display_name / locale / timezone /
+    preferred_address）都显式赋空——表示"未引导"。Bootstrap 完成时由
+    ProfileGenerator 回填，Agent system prompt 层 fallback 适当称呼。
+    """
     existing = await store_group.agent_context_store.get_owner_profile(DEFAULT_OWNER_PROFILE_ID)
     if existing is not None:
         return existing
@@ -92,6 +97,7 @@ async def _ensure_owner_profile(store_group: StoreGroup) -> OwnerProfile:
     profile = OwnerProfile(
         owner_profile_id=DEFAULT_OWNER_PROFILE_ID,
         display_name="",
+        preferred_address="",  # Feature 082 P0：显式空，不再用伪默认 "你"
         locale="",
         timezone="",
         metadata={},

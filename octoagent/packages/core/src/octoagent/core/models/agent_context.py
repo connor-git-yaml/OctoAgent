@@ -181,11 +181,18 @@ class WorkerProfileRevision(BaseModel):
 
 
 class OwnerProfile(BaseModel):
-    """Owner 全局基础身份与协作偏好。"""
+    """Owner 全局基础身份与协作偏好。
+
+    Feature 082 P0：``preferred_address`` 默认值从 ``"你"`` 改为 ``""``。
+    历史 ``"你"`` 是伪默认（Profile 输出永远显示 ``preferred_address: 你`` 让用户
+    误以为是脏数据）。空串明确表示"未设置"，由 Agent system prompt 层 fallback
+    到适当称呼（如 "Owner"）。
+    新增 ``last_synced_from_profile_at`` 用于 P2 ProfileGenerator 回填的时间戳追踪。
+    """
 
     owner_profile_id: str = Field(min_length=1)
     display_name: str = Field(default="Owner")
-    preferred_address: str = Field(default="你")
+    preferred_address: str = Field(default="")
     timezone: str = Field(default="UTC")
     locale: str = Field(default="zh-CN")
     working_style: str = Field(default="")
@@ -194,6 +201,7 @@ class OwnerProfile(BaseModel):
     main_session_only_fields: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     version: int = Field(default=1, ge=1)
+    last_synced_from_profile_at: datetime | None = Field(default=None)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
 
