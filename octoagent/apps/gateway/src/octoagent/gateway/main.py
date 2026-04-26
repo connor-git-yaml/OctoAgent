@@ -23,23 +23,15 @@ from octoagent.provider import (
     AliasRegistry,
     EchoMessageAdapter,
     FallbackManager,
-    LiteLLMClient,
     load_provider_config,
 )
 from octoagent.gateway.services.config.config_wizard import load_config
 from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
-from octoagent.gateway.services.config.litellm_runtime import (
-    resolve_codex_backend_aliases,
-    resolve_codex_reasoning_aliases,
-    resolve_reasoning_supported_aliases,
-    resolve_responses_api_direct_params,
-)
 from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
 from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
 from octoagent.gateway.services.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from octoagent.skills import SkillRunner
-from octoagent.skills.litellm_client import LiteLLMSkillClient  # noqa: F401 (Phase 4 删除，过渡期保留)
 from octoagent.skills.provider_model_client import ProviderModelClient
 
 from .deps import require_front_door_access
@@ -136,46 +128,6 @@ def _resolve_telegram_polling_timeout(project_root: Path, default: int = 15) -> 
     if cfg is None:
         return default
     return int(cfg.channels.telegram.polling_timeout_seconds)
-
-
-def _ensure_litellm_master_key_env(project_root: Path) -> None:
-    """确保 LITELLM_MASTER_KEY 环境变量已设置。
-
-    从 litellm-config-resolved.yaml 的 general_settings.master_key 读取，
-    注入到当前进程环境变量。load_provider_config() 依赖这个变量获取
-    proxy_api_key，否则内部 chat completions 调用（如 Memory 提取）会 401。
-    """
-    if os.environ.get("LITELLM_MASTER_KEY"):
-        # Already set — no action needed
-        return
-
-    config_path = project_root / "data" / "ops" / "litellm-config-resolved.yaml"
-    try:
-        import yaml
-
-        if not config_path.exists():
-            log.warning("litellm_master_key_not_found", config_path=str(config_path))
-            return
-        with open(config_path) as f:
-            cfg = yaml.safe_load(f)
-        master_key = (cfg or {}).get("general_settings", {}).get("master_key", "")
-        if master_key:
-            os.environ["LITELLM_MASTER_KEY"] = master_key
-            log.info("litellm_master_key_injected_from_config")
-        else:
-            log.warning("litellm_master_key_not_found", config_path=str(config_path))
-    except Exception:
-        log.warning("litellm_master_key_not_found", config_path=str(config_path))
-
-
-def _resolve_stream_model_aliases(project_root: Path) -> set[str]:
-    """解析需要走流式聚合的 model aliases。"""
-    return resolve_codex_backend_aliases(project_root)
-
-
-def _resolve_responses_reasoning_aliases(project_root: Path) -> dict[str, Any]:
-    """解析需要通过 Responses API 传递的默认 reasoning 配置。"""
-    return resolve_codex_reasoning_aliases(project_root)
 
 
 def _build_runtime_alias_registry(project_root: Path) -> AliasRegistry:
@@ -424,89 +376,44 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     app.state.tool_broker = tool_broker
 
-    # LLM 服务初始化（根据配置选择模式）
-    # 确保 LITELLM_MASTER_KEY 环境变量已设置——load_provider_config 依赖它
-    # 来获取 proxy_api_key，否则内部 chat completions 调用会 401
-    _ensure_litellm_master_key_env(project_root)
+    # LLM 服务初始化
+    # Feature 081 P1：LiteLLM Proxy 已退役，统一走 ProviderRouter 直连。
+    # ProviderRouter 单例提前创建（早于 LLMService / CapabilityPackService / SkillRunner /
+    # Memory 等服务），让所有 LLM + embedding 调用共享同一个 router 实例
+    # （同一个 http_client + 同一份 alias 缓存）。
     provider_config = load_provider_config()
     app.state.provider_config = provider_config
 
-    if provider_config.llm_mode == "litellm":
-        # ProxyProcessManager: 在 LiteLLMClient 初始化之前确保 Proxy 进程就绪
-        try:
-            from octoagent.gateway.services.proxy_process_manager import ProxyProcessManager
+    from octoagent.provider import (
+        ProviderRouter as _ProviderRouter,
+        ProviderRouterMessageAdapter,
+    )
 
-            proxy_manager = ProxyProcessManager(
-                instance_root=project_root,
-                proxy_url=provider_config.proxy_base_url,
-            )
-            proxy_ok = await proxy_manager.ensure_running()
-            if not proxy_ok:
-                log.warning(
-                    "litellm_proxy_start_failed",
-                    proxy_url=provider_config.proxy_base_url,
-                )
-            app.state.proxy_manager = proxy_manager
-        except Exception as exc:
-            log.warning(
-                "proxy_process_manager_unavailable",
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
-            app.state.proxy_manager = None
+    provider_router = _ProviderRouter(
+        project_root=project_root,
+        credential_store=getattr(store_group, "credential_store", None),
+        event_store=store_group.event_store,
+    )
+    app.state.provider_router = provider_router
 
-        # LiteLLM 模式：LiteLLMClient + FallbackManager
-        # 构造 OAuth token 自动刷新回调（Feature 064c 接入 LiteLLM 调用链）：
-        # Responses API 预检查 + 401 重试时触发 PkceOAuthAdapter.resolve()，
-        # 刷新后同步 os.environ[api_key_env] 供 litellm-config.yaml 引用。
-        auth_refresh_callback = build_auth_refresh_callback(
-            project_root=project_root,
-            event_store=store_group.event_store,
-        )
-        litellm_client = LiteLLMClient(
-            proxy_base_url=provider_config.proxy_base_url,
-            proxy_api_key=provider_config.proxy_api_key.get_secret_value(),
-            timeout_s=provider_config.timeout_s,
-            stream_model_aliases=_resolve_stream_model_aliases(project_root),
-            responses_model_aliases=_resolve_stream_model_aliases(project_root),
-            responses_direct_params=resolve_responses_api_direct_params(project_root),
-            responses_reasoning_aliases=_resolve_responses_reasoning_aliases(project_root),
-            reasoning_supported_aliases=resolve_reasoning_supported_aliases(project_root),
-            auth_refresh_callback=auth_refresh_callback,
-        )
-        echo_adapter = EchoMessageAdapter()
-        fallback_manager = FallbackManager(
-            primary=litellm_client,
-            fallback=echo_adapter,
-        )
-        alias_registry = _build_runtime_alias_registry(project_root)
-        llm_service = LLMService(
-            fallback_manager=fallback_manager,
-            alias_registry=alias_registry,
-        )
-        # 保存 litellm_client 引用供健康检查使用
-        app.state.litellm_client = litellm_client
-        log.info(
-            "llm_service_initialized",
-            mode="litellm",
-            proxy_url=provider_config.proxy_base_url,
-            timeout_s=provider_config.timeout_s,
-        )
-    else:
-        # Echo 模式：与 M0 行为一致
-        echo_adapter = EchoMessageAdapter()
-        fallback_manager = FallbackManager(
-            primary=echo_adapter,
-            fallback=None,
-        )
-        alias_registry = _build_runtime_alias_registry(project_root)
-        llm_service = LLMService(
-            fallback_manager=fallback_manager,
-            alias_registry=alias_registry,
-        )
-        app.state.litellm_client = None
-        app.state.proxy_manager = None
-        log.info("llm_service_initialized", mode="echo")
+    # Feature 081 P1：FallbackManager.primary 改成 ProviderRouterMessageAdapter（直连
+    # provider）；EchoMessageAdapter 作为 fallback 兜底（无 alias 配置 / 离线时降级）。
+    # 这条路径覆盖 context_compaction.py 等直接 llm_service.call() 的入口
+    # （SkillRunner 路径在下文单独走 ProviderModelClient）。
+    fallback_manager = FallbackManager(
+        primary=ProviderRouterMessageAdapter(provider_router),
+        fallback=EchoMessageAdapter(),
+    )
+    alias_registry = _build_runtime_alias_registry(project_root)
+    llm_service = LLMService(
+        fallback_manager=fallback_manager,
+        alias_registry=alias_registry,
+    )
+    # Feature 081 P1：保留这两个 attr 兼容现有 health/control_plane 引用，
+    # 都置为 None；P3 health.py / control_plane bind_proxy_manager 会清理。
+    app.state.litellm_client = None
+    app.state.proxy_manager = None
+    log.info("llm_service_initialized", mode="provider_direct")
 
     app.state.llm_service = llm_service
     # Feature 067: 注入 LLMService 到 AgentContextService，
@@ -516,18 +423,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.alias_registry = alias_registry
     app.state.background_tasks: set[asyncio.Task] = set()
 
-    # Feature 080：ProviderRouter 单例提前创建（早于 CapabilityPackService /
-    # SkillRunner / Memory 等服务），让所有 LLM + embedding 调用共享同一个
-    # router 实例（同一个 http_client + 同一份 alias 缓存）。
-    # 不需要走 LiteLLM Proxy 启动逻辑——router 直连 provider HTTP。
-    from octoagent.provider import ProviderRouter as _ProviderRouter
-
-    provider_router = _ProviderRouter(
-        project_root=project_root,
-        credential_store=getattr(store_group, "credential_store", None),
-        event_store=store_group.event_store,
-    )
-    app.state.provider_router = provider_router
     # 让所有 AgentContextService 实例（task / orchestrator / agent_session_turn_hook
     # 等多入口）都能拿到同一个 router 实例（无需修改 5 个调用签名）
     AgentContextService.set_provider_router(provider_router)
@@ -585,40 +480,42 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.capability_pack_service.bind_mcp_installer(mcp_installer)
 
     await app.state.capability_pack_service.startup()
-    if provider_config.llm_mode == "litellm":
-        # Feature 061: 创建 ApprovalBridge 用于 ask 信号桥接
-        # Feature 072: tool_search 结果回调（late-binding，因为 llm_service 在 SkillRunner 之后创建）
-        _llm_service_ref: list[Any] = []
 
-        async def _on_tool_search_result(
-            result_json: str, task_id: str = "", trace_id: str = "",
-        ) -> None:
-            if _llm_service_ref:
-                await _llm_service_ref[0].process_tool_search_results(
-                    result_json, task_id=task_id, trace_id=trace_id,
-                )
+    # Feature 081 P1：SkillRunner 无条件创建——LiteLLM Proxy 退役后统一走
+    # ProviderRouter 直连。Echo mode 由 FallbackManager 内部兜底，不在 Runner 层处理。
+    # Feature 061: 创建 ApprovalBridge 用于 ask 信号桥接
+    # Feature 072: tool_search 结果回调（late-binding，因为 llm_service 在 SkillRunner 之后创建）
+    _llm_service_ref: list[Any] = []
 
-        # Feature 080 Phase 3+5：SkillRunner 用 ProviderModelClient + ProviderRouter
-        # 直连 provider，不再依赖 LiteLLM Proxy。router 已在上面 capability_pack
-        # 之前创建并存到 app.state.provider_router，这里复用同一实例。
-        skill_runner = SkillRunner(
-            model_client=ProviderModelClient(
-                provider_router=app.state.provider_router,
-                tool_broker=tool_broker,
-            ),
+    async def _on_tool_search_result(
+        result_json: str, task_id: str = "", trace_id: str = "",
+    ) -> None:
+        if _llm_service_ref:
+            await _llm_service_ref[0].process_tool_search_results(
+                result_json, task_id=task_id, trace_id=trace_id,
+            )
+
+    # Feature 080 Phase 3+5：SkillRunner 用 ProviderModelClient + ProviderRouter
+    # 直连 provider。router 已在上面 capability_pack 之前创建并存到
+    # app.state.provider_router，这里复用同一实例。
+    skill_runner = SkillRunner(
+        model_client=ProviderModelClient(
+            provider_router=app.state.provider_router,
             tool_broker=tool_broker,
-            event_store=store_group.event_store,
-            hooks=[AgentSessionTurnHook(store_group)],
-            on_tool_search_result=_on_tool_search_result,
-        )
-        app.state.llm_service = LLMService(
-            fallback_manager=fallback_manager,
-            alias_registry=alias_registry,
-            skill_runner=skill_runner,
-            skill_discovery=app.state.skill_discovery,
-        )
-        _llm_service_ref.append(app.state.llm_service)
-        AgentContextService.set_llm_service(app.state.llm_service)
+        ),
+        tool_broker=tool_broker,
+        event_store=store_group.event_store,
+        hooks=[AgentSessionTurnHook(store_group)],
+        on_tool_search_result=_on_tool_search_result,
+    )
+    app.state.llm_service = LLMService(
+        fallback_manager=fallback_manager,
+        alias_registry=alias_registry,
+        skill_runner=skill_runner,
+        skill_discovery=app.state.skill_discovery,
+    )
+    _llm_service_ref.append(app.state.llm_service)
+    AgentContextService.set_llm_service(app.state.llm_service)
     app.state.delegation_plane_service = DelegationPlaneService(
         project_root=project_root,
         store_group=store_group,
@@ -835,17 +732,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if hasattr(app.state, "mcp_registry") and app.state.mcp_registry:
         await app.state.mcp_registry.shutdown()
 
-    # 关闭：停止 ProxyProcessManager
-    proxy_manager = getattr(app.state, "proxy_manager", None)
-    if proxy_manager is not None:
-        try:
-            await proxy_manager.stop()
-        except Exception as exc:
-            log.warning(
-                "proxy_manager_stop_failed",
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
+    # Feature 081 P1：ProxyProcessManager 已退役，无需 shutdown 子进程
+    # （app.state.proxy_manager 总是 None；P3 删除 control_plane bind_proxy_manager 后清理）
 
     # 关闭：清理数据库连接
     update_status_store = getattr(app.state, "update_status_store", None)

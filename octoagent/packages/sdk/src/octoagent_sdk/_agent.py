@@ -283,15 +283,19 @@ class Agent:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None,
     ) -> dict[str, Any]:
-        """调用 LLM API（OpenAI-compatible）。"""
-        # 优先使用 LiteLLMClient（如果可用）
+        """调用 LLM API（OpenAI-compatible）。
+
+        Feature 081 P1：移除对已废弃的 octoagent.provider.client.LiteLLMClient
+        的探测；改成直接探测 litellm package（独立的 OpenAI 兼容 SDK，与 LiteLLM
+        Proxy 无关），不可用时 fallback 到 raw HTTP。
+        """
         try:
-            from octoagent.provider.client import LiteLLMClient
+            from litellm import acompletion  # type: ignore[import-not-found]  # noqa: F401
             return await self._call_via_litellm(messages, tools)
         except ImportError:
             pass
 
-        # 否则直接 HTTP 调用 OpenAI-compatible API
+        # 没装 litellm SDK → 直接 HTTP 调用 OpenAI-compatible API
         return await self._call_via_http(client, messages, tools)
 
     async def _call_via_litellm(

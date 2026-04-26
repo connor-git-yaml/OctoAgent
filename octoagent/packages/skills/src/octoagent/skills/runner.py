@@ -45,7 +45,10 @@ from .models import (
     is_runtime_exempt_tool,
     resolve_effective_tool_allowlist,
 )
-from .litellm_client import LLMCallError
+# Feature 081 P1：从 provider 包直接 import LLMCallError，不再通过 litellm_client。
+# ProviderModelClient（Feature 080 主 model_client）抛的也是 ProviderLLMCallError，
+# 这里 alias 为 LLMCallError 与现有签名兼容。
+from octoagent.provider import ProviderLLMCallError as LLMCallError
 from .protocols import StructuredModelClientProtocol
 
 logger = structlog.get_logger(__name__)
@@ -500,7 +503,7 @@ class SkillRunner:
         )
         for call in tool_calls:
             if allowed_tool_names and call.tool_name not in allowed_tool_names:
-                # MCP 动态工具豁免：与 LiteLLM schema 层放行策略保持一致，
+                # MCP 动态工具豁免：与 ProviderClient schema 层放行策略保持一致，
                 # 避免 LLM 在 schema 中看得见 mcp.* 但执行层拒绝导致孤立 tool_call。
                 tool_meta = await self._tool_broker.get_tool_meta(call.tool_name)
                 tool_group = tool_meta.tool_group if tool_meta else ""

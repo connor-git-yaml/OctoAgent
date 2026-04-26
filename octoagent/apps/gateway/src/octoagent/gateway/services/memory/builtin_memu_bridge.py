@@ -19,7 +19,6 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any
 
-import httpx
 import jieba
 import pyarrow as pa
 import structlog
@@ -58,7 +57,6 @@ _BM25_LAYER_ID = "lancedb-fts-bm25"
 _LEXICAL_LAYER_ID = "sqlite-metadata-lexical"
 _QWEN_QUERY_PREFIX = "Instruct: Retrieve semantically relevant bilingual memory passages.\nQuery: "
 _QWEN_RETRY_BACKOFF_SECONDS = 60.0
-_EMBEDDING_PROXY_TIMEOUT_SECONDS = 20.0
 
 # ── LanceDB 常量 ───────────────────────────────────────────────
 _REINDEX_BATCH_SIZE = 64
@@ -1037,76 +1035,49 @@ class BuiltinMemUBridge:
     ) -> list[list[float]] | None:
         """实际从 provider 获取 embedding；失败返回 None 让上层回退到 zero vector。
 
-        Phase 4 主路径：通过 ProviderRouter 直连 provider 的 ``/v1/embeddings``。
-        router 不可用（Phase 3 期间 / 单测） → fallback 到 LiteLLM Proxy 兼容路径。
+        Feature 081 P1：仅保留 ProviderRouter 直连路径。LiteLLM Proxy fallback
+        分支已删除——Feature 080 后 router 在 main.py 启动时就已注入到所有
+        AgentContextService → CapabilityPackService → MemoryRuntimeService 链路。
         """
-        if self._provider_router is not None:
-            try:
-                resolved = self._provider_router.resolve_for_alias(
-                    target_alias, task_scope=None,
-                )
-            except Exception as exc:
-                log.warning(
-                    "memory_embedding_router_resolve_failed",
-                    alias=target_alias,
-                    error_type=type(exc).__name__,
-                )
-                return None
-            try:
-                return await resolved.client.embed(
-                    model_name=resolved.model_name, texts=texts,
-                )
-            except NotImplementedError as exc:
-                # transport 不支持 embed（如 ANTHROPIC_MESSAGES）
-                log.warning(
-                    "memory_embedding_transport_unsupported",
-                    alias=target_alias,
-                    transport=resolved.client.runtime.transport.value,
-                    note=str(exc),
-                )
-                return None
-            except Exception as exc:
-                log.warning(
-                    "memory_embedding_provider_call_failed",
-                    alias=target_alias,
-                    error_type=type(exc).__name__,
-                )
-                return None
+        if self._provider_router is None:
+            log.warning(
+                "memory_embedding_router_unavailable",
+                alias=target_alias,
+                hint="ProviderRouter 未注入；调用方应通过 capability_pack 注入。",
+            )
+            return None
 
-        # Fallback：LiteLLM Proxy 兼容路径（Phase 4 完结后删除）
-        config = load_config(self._project_root)
-        if config is None:
-            return None
-        runtime = getattr(config, "runtime", None)
-        proxy_url = getattr(runtime, "litellm_proxy_url", "") if runtime else ""
-        master_key_env = getattr(runtime, "master_key_env", "") if runtime else ""
-        if not proxy_url:
-            return None
-        proxy_key = self._environ.get(master_key_env, "").strip() or "no-key"
-        headers = {
-            "Authorization": f"Bearer {proxy_key}",
-            "Content-Type": "application/json",
-        }
         try:
-            async with httpx.AsyncClient(timeout=_EMBEDDING_PROXY_TIMEOUT_SECONDS) as client:
-                response = await client.post(
-                    f"{proxy_url.rstrip('/')}/v1/embeddings",
-                    headers=headers,
-                    json={
-                        "model": target_alias,
-                        "input": texts,
-                        "encoding_format": "float",
-                    },
-                )
-                response.raise_for_status()
-                payload = response.json()
-        except Exception:
+            resolved = self._provider_router.resolve_for_alias(
+                target_alias, task_scope=None,
+            )
+        except Exception as exc:
+            log.warning(
+                "memory_embedding_router_resolve_failed",
+                alias=target_alias,
+                error_type=type(exc).__name__,
+            )
             return None
-        data = sorted(payload.get("data", []), key=lambda item: int(item.get("index", 0)))
-        return [
-            [float(value) for value in item.get("embedding", [])]
-            for item in data
-        ]
+        try:
+            return await resolved.client.embed(
+                model_name=resolved.model_name, texts=texts,
+            )
+        except NotImplementedError as exc:
+            # transport 不支持 embed（如 ANTHROPIC_MESSAGES）
+            log.warning(
+                "memory_embedding_transport_unsupported",
+                alias=target_alias,
+                transport=resolved.client.runtime.transport.value,
+                note=str(exc),
+            )
+            return None
+        except Exception as exc:
+            log.warning(
+                "memory_embedding_provider_call_failed",
+                alias=target_alias,
+                error_type=type(exc).__name__,
+            )
+            return None
 
 
 # ── 辅助函数 ────────────────────────────────────────────────────

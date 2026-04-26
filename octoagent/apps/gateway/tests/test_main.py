@@ -120,72 +120,9 @@ def test_spa_static_files_fallback_to_index_for_frontend_routes(
     assert missing_asset.status_code == 404
 
 
-def test_resolve_stream_model_aliases_from_oauth_provider(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    save_config(
-        OctoAgentConfig(
-            updated_at="2026-03-07",
-            providers=[
-                ProviderEntry(
-                    id="openai-codex",
-                    name="OpenAI Codex",
-                    auth_type="oauth",
-                    api_key_env="OPENAI_API_KEY",
-                    enabled=True,
-                ),
-                ProviderEntry(
-                    id="openrouter",
-                    name="OpenRouter",
-                    auth_type="api_key",
-                    api_key_env="OPENROUTER_API_KEY",
-                    enabled=True,
-                ),
-            ],
-            model_aliases={
-                "main": ModelAlias(
-                    provider="openai-codex",
-                    model="gpt-5.4",
-                ),
-                "cheap": ModelAlias(
-                    provider="openrouter",
-                    model="openrouter/auto",
-                ),
-            },
-        ),
-        tmp_path,
-    )
-    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
-    gateway_main = importlib.import_module("octoagent.gateway.main")
-
-    assert gateway_main._resolve_stream_model_aliases(tmp_path) == {"main"}
-
-
-def test_resolve_stream_model_aliases_falls_back_to_litellm_config(
-    tmp_path: Path,
-    monkeypatch,
-) -> None:
-    _write_litellm_config(
-        tmp_path,
-        "\n".join(
-            [
-                "model_list:",
-                "  - model_name: main",
-                "    litellm_params:",
-                "      model: gpt-5.4",
-                "      api_base: https://chatgpt.com/backend-api/codex",
-                "  - model_name: cheap",
-                "    litellm_params:",
-                "      model: openrouter/auto",
-            ]
-        )
-        + "\n",
-    )
-    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
-    gateway_main = importlib.import_module("octoagent.gateway.main")
-
-    assert gateway_main._resolve_stream_model_aliases(tmp_path) == {"main"}
+# Feature 081 P1：_resolve_stream_model_aliases / _resolve_responses_reasoning_aliases
+# 已随 LiteLLM Proxy 退役从 main.py 删除——transport 现在由 ProviderEntry.transport 直接表达，
+# 不再需要从 alias 名推断。原对应单测（test_resolve_stream_model_aliases_*）随之删除。
 
 
 def test_build_runtime_alias_registry_uses_configured_aliases(

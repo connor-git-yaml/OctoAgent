@@ -33,9 +33,8 @@ from .auth import (
     validate_setup_token,
 )
 
-# 核心组件
-from .client import LiteLLMClient
-
+# Feature 081 P1：LiteLLMClient 不再公开 export；调用方应使用 ProviderClient。
+# `octoagent.provider.client` 模块顶部已加 deprecated 标记，P4 整文件删除。
 # Feature 064: OAuth Token 刷新协调器
 from .refresh_coordinator import TokenRefreshCoordinator
 
@@ -62,8 +61,7 @@ from .exceptions import (
 from .fallback import FallbackManager
 from .models import ModelCallResult, ReasoningConfig, TokenUsage
 
-# Feature 080 Phase 1：Provider 直连抽象层
-# （Phase 4 完成 LiteLLM Proxy 退役后，将取代 LiteLLMClient 成为唯一 LLM 调用层）
+# Feature 080 Phase 1：Provider 直连抽象层（已成为唯一 LLM 调用层）
 from .auth_resolver import (
     AuthResolver,
     OAuthResolver,
@@ -74,6 +72,7 @@ from .provider_client import LLMCallError as ProviderLLMCallError
 from .provider_client import ProviderClient
 from .provider_router import ProviderRouter, ResolvedAlias
 from .provider_runtime import ProviderRuntime
+from .router_message_adapter import ProviderRouterMessageAdapter
 from .transport import ProviderTransport
 
 __all__ = [
@@ -81,7 +80,6 @@ __all__ = [
     "ModelCallResult",
     "ReasoningConfig",
     "TokenUsage",
-    "LiteLLMClient",
     "AliasConfig",
     "AliasRegistry",
     "CostTracker",
@@ -130,6 +128,7 @@ __all__ = [
     "ProviderClient",
     "ProviderLLMCallError",
     "ProviderRouter",
+    "ProviderRouterMessageAdapter",
     "ProviderRuntime",
     "ProviderTransport",
     "ResolvedAlias",
