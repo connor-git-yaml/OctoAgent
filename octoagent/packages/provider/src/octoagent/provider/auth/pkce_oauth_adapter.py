@@ -69,6 +69,19 @@ class PkceOAuthAdapter(AuthAdapter):
         self._profile_name = profile_name
         self._event_store = event_store
 
+    @property
+    def credential(self) -> OAuthCredential:
+        """Feature 080：暴露当前内存中的 credential 给上层（OAuthResolver 用来读
+        ``account_id`` 渲染 header 模板）。每次 ``refresh()`` 后内部 ``_credential``
+        会被替换为新对象，property 读总是反映最新身份。
+        """
+        return self._credential
+
+    @property
+    def profile_name(self) -> str:
+        """Feature 080：profile_name 是 store 里的对账 key。"""
+        return self._profile_name
+
     async def resolve(self, *, force_refresh: bool = False) -> str:
         """返回 access_token
 

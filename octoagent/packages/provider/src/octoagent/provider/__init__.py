@@ -62,6 +62,20 @@ from .exceptions import (
 from .fallback import FallbackManager
 from .models import ModelCallResult, ReasoningConfig, TokenUsage
 
+# Feature 080 Phase 1：Provider 直连抽象层
+# （Phase 4 完成 LiteLLM Proxy 退役后，将取代 LiteLLMClient 成为唯一 LLM 调用层）
+from .auth_resolver import (
+    AuthResolver,
+    OAuthResolver,
+    ResolvedAuth,
+    StaticApiKeyResolver,
+)
+from .provider_client import LLMCallError as ProviderLLMCallError
+from .provider_client import ProviderClient
+from .provider_router import ProviderRouter, ResolvedAlias
+from .provider_runtime import ProviderRuntime
+from .transport import ProviderTransport
+
 __all__ = [
     # Provider 核心
     "ModelCallResult",
@@ -110,6 +124,17 @@ __all__ = [
     "emit_oauth_event",
     # Feature 064: Token 刷新协调器
     "TokenRefreshCoordinator",
+    # Feature 080 Phase 1：Provider 直连抽象
+    "AuthResolver",
+    "OAuthResolver",
+    "ProviderClient",
+    "ProviderLLMCallError",
+    "ProviderRouter",
+    "ProviderRuntime",
+    "ProviderTransport",
+    "ResolvedAlias",
+    "ResolvedAuth",
+    "StaticApiKeyResolver",
     # DX 工具
     "load_project_dotenv",
 ]
