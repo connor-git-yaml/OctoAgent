@@ -49,6 +49,8 @@ _BLACKLIST_DIRS = frozenset({
 })
 
 # instance root 下永远禁止 Agent 访问的文件名模式
+# Feature 081 P3：保留 ``litellm-config.yaml`` 作为黑名单条目——P4 删除生成器后
+# 用户仍可能保留历史 litellm-config 文件，路径策略仍应阻止 Agent 读取。
 _BLACKLIST_FILES = frozenset({
     "octoagent.yaml",
     "litellm-config.yaml",

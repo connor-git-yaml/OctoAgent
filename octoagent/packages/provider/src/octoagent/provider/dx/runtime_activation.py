@@ -1,23 +1,27 @@
 """统一的真实模型激活服务。
 
-负责：
+历史职责（Feature 080 之前）：
 1. 加载实例根目录下的 .env / .env.litellm
 2. 为 home-instance / repo 开发态定位 docker-compose.litellm.yml
 3. 拉起 LiteLLM Proxy 并等待 liveliness 就绪
+
+Feature 081 P3 退役：
+- LiteLLM Proxy 已不再启动 → start_proxy() / build_compose_up_command() 全部
+  改成返回 deprecation 提示（不再实际操作 docker compose）
+- resolve_source_root() 改成 best-effort，缺失 docker-compose.litellm.yml 不抛错
+  返回当前 instance root 即可（doctor / init_wizard 仍会调用，但展示文案改写）
+- load_runtime_env() 保留，仍读取 .env.litellm（兼容窗口至 P4）
+- 文件本身在 P4 拆分：保留 load_runtime_env 部分（重命名后），移除 docker-compose 部分
 """
 
 from __future__ import annotations
 
-import asyncio
-import os
-import subprocess
 import warnings
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import httpx
-
-from octoagent.gateway.services.config.config_wizard import load_config
+# Feature 081 P3：移除 asyncio / subprocess / httpx / load_config 等 imports，
+# 它们曾用于实际启动 LiteLLM Proxy + 等待 ready，本 Phase 后这些功能已退役。
 from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
 from .update_status_store import UpdateStatusStore
 
@@ -64,117 +68,58 @@ class RuntimeActivationService:
         load_dotenv(dotenv_path=str(env_litellm_path), override=override)
 
     def resolve_source_root(self) -> Path:
-        """解析 docker compose 所在源码目录。"""
+        """解析当前实例的 source root。
+
+        Feature 081 P3：不再要求 docker-compose.litellm.yml 存在。
+        Provider 直连后没有 LiteLLM 容器需要管理，source root 仅用于其他诊断展示。
+        """
         descriptor = self._status_store.load_runtime_descriptor()
         if descriptor is not None:
             candidate = Path(descriptor.project_root).expanduser().resolve()
-            if (candidate / "docker-compose.litellm.yml").exists():
+            if candidate.exists():
                 return candidate
 
-        if (self._root / "docker-compose.litellm.yml").exists():
+        if self._root.exists():
             return self._root
 
         home_source_root = self._root / "app" / "octoagent"
-        if (home_source_root / "docker-compose.litellm.yml").exists():
+        if home_source_root.exists():
             return home_source_root
 
-        raise RuntimeActivationError("未找到 docker-compose.litellm.yml，无法启动 LiteLLM Proxy")
+        return self._root  # 兜底：返回 instance root 本身
 
     def resolve_proxy_url(self) -> str:
-        """解析当前实例期望使用的 LiteLLM Proxy 地址。"""
-        config = load_config(self._root)
-        if config is not None:
-            return config.runtime.litellm_proxy_url
-        return os.environ.get("LITELLM_PROXY_URL", "http://localhost:4000")
+        """Feature 081 P3：保留接口，仅返回 deprecation 标记字符串。
+
+        Provider 直连后已无 Proxy URL 概念。本方法仅供 doctor / init_wizard 等
+        老路径继续调用不挂；返回值不应被用于实际 HTTP 调用。
+        """
+        return ""
 
     def build_compose_up_command(self) -> str:
-        """生成可直接复制执行的 LiteLLM Proxy 启动命令。"""
-        source_root = self.resolve_source_root()
-        compose_file = source_root / "docker-compose.litellm.yml"
-        env_file = self._root / ".env.litellm"
+        """Feature 081 P3：返回 deprecation 提示而非实际 compose 命令。
+
+        Provider 直连后无需启动 LiteLLM 容器；调用方（doctor / init_wizard）
+        展示此字符串时实际是给用户看 retire 状态。
+        """
         return (
-            f'OCTOAGENT_INSTANCE_ROOT="{self._root}" '
-            f'docker compose --env-file "{env_file}" '
-            f'-f "{compose_file}" up -d --force-recreate'
+            "# Feature 081：LiteLLM Proxy 已退役，无需启动。"
+            " 请运行 `octo config migrate-080` 升级配置；运行时已统一走 ProviderRouter 直连。"
         )
 
     async def start_proxy(self, *, timeout_seconds: float = 25.0) -> RuntimeActivationSummary:
-        """拉起 LiteLLM Proxy 并等待 liveliness。
+        """Feature 081 P3：禁用启动逻辑，直接抛 deprecation 错误。
 
-        .. deprecated::
-            Gateway 主流程已改用 ``ProxyProcessManager`` 管理 Proxy 生命周期。
-            本方法仅保留供 CLI 等旧路径使用，后续版本将移除。
+        Provider 直连后无 Proxy 需要启动；任何调用都说明上游路径需要更新。
+        P4 中本方法会被整体删除。
         """
         warnings.warn(
-            "start_proxy() 已弃用，Gateway 主流程改用 ProxyProcessManager。",
+            "RuntimeActivationService.start_proxy() 已退役（Feature 081 P3）。"
+            " Provider 直连后 LiteLLM Proxy 不再启动；请移除调用方对该方法的依赖。",
             DeprecationWarning,
             stacklevel=2,
         )
-        self.load_runtime_env(override=True)
-
-        env_file = self._root / ".env.litellm"
-        if not env_file.exists():
-            raise RuntimeActivationError("缺少 .env.litellm，无法启动 LiteLLM Proxy")
-
-        source_root = self.resolve_source_root()
-        compose_file = source_root / "docker-compose.litellm.yml"
-        await asyncio.to_thread(
-            self._compose_up,
-            source_root=source_root,
-            compose_file=compose_file,
-        )
-
-        proxy_url = self.resolve_proxy_url()
-        await self._wait_for_proxy(proxy_url, timeout_seconds=timeout_seconds)
-        return RuntimeActivationSummary(
-            project_root=str(self._root),
-            source_root=str(source_root),
-            compose_file=str(compose_file),
-            proxy_url=proxy_url,
-            managed_runtime=self.has_managed_runtime(),
-        )
-
-    def _compose_up(self, *, source_root: Path, compose_file: Path) -> None:
-        env = os.environ.copy()
-        env.setdefault("OCTOAGENT_INSTANCE_ROOT", str(self._root))
-        env.setdefault("OCTOAGENT_PROJECT_ROOT", str(self._root))
-        env_file = self._root / ".env.litellm"
-        command = [
-            "docker",
-            "compose",
-            "--env-file",
-            str(env_file),
-            "-f",
-            str(compose_file),
-            "up",
-            "-d",
-            "--force-recreate",
-        ]
-        result = subprocess.run(
-            command,
-            cwd=source_root,
-            env=env,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            details = result.stderr.strip() or result.stdout.strip()
-            raise RuntimeActivationError(details or "docker compose up -d 执行失败")
-
-    async def _wait_for_proxy(self, proxy_url: str, *, timeout_seconds: float) -> None:
-        deadline = asyncio.get_running_loop().time() + timeout_seconds
-        last_error = ""
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            while asyncio.get_running_loop().time() < deadline:
-                try:
-                    response = await client.get(f"{proxy_url}/health/liveliness")
-                    if response.status_code == 200:
-                        return
-                    last_error = f"status={response.status_code}"
-                except Exception as exc:
-                    last_error = str(exc)
-                await asyncio.sleep(1.0)
         raise RuntimeActivationError(
-            f"LiteLLM Proxy 在 {int(timeout_seconds)} 秒内未就绪：{last_error or proxy_url}"
+            "LiteLLM Proxy 已退役（Feature 081）；运行时统一走 ProviderRouter 直连，"
+            " 不再有 Proxy 子进程需要启动。请运行 `octo config migrate-080` 升级。"
         )

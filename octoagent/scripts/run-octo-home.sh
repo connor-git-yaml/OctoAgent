@@ -15,6 +15,9 @@ if [[ -f "${INSTANCE_ROOT}/.env" ]]; then
   set +a
 fi
 
+# Feature 081 P3：兼容窗口——老用户仍可能在 .env.litellm 内有 API key，
+# 在 P4 删除 .env.litellm 之前继续读取，让用户跑 `octo config migrate-080`
+# 主动迁移。P4 完成后此分支会随 .env.litellm 文件一起被清理。
 if [[ -f "${INSTANCE_ROOT}/.env.litellm" ]]; then
   set -a
   # shellcheck disable=SC1090
@@ -22,18 +25,9 @@ if [[ -f "${INSTANCE_ROOT}/.env.litellm" ]]; then
   set +a
 fi
 
-# Docker daemon best-effort 预热：提前触发 Docker Desktop / systemd docker 启动，
-# 使后续 LiteLLM Proxy 激活时 daemon 已就绪，缩短感知延迟。
-# OCTOAGENT_AUTOSTART_DOCKER=0 禁用；OCTOAGENT_DOCKER_DAEMON_TIMEOUT 控制超时。
-if [[ "${OCTOAGENT_AUTOSTART_DOCKER:-1}" == "1" ]]; then
-  (
-    cd "${PROJECT_ROOT}"
-    uv run python -m octoagent.provider.dx.docker_daemon \
-      --ensure --quiet \
-      --timeout "${OCTOAGENT_DOCKER_DAEMON_TIMEOUT:-30}" \
-      >/dev/null 2>&1 || true
-  ) &
-fi
+# Feature 081 P3：删除 Docker daemon 预热逻辑。
+# Provider 直连后 Gateway 不再启动 LiteLLM Proxy 子进程（也不需要 docker-compose
+# 启动 LiteLLM 容器），用户机不需要 Docker daemon。
 
 cd "${PROJECT_ROOT}"
 exec uv run uvicorn octoagent.gateway.main:app \
