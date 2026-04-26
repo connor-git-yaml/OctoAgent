@@ -22,6 +22,7 @@ from .config_schema import (
     OctoAgentConfig,
     ProviderEntry,
     ProviderNotFoundError,
+    detect_legacy_yaml_keys,
 )
 
 log = structlog.get_logger()
@@ -73,6 +74,27 @@ def load_config(project_root: Path) -> OctoAgentConfig | None:
             message=f"无法读取 octoagent.yaml：{exc}",
             field_path="(file)",
         ) from exc
+
+    # Feature 081 P2：在 raw YAML 层做 legacy schema 检测（修 Codex F2）。
+    # 必须在 Pydantic 解析之前——一旦经过 model_validate 旧字段会被默认值填充，
+    # 无法区分用户实际配过 vs 用了默认值。
+    try:
+        import yaml as _yaml  # 局部 import，避免污染模块顶层
+
+        raw = _yaml.safe_load(text)
+        legacy_keys = detect_legacy_yaml_keys(raw)
+        if legacy_keys:
+            log.warning(
+                "octoagent_yaml_legacy_schema_detected",
+                path=str(yaml_path),
+                keys=legacy_keys,
+                hint="请运行 `octo config migrate-080` 升级到新 schema（v2）",
+            )
+    except Exception as exc:  # 检测失败不应影响主流程
+        log.debug(
+            "legacy_yaml_detection_skipped",
+            error_type=type(exc).__name__,
+        )
 
     return OctoAgentConfig.from_yaml(text)
 

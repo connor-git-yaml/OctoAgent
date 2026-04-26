@@ -995,3 +995,103 @@ def _print_migration_run(run, *, heading: str) -> None:
         console.print(f"rollback.delete_project_ids={len(run.rollback_plan.delete_project_ids)}")
     if run.error_message:
         console.print(f"[red]error: {run.error_message}[/red]")
+
+
+# ---------------------------------------------------------------------------
+# config migrate-080（Feature 081 P2：yaml + .env.litellm 双对象迁移）
+# ---------------------------------------------------------------------------
+
+
+@config.command("migrate-080")
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="只打印迁移计划，不写入文件",
+)
+@click.pass_context
+def config_migrate_080(ctx: click.Context, dry_run: bool) -> None:
+    """Feature 080/081：把 octoagent.yaml 升级到 v2 schema + 迁移 .env.litellm 凭证。
+
+    \b
+    yaml 迁移：
+      - config_version: 1 → 2
+      - 推断每个 provider 的 transport（按 id / api_base，与 ProviderRouter 同源）
+      - auth_type + api_key_env → auth: {kind: api_key, env: ...}
+      - auth_type=oauth → auth: {kind: oauth, profile: '{id}-default'}
+      - runtime.{llm_mode, litellm_proxy_url, master_key_env} 保留为 deprecated
+        （运行时已忽略，下个 minor 版本删除）
+      - 失败时不破坏原文件，自动备份 → octoagent.yaml.bak.080-yaml-{timestamp}
+
+    \b
+    凭证迁移：
+      - .env.litellm 内容合并到 .env（已存在的键不覆盖）
+      - 备份 → .env.litellm.bak.080-env-{timestamp}
+      - 不删除 .env.litellm 原文件——保留兼容读取窗口至 P4
+
+    \b
+    Examples:
+      octo config migrate-080 --dry-run    # 看一眼迁移计划
+      octo config migrate-080              # 实际执行
+    """
+    from .migrate_080 import execute_migrate_080
+
+    yaml_path = ctx.obj.get("yaml_path") if ctx.obj else None
+    project_root = _resolve_project_root(yaml_path)
+
+    result = execute_migrate_080(project_root, dry_run=dry_run)
+    plan = result.plan
+
+    # ── 输出 yaml 段落 ──
+    console.print()
+    console.print("[bold]Feature 080/081 Migration[/bold]")
+    console.print("══════════════════════════════════════════════")
+    console.print(f"project_root: {project_root}")
+    console.print()
+
+    console.print("[bold]octoagent.yaml[/bold]")
+    if plan.yaml_already_v2:
+        console.print(f"  [green]✓[/green] {plan.yaml_changes[0] if plan.yaml_changes else '已是 v2'}")
+    else:
+        for change in plan.yaml_changes:
+            prefix = "  •"
+            if change.startswith("⚠️"):
+                prefix = "  [yellow]⚠️[/yellow]"
+                change = change[len("⚠️"):].strip()
+            console.print(f"{prefix} {change}")
+        if not dry_run:
+            if result.yaml_written:
+                console.print(f"  [green]✓ 写入完成[/green]：{plan.yaml_path}")
+                if plan.yaml_backup_path:
+                    console.print(f"  [dim]备份：{plan.yaml_backup_path}[/dim]")
+            else:
+                console.print("  [yellow]未写入 yaml[/yellow]")
+
+    # ── 输出 env 段落 ──
+    console.print()
+    console.print("[bold].env.litellm → .env[/bold]")
+    if plan.env_already_migrated:
+        console.print(f"  [green]✓[/green] {plan.env_changes[0] if plan.env_changes else '已迁移'}")
+    else:
+        for change in plan.env_changes:
+            console.print(f"  • {change}")
+        for conflict in plan.env_conflicts:
+            console.print(f"  [yellow]⚠️ 冲突[/yellow] {conflict}")
+        if not dry_run:
+            if result.env_written:
+                console.print(f"  [green]✓ 写入完成[/green]：{plan.env_target_path}")
+                if plan.env_backup_path:
+                    console.print(f"  [dim]备份：{plan.env_backup_path}[/dim]")
+            else:
+                console.print("  [yellow]未写入 .env[/yellow]")
+
+    # ── 错误 ──
+    if result.error:
+        console.print()
+        console.print(f"[red]错误：{result.error}[/red]")
+        raise SystemExit(1)
+
+    # ── dry-run 提示 ──
+    if dry_run:
+        console.print()
+        console.print("[dim]DRY-RUN 模式：未写入任何文件。运行 `octo config migrate-080` 实际执行。[/dim]")

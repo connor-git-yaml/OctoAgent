@@ -3,13 +3,20 @@
 定义 octoagent.yaml 的 Pydantic v2 数据模型。
 所有 Provider/ModelAlias/RuntimeConfig/OctoAgentConfig 实体均在此文件定义。
 对应 FR-001 ~ FR-004，data-model.md 全部实体定义。
+
+Feature 081 P2 升级：
+- ProviderEntry 加 ``transport`` / ``api_base`` / ``auth`` first-class 字段
+- 旧 ``auth_type`` / ``api_key_env`` / ``base_url`` 标 deprecated 但保留可读
+- ``RuntimeConfig.llm_mode`` / ``litellm_proxy_url`` / ``master_key_env`` 标 deprecated
+  保留可读，运行时被忽略；用 ``detect_legacy_yaml_keys()`` 在 raw YAML 层检测
+- 新增 ``CONFIG_VERSION_CURRENT = 2``；migrate-080 命令负责 v1 → v2 迁移
 """
 
 from __future__ import annotations
 
 import ipaddress
 import warnings
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Union
 
 import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -31,6 +38,18 @@ _ROUTED_PROVIDER_MODEL_PREFIXES: dict[str, str] = {
     "openrouter": "openrouter",
     "github": "github",
 }
+
+# Feature 081 P2：当前 schema 版本号
+# v1 = 历史 schema（含 runtime.llm_mode / litellm_proxy_url / master_key_env）
+# v2 = Feature 081 schema（runtime LiteLLM 字段 deprecated，ProviderEntry 加 transport/auth）
+CONFIG_VERSION_CURRENT = 2
+
+# Feature 081 P2：runtime 块下的 legacy 字段名（用于 raw YAML 检测）
+_RUNTIME_LEGACY_KEYS: tuple[str, ...] = (
+    "llm_mode",
+    "litellm_proxy_url",
+    "master_key_env",
+)
 
 # ---------------------------------------------------------------------------
 # 辅助错误类型
@@ -62,6 +81,56 @@ class ProviderNotFoundError(KeyError):
     """引用了不存在的 Provider ID"""
 
 
+def detect_legacy_yaml_keys(raw: dict[str, Any] | None) -> list[str]:
+    """Feature 081 P2：在 raw YAML 字典上做 legacy schema 检测（修 Codex F2）。
+
+    必须在 Pydantic 解析之前调用——一旦经过 ``model_validate`` 会有两种坏情况：
+    1. legacy 字段被 ``extra='ignore'`` 默认配置吞掉，无法检测
+    2. 旧字段保留为可读（当前设计），运行时仍读到默认值，无法区分用户实际配过
+
+    Args:
+        raw: ``yaml.safe_load(yaml_path.read_text())`` 的结果
+
+    Returns:
+        命中的 legacy key 路径列表（如 ``["runtime.llm_mode",
+        "runtime.litellm_proxy_url", "config_version<2"]``）。
+        空列表表示当前 yaml 已是 v2 schema。
+    """
+    if not isinstance(raw, dict):
+        return []
+
+    legacy_keys: list[str] = []
+
+    runtime = raw.get("runtime")
+    if isinstance(runtime, dict):
+        for key in _RUNTIME_LEGACY_KEYS:
+            if key in runtime:
+                legacy_keys.append(f"runtime.{key}")
+
+    # config_version 缺失或 < 当前版本 → 视为 legacy
+    config_version = raw.get("config_version", 1)
+    try:
+        if int(config_version) < CONFIG_VERSION_CURRENT:
+            legacy_keys.append(f"config_version<{CONFIG_VERSION_CURRENT}")
+    except (TypeError, ValueError):
+        legacy_keys.append("config_version<invalid")
+
+    # 任一 provider 用旧字段 → 视为 legacy
+    providers = raw.get("providers")
+    if isinstance(providers, list):
+        for idx, p in enumerate(providers):
+            if not isinstance(p, dict):
+                continue
+            if "auth_type" in p:
+                legacy_keys.append(f"providers[{idx}].auth_type")
+            if "api_key_env" in p:
+                legacy_keys.append(f"providers[{idx}].api_key_env")
+            if "base_url" in p:
+                legacy_keys.append(f"providers[{idx}].base_url")
+
+    return legacy_keys
+
+
 def normalize_provider_model_string(provider_id: str, model_name: str) -> str:
     """将用户输入的模型名规范化为 provider-aware LiteLLM 字符串。
 
@@ -89,10 +158,43 @@ def normalize_provider_model_string(provider_id: str, model_name: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+class AuthApiKey(BaseModel):
+    """Feature 081 P2：API Key 认证 first-class schema。"""
+
+    kind: Literal["api_key"] = Field(default="api_key", description="discriminator")
+    env: str = Field(
+        min_length=1,
+        pattern=_ENV_NAME_PATTERN,
+        description="凭证所在环境变量名（如 'OPENROUTER_API_KEY'）。仅存变量名称，不存实际值。",
+    )
+
+
+class AuthOAuth(BaseModel):
+    """Feature 081 P2：OAuth 认证 first-class schema。"""
+
+    kind: Literal["oauth"] = Field(default="oauth", description="discriminator")
+    profile: str = Field(
+        min_length=1,
+        description="auth-profiles.json 内的 profile 名称（如 'openai-codex-default'）",
+    )
+
+
+ProviderAuth = Annotated[
+    Union[AuthApiKey, AuthOAuth],
+    Field(discriminator="kind"),
+]
+
+
 class ProviderEntry(BaseModel):
     """Provider 条目 — octoagent.yaml providers[] 列表元素
 
-    不存储凭证值本身，凭证通过 api_key_env 引用环境变量（Constitution C5）。
+    不存储凭证值本身，凭证通过 ``auth`` / ``api_key_env`` 引用环境变量
+    或 ``auth-profiles.json``（Constitution C5）。
+
+    Feature 081 P2 升级：
+    - 新增 ``transport`` / ``api_base`` / ``auth`` first-class 字段
+    - 旧 ``auth_type`` / ``api_key_env`` / ``base_url`` 标 deprecated 但保留可读
+    - ``model_validator`` 自动把旧字段映射到新字段（backward-compat）
     """
 
     id: str = Field(
@@ -104,21 +206,66 @@ class ProviderEntry(BaseModel):
         description="Provider 显示名称（如 'OpenRouter'）",
         min_length=1,
     )
-    auth_type: Literal["api_key", "oauth"] = Field(
-        description="认证类型",
+    enabled: bool = Field(
+        default=True,
+        description="是否参与配置生成（False 时不生成 ProviderRouter 条目）",
+    )
+
+    # ── Feature 081 P2 新字段（first-class）──
+    transport: Literal["openai_chat", "openai_responses", "anthropic_messages"] | None = Field(
+        default=None,
+        description=(
+            "LLM 调用协议；不设时由 ProviderRouter 按 id / api_base 推断"
+            "（与 fallback 推断同源）。可选值：openai_chat / openai_responses / anthropic_messages"
+        ),
+    )
+    api_base: str = Field(
+        default="",
+        description="Provider HTTP 基础 URL（替代旧 base_url）。留空使用 Provider 默认。",
+    )
+    auth: ProviderAuth | None = Field(
+        default=None,
+        description=(
+            "认证配置（discriminated union）。不设时由 ``auth_type`` + ``api_key_env`` "
+            "自动迁移（backward-compat）。"
+        ),
+    )
+
+    # ── Deprecated 字段（Feature 081 P2 标记，保留可读，下个 minor 删除）──
+    auth_type: Literal["api_key", "oauth"] | None = Field(
+        default=None,
+        deprecated=True,
+        description="DEPRECATED Feature 081 P2：使用 ``auth.kind`` 替代",
     )
     api_key_env: str = Field(
-        description="凭证所在环境变量名（如 'OPENROUTER_API_KEY'）。仅存变量名称，不存实际值。",
-        pattern=_ENV_NAME_PATTERN,
+        default="",
+        pattern=_OPTIONAL_ENV_NAME_PATTERN,
+        deprecated=True,
+        description="DEPRECATED Feature 081 P2：使用 ``auth.env``（kind=api_key）替代",
     )
     base_url: str = Field(
         default="",
-        description="自定义 API Base URL（如 'https://api.siliconflow.cn/v1'）。留空使用 Provider 默认。",
+        deprecated=True,
+        description="DEPRECATED Feature 081 P2：使用 ``api_base`` 替代",
     )
-    enabled: bool = Field(
-        default=True,
-        description="是否参与配置生成（False 时不生成 litellm-config 条目）",
-    )
+
+    @model_validator(mode="after")
+    def _migrate_legacy_to_new_fields(self) -> ProviderEntry:
+        """Feature 081 P2：把 deprecated 旧字段自动映射到新字段。
+
+        - ``base_url`` → ``api_base``（仅当新字段为空）
+        - ``auth_type`` + ``api_key_env`` → ``auth.kind`` + ``auth.env``/``profile``
+          （仅当 ``auth`` 为 None）
+        """
+        if not self.api_base and self.base_url:
+            self.api_base = self.base_url
+        if self.auth is None:
+            if self.auth_type == "api_key" and self.api_key_env:
+                self.auth = AuthApiKey(env=self.api_key_env)
+            elif self.auth_type == "oauth":
+                # OAuth profile 名称按惯例为 ``{provider_id}-default``
+                self.auth = AuthOAuth(profile=f"{self.id}-default")
+        return self
 
 
 # ---------------------------------------------------------------------------
@@ -179,20 +326,43 @@ class RuntimeConfig(BaseModel):
 
     控制 OctoAgent 运行时行为，与 .env 独立。
     运行时优先读此配置，降级到 .env（Q3 决策）。
+
+    Feature 081 P2 升级：
+    - ``llm_mode`` / ``litellm_proxy_url`` / ``master_key_env`` 全部标 deprecated
+    - 字段保留可读供 legacy yaml 启动正常 + 触发 deprecation warning
+    - 运行时 LLM 调用统一走 ProviderRouter，不再读取这三个字段
+    - 用 ``detect_legacy_yaml_keys()`` 在 raw YAML 层做检测（在 Pydantic 解析之前）
     """
 
+    # ── Feature 081 P2：字段全部标记 deprecated，保留默认值供 legacy 路径兼容 ──
+    # 默认值与历史相同——P1-P3 期间老的 setup_service / litellm_generator / cli wizard
+    # 仍会读写这些字段（虽然运行时不消费）；P4 删除这些 legacy 路径后字段才彻底无用。
+    # 用户层 deprecation 检测在 raw YAML 层做（``detect_legacy_yaml_keys``），
+    # 检查用户文件里**实际**有没有这些 key——不依赖 Pydantic 默认值。
     llm_mode: Literal["litellm", "echo"] = Field(
         default="litellm",
-        description="LLM 运行模式：litellm（真实调用）/ echo（开发测试回显）",
+        deprecated=True,
+        description=(
+            "DEPRECATED Feature 081 P2：LiteLLM Proxy 已退役，运行时不再消费此字段。"
+            " 请运行 `octo config migrate-080` 升级。"
+        ),
     )
     litellm_proxy_url: str = Field(
         default="http://localhost:4000",
-        description="LiteLLM Proxy 地址",
+        deprecated=True,
+        description=(
+            "DEPRECATED Feature 081 P2：LiteLLM Proxy 已退役。"
+            " 请运行 `octo config migrate-080` 升级。"
+        ),
     )
     master_key_env: str = Field(
         default="LITELLM_MASTER_KEY",
-        description="Master Key 所在的环境变量名",
         pattern=_ENV_NAME_PATTERN,
+        deprecated=True,
+        description=(
+            "DEPRECATED Feature 081 P2：LiteLLM Master Key 不再使用。"
+            " 请运行 `octo config migrate-080` 升级。"
+        ),
     )
 
 
