@@ -760,6 +760,88 @@ class ProviderClient:
         }
         return content, tool_calls, metadata
 
+    # ──────────────── EMBEDDINGS（OPENAI_CHAT 专用） ────────────────
+
+    async def embed(
+        self,
+        *,
+        model_name: str,
+        texts: list[str],
+        encoding_format: str = "float",
+    ) -> list[list[float]]:
+        """获取文本向量。仅 OPENAI_CHAT transport 支持（最广，覆盖 SiliconFlow /
+        OpenAI / Together AI 等所有 OpenAI 兼容 embedding endpoint）。
+
+        Phase 4 用于 memory bridge：从 LiteLLM Proxy 切到 provider 直连后，
+        embedding 调用也通过本方法。
+
+        Args:
+            model_name: provider 端的实际 embedding 模型名（如 ``Qwen/Qwen3-
+                Embedding-0.6B`` / ``text-embedding-3-small``）
+            texts: 输入文本列表；空列表直接返回空结果
+            encoding_format: ``float`` / ``base64``，默认 ``float``
+
+        Returns:
+            与 ``texts`` 等长的 vector list；调用失败时抛 LLMCallError
+            （memory 调用方可以捕获后回退到 zero vector）
+        """
+        if self._runtime.transport != ProviderTransport.OPENAI_CHAT:
+            raise NotImplementedError(
+                f"embed() 仅支持 OPENAI_CHAT transport，当前 {self._runtime.transport}",
+            )
+        if not texts:
+            return []
+
+        auth = await self._runtime.auth_resolver.resolve()
+        body = {
+            "model": model_name,
+            "input": list(texts),
+            "encoding_format": encoding_format,
+        }
+        body.update(self._runtime.extra_body)
+        target_url = f"{self._runtime.api_base}/v1/embeddings"
+        target_headers = {
+            "Authorization": f"Bearer {auth.bearer_token}",
+            "Content-Type": "application/json",
+            **self._runtime.extra_headers,
+            **auth.extra_headers,
+        }
+
+        try:
+            response = await self._http.post(
+                target_url,
+                json=body,
+                headers=target_headers,
+            )
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            raise _classify_provider_error(exc) from exc
+
+        if response.status_code >= 400:
+            error_body = response.text[:500]
+            log.error(
+                "provider_client_embed_error",
+                status=response.status_code,
+                body=error_body,
+                provider_id=self._runtime.provider_id,
+                model=model_name,
+            )
+            raise _classify_provider_error(
+                httpx.HTTPStatusError(
+                    f"Embeddings returned {response.status_code}: {error_body}",
+                    request=response.request,
+                    response=response,
+                ),
+                status_code=response.status_code,
+            )
+
+        payload = response.json()
+        data = sorted(
+            payload.get("data", []), key=lambda item: int(item.get("index", 0)),
+        )
+        return [
+            [float(v) for v in item.get("embedding", [])] for item in data
+        ]
+
     # ──────────────── ANTHROPIC_MESSAGES ────────────────
 
     async def _call_anthropic_messages(

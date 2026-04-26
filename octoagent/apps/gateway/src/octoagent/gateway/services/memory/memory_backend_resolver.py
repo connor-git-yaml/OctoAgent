@@ -27,10 +27,13 @@ class MemoryBackendResolver:
         store_group=None,
         environ: dict[str, str] | None = None,
         client_factory=None,
+        provider_router=None,
     ) -> None:
         self._project_root = resolve_project_root(project_root).resolve()
         self._stores = store_group
         self._cached_bridge: MemoryBackend | None = None
+        # Feature 080 Phase 4：embedding 走 ProviderRouter 直连，不再 LiteLLM Proxy
+        self._provider_router = provider_router
         # environ / client_factory 保留签名兼容，不再使用
         _ = environ, client_factory
 
@@ -60,6 +63,7 @@ class MemoryBackendResolver:
             project_binding=binding_ref,
             project_root=self._project_root,
             lancedb_dir=lancedb_dir,
+            provider_router=self._provider_router,
         )
         return self._cached_bridge
 

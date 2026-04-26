@@ -27,14 +27,19 @@ class MemoryRuntimeService:
         store_group,
         memory_store: SqliteMemoryStore | None = None,
         reranker_service: Any | None = None,
+        provider_router: Any | None = None,
     ) -> None:
         self._project_root = resolve_project_root(project_root).resolve()
         self._stores = store_group
         self._memory_store = memory_store or SqliteMemoryStore(store_group.conn)
         self._reranker_service = reranker_service
+        # Feature 080 Phase 4：embedding 走 ProviderRouter 直连（router 可选，
+        # 没传时 BuiltinMemUBridge 回退 LiteLLM Proxy 兼容路径）
+        self._provider_router = provider_router
         self._backend_resolver = MemoryBackendResolver(
             self._project_root,
             store_group=store_group,
+            provider_router=provider_router,
         )
         self._retrieval_platform_service = RetrievalPlatformService(
             self._project_root,
