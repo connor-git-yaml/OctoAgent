@@ -515,11 +515,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     AgentContextService.set_llm_service(llm_service)
     app.state.alias_registry = alias_registry
     app.state.background_tasks: set[asyncio.Task] = set()
+
+    # Feature 080：ProviderRouter 单例提前创建（早于 CapabilityPackService /
+    # SkillRunner / Memory 等服务），让所有 LLM + embedding 调用共享同一个
+    # router 实例（同一个 http_client + 同一份 alias 缓存）。
+    # 不需要走 LiteLLM Proxy 启动逻辑——router 直连 provider HTTP。
+    from octoagent.provider import ProviderRouter as _ProviderRouter
+
+    provider_router = _ProviderRouter(
+        project_root=project_root,
+        credential_store=getattr(store_group, "credential_store", None),
+        event_store=store_group.event_store,
+    )
+    app.state.provider_router = provider_router
+    # 让所有 AgentContextService 实例（task / orchestrator / agent_session_turn_hook
+    # 等多入口）都能拿到同一个 router 实例（无需修改 5 个调用签名）
+    AgentContextService.set_provider_router(provider_router)
+
     app.state.capability_pack_service = CapabilityPackService(
         project_root=project_root,
         store_group=store_group,
         tool_broker=tool_broker,
         approval_override_cache=approval_override_cache,
+        # Feature 080 Phase 5：把 router 注入到 capability_pack，让其内部的
+        # MemoryRuntimeService → MemoryBackendResolver → BuiltinMemUBridge 都
+        # 拿到 router，embedding 走 ProviderRouter 直连而不是 LiteLLM Proxy
+        provider_router=provider_router,
     )
     # Feature 057: 挂载 SkillDiscovery 到 app.state 供依赖注入
     app.state.skill_discovery = app.state.capability_pack_service.skill_discovery
@@ -577,25 +598,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     result_json, task_id=task_id, trace_id=trace_id,
                 )
 
-        # Feature 080 Phase 3：把 SkillRunner 从 LiteLLMSkillClient（→ LiteLLM Proxy）
-        # 切到 ProviderModelClient（→ provider 直连 ProviderRouter）。
-        # OAuth refresh / token sync / 401&403 retry / alias task scope locking 全部
-        # 内化到 ProviderRouter + ProviderClient + OAuthResolver 中，这一层不再需要
-        # auth_refresh_callback / responses_direct_params / proxy_url。
-        from octoagent.provider import ProviderRouter as _ProviderRouter
-
-        provider_router = _ProviderRouter(
-            project_root=project_root,
-            credential_store=store_group.credential_store
-            if hasattr(store_group, "credential_store")
-            else None,
-            event_store=store_group.event_store,
-        )
-        app.state.provider_router = provider_router
-
+        # Feature 080 Phase 3+5：SkillRunner 用 ProviderModelClient + ProviderRouter
+        # 直连 provider，不再依赖 LiteLLM Proxy。router 已在上面 capability_pack
+        # 之前创建并存到 app.state.provider_router，这里复用同一实例。
         skill_runner = SkillRunner(
             model_client=ProviderModelClient(
-                provider_router=provider_router,
+                provider_router=app.state.provider_router,
                 tool_broker=tool_broker,
             ),
             tool_broker=tool_broker,

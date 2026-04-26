@@ -549,11 +549,23 @@ class AgentContextService:
 
     # 启动时由 main.py 设置，所有实例共享
     _shared_llm_service: Any | None = None
+    # Feature 080 Phase 5：ProviderRouter 单例。main.py lifespan 在所有 service 创建
+    # 之前 set_provider_router(...)，让 task / orchestrator 等多入口都能拿到同一个 router。
+    _shared_provider_router: Any | None = None
 
     @classmethod
     def set_llm_service(cls, llm_service: Any) -> None:
         """启动时注入 LLMService 单例，供 SessionMemoryExtractor 等使用。"""
         cls._shared_llm_service = llm_service
+
+    @classmethod
+    def set_provider_router(cls, provider_router: Any) -> None:
+        """Feature 080 Phase 5：启动时注入 ProviderRouter 单例。
+
+        main.py lifespan 创建 router 后调用一次。后续 AgentContextService 实例
+        在没有显式传 provider_router 时回退到这个单例（避免 5 个调用方都改签名）。
+        """
+        cls._shared_provider_router = provider_router
 
     def __init__(
         self,
@@ -561,6 +573,7 @@ class AgentContextService:
         *,
         project_root: Path | None = None,
         llm_service: Any | None = None,
+        provider_router: Any | None = None,
     ) -> None:
         self._stores = store_group
         self._llm_service = llm_service or self._shared_llm_service
@@ -569,10 +582,15 @@ class AgentContextService:
         self._project_root = (
             project_root or (Path(_env_root) if _env_root else Path.cwd())
         ).resolve()
+        # Feature 080 Phase 5：embedding 走 ProviderRouter 直连。优先用显式注入，
+        # 否则回落到 main.py lifespan 注入的 _shared_provider_router 单例
+        # （与 _shared_llm_service 同模式，避免 5 个调用方都改签名）
+        self._provider_router = provider_router or self._shared_provider_router
         self._memory_runtime = MemoryRuntimeService(
             self._project_root,
             store_group=store_group,
             reranker_service=self.get_reranker_service(),
+            provider_router=self._provider_router,
         )
 
     async def build_task_context(

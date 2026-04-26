@@ -181,6 +181,7 @@ class CapabilityPackService:
         tool_broker: ToolBroker,
         preferred_tool_index_backend: str = "auto",
         approval_override_cache: _ApprovalOverrideMemoryCache | None = None,
+        provider_router: Any | None = None,
     ) -> None:
         self._project_root = project_root
         self._stores = store_group
@@ -199,6 +200,9 @@ class CapabilityPackService:
         # Feature 061: ApprovalOverride 内存缓存（给 Hook 使用）
         # 外部传入时与 ApprovalManager 共享同一实例
         self._approval_override_cache = approval_override_cache or _ApprovalOverrideMemoryCache()
+        # Feature 080 Phase 4：embedding 路由通过 ProviderRouter 直连，
+        # 不再依赖 LiteLLM Proxy（router 为 None 时 BuiltinMemUBridge 走 fallback）
+        self._provider_router = provider_router
         self._memory_console_service = MemoryConsoleService(
             project_root,
             store_group=store_group,
@@ -206,6 +210,7 @@ class CapabilityPackService:
         self._memory_runtime_service = MemoryRuntimeService(
             project_root,
             store_group=store_group,
+            provider_router=provider_router,
         )
         # Feature 057: SKILL.md 文件系统驱动的 Skill 发现服务
         # 三级目录：内置 (skills/) > 用户 (~/.octoagent/skills/) > 项目 ({project}/skills/)
