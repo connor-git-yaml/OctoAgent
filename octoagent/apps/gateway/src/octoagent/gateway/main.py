@@ -39,7 +39,8 @@ from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationSer
 from octoagent.gateway.services.telegram_client import TelegramBotClient
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from octoagent.skills import SkillRunner
-from octoagent.skills.litellm_client import LiteLLMSkillClient
+from octoagent.skills.litellm_client import LiteLLMSkillClient  # noqa: F401 (Phase 4 删除，过渡期保留)
+from octoagent.skills.provider_model_client import ProviderModelClient
 
 from .deps import require_front_door_access
 from .middleware.logging_config import setup_logfire, setup_logging
@@ -576,16 +577,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                     result_json, task_id=task_id, trace_id=trace_id,
                 )
 
+        # Feature 080 Phase 3：把 SkillRunner 从 LiteLLMSkillClient（→ LiteLLM Proxy）
+        # 切到 ProviderModelClient（→ provider 直连 ProviderRouter）。
+        # OAuth refresh / token sync / 401&403 retry / alias task scope locking 全部
+        # 内化到 ProviderRouter + ProviderClient + OAuthResolver 中，这一层不再需要
+        # auth_refresh_callback / responses_direct_params / proxy_url。
+        from octoagent.provider import ProviderRouter as _ProviderRouter
+
+        provider_router = _ProviderRouter(
+            project_root=project_root,
+            credential_store=store_group.credential_store
+            if hasattr(store_group, "credential_store")
+            else None,
+            event_store=store_group.event_store,
+        )
+        app.state.provider_router = provider_router
+
         skill_runner = SkillRunner(
-            model_client=LiteLLMSkillClient(
-                proxy_url=provider_config.proxy_base_url,
-                master_key=provider_config.proxy_api_key.get_secret_value(),
+            model_client=ProviderModelClient(
+                provider_router=provider_router,
                 tool_broker=tool_broker,
-                responses_model_aliases=_resolve_stream_model_aliases(project_root),
-                responses_reasoning_aliases=_resolve_responses_reasoning_aliases(project_root),
-                responses_direct_params=resolve_responses_api_direct_params(project_root),
-                # Feature 078: Skill 路径接入 OAuth 刷新回调，收到 401 时强制刷新并重试
-                auth_refresh_callback=auth_refresh_callback,
             ),
             tool_broker=tool_broker,
             event_store=store_group.event_store,
