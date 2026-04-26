@@ -35,7 +35,6 @@ from octoagent.provider.auth.oauth_provider import OAuthProviderRegistry
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
 from octoagent.gateway.services.config.config_wizard import load_config
-from octoagent.gateway.services.config.litellm_generator import generate_litellm_config
 from pydantic import SecretStr
 
 from ..mcp_registry import McpServerConfig
@@ -441,13 +440,8 @@ class McpDomainService(DomainServiceBase):
             },
         )
 
-        # OAuth 成功后自动同步 litellm-config.yaml
-        try:
-            config = load_config(self._ctx.project_root)
-            generate_litellm_config(config, self._ctx.project_root)
-            log.info("oauth_litellm_config_synced")
-        except Exception as exc:
-            log.warning("oauth_litellm_config_sync_failed", error=str(exc))
+        # Feature 081 P4：OAuth 成功后不再同步 litellm-config.yaml
+        # （Provider 直连后 ProviderRouter 直接读 octoagent.yaml）
 
         activation_data = await self._activate_runtime_after_config_change(
             request=request,

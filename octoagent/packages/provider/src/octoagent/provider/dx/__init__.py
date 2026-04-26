@@ -34,40 +34,8 @@ def __getattr__(name: str):
         import importlib
         mod = importlib.import_module("octoagent.gateway.services.config.config_wizard")
         return getattr(mod, name)
-    # Feature 081 P1：litellm_generator / litellm_runtime 不再公开延迟导出。
-    # 调用方应改用 ProviderRouter / ProviderEntry.transport（Feature 080 后已就位）。
-    # 兼容性兜底：保留延迟导入（文件还在），但标记 deprecated。
-    if name in (
-        "generate_litellm_config",
-        "LITELLM_CONFIG_NAME",
-    ):
-        import importlib
-        import warnings
-
-        warnings.warn(
-            f"octoagent.provider.dx.{name} 已废弃；请改用 ProviderRouter / ProviderEntry。"
-            f" 此 lazy reexport 将在 Feature 081 P4 中删除。",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        mod = importlib.import_module("octoagent.gateway.services.config.litellm_generator")
-        return getattr(mod, name)
-    if name in (
-        "get_active_model_alias",
-        "get_all_model_aliases",
-        "get_reasoning_config_for_alias",
-    ):
-        import importlib
-        import warnings
-
-        warnings.warn(
-            f"octoagent.provider.dx.{name} 已废弃；请改用 ProviderRouter / ProviderEntry。"
-            f" 此 lazy reexport 将在 Feature 081 P4 中删除。",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        mod = importlib.import_module("octoagent.gateway.services.config.litellm_runtime")
-        return getattr(mod, name)
+    # Feature 081 P4：litellm_generator / litellm_runtime 已 git rm；
+    # 不再支持 lazy reexport，直接抛 AttributeError。
     # Phase 1 推理服务已迁移到 gateway/services/inference/
     if name in (
         "ConsolidationService",
@@ -121,8 +89,7 @@ def __getattr__(name: str):
         mod = importlib.import_module(_memory_modules[name])
         return getattr(mod, name)
     # Phase 4 CP 状态 + 其他已迁移到 gateway/services/
-    # Feature 081 P1：ProxyProcessManager 不再公开延迟导出（运行时不再启动 Proxy 子进程）。
-    # 兼容性兜底：保留延迟导入但加 DeprecationWarning，文件 P4 实际删除。
+    # Feature 081 P4：ProxyProcessManager 已 git rm（不再支持 lazy reexport）。
     _phase4_modules = {
         "ControlPlaneStateStore": "octoagent.gateway.services.control_plane.control_plane_state",
         "AutomationStore": "octoagent.gateway.services.control_plane.automation_store",
@@ -132,18 +99,6 @@ def __getattr__(name: str):
         "InlineKeyboardButton": "octoagent.gateway.services.telegram_client",
         "InlineKeyboardMarkup": "octoagent.gateway.services.telegram_client",
     }
-    if name == "ProxyProcessManager":
-        import importlib
-        import warnings
-
-        warnings.warn(
-            "ProxyProcessManager 已废弃（Feature 081 P1）；Provider 直连后不再需要 Proxy 子进程。"
-            " 此 lazy reexport 将在 Feature 081 P4 中删除。",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        mod = importlib.import_module("octoagent.gateway.services.proxy_process_manager")
-        return getattr(mod, name)
     if name in _phase4_modules:
         import importlib
         mod = importlib.import_module(_phase4_modules[name])

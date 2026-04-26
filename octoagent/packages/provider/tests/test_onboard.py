@@ -121,7 +121,6 @@ def _bootstrapper(project_root: Path, *, echo: bool = False):
         RuntimeConfig,
     )
     from octoagent.gateway.services.config.config_wizard import save_config
-    from octoagent.gateway.services.config.litellm_generator import generate_litellm_config
 
     config = OctoAgentConfig(
         updated_at="2026-03-07",
@@ -140,7 +139,7 @@ def _bootstrapper(project_root: Path, *, echo: bool = False):
         runtime=RuntimeConfig(llm_mode="echo" if echo else "litellm"),
     )
     save_config(config, project_root)
-    generate_litellm_config(config, project_root)
+    # Feature 081 P4：不再生成 litellm-config.yaml（Provider 直连）
     return ConfigBootstrapResult(config=config, source="echo" if echo else "interactive")
 
 
@@ -228,10 +227,8 @@ async def test_onboarding_service_surfaces_secret_audit_detail(
             missing_targets=["channels.telegram.bot_token_env"],
         )
 
-    monkeypatch.setattr(
-        "octoagent.provider.dx.onboarding_service.check_litellm_sync_status",
-        lambda *_args, **_kwargs: (True, []),
-    )
+    # Feature 081 P4：onboarding_service 不再 import check_litellm_sync_status
+    # （Provider 直连后无 litellm-config.yaml 同步检查）
     monkeypatch.setattr(
         "octoagent.provider.dx.onboarding_service.SecretService.audit",
         _fake_audit,

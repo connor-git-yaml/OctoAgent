@@ -15,14 +15,14 @@
 ## 核心架构（全层 Free Loop + Skill Pipeline）
 
 ```
-Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> LiteLLM Proxy
+Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> ProviderRouter -> Provider HTTP
 ```
 
 - **Orchestrator**：路由与监督层，永远 Free Loop（目标理解、Worker 派发、全局监督）
 - **Workers**：自治智能体层，永远 Free Loop（自主决策，按需调用 Skill Pipeline）
 - **Skill Pipeline / Graph**：Subagent 的确定性编排工具（DAG/FSM + checkpoint），非独立执行模式
 - **Pydantic Skills**：强类型执行层（Input/Output contract）
-- **LiteLLM Proxy**：模型网关/治理层（alias 路由 + fallback + 成本统计）
+- **ProviderRouter**：模型路由层（Feature 080/081 引入）—— alias 解析 + 凭证管理 + 直连 provider HTTP（OpenAI Chat / Responses / Anthropic Messages 三种 transport）；不再走 LiteLLM Proxy 子进程
 
 ## 技术栈
 
@@ -31,7 +31,7 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> LiteLLM Proxy
 - **Web/API**: FastAPI + Uvicorn + SSE
 - **数据库**: SQLite WAL
 - **Agent 框架**: Pydantic + Pydantic AI
-- **模型网关**: LiteLLM Proxy
+- **模型网关**: ProviderRouter 直连（Feature 080/081 替代 LiteLLM Proxy）
 - **执行隔离**: Docker
 - **可观测**: Logfire（OTel 原生）+ structlog + Event Store 查询
 - **调度**: APScheduler（MVP）
@@ -53,7 +53,7 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> LiteLLM Proxy
 ## 里程碑
 
 - **M0（基础底座）** ✅: Task/Event/Artifact + SSE 事件流 + 最小 Web UI
-- **M1（最小智能闭环）** ✅: LiteLLM + Pydantic Skill + Tool Contract + Policy
+- **M1（最小智能闭环）** ✅: LiteLLM Proxy（已退役 Feature 081） + Pydantic Skill + Tool Contract + Policy
 - **M2（多渠道多 Worker）** ✅: Telegram + Worker + A2A-Lite + JobRunner + Memory
 - **M3（增强）** ✅: Chat Import + Vault + ToolIndex + Skill Pipeline Engine
 - **M4（引导式工作台）** ✅: 30 Feature 全部完成（071b-D + 063-P3 推迟到 M5）

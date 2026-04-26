@@ -16,8 +16,6 @@ from octoagent.provider.dx.init_wizard import (
     InitConfig,
     detect_partial_init,
     generate_env_file,
-    generate_env_litellm_file,
-    generate_litellm_config,
 )
 from octoagent.provider.dx.models import InitConfig as DxInitConfig
 
@@ -67,42 +65,10 @@ class TestGenerateEnvFile:
         assert "LITELLM_PROXY_URL=http://localhost:4000" in content
 
 
-class TestGenerateEnvLitellmFile:
-    """generate_env_litellm_file 行为"""
-
-    def test_with_api_key(self, tmp_path: Path) -> None:
-        from pydantic import SecretStr
-
-        from octoagent.provider.auth.credentials import ApiKeyCredential
-
-        config = InitConfig(
-            llm_mode="litellm",
-            provider="openrouter",
-            credential=ApiKeyCredential(
-                provider="openrouter",
-                key=SecretStr("sk-or-v1-mykey"),
-            ),
-            master_key="sk-master",
-        )
-        path = generate_env_litellm_file(config, tmp_path)
-        content = path.read_text(encoding="utf-8")
-        assert "LITELLM_MASTER_KEY=sk-master" in content
-        assert "OPENROUTER_API_KEY=sk-or-v1-mykey" in content
-
-
-class TestGenerateLitellmConfig:
-    """generate_litellm_config 行为"""
-
-    def test_generates_yaml(self, tmp_path: Path) -> None:
-        config = InitConfig(
-            llm_mode="litellm",
-            provider="openrouter",
-        )
-        path = generate_litellm_config(config, tmp_path)
-        assert path.exists()
-        content = path.read_text(encoding="utf-8")
-        assert "model_list:" in content
-        assert "openrouter" in content.lower() or "auto" in content
+# Feature 081 P4：删除 TestGenerateEnvLitellmFile / TestGenerateLitellmConfig
+# 两个测试类——init_wizard 内部 generate_env_litellm_file / generate_litellm_config
+# 函数已随 LiteLLM Proxy 退役删除（Provider 直连后无需生成 .env.litellm /
+# litellm-config.yaml）。
 
 
 class TestCliInit:

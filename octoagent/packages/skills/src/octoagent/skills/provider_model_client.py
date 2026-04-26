@@ -27,7 +27,9 @@ from typing import Any
 import structlog
 from octoagent.provider.provider_router import ProviderRouter
 
-from .compactor import ContextCompactor
+# Feature 081 P4：compactor.py 已删除。运行时 compaction 主线在
+# gateway/services/context_compaction.py（走 llm_service.call → ProviderRouter），
+# 此处不再依赖 LiteLLM-Proxy-bound ContextCompactor。
 from .manifest import SkillManifest
 from .models import (
     FeedbackKind,

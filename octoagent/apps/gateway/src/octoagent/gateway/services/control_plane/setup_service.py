@@ -54,10 +54,6 @@ from octoagent.provider.auth.store import CredentialStore
 from octoagent.provider.dx.backup_service import BackupService
 from octoagent.gateway.services.config.config_schema import OctoAgentConfig
 from octoagent.gateway.services.config.config_wizard import load_config, save_config
-from octoagent.gateway.services.config.litellm_generator import (
-    check_litellm_sync_status,
-    generate_litellm_config,
-)
 import octoagent.gateway.services.control_plane as _cp_pkg  # 通过 package 引用以支持 monkeypatch
 from octoagent.provider.dx.secret_service import SecretService
 from pydantic import SecretStr, ValidationError
@@ -122,7 +118,7 @@ class SetupDomainService(DomainServiceBase):
             config = OctoAgentConfig(updated_at=date.today().isoformat())
         schema = OctoAgentConfig.model_json_schema()
         ui_hints = self._build_config_ui_hints()
-        sync_ok, diffs = check_litellm_sync_status(config, self._ctx.project_root)
+        # Feature 081 P4：移除 litellm_config sync 检查（无 litellm-config.yaml 需要同步）
         bridge_refs = await self._collect_bridge_refs()
         return ConfigSchemaDocument(
             schema=schema,
@@ -134,10 +130,10 @@ class SetupDomainService(DomainServiceBase):
                 "secret 实值不得写入 YAML",
             ],
             bridge_refs=bridge_refs,
-            warnings=[] if sync_ok else diffs,
+            warnings=[],
             degraded=ControlPlaneDegradedState(
-                is_degraded=not sync_ok,
-                reasons=[] if sync_ok else ["litellm_config_out_of_sync"],
+                is_degraded=False,
+                reasons=[],
             ),
             capabilities=[
                 ControlPlaneCapability(
@@ -972,7 +968,7 @@ class SetupDomainService(DomainServiceBase):
             agent_request_payload = merged_agent_profile
 
         save_config(config, self._ctx.project_root)
-        litellm_path = generate_litellm_config(config, self._ctx.project_root)
+        # Feature 081 P4：不再生成 litellm-config.yaml（Provider 直连）
 
         resource_refs = [
             self._resource_ref("config_schema", "config:octoagent"),
@@ -982,7 +978,6 @@ class SetupDomainService(DomainServiceBase):
         ]
         data: dict[str, Any] = {
             "review": review.model_dump(mode="json"),
-            "litellm_config_path": str(litellm_path),
         }
         secret_values = draft.get("secret_values", {})
         if isinstance(secret_values, Mapping):
@@ -1295,12 +1290,12 @@ class SetupDomainService(DomainServiceBase):
         normalized.setdefault("updated_at", date.today().isoformat())
         config = OctoAgentConfig.model_validate(normalized)
         save_config(config, self._ctx.project_root)
-        litellm_path = generate_litellm_config(config, self._ctx.project_root)
+        # Feature 081 P4：不再生成 litellm-config.yaml
         return self._completed_result(
             request=request,
             code="CONFIG_APPLIED",
-            message="配置已保存并同步 LiteLLM bridge",
-            data={"litellm_config_path": str(litellm_path)},
+            message="配置已保存（ProviderRouter 直连，无 LiteLLM bridge）",
+            data={},
             resource_refs=[
                 self._resource_ref("config_schema", "config:octoagent"),
                 self._resource_ref("diagnostics_summary", "diagnostics:runtime"),

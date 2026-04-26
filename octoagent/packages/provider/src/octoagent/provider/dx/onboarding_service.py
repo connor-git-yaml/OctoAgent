@@ -17,7 +17,6 @@ from octoagent.gateway.services.config.config_schema import ConfigParseError
 from octoagent.gateway.services.config.config_wizard import load_config
 from .doctor import DoctorRunner
 from .doctor_remediation import DoctorGuidance, DoctorRemediationPlanner
-from octoagent.gateway.services.config.litellm_generator import check_litellm_sync_status
 from .models import CheckStatus
 from .onboarding_models import (
     STEP_SEQUENCE,
@@ -224,19 +223,7 @@ class OnboardingService:
                 )
             )
 
-        in_sync, diffs = check_litellm_sync_status(config, self.project_root)
-        if not in_sync:
-            actions.append(
-                NextAction(
-                    action_id="sync-litellm",
-                    action_type="command",
-                    title="同步 LiteLLM 配置",
-                    description=diffs[0] if diffs else "统一配置与 LiteLLM 配置不一致。",
-                    command="octo config sync",
-                    blocking=True,
-                    sort_order=30,
-                )
-            )
+        # Feature 081 P4：移除 LiteLLM sync 检查（无 litellm-config.yaml 需要同步）
 
         try:
             audit = await SecretService(self.project_root).audit()

@@ -18,7 +18,6 @@ from rich.table import Table
 
 from ..auth.store import CredentialStore
 from octoagent.gateway.services.config.config_schema import TelegramChannelConfig
-from octoagent.gateway.services.config.litellm_runtime import alias_uses_codex_backend
 from .models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from .onboarding_models import OnboardingStepStatus
 from .telegram_verifier import TelegramOnboardingVerifier
@@ -97,7 +96,7 @@ class DoctorRunner:
             "max_tokens": 5,
         }
 
-        if alias_uses_codex_backend(self._root, "cheap"):
+        if self._alias_uses_responses_transport("cheap"):
             return {
                 "model": "cheap",
                 "instructions": "reply briefly",
@@ -117,9 +116,28 @@ class DoctorRunner:
 
         return payload
 
+    def _alias_uses_responses_transport(self, alias_name: str) -> bool:
+        """Feature 081 P4：替代 alias_uses_codex_backend——直接读 ProviderEntry.transport。"""
+        try:
+            from octoagent.gateway.services.config.config_wizard import load_config
+
+            cfg = load_config(self._root)
+            if cfg is None:
+                return False
+            alias_cfg = cfg.model_aliases.get(alias_name)
+            if alias_cfg is None:
+                return False
+            provider = cfg.get_provider(alias_cfg.provider)
+            if provider is None:
+                return False
+            # transport 字段（v2 schema）显式声明 / 旧 schema 按 id 推断
+            return getattr(provider, "transport", None) == "openai_responses" or provider.id == "openai-codex"
+        except Exception:
+            return False
+
     def _build_live_ping_endpoint(self) -> str:
-        """根据 alias 路由选择 doctor live ping 使用的 Proxy 接口。"""
-        if alias_uses_codex_backend(self._root, "cheap"):
+        """根据 alias 路由选择 doctor live ping 使用的接口。"""
+        if self._alias_uses_responses_transport("cheap"):
             return "/v1/responses"
         return "/v1/chat/completions"
 
@@ -620,39 +638,15 @@ class DoctorRunner:
         )
 
     async def check_litellm_sync(self) -> CheckResult:
-        """检测 octoagent.yaml 与 litellm-config.yaml 一致性（WARN 级别）
+        """Feature 081 P4：LiteLLM Proxy 已退役，无 litellm-config.yaml 衍生配置需要同步。
 
-        不一致时 fix_hint 提示 octo config sync（FR-013/SC-005）。
-        octoagent.yaml 不存在时跳过（Constitution C6）。
+        本检查保留为兼容性 stub（doctor 调用 list 内仍引用），始终 PASS。
         """
-        try:
-            cfg, skip = self._load_config_safe("litellm_sync")
-            if skip is not None:
-                return skip
-            from octoagent.gateway.services.config.litellm_generator import check_litellm_sync_status
-
-            in_sync, diffs = check_litellm_sync_status(cfg, self._root)
-        except Exception as exc:
-            return CheckResult(
-                name="litellm_sync",
-                status=CheckStatus.WARN,
-                level=CheckLevel.RECOMMENDED,
-                message=f"同步检测失败：{exc}",
-                fix_hint="运行 octo config sync",
-            )
-        if in_sync:
-            return CheckResult(
-                name="litellm_sync",
-                status=CheckStatus.PASS,
-                level=CheckLevel.RECOMMENDED,
-                message="octoagent.yaml 与 litellm-config.yaml 一致",
-            )
         return CheckResult(
             name="litellm_sync",
-            status=CheckStatus.WARN,
+            status=CheckStatus.PASS,
             level=CheckLevel.RECOMMENDED,
-            message=f"配置不一致：{diffs[0]}" if diffs else "配置不一致",
-            fix_hint="运行 octo config sync 重新生成 litellm-config.yaml",
+            message="Feature 081：Provider 直连后无衍生配置需要同步",
         )
 
     async def check_telegram_config(self) -> CheckResult:

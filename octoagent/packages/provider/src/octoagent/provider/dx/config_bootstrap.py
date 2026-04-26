@@ -24,7 +24,6 @@ from octoagent.gateway.services.config.config_schema import (
     TelegramChannelConfig,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
-from octoagent.gateway.services.config.litellm_generator import generate_litellm_config
 
 PromptFunc = Callable[[str, str], str]
 ChoicePromptFunc = Callable[[str, list[str], str], str]
@@ -379,7 +378,7 @@ def bootstrap_config(
         telegram_webhook_secret_env=telegram_webhook_secret_env,
     )
     save_config(config, project_root)
-    generate_litellm_config(config, project_root)
+    # Feature 081 P4：不再生成 litellm-config.yaml（Provider 直连）
     return ConfigBootstrapResult(
         config=config,
         source="echo" if echo else "interactive",

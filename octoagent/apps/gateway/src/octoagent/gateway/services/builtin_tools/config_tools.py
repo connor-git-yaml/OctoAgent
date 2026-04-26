@@ -245,8 +245,7 @@ async def register(broker, deps: ToolDeps) -> None:
                     {"error": "CONFIG_NOT_FOUND", "message": "octoagent.yaml 不存在"},
                     ensure_ascii=False,
                 )
-            from octoagent.gateway.services.config.litellm_generator import generate_litellm_config as _gen_litellm
-            out_path = _gen_litellm(config, deps.project_root)
+            # Feature 081 P4：不再生成 litellm-config.yaml；只做基础校验
             enabled_providers = [p.id for p in config.providers if p.enabled]
             enabled_aliases = [
                 k for k, v in config.model_aliases.items()
@@ -255,8 +254,7 @@ async def register(broker, deps: ToolDeps) -> None:
             return json.dumps(
                 {
                     "success": True,
-                    "message": "LiteLLM 衍生配置已同步",
-                    "output_path": str(out_path),
+                    "message": "Feature 081：Provider 直连后无衍生配置需要同步",
                     "enabled_providers": enabled_providers,
                     "enabled_aliases": enabled_aliases,
                     "hint": (

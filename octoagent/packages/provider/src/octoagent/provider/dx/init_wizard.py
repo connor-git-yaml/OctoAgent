@@ -354,64 +354,9 @@ def generate_env_file(config: InitConfig, project_root: Path) -> Path:
     return env_path
 
 
-def generate_env_litellm_file(config: InitConfig, project_root: Path) -> Path:
-    """生成 .env.litellm 文件"""
-    env_path = project_root / ".env.litellm"
-    lines = [
-        "# LiteLLM Proxy 环境配置（由 octo init 自动生成）",
-    ]
-
-    if config.master_key:
-        lines.append(f"LITELLM_MASTER_KEY={config.master_key}")
-
-    # 根据 Provider 设置对应的环境变量
-    if config.credential is not None:
-        provider_info = PROVIDERS.get(config.provider, {})
-        env_key = provider_info.get("env_key", "")
-        if env_key and hasattr(config.credential, "key"):
-            lines.append(
-                f"{env_key}={config.credential.key.get_secret_value()}",  # type: ignore[union-attr]
-            )
-        elif env_key and hasattr(config.credential, "token"):
-            lines.append(
-                f"{env_key}={config.credential.token.get_secret_value()}",  # type: ignore[union-attr]
-            )
-        elif env_key and hasattr(config.credential, "access_token"):
-            lines.append(
-                f"{env_key}={config.credential.access_token.get_secret_value()}",  # type: ignore[union-attr]
-            )
-
-    lines.append("")  # 末尾空行
-    env_path.write_text("\n".join(lines), encoding="utf-8")
-    return env_path
-
-
-def generate_litellm_config(config: InitConfig, project_root: Path) -> Path:
-    """生成 litellm-config.yaml 文件"""
-    config_path = project_root / "litellm-config.yaml"
-
-    # 根据 Provider 生成基本模型配置
-    provider = config.provider or "openrouter"
-    provider_info = PROVIDERS.get(provider, {})
-    env_key = provider_info.get("env_key", "OPENROUTER_API_KEY")
-
-    yaml_content = f"""# LiteLLM Proxy 配置（由 octo init 自动生成）
-model_list:
-  - model_name: "main"
-    litellm_params:
-      model: "{_get_default_model(provider)}"
-      api_key: "os.environ/{env_key}"
-
-  - model_name: "cheap"
-    litellm_params:
-      model: "{_get_cheap_model(provider)}"
-      api_key: "os.environ/{env_key}"
-
-general_settings:
-  master_key: "os.environ/LITELLM_MASTER_KEY"
-"""
-    config_path.write_text(yaml_content, encoding="utf-8")
-    return config_path
+# Feature 081 P4：generate_env_litellm_file / generate_litellm_config 已删除——
+# Provider 直连后无 LiteLLM 配置/凭证文件需要生成。原 init_wizard 的 LiteLLM
+# 生成路径仅服务历史 mode="litellm"；新流程改用 .env + octoagent.yaml。
 
 
 def _get_default_model(provider: str) -> str:
@@ -552,11 +497,8 @@ def run_init_wizard(
     env_file = generate_env_file(config, project_root)
     generated_files.append(str(env_file))
 
-    if llm_mode == "litellm":
-        env_litellm = generate_env_litellm_file(config, project_root)
-        generated_files.append(str(env_litellm))
-        litellm_config = generate_litellm_config(config, project_root)
-        generated_files.append(str(litellm_config))
+    # Feature 081 P4：删除 .env.litellm + litellm-config.yaml 的生成路径
+    # （Provider 直连后只需 .env + octoagent.yaml）
 
     # 步骤 9: 输出摘要
     console.print()
@@ -568,11 +510,9 @@ def run_init_wizard(
     console.print(f"  生成文件: {', '.join(generated_files)}")
     console.print()
     if llm_mode == "litellm":
-        from .runtime_activation import RuntimeActivationService
-
+        # Feature 081 P4：LiteLLM Proxy 已退役，不再展示 docker compose 命令
         console.print(
-            "[dim]下一步: "
-            f"{RuntimeActivationService(project_root).build_compose_up_command()}[/dim]"
+            "[dim]下一步: 运行 `octo run` 启动 Gateway（Provider 直连）[/dim]"
         )
 
     return config

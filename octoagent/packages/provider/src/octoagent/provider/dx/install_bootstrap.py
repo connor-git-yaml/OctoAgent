@@ -13,7 +13,6 @@ from .backup_service import resolve_project_root
 from .config_bootstrap import bootstrap_config
 from octoagent.gateway.services.config.config_wizard import load_config
 from .console_output import create_console, render_panel
-from octoagent.gateway.services.config.litellm_generator import generate_litellm_config
 from .runtime_descriptor_defaults import (
     build_frontend_build_command,
     build_workspace_sync_command,
@@ -195,13 +194,11 @@ def _bootstrap_instance_root(
         actions.append(f"bootstrap echo config: {config_path}")
     else:
         warnings.append(f"检测到已有实例配置，保留现有 octoagent.yaml：{config_path}")
+        # Feature 081 P4：不再同步 litellm-config.yaml（Provider 直连）
         try:
-            config = load_config(root)
-            if config is not None:
-                generate_litellm_config(config, root)
-                actions.append(f"sync litellm-config.yaml: {root / 'litellm-config.yaml'}")
+            load_config(root)  # 校验配置可解析
         except Exception as exc:
-            warnings.append(f"现有实例配置未能自动同步 litellm-config.yaml：{exc}")
+            warnings.append(f"现有实例配置未能加载：{exc}")
 
     for launcher_path in _write_user_launchers(source_root, root):
         actions.append(f"write launcher: {launcher_path}")

@@ -42,7 +42,8 @@ from octoagent.gateway.services.config.config_wizard import (
     wizard_update_provider,
 )
 from .console_output import create_console
-from octoagent.gateway.services.config.litellm_generator import build_litellm_config_dict, generate_litellm_config
+# Feature 081 P4：litellm_generator 已 git rm；本文件仍保留 octo config sync 命令
+# 但内部不再生成 litellm-config.yaml（Provider 直连）。
 from .project_migration import ProjectWorkspaceMigrationService
 from .runtime_activation import RuntimeActivationService, RuntimeActivationSummary
 from .update_service import UpdateService
@@ -142,16 +143,18 @@ def _save_memory_patch(
 
 
 def _auto_sync(config: OctoAgentConfig, project_root: Path) -> None:
-    """自动触发衍生配置同步并打印简短摘要（FR-007）"""
+    """Feature 081 P4：原"自动同步 litellm 衍生配置"逻辑已退役——
+    Provider 直连后 ProviderRouter 直接读 octoagent.yaml，无衍生配置需要生成。
+    保留函数签名供调用方继续不挂；仅打印 enabled providers / aliases 摘要。
+    """
     try:
-        out_path = generate_litellm_config(config, project_root)
         enabled_providers = [p.id for p in config.providers if p.enabled]
         enabled_aliases = [
             k
             for k, v in config.model_aliases.items()
             if any(p.id == v.provider and p.enabled for p in config.providers)
         ]
-        console.print(f"[green]  已同步 LiteLLM 衍生配置[/green] → {out_path}")
+        console.print("[green]  octoagent.yaml 已保存[/green]（Provider 直连，无衍生配置同步）")
         console.print(
             f"  包含 {len(enabled_aliases)} 个 model aliases"
             + (f"（{', '.join(enabled_aliases)}）" if enabled_aliases else "")
@@ -161,12 +164,11 @@ def _auto_sync(config: OctoAgentConfig, project_root: Path) -> None:
             + (f"（{', '.join(enabled_providers)}）" if enabled_providers else "")
         )
         console.print(
-            "  说明: 这一步只会重新生成 litellm-config.yaml，不会自动重启 runtime。"
+            "  说明: 不会自动重启 runtime；如需启用真实模型请使用 octo setup。"
             " 如需立即生效，请追加 --activate。"
         )
     except Exception as exc:
-        err_console.print(f"[yellow]警告：同步 litellm-config.yaml 失败：{exc}[/yellow]")
-        err_console.print("  请稍后手动运行 octo config sync")
+        err_console.print(f"[yellow]警告：保存配置摘要时出错：{exc}[/yellow]")
 
 
 def _print_runtime_activation(summary: RuntimeActivationSummary) -> None:
@@ -525,23 +527,31 @@ def provider_add(
         )
         raise SystemExit(1) from exc
 
-    # 写入 API Key 到 .env.litellm（Q2 决策：凭证不进 octoagent.yaml）
+    # 写入 API Key 到 .env（Q2 决策：凭证不进 octoagent.yaml）
+    # Feature 081 P4：写到 .env 而非 .env.litellm（migrate-080 已迁移老用户）
     if not no_credential and auth_type == "api_key" and sys.stdin.isatty():
         import questionary
 
         api_key_value = questionary.password(
-            f"请输入 {api_key_env} 的值（API Key），留空跳过（可稍后手动配置 .env.litellm）："
+            f"请输入 {api_key_env} 的值（API Key），留空跳过（可稍后手动配置 .env）："
         ).ask()
         if api_key_value:
-            from octoagent.gateway.services.config.litellm_generator import generate_env_litellm
-
-            generate_env_litellm(
-                provider_id=provider_id,
-                api_key=api_key_value,
-                env_var_name=api_key_env,
-                project_root=project_root,
-            )
-            console.print("[green]  API Key 已写入 .env.litellm[/green]")
+            env_path = project_root / ".env"
+            existing = env_path.read_text(encoding="utf-8") if env_path.exists() else ""
+            new_line = f"{api_key_env}={api_key_value}\n"
+            lines = existing.splitlines(keepends=True)
+            new_lines: list[str] = []
+            found = False
+            for line in lines:
+                if line.startswith(f"{api_key_env}=") or line.startswith(f"{api_key_env} ="):
+                    new_lines.append(new_line)
+                    found = True
+                else:
+                    new_lines.append(line)
+            if not found:
+                new_lines.append(new_line)
+            env_path.write_text("".join(new_lines), encoding="utf-8")
+            console.print("[green]  API Key 已写入 .env[/green]")
 
     # 更新配置（overwrite=True，因为用户已确认 update）
     overwrite = existing_provider is not None
@@ -846,19 +856,25 @@ def config_sync(ctx: click.Context, dry_run: bool) -> None:
         raise SystemExit(1)
 
     if dry_run:
-        # 预览：生成内容但不写文件（复用 build_litellm_config_dict 避免重复逻辑）
+        # Feature 081 P4：预览不再生成 litellm-config.yaml；只展示当前 octoagent.yaml 摘要
         import yaml as _yaml
 
-        from octoagent.gateway.services.config.litellm_generator import GENERATED_MARKER
-
-        litellm_cfg = build_litellm_config_dict(cfg)
-        preview = GENERATED_MARKER + "\n" + _yaml.dump(litellm_cfg, allow_unicode=True)
-        console.print("[bold]--dry-run 预览（不写文件）：[/bold]")
+        preview = _yaml.dump(
+            {
+                "providers": [{"id": p.id, "enabled": p.enabled} for p in cfg.providers],
+                "model_aliases": {
+                    k: {"provider": v.provider, "model": v.model}
+                    for k, v in cfg.model_aliases.items()
+                },
+            },
+            allow_unicode=True,
+        )
+        console.print("[bold]--dry-run 预览（Feature 081 后不再生成 litellm-config.yaml）：[/bold]")
         console.print(preview)
         return
 
     try:
-        out_path = generate_litellm_config(cfg, project_root)
+        # Feature 081 P4：不再生成 litellm-config.yaml；只打印 enabled providers 摘要
         enabled_providers = [p.id for p in cfg.providers if p.enabled]
         enabled_aliases = [
             k
@@ -866,8 +882,7 @@ def config_sync(ctx: click.Context, dry_run: bool) -> None:
             if any(p.id == v.provider and p.enabled for p in cfg.providers)
         ]
         console.print()
-        console.print("[bold green]衍生配置同步完成[/bold green]")
-        console.print(f"  写入: [cyan]{out_path}[/cyan]")
+        console.print("[bold green]Feature 081：Provider 直连已就绪[/bold green]")
         console.print(
             f"  包含 {len(enabled_aliases)} 个 model aliases"
             + (f"（{', '.join(enabled_aliases)}）" if enabled_aliases else "")
