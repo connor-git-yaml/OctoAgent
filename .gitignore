@@ -74,3 +74,6 @@ docker-compose.override.yml
 # ===== Node（如有前端）=====
 node_modules/
 .next/
+
+# ScheduleWakeup runtime artifact（不应进版本控制）
+.claude/scheduled_tasks.lock
