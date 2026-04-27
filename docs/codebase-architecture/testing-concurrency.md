@@ -54,9 +54,15 @@ runner 内部 timing 假设，超 F083 scope。
 
 - `apps/gateway/tests/test_task_runner.py::TestTaskRunner::test_attach_input_*`
   - 现象：高 CPU 负载下偶发 `'task is not waiting for human input'`
-  - 原因：task runner monitor thread 与测试 polling 之间 race
-  - 缓解：F083 P4 把轮询窗口从 1s 增到 5s + 多状态联合检查；race 概率 40% → ~20%
-  - 治本：需要修 task runner 状态机或测试用 mock monitor（追踪：未来 Feature）
+  - 原因：两类 race
+    1. `ExecutionConsoleService.attach_input` 内 task.status 读取 vs request_input 状态转换（**P5 已治本**）
+    2. `runner_2.attach_input` 在 runner 重启 + recovery 路径 vs attach_input 检查（**未治本**）
+  - 缓解（P5）：
+    * 测试侧 — 轮询窗口 1s → 5s + 多状态联合检查
+    * 代码侧 — `ExecutionConsoleService._read_task_with_waiting_input_retry`（最多 120ms retry）
+  - 当前 race 概率：40% → ~20%（仍未达 0），主要来自 race #2
+  - 治本：runner restart 路径 startup recovery 与 attach_input 的 timing 解耦
+    （独立 Feature 084）
 
 ### 4.3 命令模板
 

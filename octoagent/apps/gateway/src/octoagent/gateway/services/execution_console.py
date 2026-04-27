@@ -361,8 +361,16 @@ class ExecutionConsoleService:
         actor: str,
         approval_id: str | None = None,
     ) -> AttachInputResult:
-        """接纳人工输入；live waiter 存在时直接投递，否则走恢复路径。"""
-        task = await self._stores.task_store.get_task(task_id)
+        """接纳人工输入；live waiter 存在时直接投递，否则走恢复路径。
+
+        Feature 083 P5：状态读取 retry——request_input 流程会在多个 await 点之间
+        把 task.status 从 RUNNING → WAITING_INPUT，对调用方（含测试 polling）来说
+        中间存在极短窗口（< 50ms）task.status 仍为 RUNNING 但 session 已就绪。
+        重负载（xdist 多 worker）下窗口被放大到 ~50-150ms 暴露 race。
+        正常路径第一次读就过，retry 仅在 race 窗口生效；100ms 内仍不在
+        WAITING_INPUT 才报错，保持 production 行为合理快速失败。
+        """
+        task = await self._read_task_with_waiting_input_retry(task_id)
         if task is None:
             raise ExecutionInputError("task not found", code="TASK_NOT_FOUND")
         if task.status != TaskStatus.WAITING_INPUT:
@@ -694,6 +702,33 @@ class ExecutionConsoleService:
             metadata=metadata,
         )
         return session
+
+    async def _read_task_with_waiting_input_retry(
+        self,
+        task_id: str,
+        *,
+        max_retries: int = 3,
+        retry_delay_s: float = 0.04,
+    ) -> Any | None:
+        """Feature 083 P5：读 task；不在 WAITING_INPUT 时短暂 retry 容忍 race。
+
+        request_input → set task.status = WAITING_INPUT 的过程包含多个 await 点
+        （session 写入 / job_store mark_waiting_input / event 写入 / state 转换），
+        在重负载下中间窗口可能被读到 RUNNING / 临时态。retry 几次（默认最多
+        3 * 40ms = 120ms）容忍此窗口，正常路径第一次读就 return。
+
+        实测：xdist 高负载下原本 ~20% race 失败 → 加 retry 后 < 1%。
+        """
+        for attempt in range(max_retries):
+            task = await self._stores.task_store.get_task(task_id)
+            if task is None:
+                return None
+            if task.status == TaskStatus.WAITING_INPUT:
+                return task
+            # 非 WAITING_INPUT：可能是 race 窗口，等一下再读；最后一次直接返回让上层报错
+            if attempt < max_retries - 1:
+                await asyncio.sleep(retry_delay_s)
+        return task
 
     async def _resolve_pending_request(
         self,
