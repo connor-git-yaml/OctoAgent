@@ -213,14 +213,20 @@ def plan_yaml_migration(raw: dict[str, Any], yaml_path: Path) -> Migrate080Plan:
         for legacy_key in ("llm_mode", "litellm_proxy_url", "master_key_env"):
             if legacy_key in runtime:
                 plan.yaml_changes.append(
-                    f"runtime.{legacy_key} = {runtime[legacy_key]!r}（保留为 deprecated，运行时已忽略）"
+                    f"runtime.{legacy_key} = {runtime[legacy_key]!r}（**移除**，F081 P3b 已退役 LiteLLM）"
                 )
 
     return plan
 
 
 def _build_v2_yaml(raw: dict[str, Any]) -> dict[str, Any]:
-    """基于 raw v1 yaml 构建 v2 dict（不写文件）。"""
+    """基于 raw v1 yaml 构建 v2 dict（不写文件）。
+
+    Feature 081 fix（2026-04-27）：strip 掉 runtime 下 LiteLLM 残留字段。
+    F081 P3b 已退役 LiteLLM；保留这些字段会让 detect_legacy_yaml_keys 在迁移
+    后继续命中，warning 一直打。Pydantic schema 字段仍标 deprecated 但默认值
+    存在，移除字段后默认值正常 fallback，不影响运行时。
+    """
     new_raw: dict[str, Any] = dict(raw)
     new_raw["config_version"] = 2
 
@@ -234,6 +240,19 @@ def _build_v2_yaml(raw: dict[str, Any]) -> dict[str, Any]:
             new_p, _ = _migrate_provider_block(p)
             new_providers.append(new_p)
         new_raw["providers"] = new_providers
+
+    # 移除 runtime 下的 LiteLLM 残留字段
+    runtime = raw.get("runtime")
+    if isinstance(runtime, dict):
+        new_runtime = {
+            k: v
+            for k, v in runtime.items()
+            if k not in ("llm_mode", "litellm_proxy_url", "master_key_env")
+        }
+        if new_runtime:
+            new_raw["runtime"] = new_runtime
+        else:
+            new_raw.pop("runtime", None)
 
     return new_raw
 

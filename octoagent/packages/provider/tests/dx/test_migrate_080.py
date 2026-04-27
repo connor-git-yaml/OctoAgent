@@ -99,6 +99,60 @@ def test_migrate_yaml_v1_to_v2(tmp_path: Path) -> None:
     assert p["auth"] == {"kind": "api_key", "env": "OPENROUTER_API_KEY"}
 
 
+def test_migrate_yaml_strips_runtime_litellm_legacy_fields(tmp_path: Path) -> None:
+    """Feature 081 fix（2026-04-27）：迁移后 runtime 下 LiteLLM 残留必须被移除。
+
+    用户场景（实测复现）：
+    - migrate-080 后 yaml 仍含 runtime.llm_mode/litellm_proxy_url/master_key_env
+    - 每次 load_config 仍触发 octoagent_yaml_legacy_schema_detected warn
+    - 即使 dedup 也只是抑制 spam，warn 本身仍打 1 次（误导用户以为没迁完）
+
+    本测试锁定：迁移后 runtime 下不再含任何 LiteLLM 残留。
+    若 runtime 仅有 LiteLLM 字段，整个 runtime 块也应消失。
+    """
+    yaml_path = tmp_path / "octoagent.yaml"
+    yaml_path.write_text(_v1_yaml(), encoding="utf-8")
+
+    result = execute_migrate_080(tmp_path, dry_run=False)
+    assert result.error is None
+    assert result.yaml_written is True
+
+    new_raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    runtime_after = new_raw.get("runtime", {})
+    if isinstance(runtime_after, dict):
+        for key in ("llm_mode", "litellm_proxy_url", "master_key_env"):
+            assert key not in runtime_after, (
+                f"runtime.{key} 在 migrate 后仍存在；应被移除避免重复触发 legacy 检测"
+            )
+
+    # detect_legacy_yaml_keys 应该返回空（除非 providers 也漏迁，但本 fixture 已迁完）
+    from octoagent.gateway.services.config.config_schema import detect_legacy_yaml_keys
+
+    legacy_after = detect_legacy_yaml_keys(new_raw)
+    assert legacy_after == [], (
+        f"migrate 后 detect_legacy_yaml_keys 仍命中：{legacy_after}；"
+        "说明 v2 schema 没有真正清理干净"
+    )
+
+
+def test_migrate_yaml_preserves_non_litellm_runtime_fields(tmp_path: Path) -> None:
+    """runtime 下非 LiteLLM 字段应保留（防御过度 strip）。"""
+    yaml_path = tmp_path / "octoagent.yaml"
+    yaml_path.write_text(
+        _v1_yaml(extra_runtime={"some_other_setting": "keep_me"}),
+        encoding="utf-8",
+    )
+
+    execute_migrate_080(tmp_path, dry_run=False)
+
+    new_raw = yaml.safe_load(yaml_path.read_text(encoding="utf-8"))
+    assert new_raw.get("runtime", {}).get("some_other_setting") == "keep_me"
+    # LiteLLM 字段仍应被剥
+    runtime_after = new_raw.get("runtime", {})
+    for key in ("llm_mode", "litellm_proxy_url", "master_key_env"):
+        assert key not in runtime_after
+
+
 def test_migrate_yaml_v2_idempotent(tmp_path: Path) -> None:
     """v2 yaml → 不再迁移（幂等）。"""
     raw_v2 = {
