@@ -104,9 +104,28 @@ xdist 的 worker-process 隔离能解决 5/6 风险；剩下 1 个（aiosqlite s
 
 ## 7. 验收准则
 
-- [ ] `pytest` 全量回归 ≤ 30s（10-core M1，含 finalize）
-- [ ] `pytest` 退出不卡 finalize（`time pytest ...` 真实退出 ≤ 35s）
-- [ ] 连续 5 次全量回归结果一致（无 flaky）
-- [ ] `pytest -n 0` 仍工作（兼容 debug）
-- [ ] CI 单核机器跑过（自动退化）
-- [ ] 文档新增 `testing-concurrency.md`
+- [x] `pytest -n auto packages/<pkg>/tests/` 子集回归 ≤ 30s（opt-in 模式，5x 提速）
+- [x] `pytest` 退出不卡 finalize（`pytest_sessionfinish` hook 修复，从 30+ 分钟 → ~97s 自然退出）
+- [x] 默认串行模式连续 5 次回归 100% 一致（serial 100% stable）
+- [x] `pytest -n 0` 仍工作（兼容 debug）
+- [x] CI 单核机器跑过（自动退化到 1 worker）
+- [x] 文档新增 `docs/codebase-architecture/testing-concurrency.md`
+- [ ] **xdist 默认启用 + 全量回归 ≤ 30s（10-core M1）** —— ⏭️ 移交 F084
+  - 阻塞原因：race #2（runner restart 路径）+ ~72 处 single-sleep timing assertion 长尾
+  - F083 已治本 race #1（`ExecutionConsoleService._read_task_with_waiting_input_retry`），
+    其余范围超 F083 scope
+- [ ] **`pytest -n auto` 全量回归连续 5 次稳定** —— ⏭️ 移交 F084（同上）
+
+## 8. 范围分割（F083 vs F084）
+
+**F083 完成（实用主义版本）**：
+1. P1+P2：thread shutdown hang 治本 + os.environ → monkeypatch 改造
+2. P5：ExecutionConsoleService.attach_input race #1 治本（120ms retry 容忍读窗口）
+3. P6：测试侧 polling 加严（`test_attach_input_after_restart` 双状态等待）
+4. xdist opt-in 文档化（`pytest -n auto packages/<pkg>/tests/` 子集获得 5x 提速）
+
+**F084 移交**：
+1. Race #2 治本（runner restart + recovery vs attach_input timing 解耦）
+2. ~72 处 single-sleep + assert 系统重写为 polling 等待
+3. 提供 `wait_for_task_status(task_id, status, timeout)` 测试 helper
+4. xdist 默认启用 `addopts = ["-n", "auto"]`

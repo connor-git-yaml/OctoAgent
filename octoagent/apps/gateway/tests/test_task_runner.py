@@ -1038,15 +1038,28 @@ class TestTaskRunner:
         assert result.delivered_live is False
         assert result.session_id == original_session_id
 
-        for _ in range(20):
+        # Feature 083 P5：等到 task.status 和 job.status 双方都 SUCCEEDED 才停。
+        # 原代码只等 task.status == SUCCEEDED，但 task_store 和 task_job_store
+        # 是两个独立 store，task.status set 后 job.status 同步可能滞后；xdist 高
+        # CPU 负载下窗口被放大到偶发 fail。5s 窗口足够覆盖。
+        for _ in range(100):
             task = await task_service_2.get_task(task_id)
-            if task is not None and task.status == TaskStatus.SUCCEEDED:
+            job = await store_group_2.task_job_store.get_job(task_id)
+            if (
+                task is not None
+                and task.status == TaskStatus.SUCCEEDED
+                and job is not None
+                and job.status == "SUCCEEDED"
+            ):
                 break
             await asyncio.sleep(0.05)
         else:
-            raise AssertionError("task did not resume to SUCCEEDED after restart")
+            raise AssertionError(
+                f"task / job did not both reach SUCCEEDED within 5s "
+                f"(task.status={task.status if task else None}, "
+                f"job.status={job.status if job else None})"
+            )
 
-        job = await store_group_2.task_job_store.get_job(task_id)
         assert job is not None
         assert job.status == "SUCCEEDED"
         final_session = await runner_2.get_execution_session(task_id)

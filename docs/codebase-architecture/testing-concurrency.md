@@ -1,7 +1,7 @@
 # 测试并发架构（Feature 083）
 
-> 引入版本：Feature 083（4 Phase，2026-04-27）
-> 状态：✅ 完成（实用主义版本——hang 修复确定收益；xdist 改成 opt-in）
+> 引入版本：Feature 083（6 Phase，2026-04-27）
+> 状态：✅ 完成（实用主义版本——hang 修复 + race #1 治本 + xdist opt-in；race #2 + 长尾 race 移交 F084）
 
 ## 1. 历史问题
 
@@ -14,9 +14,14 @@ OctoAgent 测试套件在 Feature 083 之前有两个开发体验问题：
 
 ## 2. 修复策略（实用主义）
 
-P3 启用 xdist 后 5 次稳定性验证暴露 task_runner 状态机测试的真实 race condition
-（`test_attach_input_*` 在高 CPU 负载下偶发 fail，~20-40% 概率）。治本要修 task
-runner 内部 timing 假设，超 F083 scope。
+P3 启用 xdist 后 5 次稳定性验证暴露多处 race condition：
+- `test_attach_input_*`（task_runner 状态机）在高 CPU 负载下偶发 fail（~20-40%）
+- `test_timeout_path_generates_worker_timeout_result` 单 sleep + assert 模式
+- 全仓 ~72 处 single-sleep timing assertion，长尾 race 散落各 integration test
+
+P5 治本 race #1（`ExecutionConsoleService.attach_input` 内 task.status 读取窗口），
+P6 把测试 polling 改严，但**race #2 + 长尾 race 治本超 F083 scope**——既要修 task
+runner 内部 timing 假设，又要把所有 single-sleep 模式重写为 polling，应作为独立 Feature。
 
 最终决策：
 
@@ -24,7 +29,10 @@ runner 内部 timing 假设，超 F083 scope。
 |------|------|
 | thread shutdown hang | ✅ 修复（`pytest_sessionfinish` hook） |
 | os.environ fixture 污染 | ✅ 改 `monkeypatch.setenv` |
-| attach_input 测试 race 概率 | ✅ 等待逻辑加严（5s 窗口 + 多状态联合检查） |
+| Race #1（ExecutionConsole 读窗口）| ✅ P5 治本（`_read_task_with_waiting_input_retry`） |
+| Race #2（runner restart + recovery）| ⏭️ 移交 F084 |
+| 单 sleep + assert 长尾（~72 处）| ⏭️ 移交 F084 |
+| `test_attach_input_after_restart` 测试 polling | ✅ P6 加严（双状态联合等待 + 5s 窗口） |
 | xdist 默认启用 | ❌ 撤销——风险大于收益 |
 | xdist opt-in | ✅ 文档化使用场景 |
 
@@ -32,11 +40,11 @@ runner 内部 timing 假设，超 F083 scope。
 
 | 指标 | 修复前 | 修复后（默认）| 修复后（`-n auto`）|
 |------|--------|---------|---------|
-| pytest 报告时间 | 93.41s | **93s** | **~17s** |
-| 进程实际退出 | 30+ 分钟（hang） | **~97s** | **~20s**（稳定时） |
-| 稳定性 | 100% | **100%** | ~60-80%（task_runner race） |
+| pytest 报告时间 | 93.41s | **~103s**（含 F082 新增测试）| **~17s** |
+| 进程实际退出 | 30+ 分钟（hang） | **~104s** | **~20s**（稳定时） |
+| 稳定性（5 次连续）| 100% | **100%（5/5 验证通过）** | ~60-80%（race 长尾）|
 | CPU 利用率 | ~100% (1 core) | ~100% (1 core) | ~689% (10-core) |
-| 测试通过率 | 2419/2419 | 2419/2419 | 2419/2419（稳定时） |
+| 测试通过率 | 2419/2419 | **2829/2829** | 2829/2829（稳定时）|
 
 ## 4. xdist opt-in 使用方法
 
@@ -50,19 +58,27 @@ runner 内部 timing 假设，超 F083 scope。
 - ❌ **CI 全量回归**：仍用默认串行确保稳定
 - ❌ **task_runner 测试**：用 `-n 0` 串行（race 测试集）
 
-### 4.2 已知 flaky 测试集
+### 4.2 已知 flaky 测试集（仅在 `-n auto` 全量并发下出现）
 
 - `apps/gateway/tests/test_task_runner.py::TestTaskRunner::test_attach_input_*`
   - 现象：高 CPU 负载下偶发 `'task is not waiting for human input'`
   - 原因：两类 race
     1. `ExecutionConsoleService.attach_input` 内 task.status 读取 vs request_input 状态转换（**P5 已治本**）
-    2. `runner_2.attach_input` 在 runner 重启 + recovery 路径 vs attach_input 检查（**未治本**）
-  - 缓解（P5）：
-    * 测试侧 — 轮询窗口 1s → 5s + 多状态联合检查
+    2. `runner_2.attach_input` 在 runner 重启 + recovery 路径 vs attach_input 检查（**未治本，移交 F084**）
+  - 缓解（P5+P6）：
+    * 测试侧 — `test_attach_input_after_restart` polling 改双状态联合等待 + 1s → 5s 窗口
     * 代码侧 — `ExecutionConsoleService._read_task_with_waiting_input_retry`（最多 120ms retry）
-  - 当前 race 概率：40% → ~20%（仍未达 0），主要来自 race #2
-  - 治本：runner restart 路径 startup recovery 与 attach_input 的 timing 解耦
-    （独立 Feature 084）
+  - 当前 race 概率：40% → ~20%（race #2 治本需独立 Feature 084）
+
+- `tests/integration/test_f009_worker_runtime_flow.py::test_timeout_path_generates_worker_timeout_result`
+  - 现象：`assert data["task"]["status"] == "FAILED"` 偶发为 `'RUNNING'`
+  - 原因：`await asyncio.sleep(0.4)` + 单 assert 模式；高 CPU 负载下 0.4s 不够覆盖
+    timeout 检测 + 状态转换 + DB commit
+  - 治本：所有 single-sleep + assert 模式重写为 polling 等待（移交 F084）
+
+- 全仓 ~72 处 `await asyncio.sleep(N) + assert` 单 sleep 模式
+  - 默认串行下都稳定，仅在 xdist 并发下偶发暴露
+  - 治本范围太大，移交 F084 独立做
 
 ### 4.3 命令模板
 
@@ -149,9 +165,11 @@ pytest -n auto --forked
 
 ## 9. 后续工作
 
-- **修复 task_runner 真实 race**（独立 Feature）：把测试改用 mock monitor 或同步 callback
-  替代 polling，从根本上消除 timing race
-- **xdist 默认启用**：等 race 修完后再启用（pyproject.toml `addopts = ["-n", "auto"]`）
+**Feature 084（计划）— xdist 默认启用 + race 长尾治理**：
+- 修复 task_runner race #2（runner restart + recovery 路径下 attach_input 状态读取的次生窗口）
+- 把所有 single-sleep + assert 模式（~72 处）系统重写为 polling 等待
+- 提供 `wait_for_task_status(task_id, status, timeout)` 测试 helper 统一收敛 polling 模式
+- 上述全部完成后，恢复 `pyproject.toml` 的 `addopts = ["-n", "auto"]` 默认
 
 ## 10. 相关 Feature 文档
 
