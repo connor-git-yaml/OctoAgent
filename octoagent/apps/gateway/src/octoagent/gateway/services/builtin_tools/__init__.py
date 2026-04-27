@@ -6,6 +6,7 @@
 
 from ._deps import ToolDeps
 from . import (
+    bootstrap_tools,
     browser_tools,
     config_tools,
     delegation_tools,
@@ -34,4 +35,5 @@ async def register_all(broker, deps: ToolDeps) -> None:
     await supervision_tools.register(broker, deps)
     await mcp_tools.register(broker, deps)
     await config_tools.register(broker, deps)
+    await bootstrap_tools.register(broker, deps)  # Feature 082 P2
     await misc_tools.register(broker, deps)
