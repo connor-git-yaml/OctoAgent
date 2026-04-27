@@ -1,6 +1,10 @@
-"""apps/gateway 测试配置 -- FastAPI TestClient + async DB fixture"""
+"""apps/gateway 测试配置 -- FastAPI TestClient + async DB fixture
 
-import os
+Feature 083 P2：``app`` fixture 改用 ``monkeypatch.setenv`` 替代直接赋值
+``os.environ[...]``——后者会污染全局环境，xdist 单 worker 内并行 test 互相覆盖
+（worker 间靠进程隔离能解决，但 worker 内顺序 test 也需要 monkeypatch 自动清理）。
+"""
+
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -19,21 +23,20 @@ async def gateway_tmp_dir(tmp_path: Path) -> Path:
 
 
 @pytest_asyncio.fixture
-async def app(gateway_tmp_dir: Path):
-    """创建测试用 FastAPI app 实例"""
-    # 设置测试环境变量
-    os.environ["OCTOAGENT_DB_PATH"] = str(gateway_tmp_dir / "sqlite" / "test.db")
-    os.environ["OCTOAGENT_ARTIFACTS_DIR"] = str(gateway_tmp_dir / "artifacts")
-    os.environ["LOGFIRE_SEND_TO_LOGFIRE"] = "false"
+async def app(gateway_tmp_dir: Path, monkeypatch):
+    """创建测试用 FastAPI app 实例。
+
+    Feature 083 P2：用 monkeypatch 自动恢复 env vars；teardown 不再需要手动 pop。
+    """
+    monkeypatch.setenv("OCTOAGENT_DB_PATH", str(gateway_tmp_dir / "sqlite" / "test.db"))
+    monkeypatch.setenv("OCTOAGENT_ARTIFACTS_DIR", str(gateway_tmp_dir / "artifacts"))
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
 
     from octoagent.gateway.main import create_app
 
     application = create_app()
     yield application
-
-    # 清理环境变量
-    for key in ["OCTOAGENT_DB_PATH", "OCTOAGENT_ARTIFACTS_DIR", "LOGFIRE_SEND_TO_LOGFIRE"]:
-        os.environ.pop(key, None)
+    # monkeypatch 自动清理 env vars——不需要手动 pop
 
 
 @pytest_asyncio.fixture
