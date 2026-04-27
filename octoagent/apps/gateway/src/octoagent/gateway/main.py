@@ -264,10 +264,32 @@ def _persist_runtime_state(
     return True
 
 
+def _warn_duplicate_instance_roots(project_root: Path) -> None:
+    """Feature 082 P4：检测多个 instance root 副本（不阻断启动，仅 warning）。
+
+    历史问题：``OCTOAGENT_PROJECT_ROOT`` 灵活性 + 不同启动场景在不同位置初始化
+    文件骨架 → 产生 3 份 USER.md 等"幽灵副本"。
+    """
+    candidates = [
+        Path.home() / ".octoagent" / "behavior" / "system" / "USER.md",
+        Path.home() / ".octoagent" / "app" / "behavior" / "system" / "USER.md",
+        Path.home() / ".octoagent" / "app" / "octoagent" / "behavior" / "system" / "USER.md",
+    ]
+    existing = [str(p) for p in candidates if p.exists()]
+    if len(existing) > 1:
+        log.warning(
+            "multiple_instance_roots_detected",
+            project_root=str(project_root),
+            duplicate_user_md_paths=existing,
+            recommendation="run `octo cleanup duplicate-roots` to consolidate",
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理：启动时初始化 DB 和 LLM 组件，关闭时清理连接"""
     project_root = _resolve_project_root()
+    _warn_duplicate_instance_roots(project_root)  # Feature 082 P4
     app.state.project_root = project_root
     app.state.front_door_guard = FrontDoorGuard(project_root)
     app.state.update_status_store = _build_update_status_store(project_root)

@@ -59,6 +59,14 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> ProviderRoute
 - **M4（引导式工作台）** ✅: 30 Feature 全部完成（071b-D + 063-P3 推迟到 M5）
 - **M5（文件工作台）** ⏳: 语音/多模态/Companion/通知中心
 
+### 后续修复（M5 阶段）
+
+- **Feature 081（LiteLLM 完全退役）** ✅: Provider 直连替代 LiteLLM Proxy；migrate-080 双对象迁移
+- **Feature 082（Bootstrap & Profile Integrity）** ✅: 修复"用户首次引导从未真实跑过"
+  根本性漏洞——OwnerProfile 默认值清理 + 状态机加严 + 完成路径接入 +
+  USER.md 动态生成 + 迁移命令 + 多 root 收敛。
+  详见 `docs/codebase-architecture/bootstrap-profile-flow.md`
+
 ## 协作行为准则
 
 ### 沟通与输出

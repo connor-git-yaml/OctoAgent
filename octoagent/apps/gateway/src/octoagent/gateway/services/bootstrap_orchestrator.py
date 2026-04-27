@@ -67,6 +67,12 @@ class BootstrapCompletionResult:
     fields_skipped: list[str] = field(default_factory=list)
     """用户已显式设置过 → 保留原值不覆盖；告诉调用方为什么没生效。"""
 
+    user_md_written: bool = False
+    """USER.md 是否被 UserMdRenderer 实际写入（OwnerProfile 实质填充时才写）。"""
+
+    user_md_path: str | None = None
+    """USER.md 写入的实际路径；未写入时为 None。"""
+
     warnings: list[str] = field(default_factory=list)
 
     def to_payload(self) -> dict[str, Any]:
@@ -76,6 +82,8 @@ class BootstrapCompletionResult:
             "owner_profile_updated": self.owner_profile_updated,
             "fields_updated": list(self.fields_updated),
             "fields_skipped": list(self.fields_skipped),
+            "user_md_written": self.user_md_written,
+            "user_md_path": self.user_md_path,
             "warnings": list(self.warnings),
         }
 
@@ -232,7 +240,29 @@ class BootstrapSessionOrchestrator:
                     f"OwnerProfile {session.owner_profile_id!r} 不存在，跳过回填"
                 )
 
-        # 3. 标记 .onboarding-state.json 完成
+        # 3. USER.md 渲染（Feature 082 P3）：基于刚回填的 OwnerProfile 重新写
+        # 仅在 owner_profile_updated 时触发——避免覆盖用户手工 USER.md
+        if result.owner_profile_updated and session.owner_profile_id:
+            try:
+                # 重新读最新 OwnerProfile（含刚同步的字段）
+                from .user_md_renderer import UserMdRenderer
+
+                fresh_profile = await self._store.get_owner_profile(session.owner_profile_id)
+                renderer = UserMdRenderer(self._root)
+                _render_result, written_path = renderer.render_and_write(fresh_profile)
+                if written_path is not None:
+                    result.user_md_written = True
+                    result.user_md_path = str(written_path)
+            except Exception as exc:
+                result.warnings.append(f"USER.md 渲染失败：{exc}")
+                log.warning(
+                    "bootstrap_user_md_render_failed",
+                    bootstrap_id=bootstrap_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+
+        # 4. 标记 .onboarding-state.json 完成
         try:
             state = mark_onboarding_completed(self._root)
             result.onboarding_completed_at = state.onboarding_completed_at
@@ -245,7 +275,7 @@ class BootstrapSessionOrchestrator:
                 error=str(exc),
             )
 
-        # 4. 更新 BootstrapSession.status = COMPLETED
+        # 5. 更新 BootstrapSession.status = COMPLETED
         completed_session = session.model_copy(
             update={
                 "status": BootstrapSessionStatus.COMPLETED,

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 
-from octoagent.tooling import SideEffectLevel, tool_contract
+from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 
 from ..bootstrap_orchestrator import BootstrapSessionOrchestrator
 from ._deps import ToolDeps, resolve_runtime_project_context
@@ -143,4 +143,4 @@ async def register(broker, deps: ToolDeps) -> None:
                 ensure_ascii=False,
             )
 
-    await broker.register(bootstrap_complete)
+    await broker.try_register(reflect_tool_schema(bootstrap_complete), bootstrap_complete)
