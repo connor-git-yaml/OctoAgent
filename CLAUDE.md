@@ -66,6 +66,12 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> ProviderRoute
   根本性漏洞——OwnerProfile 默认值清理 + 状态机加严 + 完成路径接入 +
   USER.md 动态生成 + 迁移命令 + 多 root 收敛。
   详见 `docs/codebase-architecture/bootstrap-profile-flow.md`
+- **Feature 083（测试并发加速）** ✅（务实版本）: 修 thread shutdown hang（aiosqlite + asyncio
+  executor）+ 修 fixture `os.environ` 污染 + `attach_input` 测试 race 加严等待。
+  进程退出从 30+ 分钟 hang → ~20s（关键修复）。
+  xdist 提速作为 opt-in（`pytest -n auto`，5.5x 提速但 task_runner 状态机测试有 race
+  ~20% 失败率，治本超 F083 scope）。
+  详见 `docs/codebase-architecture/testing-concurrency.md`
 
 ## 协作行为准则
 

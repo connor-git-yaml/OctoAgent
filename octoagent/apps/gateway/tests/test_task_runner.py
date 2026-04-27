@@ -92,6 +92,11 @@ class InteractiveLLMService:
 
 
 class TestTaskRunner:
+    # Feature 083 P4：本 class 包含 timing-sensitive 测试（test_attach_input_* 依赖
+    # task runner 状态机的 1s 轮询窗口）。pyproject.toml 配置 --dist=loadscope
+    # 让同 class 的 test 自动路由到同一 xdist worker，避免跨 worker CPU 争抢
+    # 让轮询窗口失败。同 worker 内 sequential 执行，timing 稳定。
+
     async def test_enqueue_runs_and_marks_job_succeeded(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
             str(tmp_path / "runner.db"),
@@ -888,15 +893,25 @@ class TestTaskRunner:
         assert created is True
         await runner.enqueue(task_id, msg.text)
 
-        for _ in range(20):
+        # Feature 083 P4：等更全的状态——task.status=WAITING_INPUT + session.state +
+        # session.can_attach_input 三者齐 + 5s 窗口（原 1s 在 xdist 下偶发不够）
+        for _ in range(100):
             task = await task_service.get_task(task_id)
-            if task is not None and task.status == TaskStatus.WAITING_INPUT:
+            session = await runner.get_execution_session(task_id)
+            if (
+                task is not None
+                and task.status == TaskStatus.WAITING_INPUT
+                and session is not None
+                and session.state == ExecutionSessionState.WAITING_INPUT
+                and session.can_attach_input is True
+            ):
                 break
             await asyncio.sleep(0.05)
         else:
-            raise AssertionError("task did not enter WAITING_INPUT")
+            raise AssertionError(
+                "task did not reach WAITING_INPUT + session.can_attach_input within 5s"
+            )
 
-        session = await runner.get_execution_session(task_id)
         assert session is not None
         assert session.state == ExecutionSessionState.WAITING_INPUT
         # c55dd77 删除 DockerRuntimeBackend 空壳后统一回 INLINE
@@ -1159,15 +1174,29 @@ class TestTaskRunner:
         assert created is True
         await runner.enqueue(task_id, msg.text)
 
-        for _ in range(20):
+        # Feature 083 P4：等到 task 真正进入 WAITING_INPUT + session 露出 approval_id
+        # 才发 attach_input。原代码只等 session.pending_approval_id 出现，但
+        # `pending_approval_id` 设置点可能早于 task.status=WAITING_INPUT，xdist
+        # 高 CPU 负载下两步 transition 之间的 gap 让 attach_input 命中
+        # "task is not waiting for human input"。
+        approval_id: str | None = None
+        for _ in range(100):  # 5s 窗口（原 1s 太紧）
+            task = await task_service.get_task(task_id)
             session = await runner.get_execution_session(task_id)
-            if session is not None and session.pending_approval_id:
+            if (
+                task is not None
+                and task.status == TaskStatus.WAITING_INPUT
+                and session is not None
+                and session.pending_approval_id
+            ):
+                approval_id = session.pending_approval_id
                 break
             await asyncio.sleep(0.05)
         else:
-            raise AssertionError("approval_id was not exposed for interactive input")
+            raise AssertionError(
+                "task did not reach WAITING_INPUT + pending_approval_id within 5s"
+            )
 
-        approval_id = session.pending_approval_id
         assert approval_id is not None
 
         try:
