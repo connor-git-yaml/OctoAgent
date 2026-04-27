@@ -7,6 +7,7 @@ from octoagent.provider.dx.models import CheckLevel, CheckResult, CheckStatus, D
 
 
 def test_planner_builds_blocking_guidance() -> None:
+    """F081 cleanup：原 docker_running check 已删除，改用 telegram_token 验证 warning 路径。"""
     report = DoctorReport(
         checks=[
             CheckResult(
@@ -17,11 +18,11 @@ def test_planner_builds_blocking_guidance() -> None:
                 fix_hint="运行 octo config init",
             ),
             CheckResult(
-                name="docker_running",
+                name="telegram_token",
                 status=CheckStatus.WARN,
                 level=CheckLevel.RECOMMENDED,
-                message="Docker 未运行",
-                fix_hint="启动 Docker Desktop",
+                message="缺少 Telegram bot token 环境变量",
+                fix_hint="在 .env 中设置 TELEGRAM_BOT_TOKEN",
             ),
         ],
         overall_status=CheckStatus.FAIL,
@@ -32,7 +33,8 @@ def test_planner_builds_blocking_guidance() -> None:
     assert guidance.overall_status == "blocked"
     # env_file 对应的 action command 是 "octo init"，与 config-init 类型不同
     assert guidance.blocking_actions[0].command == "octo init"
-    assert [group.stage for group in guidance.groups] == ["system", "config"]
+    # env_file 在 config stage，telegram_token 在 config stage
+    assert [group.stage for group in guidance.groups] == ["config"]
 
 
 def test_planner_ready_when_no_findings() -> None:

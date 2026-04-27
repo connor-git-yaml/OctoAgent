@@ -96,24 +96,17 @@ def _config_missing_for_check(check: CheckResult) -> bool:
 def _severity(check: CheckResult) -> Literal["blocking", "warning"]:
     if check.status == CheckStatus.FAIL and check.level == CheckLevel.REQUIRED:
         return "blocking"
-    if check.name == "live_ping" and check.status == CheckStatus.FAIL:
-        return "blocking"
     if check.name == "octoagent_yaml_valid" and check.status == CheckStatus.FAIL:
         return "blocking"
     return "warning"
 
 
 def _stage_for(check_name: str) -> DoctorStage:
-    if check_name in {"python_version", "uv_installed", "docker_running", "db_writable"}:
+    if check_name in {"python_version", "uv_installed", "db_writable"}:
         return "system"
     if check_name in {
         "env_file",
-        "env_litellm_file",
-        "llm_mode",
-        "proxy_key",
-        "master_key_match",
         "octoagent_yaml_valid",
-        "litellm_sync",
         "telegram_config",
         "telegram_token",
     }:
@@ -158,66 +151,9 @@ def _action_for(check: CheckResult, severity: Literal["blocking", "warning"]) ->
             blocking=blocking,
             sort_order=30,
         ),
-        "env_litellm_file": _command_action(
-            "octo-init-env-litellm",
-            "运行初始化向导",
-            "补齐 .env.litellm 与 LiteLLM 相关环境变量。",
-            "octo init",
-            blocking=blocking,
-            sort_order=35,
-        ),
-        "llm_mode": _manual_action(
-            "repair-llm-mode",
-            "修复运行模式",
-            check.fix_hint or "修复 llm_mode 配置来源。",
-            blocking=blocking,
-            sort_order=40,
-            manual_steps=[check.fix_hint or "修复 llm_mode 配置来源。", *_doctor_retry_steps()],
-        ),
-        "proxy_key": _manual_action(
-            "repair-proxy-key",
-            "补齐 Proxy Key",
-            check.fix_hint or "确保运行时引用的 Proxy Key 环境变量已设置。",
-            blocking=blocking,
-            sort_order=45,
-            manual_steps=[
-                check.fix_hint or "确保运行时引用的 Proxy Key 环境变量已设置。",
-                *_doctor_retry_steps(),
-            ],
-        ),
-        "master_key_match": _manual_action(
-            "sync-master-key",
-            "同步 Master Key",
-            check.fix_hint or "同步 legacy master/proxy key 配置。",
-            blocking=blocking,
-            sort_order=46,
-            manual_steps=[
-                check.fix_hint or "同步 legacy master/proxy key 配置。",
-                *_doctor_retry_steps(),
-            ],
-        ),
-        "docker_running": _manual_action(
-            "start-docker",
-            "启动 Docker",
-            "Docker 未运行，先启动 Docker Desktop 或 docker daemon。",
-            blocking=blocking,
-            sort_order=50,
-            manual_steps=[
-                "启动 Docker Desktop 或 docker daemon",
-                "修复后重新运行: octo doctor --live",
-            ],
-        ),
-        "proxy_reachable": _manual_action(
-            "start-proxy",
-            "修复 LiteLLM Proxy 连通性",
-            check.fix_hint or "确保配置的 LiteLLM Proxy 可达。",
-            blocking=blocking,
-            sort_order=55,
-            manual_steps=[
-                check.fix_hint or "确保配置的 LiteLLM Proxy 可达。",
-                *_doctor_retry_steps(),
-            ],
-        ),
+        # F081 cleanup：删除 env_litellm_file / llm_mode / proxy_key / master_key_match /
+        # docker_running / proxy_reachable —— 全部为 LiteLLM Proxy 时代的检查项的 remediation
+        # 映射，对应 check_ 方法已删除。
         "db_writable": _manual_action(
             "repair-data-permission",
             "修复 data 目录权限",
@@ -248,25 +184,7 @@ def _action_for(check: CheckResult, severity: Literal["blocking", "warning"]) ->
             blocking=blocking,
             sort_order=75,
         ),
-        "litellm_sync": _command_action(
-            "resync-litellm",
-            "重新同步 LiteLLM 配置",
-            "重新生成 litellm-config.yaml。",
-            "octo config sync",
-            blocking=blocking,
-            sort_order=80,
-        ),
-        "live_ping": _manual_action(
-            "repair-live-ping",
-            "修复端到端连通性",
-            check.fix_hint or "检查 proxy key、provider key 与网络连通性后重试。",
-            blocking=blocking,
-            sort_order=90,
-            manual_steps=[
-                check.fix_hint or "检查 proxy key、provider key 与网络连通性",
-                *_doctor_retry_steps(),
-            ],
-        ),
+        # F081 cleanup：删除 litellm_sync / live_ping —— LiteLLM 时代检查项 remediation
         "telegram_config": _manual_action(
             "repair-telegram-config",
             "补齐 Telegram 配置",

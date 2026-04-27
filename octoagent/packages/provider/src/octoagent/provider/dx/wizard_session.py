@@ -254,17 +254,7 @@ class WizardSessionService:
             "memory.rerank_model_alias",
             advanced=advanced,
         )
-        llm_mode = self._prompt_choice(field_hints, "runtime.llm_mode")
-        proxy_url = self._prompt_field(
-            field_hints,
-            "runtime.litellm_proxy_url",
-            advanced=advanced,
-        )
-        master_key_env = self._prompt_field(
-            field_hints,
-            "runtime.master_key_env",
-            advanced=advanced,
-        )
+        # F081 cleanup：runtime.{llm_mode,litellm_proxy_url,master_key_env} 已删除
         telegram_enabled = self._prompt_confirm(field_hints, "channels.telegram.enabled")
         telegram_mode = current_config.channels.telegram.mode if current_config else "polling"
         telegram_bot_token_env = (
@@ -329,11 +319,7 @@ class WizardSessionService:
                 embedding_model_alias=memory_embedding_alias.strip(),
                 rerank_model_alias=memory_rerank_alias.strip(),
             ),
-            runtime=RuntimeConfig(
-                llm_mode=llm_mode,
-                litellm_proxy_url=proxy_url,
-                master_key_env=master_key_env,
-            ),
+            runtime=RuntimeConfig(),  # F081 cleanup：deprecated 字段已删除
             channels=ChannelsConfig(
                 telegram=TelegramChannelConfig(
                     enabled=telegram_enabled,
@@ -504,15 +490,8 @@ class WizardSessionService:
     @staticmethod
     def _build_draft_secret_bindings(config: OctoAgentConfig) -> list[dict[str, Any]]:
         targets: list[dict[str, Any]] = []
-        if config.runtime.master_key_env and config.runtime.llm_mode == "litellm":
-            targets.append(
-                {
-                    "target_kind": "runtime",
-                    "target_key": "runtime.master_key_env",
-                    "env_name": config.runtime.master_key_env,
-                    "display_name": "LiteLLM Master Key",
-                }
-            )
+        # F081 cleanup：移除 LiteLLM Master Key 注册（runtime.master_key_env / llm_mode
+        # 字段已删除）；ProviderRouter 直连后无 master key 概念。
         for provider in config.providers:
             if provider.auth_type == "api_key" and provider.api_key_env:
                 targets.append(

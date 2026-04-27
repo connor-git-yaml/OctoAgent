@@ -33,7 +33,8 @@ from octoagent.protocol import (
     build_task_message,
     dispatch_envelope_from_task_message,
 )
-from octoagent.provider.config import ProviderConfig
+# F081 cleanup：octoagent.provider.config 已删除（连同 LiteLLM Proxy）；
+# echo 模式现仅由 OCTOAGENT_LLM_MODE 环境变量控制。
 from octoagent.provider.dx.channel_verifier import ChannelVerifierRegistry
 from octoagent.provider.dx.chat_import_service import ChatImportService
 from octoagent.provider.dx.cli import main as provider_cli
@@ -218,9 +219,8 @@ async def test_first_use_acceptance_config_gateway_pairing_and_onboarding_resume
 
     doctor = DoctorRunner(project_root=tmp_path)
     env_check = await doctor.check_env_file()
-    litellm_env_check = await doctor.check_env_litellm_file()
+    # F081 cleanup：check_env_litellm_file 已删除（LiteLLM Proxy 退役）。
     assert env_check.status == CheckStatus.SKIP
-    assert litellm_env_check.status == CheckStatus.SKIP
 
     status_store = UpdateStatusStore(tmp_path)
     status_store.save_runtime_descriptor(
@@ -266,11 +266,7 @@ async def test_first_use_acceptance_config_gateway_pairing_and_onboarding_resume
         locator={"env_name": "OPENROUTER_SOURCE"},
         target_keys=["providers.openrouter.api_key_env"],
     )
-    await secret_service.configure(
-        source_type=SecretRefSourceType.ENV,
-        locator={"env_name": "MASTER_KEY_SOURCE"},
-        target_keys=["runtime.master_key_env"],
-    )
+    # F081 cleanup：runtime.master_key_env target 已删除
     await secret_service.configure(
         source_type=SecretRefSourceType.ENV,
         locator={"env_name": "TELEGRAM_BOT_TOKEN_SOURCE"},
@@ -293,11 +289,7 @@ async def test_first_use_acceptance_config_gateway_pairing_and_onboarding_resume
     from octoagent.provider.dx.onboarding_service import OnboardingService
 
     monkeypatch.setattr(gateway_main, "TelegramBotClient", lambda _root: bot_client)
-    monkeypatch.setattr(
-        gateway_main,
-        "load_provider_config",
-        lambda: ProviderConfig(llm_mode="echo", config_source="env"),
-    )
+    monkeypatch.setenv("OCTOAGENT_LLM_MODE", "echo")
 
     app: FastAPI = gateway_main.create_app()
 
@@ -466,11 +458,7 @@ async def test_operator_parity_acceptance_web_and_telegram_share_same_pairing_it
     from octoagent.gateway import main as gateway_main
 
     monkeypatch.setattr(gateway_main, "TelegramBotClient", lambda _root: bot_client)
-    monkeypatch.setattr(
-        gateway_main,
-        "load_provider_config",
-        lambda: ProviderConfig(llm_mode="echo", config_source="env"),
-    )
+    monkeypatch.setenv("OCTOAGENT_LLM_MODE", "echo")
 
     app: FastAPI = gateway_main.create_app()
 

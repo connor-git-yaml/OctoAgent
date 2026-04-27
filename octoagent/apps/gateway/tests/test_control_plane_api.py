@@ -1081,44 +1081,10 @@ class TestControlPlaneApi:
         assert "api_key_env" not in serialized
         assert "sk-" not in serialized
 
-    async def test_setup_review_echo_mode_does_not_block_on_provider_or_alias(
-        self,
-        control_plane_client: AsyncClient,
-        seeded_control_plane,
-    ) -> None:
-        resp = await control_plane_client.post(
-            "/api/control/actions",
-            json={
-                "request_id": str(ULID()),
-                "action_id": "setup.review",
-                "surface": "web",
-                "actor": {
-                    "actor_id": "user:web",
-                    "actor_label": "Owner",
-                },
-                "params": {
-                    "draft": {
-                        "config": {
-                            "runtime": {
-                                "llm_mode": "echo",
-                            },
-                            "providers": [],
-                            "model_aliases": {},
-                        }
-                    }
-                },
-            },
-        )
-
-        assert resp.status_code == 200
-        review = resp.json()["result"]["data"]["review"]
-        assert "provider_missing" not in review["blocking_reasons"]
-        assert "main_alias_missing" not in review["blocking_reasons"]
-        assert any(
-            item["risk_id"] == "provider_missing" and item["blocking"] is False
-            for item in review["provider_runtime_risks"]
-        )
-        assert any("体验模式" in item["summary"] for item in review["provider_runtime_risks"])
+    # F081 cleanup：删除 test_setup_review_echo_mode_does_not_block_on_provider_or_alias
+    # —— setup_service 已移除 echo mode 路径（runtime.llm_mode 字段删除，
+    # `requires_real_model = True` 硬编码），原测试断言的"echo 模式下 provider/alias
+    # 缺失不 block"行为不再成立。
 
     async def test_setup_review_uses_draft_aliases_for_skill_governance(
         self,
@@ -1732,12 +1698,14 @@ class TestControlPlaneApi:
         assert "policy_profile_id" not in default_project.metadata
         assert "skill_selection" not in default_project.metadata
 
-    async def test_setup_apply_persists_litellm_secret_values_and_api_key_profile(
+    async def test_setup_apply_persists_provider_secret_values_and_api_key_profile(
         self,
         control_plane_app,
         control_plane_client: AsyncClient,
         seeded_control_plane,
     ) -> None:
+        """F081 cleanup：原 LITELLM_MASTER_KEY / LITELLM_PROXY_KEY / .env.litellm
+        相关写入已删除；setup.apply 仅持久化 provider api_key 到 .env + auth-profiles.json。"""
         resp = await control_plane_client.post(
             "/api/control/actions",
             json={
@@ -1751,11 +1719,6 @@ class TestControlPlaneApi:
                 "params": {
                     "draft": {
                         "config": {
-                            "runtime": {
-                                "llm_mode": "litellm",
-                                "litellm_proxy_url": "http://localhost:4000",
-                                "master_key_env": "LITELLM_MASTER_KEY",
-                            },
                             "providers": [
                                 {
                                     "id": "openrouter",
@@ -1774,11 +1737,10 @@ class TestControlPlaneApi:
                         },
                         "secret_values": {
                             "OPENROUTER_API_KEY": "sk-openrouter-value",
-                            "LITELLM_MASTER_KEY": "sk-master-value",
                         },
                         "agent_profile": {
                             "scope": "project",
-                            "name": "LiteLLM 主 Agent",
+                            "name": "主 Agent",
                             "persona_summary": "用于验证密钥落盘。",
                             "tool_profile": "standard",
                             "model_alias": "main",
@@ -1791,19 +1753,17 @@ class TestControlPlaneApi:
         assert resp.status_code == 200
         result = resp.json()["result"]
         assert result["code"] == "SETUP_APPLIED"
+        # F081 cleanup：返回字段名 litellm_env_names 仍兼容保留，但内容只有 provider api_key。
         assert result["data"]["saved_secrets"]["litellm_env_names"] == [
-            "LITELLM_MASTER_KEY",
-            "LITELLM_PROXY_KEY",
             "OPENROUTER_API_KEY",
         ]
         assert result["data"]["saved_secrets"]["profile_names"] == ["openrouter-default"]
 
-        env_path = control_plane_app.state.project_root / ".env.litellm"
+        # F081 cleanup：所有 secret 写入 .env（不再分 .env.litellm）。
+        env_path = control_plane_app.state.project_root / ".env"
         assert env_path.exists()
         env_text = env_path.read_text(encoding="utf-8")
         assert "OPENROUTER_API_KEY=sk-openrouter-value" in env_text
-        assert "LITELLM_MASTER_KEY=sk-master-value" in env_text
-        assert "LITELLM_PROXY_KEY=sk-master-value" in env_text
 
         store = CredentialStore(control_plane_app.state.project_root / "auth-profiles.json")
         profile = store.get_profile("openrouter-default")
@@ -1824,6 +1784,8 @@ class TestControlPlaneApi:
         修复前：``_save_runtime_secret_values`` 用 ``provider.api_key_env`` 读字段；
         v2 yaml 中 ``api_key_env`` 是 default ""，``litellm_targets`` 不含真实 env 名 →
         提交的 secret 静默丢弃，profile 也不写入。
+
+        F081 cleanup：原 LITELLM_MASTER_KEY 写入路径已删除，secret 统一写 .env。
         """
         resp = await control_plane_client.post(
             "/api/control/actions",
@@ -1839,11 +1801,6 @@ class TestControlPlaneApi:
                     "draft": {
                         "config": {
                             "config_version": 2,
-                            "runtime": {
-                                "llm_mode": "litellm",
-                                "litellm_proxy_url": "http://localhost:4000",
-                                "master_key_env": "LITELLM_MASTER_KEY",
-                            },
                             "providers": [
                                 # v2 schema：仅用 transport / api_base / auth；不写 auth_type/api_key_env
                                 {
@@ -1867,7 +1824,6 @@ class TestControlPlaneApi:
                         },
                         "secret_values": {
                             "OPENROUTER_API_KEY": "sk-v2-secret",
-                            "LITELLM_MASTER_KEY": "sk-master-v2",
                         },
                         "agent_profile": {
                             "scope": "project",
@@ -1888,13 +1844,13 @@ class TestControlPlaneApi:
         # 关键断言：v2 schema 下 secret 仍然落盘
         saved = result["data"]["saved_secrets"]
         assert "OPENROUTER_API_KEY" in saved["litellm_env_names"], (
-            f"v2 schema 下 OPENROUTER_API_KEY 应写入 .env(.litellm)；实际 saved={saved}"
+            f"v2 schema 下 OPENROUTER_API_KEY 应写入 .env；实际 saved={saved}"
         )
         assert "openrouter-default" in saved["profile_names"], (
             f"v2 schema 下 openrouter-default profile 应写入 auth-profiles.json；实际 saved={saved}"
         )
 
-        env_path = control_plane_app.state.project_root / ".env.litellm"
+        env_path = control_plane_app.state.project_root / ".env"
         assert env_path.exists()
         env_text = env_path.read_text(encoding="utf-8")
         assert "OPENROUTER_API_KEY=sk-v2-secret" in env_text

@@ -104,7 +104,7 @@ class RuntimeActivationService:
         """
         return (
             "# Feature 081：LiteLLM Proxy 已退役，无需启动。"
-            " 请运行 `octo config migrate-080` 升级配置；运行时已统一走 ProviderRouter 直连。"
+            " 运行时统一走 ProviderRouter 直连。"
         )
 
     async def start_proxy(self, *, timeout_seconds: float = 25.0) -> RuntimeActivationSummary:
@@ -121,5 +121,5 @@ class RuntimeActivationService:
         )
         raise RuntimeActivationError(
             "LiteLLM Proxy 已退役（Feature 081）；运行时统一走 ProviderRouter 直连，"
-            " 不再有 Proxy 子进程需要启动。请运行 `octo config migrate-080` 升级。"
+            " 不再有 Proxy 子进程需要启动。"
         )

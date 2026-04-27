@@ -299,7 +299,7 @@ async def test_m3_first_use_dashboard_and_trust_boundary_acceptance(
 
     doctor = DoctorRunner(project_root=tmp_path)
     assert (await doctor.check_env_file()).status == CheckStatus.SKIP
-    assert (await doctor.check_env_litellm_file()).status == CheckStatus.SKIP
+    # F081 cleanup：check_env_litellm_file 已删除（LiteLLM Proxy 退役）。
 
     _configure_runtime_env(monkeypatch, tmp_path)
 

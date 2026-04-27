@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -18,9 +17,7 @@ from octoagent.provider.dx.channel_verifier import VerifierAvailability
 from octoagent.provider.dx.cli import main
 from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
-    ModelAlias,
     OctoAgentConfig,
-    ProviderEntry,
     RuntimeConfig,
     TelegramChannelConfig,
 )
@@ -78,56 +75,12 @@ def _write_invalid_telegram_config(tmp_path: Path) -> None:
     )
 
 
-def _write_runtime_config(
-    tmp_path: Path,
-    *,
-    llm_mode: str = "echo",
-    proxy_url: str = "http://yaml-proxy:4001",
-    master_key_env: str = "YAML_MASTER_KEY",
-) -> None:
+def _write_runtime_config(tmp_path: Path) -> None:
+    """F081 cleanup：RuntimeConfig 已退化为空块；写一个最小 octoagent.yaml 即可。"""
     save_config(
         OctoAgentConfig(
             updated_at="2026-03-07",
-            runtime=RuntimeConfig(
-                llm_mode=llm_mode,
-                litellm_proxy_url=proxy_url,
-                master_key_env=master_key_env,
-            ),
-        ),
-        tmp_path,
-    )
-
-
-def _write_codex_runtime_config(
-    tmp_path: Path,
-    *,
-    proxy_url: str = "http://yaml-proxy:4001",
-    master_key_env: str = "YAML_MASTER_KEY",
-) -> None:
-    save_config(
-        OctoAgentConfig(
-            updated_at="2026-03-07",
-            providers=[
-                ProviderEntry(
-                    id="openai-codex",
-                    name="OpenAI Codex",
-                    auth_type="oauth",
-                    api_key_env="OPENAI_API_KEY",
-                )
-            ],
-            model_aliases={
-                "cheap": ModelAlias(
-                    provider="openai-codex",
-                    model="gpt-5.4",
-                    description="doctor live ping",
-                    thinking_level="low",
-                )
-            },
-            runtime=RuntimeConfig(
-                llm_mode="litellm",
-                litellm_proxy_url=proxy_url,
-                master_key_env=master_key_env,
-            ),
+            runtime=RuntimeConfig(),
         ),
         tmp_path,
     )
@@ -204,196 +157,20 @@ class TestDoctorChecks:
         assert result.status == CheckStatus.PASS
 
     async def test_env_file_skips_when_yaml_runtime_exists(self, tmp_path: Path) -> None:
-        _write_runtime_config(tmp_path, llm_mode="echo")
+        _write_runtime_config(tmp_path)
         runner = DoctorRunner(project_root=tmp_path)
         result = await runner.check_env_file()
         assert result.status == CheckStatus.SKIP
         assert "octoagent.yaml" in result.message
         assert result.fix_hint == ""
 
-    async def test_env_litellm_missing(self, tmp_path: Path) -> None:
-        runner = DoctorRunner(project_root=tmp_path)
-        result = await runner.check_env_litellm_file()
-        assert result.status == CheckStatus.WARN
-
-    async def test_env_litellm_skips_when_yaml_runtime_exists(self, tmp_path: Path) -> None:
-        _write_runtime_config(tmp_path, llm_mode="echo")
-        runner = DoctorRunner(project_root=tmp_path)
-        result = await runner.check_env_litellm_file()
-        assert result.status == CheckStatus.SKIP
-        assert "octoagent.yaml" in result.message
-        assert result.fix_hint == ""
-
-    async def test_llm_mode_set(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setenv("OCTOAGENT_LLM_MODE", "litellm")
-        runner = DoctorRunner(project_root=tmp_path)
-        result = await runner.check_llm_mode()
-        assert result.status == CheckStatus.PASS
-
-    async def test_llm_mode_unset(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.delenv("OCTOAGENT_LLM_MODE", raising=False)
-        runner = DoctorRunner(project_root=tmp_path)
-        result = await runner.check_llm_mode()
-        assert result.status == CheckStatus.FAIL
-
-    async def test_llm_mode_reads_yaml_runtime(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _write_runtime_config(tmp_path, llm_mode="echo")
-        monkeypatch.delenv("OCTOAGENT_LLM_MODE", raising=False)
-        runner = DoctorRunner(project_root=tmp_path)
-
-        result = await runner.check_llm_mode()
-
-        assert result.status == CheckStatus.PASS
-        assert result.message == "runtime.llm_mode=echo"
-
-    async def test_proxy_key_unset(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.delenv("LITELLM_PROXY_KEY", raising=False)
-        runner = DoctorRunner(project_root=tmp_path)
-        result = await runner.check_proxy_key()
-        assert result.status == CheckStatus.WARN
-
-    async def test_proxy_key_reads_custom_yaml_master_key_env(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _write_runtime_config(tmp_path, master_key_env="CUSTOM_MASTER_KEY")
-        monkeypatch.setenv("CUSTOM_MASTER_KEY", "yaml-key")
-        monkeypatch.delenv("LITELLM_PROXY_KEY", raising=False)
-        runner = DoctorRunner(project_root=tmp_path)
-
-        result = await runner.check_proxy_key()
-
-        assert result.status == CheckStatus.PASS
-        assert result.message == "CUSTOM_MASTER_KEY 已设置"
-
-    async def test_master_key_match_skip(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.delenv("LITELLM_MASTER_KEY", raising=False)
-        monkeypatch.delenv("LITELLM_PROXY_KEY", raising=False)
-        runner = DoctorRunner(project_root=tmp_path)
-        result = await runner.check_master_key_match()
-        assert result.status == CheckStatus.SKIP
-
-    async def test_master_key_match_skips_legacy_compare_for_yaml_runtime(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _write_runtime_config(tmp_path, master_key_env="CUSTOM_MASTER_KEY")
-        monkeypatch.setenv("CUSTOM_MASTER_KEY", "yaml-key")
-        monkeypatch.setenv("LITELLM_MASTER_KEY", "legacy-master")
-        monkeypatch.setenv("LITELLM_PROXY_KEY", "legacy-proxy")
-        runner = DoctorRunner(project_root=tmp_path)
-
-        result = await runner.check_master_key_match()
-
-        assert result.status == CheckStatus.SKIP
-        assert "CUSTOM_MASTER_KEY" in result.message
-
-    async def test_master_key_match_pass(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        monkeypatch.setenv("LITELLM_MASTER_KEY", "sk-test")
-        monkeypatch.setenv("LITELLM_PROXY_KEY", "sk-test")
-        runner = DoctorRunner(project_root=tmp_path)
-        result = await runner.check_master_key_match()
-        assert result.status == CheckStatus.PASS
-
-    async def test_proxy_reachable_uses_yaml_runtime_proxy_url(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _write_runtime_config(tmp_path, proxy_url="http://yaml-proxy:4310")
-        calls: list[str] = []
-
-        class FakeAsyncClient:
-            def __init__(self, *, timeout: float) -> None:
-                self.timeout = timeout
-
-            async def __aenter__(self) -> FakeAsyncClient:
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb) -> None:
-                del exc_type, exc, tb
-
-            async def get(self, url: str):
-                calls.append(url)
-                return SimpleNamespace(status_code=200)
-
-        monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
-        runner = DoctorRunner(project_root=tmp_path)
-
-        result = await runner.check_proxy_reachable()
-
-        assert result.status == CheckStatus.PASS
-        assert calls == ["http://yaml-proxy:4310/health/liveliness"]
-
-    async def test_live_ping_uses_yaml_runtime_proxy_url_and_key_env(
-        self,
-        tmp_path: Path,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        _write_runtime_config(
-            tmp_path,
-            proxy_url="http://yaml-proxy:4320",
-            master_key_env="CUSTOM_MASTER_KEY",
-        )
-        monkeypatch.setenv("CUSTOM_MASTER_KEY", "yaml-key")
-        calls: list[tuple[str, str]] = []
-
-        class FakeResponse:
-            status_code = 200
-            headers = {"content-type": "application/json"}
-            text = ""
-
-            def json(self) -> dict[str, object]:
-                return {"ok": True}
-
-        class FakeAsyncClient:
-            def __init__(self, *, timeout: float) -> None:
-                self.timeout = timeout
-
-            async def __aenter__(self) -> FakeAsyncClient:
-                return self
-
-            async def __aexit__(self, exc_type, exc, tb) -> None:
-                del exc_type, exc, tb
-
-            async def post(self, url: str, *, headers: dict[str, str], json: dict[str, object]):
-                del json
-                calls.append((url, headers["Authorization"]))
-                return FakeResponse()
-
-        monkeypatch.setattr(httpx, "AsyncClient", FakeAsyncClient)
-        runner = DoctorRunner(project_root=tmp_path)
-
-        result = await runner.check_live_ping()
-
-        assert result.status == CheckStatus.PASS
-        assert calls == [("http://yaml-proxy:4320/v1/chat/completions", "Bearer yaml-key")]
+    # F081 cleanup：删除以下 LiteLLM Proxy 时代的检查测试 ——
+    # test_env_litellm_missing / test_env_litellm_skips_when_yaml_runtime_exists /
+    # test_llm_mode_set / test_llm_mode_unset / test_llm_mode_reads_yaml_runtime /
+    # test_proxy_key_unset / test_proxy_key_reads_custom_yaml_master_key_env /
+    # test_master_key_match_skip / test_master_key_match_skips_legacy_compare_for_yaml_runtime /
+    # test_master_key_match_pass / test_proxy_reachable_uses_yaml_runtime_proxy_url /
+    # test_live_ping_uses_yaml_runtime_proxy_url_and_key_env。对应的 check_* 方法已删除。
 
     async def test_db_writable(self, tmp_path: Path) -> None:
         runner = DoctorRunner(project_root=tmp_path)
@@ -520,10 +297,8 @@ class TestDoctorOverall:
             pytest.skip("uv not in PATH")
         # 创建所需文件
         (tmp_path / ".env").write_text("OCTOAGENT_LLM_MODE=echo", encoding="utf-8")
-        (tmp_path / ".env.litellm").write_text("", encoding="utf-8")
+        # F081 cleanup：.env.litellm / LITELLM_*_KEY 检查项均已删除。
         monkeypatch.setenv("OCTOAGENT_LLM_MODE", "echo")
-        monkeypatch.setenv("LITELLM_PROXY_KEY", "sk-test")
-        monkeypatch.setenv("LITELLM_MASTER_KEY", "sk-test")
 
         runner = DoctorRunner(project_root=tmp_path)
         # 使用有凭证的 store
@@ -668,7 +443,7 @@ class TestFormatReport:
         self,
         tmp_path: Path,
     ) -> None:
-        _write_runtime_config(tmp_path, llm_mode="echo")
+        _write_runtime_config(tmp_path)
         runner = DoctorRunner(project_root=tmp_path)
 
         report = await runner.run_all_checks(live=False)
@@ -680,6 +455,7 @@ class TestFormatReport:
         }
 
         assert "env_file" not in check_names
+        # F081 cleanup：env_litellm_file 检查项已删除，无需断言
         assert "env_litellm_file" not in check_names
 
 
@@ -713,17 +489,18 @@ class TestDoctorCli:
         from click.testing import CliRunner
         from octoagent.provider.dx import doctor as doctor_module
 
+        # F081 cleanup：原 live_ping 检查已删除，改用 env_file FAIL + REQUIRED 触发 blocking。
         report = doctor_module.DoctorReport(
             checks=[
                 doctor_module.CheckResult(
-                    name="live_ping",
+                    name="env_file",
                     status=CheckStatus.FAIL,
-                    level=CheckLevel.RECOMMENDED,
-                    message="Proxy 认证失败",
-                    fix_hint="检查 CUSTOM_MASTER_KEY 配置",
+                    level=CheckLevel.REQUIRED,
+                    message=".env 文件不存在",
+                    fix_hint="运行 octo init 生成配置文件",
                 )
             ],
-            overall_status=CheckStatus.WARN,
+            overall_status=CheckStatus.FAIL,
             timestamp=datetime.now(tz=UTC),
         )
 

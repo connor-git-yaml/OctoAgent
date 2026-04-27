@@ -64,8 +64,8 @@ def _make_config(**kwargs: object) -> OctoAgentConfig:
 def test_parse_full_config() -> None:
     """正常解析含所有字段的配置。
 
-    Feature 081 P2：所有 LiteLLM 相关字段标记 deprecated 但默认值不变
-    （兼容 setup wizard / litellm_generator 等待 P3 改造的路径）；
+    F081 cleanup：原 LiteLLM 相关字段（runtime.llm_mode/litellm_proxy_url/
+    master_key_env）已全部删除，RuntimeConfig 退化为空块。
     本 test 额外验证 backward-compat 迁移效果——ProviderEntry 用旧 schema
     创建后会自动迁移到 ``auth`` first-class 字段。
     """
@@ -78,8 +78,6 @@ def test_parse_full_config() -> None:
     assert config.providers[0].auth is not None
     assert config.providers[0].auth.kind == "api_key"
     assert config.providers[0].auth.env == "OPENROUTER_API_KEY"
-    # Feature 081 P2：deprecated 字段保留默认值（兼容 legacy 路径）
-    assert config.runtime.llm_mode == "litellm"
 
 
 def test_model_alias_normalizes_routed_provider_model_string() -> None:
@@ -94,19 +92,14 @@ def test_model_alias_normalizes_routed_provider_model_string() -> None:
 def test_default_values() -> None:
     """缺省字段使用默认值。
 
-    Feature 081 P2：runtime 块下 ``llm_mode`` / ``litellm_proxy_url`` /
-    ``master_key_env`` 已标 deprecated 但默认值保持不变——P3 才改造 setup wizard
-    等 legacy 路径，P4 才删除 litellm_generator。当前默认值仅供这些 legacy 路径
-    继续正确生成 yaml；运行时（main.py）已不再消费这些字段。
+    F081 cleanup：``runtime`` 块下原本的 LiteLLM 字段（``llm_mode`` /
+    ``litellm_proxy_url`` / ``master_key_env``）已全部删除；``RuntimeConfig``
+    退化为空块（schema 占位），运行时不再消费这些字段。
     """
     config = OctoAgentConfig(updated_at="2026-03-04")
     assert config.config_version == 1
     assert config.providers == []
     assert config.model_aliases == {}
-    # Feature 081 P2：deprecated 但默认值保留（legacy 路径仍依赖）
-    assert config.runtime.llm_mode == "litellm"
-    assert config.runtime.litellm_proxy_url == "http://localhost:4000"
-    assert config.runtime.master_key_env == "LITELLM_MASTER_KEY"
     assert config.front_door.mode == "loopback"
     assert config.front_door.bearer_token_env == "OCTOAGENT_FRONTDOOR_TOKEN"
     assert config.channels.telegram.enabled is False
@@ -252,18 +245,8 @@ def test_api_key_env_valid_format() -> None:
 # config_version 兼容性（NFR-006 向前兼容）
 # ---------------------------------------------------------------------------
 
-
-def test_unknown_config_version_warns() -> None:
-    """config_version != 1 时打印 WARNING 并继续（不拒绝）"""
-    with warnings.catch_warnings(record=True) as w:
-        warnings.simplefilter("always")
-        config = OctoAgentConfig(
-            config_version=2,
-            updated_at="2026-03-04",
-        )
-    assert config.config_version == 2
-    assert any("config_version=2" in str(warning.message) for warning in w)
-
+# F081 cleanup：删除 test_unknown_config_version_warns ——
+# OctoAgentConfig 的 warn_unknown_version model_validator 已被移除。
 
 # ---------------------------------------------------------------------------
 # 往返序列化测试

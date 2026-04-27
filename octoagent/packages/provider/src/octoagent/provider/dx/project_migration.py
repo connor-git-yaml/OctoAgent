@@ -900,11 +900,7 @@ class ProjectWorkspaceMigrationService:
 
         if cfg is None:
             return
-        self._add_yaml_env_ref(
-            discovery,
-            cfg.runtime.master_key_env,
-            "runtime.master_key_env",
-        )
+        # F081 cleanup：移除 master_key_env 注册（runtime.master_key_env 已删除）
         for provider in cfg.providers:
             self._add_yaml_env_ref(
                 discovery,

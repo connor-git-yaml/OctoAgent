@@ -18,6 +18,7 @@ from octoagent.provider.dx.update_status_store import UpdateStatusStore
 
 
 def _write_secret_test_config(project_root: Path) -> None:
+    """F081 cleanup：RuntimeConfig 已退化为空块，不再写 LiteLLM 字段。"""
     save_config(
         OctoAgentConfig(
             updated_at="2026-03-08",
@@ -33,24 +34,18 @@ def _write_secret_test_config(project_root: Path) -> None:
                 "main": ModelAlias(provider="openrouter", model="openrouter/auto"),
                 "cheap": ModelAlias(provider="openrouter", model="openrouter/auto"),
             },
-            runtime=RuntimeConfig(
-                llm_mode="litellm",
-                litellm_proxy_url="http://localhost:4000",
-                master_key_env="LITELLM_MASTER_KEY",
-            ),
+            runtime=RuntimeConfig(),
         ),
         project_root,
     )
 
 
 async def test_secret_service_configure_audit_apply_and_unmanaged_reload(tmp_path: Path) -> None:
+    """F081 cleanup：runtime.master_key_env target 已删除，仅剩 provider api_key target。"""
     _write_secret_test_config(tmp_path)
     service = SecretService(
         tmp_path,
-        environ={
-            "OPENROUTER_SOURCE": "provider-secret",
-            "MASTER_KEY_SOURCE": "master-secret",
-        },
+        environ={"OPENROUTER_SOURCE": "provider-secret"},
     )
 
     provider_summary = await service.configure(
@@ -58,14 +53,8 @@ async def test_secret_service_configure_audit_apply_and_unmanaged_reload(tmp_pat
         locator={"env_name": "OPENROUTER_SOURCE"},
         target_keys=["providers.openrouter.api_key_env"],
     )
-    runtime_summary = await service.configure(
-        source_type=SecretRefSourceType.ENV,
-        locator={"env_name": "MASTER_KEY_SOURCE"},
-        target_keys=["runtime.master_key_env"],
-    )
 
     assert provider_summary.configured_targets == ["providers.openrouter.api_key_env"]
-    assert runtime_summary.configured_targets == ["runtime.master_key_env"]
 
     report = await service.audit()
     assert report.missing_targets == []
@@ -75,23 +64,17 @@ async def test_secret_service_configure_audit_apply_and_unmanaged_reload(tmp_pat
     dry_run = await service.apply(dry_run=True)
     assert dry_run.status == "dry_run"
     assert dry_run.applied_binding_ids == []
-    assert dry_run.materialization_summary["resolved_env_names"] == [
-        "LITELLM_MASTER_KEY",
-        "OPENROUTER_API_KEY",
-    ]
+    assert dry_run.materialization_summary["resolved_env_names"] == ["OPENROUTER_API_KEY"]
 
     applied = await service.apply()
     assert applied.status == "applied"
-    assert len(applied.applied_binding_ids) == 2
+    assert len(applied.applied_binding_ids) == 1
     assert applied.reload_required is True
 
     reloaded = await service.reload()
     assert reloaded.overall_status == "action_required"
     assert reloaded.materialization.delivery_mode == "unmanaged_manual"
-    assert reloaded.materialization.resolved_env_names == [
-        "LITELLM_MASTER_KEY",
-        "OPENROUTER_API_KEY",
-    ]
+    assert reloaded.materialization.resolved_env_names == ["OPENROUTER_API_KEY"]
 
     post_reload_report = await service.audit()
     assert post_reload_report.overall_status == "ready"
@@ -102,25 +85,18 @@ async def test_secret_service_reload_managed_runtime_and_redaction(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
+    """F081 cleanup：runtime.master_key_env target 已删除。"""
     _write_secret_test_config(tmp_path)
     secret_value = "super-secret-value"
     service = SecretService(
         tmp_path,
-        environ={
-            "OPENROUTER_SOURCE": secret_value,
-            "MASTER_KEY_SOURCE": "master-secret",
-        },
+        environ={"OPENROUTER_SOURCE": secret_value},
     )
 
     await service.configure(
         source_type=SecretRefSourceType.ENV,
         locator={"env_name": "OPENROUTER_SOURCE"},
         target_keys=["providers.openrouter.api_key_env"],
-    )
-    await service.configure(
-        source_type=SecretRefSourceType.ENV,
-        locator={"env_name": "MASTER_KEY_SOURCE"},
-        target_keys=["runtime.master_key_env"],
     )
     await service.apply()
 
@@ -160,7 +136,6 @@ async def test_secret_service_reload_managed_runtime_and_redaction(
     assert result.materialization.delivery_mode == "managed_restart_verify"
     assert result.materialization.resolved_targets == [
         "providers.openrouter.api_key_env",
-        "runtime.master_key_env",
     ]
 
     apply_payload = json.loads(
@@ -189,13 +164,13 @@ async def test_secret_service_reload_managed_runtime_and_redaction(
 
 
 async def test_secret_service_rotate_requires_reapply(tmp_path: Path) -> None:
+    """F081 cleanup：runtime.master_key_env target 已删除。"""
     _write_secret_test_config(tmp_path)
     service = SecretService(
         tmp_path,
         environ={
             "OPENROUTER_SOURCE": "provider-secret",
             "OPENROUTER_ROTATED": "provider-secret-rotated",
-            "MASTER_KEY_SOURCE": "master-secret",
         },
     )
 
@@ -203,11 +178,6 @@ async def test_secret_service_rotate_requires_reapply(tmp_path: Path) -> None:
         source_type=SecretRefSourceType.ENV,
         locator={"env_name": "OPENROUTER_SOURCE"},
         target_keys=["providers.openrouter.api_key_env"],
-    )
-    await service.configure(
-        source_type=SecretRefSourceType.ENV,
-        locator={"env_name": "MASTER_KEY_SOURCE"},
-        target_keys=["runtime.master_key_env"],
     )
     await service.apply()
     await service.reload()
@@ -225,6 +195,7 @@ async def test_secret_service_rotate_requires_reapply(tmp_path: Path) -> None:
 
 
 async def test_secret_service_skips_disabled_provider_targets(tmp_path: Path) -> None:
+    """F081 cleanup：RuntimeConfig 已退化为空块。"""
     save_config(
         OctoAgentConfig(
             updated_at="2026-03-08",
@@ -248,11 +219,7 @@ async def test_secret_service_skips_disabled_provider_targets(tmp_path: Path) ->
                 "main": ModelAlias(provider="openrouter", model="openrouter/auto"),
                 "cheap": ModelAlias(provider="openrouter", model="openrouter/auto"),
             },
-            runtime=RuntimeConfig(
-                llm_mode="echo",
-                litellm_proxy_url="http://localhost:4000",
-                master_key_env="LITELLM_MASTER_KEY",
-            ),
+            runtime=RuntimeConfig(),
         ),
         tmp_path,
     )
@@ -272,9 +239,10 @@ async def test_secret_service_skips_disabled_provider_targets(tmp_path: Path) ->
 
 
 async def test_secret_service_warning_only_bridge_reports_ready(tmp_path: Path) -> None:
+    """F081 cleanup：runtime.master_key_env target 已删除，仅剩 1 个 provider target。"""
     _write_secret_test_config(tmp_path)
     (tmp_path / ".env.litellm").write_text(
-        "OPENROUTER_API_KEY=provider-secret\nLITELLM_MASTER_KEY=master-secret\n",
+        "OPENROUTER_API_KEY=provider-secret\n",
         encoding="utf-8",
     )
     service = SecretService(tmp_path, environ={})
@@ -284,10 +252,11 @@ async def test_secret_service_warning_only_bridge_reports_ready(tmp_path: Path) 
     assert report.overall_status == "ready"
     assert report.missing_targets == []
     assert report.reload_required is False
-    assert len(report.warnings) == 2
+    assert len(report.warnings) == 1
 
 
 async def test_project_inspect_uses_project_scoped_secret_status(tmp_path: Path) -> None:
+    """F081 cleanup：runtime.master_key_env target 已删除。"""
     _write_secret_test_config(tmp_path)
     selector = ProjectSelectorService(tmp_path)
     alpha, _, _ = await selector.create_project(name="Alpha", slug="alpha", set_active=False)
@@ -296,9 +265,7 @@ async def test_project_inspect_uses_project_scoped_secret_status(tmp_path: Path)
         tmp_path,
         environ={
             "OPENROUTER_ALPHA": "alpha-secret",
-            "MASTER_ALPHA": "alpha-master",
             "OPENROUTER_BETA": "beta-secret",
-            "MASTER_BETA": "beta-master",
         },
     )
 
@@ -308,12 +275,6 @@ async def test_project_inspect_uses_project_scoped_secret_status(tmp_path: Path)
         locator={"env_name": "OPENROUTER_ALPHA"},
         target_keys=["providers.openrouter.api_key_env"],
     )
-    await service.configure(
-        project_ref=alpha.slug,
-        source_type=SecretRefSourceType.ENV,
-        locator={"env_name": "MASTER_ALPHA"},
-        target_keys=["runtime.master_key_env"],
-    )
     await service.apply(project_ref=alpha.slug)
 
     await service.configure(
@@ -321,12 +282,6 @@ async def test_project_inspect_uses_project_scoped_secret_status(tmp_path: Path)
         source_type=SecretRefSourceType.ENV,
         locator={"env_name": "OPENROUTER_BETA"},
         target_keys=["providers.openrouter.api_key_env"],
-    )
-    await service.configure(
-        project_ref=beta.slug,
-        source_type=SecretRefSourceType.ENV,
-        locator={"env_name": "MASTER_BETA"},
-        target_keys=["runtime.master_key_env"],
     )
     await service.apply(project_ref=beta.slug)
     await service.reload(project_ref=beta.slug)

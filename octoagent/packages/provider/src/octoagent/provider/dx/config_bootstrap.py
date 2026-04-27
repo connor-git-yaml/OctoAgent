@@ -170,7 +170,7 @@ def build_bootstrap_config_for_provider(
             updated_at=date.today().isoformat(),
             providers=[provider_entry],
             model_aliases=default_aliases,
-            runtime=RuntimeConfig(llm_mode="litellm"),
+            runtime=RuntimeConfig(),
         )
         if enable_telegram:
             return apply_telegram_channel_config(
@@ -219,7 +219,7 @@ def build_bootstrap_config_for_provider(
         updated_at=date.today().isoformat(),
         providers=[provider_entry],
         model_aliases=default_aliases,
-        runtime=RuntimeConfig(llm_mode="litellm"),
+        runtime=RuntimeConfig(),
     )
     if enable_telegram:
         return apply_telegram_channel_config(
@@ -273,7 +273,7 @@ def build_bootstrap_config(
     if echo:
         config = OctoAgentConfig(
             updated_at=date.today().isoformat(),
-            runtime=RuntimeConfig(llm_mode="echo"),
+            runtime=RuntimeConfig(),
         )
         if enable_telegram:
             return apply_telegram_channel_config(

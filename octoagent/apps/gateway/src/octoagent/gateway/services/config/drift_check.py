@@ -125,8 +125,8 @@ def detect_auth_config_drift(
                 )
             )
 
-    # Feature 081 P4 修复（Codex F2）：v2 yaml 经 migrate-080 后只有 ``auth.kind``，
-    # 老 ``auth_type`` 不再写入；用 ``effective_auth_kind`` 兼容 v1+v2 双形态。
+    # Feature 081 P4 修复（Codex F2）：v2 yaml 只有 ``auth.kind``，老 ``auth_type``
+    # 不再写入；用 ``effective_auth_kind`` 兼容 v1+v2 双形态。
     # 同时校验 ``auth.profile`` 是否真的存在于 auth-profiles.json，避免 provider 配了
     # OAuth 但实际指向不存在的 profile 时漏报。
     if config is not None:

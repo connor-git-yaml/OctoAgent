@@ -11,7 +11,6 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import structlog
 from rich.table import Table
@@ -27,13 +26,13 @@ log = structlog.get_logger()
 
 @dataclass(slots=True)
 class RuntimeCheckContext:
-    """doctor 运行时检查使用的统一上下文。"""
+    """doctor 运行时检查使用的统一上下文。
+
+    F081 cleanup：deprecated LiteLLM 字段（llm_mode/proxy_url/proxy_key/proxy_key_env）
+    已删除；ProviderRouter 直连后不再有 Proxy 概念。
+    """
 
     source: str
-    llm_mode: str
-    proxy_url: str
-    proxy_key_env: str
-    proxy_key: str
 
 
 class DoctorRunner:
@@ -56,90 +55,13 @@ class DoctorRunner:
         return (self._root / "octoagent.yaml").exists()
 
     def _resolve_runtime_context(self) -> RuntimeCheckContext:
-        """解析 provider/runtime 配置来源，优先使用 octoagent.yaml.runtime。"""
-        from octoagent.gateway.services.config.config_wizard import load_config
-
+        """解析 provider/runtime 配置来源。"""
         if (self._root / "octoagent.yaml").exists():
-            try:
-                cfg = load_config(self._root)
-            except Exception:
-                cfg = None
-            if cfg is not None:
-                env_name = cfg.runtime.master_key_env
-                return RuntimeCheckContext(
-                    source="octoagent_yaml",
-                    llm_mode=cfg.runtime.llm_mode,
-                    proxy_url=cfg.runtime.litellm_proxy_url,
-                    proxy_key_env=env_name,
-                    proxy_key=os.environ.get(env_name, ""),
-                )
+            return RuntimeCheckContext(source="octoagent_yaml")
+        return RuntimeCheckContext(source="env")
 
-        return RuntimeCheckContext(
-            source="env",
-            llm_mode=os.environ.get("OCTOAGENT_LLM_MODE", ""),
-            proxy_url=os.environ.get("LITELLM_PROXY_URL", "http://localhost:4000"),
-            proxy_key_env="LITELLM_PROXY_KEY",
-            proxy_key=os.environ.get("LITELLM_PROXY_KEY", ""),
-        )
-
-    def _build_live_ping_payload(self) -> dict[str, Any]:
-        """构建 live ping 请求体。
-
-        OpenAI Codex OAuth 路由通过 ChatGPT backend API 的 Responses 接口转发时，
-        要求显式提供 instructions，且 input 必须为结构化列表；doctor 旧探活
-        使用的 chat/completions + max_tokens 组合会触发 404/400。
-        其他 provider 继续沿用原有最小 chat/completions payload。
-        """
-        payload: dict[str, Any] = {
-            "model": "cheap",
-            "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 5,
-        }
-
-        if self._alias_uses_responses_transport("cheap"):
-            return {
-                "model": "cheap",
-                "instructions": "reply briefly",
-                "input": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "input_text",
-                                "text": "ping",
-                            }
-                        ],
-                    }
-                ],
-                "store": False,
-            }
-
-        return payload
-
-    def _alias_uses_responses_transport(self, alias_name: str) -> bool:
-        """Feature 081 P4：替代 alias_uses_codex_backend——直接读 ProviderEntry.transport。"""
-        try:
-            from octoagent.gateway.services.config.config_wizard import load_config
-
-            cfg = load_config(self._root)
-            if cfg is None:
-                return False
-            alias_cfg = cfg.model_aliases.get(alias_name)
-            if alias_cfg is None:
-                return False
-            provider = cfg.get_provider(alias_cfg.provider)
-            if provider is None:
-                return False
-            # transport 字段（v2 schema）显式声明 / 旧 schema 按 id 推断
-            return getattr(provider, "transport", None) == "openai_responses" or provider.id == "openai-codex"
-        except Exception:
-            return False
-
-    def _build_live_ping_endpoint(self) -> str:
-        """根据 alias 路由选择 doctor live ping 使用的接口。"""
-        if self._alias_uses_responses_transport("cheap"):
-            return "/v1/responses"
-        return "/v1/chat/completions"
+    # F081 cleanup：删除 _build_live_ping_payload / _alias_uses_responses_transport /
+    # _build_live_ping_endpoint —— 仅用于 check_live_ping，本 cleanup 后无调用。
 
     async def run_all_checks(self, live: bool = False) -> DoctorReport:
         """执行所有检查项
@@ -158,25 +80,16 @@ class DoctorRunner:
 
         # 配置文件检查
         checks.append(await self.check_env_file())
-        checks.append(await self.check_env_litellm_file())
-
-        # 环境变量检查
-        checks.append(await self.check_llm_mode())
-        checks.append(await self.check_proxy_key())
-        checks.append(await self.check_master_key_match())
 
         # 运行时检查
-        checks.append(await self.check_docker_running())
-        checks.append(await self.check_proxy_reachable())
         checks.append(await self.check_db_writable())
 
         # 凭证检查
         checks.append(await self.check_credential_valid())
         checks.append(await self.check_credential_expiry())
 
-        # Feature 014 新增检查项（不修改现有签名）
+        # Feature 014 新增检查项
         checks.append(await self.check_octoagent_yaml_valid())
-        checks.append(await self.check_litellm_sync())
         checks.append(await self.check_telegram_config())
         checks.append(await self.check_telegram_token())
         checks.append(await self.check_secret_bindings())
@@ -184,7 +97,6 @@ class DoctorRunner:
         # --live 检查
         if live:
             checks.append(await self.check_telegram_readiness())
-            checks.append(await self.check_live_ping())
 
         # 计算整体状态
         overall = self._compute_overall(checks)
@@ -264,168 +176,9 @@ class DoctorRunner:
             fix_hint="运行 octo config init 或 octo init 生成配置文件",
         )
 
-    async def check_env_litellm_file(self) -> CheckResult:
-        """.env.litellm 文件存在"""
-        path = self._root / ".env.litellm"
-        if path.exists():
-            return CheckResult(
-                name="env_litellm_file",
-                status=CheckStatus.PASS,
-                level=CheckLevel.RECOMMENDED,
-                message=".env.litellm 存在",
-            )
-        if self._has_yaml_runtime_config():
-            return CheckResult(
-                name="env_litellm_file",
-                status=CheckStatus.SKIP,
-                level=CheckLevel.RECOMMENDED,
-                message="检测到 octoagent.yaml，.env.litellm 改为可选",
-            )
-        return CheckResult(
-            name="env_litellm_file",
-            status=CheckStatus.WARN,
-            level=CheckLevel.RECOMMENDED,
-            message=".env.litellm 文件不存在",
-            fix_hint="运行 octo init 生成配置文件",
-        )
-
-    async def check_llm_mode(self) -> CheckResult:
-        """检查 llm_mode 配置是否可解析。"""
-        runtime = self._resolve_runtime_context()
-        if runtime.llm_mode:
-            label = (
-                "runtime.llm_mode"
-                if runtime.source == "octoagent_yaml"
-                else "OCTOAGENT_LLM_MODE"
-            )
-            return CheckResult(
-                name="llm_mode",
-                status=CheckStatus.PASS,
-                level=CheckLevel.REQUIRED,
-                message=f"{label}={runtime.llm_mode}",
-            )
-        return CheckResult(
-            name="llm_mode",
-            status=CheckStatus.FAIL,
-            level=CheckLevel.REQUIRED,
-            message="未检测到 llm_mode 配置",
-            fix_hint="在 octoagent.yaml.runtime.llm_mode 中设置，或导出 OCTOAGENT_LLM_MODE",
-        )
-
-    async def check_proxy_key(self) -> CheckResult:
-        """检查当前运行时引用的 Proxy Key 环境变量。"""
-        runtime = self._resolve_runtime_context()
-        if runtime.proxy_key:
-            return CheckResult(
-                name="proxy_key",
-                status=CheckStatus.PASS,
-                level=CheckLevel.RECOMMENDED,
-                message=f"{runtime.proxy_key_env} 已设置",
-            )
-        return CheckResult(
-            name="proxy_key",
-            status=CheckStatus.WARN,
-            level=CheckLevel.RECOMMENDED,
-            message=f"缺少 Proxy Key 环境变量: {runtime.proxy_key_env}",
-            fix_hint=f"在 .env / .env.litellm / shell 中设置 {runtime.proxy_key_env}",
-        )
-
-    async def check_master_key_match(self) -> CheckResult:
-        """LITELLM_MASTER_KEY == LITELLM_PROXY_KEY"""
-        runtime = self._resolve_runtime_context()
-        if runtime.source == "octoagent_yaml":
-            return CheckResult(
-                name="master_key_match",
-                status=CheckStatus.SKIP,
-                level=CheckLevel.RECOMMENDED,
-                message=(
-                    f"使用 runtime.master_key_env={runtime.proxy_key_env}，"
-                    "跳过 legacy master/proxy key 对比"
-                ),
-            )
-
-        master = os.environ.get("LITELLM_MASTER_KEY", "")
-        proxy = os.environ.get("LITELLM_PROXY_KEY", "")
-
-        if not master and not proxy:
-            return CheckResult(
-                name="master_key_match",
-                status=CheckStatus.SKIP,
-                level=CheckLevel.RECOMMENDED,
-                message="Master Key 和 Proxy Key 均未设置",
-            )
-        if master == proxy:
-            return CheckResult(
-                name="master_key_match",
-                status=CheckStatus.PASS,
-                level=CheckLevel.RECOMMENDED,
-                message="Master Key 和 Proxy Key 匹配",
-            )
-        return CheckResult(
-            name="master_key_match",
-            status=CheckStatus.WARN,
-            level=CheckLevel.RECOMMENDED,
-            message="LITELLM_MASTER_KEY != LITELLM_PROXY_KEY",
-            fix_hint="将 LITELLM_MASTER_KEY 与 LITELLM_PROXY_KEY 统一为同一值，或运行 octo init",
-        )
-
-    async def check_docker_running(self) -> CheckResult:
-        """Docker daemon 运行中"""
-        try:
-            result = subprocess.run(
-                ["docker", "info"],
-                capture_output=True,
-                timeout=10,
-            )
-            if result.returncode == 0:
-                return CheckResult(
-                    name="docker_running",
-                    status=CheckStatus.PASS,
-                    level=CheckLevel.RECOMMENDED,
-                    message="Docker 运行中",
-                )
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            pass
-        return CheckResult(
-            name="docker_running",
-            status=CheckStatus.WARN,
-            level=CheckLevel.RECOMMENDED,
-            message="Docker 未运行或未安装",
-            fix_hint="启动 Docker Desktop",
-        )
-
-    async def check_proxy_reachable(self) -> CheckResult:
-        """LiteLLM Proxy /health/liveliness 返回 200"""
-        import httpx
-
-        runtime = self._resolve_runtime_context()
-        proxy_url = runtime.proxy_url
-        fix_hint = self._build_proxy_start_hint()
-        try:
-            async with httpx.AsyncClient(timeout=5) as client:
-                resp = await client.get(f"{proxy_url}/health/liveliness")
-                if resp.status_code == 200:
-                    return CheckResult(
-                        name="proxy_reachable",
-                        status=CheckStatus.PASS,
-                        level=CheckLevel.RECOMMENDED,
-                        message=f"LiteLLM Proxy 可达 ({proxy_url})",
-                    )
-                return CheckResult(
-                    name="proxy_reachable",
-                    status=CheckStatus.WARN,
-                    level=CheckLevel.RECOMMENDED,
-                    message=f"Proxy 返回 {resp.status_code}",
-                    fix_hint="检查 LiteLLM Proxy 配置",
-                )
-        except Exception:
-            return CheckResult(
-                name="proxy_reachable",
-                status=CheckStatus.WARN,
-                level=CheckLevel.RECOMMENDED,
-                message=f"LiteLLM Proxy 不可达 ({proxy_url})",
-                fix_hint=fix_hint,
-            )
+    # F081 cleanup：删除 check_env_litellm_file / check_llm_mode / check_proxy_key /
+    # check_master_key_match / check_docker_running / check_proxy_reachable —
+    # 全部为 LiteLLM Proxy 时代的检查项，ProviderRouter 直连后无相关概念。
 
     async def check_db_writable(self) -> CheckResult:
         """SQLite DB 可写"""
@@ -504,64 +257,8 @@ class DoctorRunner:
             message="所有凭证均有效",
         )
 
-    async def check_live_ping(self) -> CheckResult:
-        """cheap 模型 ping（仅 --live）"""
-        import httpx
-
-        runtime = self._resolve_runtime_context()
-        proxy_url = runtime.proxy_url
-        proxy_key = runtime.proxy_key
-
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                resp = await client.post(
-                    f"{proxy_url}{self._build_live_ping_endpoint()}",
-                    headers={"Authorization": f"Bearer {proxy_key}"},
-                    json=self._build_live_ping_payload(),
-                )
-                if resp.status_code == 200:
-                    return CheckResult(
-                        name="live_ping",
-                        status=CheckStatus.PASS,
-                        level=CheckLevel.RECOMMENDED,
-                        message="LLM 端到端调用成功",
-                    )
-                content_type = resp.headers.get("content-type", "")
-                data = resp.json() if content_type.startswith("application/json") else {}
-                error_msg = data.get("error", {}).get("message", resp.text[:100])
-
-                # 区分 Proxy 层故障和 Provider 层故障 (EC-6)
-                if resp.status_code in (401, 403):
-                    return CheckResult(
-                        name="live_ping",
-                        status=CheckStatus.FAIL,
-                        level=CheckLevel.RECOMMENDED,
-                        message=f"Proxy 认证失败: {error_msg}",
-                        fix_hint=f"检查 {runtime.proxy_key_env} 配置",
-                    )
-                elif resp.status_code == 502:
-                    return CheckResult(
-                        name="live_ping",
-                        status=CheckStatus.FAIL,
-                        level=CheckLevel.RECOMMENDED,
-                        message=f"上游 Provider 不可达: {error_msg}",
-                        fix_hint="检查 Provider API Key 和网络连通性",
-                    )
-                return CheckResult(
-                    name="live_ping",
-                    status=CheckStatus.FAIL,
-                    level=CheckLevel.RECOMMENDED,
-                    message=f"LLM 调用失败 ({resp.status_code}): {error_msg}",
-                    fix_hint="运行 octo doctor 检查各项配置",
-                )
-        except Exception as exc:
-            return CheckResult(
-                name="live_ping",
-                status=CheckStatus.FAIL,
-                level=CheckLevel.RECOMMENDED,
-                message=f"LLM 调用异常: {exc}",
-                fix_hint="确保 LiteLLM Proxy 已启动",
-            )
+    # F081 cleanup：删除 check_live_ping —— LiteLLM Proxy 时代的端到端 ping，
+    # ProviderRouter 直连后改为通过 ProviderRouter 自身的健康检查路径。
 
     def _load_config_safe(
         self, check_name: str
@@ -637,17 +334,7 @@ class DoctorRunner:
             ),
         )
 
-    async def check_litellm_sync(self) -> CheckResult:
-        """Feature 081 P4：LiteLLM Proxy 已退役，无 litellm-config.yaml 衍生配置需要同步。
-
-        本检查保留为兼容性 stub（doctor 调用 list 内仍引用），始终 PASS。
-        """
-        return CheckResult(
-            name="litellm_sync",
-            status=CheckStatus.PASS,
-            level=CheckLevel.RECOMMENDED,
-            message="Feature 081：Provider 直连后无衍生配置需要同步",
-        )
+    # F081 cleanup：删除 check_litellm_sync 兼容 stub（已无调用方）。
 
     async def check_telegram_config(self) -> CheckResult:
         """检查 Telegram channel 最小配置是否可用。"""
@@ -804,14 +491,6 @@ class DoctorRunner:
         if manual_steps:
             return str(manual_steps[0])
         return str(getattr(action, "description", ""))
-
-    def _build_proxy_start_hint(self) -> str:
-        try:
-            from .runtime_activation import RuntimeActivationService
-
-            return RuntimeActivationService(self._root).build_compose_up_command()
-        except Exception:
-            return "docker compose -f docker-compose.litellm.yml up -d"
 
     @staticmethod
     def _compute_overall(checks: list[CheckResult]) -> CheckStatus:

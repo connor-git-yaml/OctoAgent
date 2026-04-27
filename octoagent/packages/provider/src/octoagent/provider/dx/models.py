@@ -48,21 +48,3 @@ class DoctorReport(BaseModel):
     timestamp: datetime = Field(description="诊断时间")
 
 
-class InitConfig(BaseModel):
-    """octo init 配置结果"""
-
-    llm_mode: Literal["echo", "litellm"] = Field(description="LLM 运行模式")
-    provider: str = Field(default="", description="Provider 标识")
-    auth_mode: Literal["api_key", "token", "oauth"] = Field(
-        default="api_key",
-        description="认证模式",
-    )
-    credential: Credential | None = Field(
-        default=None,
-        description="关联的凭证",
-    )
-    master_key: str = Field(default="", description="LiteLLM Master Key")
-    docker_available: bool = Field(
-        default=False,
-        description="Docker 是否可用",
-    )

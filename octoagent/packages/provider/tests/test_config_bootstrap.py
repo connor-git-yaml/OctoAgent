@@ -9,8 +9,8 @@ from octoagent.gateway.services.config.config_wizard import load_config
 
 
 def test_build_bootstrap_config_echo() -> None:
+    """F081 cleanup：RuntimeConfig 已退化为空块，不再有 llm_mode 字段。"""
     config = build_bootstrap_config(echo=True)
-    assert config.runtime.llm_mode == "echo"
     assert config.providers == []
 
 

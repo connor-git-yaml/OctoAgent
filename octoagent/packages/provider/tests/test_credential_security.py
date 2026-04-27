@@ -115,26 +115,5 @@ class TestCredentialEventPayload:
         )
 
 
-class TestConfigCredentialSeparation:
-    """配置与凭证物理隔离验证 (FR-013)"""
-
-    def test_credential_not_in_env_file(self, tmp_path: Path) -> None:
-        """凭证值不应出现在 .env 文件中（仅在 .env.litellm 中）"""
-        from octoagent.provider.dx.init_wizard import (
-            InitConfig,
-            generate_env_file,
-        )
-
-        config = InitConfig(
-            llm_mode="litellm",
-            provider="openrouter",
-            credential=ApiKeyCredential(
-                provider="openrouter",
-                key=SecretStr("sk-or-v1-secret"),
-            ),
-            master_key="sk-master-test",
-        )
-        env_path = generate_env_file(config, tmp_path)
-        content = env_path.read_text(encoding="utf-8")
-        # .env 中不应有 API Key 值
-        assert "sk-or-v1-secret" not in content
+# F081 cleanup：原 TestConfigCredentialSeparation 类依赖 init_wizard.generate_env_file
+# 已随 LiteLLM Proxy 退役整体删除（init_wizard 现归 WizardSessionService 接管）。

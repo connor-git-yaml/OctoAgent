@@ -22,18 +22,12 @@ from .config_schema import (
     OctoAgentConfig,
     ProviderEntry,
     ProviderNotFoundError,
-    detect_legacy_yaml_keys,
 )
 
 log = structlog.get_logger()
 
 # octoagent.yaml 的标准文件名
 OCTOAGENT_YAML_NAME = "octoagent.yaml"
-
-# Feature 081 fix：legacy schema warning 进程级去重。
-# load_config 在一次 CLI 调用里被多个组件各自加载（>= 9 次），
-# 每次都打 warning 是 UX bug。同一 (path, mtime, key 集合) 进程内只警告 1 次。
-_legacy_warning_seen: set[tuple[str, float, tuple[str, ...]]] = set()
 
 
 def _resolve_yaml_path(project_root: Path) -> Path:
@@ -80,42 +74,7 @@ def load_config(project_root: Path) -> OctoAgentConfig | None:
             field_path="(file)",
         ) from exc
 
-    # Feature 081 P2：在 raw YAML 层做 legacy schema 检测（修 Codex F2）。
-    # 必须在 Pydantic 解析之前——一旦经过 model_validate 旧字段会被默认值填充，
-    # 无法区分用户实际配过 vs 用了默认值。
-    try:
-        import yaml as _yaml  # 局部 import，避免污染模块顶层
-
-        raw = _yaml.safe_load(text)
-        legacy_keys = detect_legacy_yaml_keys(raw)
-        if legacy_keys:
-            # 进程级去重：同一文件 + mtime + key 集合只警告 1 次。
-            # mtime 变化（用户编辑或 migrate-080 写入）后会重新警告。
-            try:
-                mtime = yaml_path.stat().st_mtime
-            except OSError:
-                mtime = 0.0
-            dedup_key = (str(yaml_path), mtime, tuple(legacy_keys))
-            if dedup_key not in _legacy_warning_seen:
-                _legacy_warning_seen.add(dedup_key)
-                log.warning(
-                    "octoagent_yaml_legacy_schema_detected",
-                    path=str(yaml_path),
-                    keys=legacy_keys,
-                    hint="请运行 `octo config migrate-080` 升级到新 schema（v2）",
-                )
-    except Exception as exc:  # 检测失败不应影响主流程
-        log.debug(
-            "legacy_yaml_detection_skipped",
-            error_type=type(exc).__name__,
-        )
-
     return OctoAgentConfig.from_yaml(text)
-
-
-def reset_legacy_warning_cache() -> None:
-    """清空 legacy schema 警告去重缓存（仅供测试使用）。"""
-    _legacy_warning_seen.clear()
 
 
 def save_config(config: OctoAgentConfig, project_root: Path) -> None:

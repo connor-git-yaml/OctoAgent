@@ -4,12 +4,9 @@
 所有 Provider/ModelAlias/RuntimeConfig/OctoAgentConfig 实体均在此文件定义。
 对应 FR-001 ~ FR-004，data-model.md 全部实体定义。
 
-Feature 081 P2 升级：
+Feature 081 P2 升级（v1 → v2 schema）：
 - ProviderEntry 加 ``transport`` / ``api_base`` / ``auth`` first-class 字段
 - 旧 ``auth_type`` / ``api_key_env`` / ``base_url`` 标 deprecated 但保留可读
-- ``RuntimeConfig.llm_mode`` / ``litellm_proxy_url`` / ``master_key_env`` 标 deprecated
-  保留可读，运行时被忽略；用 ``detect_legacy_yaml_keys()`` 在 raw YAML 层检测
-- 新增 ``CONFIG_VERSION_CURRENT = 2``；migrate-080 命令负责 v1 → v2 迁移
 """
 
 from __future__ import annotations
@@ -39,18 +36,6 @@ _ROUTED_PROVIDER_MODEL_PREFIXES: dict[str, str] = {
     "github": "github",
 }
 
-# Feature 081 P2：当前 schema 版本号
-# v1 = 历史 schema（含 runtime.llm_mode / litellm_proxy_url / master_key_env）
-# v2 = Feature 081 schema（runtime LiteLLM 字段 deprecated，ProviderEntry 加 transport/auth）
-CONFIG_VERSION_CURRENT = 2
-
-# Feature 081 P2：runtime 块下的 legacy 字段名（用于 raw YAML 检测）
-_RUNTIME_LEGACY_KEYS: tuple[str, ...] = (
-    "llm_mode",
-    "litellm_proxy_url",
-    "master_key_env",
-)
-
 # ---------------------------------------------------------------------------
 # 辅助错误类型
 # ---------------------------------------------------------------------------
@@ -79,56 +64,6 @@ class CredentialLeakError(ValueError):
 
 class ProviderNotFoundError(KeyError):
     """引用了不存在的 Provider ID"""
-
-
-def detect_legacy_yaml_keys(raw: dict[str, Any] | None) -> list[str]:
-    """Feature 081 P2：在 raw YAML 字典上做 legacy schema 检测（修 Codex F2）。
-
-    必须在 Pydantic 解析之前调用——一旦经过 ``model_validate`` 会有两种坏情况：
-    1. legacy 字段被 ``extra='ignore'`` 默认配置吞掉，无法检测
-    2. 旧字段保留为可读（当前设计），运行时仍读到默认值，无法区分用户实际配过
-
-    Args:
-        raw: ``yaml.safe_load(yaml_path.read_text())`` 的结果
-
-    Returns:
-        命中的 legacy key 路径列表（如 ``["runtime.llm_mode",
-        "runtime.litellm_proxy_url", "config_version<2"]``）。
-        空列表表示当前 yaml 已是 v2 schema。
-    """
-    if not isinstance(raw, dict):
-        return []
-
-    legacy_keys: list[str] = []
-
-    runtime = raw.get("runtime")
-    if isinstance(runtime, dict):
-        for key in _RUNTIME_LEGACY_KEYS:
-            if key in runtime:
-                legacy_keys.append(f"runtime.{key}")
-
-    # config_version 缺失或 < 当前版本 → 视为 legacy
-    config_version = raw.get("config_version", 1)
-    try:
-        if int(config_version) < CONFIG_VERSION_CURRENT:
-            legacy_keys.append(f"config_version<{CONFIG_VERSION_CURRENT}")
-    except (TypeError, ValueError):
-        legacy_keys.append("config_version<invalid")
-
-    # 任一 provider 用旧字段 → 视为 legacy
-    providers = raw.get("providers")
-    if isinstance(providers, list):
-        for idx, p in enumerate(providers):
-            if not isinstance(p, dict):
-                continue
-            if "auth_type" in p:
-                legacy_keys.append(f"providers[{idx}].auth_type")
-            if "api_key_env" in p:
-                legacy_keys.append(f"providers[{idx}].api_key_env")
-            if "base_url" in p:
-                legacy_keys.append(f"providers[{idx}].base_url")
-
-    return legacy_keys
 
 
 def normalize_provider_model_string(provider_id: str, model_name: str) -> str:
@@ -269,7 +204,7 @@ class ProviderEntry(BaseModel):
 
     # ── Feature 081 P4 修复（Codex high finding F1+F2）：v2 优先 / v1 fallback 属性 ──
     # 调用方应优先用这些属性而非直接读 auth_type / api_key_env，因为 v2 yaml 经过
-    # migrate-080 后 auth_type / api_key_env 字段被省略（仍可读但 default=None/""），
+    # F081 cleanup 后 auth_type / api_key_env 字段被省略（仍可读但 default=None/""），
     # 直接读旧字段会让 setup_service / drift_check 等在 v2 yaml 下漏检测。
 
     @property
@@ -350,48 +285,11 @@ class ModelAlias(BaseModel):
 
 
 class RuntimeConfig(BaseModel):
-    """运行时配置 — octoagent.yaml runtime 块
+    """运行时配置 — octoagent.yaml runtime 块（占位，目前无字段）。
 
-    控制 OctoAgent 运行时行为，与 .env 独立。
-    运行时优先读此配置，降级到 .env（Q3 决策）。
-
-    Feature 081 P2 升级：
-    - ``llm_mode`` / ``litellm_proxy_url`` / ``master_key_env`` 全部标 deprecated
-    - 字段保留可读供 legacy yaml 启动正常 + 触发 deprecation warning
-    - 运行时 LLM 调用统一走 ProviderRouter，不再读取这三个字段
-    - 用 ``detect_legacy_yaml_keys()`` 在 raw YAML 层做检测（在 Pydantic 解析之前）
+    F081 P3b 退役 LiteLLM 后所有原有字段均已删除（``llm_mode`` / ``litellm_proxy_url``
+    / ``master_key_env``）。块本身保留作为 schema 占位，后续新增运行时配置直接在此扩展。
     """
-
-    # ── Feature 081 P2：字段全部标记 deprecated，保留默认值供 legacy 路径兼容 ──
-    # 默认值与历史相同——P1-P3 期间老的 setup_service / litellm_generator / cli wizard
-    # 仍会读写这些字段（虽然运行时不消费）；P4 删除这些 legacy 路径后字段才彻底无用。
-    # 用户层 deprecation 检测在 raw YAML 层做（``detect_legacy_yaml_keys``），
-    # 检查用户文件里**实际**有没有这些 key——不依赖 Pydantic 默认值。
-    llm_mode: Literal["litellm", "echo"] = Field(
-        default="litellm",
-        deprecated=True,
-        description=(
-            "DEPRECATED Feature 081 P2：LiteLLM Proxy 已退役，运行时不再消费此字段。"
-            " 请运行 `octo config migrate-080` 升级。"
-        ),
-    )
-    litellm_proxy_url: str = Field(
-        default="http://localhost:4000",
-        deprecated=True,
-        description=(
-            "DEPRECATED Feature 081 P2：LiteLLM Proxy 已退役。"
-            " 请运行 `octo config migrate-080` 升级。"
-        ),
-    )
-    master_key_env: str = Field(
-        default="LITELLM_MASTER_KEY",
-        pattern=_ENV_NAME_PATTERN,
-        deprecated=True,
-        description=(
-            "DEPRECATED Feature 081 P2：LiteLLM Master Key 不再使用。"
-            " 请运行 `octo config migrate-080` 升级。"
-        ),
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -695,20 +593,10 @@ class OctoAgentConfig(BaseModel):
                 )
         return self
 
-    @model_validator(mode="before")
-    @classmethod
-    def warn_unknown_version(cls, data: object) -> object:
-        """config_version != 1 时打印 WARNING 并继续（NFR-006 向前兼容）"""
-        if isinstance(data, dict):
-            version = data.get("config_version", 1)
-            if isinstance(version, int) and version != 1:
-                warnings.warn(
-                    f"octoagent.yaml config_version={version} 与当前版本（1）不匹配，"
-                    f"建议运行 octo config migrate 升级配置格式。继续使用当前配置。",
-                    UserWarning,
-                    stacklevel=2,
-                )
-        return data
+    # F081 cleanup（2026-04-27）：原 ``warn_unknown_version`` model_validator 已删除。
+    # 旧逻辑硬编码 ``version != 1`` 触发 warning，v2 schema 切换后反把 v2 误判为不匹配。
+    # schema 兼容现在通过 ``ProviderEntry`` 的 v1→v2 字段互转处理；
+    # ``config_version`` 仅作信息字段保留。
 
     def get_provider(self, provider_id: str) -> ProviderEntry | None:
         """按 id 查找 Provider 条目"""
@@ -811,15 +699,6 @@ def build_config_schema_document(
                     "model_aliases.cheap.model",
                 ],
             },
-            "runtime": {
-                "title": "Runtime",
-                "description": "配置 runtime 与 proxy 入口。",
-                "fields": [
-                    "runtime.llm_mode",
-                    "runtime.litellm_proxy_url",
-                    "runtime.master_key_env",
-                ],
-            },
             "memory": {
                 "title": "Memory",
                 "description": "本地记忆引擎别名配置。",
@@ -918,33 +797,6 @@ def build_config_schema_document(
                     if config and "cheap" in config.model_aliases
                     else "openrouter/auto"
                 ),
-            },
-            "runtime.llm_mode": {
-                "label": "LLM 模式",
-                "input": "choice",
-                "required": True,
-                "choices": ["litellm", "echo"],
-                "default": config.runtime.llm_mode if config else "litellm",
-            },
-            "runtime.litellm_proxy_url": {
-                "label": "LiteLLM Proxy URL",
-                "input": "text",
-                "required": False,
-                "recommended": True,
-                "default": (
-                    config.runtime.litellm_proxy_url if config else "http://localhost:4000"
-                ),
-            },
-            "runtime.master_key_env": {
-                "label": "Master Key 环境变量名",
-                "input": "env_name",
-                "required": False,
-                "recommended": True,
-                "secret_target": {
-                    "target_kind": "runtime",
-                    "target_key": "runtime.master_key_env",
-                },
-                "default": config.runtime.master_key_env if config else "LITELLM_MASTER_KEY",
             },
             "memory.reasoning_model_alias": {
                 "label": "记忆加工模型别名",

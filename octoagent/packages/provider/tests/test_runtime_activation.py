@@ -18,7 +18,6 @@ def test_build_compose_up_command_returns_deprecation_message(tmp_path: Path) ->
     command = service.build_compose_up_command()
     assert "Feature 081" in command
     assert "已退役" in command
-    assert "migrate-080" in command
 
 
 @pytest.mark.asyncio

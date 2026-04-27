@@ -23,7 +23,6 @@ from octoagent.provider import (
     AliasRegistry,
     EchoMessageAdapter,
     FallbackManager,
-    load_provider_config,
 )
 from octoagent.gateway.services.config.config_wizard import load_config
 from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
@@ -403,8 +402,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # ProviderRouter 单例提前创建（早于 LLMService / CapabilityPackService / SkillRunner /
     # Memory 等服务），让所有 LLM + embedding 调用共享同一个 router 实例
     # （同一个 http_client + 同一份 alias 缓存）。
-    provider_config = load_provider_config()
-    app.state.provider_config = provider_config
+    # F081 cleanup：echo mode 仅由 OCTOAGENT_LLM_MODE 环境变量控制（CI / 离线 dev）；
+    # 原 ProviderConfig dataclass 已删除。
+    import os as _os
+    _llm_mode_env = _os.environ.get("OCTOAGENT_LLM_MODE", "").strip().lower()
 
     from octoagent.provider import (
         ProviderRouter as _ProviderRouter,
@@ -419,11 +420,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.provider_router = provider_router
 
     # Feature 081 P4 修复（Codex F2）：保留 echo mode 安全语义。
-    # 老用户配 ``runtime.llm_mode: echo`` 或 ``OCTOAGENT_LLM_MODE=echo`` 时
-    # 必须保持纯 echo（绝不真实调 provider），避免 Provider 直连后变成静默
-    # 把离线/开发实例切到真实账单。
+    # 用户设 ``OCTOAGENT_LLM_MODE=echo`` 时必须保持纯 echo（绝不真实调 provider），
+    # 避免 Provider 直连后静默把离线/开发实例切到真实账单。
     alias_registry = _build_runtime_alias_registry(project_root)
-    if provider_config.llm_mode == "echo":
+    if _llm_mode_env == "echo":
         # Echo mode：与 M0 行为一致，纯 echo primary，无 fallback
         fallback_manager = FallbackManager(
             primary=EchoMessageAdapter(),
@@ -534,7 +534,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 result_json, task_id=task_id, trace_id=trace_id,
             )
 
-    if provider_config.llm_mode != "echo":
+    if _llm_mode_env != "echo":
         # Feature 080 Phase 3+5：SkillRunner 用 ProviderModelClient + ProviderRouter
         # 直连 provider。router 已在上面 capability_pack 之前创建并存到
         # app.state.provider_router，这里复用同一实例。

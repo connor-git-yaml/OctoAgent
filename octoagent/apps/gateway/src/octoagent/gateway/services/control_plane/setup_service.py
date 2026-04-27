@@ -410,7 +410,6 @@ class SetupDomainService(DomainServiceBase):
             else ("action_required" if review.provider_runtime_risks else "ready"),
             summary=(
                 f"已启用 {len(config.current_value.get('providers', []))} 个 provider，"
-                f"runtime={config.current_value.get('runtime', {}).get('llm_mode', '')}，"
                 f"凭证={len(self._credential_store().list_profiles())}"
             ),
             warnings=list(config.warnings),
@@ -1450,15 +1449,15 @@ class SetupDomainService(DomainServiceBase):
         if not normalized:
             return {"litellm_env_names": [], "runtime_env_names": [], "profile_names": []}
 
-        # Feature 081 P4 修复（Codex F1）：用 effective_api_key_env 读 v2 ``auth.env`` 优先，
-        # 兼容老 v1 ``api_key_env``。直接读 ``provider.api_key_env`` 在 v2 yaml 下永远是空，
-        # 会导致 setup.apply 提交的 secret 静默丢弃。
-        litellm_targets = {config.runtime.master_key_env}
+        # F081 cleanup：runtime.master_key_env 已删除；ProviderRouter 直连后无 master
+        # key 概念。所有 provider api_key 进 .env，runtime/channel 凭证也进 .env。
+        # 历史上 LiteLLM Master Key 写到 .env.litellm，本次 cleanup 后不再分文件。
+        provider_targets: set[str] = set()
         runtime_targets: set[str] = set()
         for provider in config.providers:
             env_name = provider.effective_api_key_env
             if env_name:
-                litellm_targets.add(env_name)
+                provider_targets.add(env_name)
         if config.front_door.bearer_token_env:
             runtime_targets.add(config.front_door.bearer_token_env)
         if config.front_door.trusted_proxy_token_env:
@@ -1469,22 +1468,21 @@ class SetupDomainService(DomainServiceBase):
         if telegram.webhook_secret_env:
             runtime_targets.add(telegram.webhook_secret_env)
 
-        litellm_updates = {
-            env_name: value for env_name, value in normalized.items() if env_name in litellm_targets
+        provider_updates = {
+            env_name: value
+            for env_name, value in normalized.items()
+            if env_name in provider_targets
         }
         runtime_updates = {
-            env_name: value for env_name, value in normalized.items() if env_name in runtime_targets
+            env_name: value
+            for env_name, value in normalized.items()
+            if env_name in runtime_targets
         }
-        if config.runtime.master_key_env in litellm_updates:
-            master_key = litellm_updates[config.runtime.master_key_env]
-            if config.runtime.master_key_env == "LITELLM_MASTER_KEY":
-                litellm_updates.setdefault("LITELLM_PROXY_KEY", master_key)
 
-        self._write_env_values(self._ctx.project_root / ".env.litellm", litellm_updates)
-        self._write_env_values(self._ctx.project_root / ".env", runtime_updates)
+        # 所有 secret 统一写 .env（F081 P3b 退役 .env.litellm 后不再分文件）
+        merged_env = {**provider_updates, **runtime_updates}
+        self._write_env_values(self._ctx.project_root / ".env", merged_env)
 
-        # Feature 081 P4 修复（Codex F1）：v2 ``auth.kind`` / ``auth.env`` 优先；
-        # 老 ``auth_type`` / ``api_key_env`` 仅作 fallback。
         store = self._credential_store()
         saved_profiles: list[str] = []
         for provider in config.providers:
@@ -1493,7 +1491,7 @@ class SetupDomainService(DomainServiceBase):
             env_name = provider.effective_api_key_env
             if not env_name:
                 continue
-            secret_value = litellm_updates.get(env_name)
+            secret_value = provider_updates.get(env_name)
             if not secret_value:
                 continue
             existing = store.get_profile(f"{provider.id}-default")
@@ -1517,36 +1515,15 @@ class SetupDomainService(DomainServiceBase):
             saved_profiles.append(profile.name)
 
         return {
-            "litellm_env_names": sorted(litellm_updates.keys()),
+            "litellm_env_names": sorted(provider_updates.keys()),
             "runtime_env_names": sorted(runtime_updates.keys()),
             "profile_names": saved_profiles,
         }
 
     def _build_config_ui_hints(self) -> dict[str, ConfigFieldHint]:
+        # F081 cleanup：移除 runtime.{llm_mode,litellm_proxy_url,master_key_env}
+        # 三个 ConfigFieldHint。这三个字段已从 RuntimeConfig 删除。
         hints = {
-            "runtime.llm_mode": ConfigFieldHint(
-                field_path="runtime.llm_mode",
-                section="runtime",
-                label="LLM 模式",
-                description="Gateway 当前运行模式",
-                widget="select",
-                order=10,
-            ),
-            "runtime.litellm_proxy_url": ConfigFieldHint(
-                field_path="runtime.litellm_proxy_url",
-                section="runtime",
-                label="LiteLLM 代理地址",
-                placeholder="http://localhost:4000",
-                order=20,
-            ),
-            "runtime.master_key_env": ConfigFieldHint(
-                field_path="runtime.master_key_env",
-                section="runtime",
-                label="主密钥环境变量",
-                widget="env-ref",
-                sensitive=True,
-                order=30,
-            ),
             "memory.reasoning_model_alias": ConfigFieldHint(
                 field_path="memory.reasoning_model_alias",
                 section="memory-models",
@@ -1751,11 +1728,9 @@ class SetupDomainService(DomainServiceBase):
             if isinstance(item, dict) and item.get("enabled", True)
         ]
         model_aliases = config.get("model_aliases", {})
-        runtime_cfg = (
-            config.get("runtime", {}) if isinstance(config.get("runtime"), dict) else {}
-        )
-        llm_mode = str(runtime_cfg.get("llm_mode", "echo")).strip().lower() or "echo"
-        requires_real_model = llm_mode != "echo"
+        # F081 cleanup：runtime.llm_mode 已删除（曾经的 "echo" 模式专用于 LiteLLM Proxy）。
+        # ProviderRouter 直连后所有用户都需要真实 model alias 才能跑——简化为始终 True。
+        requires_real_model = True
         front_door = (
             config.get("front_door", {}) if isinstance(config.get("front_door"), dict) else {}
         )

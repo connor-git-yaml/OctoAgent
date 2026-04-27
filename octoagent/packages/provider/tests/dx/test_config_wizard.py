@@ -109,67 +109,6 @@ providers:
         load_config(tmp_path)
 
 
-def test_load_config_legacy_schema_warning_deduped_within_process(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Feature 081 fix：同一 legacy yaml 在一次进程里只警告 1 次（避免 9 次 spam）。
-
-    场景：octo update 一次调用里 load_config 被 >= 9 个组件调用，
-    legacy schema warning 被打 9 次，UX 严重劣化。
-    本测试锁定：同一文件 + mtime + key 集合，warning 在进程内仅 1 次。
-    """
-    from octoagent.gateway.services.config import config_wizard
-    from octoagent.gateway.services.config.config_wizard import (
-        reset_legacy_warning_cache,
-    )
-
-    # 必须先清空——其他测试可能已经触发过 cache
-    reset_legacy_warning_cache()
-
-    legacy_yaml = """
-config_version: 1
-updated_at: "2026-03-04"
-runtime:
-  llm_mode: proxy
-  litellm_proxy_url: http://localhost:4000
-  master_key_env: LITELLM_MASTER_KEY
-providers:
-  - id: openrouter
-    name: OpenRouter
-    auth_type: api_key
-    api_key_env: OPENROUTER_API_KEY
-    base_url: https://openrouter.ai/api/v1
-"""
-    (tmp_path / "octoagent.yaml").write_text(legacy_yaml, encoding="utf-8")
-
-    # 直接 monkeypatch config_wizard.log.warning（避开 structlog 全局配置 race）
-    captured: list[str] = []
-    original_warning = config_wizard.log.warning
-
-    def _record(event: str, **kwargs):
-        if event == "octoagent_yaml_legacy_schema_detected":
-            captured.append(event)
-        return original_warning(event, **kwargs)
-
-    monkeypatch.setattr(config_wizard.log, "warning", _record)
-
-    try:
-        # 9 次连续 load_config，模拟 octo update 多组件调用
-        for _ in range(9):
-            try:
-                load_config(tmp_path)
-            except ConfigParseError:
-                # legacy schema 经 from_yaml 后会在 v1→v2 迁移环节失败，
-                # 但 warn 在 raise 前已 emit 过；不影响本测试目的
-                pass
-        assert len(captured) == 1, (
-            f"期待 9 次 load_config 只触发 1 次 warning，实际 {len(captured)} 次"
-        )
-    finally:
-        reset_legacy_warning_cache()
-
-
 # ---------------------------------------------------------------------------
 # save_config 原子写入测试
 # ---------------------------------------------------------------------------

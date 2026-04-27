@@ -6,7 +6,6 @@ click CLI 框架：main group + init command + doctor command。
 from __future__ import annotations
 
 import asyncio
-import secrets
 from pathlib import Path
 from typing import Any
 
@@ -67,10 +66,6 @@ def _build_setup_config_patch(config: Any) -> dict[str, Any]:
     }
 
 
-def _generate_local_proxy_key() -> str:
-    return f"sk-local-{secrets.token_urlsafe(24)}"
-
-
 def _ensure_action_completed(result: Any, *, action_label: str) -> None:
     status = getattr(result, "status", None)
     if status in (None, "", ControlPlaneActionStatus.COMPLETED, "completed"):
@@ -123,11 +118,6 @@ main.add_command(cleanup_group)  # Feature 082 P4
     help="Provider API Key；省略时交互输入",
 )
 @click.option(
-    "--master-key",
-    default=None,
-    help="LiteLLM Proxy Key；省略时交互输入",
-)
-@click.option(
     "--skip-live-verify",
     is_flag=True,
     default=False,
@@ -142,7 +132,6 @@ def setup(
     main_model: str | None,
     cheap_model: str | None,
     api_key: str | None,
-    master_key: str | None,
     skip_live_verify: bool,
 ) -> None:
     """新手一键接入真实模型。"""
@@ -230,7 +219,6 @@ def setup(
                 api_key_env=resolved_api_key_env,
             )
         provider_entry = config.providers[0]
-        runtime = config.runtime
 
         secret_values: dict[str, str] = {}
         if provider_entry.auth_type == "api_key":
@@ -241,13 +229,7 @@ def setup(
             if not provider_api_key.strip():
                 raise click.ClickException("API Key 不能为空。")
             secret_values[provider_entry.api_key_env] = provider_api_key.strip()
-
-        proxy_master_key = master_key or _generate_local_proxy_key()
-        if master_key is None:
-            console.print(
-                f"[dim]未提供 {runtime.master_key_env}，已自动生成本地 LiteLLM Proxy Key。[/dim]"
-            )
-        secret_values[runtime.master_key_env] = proxy_master_key.strip()
+        # F081 cleanup：删除 LiteLLM Master Key 注册路径（runtime.master_key_env 已删）
 
         adapter = LocalSetupGovernanceAdapter(project_root)
         if provider_entry.id == "openai-codex":

@@ -38,8 +38,9 @@ from .auth import (
 # Feature 064: OAuth Token 刷新协调器
 from .refresh_coordinator import TokenRefreshCoordinator
 
-# 配置
-from .config import ProviderConfig, load_provider_config
+# F081 cleanup：原 provider.config (ProviderConfig + load_provider_config) 已删除
+# —— 那是 LiteLLM Proxy 时代的 ProviderConfig dataclass，
+# 现在配置通过 OctoAgentConfig + ProviderRouter 直读 yaml。
 from .cost import CostTracker
 
 # Feature 003: DX 工具（已迁移到 gateway/services/config/）
@@ -85,8 +86,6 @@ __all__ = [
     "CostTracker",
     "FallbackManager",
     "EchoMessageAdapter",
-    "ProviderConfig",
-    "load_provider_config",
     # 异常
     "AuthenticationError",
     "ProviderError",

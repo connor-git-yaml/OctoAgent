@@ -428,15 +428,7 @@ class SecretService:
 
     def _collect_target_specs(self, config: OctoAgentConfig) -> list[_TargetSpec]:
         targets: list[_TargetSpec] = []
-        if config.runtime.llm_mode == "litellm" and config.runtime.master_key_env:
-            targets.append(
-                _TargetSpec(
-                    target_kind=SecretTargetKind.RUNTIME,
-                    target_key="runtime.master_key_env",
-                    env_name=config.runtime.master_key_env,
-                    display_name="LiteLLM Master Key",
-                )
-            )
+        # F081 cleanup：移除 LiteLLM Master Key target（runtime.master_key_env / llm_mode 已删除）
         for provider in config.providers:
             if provider.enabled and provider.auth_type == "api_key" and provider.api_key_env:
                 targets.append(

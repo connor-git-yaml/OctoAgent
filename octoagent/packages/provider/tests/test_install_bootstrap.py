@@ -83,8 +83,7 @@ def test_run_install_bootstrap_bootstraps_home_instance(
     assert (instance_root / "bin" / "octo").exists()
     assert (instance_root / "bin" / "octo-start").exists()
     assert (instance_root / "bin" / "octo-doctor").exists()
-    content = (instance_root / "octoagent.yaml").read_text(encoding="utf-8")
-    assert "llm_mode: echo" in content
+    # F081 cleanup：RuntimeConfig 已退化为空块，runtime.llm_mode 已删除。
     assert any("prepare instance root" in item for item in attempt.actions_completed)
     assert any("octo-start" in item for item in attempt.next_actions)
     assert not any("uvicorn octoagent.gateway.main:app" in item for item in attempt.next_actions)
