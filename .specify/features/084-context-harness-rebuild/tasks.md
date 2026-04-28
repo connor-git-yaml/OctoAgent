@@ -439,7 +439,7 @@
 - 满足条件时跳过初始化写入，进入 sync 流程（R9 缓解，J5 验收场景 3）
 - 新增对应单元测试覆盖"已有档案跳过覆盖"路径
 
-### T033 改造 gateway/main.py lifespan 接入 SnapshotStore [实现 / 1h]
+### T033 [x] 改造 gateway/main.py lifespan 接入 SnapshotStore [实现 / 1h]
 **依赖**: T025, T030  
 **目标文件**: `apps/gateway/src/octoagent/gateway/main.py`  
 **验收**:
@@ -448,7 +448,7 @@
 - 调用 `owner_profile_sync_on_startup()`
 - 启动顺序：DB init → ToolRegistry scan → SnapshotStore init → OwnerProfile sync
 
-### T034 改造 orchestrator.py 从 SnapshotStore 读取系统提示 [重构 / 1.5h]
+### T034 [x] 改造 orchestrator.py 从 SnapshotStore 读取系统提示 [重构 / 1.5h]
 **依赖**: T001, T022, T033  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/orchestrator.py`  
 **验收**:
@@ -457,7 +457,7 @@
 - mid-session 写入 USER.md 不改变当前 session 的系统提示内容（SC-011）
 - `pytest tests/` 全量通过
 
-### T035 集成 ThreatScanner 到 PolicyGate [重构 / 1.5h]
+### T035 [x] 集成 ThreatScanner 到 PolicyGate [重构 / 1.5h]
 **依赖**: T009, T027  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/policy.py`  
 **验收**:
@@ -466,7 +466,7 @@
 - WARN 级命中记录日志，不直接 block
 - 工具层不自行拦截，所有 scan 通过 PolicyGate 触发
 
-### T036 [P] 单元测试：SnapshotStore 前缀缓存不可变 [测试 / 1.5h]
+### T036 [x] [P] 单元测试：SnapshotStore 前缀缓存不可变 [测试 / 1.5h]
 **依赖**: T022, T023  
 **目标文件**: `apps/gateway/tests/harness/test_snapshot_store.py`  
 **验收**:
@@ -474,7 +474,7 @@
 - `test_snapshot_store_live_state_updated`：写入后 `get_live_state()` 返回新内容
 - `test_snapshot_store_atomic_write`：write_through 中途模拟异常，原始文件完整性不受损
 
-### T037 [P] 单元测试：user_profile 三工具 contract 验证 [测试 / 1h]
+### T037 [x] [P] 单元测试：user_profile 三工具 contract 验证 [测试 / 1h]
 **依赖**: T027, T028, T029  
 **目标文件**: `apps/gateway/tests/tools/test_user_profile_tools_contract.py`  
 **验收**:
@@ -483,7 +483,7 @@
 - `test_user_profile_observe_schema_matches_handler`：同上
 - `test_user_profile_update_entrypoints_contain_web`：entrypoints 含 web
 
-### T038 [P] 单元测试：OwnerProfile sync hook [测试 / 1h]
+### T038 [x] [P] 单元测试：OwnerProfile sync hook [测试 / 1h]
 **依赖**: T030  
 **目标文件**: `apps/gateway/tests/models/test_owner_profile_sync.py`  
 **验收**:
@@ -491,7 +491,7 @@
 - `test_owner_profile_sync_fails_gracefully`：USER.md 解析失败时 WARN 日志，不抛异常
 - `test_owner_profile_no_is_filled`：`is_filled` 方法已不存在
 
-### T039 集成测试：路径 A USER.md 写入全链路 [测试 / 2h]
+### T039 [x] 集成测试：路径 A USER.md 写入全链路 [测试 / 2h]
 **依赖**: T027, T035, T036  
 **目标文件**: `apps/gateway/tests/integration/test_user_profile_write_path.py`  
 **验收**:
@@ -499,7 +499,7 @@
 - `test_path_a_threat_scanner_blocks_injection`：传入含 `ignore previous instructions` 内容，验证被 block + `MEMORY_ENTRY_BLOCKED` 事件写入 + USER.md 无恶意内容
 - `test_path_a_char_limit_enforced`：USER.md 超 50000 字符时 add 被拒绝
 
-### T040 Phase 2 全量回归验证 [测试 / 1h]
+### T040 [x] Phase 2 全量回归验证 [测试 / 1h]
 **依赖**: T035, T038, T039  
 **目标文件**: 无新文件  
 **验收**:

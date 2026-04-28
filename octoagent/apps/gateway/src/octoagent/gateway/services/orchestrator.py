@@ -443,6 +443,9 @@ class OrchestratorService:
         # Feature 064 P2-B: 通知服务（可选注入，不注入时不影响现有行为）
         self._notification_service = notification_service
 
+        # F084 Phase 2 T034：SnapshotStore 冻结副本接入（延迟注入，lifespan 启动后设置）
+        self._snapshot_store: Any | None = None
+
     # ----- Feature 064 P2-B: 通知服务 -----
 
     async def _notify_state_change(
@@ -1446,31 +1449,36 @@ class OrchestratorService:
         self,
         session: "AgentSession | None",
         snapshot_store: "Any | None" = None,
-    ) -> str:
-        """构建主 Agent 的系统提示（Feature 084 Phase 2 接入预留）。
+    ) -> dict[str, str]:
+        """构建主 Agent 的系统提示冻结快照内容（Feature 084 Phase 2 接入）。
 
-        当前实现：透传到 AgentContextService（不改变现有行为）。
-        Phase 2 接入后：当 snapshot_store 不为 None 时，
-        从 snapshot_store.format_for_system_prompt() 读取冻结快照内容（SC-011）。
+        Phase 2 接入：当 snapshot_store 不为 None 时（优先使用传入参数，
+        其次使用 self._snapshot_store），从 format_for_system_prompt() 读取
+        冻结快照内容（SC-011）。
+
+        设计：返回 dict[str, str]，其中 key 是文件名（"USER.md" / "MEMORY.md"），
+        value 是 session 启动时冻结的内容副本。mid-session 写入 USER.md 不改变
+        当前 session 的系统提示内容（不变量：冻结副本不可变）。
 
         Args:
             session: 当前 Agent session（可能为 None）。
-            snapshot_store: SnapshotStore 单例（Phase 2 注入，当前可传 None）。
+            snapshot_store: SnapshotStore 单例（显式注入优先；None 时退回 self._snapshot_store）。
 
         Returns:
-            系统提示字符串（Phase 2 前返回空字符串，由 AgentContextService 负责构建）。
+            冻结快照内容 dict；快照不可用时返回空 dict（由 AgentContextService 正常构建）。
         """
-        # Phase 2 接入点：当 snapshot_store 不为 None 时改为读取冻结快照
-        if snapshot_store is not None:
+        # 优先使用传入的 snapshot_store，其次使用 self._snapshot_store
+        effective_store = snapshot_store if snapshot_store is not None else self._snapshot_store
+        if effective_store is not None:
             try:
-                return snapshot_store.format_for_system_prompt()
+                return effective_store.format_for_system_prompt()
             except Exception:
                 log.warning(
                     "snapshot_store_format_failed",
                     session_id=str(getattr(session, "session_id", "")),
                 )
-        # Phase 1 保留：返回空字符串，系统提示由 AgentContextService 正常构建
-        return ""
+        # snapshot_store 不可用时返回空 dict，系统提示由 AgentContextService 正常构建
+        return {}
 
     async def _build_request_runtime_hints(
         self,

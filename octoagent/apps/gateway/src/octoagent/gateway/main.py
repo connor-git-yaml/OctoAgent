@@ -312,7 +312,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     app.state.project_migration_run = await migration_service.ensure_default_project()
 
+    # F084 Phase 2 T033：ToolRegistry scan + SnapshotStore 单例 + OwnerProfile sync
+    # 启动顺序（防 F23 回归）：
+    #   DB init → ToolRegistry scan → ensure_filesystem_skeleton（创建 USER.md/MEMORY.md
+    #   骨架）→ ensure_startup_records → SnapshotStore.load_snapshot（此时文件已存在，
+    #   不会冻结空内容）→ OwnerProfile sync
+    from .harness.tool_registry import scan_and_register, get_registry
+
+    _builtin_tools_path = Path(__file__).resolve().parent / "tools"
+    _tool_registry = get_registry()
+    scan_and_register(_tool_registry, _builtin_tools_path)
+
     # Feature 056: clean install 后补齐文件系统骨架 + 默认 agent profile + bootstrap session
+    # 必须在 SnapshotStore.load_snapshot 之前——否则 clean install 上 USER.md 不存在，
+    # SnapshotStore 会冻结空字符串，整个进程生命周期 user_profile.read 返回空（F23）
     from octoagent.core.behavior_workspace import ensure_filesystem_skeleton
 
     skeleton_created = ensure_filesystem_skeleton(project_root)
@@ -322,6 +335,32 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from .services.startup_bootstrap import ensure_startup_records
 
     await ensure_startup_records(store_group=store_group, project_root=project_root)
+
+    # 现在文件已存在（或刚被骨架创建），可以安全冻结快照
+    from .harness.snapshot_store import SnapshotStore
+
+    _snapshot_store = SnapshotStore(conn=store_group.conn)
+    _user_md_path = project_root / "behavior" / "system" / "USER.md"
+    _memory_md_path = project_root / "behavior" / "system" / "MEMORY.md"
+    await _snapshot_store.load_snapshot(
+        session_id="__startup__",
+        files={
+            "USER.md": _user_md_path,
+            "MEMORY.md": _memory_md_path,
+        },
+    )
+    app.state.snapshot_store = _snapshot_store
+
+    from octoagent.core.models.agent_context import owner_profile_sync_on_startup
+
+    try:
+        await owner_profile_sync_on_startup(_user_md_path)
+    except Exception as _exc:
+        log.warning(
+            "owner_profile_sync_on_startup_failed",
+            error_type=type(_exc).__name__,
+            error=str(_exc),
+        )
 
     # Feature 058: 确保 MCP 安装相关目录存在
     _mcp_servers_dir = Path.home() / ".octoagent" / "mcp-servers"
@@ -519,6 +558,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await app.state.capability_pack_service.startup()
 
+    # F084 Phase 2 T033：startup 后把 SnapshotStore 注入 ToolDeps
+    # （startup 内部执行 _register_builtin_tools 创建 ToolDeps，之后才可注入）
+    _tool_deps = getattr(app.state.capability_pack_service, "_tool_deps", None)
+    if _tool_deps is not None and hasattr(_snapshot_store, "load_snapshot"):
+        _tool_deps._snapshot_store = _snapshot_store
+
     # Feature 081 P4 修复（Codex F2）：SkillRunner 仅在非 echo 模式下创建。
     # echo 模式必须保持纯 echo 行为——ProviderModelClient 会绕过 FallbackManager
     # 直连 provider，这违反了 echo 的离线/开发语义。
@@ -631,6 +676,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         log.warning("graph_pipeline_tool_init_skipped", error=str(exc))
         app.state.graph_pipeline_tool = None
+
+    # F084 Phase 2 T034：把 SnapshotStore 注入 OrchestratorService（替代直读 USER.md）
+    _orchestrator = getattr(getattr(app.state, "task_runner", None), "_orchestrator", None)
+    if _orchestrator is not None and hasattr(_snapshot_store, "format_for_system_prompt"):
+        _orchestrator._snapshot_store = _snapshot_store
 
     await telegram_service.startup()
 

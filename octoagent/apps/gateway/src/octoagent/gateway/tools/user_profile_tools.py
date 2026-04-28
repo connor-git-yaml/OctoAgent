@@ -39,7 +39,8 @@ from octoagent.core.models.tool_results import (
 from octoagent.gateway.harness.snapshot_store import CharLimitExceeded
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
-from octoagent.gateway.harness.threat_scanner import scan as threat_scan
+from octoagent.gateway.harness.threat_scanner import scan as threat_scan  # 保留备用（observe 直接用）
+from octoagent.gateway.services.policy import PolicyGate
 from octoagent.tooling import reflect_tool_schema, tool_contract
 
 from ..services.builtin_tools._deps import ToolDeps
@@ -161,27 +162,32 @@ async def register(broker, deps: ToolDeps) -> None:
                 approval_requested=False,
             )
 
-        # 1) ThreatScanner 扫描
-        scan_result = threat_scan(content)
-        if scan_result.blocked:
-            await _emit_event(
-                deps,
-                event_type=EventType.MEMORY_ENTRY_BLOCKED,
-                payload={
-                    "tool": "user_profile.update",
-                    "operation": operation,
-                    "pattern_id": scan_result.pattern_id,
-                    "severity": scan_result.severity,
-                    "input_hash": _hash_fact(content),
-                    # 不写完整恶意内容，FR-3.4 / Constitution C5
-                },
-            )
+        # 1) PolicyGate 统一内容安全扫描（Constitution C10 统一入口，T035）
+        # PolicyGate 内部调 ThreatScanner.scan()，工具层不直接拦截
+        try:
+            from ..services.execution_context import get_current_execution_context
+            _ctx = get_current_execution_context()
+            _task_id = (_ctx.task_id if _ctx else "") or ""
+        except Exception:
+            _task_id = ""
+        _stores = getattr(deps, "stores", None)
+        _event_store = getattr(_stores, "event_store", None)
+        _task_store = getattr(_stores, "task_store", None)
+        _gate = PolicyGate(event_store=_event_store, task_store=_task_store)
+        _check = await _gate.check(
+            content=content,
+            tool_name="user_profile.update",
+            task_id=_task_id,
+            extra_payload={"operation": operation},
+        )
+        if not _check.allowed:
+            _scan_result = _check.scan_result
             return UserProfileUpdateResult(
                 status="rejected",
                 target=target_id,
-                reason=f"threat_blocked: {scan_result.matched_pattern_description or scan_result.pattern_id}",
+                reason=_check.reason,
                 blocked=True,
-                pattern_id=scan_result.pattern_id,
+                pattern_id=_scan_result.pattern_id if _scan_result else None,
                 approval_requested=False,
             )
 
@@ -349,23 +355,26 @@ async def register(broker, deps: ToolDeps) -> None:
                 queued=False,
             )
 
-        # 闸 2: ThreatScanner（位于队列长度检查之前——避免恶意内容浪费队列名额）
-        scan_result = threat_scan(fact_content)
-        if scan_result.blocked:
-            await _emit_event(
-                deps,
-                event_type=EventType.MEMORY_ENTRY_BLOCKED,
-                payload={
-                    "tool": "user_profile.observe",
-                    "pattern_id": scan_result.pattern_id,
-                    "severity": scan_result.severity,
-                    "input_hash": _hash_fact(fact_content),
-                },
-            )
+        # 闸 2: PolicyGate 统一内容安全扫描（Constitution C10 统一入口，T035）
+        # 位于队列长度检查之前——避免恶意内容浪费队列名额
+        try:
+            from ..services.execution_context import get_current_execution_context
+            _obs_ctx = get_current_execution_context()
+            _obs_task_id = (_obs_ctx.task_id if _obs_ctx else "") or ""
+        except Exception:
+            _obs_task_id = ""
+        _obs_event_store = getattr(getattr(deps, "stores", None), "event_store", None)
+        _obs_gate = PolicyGate(event_store=_obs_event_store)
+        _obs_check = await _obs_gate.check(
+            content=fact_content,
+            tool_name="user_profile.observe",
+            task_id=_obs_task_id,
+        )
+        if not _obs_check.allowed:
             return ObserveResult(
                 status="rejected",
                 target=target_id,
-                reason=f"threat_blocked: {scan_result.matched_pattern_description or scan_result.pattern_id}",
+                reason=_obs_check.reason,
                 queued=False,
             )
 
@@ -513,8 +522,9 @@ async def _emit_event(deps: ToolDeps, *, event_type: EventType, payload: dict[st
             task_seq=task_seq,
             ts=datetime.now(timezone.utc),
             type=event_type,
-            actor=ActorType.AGENT,
+            actor=ActorType.SYSTEM,
             payload=payload,
+            trace_id=task_id,  # 审计场景用 task_id 作为 trace_id
         )
         await event_store.append_event_committed(event, update_task_pointer=False)
     except Exception as exc:
