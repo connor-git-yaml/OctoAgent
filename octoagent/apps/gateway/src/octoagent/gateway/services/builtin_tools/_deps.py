@@ -46,12 +46,19 @@ class ToolDeps:
     _mcp_registry: Any = None
     _mcp_installer: Any = None
     _pack_service: Any = None  # 弱引用回 CapabilityPackService
+    _snapshot_store: Any = None  # F084 Phase 2 T022-T025
 
     @property
     def task_runner(self):
         if self._task_runner is None:
             raise RuntimeError("task_runner not bound yet")
         return self._task_runner
+
+    @property
+    def snapshot_store(self):
+        if self._snapshot_store is None:
+            raise RuntimeError("snapshot_store not bound yet (F084 Phase 2 T033 待接入)")
+        return self._snapshot_store
 
     @property
     def delegation_plane(self):

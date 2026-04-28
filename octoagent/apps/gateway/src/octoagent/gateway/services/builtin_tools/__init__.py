@@ -43,6 +43,12 @@ async def register_all(broker, deps: ToolDeps) -> None:
     await config_tools.register(broker, deps)
     await misc_tools.register(broker, deps)
 
+    # F084 Phase 2 T026-T029（防 F20 critical）：user_profile_tools 在
+    # gateway/tools/ 目录而非 builtin_tools/，必须在此处显式接入注册路径，
+    # 否则 user_profile.update / read / observe 三个工具不会被 broker / ToolRegistry 装载
+    from octoagent.gateway.tools import user_profile_tools
+    await user_profile_tools.register(broker, deps)
+
 
 def list_for_entrypoint(entrypoint: str) -> list:
     """返回指定入口点可见的 ToolEntry 列表（委托 ToolRegistry，Feature 084 D1 根治）。

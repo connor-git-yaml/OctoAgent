@@ -244,15 +244,34 @@ class BootstrapSessionOrchestrator:
         # 仅在 owner_profile_updated 时触发——避免覆盖用户手工 USER.md
         if result.owner_profile_updated and session.owner_profile_id:
             try:
-                # 重新读最新 OwnerProfile（含刚同步的字段）
-                from .user_md_renderer import UserMdRenderer
+                # F084 Phase 2 T032：重装路径防误覆盖（R9 / J5 场景 3）
+                # 已实质填充的 USER.md 不再渲染覆盖（用户清 ~/.octoagent/data
+                # 但保留 behavior 目录的重装场景）；改为进入 sync 流程
+                from octoagent.core.models.agent_context import (
+                    _user_md_substantively_filled,
+                )
 
-                fresh_profile = await self._store.get_owner_profile(session.owner_profile_id)
-                renderer = UserMdRenderer(self._root)
-                _render_result, written_path = renderer.render_and_write(fresh_profile)
-                if written_path is not None:
-                    result.user_md_written = True
-                    result.user_md_path = str(written_path)
+                user_md = self._root / "behavior" / "system" / "USER.md"
+                if _user_md_substantively_filled(user_md):
+                    result.warnings.append(
+                        "USER.md 已实质填充（>100 字符），跳过渲染覆盖（重装路径保护）"
+                    )
+                    log.info(
+                        "bootstrap_user_md_render_skipped",
+                        bootstrap_id=bootstrap_id,
+                        reason="user_md_already_filled",
+                        user_md_path=str(user_md),
+                    )
+                else:
+                    # 重新读最新 OwnerProfile（含刚同步的字段）
+                    from .user_md_renderer import UserMdRenderer
+
+                    fresh_profile = await self._store.get_owner_profile(session.owner_profile_id)
+                    renderer = UserMdRenderer(self._root)
+                    _render_result, written_path = renderer.render_and_write(fresh_profile)
+                    if written_path is not None:
+                        result.user_md_written = True
+                        result.user_md_path = str(written_path)
             except Exception as exc:
                 result.warnings.append(f"USER.md 渲染失败：{exc}")
                 log.warning(

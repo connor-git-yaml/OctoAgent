@@ -202,6 +202,15 @@ class OwnerProfile(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     version: int = Field(default=1, ge=1)
     last_synced_from_profile_at: datetime | None = Field(default=None)
+    # F084 Phase 2 T030：OwnerProfile 退化为派生只读视图（USER.md 是 SoT，FR-9.1）
+    bootstrap_completed: bool = Field(
+        default=False,
+        description="USER.md 实质填充后置 True（替代旧 BootstrapSession 状态机判定）",
+    )
+    last_synced_from_user_md: datetime | None = Field(
+        default=None,
+        description="最近一次从 USER.md 解析回填的时间戳（user_profile.update 写入后异步触发）",
+    )
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
 
@@ -457,3 +466,119 @@ class ContextResolveResult(BaseModel):
     memory_hits: list[dict[str, Any]] = Field(default_factory=list)
     degraded_reason: str = Field(default="")
     source_refs: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# F084 Phase 2 T030 / T031：OwnerProfile sync hook
+# ---------------------------------------------------------------------------
+# 设计：USER.md 是 SoT（FR-9.1），OwnerProfile 退化为派生只读视图。
+# - 系统启动时：owner_profile_sync_on_startup() 解析 USER.md 回填字段
+# - user_profile.update 写入成功后：sync_owner_profile_from_user_md() 异步触发
+# - 解析失败：写 WARN 日志，不抛异常（防 R9 启动失败）
+
+import re as _re  # noqa: E402（模块级 sync hook 区域局部 import）
+from pathlib import Path  # noqa: E402
+
+import structlog as _structlog  # noqa: E402
+
+_sync_log = _structlog.get_logger(__name__)
+
+# USER.md 实质填充阈值（替代旧 _user_md_is_filled / is_filled 语义；FR-9.5）
+USER_MD_FILLED_MIN_CHARS = 100
+
+
+def _user_md_substantively_filled(user_md_path: Path) -> bool:
+    """USER.md 是否实质填充：存在 + len(content) > 100（FR-9.5）。
+
+    替代旧的 _user_md_is_filled / OwnerProfile.is_filled 语义；
+    Phase 4 退役 BootstrapSession 后仅此函数生效。
+    """
+    try:
+        if not user_md_path.exists():
+            return False
+        content = user_md_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return len(content) > USER_MD_FILLED_MIN_CHARS
+
+
+def _parse_user_md_fields(content: str) -> dict[str, str]:
+    """从 USER.md 文本中解析常见字段（best-effort）。
+
+    支持的轻量 pattern：
+        时区: Asia/Shanghai
+        语言: zh-CN
+        称呼: 你 / Connor
+        风格: ...
+    解析失败时返回部分匹配结果，不抛异常。
+    """
+    fields: dict[str, str] = {}
+    if not content:
+        return fields
+
+    # 中文/英文 key 都识别（不区分大小写）
+    patterns = {
+        "timezone": r"(?:时区|timezone)[:：]\s*([\w/+\-]+)",
+        "locale": r"(?:语言|locale)[:：]\s*([\w\-]+)",
+        "preferred_address": r"(?:称呼|preferred[_ ]address)[:：]\s*([^\n]+)",
+        "working_style": r"(?:工作风格|风格|working[_ ]style)[:：]\s*([^\n]+)",
+        "display_name": r"(?:姓名|名字|display[_ ]name)[:：]\s*([^\n]+)",
+    }
+    for field_name, pattern in patterns.items():
+        match = _re.search(pattern, content, _re.IGNORECASE)
+        if match:
+            fields[field_name] = match.group(1).strip()
+    return fields
+
+
+async def sync_owner_profile_from_user_md(user_md_path: Path) -> dict[str, Any] | None:
+    """从 USER.md 解析字段更新 OwnerProfile 派生视图（user_profile.update 后异步触发）。
+
+    Args:
+        user_md_path: USER.md 绝对路径
+
+    Returns:
+        解析得到的字段 dict（供调用方持久化）；解析失败 / 文件不存在时 None。
+        本函数本身不直接写库——具体写库由调用方（Phase 3 sync 服务或 lifespan）完成。
+    """
+    try:
+        if not user_md_path.exists():
+            _sync_log.debug("user_md_sync_skipped_no_file", path=str(user_md_path))
+            return None
+        content = user_md_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        _sync_log.warning(
+            "user_md_sync_read_failed",
+            path=str(user_md_path),
+            error=str(exc),
+        )
+        return None
+
+    try:
+        fields = _parse_user_md_fields(content)
+    except Exception as exc:  # noqa: BLE001 — 解析失败不抛
+        _sync_log.warning(
+            "user_md_sync_parse_failed",
+            path=str(user_md_path),
+            error=str(exc),
+        )
+        return None
+
+    fields["bootstrap_completed"] = _user_md_substantively_filled(user_md_path)
+    fields["last_synced_from_user_md"] = _utc_now().isoformat()
+    fields["__source__"] = str(user_md_path)
+    _sync_log.info(
+        "user_md_synced",
+        path=str(user_md_path),
+        fields_extracted=[k for k in fields.keys() if not k.startswith("__")],
+    )
+    return fields
+
+
+async def owner_profile_sync_on_startup(user_md_path: Path) -> dict[str, Any] | None:
+    """系统启动时同步 OwnerProfile（FR-9.2）。
+
+    与 sync_owner_profile_from_user_md 行为一致；命名不同是为了在 lifespan
+    日志/调用栈里清晰区分启动期 vs 写入后触发。
+    """
+    return await sync_owner_profile_from_user_md(user_md_path)

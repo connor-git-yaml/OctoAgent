@@ -283,11 +283,17 @@ class UserProfileUpdateResult(WriteResult):
 
 
 class ObserveResult(WriteResult):
-    """user_profile.observe 写入结果（写入 observation_candidates 队列）。"""
+    """user_profile.observe 写入结果（写入 observation_candidates 队列）。
 
-    candidate_id: str = ""
-    deduplicated: bool = False
-    """True 时表示内容重复（hash 匹配），已被去重跳过。"""
+    与 spec FR-2.7 / contracts/tools-contract.md 对齐：
+    - queued: 是否成功入队（语义比 status="written" 更直接，供 LLM/UI 判断）
+    - candidate_id: 入队成功时的候选 ID（None 表示未入队）
+    - dedup_hit: 是否命中 dedup（source_turn_id + fact_content_hash）
+    """
+
+    queued: bool = False
+    candidate_id: str | None = None
+    dedup_hit: bool = False
 
 
 # ---------------------------------------------------------------------------
