@@ -45,6 +45,7 @@ from .routes import (
     control_plane,
     execution,
     health,
+    memory_candidates,
     message,
     operator_inbox,
     ops,
@@ -682,6 +683,39 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if _orchestrator is not None and hasattr(_snapshot_store, "format_for_system_prompt"):
         _orchestrator._snapshot_store = _snapshot_store
 
+    # F084 Phase 3 T049：启动 ObservationRoutine（feature flag 检查）
+    from .routines.observation_promoter import ObservationRoutine
+
+    _obs_feature_enabled = True
+    try:
+        _obs_cfg = load_config(project_root)
+        if _obs_cfg is not None:
+            _obs_feature_enabled = getattr(
+                getattr(_obs_cfg, "features", None),
+                "observation_routine_enabled",
+                True,
+            )
+    except Exception as _obs_exc:
+        log.debug(
+            "observation_routine_feature_flag_fallback",
+            error=str(_obs_exc),
+            default=_obs_feature_enabled,
+        )
+
+    # Telegram 通知函数（异步）：如果 telegram_service 有 notify_text，直接用；否则 None
+    _obs_telegram_notify = getattr(telegram_service, "notify_text", None)
+
+    _observation_routine = ObservationRoutine(
+        conn=store_group.conn,
+        event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
+        task_store=store_group.task_store if hasattr(store_group, "task_store") else None,
+        provider_router=provider_router,
+        telegram_notify_fn=_obs_telegram_notify,
+        feature_enabled=_obs_feature_enabled,
+    )
+    await _observation_routine.start()
+    app.state.observation_routine = _observation_routine
+
     await telegram_service.startup()
 
     # Feature 011: 注册 WatchdogScanner APScheduler job
@@ -813,6 +847,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                         error_type=type(exc).__name__,
                     )
 
+    # F084 Phase 3 T049：关闭 ObservationRoutine
+    if hasattr(app.state, "observation_routine") and app.state.observation_routine:
+        await app.state.observation_routine.stop()
+
     # 关闭：停止 Watchdog 调度器
     if hasattr(app.state, "watchdog_scheduler") and app.state.watchdog_scheduler:
         app.state.watchdog_scheduler.shutdown(wait=False)
@@ -886,6 +924,8 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, tags=["chat"], dependencies=protected)
     app.include_router(control_plane.router, tags=["control-plane"], dependencies=protected)
     app.include_router(skills.router, dependencies=protected)
+    # F084 Phase 3 T050-T051：Memory Candidates + Snapshots API
+    app.include_router(memory_candidates.router, tags=["memory"], dependencies=protected)
     pipelines.include_pipeline_routers(app, tags=["pipelines"], dependencies=protected)
 
     # 挂载前端静态文件（frontend/dist/ -> /）

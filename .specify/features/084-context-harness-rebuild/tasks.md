@@ -562,7 +562,7 @@
 - 顶层 `registry.register(ToolEntry(entrypoints={"agent_runtime"}, ...))` 调用
 - 任务完成时写 `SUBAGENT_RETURNED` 事件
 
-### T046 [P] 实现 ObservationRoutine — 基础框架 [实现 / 2h]
+### T046 [x] [P] 实现 ObservationRoutine — 基础框架 [实现 / 2h]
 **依赖**: T040  
 **目标文件**: `apps/gateway/src/octoagent/gateway/routines/observation_promoter.py`  
 **验收**:
@@ -572,7 +572,7 @@
 - `_run_loop()` 每 INTERVAL_SECONDS 执行一次 pipeline，异常不终止整个 loop
 - feature flag 通过配置文件控制（FR-6.4）
 
-### T047 [P] 实现 ObservationRoutine — extract + dedupe 阶段 [实现 / 2h]
+### T047 [x] [P] 实现 ObservationRoutine — extract + dedupe 阶段 [实现 / 2h]
 **依赖**: T046  
 **目标文件**: `apps/gateway/src/octoagent/gateway/routines/observation_promoter.py`  
 **验收**:
@@ -581,7 +581,7 @@
 - 每个 stage 完成写 `OBSERVATION_STAGE_COMPLETED` 事件（含 `stage_name`、`input_count`、`output_count`、`duration_ms`）（FR-6.3）
 - 隔离会话，不访问当前活跃用户 session context（FR-6.2）
 
-### T048 [P] 实现 ObservationRoutine — categorize 阶段 + 降级 [实现 / 2h]
+### T048 [x] [P] 实现 ObservationRoutine — categorize 阶段 + 降级 [实现 / 2h]
 **依赖**: T047  
 **目标文件**: `apps/gateway/src/octoagent/gateway/routines/observation_promoter.py`  
 **验收**:
@@ -590,7 +590,7 @@
 - confidence ≥ 0.7 的候选写入 candidates 表；< 0.7 丢弃（仲裁 2）
 - 队列超 50 条时停止写入，推送 Telegram 通知（J7 验收场景 5）
 
-### T049 [P] 接入 ObservationRoutine 到 main.py lifespan [实现 / 30min]
+### T049 [x] [P] 接入 ObservationRoutine 到 main.py lifespan [实现 / 30min]
 **依赖**: T046, T033  
 **目标文件**: `apps/gateway/src/octoagent/gateway/main.py`  
 **验收**:
@@ -598,7 +598,7 @@
 - lifespan 关闭时调用 `ObservationRoutine.stop()`，await 取消完成
 - APScheduler 现有 cron jobs 不受影响（职责不混淆，FR-6.5）
 
-### T050 [P] 实现 Memory Candidates API — GET 端点 [实现 / 1h]
+### T050 [x] [P] 实现 Memory Candidates API — GET 端点 [实现 / 1h]
 **依赖**: T020  
 **目标文件**: `apps/gateway/src/octoagent/gateway/api/memory_candidates.py`  
 **验收**:
@@ -607,7 +607,7 @@
 - 每条候选含 `id`、`fact_content`、`category`、`confidence`、`created_at`、`expires_at`、`source_turn_id`
 - 路由注册到 FastAPI app
 
-### T051 [P] 实现 Memory Candidates API — promote / discard 端点 [实现 / 1.5h]
+### T051 [x] [P] 实现 Memory Candidates API — promote / discard 端点 [实现 / 1.5h]
 **依赖**: T050  
 **目标文件**: `apps/gateway/src/octoagent/gateway/api/memory_candidates.py`  
 **验收**:
@@ -616,7 +616,7 @@
 - `PUT /api/memory/candidates/bulk_discard`：批量 reject（FR-8.3），request body 含 `candidate_ids`
 - `GET /api/snapshots/{tool_call_id}`：查询 SnapshotRecord，404 处理
 
-### T052 [P] 实现候选自动归档定期清理 [实现 / 1h]
+### T052 [x] [P] 实现候选自动归档定期清理 [实现 / 1h]
 **依赖**: T051  
 **目标文件**: `apps/gateway/src/octoagent/gateway/routines/observation_promoter.py`（或现有 cleanup service）  
 **验收**:
