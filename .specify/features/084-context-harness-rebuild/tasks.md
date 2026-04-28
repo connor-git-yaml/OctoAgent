@@ -651,7 +651,7 @@
 - 批量操作后列表清空
 - 有未处理候选（pending_count > 0）时导航红点 badge 展示，清零后消失（FR-8.4）
 
-### T056 [P] 单元测试：ApprovalGate allowlist + 事件 [测试 / 1.5h]
+### T056 [x] [P] 单元测试：ApprovalGate allowlist + 事件 [测试 / 1.5h]
 **依赖**: T041, T042  
 **目标文件**: `apps/gateway/tests/harness/test_approval_gate.py`  
 **验收**:
@@ -660,7 +660,7 @@
 - `test_approval_gate_writes_approval_requested_event`：APPROVAL_REQUESTED 事件含 threat_category + pattern_id
 - `test_approval_gate_rejected_notifies_agent`：拒绝时 AgentHandle 收到明确 rejected
 
-### T057 [P] 单元测试：DelegationManager 约束验证 [测试 / 1h]
+### T057 [x] [P] 单元测试：DelegationManager 约束验证 [测试 / 1h]
 **依赖**: T044  
 **目标文件**: `apps/gateway/tests/harness/test_delegation_manager.py`  
 **验收**:
@@ -669,14 +669,14 @@
 - `test_delegate_task_blacklist_blocks`：黑名单 Worker 被拒，SUBAGENT_SPAWNED 事件不写入
 - `test_delegate_task_success_writes_event`：正常派发写入 SUBAGENT_SPAWNED 事件
 
-### T058 [P] 单元测试：delegate_task contract 验证 [测试 / 1h]
+### T058 [x] [P] 单元测试：delegate_task contract 验证 [测试 / 1h]
 **依赖**: T045  
 **目标文件**: `apps/gateway/tests/tools/test_delegate_task_contract.py`  
 **验收**:
 - `test_delegate_task_schema_matches_contract`：handler schema 与 `contracts/tools-contract.md` 对齐
 - `test_delegate_task_entrypoints_agent_runtime_only`：entrypoints 仅含 agent_runtime（不含 web）
 
-### T059 [P] 集成测试：ThreatScanner → ApprovalGate 联动 [测试 / 1.5h]
+### T059 [x] [P] 集成测试：ThreatScanner → ApprovalGate 联动 [测试 / 1.5h]
 **依赖**: T035, T042  
 **目标文件**: `apps/gateway/tests/integration/test_threat_approval_integration.py`  
 **验收**:
@@ -684,7 +684,7 @@
 - `test_warn_level_routes_to_approval_gate`：WARN 级 pattern 命中 → 触发 ApprovalGate → 批准后写入 → 拒绝后不写入
 - `test_normal_content_passes_through`：合法内容通过 ThreatScanner → 直接写入（无 false positive）
 
-### T060 [P] 集成测试：Observation Routine → candidates 写入 [测试 / 1.5h]
+### T060 [x] [P] 集成测试：Observation Routine → candidates 写入 [测试 / 1.5h]
 **依赖**: T048, T052  
 **目标文件**: `apps/gateway/tests/integration/test_observation_routine.py`  
 **验收**:
@@ -693,7 +693,7 @@
 - `test_routine_utility_model_unavailable_degrades`：utility model 不可用时候选以低置信度入队，routine 不中断
 - `test_routine_stage_events_written`：每个 stage 完成时 OBSERVATION_STAGE_COMPLETED 事件正确写入
 
-### T061 集成测试：candidates → promote → USER.md [测试 / 1.5h]
+### T061 [x] 集成测试：candidates → promote → USER.md [测试 / 1.5h]
 **依赖**: T051  
 **目标文件**: `apps/gateway/tests/integration/test_observation_promote.py`  
 **验收**:
@@ -702,7 +702,7 @@
 - `test_reject_candidate_does_not_write`：reject 后 USER.md 不变，OBSERVATION_DISCARDED 事件写入
 - `test_bulk_discard_clears_pending`：批量 reject 后 pending 候选全部变为 rejected
 
-### T062 Phase 3 全量回归验证 [测试 / 1h]
+### T062 [x] Phase 3 全量回归验证 [测试 / 1h]
 **依赖**: T056, T057, T059, T060, T061  
 **目标文件**: 无新文件  
 **验收**:

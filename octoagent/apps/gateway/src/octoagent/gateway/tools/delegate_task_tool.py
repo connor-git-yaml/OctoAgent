@@ -178,10 +178,12 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         # F26 修复（Codex 独立 review high）：把 stub 替换为真实派发——
         # 调用 launch_child（与 subagents.spawn 同路径，复用现有 Worker Runtime）。
         # 这样 DelegationManager 的 gate 检查 + 真实子任务创建串联起来：
-        # 1. DelegationManager.delegate 已写 SUBAGENT_SPAWNED 事件（约束通过时）
+        # 1. DelegationManager.delegate 做 gate 检查（depth/concurrent/blacklist），不写事件
         # 2. launch_child 实际创建 child task（task_runner 接管 lifecycle）
-        # 3. async 模式立即返回 task_id；sync 模式 wait + return
-        # 4. SUBAGENT_RETURNED 事件由 task_runner 终态回调写入（非本工具职责）
+        # 3. F34 修复：launch_child 成功后调 mgr._emit_spawned_event 写真实 child_task_id
+        #    （旧实现 delegate_task_tool 不写事件 → 违反 FR-5.5 / Constitution C2 审计要求）
+        # 4. async 模式立即返回 task_id；sync 模式 wait + return
+        # 5. SUBAGENT_RETURNED 事件由 task_runner 终态回调写入（非本工具职责）
         try:
             from ..services.builtin_tools._deps import launch_child as _launch_child
             launch_payload = await _launch_child(
@@ -209,6 +211,33 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             )
 
         spawned_task_id = (launch_payload or {}).get("task_id", "") if isinstance(launch_payload, dict) else ""
+
+        # F34 修复（Codex independent review high）：launch_child 成功后写
+        # SUBAGENT_SPAWNED 审计事件（FR-5.5 / Constitution C2 / C4）。
+        # 旧实现完全不写此事件，导致真实派发的 child_task_id 在事件流中没有溯源记录，
+        # 违反 C2 "所有写操作必有审计事件" + C4 "不可逆操作两阶段记录"。
+        if spawned_task_id:
+            try:
+                await mgr._emit_spawned_event(
+                    task_id=current_task_id or _DELEGATE_AUDIT_TASK_ID,
+                    child_task_id=spawned_task_id,
+                    target_worker=target_worker,
+                    depth=current_depth,
+                    task_description=task_description,
+                    callback_mode=callback_mode,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # 审计写失败不阻断已派发的子任务（task_runner 已在跑），
+                # 但 ERROR 级日志显眼标记 audit drop（与其他事件路径一致）
+                import structlog as _structlog_module
+                _structlog_module.get_logger(__name__).error(
+                    "delegate_task_spawned_event_failed",
+                    parent_task_id=current_task_id,
+                    child_task_id=spawned_task_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    hint="Constitution C2 风险：SUBAGENT_SPAWNED 事件未持久化",
+                )
 
         # async 模式：立即返回 spawned + task_id（FR-5.1）
         if callback_mode == "async":
