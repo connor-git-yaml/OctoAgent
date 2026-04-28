@@ -1,0 +1,58 @@
+# toolsets.yaml：声明式工具集配置（Feature 084 Phase 1）
+#
+# 格式：
+#   toolsets:
+#     <toolset_name>:
+#       entrypoints: [web, agent_runtime, telegram]   # 适用入口点
+#       tools: [tool.name, ...]                        # 工具列表
+#       includes: [other_toolset]                      # 继承其他 toolset（可选）
+#       blocked: [tool.name]                           # 屏蔽工具（覆盖 includes）
+
+toolsets:
+  # core toolset：所有入口点可见的核心工具（D1 根因修复）
+  core:
+    entrypoints: [web, agent_runtime, telegram]
+    tools:
+      - user_profile.update
+      - user_profile.read
+      - user_profile.observe
+      - delegate_task
+      - memory.read
+      - memory.search
+      - memory.recall
+      - memory.write
+      - memory.citations
+
+  # agent_only toolset：仅 agent_runtime 可见的工具
+  agent_only:
+    entrypoints: [agent_runtime]
+    tools:
+      - clarify
+      - subagents.list
+      - subagents.kill
+      - subagents.steer
+      - work.plan
+      - work.merge
+      - work.delete
+      - nodes.list
+      - cron.list
+
+  # ops_tools toolset：运维诊断类工具（web + agent_runtime 可见）
+  ops_tools:
+    entrypoints: [web, agent_runtime]
+    tools:
+      - project.inspect
+      - runtime.inspect
+      - gateway.inspect
+      - browser.status
+      - mcp.servers.list
+      - mcp.tools.list
+      - mcp.tools.refresh
+
+  # telegram toolset：Telegram 渠道专属工具
+  telegram:
+    entrypoints: [telegram, agent_runtime]
+    tools:
+      - user_profile.update
+      - user_profile.read
+      - user_profile.observe

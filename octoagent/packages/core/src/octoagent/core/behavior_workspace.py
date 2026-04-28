@@ -173,12 +173,6 @@ def load_onboarding_state(
             state.onboarding_completed_at = raw.get("onboarding_completed_at")
         except (json.JSONDecodeError, OSError):
             log.warning("onboarding_state_read_failed", path=str(state_path))
-    else:
-        # Legacy 兼容检测（T1.7）：无 state 文件但项目已在使用
-        state = _detect_legacy_onboarding_completion(project_root)
-        if state.is_completed():
-            save_onboarding_state(project_root, state)
-            return state
 
     # 路径 B（T1.5）：文件删除触发完成
     if state.bootstrap_seeded_at and not state.onboarding_completed_at:
@@ -247,72 +241,6 @@ def _user_md_is_filled(project_root: Path) -> bool:
         return False
     placeholder_markers = ("待引导时填写", "待了解后补充", "待引导或对话中了解")
     return not any(marker in content for marker in placeholder_markers)
-
-
-def _detect_legacy_onboarding_completion(project_root: Path) -> OnboardingState:
-    """Legacy 兼容检测：无 state 文件时推断 onboarding 是否已完成。
-
-    Feature 082 P1 加严（修复 Bootstrap & Profile Integrity）：
-    - **删除** "data/ 目录非空" 指标——Gateway 跑过一次后该指标**永远为真**，
-      是历史误标 ``onboarding_completed_at`` 的元凶（导致 Bootstrap 引导从未真实跑过）
-    - **要求双证据**：IDENTITY.md 实质修改 **AND** USER.md 已填充（不含占位符）
-    - 单证据命中（如仅 IDENTITY.md 改）只 log warning，不视为完成
-
-    历史行为：``identity_modified or has_sessions`` 即标记完成（误标率高）
-    新行为：``identity_modified and user_md_filled``（双证据要求）
-
-    指标 1：IDENTITY.md 内容已被修改（与默认模板不同）
-    指标 2：USER.md 已填充（不含 "待引导时填写" 等占位符）
-    """
-    root = project_root.resolve()
-    state = OnboardingState()
-
-    # 指标 1：检查 IDENTITY.md 是否已被修改
-    identity_paths = [
-        root / "behavior" / "agents" / "main" / "IDENTITY.md",
-    ]
-    identity_modified = False
-    for identity_path in identity_paths:
-        if identity_path.exists():
-            try:
-                content = identity_path.read_text(encoding="utf-8").strip()
-                # 检查是否仍为默认模板内容
-                default_marker = "当前 Agent 名称："
-                if content and default_marker not in content:
-                    identity_modified = True
-                    break
-                # 即使包含默认标记，如果长度比默认模板长很多，也视为已修改
-                if len(content) > 200:
-                    identity_modified = True
-                    break
-            except OSError:
-                pass
-
-    # 指标 2：USER.md 是否已填充（Feature 082 P1 新增；替代 data/ 非空）
-    user_md_filled = _user_md_is_filled(root)
-
-    if identity_modified and user_md_filled:
-        now = datetime.now(UTC).isoformat()
-        state.bootstrap_seeded_at = now  # 回填
-        state.onboarding_completed_at = now
-        log.info(
-            "legacy_onboarding_completion_detected",
-            identity_modified=identity_modified,
-            user_md_filled=user_md_filled,
-        )
-    elif identity_modified or user_md_filled:
-        # 单证据命中——可能是部分完成或文件被半手工修改；不回填，仅 warning 引导用户
-        log.warning(
-            "legacy_onboarding_partial_evidence_detected",
-            identity_modified=identity_modified,
-            user_md_filled=user_md_filled,
-            recommendation=(
-                "检测到部分引导痕迹但证据不全，未自动标记完成。"
-                "Bootstrap 引导会重新跑；如确认已完成可手动设置 .onboarding-state.json。"
-            ),
-        )
-
-    return state
 
 
 # ---------------------------------------------------------------------------

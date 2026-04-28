@@ -5,9 +5,20 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import BaseModel
+
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from octoagent.gateway.harness.tool_registry import ToolEntry
+from octoagent.gateway.harness.tool_registry import register as _registry_register
 
 from ._deps import ToolDeps, resolve_instance_root, resolve_and_check_path, truncate_text
+
+# 各工具 entrypoints 声明（Feature 084 D1 根治）
+_TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
+    "filesystem.list_dir":   frozenset({"agent_runtime"}),
+    "filesystem.read_text":  frozenset({"agent_runtime"}),
+    "filesystem.write_text": frozenset({"agent_runtime"}),
+}
 
 
 async def register(broker: Any, deps: ToolDeps) -> None:
@@ -154,3 +165,18 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         filesystem_write_text,
     ):
         await broker.try_register(reflect_tool_schema(handler), handler)
+
+    # 向 ToolRegistry 注册 ToolEntry（Feature 084 T012 — entrypoints 迁移）
+    for _name, _handler, _sel in (
+        ("filesystem.list_dir",   filesystem_list_dir,   SideEffectLevel.NONE),
+        ("filesystem.read_text",  filesystem_read_text,  SideEffectLevel.NONE),
+        ("filesystem.write_text", filesystem_write_text, SideEffectLevel.REVERSIBLE),
+    ):
+        _registry_register(ToolEntry(
+            name=_name,
+            entrypoints=_TOOL_ENTRYPOINTS[_name],
+            toolset="agent_only",
+            handler=_handler,
+            schema=BaseModel,
+            side_effect_level=_sel,
+        ))

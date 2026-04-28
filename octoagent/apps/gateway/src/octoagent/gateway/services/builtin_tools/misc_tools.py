@@ -25,10 +25,24 @@ from octoagent.core.behavior_workspace import (
     mark_onboarding_completed,
 )
 from octoagent.core.models.behavior import BehaviorReviewMode
+from pydantic import BaseModel
+
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from octoagent.gateway.harness.tool_registry import ToolEntry
+from octoagent.gateway.harness.tool_registry import register as _registry_register
 
 from ..execution_context import get_current_execution_context
 from ._deps import ToolDeps, current_parent
+
+# 各工具 entrypoints 声明（Feature 084 D1 根治）
+_TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
+    "pdf.inspect":         frozenset({"agent_runtime"}),
+    "image.inspect":       frozenset({"agent_runtime"}),
+    "tts.speak":           frozenset({"agent_runtime"}),
+    "canvas.write":        frozenset({"agent_runtime"}),
+    "behavior.write_file": frozenset({"agent_runtime"}),
+    "skills":              frozenset({"agent_runtime", "web"}),
+}
 
 _log = structlog.get_logger()
 
@@ -389,3 +403,21 @@ async def register(broker, deps: ToolDeps) -> None:
         skills,
     ):
         await broker.try_register(reflect_tool_schema(handler), handler)
+
+    # 向 ToolRegistry 注册 ToolEntry（Feature 084 T013 — entrypoints 迁移）
+    for _name, _handler, _sel in (
+        ("pdf.inspect",         pdf_inspect,         SideEffectLevel.NONE),
+        ("image.inspect",       image_inspect,       SideEffectLevel.NONE),
+        ("tts.speak",           tts_speak,           SideEffectLevel.REVERSIBLE),
+        ("canvas.write",        canvas_write,        SideEffectLevel.REVERSIBLE),
+        ("behavior.write_file", behavior_write_file, SideEffectLevel.REVERSIBLE),
+        ("skills",              skills,              SideEffectLevel.NONE),
+    ):
+        _registry_register(ToolEntry(
+            name=_name,
+            entrypoints=_TOOL_ENTRYPOINTS[_name],
+            toolset="core",
+            handler=_handler,
+            schema=BaseModel,
+            side_effect_level=_sel,
+        ))

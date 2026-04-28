@@ -1442,6 +1442,36 @@ class OrchestratorService:
             return False
         return self._is_routing_decision_eligible(request)
 
+    def _build_system_prompt(
+        self,
+        session: "AgentSession | None",
+        snapshot_store: "Any | None" = None,
+    ) -> str:
+        """构建主 Agent 的系统提示（Feature 084 Phase 2 接入预留）。
+
+        当前实现：透传到 AgentContextService（不改变现有行为）。
+        Phase 2 接入后：当 snapshot_store 不为 None 时，
+        从 snapshot_store.format_for_system_prompt() 读取冻结快照内容（SC-011）。
+
+        Args:
+            session: 当前 Agent session（可能为 None）。
+            snapshot_store: SnapshotStore 单例（Phase 2 注入，当前可传 None）。
+
+        Returns:
+            系统提示字符串（Phase 2 前返回空字符串，由 AgentContextService 负责构建）。
+        """
+        # Phase 2 接入点：当 snapshot_store 不为 None 时改为读取冻结快照
+        if snapshot_store is not None:
+            try:
+                return snapshot_store.format_for_system_prompt()
+            except Exception:
+                log.warning(
+                    "snapshot_store_format_failed",
+                    session_id=str(getattr(session, "session_id", "")),
+                )
+        # Phase 1 保留：返回空字符串，系统提示由 AgentContextService 正常构建
+        return ""
+
     async def _build_request_runtime_hints(
         self,
         request: OrchestratorRequest,

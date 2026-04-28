@@ -15,3 +15,5 @@
 [10:57:58] GATE_TASKS: PAUSE → APPROVED | mode=phase-pause
 [10:57:58] phase_5_5_analyze: STARTED
 [11:00:33] phase_5_5_analyze: COMPLETED | GREEN | F001 fixed (72→76) | F002 deferred to Phase 2 prep
+[11:13:31] phase_6_implement_phase1: STARTED | scope=T001-T015 (前置CLEANUP + Harness 基础设施)
+[11:52:53] phase_6_implement_phase1: COMPLETED | T001-T018 done | regression 2786 passed | Codex F1=accepted-by-design F2=fixed

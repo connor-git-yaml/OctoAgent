@@ -1703,31 +1703,24 @@ class CapabilityPackService:
 
     @staticmethod
     def _resolve_tool_entrypoints(tool_name: str) -> list[str]:
-        explicit: dict[str, list[str]] = {
-            "project.inspect": ["agent_runtime", "web"],
-            "runtime.inspect": ["agent_runtime", "web"],
-            "gateway.inspect": ["agent_runtime", "web"],
-            "browser.status": ["agent_runtime", "web"],
-            "cron.list": ["agent_runtime", "web"],
-            "nodes.list": ["agent_runtime", "web"],
-            "work.merge": ["agent_runtime", "web"],
-            "work.delete": ["agent_runtime", "web"],
-            "work.plan": ["agent_runtime", "web"],
-            "subagents.list": ["agent_runtime", "web"],
-            "subagents.kill": ["agent_runtime", "web"],
-            "subagents.steer": ["agent_runtime", "web"],
-            "mcp.servers.list": ["agent_runtime", "web"],
-            "mcp.tools.list": ["agent_runtime", "web"],
-            "mcp.tools.refresh": ["agent_runtime", "web"],
-            "memory.read": ["agent_runtime", "web"],
-            "memory.search": ["agent_runtime", "web"],
-            "memory.citations": ["agent_runtime", "web"],
-            "memory.recall": ["agent_runtime", "web"],
-            "memory.write": ["agent_runtime", "web"],
-        }
+        """从 ToolRegistry 查询工具的 entrypoints（Feature 084 D1 根治，删除硬编码 explicit 字典）。
+
+        优先从 ToolRegistry 读取工具的 entrypoints 声明（T012/T013 已迁移）。
+        ToolRegistry 未命中时（如 MCP 动态工具），对 mcp.* 返回 web+agent_runtime，
+        其余降级为 agent_runtime。
+        """
+        from octoagent.gateway.harness.tool_registry import get_registry
+        registry = get_registry()
+        # _snapshot_entries() 持有锁安全读副本，过滤出目标工具
+        if tool_name in registry:
+            # 直接遍历快照取第一个匹配（O(n) 但工具数量有限）
+            for entry in registry._snapshot_entries():
+                if entry.name == tool_name:
+                    return sorted(entry.entrypoints)
+        # 降级：mcp.* 动态工具默认 web+agent_runtime；其余默认 agent_runtime
         if tool_name.startswith("mcp."):
             return ["agent_runtime", "web"]
-        return explicit.get(tool_name, ["agent_runtime"])
+        return ["agent_runtime"]
 
     @staticmethod
     def _validate_remote_url(url: str) -> str:

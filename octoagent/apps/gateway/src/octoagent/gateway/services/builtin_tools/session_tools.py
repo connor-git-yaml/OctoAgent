@@ -5,12 +5,25 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import BaseModel
+
 from octoagent.core.models import OwnerProfile
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from octoagent.gateway.harness.tool_registry import ToolEntry
+from octoagent.gateway.harness.tool_registry import register as _registry_register
 
 from ..agent_context import build_ambient_runtime_facts
 from ..execution_context import get_current_execution_context
 from ._deps import ToolDeps
+
+# 各工具 entrypoints 声明（Feature 084 D1 根治）
+_TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
+    "task.inspect":    frozenset({"agent_runtime"}),
+    "runtime.now":     frozenset({"agent_runtime"}),
+    "agents.list":     frozenset({"agent_runtime", "web"}),
+    "sessions.list":   frozenset({"agent_runtime", "web"}),
+    "session.status":  frozenset({"agent_runtime", "web"}),
+}
 
 
 async def register(broker: Any, deps: ToolDeps) -> None:
@@ -188,3 +201,20 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         session_status,
     ):
         await broker.try_register(reflect_tool_schema(handler), handler)
+
+    # 向 ToolRegistry 注册 ToolEntry（Feature 084 T013 — entrypoints 迁移）
+    for _name, _handler, _sel in (
+        ("task.inspect",   task_inspect,   SideEffectLevel.NONE),
+        ("runtime.now",    runtime_now,    SideEffectLevel.NONE),
+        ("agents.list",    agents_list,    SideEffectLevel.NONE),
+        ("sessions.list",  sessions_list,  SideEffectLevel.NONE),
+        ("session.status", session_status, SideEffectLevel.NONE),
+    ):
+        _registry_register(ToolEntry(
+            name=_name,
+            entrypoints=_TOOL_ENTRYPOINTS[_name],
+            toolset="core",
+            handler=_handler,
+            schema=BaseModel,
+            side_effect_level=_sel,
+        ))

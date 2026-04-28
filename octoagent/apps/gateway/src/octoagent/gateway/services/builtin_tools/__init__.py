@@ -1,12 +1,14 @@
-"""builtin_tools 包：内置工具 handler 注册入口。
+"""builtin_tools 包：内置工具 handler 注册入口（Feature 084 T014 — ToolRegistry shim）。
 
 将 capability_pack.py 的 _register_builtin_tools 拆分为 12 个独立模块，
 每模块按 tool_group 组织，统一通过 ToolDeps 注入依赖。
+
+Feature 084 改造：每个工具模块的 register() 函数已同时向 ToolRegistry 注册 ToolEntry，
+register_all() 保持外部 API 不变，作为 ToolRegistry 的填充入口（shim）。
 """
 
 from ._deps import ToolDeps
 from . import (
-    bootstrap_tools,
     browser_tools,
     config_tools,
     delegation_tools,
@@ -23,7 +25,11 @@ from . import (
 
 
 async def register_all(broker, deps: ToolDeps) -> None:
-    """注册所有内置工具。"""
+    """注册所有内置工具。
+
+    每个模块的 register() 调用已同时向全局 ToolRegistry 注册 ToolEntry（Feature 084）。
+    外层 API 不变，原有 broker.try_register 路径保留向后兼容。
+    """
     await runtime_tools.register(broker, deps)
     await session_tools.register(broker, deps)
     await filesystem_tools.register(broker, deps)
@@ -35,5 +41,17 @@ async def register_all(broker, deps: ToolDeps) -> None:
     await supervision_tools.register(broker, deps)
     await mcp_tools.register(broker, deps)
     await config_tools.register(broker, deps)
-    await bootstrap_tools.register(broker, deps)  # Feature 082 P2
     await misc_tools.register(broker, deps)
+
+
+def list_for_entrypoint(entrypoint: str) -> list:
+    """返回指定入口点可见的 ToolEntry 列表（委托 ToolRegistry，Feature 084 D1 根治）。
+
+    Args:
+        entrypoint: 入口点名称，如 "web"、"agent_runtime"、"telegram"。
+
+    Returns:
+        在指定入口点可见的 ToolEntry 列表。
+    """
+    from octoagent.gateway.harness.tool_registry import get_registry
+    return get_registry().list_for_entrypoint(entrypoint)

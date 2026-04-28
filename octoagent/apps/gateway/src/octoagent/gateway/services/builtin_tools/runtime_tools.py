@@ -7,10 +7,24 @@ import platform
 import socket
 from typing import Any
 
+from pydantic import BaseModel
+
 from octoagent.gateway.services.control_plane.automation_store import AutomationStore
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from octoagent.gateway.harness.tool_registry import ToolEntry
+from octoagent.gateway.harness.tool_registry import register as _registry_register
 
 from ._deps import ToolDeps
+
+# 各工具 entrypoints 声明（Feature 084 D1 根治）
+_TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
+    "project.inspect": frozenset({"agent_runtime", "web"}),
+    "artifact.list":   frozenset({"agent_runtime"}),
+    "runtime.inspect": frozenset({"agent_runtime", "web"}),
+    "gateway.inspect": frozenset({"agent_runtime", "web"}),
+    "nodes.list":      frozenset({"agent_runtime", "web"}),
+    "cron.list":       frozenset({"agent_runtime", "web"}),
+}
 
 
 async def register(broker: Any, deps: ToolDeps) -> None:
@@ -178,3 +192,21 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         cron_list,
     ):
         await broker.try_register(reflect_tool_schema(handler), handler)
+
+    # 向 ToolRegistry 注册 ToolEntry（Feature 084 T013 — entrypoints 迁移）
+    for _name, _handler, _sel in (
+        ("project.inspect", project_inspect, SideEffectLevel.NONE),
+        ("artifact.list",   artifact_list,   SideEffectLevel.NONE),
+        ("runtime.inspect", runtime_inspect, SideEffectLevel.NONE),
+        ("gateway.inspect", gateway_inspect, SideEffectLevel.NONE),
+        ("nodes.list",      nodes_list,      SideEffectLevel.NONE),
+        ("cron.list",       cron_list,       SideEffectLevel.NONE),
+    ):
+        _registry_register(ToolEntry(
+            name=_name,
+            entrypoints=_TOOL_ENTRYPOINTS[_name],
+            toolset="ops_tools",
+            handler=_handler,
+            schema=BaseModel,
+            side_effect_level=_sel,
+        ))

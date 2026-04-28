@@ -14,9 +14,30 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import BaseModel
+
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from octoagent.gateway.harness.tool_registry import ToolEntry
+from octoagent.gateway.harness.tool_registry import register as _registry_register
 
 from ._deps import ToolDeps
+
+# 各工具 entrypoints 声明（Feature 084 D1 根治 + Codex F2 收紧）
+#
+# 设计原则：写配置 / 凭证 / 模型连接的工具默认仅 agent_runtime 可见。
+# Web 入口（owner 直接对话）需要 Approval Gate 才能调这些工具——Phase 3 上线
+# ApprovalGate 后再开 web。当前阶段（Phase 1 末）只把只读 inspect 放 web。
+#
+# 例外：setup.review 是审视性操作（不改 yaml / 不写凭证），可以 web 看；
+#      但 setup.quick_connect 会真实写 yaml + 凭证 → 必须经 Approval（Phase 3）
+_TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
+    "config.inspect":         frozenset({"agent_runtime", "web"}),  # 只读
+    "config.add_provider":    frozenset({"agent_runtime"}),          # 写 yaml → web 待 Phase 3 ApprovalGate
+    "config.set_model_alias": frozenset({"agent_runtime"}),          # 写 yaml → web 待 Phase 3
+    "config.sync":            frozenset({"agent_runtime"}),          # 写 yaml + LiteLLM → web 待 Phase 3
+    "setup.review":           frozenset({"agent_runtime", "web"}),   # 只读审视
+    "setup.quick_connect":    frozenset({"agent_runtime"}),          # 写 yaml + 凭证 → web 待 Phase 3
+}
 
 
 def _parse_setup_draft_json(raw: str) -> dict[str, Any]:
@@ -393,3 +414,21 @@ async def register(broker, deps: ToolDeps) -> None:
         setup_quick_connect,
     ):
         await broker.try_register(reflect_tool_schema(handler), handler)
+
+    # 向 ToolRegistry 注册 ToolEntry（Feature 084 T012 — entrypoints 迁移）
+    for _name, _handler, _sel in (
+        ("config.inspect",         config_inspect,         SideEffectLevel.NONE),
+        ("config.add_provider",    config_add_provider,    SideEffectLevel.REVERSIBLE),
+        ("config.set_model_alias", config_set_model_alias, SideEffectLevel.REVERSIBLE),
+        ("config.sync",            config_sync,            SideEffectLevel.REVERSIBLE),
+        ("setup.review",           setup_review,           SideEffectLevel.NONE),
+        ("setup.quick_connect",    setup_quick_connect,    SideEffectLevel.REVERSIBLE),
+    ):
+        _registry_register(ToolEntry(
+            name=_name,
+            entrypoints=_TOOL_ENTRYPOINTS[_name],
+            toolset="ops_tools",
+            handler=_handler,
+            schema=BaseModel,
+            side_effect_level=_sel,
+        ))

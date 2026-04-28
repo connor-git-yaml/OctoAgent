@@ -205,86 +205,11 @@ class TestBootstrapTemplate:
         assert "<!-- COMPLETED -->" in content
 
 
-class TestLegacyCompatibility:
-    """T1.7 Legacy 兼容检测；Feature 082 P1 加严：双证据要求。"""
-
-    def test_legacy_with_modified_identity_only_does_not_complete(self, tmp_path: Path) -> None:
-        """Feature 082 P1：仅 IDENTITY.md 修改不再视为完成。
-
-        历史行为：identity_modified or has_sessions → 完成（误标率高）
-        新行为：identity_modified AND user_md_filled 才完成；
-        仅一个证据命中 → log warning，不回填。
-        """
-        # 手动创建目录结构，不创建 state 文件
-        identity_dir = tmp_path / "behavior" / "agents" / "main"
-        identity_dir.mkdir(parents=True)
-        identity_path = identity_dir / "IDENTITY.md"
-        # 写入自定义内容（不含默认标记）
-        identity_path.write_text("我是 Connor 的私人助理，代号 ATM。", encoding="utf-8")
-
-        state = load_onboarding_state(tmp_path)
-        # P1 加严后：缺 USER.md 实质填充 → 不视为完成
-        assert not state.is_completed()
-
-    def test_legacy_with_data_dir_alone_does_not_complete(self, tmp_path: Path) -> None:
-        """Feature 082 P1：``data/`` 非空指标已删除。
-
-        历史 bug：Gateway 跑过一次后 data/ 永远非空 → legacy detection 永远命中
-        → onboarding_completed_at 被误标 → Bootstrap 引导从未真实跑过。
-        修复：完全移除 has_sessions 指标，仅看 identity + USER.md 双证据。
-        """
-        data_dir = tmp_path / "data"
-        data_dir.mkdir(parents=True)
-        (data_dir / "some_session.db").touch()
-
-        state = load_onboarding_state(tmp_path)
-        # P1 加严后：data/ 非空不再触发完成
-        assert not state.is_completed()
-
-    def test_legacy_with_both_evidences_marks_completed(self, tmp_path: Path) -> None:
-        """Feature 082 P1：双证据齐全（IDENTITY.md 改 + USER.md 已填充）→ 自动标记完成。"""
-        identity_dir = tmp_path / "behavior" / "agents" / "main"
-        identity_dir.mkdir(parents=True)
-        identity_path = identity_dir / "IDENTITY.md"
-        identity_path.write_text("我是 Connor 的私人助理，代号 ATM。", encoding="utf-8")
-
-        # USER.md 已填充（不含占位符）
-        user_md_dir = tmp_path / "behavior" / "system"
-        user_md_dir.mkdir(parents=True)
-        user_md = user_md_dir / "USER.md"
-        user_md.write_text(
-            "## 用户画像\n\n### 基本信息\n- **称呼**: Connor\n- **时区/地点**: Asia/Shanghai\n",
-            encoding="utf-8",
-        )
-
-        state = load_onboarding_state(tmp_path)
-        assert state.is_completed(), "双证据齐全应被识别为 legacy 完成"
-
-    def test_legacy_with_user_md_placeholder_not_completed(self, tmp_path: Path) -> None:
-        """Feature 082 P1：USER.md 仍含占位符 → 不视为已填充。"""
-        identity_dir = tmp_path / "behavior" / "agents" / "main"
-        identity_dir.mkdir(parents=True)
-        identity_path = identity_dir / "IDENTITY.md"
-        identity_path.write_text("我是 Connor 的私人助理，代号 ATM。", encoding="utf-8")
-
-        # USER.md 仍是占位符模板
-        user_md_dir = tmp_path / "behavior" / "system"
-        user_md_dir.mkdir(parents=True)
-        user_md = user_md_dir / "USER.md"
-        user_md.write_text(
-            "## 用户画像\n- **称呼**: （待引导时填写——用户希望被称呼的名字或昵称）\n",
-            encoding="utf-8",
-        )
-
-        state = load_onboarding_state(tmp_path)
-        # 占位符存在 → user_md_is_filled 返回 False → 不视为完成
-        assert not state.is_completed()
-
-    def test_fresh_install_not_legacy(self, tmp_path: Path) -> None:
-        """全新安装（无 state、无 identity、无 USER.md）→ 不自动标记。"""
-        state = load_onboarding_state(tmp_path)
-        assert not state.is_completed()
-
+# F084 T002：删除 TestLegacyCompatibility 类。
+# 历史背景：F082 P1 引入 _detect_legacy_onboarding_completion 做"双证据"检测
+# （IDENTITY.md 改 + USER.md 实质填充 → legacy 完成）。F084 退役该函数后，
+# 整个 legacy 检测概念由 SnapshotStore 接管（Phase 2 实现）—— SnapshotStore 直接
+# 读 USER.md 是 SoT，无需"探测"是否 legacy 完成。
 
 # ============================================================================
 # Phase 2: BehaviorLoadProfile 差异化加载

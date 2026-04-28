@@ -5,9 +5,19 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import BaseModel
+
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from octoagent.gateway.harness.tool_registry import ToolEntry
+from octoagent.gateway.harness.tool_registry import register as _registry_register
 
 from ._deps import ToolDeps, truncate_text
+
+# 各工具 entrypoints 声明（Feature 084 D1 根治）
+_TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
+    "web.fetch":  frozenset({"agent_runtime"}),
+    "web.search": frozenset({"agent_runtime"}),
+}
 
 
 async def register(broker: Any, deps: ToolDeps) -> None:
@@ -78,3 +88,17 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         web_search,
     ):
         await broker.try_register(reflect_tool_schema(handler), handler)
+
+    # 向 ToolRegistry 注册 ToolEntry（Feature 084 T013 — entrypoints 迁移）
+    for _name, _handler, _sel in (
+        ("web.fetch",  web_fetch,  SideEffectLevel.NONE),
+        ("web.search", web_search, SideEffectLevel.NONE),
+    ):
+        _registry_register(ToolEntry(
+            name=_name,
+            entrypoints=_TOOL_ENTRYPOINTS[_name],
+            toolset="agent_only",
+            handler=_handler,
+            schema=BaseModel,
+            side_effect_level=_sel,
+        ))

@@ -14,7 +14,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import BaseModel
+
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from octoagent.gateway.harness.tool_registry import ToolEntry
+from octoagent.gateway.harness.tool_registry import register as _registry_register
 
 from ._deps import (
     ToolDeps,
@@ -26,6 +30,18 @@ from ._deps import (
     resolve_child_work,
     WORK_TERMINAL_VALUES,
 )
+
+# 各工具 entrypoints 声明（Feature 084 D1 根治 + Codex F2 收紧）
+# 设计原则：终止/控制/合并/删除 sub-agent 是不可逆动作，web 暴露需要 ApprovalGate（Phase 3）。
+# 当前阶段（Phase 1 末）只把只读 inspect 放 web。
+_TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
+    "work.inspect":    frozenset({"agent_runtime", "web"}),  # 只读
+    "subagents.spawn": frozenset({"agent_runtime"}),         # 派发 → web 待 Phase 3 ApprovalGate
+    "subagents.kill":  frozenset({"agent_runtime"}),         # 不可逆终止 → web 待 Phase 3
+    "subagents.steer": frozenset({"agent_runtime"}),         # 控制 → web 待 Phase 3
+    "work.merge":      frozenset({"agent_runtime"}),         # 合并 → web 待 Phase 3
+    "work.delete":     frozenset({"agent_runtime"}),         # 不可逆删除 → web 待 Phase 3
+}
 
 
 async def register(broker, deps: ToolDeps) -> None:
@@ -286,3 +302,21 @@ async def register(broker, deps: ToolDeps) -> None:
         work_delete,
     ):
         await broker.try_register(reflect_tool_schema(handler), handler)
+
+    # 向 ToolRegistry 注册 ToolEntry（Feature 084 T012 — entrypoints 迁移）
+    for _name, _handler, _sel in (
+        ("work.inspect",    work_inspect,    SideEffectLevel.NONE),
+        ("subagents.spawn", subagents_spawn, SideEffectLevel.REVERSIBLE),
+        ("subagents.kill",  subagents_kill,  SideEffectLevel.REVERSIBLE),
+        ("subagents.steer", subagents_steer, SideEffectLevel.REVERSIBLE),
+        ("work.merge",      work_merge,      SideEffectLevel.REVERSIBLE),
+        ("work.delete",     work_delete,     SideEffectLevel.REVERSIBLE),
+    ):
+        _registry_register(ToolEntry(
+            name=_name,
+            entrypoints=_TOOL_ENTRYPOINTS[_name],
+            toolset="agent_only",
+            handler=_handler,
+            schema=BaseModel,
+            side_effect_level=_sel,
+        ))

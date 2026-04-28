@@ -31,7 +31,11 @@ from octoagent.memory import (
 from octoagent.gateway.services.memory.memory_retrieval_profile import (
     apply_retrieval_profile_to_hook_options,
 )
+from pydantic import BaseModel
+
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from octoagent.gateway.harness.tool_registry import ToolEntry
+from octoagent.gateway.harness.tool_registry import register as _registry_register
 
 from ..execution_context import get_current_execution_context
 from ._deps import (
@@ -42,6 +46,16 @@ from ._deps import (
 )
 
 _log = structlog.get_logger()
+
+# 各工具 entrypoints 声明（Feature 084 D1 根治）
+_TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
+    "memory.read":      frozenset({"agent_runtime", "web"}),
+    "memory.browse":    frozenset({"agent_runtime", "web"}),
+    "memory.search":    frozenset({"agent_runtime", "web"}),
+    "memory.citations": frozenset({"agent_runtime", "web"}),
+    "memory.recall":    frozenset({"agent_runtime", "web"}),
+    "memory.write":     frozenset({"agent_runtime", "web"}),
+}
 
 _VALID_PARTITIONS = {"core", "profile", "work", "health", "finance", "chat"}
 
@@ -523,3 +537,21 @@ async def register(broker, deps: ToolDeps) -> None:
         memory_write,
     ):
         await broker.try_register(reflect_tool_schema(handler), handler)
+
+    # 向 ToolRegistry 注册 ToolEntry（Feature 084 T013 — entrypoints 迁移）
+    for _name, _handler, _sel in (
+        ("memory.read",      memory_read,      SideEffectLevel.NONE),
+        ("memory.browse",    memory_browse,    SideEffectLevel.NONE),
+        ("memory.search",    memory_search,    SideEffectLevel.NONE),
+        ("memory.citations", memory_citations, SideEffectLevel.NONE),
+        ("memory.recall",    memory_recall,    SideEffectLevel.NONE),
+        ("memory.write",     memory_write,     SideEffectLevel.REVERSIBLE),
+    ):
+        _registry_register(ToolEntry(
+            name=_name,
+            entrypoints=_TOOL_ENTRYPOINTS[_name],
+            toolset="core",
+            handler=_handler,
+            schema=BaseModel,
+            side_effect_level=_sel,
+        ))

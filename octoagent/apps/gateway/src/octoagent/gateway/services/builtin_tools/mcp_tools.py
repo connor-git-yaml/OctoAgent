@@ -14,9 +14,25 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from pydantic import BaseModel
+
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from octoagent.gateway.harness.tool_registry import ToolEntry
+from octoagent.gateway.harness.tool_registry import register as _registry_register
 
 from ._deps import ToolDeps
+
+# 各工具 entrypoints 声明（Feature 084 D1 根治 + Codex F2 收紧）
+# 设计原则：MCP 安装/卸载是不可逆 + 涉及外部包 → web 暴露需要 ApprovalGate（Phase 3）。
+# tools.refresh 是重新加载（无副作用） → 可以 web。
+_TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
+    "mcp.servers.list":   frozenset({"agent_runtime", "web"}),  # 只读
+    "mcp.tools.list":     frozenset({"agent_runtime", "web"}),  # 只读
+    "mcp.tools.refresh":  frozenset({"agent_runtime", "web"}),  # 重载
+    "mcp.install":        frozenset({"agent_runtime"}),          # 安装外部包 → web 待 Phase 3 ApprovalGate
+    "mcp.install_status": frozenset({"agent_runtime", "web"}),  # 只读状态
+    "mcp.uninstall":      frozenset({"agent_runtime"}),          # 不可逆卸载 → web 待 Phase 3
+}
 
 
 async def register(broker, deps: ToolDeps) -> None:
@@ -361,3 +377,21 @@ async def register(broker, deps: ToolDeps) -> None:
         mcp_uninstall,
     ):
         await broker.try_register(reflect_tool_schema(handler), handler)
+
+    # 向 ToolRegistry 注册 ToolEntry（Feature 084 T013 — entrypoints 迁移）
+    for _name, _handler, _sel in (
+        ("mcp.servers.list",   mcp_servers_list,   SideEffectLevel.NONE),
+        ("mcp.tools.list",     mcp_tools_list,     SideEffectLevel.NONE),
+        ("mcp.tools.refresh",  mcp_tools_refresh,  SideEffectLevel.NONE),
+        ("mcp.install",        mcp_install,        SideEffectLevel.REVERSIBLE),
+        ("mcp.install_status", mcp_install_status, SideEffectLevel.NONE),
+        ("mcp.uninstall",      mcp_uninstall,      SideEffectLevel.REVERSIBLE),
+    ):
+        _registry_register(ToolEntry(
+            name=_name,
+            entrypoints=_TOOL_ENTRYPOINTS[_name],
+            toolset="ops_tools",
+            handler=_handler,
+            schema=BaseModel,
+            side_effect_level=_sel,
+        ))

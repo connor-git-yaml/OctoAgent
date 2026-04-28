@@ -9,7 +9,7 @@
 
 ## 前置 CLEANUP（Phase 1 开始前，串行执行）
 
-### T001 抽离 orchestrator.py 的 system prompt 构造逻辑 [重构 / 2h]
+### T001 [x] 抽离 orchestrator.py 的 system prompt 构造逻辑 [重构 / 2h]
 **依赖**: 无  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/orchestrator.py`  
 **验收**:
@@ -18,7 +18,7 @@
 - 原有行为不变，`pytest tests/` 全量通过
 - 函数有完整类型注解和 docstring
 
-### T002 清理 behavior_workspace.py 遗留检测方法 [删除 / 1h]
+### T002 [x] 清理 behavior_workspace.py 遗留检测方法 [删除 / 1h]
 **依赖**: 无  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/behavior_workspace.py`  
 **验收**:
@@ -33,7 +33,7 @@
 
 **目标**: ToolRegistry + ThreatScanner 上线，bootstrap.complete 退役，web 入口工具可见性修通（D1 断层根治）
 
-### T003 [P] 创建 harness/ 包目录结构 [实现 / 30min]
+### T003 [x] [P] 创建 harness/ 包目录结构 [实现 / 30min]
 **依赖**: T001, T002  
 **目标文件**:
 - `apps/gateway/src/octoagent/gateway/harness/__init__.py`
@@ -44,7 +44,7 @@
 - `from octoagent.gateway.harness import *` 无 ImportError
 - `from octoagent.gateway.tools import *` 无 ImportError
 
-### T004 [P] 实现 ToolEntry 数据模型 [实现 / 1h]
+### T004 [x] [P] 实现 ToolEntry 数据模型 [实现 / 1h]
 **依赖**: T003  
 **目标文件**: `apps/gateway/src/octoagent/gateway/harness/tool_registry.py`  
 **验收**:
@@ -53,7 +53,7 @@
 - `model_config = {"arbitrary_types_allowed": True}` 已设置
 - 单元测试 `test_tool_entry_creation` 通过
 
-### T005 [P] 实现 ToolRegistry 核心逻辑 [实现 / 2h]
+### T005 [x] [P] 实现 ToolRegistry 核心逻辑 [实现 / 2h]
 **依赖**: T004  
 **目标文件**: `apps/gateway/src/octoagent/gateway/harness/tool_registry.py`  
 **验收**:
@@ -62,7 +62,7 @@
 - `list_for_entrypoint("web")` 只返回 `"web"` 在 entrypoints 集合中的工具
 - `dispatch()` 对不存在工具抛出 `ToolNotFoundError`
 
-### T006 [P] 实现 AST 扫描 + 自动注册函数 [实现 / 2h]
+### T006 [x] [P] 实现 AST 扫描 + 自动注册函数 [实现 / 2h]
 **依赖**: T005  
 **目标文件**: `apps/gateway/src/octoagent/gateway/harness/tool_registry.py`  
 **验收**:
@@ -71,7 +71,7 @@
 - 扫描耗时有计时日志，超 200ms 写 WARN 日志
 - 单元测试：mock 3 个假工具模块，`scan_and_register` 注册数量正确
 
-### T007 [P] 实现 ToolsetResolver + toolsets.yaml [实现 / 1.5h]
+### T007 [x] [P] 实现 ToolsetResolver + toolsets.yaml [实现 / 1.5h]
 **依赖**: T005  
 **目标文件**:
 - `apps/gateway/src/octoagent/gateway/harness/toolset_resolver.py`
@@ -83,7 +83,7 @@
 - `toolsets.yaml` 包含 core、agent_only、telegram 三个 toolset 定义
 - core toolset 包含 `user_profile.update`、`user_profile.read`、`user_profile.observe`、`delegate_task`，entrypoints 含 web
 
-### T008 [P] 实现 ThreatScanner — pattern table [实现 / 2h]
+### T008 [x] [P] 实现 ThreatScanner — pattern table [实现 / 2h]
 **依赖**: T003  
 **目标文件**: `apps/gateway/src/octoagent/gateway/harness/threat_scanner.py`  
 **验收**:
@@ -91,7 +91,7 @@
 - `_MEMORY_THREAT_PATTERNS` 列表含 ≥ 15 条 pattern，覆盖：prompt injection (PI-001~005)、role hijacking (RH-001~003)、exfiltration via curl/wget (EX-001~002)、SSH backdoor (EX-003)、base64 payload (B64-001~002)、system override (SO-001~002)
 - 每条 pattern 使用词边界 `\b` 或上下文锚点减少 false positive
 
-### T009 [P] 实现 ThreatScanner — invisible unicode + scan 函数 [实现 / 1.5h]
+### T009 [x] [P] 实现 ThreatScanner — invisible unicode + scan 函数 [实现 / 1.5h]
 **依赖**: T008  
 **目标文件**: `apps/gateway/src/octoagent/gateway/harness/threat_scanner.py`  
 **验收**:
@@ -100,7 +100,7 @@
 - `scan(content: str) -> ThreatScanResult` 函数：先遍历 invisible chars（O(n)），再匹配 pattern table；全部未命中时返回 `blocked=False`
 - BLOCK 级 pattern 命中时立即返回，不继续扫描
 
-### T010 [P] grep 扫描 bootstrap.complete 引用 [实现 / 30min]
+### T010 [x] [P] grep 扫描 bootstrap.complete 引用 [实现 / 30min]
 **依赖**: T001, T002  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/builtin_tools/bootstrap_tools.py`（只读分析）  
 **验收**:
@@ -108,7 +108,7 @@
 - 结果写入 plan.md 的"删除影响矩阵"注释（或以注释形式附在本任务）
 - 确认引用数量和文件路径，为 T011 做准备
 
-### T011 删除 bootstrap.complete 工具 handler [删除 / 1h]
+### T011 [x] 删除 bootstrap.complete 工具 handler [删除 / 1h]
 **依赖**: T010  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/builtin_tools/bootstrap_tools.py`  
 **验收**:
@@ -117,7 +117,7 @@
 - `grep -r "bootstrap.complete" --include="*.py" .` 结果为零
 - `pytest tests/` 全量通过（相关测试已同步删除或更新）
 
-### T012 [P] 现有工具 entrypoints 迁移 — 前 20 个工具 [重构 / 2h]
+### T012 [x] [P] 现有工具 entrypoints 迁移 — 前 20 个工具 [重构 / 2h]
 **依赖**: T005  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/builtin_tools/` 下各工具文件  
 **验收**:
@@ -126,7 +126,7 @@
 - 添加顶层 `registry.register(ToolEntry(...))` 调用（为 AST 扫描预备）
 - 每个工具的 `entrypoints` 声明语义准确（仅 agent_runtime 的工具不加 web）
 
-### T013 [P] 现有工具 entrypoints 迁移 — 剩余工具 [重构 / 2h]
+### T013 [x] [P] 现有工具 entrypoints 迁移 — 剩余工具 [重构 / 2h]
 **依赖**: T005  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/builtin_tools/` 下各工具文件  
 **验收**:
@@ -134,7 +134,7 @@
 - 全量工具迁移完成，无遗漏
 - `pytest tests/` 全量通过
 
-### T014 builtin_tools/__init__.py 改写为 ToolRegistry shim [重构 / 2h]
+### T014 [x] builtin_tools/__init__.py 改写为 ToolRegistry shim [重构 / 2h]
 **依赖**: T006, T012, T013  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/builtin_tools/__init__.py`  
 **验收**:
@@ -143,7 +143,7 @@
 - 删除硬编码 explicit 工具字典（D1 根因）
 - `pytest tests/` 全量通过
 
-### T015 [P] 单元测试：ToolRegistry entrypoints 过滤 [测试 / 1.5h]
+### T015 [x] [P] 单元测试：ToolRegistry entrypoints 过滤 [测试 / 1.5h]
 **依赖**: T005, T007  
 **目标文件**: `apps/gateway/tests/harness/test_tool_registry.py`  
 **验收**:
