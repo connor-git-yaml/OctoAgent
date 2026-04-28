@@ -716,7 +716,7 @@
 
 **目标**: F082 遗留代码完全清除，架构文档同步，验收场景 4（重装路径）通过
 
-### T063 grep 全量依赖扫描 — Phase 4 退役前置检查 [实现 / 30min]
+### T063 [x] grep 全量依赖扫描 — Phase 4 退役前置检查 [实现 / 30min]
 **依赖**: T062  
 **目标文件**: 无新文件（执行 grep 验证）  
 **验收**:
@@ -729,7 +729,7 @@
   - `grep -r "bootstrap_orchestrator" --include="*.py" .`
 - 所有引用数量 > 0 的文件列表记录，作为 T064-T067 的输入
 
-### T064 删除 bootstrap_tools.py 整体文件 [删除 / 1h]
+### T064 [x] 删除 bootstrap_tools.py 整体文件 [删除 / 1h]
 **依赖**: T063  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/builtin_tools/bootstrap_tools.py`  
 **验收**:
@@ -738,7 +738,7 @@
 - 相关测试同步删除或迁移
 - `pytest tests/` 全量通过
 
-### T065 删除 user_md_renderer.py + 迁移调用方 [删除 / 1.5h]
+### T065 [x] 删除 user_md_renderer.py + 迁移调用方 [删除 / 1.5h]
 **依赖**: T064  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/user_md_renderer.py`  
 **验收**:
@@ -747,7 +747,7 @@
 - `grep -r "UserMdRenderer" --include="*.py" .` 结果为零
 - `pytest tests/` 全量通过
 
-### T066 删除 bootstrap_integrity.py + 迁移调用方 [删除 / 1h]
+### T066 [x] 删除 bootstrap_integrity.py + 迁移调用方 [删除 / 1h]
 **依赖**: T065  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/bootstrap_integrity.py`  
 **验收**:
@@ -756,7 +756,7 @@
 - `grep -r "BootstrapIntegrityChecker" --include="*.py" .` 结果为零
 - `pytest tests/` 全量通过
 
-### T067 删除 bootstrap_orchestrator.py + provider/bootstrap_commands.py [删除 / 2h]
+### T067 [x] 删除 bootstrap_orchestrator.py + provider/bootstrap_commands.py [删除 / 2h]
 **依赖**: T066  
 **目标文件**:
 - `apps/gateway/src/octoagent/gateway/services/bootstrap_orchestrator.py`
@@ -769,7 +769,7 @@
 - F082 遗留测试（约 50 个）逐一评估：可迁移的改写到新路径，不可迁移的删除
 - `pytest tests/` 全量通过
 
-### T068 SQLite DROP BootstrapSession migration + capability_pack 最终清理 [删除 / 1h]
+### T068 [x] SQLite DROP BootstrapSession migration + capability_pack 最终清理 [删除 / 1h]
 **依赖**: T067  
 **目标文件**: `packages/core/src/octoagent/core/store/sqlite_init.py`  
 **验收**:

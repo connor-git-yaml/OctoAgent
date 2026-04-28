@@ -782,10 +782,13 @@ export interface OwnerProfileDocument extends ControlPlaneDocumentBase {
 export interface BootstrapSessionDocument extends ControlPlaneDocumentBase {
   resource_type: "bootstrap_session";
   resource_id: "bootstrap:current";
-  active_project_id: string;
+  // F084 Phase 4 T067：bootstrap_session 状态机已退役，后端只返回 base ControlPlaneDocument
+  // 字段（resource_type / resource_id / warnings 等）。下列字段改为 optional 兼容旧测试 fixture，
+  // 但生产代码不应再依赖（bootstrap 完成状态由 USER.md 实质填充判断替代）。
+  active_project_id?: string;
   active_workspace_id?: string;
-  session: Record<string, unknown>;
-  resumable: boolean;
+  session?: Record<string, unknown>;
+  resumable?: boolean;
 }
 
 export interface ContextSessionItem {

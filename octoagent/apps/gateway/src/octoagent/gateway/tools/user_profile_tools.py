@@ -1,6 +1,6 @@
 """user_profile_tools：USER.md 写入流（T026-T029）。
 
-Feature 084 Phase 2 —— D4 命名清晰路径（替代旧的 bootstrap.complete）。
+Feature 084 Phase 2 —— D4 命名清晰路径（替代旧版 bootstrap 状态机）。
 
 工具列表：
 - user_profile.update：add / replace / remove 三种操作

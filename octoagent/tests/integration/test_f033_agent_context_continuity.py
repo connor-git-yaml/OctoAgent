@@ -10,8 +10,6 @@ import pytest
 from octoagent.core.models import (
     AgentProfile,
     AgentProfileScope,
-    BootstrapSession,
-    BootstrapSessionStatus,
     OwnerOverlayScope,
     OwnerProfile,
     OwnerProfileOverlay,
@@ -69,7 +67,6 @@ async def _seed_project(
     workspace_id = f"workspace-{slug}"
     agent_profile_id = f"agent-profile-{slug}"
     owner_overlay_id = f"owner-overlay-{slug}"
-    bootstrap_id = f"bootstrap-{slug}"
     project = Project(
         project_id=project_id,
         slug=slug,
@@ -125,18 +122,6 @@ async def _seed_project(
             scope=OwnerOverlayScope.PROJECT,
             project_id=project_id,
             assistant_identity_overrides={"assistant_name": assistant_name},
-        )
-    )
-    await store_group.agent_context_store.save_bootstrap_session(
-        BootstrapSession(
-            bootstrap_id=bootstrap_id,
-            project_id=project_id,
-            owner_profile_id="owner-profile-default",
-            owner_overlay_id=owner_overlay_id,
-            agent_profile_id=agent_profile_id,
-            status=BootstrapSessionStatus.COMPLETED,
-            current_step="done",
-            answers={"assistant_identity": assistant_name},
         )
     )
     await store_group.agent_context_store.save_session_context(

@@ -16,7 +16,6 @@ from rich.console import RenderableType
 from .auth_commands import auth
 from .backup_commands import backup, export, restore
 from .behavior_commands import behavior_group
-from .bootstrap_commands import bootstrap_group  # Feature 082 P4
 from .chat_import_commands import import_cmd
 from .cleanup_commands import cleanup_group  # Feature 082 P4
 from .config_commands import _resolve_project_root, config
@@ -95,7 +94,6 @@ main.add_command(restart)
 main.add_command(verify)
 main.add_command(project_group)
 main.add_command(secrets_group)
-main.add_command(bootstrap_group)  # Feature 082 P4
 main.add_command(cleanup_group)  # Feature 082 P4
 
 

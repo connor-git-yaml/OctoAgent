@@ -18,7 +18,6 @@ from ..models.agent_context import (
     AgentSessionStatus,
     AgentSessionTurn,
     AgentSessionTurnKind,
-    BootstrapSession,
     ContextFrame,
     MemoryNamespace,
     MemoryNamespaceKind,
@@ -388,55 +387,6 @@ class SqliteAgentContextStore:
                 (),
             )
         return [self._row_to_owner_overlay(row) for row in rows]
-
-    async def save_bootstrap_session(self, session: BootstrapSession) -> BootstrapSession:
-        await self._conn.execute(
-            """
-            INSERT INTO bootstrap_sessions (
-                bootstrap_id, project_id, owner_profile_id,
-                owner_overlay_id, agent_profile_id, status, current_step, steps,
-                answers, generated_profile_ids, generated_owner_revision,
-                blocking_reason, surface, metadata, created_at, updated_at, completed_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(bootstrap_id) DO UPDATE SET
-                project_id = excluded.project_id,
-                owner_profile_id = excluded.owner_profile_id,
-                owner_overlay_id = excluded.owner_overlay_id,
-                agent_profile_id = excluded.agent_profile_id,
-                status = excluded.status,
-                current_step = excluded.current_step,
-                steps = excluded.steps,
-                answers = excluded.answers,
-                generated_profile_ids = excluded.generated_profile_ids,
-                generated_owner_revision = excluded.generated_owner_revision,
-                blocking_reason = excluded.blocking_reason,
-                surface = excluded.surface,
-                metadata = excluded.metadata,
-                updated_at = excluded.updated_at,
-                completed_at = excluded.completed_at
-            """,
-            (
-                session.bootstrap_id,
-                session.project_id,
-                session.owner_profile_id,
-                session.owner_overlay_id,
-                session.agent_profile_id,
-                session.status.value,
-                session.current_step,
-                self._dump(session.steps),
-                self._dump(session.answers),
-                self._dump(session.generated_profile_ids),
-                session.generated_owner_revision,
-                session.blocking_reason,
-                session.surface,
-                self._dump(session.metadata),
-                session.created_at.isoformat(),
-                session.updated_at.isoformat(),
-                session.completed_at.isoformat() if session.completed_at else None,
-            ),
-        )
-        return session
 
     async def save_agent_runtime(self, runtime: AgentRuntime) -> AgentRuntime:
         await self._conn.execute(
@@ -942,53 +892,6 @@ class SqliteAgentContextStore:
         )
         return [self._row_to_memory_namespace(row) for row in rows]
 
-    async def get_bootstrap_session(self, bootstrap_id: str) -> BootstrapSession | None:
-        row = await self._fetchone(
-            "SELECT * FROM bootstrap_sessions WHERE bootstrap_id = ?",
-            (bootstrap_id,),
-        )
-        return self._row_to_bootstrap_session(row) if row is not None else None
-
-    async def get_latest_bootstrap_session(
-        self,
-        *,
-        project_id: str,
-    ) -> BootstrapSession | None:
-        if project_id:
-            row = await self._fetchone(
-                """
-                SELECT * FROM bootstrap_sessions
-                WHERE project_id = ?
-                ORDER BY updated_at DESC
-                LIMIT 1
-                """,
-                (project_id,),
-            )
-            if row is not None:
-                return self._row_to_bootstrap_session(row)
-        return None
-
-    async def list_bootstrap_sessions(
-        self,
-        *,
-        project_id: str | None = None,
-    ) -> list[BootstrapSession]:
-        if project_id:
-            rows = await self._fetchall(
-                """
-                SELECT * FROM bootstrap_sessions
-                WHERE project_id = ?
-                ORDER BY updated_at DESC
-                """,
-                (project_id,),
-            )
-        else:
-            rows = await self._fetchall(
-                "SELECT * FROM bootstrap_sessions ORDER BY updated_at DESC",
-                (),
-            )
-        return [self._row_to_bootstrap_session(row) for row in rows]
-
     async def save_session_context(self, state: SessionContextState) -> SessionContextState:
         await self._conn.execute(
             """
@@ -1481,32 +1384,6 @@ class SqliteAgentContextStore:
             version=row["version"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
-        )
-
-    @classmethod
-    def _row_to_bootstrap_session(cls, row: aiosqlite.Row) -> BootstrapSession:
-        return BootstrapSession(
-            bootstrap_id=row["bootstrap_id"],
-            project_id=row["project_id"],
-            owner_profile_id=row["owner_profile_id"],
-            owner_overlay_id=row["owner_overlay_id"],
-            agent_profile_id=row["agent_profile_id"],
-            status=row["status"],
-            current_step=row["current_step"],
-            steps=cls._load(row["steps"], []),
-            answers=cls._load(row["answers"], {}),
-            generated_profile_ids=cls._load(row["generated_profile_ids"], []),
-            generated_owner_revision=row["generated_owner_revision"],
-            blocking_reason=row["blocking_reason"],
-            surface=row["surface"],
-            metadata=cls._load(row["metadata"], {}),
-            created_at=datetime.fromisoformat(row["created_at"]),
-            updated_at=datetime.fromisoformat(row["updated_at"]),
-            completed_at=(
-                datetime.fromisoformat(row["completed_at"])
-                if row["completed_at"]
-                else None
-            ),
         )
 
     @classmethod

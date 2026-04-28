@@ -22,8 +22,6 @@ from octoagent.core.models import (
     AgentSessionStatus,
     AgentSessionTurn,
     AgentSessionTurnKind,
-    BootstrapSession,
-    BootstrapSessionStatus,
     ContextFrame,
     DelegationTargetKind,
     DynamicToolSelection,
@@ -373,38 +371,7 @@ async def _seed_context_resources(app) -> None:
             assistant_identity_overrides={"assistant_name": "Default Agent"},
         )
     )
-    await store_group.agent_context_store.save_bootstrap_session(
-        BootstrapSession(
-            bootstrap_id="bootstrap-default",
-            project_id=project.project_id,
-
-            owner_profile_id="owner-profile-default",
-            owner_overlay_id="owner-overlay-default",
-            agent_profile_id="agent-profile-default",
-            status=BootstrapSessionStatus.COMPLETED,
-            current_step="done",
-            answers={"assistant_identity": "Default Agent"},
-            metadata={
-                "questionnaire": {
-                    "owner_identity": {
-                        "route": "memory",
-                        "target": "OwnerProfile + Memory",
-                        "summary": "用户怎么称呼自己、长期个人事实。",
-                    },
-                    "assistant_identity": {
-                        "route": "behavior",
-                        "target": "IDENTITY.md",
-                        "summary": "默认会话 Agent 的身份与名称。",
-                    },
-                    "secret_routing": {
-                        "route": "secrets",
-                        "target": "projects/default-project/project.secret-bindings.json",
-                        "summary": "敏感值进入 project secret bindings。",
-                    },
-                }
-            },
-        )
-    )
+    # F084 Phase 4 T067：bootstrap_session 状态机已退役，不再 seed bootstrap_session 记录。
     await store_group.agent_context_store.save_agent_runtime(runtime)
     await store_group.agent_context_store.save_agent_session(agent_session)
     await store_group.agent_context_store.save_memory_namespace(project_namespace)
@@ -718,15 +685,8 @@ class TestControlPlaneApi:
         assert payload["resources"]["owner_profile"]["profile"]["owner_profile_id"] == (
             "owner-profile-default"
         )
-        assert payload["resources"]["bootstrap_session"]["session"]["bootstrap_id"] == (
-            "bootstrap-default"
-        )
-        assert (
-            payload["resources"]["bootstrap_session"]["session"]["metadata"]["questionnaire"][
-                "secret_routing"
-            ]["route"]
-            == "secrets"
-        )
+        # F084 Phase 4 T067：bootstrap_session 状态机已退役，资源返回空文档，仅验证 key 存在。
+        assert "bootstrap_session" in payload["resources"]
         assert payload["resources"]["context_continuity"]["frames"][0]["context_frame_id"] == (
             "context-frame-default"
         )

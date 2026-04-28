@@ -28,8 +28,6 @@ from octoagent.core.models import (
     AgentSessionKind,
     AgentSessionTurn,
     AgentSessionTurnKind,
-    BootstrapSession,
-    BootstrapSessionStatus,
     ContextFrame,
     ContextRequestKind,
     ContextResolveRequest,
@@ -138,7 +136,8 @@ class SystemPromptContext:
     agent_profile: AgentProfile
     owner_profile: OwnerProfile
     owner_overlay: OwnerProfileOverlay | None
-    bootstrap: BootstrapSession
+    # F084 Phase 4 T067：bootstrap_completed 替代已退役的 bootstrap_session 状态字段
+    bootstrap_completed: bool
     recent_summary: str
     session_replay: SessionReplayProjection | None
     memory_hits: list[MemoryRecallHit]
@@ -503,7 +502,8 @@ class ResolvedContextBundle:
     agent_profile: AgentProfile
     owner_profile: OwnerProfile
     owner_overlay: OwnerProfileOverlay | None
-    bootstrap: BootstrapSession
+    # F084 Phase 4 T067：bootstrap_completed 替代已退役的 bootstrap_session
+    bootstrap_completed: bool
     agent_runtime: AgentRuntime
     agent_session: AgentSession
     session_state: SessionContextState
@@ -626,7 +626,7 @@ class AgentContextService:
         agent_profile = bundle.agent_profile
         owner_profile = bundle.owner_profile
         owner_overlay = bundle.owner_overlay
-        bootstrap = bundle.bootstrap
+        bootstrap_completed = bundle.bootstrap_completed
         agent_runtime = bundle.agent_runtime
         agent_session = bundle.agent_session
         session_state = bundle.session_state
@@ -654,7 +654,7 @@ class AgentContextService:
             agent_profile=agent_profile,
             owner_profile=owner_profile,
             owner_overlay=owner_overlay,
-            bootstrap=bootstrap,
+            bootstrap_completed=bootstrap_completed,
             recent_summary=recent_summary,
             session_replay=session_replay,
             memory_hits=memory_hits,
@@ -735,7 +735,7 @@ class AgentContextService:
             agent_profile=agent_profile,
             owner_profile=owner_profile,
             owner_overlay=owner_overlay,
-            bootstrap=bootstrap,
+            bootstrap_completed=bootstrap_completed,
             session_state=session_state,
             memory_hits=memory_hits,
             runtime_context=runtime_context,
@@ -834,7 +834,7 @@ class AgentContextService:
             owner_profile_id=owner_profile.owner_profile_id,
             owner_overlay_id=owner_overlay.owner_overlay_id if owner_overlay is not None else "",
             owner_profile_revision=owner_profile.version,
-            bootstrap_session_id=bootstrap.bootstrap_id,
+            bootstrap_session_id="",
             recall_frame_id=recall_frame_id,
             system_blocks=system_blocks,
             recent_summary=recent_summary,
@@ -907,7 +907,7 @@ class AgentContextService:
                         owner_overlay.owner_overlay_id if owner_overlay is not None else None
                     ),
                     owner_profile_revision=owner_profile.version,
-                    bootstrap_session_id=bootstrap.bootstrap_id,
+                    bootstrap_session_id="",
                     recall_frame_id=recall_frame.recall_frame_id,
                     system_blocks=system_blocks,
                     recent_summary=recent_summary,
@@ -1100,12 +1100,20 @@ class AgentContextService:
             owner_profile=owner_profile,
             project=project,
         )
-        bootstrap = await self._ensure_bootstrap_session(
-            project=project,
-            owner_profile=owner_profile,
-            owner_overlay=owner_overlay,
-            agent_profile=agent_profile,
-            surface=request.surface,
+        # F084 Phase 4 T067：bootstrap_session 状态机已退役。
+        # F35 修复（Codex independent review high）：owner_profile.bootstrap_completed
+        # 字段在 owner_profiles 表 DDL 中未持久化，sync_owner_profile_from_user_md
+        # 也只返回 dict 不写库——直接读会永远 False，导致用户填好 USER.md 后仍被判为
+        # "未完成 bootstrap"，每次会话反复要求初始化。
+        # 按 spec 用户决策 1（USER.md 是 SoT，OwnerProfile 是派生只读视图），
+        # bootstrap 完成状态直接从 USER.md 实质填充判断（_user_md_substantively_filled）+
+        # .onboarding-state.json 完成 marker，不依赖 owner_profile 字段。
+        from octoagent.core.models.agent_context import _user_md_substantively_filled
+
+        _user_md_path = self._project_root / "behavior" / "system" / "USER.md"
+        bootstrap_completed: bool = (
+            _user_md_substantively_filled(_user_md_path)
+            or load_onboarding_state(self._project_root).is_completed()
         )
         session_state = await self._ensure_session_context(
             task=task,
@@ -1161,7 +1169,7 @@ class AgentContextService:
             recall_plan=recall_plan,
         )
         degraded_reasons.extend(memory_reasons)
-        if bootstrap.status is BootstrapSessionStatus.PENDING:
+        if not bootstrap_completed:
             degraded_reasons.append("bootstrap_pending")
         return ResolvedContextBundle(
             request=request,
@@ -1169,7 +1177,7 @@ class AgentContextService:
             agent_profile=agent_profile,
             owner_profile=owner_profile,
             owner_overlay=owner_overlay,
-            bootstrap=bootstrap,
+            bootstrap_completed=bootstrap_completed,
             agent_runtime=agent_runtime,
             agent_session=agent_session,
             session_state=session_state.model_copy(
@@ -2896,163 +2904,6 @@ class AgentContextService:
         await self._stores.agent_context_store.save_owner_overlay(overlay)
         return overlay
 
-    async def _ensure_bootstrap_session(
-        self,
-        *,
-        project: Project | None,
-        owner_profile: OwnerProfile,
-        owner_overlay: OwnerProfileOverlay | None,
-        agent_profile: AgentProfile,
-        surface: str,
-    ) -> BootstrapSession:
-        project_id = project.project_id if project is not None else ""
-        bootstrap_steps = [
-            "owner_identity",
-            "assistant_identity",
-            "assistant_personality",
-            "locale_and_location",
-            "memory_preferences",
-            "secret_routing",
-        ]
-        bootstrap_template_ids = list(
-            dict.fromkeys(
-                [
-                    *agent_profile.bootstrap_template_ids,
-                    *(
-                        owner_overlay.bootstrap_template_ids
-                        if owner_overlay is not None
-                        else []
-                    ),
-                ]
-            )
-        )
-        bootstrap_metadata = {
-            "project_path_manifest_required": True,
-            "bootstrap_template_ids": bootstrap_template_ids,
-            "questionnaire": [
-                {
-                    "step": "owner_identity",
-                    "prompt": "你希望系统如何称呼你？有哪些稳定的个人偏好需要记住？",
-                    "route": "memory",
-                },
-                {
-                    "step": "assistant_identity",
-                    "prompt": "默认会话 Agent 应该叫什么？是否有固定角色定位？",
-                    "route": "behavior:IDENTITY.md",
-                },
-                {
-                    "step": "assistant_personality",
-                    "prompt": "你希望 Agent 的性格、语气、协作风格是什么？",
-                    "route": "behavior:SOUL.md",
-                },
-                {
-                    "step": "locale_and_location",
-                    "prompt": "你的常用语言、时区、地点是什么？哪些是长期事实？",
-                    "route": "memory",
-                },
-                {
-                    "step": "memory_preferences",
-                    "prompt": "哪些信息应该长期记住，哪些只属于当前项目/任务？",
-                    "route": "memory_policy",
-                },
-                {
-                    "step": "secret_routing",
-                    "prompt": "哪些是敏感信息，应通过 secret bindings 而不是行为文件保存？",
-                    "route": "secrets",
-                },
-            ],
-            "storage_boundary_hints": {
-                "facts_store": "MemoryService",
-                "facts_access": "通过 MemoryService / memory tools 读取与写入稳定事实。",
-                "secrets_store": "SecretService",
-                "secrets_access": (
-                    "通过 SecretService / secret bindings workflow 管理敏感值；"
-                    "project.secret-bindings.json 只保存绑定元数据。"
-                ),
-                "secret_bindings_metadata_path": (
-                    f"projects/{project.slug}/project.secret-bindings.json"
-                    if project is not None and project.slug
-                    else ""
-                ),
-                "behavior_store": "behavior files",
-            },
-        }
-        existing = await self._stores.agent_context_store.get_latest_bootstrap_session(
-            project_id=project_id,
-        )
-        if existing is not None:
-            # 同步 OnboardingState → BootstrapSession 状态
-            # 如果全局 onboarding 已完成但 session 仍 PENDING，自动升级
-            onboarding = load_onboarding_state(self._project_root)
-            if (
-                onboarding.is_completed()
-                and existing.status is BootstrapSessionStatus.PENDING
-            ):
-                existing = existing.model_copy(
-                    update={
-                        "status": BootstrapSessionStatus.COMPLETED,
-                        "blocking_reason": "",
-                        "updated_at": datetime.now(tz=UTC),
-                    }
-                )
-                await self._stores.agent_context_store.save_bootstrap_session(existing)
-
-            needs_update = (
-                existing.steps != bootstrap_steps
-                or existing.current_step == "owner_basics"
-                or existing.metadata.get("bootstrap_template_ids") != bootstrap_template_ids
-            )
-            if needs_update:
-                existing = existing.model_copy(
-                    update={
-                        "current_step": (
-                            existing.current_step
-                            if existing.current_step and existing.current_step != "owner_basics"
-                            else bootstrap_steps[0]
-                        ),
-                        "steps": bootstrap_steps,
-                        "metadata": {
-                            **bootstrap_metadata,
-                            **dict(existing.metadata),
-                            "bootstrap_template_ids": bootstrap_template_ids,
-                            "questionnaire": bootstrap_metadata["questionnaire"],
-                            "storage_boundary_hints": bootstrap_metadata[
-                                "storage_boundary_hints"
-                            ],
-                        },
-                        "updated_at": datetime.now(tz=UTC),
-                    }
-                )
-                await self._stores.agent_context_store.save_bootstrap_session(existing)
-            return existing
-        # 检查全局 OnboardingState——如果已完成过（任何 project），新 project 直接 COMPLETED
-        onboarding = load_onboarding_state(self._project_root)
-        if onboarding.is_completed():
-            initial_status = BootstrapSessionStatus.COMPLETED
-            initial_step = bootstrap_steps[-1] if bootstrap_steps else ""
-            blocking = ""
-        else:
-            initial_status = BootstrapSessionStatus.PENDING
-            initial_step = bootstrap_steps[0]
-            blocking = "bootstrap 尚未完成，将以 safe default 继续回答。"
-
-        session = BootstrapSession(
-            bootstrap_id=f"bootstrap-{project_id or 'default'}",
-            project_id=project_id,
-            owner_profile_id=owner_profile.owner_profile_id,
-            owner_overlay_id=owner_overlay.owner_overlay_id if owner_overlay is not None else "",
-            agent_profile_id=agent_profile.profile_id,
-            status=initial_status,
-            current_step=initial_step,
-            steps=bootstrap_steps,
-            answers={},
-            surface=surface,
-            blocking_reason=blocking,
-            metadata=bootstrap_metadata,
-        )
-        await self._stores.agent_context_store.save_bootstrap_session(session)
-        return session
-
     async def _ensure_session_context(
         self,
         *,
@@ -3510,7 +3361,7 @@ class AgentContextService:
         task = ctx.task
         agent_profile = ctx.agent_profile
         owner_profile = ctx.owner_profile
-        bootstrap = ctx.bootstrap
+        bootstrap_completed = ctx.bootstrap_completed
         dispatch_metadata = ctx.dispatch_metadata
         runtime_context = ctx.runtime_context
 
@@ -3598,9 +3449,7 @@ class AgentContextService:
             # BehaviorToolGuide（使用已解析的 workspace，消除双重调用）
             build_behavior_tool_guide_block(
                 workspace=behavior_ws,
-                is_bootstrap_pending=(
-                    bootstrap.status is BootstrapSessionStatus.PENDING
-                ),
+                is_bootstrap_pending=not bootstrap_completed,
             ),
             # RuntimeHints
             render_runtime_hint_block(
@@ -3662,45 +3511,22 @@ class AgentContextService:
                 f"control_metadata_summary={control_summary}"
             )
 
-        # Bootstrap
-        bootstrap_block_content = (
-            f"BootstrapSession: {bootstrap.status.value}\n"
-            f"current_step: {bootstrap.current_step}\n"
-            f"blocking_reason: {bootstrap.blocking_reason or 'N/A'}\n"
-            f"answers: {truncate_chars(str(bootstrap.answers or {}), 280)}"
-        )
-        if bootstrap.status is BootstrapSessionStatus.PENDING:
-            # 从 metadata.questionnaire 提取当前步骤的提问
-            questionnaire = (bootstrap.metadata or {}).get("questionnaire", [])
-            current_step = bootstrap.current_step or ""
-            current_q = next(
-                (q for q in questionnaire if q.get("step") == current_step),
-                None,
-            )
-            remaining_steps = []
-            found_current = False
-            for q in questionnaire:
-                if q.get("step") == current_step:
-                    found_current = True
-                if found_current:
-                    remaining_steps.append(q.get("step", ""))
-            prompt_hint = current_q["prompt"] if current_q else ""
+        # Bootstrap 状态（F084 Phase 4 T067：仅显示完成状态）
+        bootstrap_status_value = "completed" if bootstrap_completed else "pending"
+        bootstrap_block_content = f"BootstrapStatus: {bootstrap_status_value}"
+        if not bootstrap_completed:
             bootstrap_block_content += (
                 "\n\n[BOOTSTRAP 引导指令]\n"
-                "当前 bootstrap 尚未完成。你的首要任务是完成初始化问卷。\n"
+                "当前 bootstrap 尚未完成。你的首要任务是通过对话了解用户偏好并写入档案。\n"
                 "规则：\n"
                 "1. 每次只问一个问题，等用户回答后再进入下一步\n"
                 "2. 先用简短友好的方式打招呼，然后自然地引出当前步骤的问题\n"
                 "3. 用户回答后，根据信息类型选择正确的存储方式：\n"
-                "   - 称呼/偏好/规则 -> behavior.write_file 写入对应行为文件\n"
+                "   - 称呼/偏好/规则 -> user_profile.update 或 behavior.write_file\n"
                 "   - 稳定事实 -> memory tools\n"
                 "   - 敏感值 -> SecretService\n"
-                "4. 如果用户想跳过某个步骤，尊重用户意愿并进入下一步\n"
+                "4. 如果用户想跳过某个步骤，尊重用户意愿并继续\n"
                 "5. 不要一次性列出所有问题\n"
-                f"\n当前步骤: {current_step}\n"
-                f"当前问题: {prompt_hint}\n"
-                f"剩余步骤: {', '.join(remaining_steps)}\n"
-                f"已完成的回答: {truncate_chars(str(bootstrap.answers or {}), 280)}"
             )
         context_sections.append(bootstrap_block_content)
 
@@ -3888,7 +3714,7 @@ class AgentContextService:
         agent_profile: AgentProfile,
         owner_profile: OwnerProfile,
         owner_overlay: OwnerProfileOverlay | None,
-        bootstrap: BootstrapSession,
+        bootstrap_completed: bool,
         recent_summary: str,
         session_replay: SessionReplayProjection | None,
         memory_hits: list[MemoryRecallHit],
@@ -3940,7 +3766,7 @@ class AgentContextService:
                 project=project, task=task,
                 current_user_text=compiled.latest_user_text or task.title,
                 agent_profile=agent_profile, owner_profile=owner_profile,
-                owner_overlay=owner_overlay, bootstrap=bootstrap,
+                owner_overlay=owner_overlay, bootstrap_completed=bootstrap_completed,
                 recent_summary=cur_summary, session_replay=cur_replay,
                 memory_hits=cur_hits, memory_scope_ids=memory_scope_ids,
                 memory_prefetch_mode=memory_prefetch_mode,
@@ -4048,7 +3874,7 @@ class AgentContextService:
         agent_profile: AgentProfile,
         owner_profile: OwnerProfile,
         owner_overlay: OwnerProfileOverlay | None,
-        bootstrap: BootstrapSession,
+        bootstrap_completed: bool,
         session_state: SessionContextState,
         memory_hits: list[MemoryRecallHit],
         runtime_context: RuntimeControlContext | None,
@@ -4066,9 +3892,9 @@ class AgentContextService:
                 "label": owner_profile.display_name,
             },
             {
-                "ref_type": "bootstrap_session",
-                "ref_id": bootstrap.bootstrap_id,
-                "label": bootstrap.status.value,
+                "ref_type": "bootstrap_status",
+                "ref_id": "bootstrap",
+                "label": "completed" if bootstrap_completed else "pending",
             },
             {
                 "ref_type": "session_context",

@@ -36,12 +36,12 @@ from octoagent.core.models import (
     AgentSessionContinuityItem,
     AgentSessionKind,
     AgentSessionStatus,
-    BootstrapSessionDocument,
     ContextContinuityDocument,
     ContextFrameItem,
     ContextSessionItem,
     ControlPlaneCapability,
     ControlPlaneDegradedState,
+    ControlPlaneDocument,
     ControlPlaneState,
     ControlPlaneSupportStatus,
     ControlPlaneTargetRef,
@@ -189,22 +189,17 @@ class SessionDomainService(DomainServiceBase):
             ],
         )
 
-    async def get_bootstrap_session_document(self) -> BootstrapSessionDocument:
-        _, selected_project, _, _ = await self._resolve_selection()
-        session = None
-        if selected_project is not None:
-            session = await self._stores.agent_context_store.get_latest_bootstrap_session(
-                project_id=selected_project.project_id,
-            )
-        return BootstrapSessionDocument(
-            active_project_id=selected_project.project_id if selected_project is not None else "",
-            session=session.model_dump(mode="json") if session is not None else {},
-            resumable=bool(session is not None and session.status.value != "completed"),
-            warnings=[] if session is not None else ["当前 project 没有 bootstrap session。"],
-            degraded=ControlPlaneDegradedState(
-                is_degraded=session is None,
-                reasons=["bootstrap_session_missing"] if session is None else [],
-            ),
+    async def get_bootstrap_session_document(self) -> ControlPlaneDocument:
+        # F084 Phase 4 T067：bootstrap_session 状态机已退役。
+        # F37 修复（Codex independent review medium）：返回基础 ControlPlaneDocument，
+        # resource_id 保持 "bootstrap:current"（前端测试 fixture 兼容），warning 明确
+        # 状态机退役。前端实际业务代码不读 .session / .resumable / .active_project_id
+        # （仅 App.test.tsx / AgentCenter.test.tsx fixture 引用），同步把这些字段改为
+        # optional 避免 type-check 失败。bootstrap 完成状态由 USER.md 实质填充判断替代。
+        return ControlPlaneDocument(
+            resource_type="bootstrap_session",
+            resource_id="bootstrap:current",
+            warnings=["bootstrap_session 状态机已在 F084 Phase 4 退役（USER.md 实质填充作为完成信号）。"],
         )
 
     async def get_context_continuity_document(self) -> ContextContinuityDocument:

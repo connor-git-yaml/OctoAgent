@@ -225,24 +225,6 @@ def mark_onboarding_completed(project_root: Path) -> OnboardingState:
     return state
 
 
-def _user_md_is_filled(project_root: Path) -> bool:
-    """检查 ``behavior/system/USER.md`` 是否已经被实际填充（不再是占位符模板）。
-
-    Feature 082 P1：用作 legacy detection 的实质证据之一。
-    判定：文件存在 + 内容**不含**任何占位符标识词（``"待引导时填写"`` /
-    ``"待了解后补充"`` / ``"待引导或对话中了解"``）即视为已填充。
-    """
-    user_md = project_root / "behavior" / "system" / "USER.md"
-    if not user_md.exists():
-        return False
-    try:
-        content = user_md.read_text(encoding="utf-8")
-    except OSError:
-        return False
-    placeholder_markers = ("待引导时填写", "待了解后补充", "待引导或对话中了解")
-    return not any(marker in content for marker in placeholder_markers)
-
-
 # ---------------------------------------------------------------------------
 # Feature 063: Head/Tail 截断策略
 # ---------------------------------------------------------------------------

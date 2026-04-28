@@ -883,10 +883,6 @@ _AGENT_CONTEXT_INDEXES = [
         "ON owner_profile_overlays(scope, project_id, updated_at DESC);"
     ),
     (
-        "CREATE INDEX IF NOT EXISTS idx_bootstrap_sessions_scope "
-        "ON bootstrap_sessions(project_id, updated_at DESC);"
-    ),
-    (
         "CREATE INDEX IF NOT EXISTS idx_session_context_states_thread "
         "ON session_context_states(thread_id, updated_at DESC);"
     ),
@@ -1115,6 +1111,12 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     # ULID canonical row（如没有就地 rename 成新 ULID），消除侧栏会话重复、删除后残留等问题。
     if agent_runtime_columns and agent_session_columns:
         await _merge_composite_agent_identity_rows(conn)
+
+    # F084 Phase 4 T068：DROP bootstrap_sessions 表（bootstrap_session 状态机已退役）
+    # bootstrap 完成状态由 owner_profile.bootstrap_completed + USER.md 实质填充判断替代。
+    await conn.execute("DROP TABLE IF EXISTS bootstrap_sessions")
+    await conn.execute("DROP INDEX IF EXISTS idx_bootstrap_sessions_owner")
+    await conn.execute("DROP INDEX IF EXISTS idx_bootstrap_sessions_scope")
 
 
 _COMPOSITE_RUNTIME_ID_PATTERN = "role:%"
@@ -1511,7 +1513,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_WORKER_PROFILE_REVISIONS_DDL)
     await conn.execute(_OWNER_PROFILES_DDL)
     await conn.execute(_OWNER_PROFILE_OVERLAYS_DDL)
-    await conn.execute(_BOOTSTRAP_SESSIONS_DDL)
+    # F084 Phase 4 T068：不再 CREATE bootstrap_sessions（已退役，_migrate_legacy_tables 会 DROP 旧表）
     await conn.execute(_AGENT_RUNTIMES_DDL)
     await conn.execute(_AGENT_SESSIONS_DDL)
     await conn.execute(_AGENT_SESSION_TURNS_DDL)

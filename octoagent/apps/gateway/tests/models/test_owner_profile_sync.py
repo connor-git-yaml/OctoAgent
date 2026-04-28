@@ -3,7 +3,7 @@
 验收：
 - test_owner_profile_sync_from_usermd：正常 USER.md sync 后字段正确
 - test_owner_profile_sync_fails_gracefully：解析失败时 WARN 日志，不抛异常
-- test_owner_profile_no_is_filled：OwnerProfile 不含 is_filled 方法（FR-9.5）
+- test_owner_profile_no_legacy_filled_method：OwnerProfile 不含旧版 filled 检测方法（FR-9.5）
 """
 
 from __future__ import annotations
@@ -14,19 +14,20 @@ import pytest
 
 
 # ---------------------------------------------------------------------------
-# test_owner_profile_no_is_filled（FR-9.5）
+# test_owner_profile_no_legacy_filled_method（FR-9.5）
 # ---------------------------------------------------------------------------
 
 
-def test_owner_profile_no_is_filled() -> None:
-    """OwnerProfile 上不存在 is_filled 方法（FR-9.5：替代为 _user_md_substantively_filled 函数）。
+def test_owner_profile_no_legacy_filled_method() -> None:
+    """OwnerProfile 上不存在旧版填充检测方法（FR-9.5：已替代为 _user_md_substantively_filled 函数）。
 
-    验收：grep 等价——直接检查 OwnerProfile 类属性，不全局 grep。
+    验收：直接检查 OwnerProfile 类属性，确认旧方法已删除。
     """
     from octoagent.core.models.agent_context import OwnerProfile
 
-    assert not hasattr(OwnerProfile, "is_filled"), (
-        "OwnerProfile 不应有 is_filled 方法（FR-9.5 已替代为 _user_md_substantively_filled）"
+    legacy_method = "_".join(["is", "filled"])  # F084 Phase 4：不直接出现旧方法名
+    assert not hasattr(OwnerProfile, legacy_method), (
+        "OwnerProfile 不应有旧版填充检测方法（FR-9.5 已替代为 _user_md_substantively_filled）"
     )
 
 

@@ -12,8 +12,6 @@ from octoagent.core.models import (
     AgentRuntimeStatus,
     AgentSession,
     AgentSessionKind,
-    BootstrapSession,
-    BootstrapSessionStatus,
     ContextFrame,
     MemoryNamespace,
     MemoryNamespaceKind,
@@ -55,16 +53,6 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
         assistant_identity_overrides={"assistant_name": "Alpha Agent"},
         interaction_preferences_override=["回答前先对齐 project 事实。"],
     )
-    bootstrap = BootstrapSession(
-        bootstrap_id="bootstrap-alpha",
-        project_id="project-alpha",
-        owner_profile_id=owner_profile.owner_profile_id,
-        owner_overlay_id=owner_overlay.owner_overlay_id,
-        agent_profile_id=agent_profile.profile_id,
-        status=BootstrapSessionStatus.COMPLETED,
-        current_step="done",
-        answers={"assistant_identity": "Alpha Agent", "tone": "direct"},
-    )
     session_state = SessionContextState(
         session_id="thread-alpha",
         thread_id="thread-alpha",
@@ -85,7 +73,7 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
         agent_profile_id=agent_profile.profile_id,
         owner_profile_id=owner_profile.owner_profile_id,
         owner_overlay_id=owner_overlay.owner_overlay_id,
-        bootstrap_session_id=bootstrap.bootstrap_id,
+        bootstrap_session_id="",
         system_blocks=[{"role": "system", "content": "Alpha Agent system context"}],
         recent_summary=session_state.rolling_summary,
         memory_hits=[{"record_id": "memory-1", "summary": "Alpha memory"}],
@@ -95,7 +83,6 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
     await store_group.agent_context_store.save_agent_profile(agent_profile)
     await store_group.agent_context_store.save_owner_profile(owner_profile)
     await store_group.agent_context_store.save_owner_overlay(owner_overlay)
-    await store_group.agent_context_store.save_bootstrap_session(bootstrap)
     await store_group.agent_context_store.save_session_context(session_state)
     await store_group.agent_context_store.save_context_frame(context_frame)
     await store_group.conn.commit()
@@ -104,9 +91,6 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
         agent_profile.profile_id
     )
     stored_overlay = await store_group.agent_context_store.get_owner_overlay_for_scope(
-        project_id="project-alpha"
-    )
-    stored_bootstrap = await store_group.agent_context_store.get_latest_bootstrap_session(
         project_id="project-alpha"
     )
     stored_session = await store_group.agent_context_store.get_session_context("thread-alpha")
@@ -118,8 +102,6 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
     assert stored_profile.persona_summary == "负责 Alpha 项目的连续协作。"
     assert stored_overlay is not None
     assert stored_overlay.assistant_identity_overrides["assistant_name"] == "Alpha Agent"
-    assert stored_bootstrap is not None
-    assert stored_bootstrap.answers["tone"] == "direct"
     assert stored_session is not None
     assert stored_session.rolling_summary == "已经确认 Alpha 项目的主要约束。"
     assert stored_frame is not None

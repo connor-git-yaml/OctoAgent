@@ -27,8 +27,6 @@ from octoagent.core.models import (
     AgentSession,
     AgentSessionKind,
     AgentSessionStatus,
-    BootstrapSession,
-    BootstrapSessionStatus,
     OwnerProfile,
     Project,
 )
@@ -51,7 +49,8 @@ async def ensure_startup_records(
 
     owner_profile = await _ensure_owner_profile(store_group)
     agent_profile = await _ensure_agent_profile(store_group, project)
-    await _ensure_bootstrap_session(store_group, project, owner_profile, agent_profile)
+    # F084 Phase 4 T067/T068：bootstrap_session 状态机已退役，不再创建 bootstrap_session 记录。
+    # bootstrap 完成状态通过 owner_profile.bootstrap_completed 和 USER.md 实质填充判断。
 
     # 回填 default project 的 primary_agent_id（如果尚未设置）
     await _backfill_primary_agent_id(store_group, project)
@@ -194,98 +193,6 @@ async def _ensure_agent_profile(
 
     return profile
 
-
-async def _ensure_bootstrap_session(
-    store_group: StoreGroup,
-    project: Project,
-    owner_profile: OwnerProfile,
-    agent_profile: AgentProfile,
-) -> BootstrapSession:
-    """确保默认 bootstrap session 存在。"""
-    project_id = project.project_id
-
-    existing = await store_group.agent_context_store.get_latest_bootstrap_session(
-        project_id=project_id,
-    )
-    if existing is not None:
-        return existing
-
-    bootstrap_steps = [
-        "owner_identity",
-        "assistant_identity",
-        "assistant_personality",
-        "locale_and_location",
-        "memory_preferences",
-        "secret_routing",
-    ]
-    bootstrap_metadata = {
-        "project_path_manifest_required": True,
-        "bootstrap_template_ids": list(agent_profile.bootstrap_template_ids),
-        "questionnaire": [
-            {
-                "step": "owner_identity",
-                "prompt": "你希望系统如何称呼你？有哪些稳定的个人偏好需要记住？",
-                "route": "memory",
-            },
-            {
-                "step": "assistant_identity",
-                "prompt": "默认会话 Agent 应该叫什么？是否有固定角色定位？",
-                "route": "behavior:IDENTITY.md",
-            },
-            {
-                "step": "assistant_personality",
-                "prompt": "你希望 Agent 的性格、语气、协作风格是什么？",
-                "route": "behavior:SOUL.md",
-            },
-            {
-                "step": "locale_and_location",
-                "prompt": "你的常用语言、时区、地点是什么？哪些是长期事实？",
-                "route": "memory",
-            },
-            {
-                "step": "memory_preferences",
-                "prompt": "哪些信息应该长期记住，哪些只属于当前项目/任务？",
-                "route": "memory_policy",
-            },
-            {
-                "step": "secret_routing",
-                "prompt": "哪些是敏感信息，应通过 secret bindings 而不是行为文件保存？",
-                "route": "secrets",
-            },
-        ],
-        "storage_boundary_hints": {
-            "facts_store": "MemoryService",
-            "facts_access": "通过 MemoryService / memory tools 读取与写入稳定事实。",
-            "secrets_store": "SecretService",
-            "secrets_access": (
-                "通过 SecretService / secret bindings workflow 管理敏感值；"
-                "project.secret-bindings.json 只保存绑定元数据。"
-            ),
-            "secret_bindings_metadata_path": (
-                f"projects/{project.slug}/project.secret-bindings.json"
-                if project.slug
-                else ""
-            ),
-            "behavior_store": "behavior files",
-        },
-    }
-
-    session = BootstrapSession(
-        bootstrap_id=f"bootstrap-{project_id}",
-        project_id=project_id,
-        owner_profile_id=owner_profile.owner_profile_id,
-        owner_overlay_id="",
-        agent_profile_id=agent_profile.profile_id,
-        status=BootstrapSessionStatus.PENDING,
-        current_step=bootstrap_steps[0],
-        steps=bootstrap_steps,
-        answers={},
-        surface="startup",
-        blocking_reason="bootstrap 尚未完成，将以 safe default 继续回答。",
-        metadata=bootstrap_metadata,
-    )
-    await store_group.agent_context_store.save_bootstrap_session(session)
-    return session
 
 
 async def _backfill_primary_agent_id(

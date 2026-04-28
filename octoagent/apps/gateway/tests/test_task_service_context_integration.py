@@ -17,8 +17,6 @@ from octoagent.core.models import (
     AgentSessionKind,
     AgentSessionTurn,
     AgentSessionTurnKind,
-    BootstrapSession,
-    BootstrapSessionStatus,
     EventType,
     MemoryNamespaceKind,
     OwnerOverlayScope,
@@ -235,22 +233,7 @@ async def _seed_project_context(store_group) -> None:
             working_style_override="聚焦 Alpha 项目的里程碑推进。",
         )
     )
-    await store_group.agent_context_store.save_bootstrap_session(
-        BootstrapSession(
-            bootstrap_id="bootstrap-alpha",
-            project_id=project.project_id,
-
-            owner_profile_id="owner-profile-default",
-            owner_overlay_id="owner-overlay-alpha",
-            agent_profile_id="agent-profile-alpha",
-            status=BootstrapSessionStatus.COMPLETED,
-            current_step="done",
-            answers={
-                "assistant_identity": "Alpha Agent",
-                "interaction_preference": "direct",
-            },
-        )
-    )
+    # F084 Phase 4 T067：bootstrap_session 状态机已退役，不再 seed bootstrap_session 记录。
     await store_group.agent_context_store.save_session_context(
         SessionContextState(
             session_id="thread-alpha",
@@ -299,13 +282,6 @@ async def test_agent_context_backfills_bootstrap_templates_and_routes(
         owner_profile=owner_profile,
         project=project,
     )
-    bootstrap = await service._ensure_bootstrap_session(
-        project=project,
-        owner_profile=owner_profile,
-        owner_overlay=owner_overlay,
-        agent_profile=agent_profile,
-        surface="chat",
-    )
     mirrored = await service._ensure_agent_profile_from_worker_profile("singleton:research")
 
     assert owner_overlay is not None
@@ -315,28 +291,7 @@ async def test_agent_context_backfills_bootstrap_templates_and_routes(
     assert "behavior:project:PROJECT.md" in agent_profile.bootstrap_template_ids
     assert "behavior:project:PROJECT.md" in owner_overlay.bootstrap_template_ids
     assert "behavior:project_agent:TOOLS.md" in mirrored.bootstrap_template_ids
-    assert bootstrap.steps == [
-        "owner_identity",
-        "assistant_identity",
-        "assistant_personality",
-        "locale_and_location",
-        "memory_preferences",
-        "secret_routing",
-    ]
-    assert bootstrap.metadata["project_path_manifest_required"] is True
-    routes = {
-        item["step"]: item["route"]
-        for item in bootstrap.metadata.get("questionnaire", [])
-    }
-    assert routes["owner_identity"] == "memory"
-    assert routes["assistant_personality"] == "behavior:SOUL.md"
-    assert routes["secret_routing"] == "secrets"
-    assert (
-        bootstrap.metadata["storage_boundary_hints"]["facts_store"] == "MemoryService"
-    )
-    assert "behavior:project:instructions/README.md" in bootstrap.metadata[
-        "bootstrap_template_ids"
-    ]
+    # F084 Phase 4 T067：_ensure_bootstrap_session 已退役，仅验证模板 IDs 正确填充。
 
 
 async def test_task_service_injects_profile_bootstrap_recent_and_memory(

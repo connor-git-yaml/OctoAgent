@@ -58,11 +58,6 @@ class OwnerOverlayScope(StrEnum):
     WORKSPACE = "workspace"
 
 
-class BootstrapSessionStatus(StrEnum):
-    PENDING = "pending"
-    COMPLETED = "completed"
-
-
 class ContextRequestKind(StrEnum):
     CHAT = "chat"
     AUTOMATION = "automation"
@@ -205,7 +200,7 @@ class OwnerProfile(BaseModel):
     # F084 Phase 2 T030：OwnerProfile 退化为派生只读视图（USER.md 是 SoT，FR-9.1）
     bootstrap_completed: bool = Field(
         default=False,
-        description="USER.md 实质填充后置 True（替代旧 BootstrapSession 状态机判定）",
+        description="USER.md 实质填充后置 True（F084 Phase 4：bootstrap 完成状态新标准）",
     )
     last_synced_from_user_md: datetime | None = Field(
         default=None,
@@ -232,28 +227,6 @@ class OwnerProfileOverlay(BaseModel):
     version: int = Field(default=1, ge=1)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
-
-
-class BootstrapSession(BaseModel):
-    """首启或 project-init bootstrap 状态。"""
-
-    bootstrap_id: str = Field(min_length=1)
-    project_id: str = Field(default="")
-    owner_profile_id: str = Field(default="")
-    owner_overlay_id: str = Field(default="")
-    agent_profile_id: str = Field(default="")
-    status: BootstrapSessionStatus = BootstrapSessionStatus.PENDING
-    current_step: str = Field(default="owner_basics")
-    steps: list[str] = Field(default_factory=list)
-    answers: dict[str, Any] = Field(default_factory=dict)
-    generated_profile_ids: list[str] = Field(default_factory=list)
-    generated_owner_revision: int = Field(default=0, ge=0)
-    blocking_reason: str = Field(default="")
-    surface: str = Field(default="chat")
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    created_at: datetime = Field(default_factory=_utc_now)
-    updated_at: datetime = Field(default_factory=_utc_now)
-    completed_at: datetime | None = None
 
 
 class AgentRuntime(BaseModel):
@@ -483,16 +456,12 @@ import structlog as _structlog  # noqa: E402
 
 _sync_log = _structlog.get_logger(__name__)
 
-# USER.md 实质填充阈值（替代旧 _user_md_is_filled / is_filled 语义；FR-9.5）
+# USER.md 实质填充阈值（FR-9.5）
 USER_MD_FILLED_MIN_CHARS = 100
 
 
 def _user_md_substantively_filled(user_md_path: Path) -> bool:
-    """USER.md 是否实质填充：存在 + len(content) > 100（FR-9.5）。
-
-    替代旧的 _user_md_is_filled / OwnerProfile.is_filled 语义；
-    Phase 4 退役 BootstrapSession 后仅此函数生效。
-    """
+    """USER.md 是否实质填充：存在 + len(content) > 100（FR-9.5）。"""
     try:
         if not user_md_path.exists():
             return False

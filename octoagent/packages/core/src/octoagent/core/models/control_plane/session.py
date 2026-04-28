@@ -213,9 +213,4 @@ class OwnerProfileDocument(ControlPlaneDocument):
     overlays: list[dict[str, Any]] = Field(default_factory=list)
 
 
-class BootstrapSessionDocument(ControlPlaneDocument):
-    resource_type: str = "bootstrap_session"
-    resource_id: str = "bootstrap:current"
-    active_project_id: str = Field(default="")
-    session: dict[str, Any] = Field(default_factory=dict)
-    resumable: bool = False
+# F084 Phase 4 T067：bootstrap_session document 已退役，端点返回空 ControlPlaneDocument
