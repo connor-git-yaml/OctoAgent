@@ -120,6 +120,8 @@ class EventType(StrEnum):
     APPROVAL_APPROVED = "APPROVAL_APPROVED"
     APPROVAL_REJECTED = "APPROVAL_REJECTED"
     APPROVAL_EXPIRED = "APPROVAL_EXPIRED"
+    # Feature 084 Phase 3: ApprovalGate 决策事件（FR-4.4）
+    APPROVAL_DECIDED = "APPROVAL_DECIDED"          # 审批决策完成（含 approved/rejected）
 
     # Feature 006: 策略配置变更事件 -- 对齐 FR-027
     POLICY_CONFIG_CHANGED = "POLICY_CONFIG_CHANGED"

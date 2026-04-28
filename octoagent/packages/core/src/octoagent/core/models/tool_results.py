@@ -297,6 +297,31 @@ class ObserveResult(WriteResult):
 
 
 # ---------------------------------------------------------------------------
+# delegate_task 工具子类（Feature 084 Phase 3 T045）
+# ---------------------------------------------------------------------------
+
+
+class DelegateTaskResult(WriteResult):
+    """delegate_task 工具返回结果（FR-5 / T045）。
+
+    async 模式：status="pending" + child_task_id，立即返回不等待子任务完成。
+    sync 模式：等待子任务完成后返回 status="written"；超时返回 status="skipped" + reason。
+    失败时：status="rejected" + reason（depth_exceeded / CAPACITY_EXCEEDED / blacklist_blocked）。
+
+    child_task_id 保留供调用方追踪子任务状态（防 F14 追踪链路断裂模式）。
+    """
+
+    child_task_id: str | None = None
+    """新创建的子任务 ID；派发失败时为 None。"""
+
+    target_worker: str = ""
+    """目标 Worker 名称（回显，方便调用方确认）。"""
+
+    callback_mode: str = "async"
+    """回调模式（async/sync）。"""
+
+
+# ---------------------------------------------------------------------------
 # 模块导出
 # ---------------------------------------------------------------------------
 
@@ -329,4 +354,6 @@ __all__ = [
     # User Profile
     "UserProfileUpdateResult",
     "ObserveResult",
+    # Delegate Task（Feature 084 Phase 3）
+    "DelegateTaskResult",
 ]

@@ -49,6 +49,11 @@ async def register_all(broker, deps: ToolDeps) -> None:
     from octoagent.gateway.tools import user_profile_tools
     await user_profile_tools.register(broker, deps)
 
+    # F084 Phase 3 T045（防 F20 critical）：delegate_task 工具显式接入注册路径
+    # entrypoints 仅含 agent_runtime（FR-5.1 / SC-010 反向）
+    from octoagent.gateway.tools import delegate_task_tool
+    await delegate_task_tool.register(broker, deps)
+
 
 def list_for_entrypoint(entrypoint: str) -> list:
     """返回指定入口点可见的 ToolEntry 列表（委托 ToolRegistry，Feature 084 D1 根治）。

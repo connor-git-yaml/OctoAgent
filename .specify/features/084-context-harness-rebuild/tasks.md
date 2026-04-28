@@ -513,7 +513,7 @@
 
 **目标**: 全部 P1 Nice 功能上线，observation → UI promote 完整闭环
 
-### T041 实现 ApprovalGate — session allowlist + 事件写入 [实现 / 2h]
+### T041 [x] 实现 ApprovalGate — session allowlist + 事件写入 [实现 / 2h]
 **依赖**: T040  
 **目标文件**: `apps/gateway/src/octoagent/gateway/harness/approval_gate.py`  
 **验收**:
@@ -523,7 +523,7 @@
 - `add_to_allowlist(session_id, operation_type)` 批准后加入 allowlist
 - session 结束时 allowlist 清零（不跨 session 持久化）
 
-### T042 实现 ApprovalGate — SSE 异步路径 [实现 / 2h]
+### T042 [x] 实现 ApprovalGate — SSE 异步路径 [实现 / 2h]
 **依赖**: T041  
 **目标文件**: `apps/gateway/src/octoagent/gateway/harness/approval_gate.py`  
 **验收**:
@@ -533,7 +533,7 @@
 - `APPROVAL_DECIDED` 事件写入（含 `decision`、`operator`、`timestamp`）
 - 拒绝时 Agent 收到明确 `rejected` 通知（不 timeout 静默）
 
-### T043 重构 ToolBroker 集成 ToolRegistry dispatch [重构 / 2h]
+### T043 [x] 重构 ToolBroker 集成 ToolRegistry dispatch [重构 / 2h]
 **依赖**: T041, T042  
 **目标文件**: `apps/gateway/src/octoagent/gateway/services/tool_broker.py`  
 **验收**:
@@ -542,7 +542,7 @@
 - 外层 API（schema_for、execute 函数签名）不变，不破坏现有测试
 - ToolBroker 保留 schema 反射（Constitution C3）
 
-### T044 [P] 实现 DelegationManager — 深度 + 并发控制 [实现 / 2h]
+### T044 [x] [P] 实现 DelegationManager — 深度 + 并发控制 [实现 / 2h]
 **依赖**: T040  
 **目标文件**: `apps/gateway/src/octoagent/gateway/harness/delegation.py`  
 **验收**:
@@ -551,7 +551,7 @@
 - 深度超限返回 `depth_exceeded` 错误；并发超限返回 `CAPACITY_EXCEEDED`；黑名单命中返回错误（不写 SUBAGENT_SPAWNED 事件）
 - 通过时写入 `SUBAGENT_SPAWNED` 事件（含 `task_id`、`target_worker`、`depth`）
 
-### T045 [P] 实现 delegate_task 工具 handler [实现 / 1.5h]
+### T045 [x] [P] 实现 delegate_task 工具 handler [实现 / 1.5h]
 **依赖**: T044  
 **目标文件**: `apps/gateway/src/octoagent/gateway/tools/delegate_task_tool.py`  
 **验收**:
