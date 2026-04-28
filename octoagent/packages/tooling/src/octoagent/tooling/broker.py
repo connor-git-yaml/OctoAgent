@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 
 import structlog
+from pydantic import BaseModel
 from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event
 from octoagent.core.models.payloads import (
@@ -375,7 +376,15 @@ class ToolBroker:
         # 步骤 5: 执行工具
         try:
             raw_output = await self._invoke_handler(handler, current_args, meta.timeout_seconds)
-            output_str = str(raw_output) if raw_output is not None else ""
+            # T021.6：BaseModel（如 WriteResult 子类）用 model_dump_json() 序列化为 JSON，
+            # 保留 children / task_id / memory_id 等结构化字段（防 F7 str(model) repr 污染）；
+            # 老路径（return json.dumps(...)）不变，仍走 str()。
+            if raw_output is None:
+                output_str = ""
+            elif isinstance(raw_output, BaseModel):
+                output_str = raw_output.model_dump_json()
+            else:
+                output_str = str(raw_output)
             duration = time.monotonic() - start_time
             result = ToolResult(
                 output=output_str,

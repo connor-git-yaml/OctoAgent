@@ -197,6 +197,18 @@ class EventType(StrEnum):
     TOOL_DEMOTED = "TOOL_DEMOTED"                            # Active 工具回退为 Deferred
     TOOL_INDEX_DEGRADED = "TOOL_INDEX_DEGRADED"              # ToolIndex 降级
 
+    # Feature 084 Phase 2: USER.md 写入 + Observation Routine + Sub-agent Delegation 事件（FR-10）
+    MEMORY_ENTRY_ADDED = "MEMORY_ENTRY_ADDED"                # user_profile.update add 成功
+    MEMORY_ENTRY_REPLACED = "MEMORY_ENTRY_REPLACED"          # user_profile.update replace 成功
+    MEMORY_ENTRY_REMOVED = "MEMORY_ENTRY_REMOVED"            # user_profile.update remove 成功
+    MEMORY_ENTRY_BLOCKED = "MEMORY_ENTRY_BLOCKED"            # ThreatScanner 拦截写入
+    OBSERVATION_OBSERVED = "OBSERVATION_OBSERVED"            # user_profile.observe 写入 candidates
+    OBSERVATION_STAGE_COMPLETED = "OBSERVATION_STAGE_COMPLETED"  # Observation Routine 单阶段完成
+    OBSERVATION_PROMOTED = "OBSERVATION_PROMOTED"            # 候选被用户接受并写入 USER.md
+    OBSERVATION_DISCARDED = "OBSERVATION_DISCARDED"          # 候选被用户拒绝
+    SUBAGENT_SPAWNED = "SUBAGENT_SPAWNED"                    # DelegationManager 派发子任务
+    SUBAGENT_RETURNED = "SUBAGENT_RETURNED"                  # 子任务返回结果
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

@@ -302,13 +302,13 @@ async def test_handler_missing_sets_failed_status(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     result = await tool.execute(action="start", pipeline_id="missing-handler-pipeline")
-    assert "started successfully" in result
+    assert "started successfully" in result.detail
 
     # 等待后台任务完成
     await asyncio.sleep(0.2)
 
     # 检查 run 状态
-    run_id = result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = result.detail.split("run_id: ")[1].split("\n")[0].strip()
     run = await tool.engine.get_pipeline_run(run_id)
     assert run is not None
     assert run.status == PipelineRunStatus.FAILED
@@ -339,12 +339,12 @@ async def test_node_timeout_sets_failed_status(tmp_path: Path) -> None:
     tool.engine.register_handler("slow_handler", slow_handler)
 
     result = await tool.execute(action="start", pipeline_id="timeout-pipeline")
-    assert "started successfully" in result
+    assert "started successfully" in result.detail
 
     # 等待后台任务完成
     await asyncio.sleep(0.5)
 
-    run_id = result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = result.detail.split("run_id: ")[1].split("\n")[0].strip()
     run = await tool.engine.get_pipeline_run(run_id)
     assert run is not None
     assert run.status == PipelineRunStatus.FAILED
@@ -374,11 +374,11 @@ async def test_failed_outcome_has_unified_metadata(tmp_path: Path) -> None:
     tool.engine.register_handler("always_fail", always_fail_handler)
 
     result = await tool.execute(action="start", pipeline_id="fail-pipeline")
-    assert "started successfully" in result
+    assert "started successfully" in result.detail
 
     await asyncio.sleep(0.2)
 
-    run_id = result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = result.detail.split("run_id: ")[1].split("\n")[0].strip()
     run = await tool.engine.get_pipeline_run(run_id)
     assert run is not None
     assert run.status == PipelineRunStatus.FAILED
@@ -403,11 +403,11 @@ async def test_list_returns_available_pipelines(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     result = await tool.execute(action="list")
-    assert "Available Pipelines (1):" in result
-    assert "test-pipeline" in result
-    assert "Tags: test" in result
-    assert "Trigger:" in result
-    assert 'graph_pipeline(action="start"' in result
+    assert "Available Pipelines (1):" in result.detail
+    assert "test-pipeline" in result.detail
+    assert "Tags: test" in result.detail
+    assert "Trigger:" in result.detail
+    assert 'graph_pipeline(action="start"' in result.detail
 
     await store_group.conn.close()
 
@@ -417,7 +417,7 @@ async def test_list_empty_registry(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [])
 
     result = await tool.execute(action="list")
-    assert "No pipelines available" in result
+    assert "No pipelines available" in result.detail
 
     await store_group.conn.close()
 
@@ -433,8 +433,8 @@ async def test_list_with_input_schema(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     result = await tool.execute(action="list")
-    assert "branch (string, required)" in result
-    assert "skip_tests" in result
+    assert "branch (string, required)" in result.detail
+    assert "skip_tests" in result.detail
 
     await store_group.conn.close()
 
@@ -455,15 +455,15 @@ async def test_start_creates_run_and_returns_run_id(tmp_path: Path) -> None:
         pipeline_id="test-pipeline",
         params={"key": "value"},
     )
-    assert "started successfully" in result
-    assert "run_id:" in result
-    assert "task_id:" in result
-    assert "status" in result.lower() or "background" in result.lower()
+    assert "started successfully" in result.detail
+    assert "run_id:" in result.detail
+    assert "task_id:" in result.detail
+    assert "status" in result.detail.lower() or "background" in result.detail.lower()
 
     # 等待后台完成
     await asyncio.sleep(0.3)
 
-    run_id = result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = result.detail.split("run_id: ")[1].split("\n")[0].strip()
     run = await tool.engine.get_pipeline_run(run_id)
     assert run is not None
     assert run.status == PipelineRunStatus.SUCCEEDED  # 3 个 passthrough 应该成功
@@ -481,8 +481,8 @@ async def test_start_pipeline_not_found(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [])
 
     result = await tool.execute(action="start", pipeline_id="nonexistent")
-    assert "Error: pipeline not found" in result
-    assert "nonexistent" in result
+    assert "Error: pipeline not found" in result.detail
+    assert "nonexistent" in result.detail
 
     await store_group.conn.close()
 
@@ -492,7 +492,7 @@ async def test_start_missing_pipeline_id(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [])
 
     result = await tool.execute(action="start")
-    assert "Error:" in result
+    assert "Error:" in result.detail
 
     await store_group.conn.close()
 
@@ -511,8 +511,8 @@ async def test_start_missing_required_params(tmp_path: Path) -> None:
         pipeline_id="test-pipeline",
         params={},
     )
-    assert "Error: invalid params" in result
-    assert "branch" in result
+    assert "Error: invalid params" in result.detail
+    assert "branch" in result.detail
 
     await store_group.conn.close()
 
@@ -531,7 +531,7 @@ async def test_start_with_valid_required_params(tmp_path: Path) -> None:
         pipeline_id="test-pipeline",
         params={"branch": "main"},
     )
-    assert "started successfully" in result
+    assert "started successfully" in result.detail
 
     await asyncio.sleep(0.3)
     await store_group.conn.close()
@@ -550,16 +550,16 @@ async def test_concurrent_run_limit(tmp_path: Path) -> None:
 
     # 启动 2 个 run（会暂停在 gate 节点）
     result1 = await tool.execute(action="start", pipeline_id="gate-pipeline")
-    assert "started successfully" in result1
+    assert "started successfully" in result1.detail
     await asyncio.sleep(0.2)
 
     result2 = await tool.execute(action="start", pipeline_id="gate-pipeline")
-    assert "started successfully" in result2
+    assert "started successfully" in result2.detail
     await asyncio.sleep(0.2)
 
     # 第 3 个应被拒绝
     result3 = await tool.execute(action="start", pipeline_id="gate-pipeline")
-    assert "Error: maximum concurrent pipeline runs reached" in result3
+    assert "Error: maximum concurrent pipeline runs reached" in result3.detail
 
     await store_group.conn.close()
 
@@ -576,17 +576,17 @@ async def test_status_returns_run_info(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="gate-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
     result = await tool.execute(action="status", run_id=run_id)
-    assert "Pipeline Run Status:" in result
-    assert run_id in result
-    assert "gate-pipeline" in result
-    assert "WAITING_APPROVAL" in result
-    assert "waiting_for:" in result
-    assert "resume_command:" in result
+    assert "Pipeline Run Status:" in result.detail
+    assert run_id in result.detail
+    assert "gate-pipeline" in result.detail
+    assert "WAITING_APPROVAL" in result.detail
+    assert "waiting_for:" in result.detail
+    assert "resume_command:" in result.detail
 
     await store_group.conn.close()
 
@@ -596,7 +596,7 @@ async def test_status_run_not_found(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [])
 
     result = await tool.execute(action="status", run_id="nonexistent-run-id")
-    assert "Error: pipeline run not found" in result
+    assert "Error: pipeline run not found" in result.detail
 
     await store_group.conn.close()
 
@@ -606,7 +606,7 @@ async def test_status_missing_run_id(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [])
 
     result = await tool.execute(action="status")
-    assert "Error:" in result
+    assert "Error:" in result.detail
 
     await store_group.conn.close()
 
@@ -626,14 +626,14 @@ async def test_status_failed_run_includes_failure_info(tmp_path: Path) -> None:
     tool.engine.register_handler("always_fail", always_fail_handler)
 
     start_result = await tool.execute(action="start", pipeline_id="fail-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
     result = await tool.execute(action="status", run_id=run_id)
-    assert "FAILED" in result
-    assert "failure_category:" in result
-    assert "failed_node:" in result
+    assert "FAILED" in result.detail
+    assert "failure_category:" in result.detail
+    assert "failed_node:" in result.detail
 
     await store_group.conn.close()
 
@@ -650,7 +650,7 @@ async def test_resume_approval_approved(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="gate-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
@@ -661,7 +661,7 @@ async def test_resume_approval_approved(tmp_path: Path) -> None:
 
     # 恢复
     result = await tool.execute(action="resume", run_id=run_id, approved=True)
-    assert "resumed successfully" in result
+    assert "resumed successfully" in result.detail
 
     await asyncio.sleep(0.3)
 
@@ -680,13 +680,13 @@ async def test_resume_approval_denied(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="gate-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
     result = await tool.execute(action="resume", run_id=run_id, approved=False)
-    assert "cancelled" in result.lower()
-    assert "denied" in result.lower()
+    assert "cancelled" in result.detail.lower()
+    assert "denied" in result.detail.lower()
 
     run = await tool.engine.get_pipeline_run(run_id)
     assert run is not None
@@ -702,13 +702,13 @@ async def test_resume_approval_missing_approved(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="gate-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
     result = await tool.execute(action="resume", run_id=run_id)
-    assert "Error:" in result
-    assert "approved" in result.lower()
+    assert "Error:" in result.detail
+    assert "approved" in result.detail.lower()
 
     await store_group.conn.close()
 
@@ -725,7 +725,7 @@ async def test_resume_input_with_data(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="input-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
@@ -738,7 +738,7 @@ async def test_resume_input_with_data(tmp_path: Path) -> None:
         run_id=run_id,
         input_data={"user_name": "Connor"},
     )
-    assert "resumed successfully" in result
+    assert "resumed successfully" in result.detail
 
     await asyncio.sleep(0.3)
 
@@ -756,13 +756,13 @@ async def test_resume_input_missing_data(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="input-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
     result = await tool.execute(action="resume", run_id=run_id)
-    assert "Error:" in result
-    assert "input_data" in result
+    assert "Error:" in result.detail
+    assert "input_data" in result.detail
 
     await store_group.conn.close()
 
@@ -774,13 +774,13 @@ async def test_resume_not_in_resumable_state(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="test-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
     # 此时应该已经 SUCCEEDED
     result = await tool.execute(action="resume", run_id=run_id)
-    assert "Error: cannot resume" in result
+    assert "Error: cannot resume" in result.detail
 
     await store_group.conn.close()
 
@@ -790,7 +790,7 @@ async def test_resume_run_not_found(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [])
 
     result = await tool.execute(action="resume", run_id="nonexistent")
-    assert "Error: pipeline run not found" in result
+    assert "Error: pipeline run not found" in result.detail
 
     await store_group.conn.close()
 
@@ -807,13 +807,13 @@ async def test_cancel_running_pipeline(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="gate-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
     result = await tool.execute(action="cancel", run_id=run_id)
-    assert "cancelled" in result.lower()
-    assert "Side effects" in result
+    assert "cancelled" in result.detail.lower()
+    assert "Side effects" in result.detail
 
     run = await tool.engine.get_pipeline_run(run_id)
     assert run is not None
@@ -829,13 +829,13 @@ async def test_cancel_terminal_pipeline(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="test-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
     result = await tool.execute(action="cancel", run_id=run_id)
-    assert "Error: cannot cancel" in result
-    assert "SUCCEEDED" in result
+    assert "Error: cannot cancel" in result.detail
+    assert "SUCCEEDED" in result.detail
 
     await store_group.conn.close()
 
@@ -845,7 +845,7 @@ async def test_cancel_run_not_found(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [])
 
     result = await tool.execute(action="cancel", run_id="nonexistent")
-    assert "Error: pipeline run not found" in result
+    assert "Error: pipeline run not found" in result.detail
 
     await store_group.conn.close()
 
@@ -876,7 +876,7 @@ async def test_retry_failed_pipeline(tmp_path: Path) -> None:
     tool.engine.register_handler("always_fail", sometimes_fail_handler)
 
     start_result = await tool.execute(action="start", pipeline_id="fail-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
@@ -887,8 +887,8 @@ async def test_retry_failed_pipeline(tmp_path: Path) -> None:
 
     # 重试
     result = await tool.execute(action="retry", run_id=run_id)
-    assert "Retrying" in result
-    assert "step-fail" in result
+    assert "Retrying" in result.detail
+    assert "step-fail" in result.detail
 
     await asyncio.sleep(0.3)
 
@@ -907,13 +907,13 @@ async def test_retry_non_failed_pipeline(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="gate-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
     result = await tool.execute(action="retry", run_id=run_id)
-    assert "Error: cannot retry" in result
-    assert "WAITING_APPROVAL" in result
+    assert "Error: cannot retry" in result.detail
+    assert "WAITING_APPROVAL" in result.detail
 
     await store_group.conn.close()
 
@@ -923,7 +923,7 @@ async def test_retry_run_not_found(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [])
 
     result = await tool.execute(action="retry", run_id="nonexistent")
-    assert "Error: pipeline run not found" in result
+    assert "Error: pipeline run not found" in result.detail
 
     await store_group.conn.close()
 
@@ -955,8 +955,8 @@ async def test_terminal_state_sync_on_success(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="test-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
-    task_id = start_result.split("task_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
+    task_id = start_result.detail.split("task_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.5)
 
@@ -980,7 +980,7 @@ async def test_definition_snapshot_cached(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [manifest])
 
     start_result = await tool.execute(action="start", pipeline_id="test-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     # 验证 definition 在内存中
     assert run_id in tool._run_definitions
@@ -1026,8 +1026,8 @@ async def test_unknown_action(tmp_path: Path) -> None:
     tool, store_group = await _create_tool(tmp_path, [])
 
     result = await tool.execute(action="invalid_action")
-    assert "Error: unknown action" in result
-    assert "invalid_action" in result
+    assert "Error: unknown action" in result.detail
+    assert "invalid_action" in result.detail
 
     await store_group.conn.close()
 
@@ -1045,7 +1045,7 @@ async def test_e2e_pipeline_execution(tmp_path: Path) -> None:
 
     # 1. list
     list_result = await tool.execute(action="list")
-    assert "test-pipeline" in list_result
+    assert "test-pipeline" in list_result.detail
 
     # 2. start
     start_result = await tool.execute(
@@ -1053,15 +1053,15 @@ async def test_e2e_pipeline_execution(tmp_path: Path) -> None:
         pipeline_id="test-pipeline",
         params={"input_key": "input_value"},
     )
-    assert "started successfully" in start_result
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    assert "started successfully" in start_result.detail
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     # 3. 等待完成
     await asyncio.sleep(0.5)
 
     # 4. status
     status_result = await tool.execute(action="status", run_id=run_id)
-    assert "SUCCEEDED" in status_result
+    assert "SUCCEEDED" in status_result.detail
 
     # 5. 验证 checkpoints
     checkpoints = await store_group.work_store.list_pipeline_checkpoints(run_id)
@@ -1079,23 +1079,23 @@ async def test_e2e_hitl_approval_flow(tmp_path: Path) -> None:
 
     # 1. start
     start_result = await tool.execute(action="start", pipeline_id="gate-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
 
     # 2. status - 应该暂停
     status_result = await tool.execute(action="status", run_id=run_id)
-    assert "WAITING_APPROVAL" in status_result
+    assert "WAITING_APPROVAL" in status_result.detail
 
     # 3. resume - 批准
     resume_result = await tool.execute(action="resume", run_id=run_id, approved=True)
-    assert "resumed successfully" in resume_result
+    assert "resumed successfully" in resume_result.detail
 
     await asyncio.sleep(0.3)
 
     # 4. status - 应该成功
     status_result = await tool.execute(action="status", run_id=run_id)
-    assert "SUCCEEDED" in status_result
+    assert "SUCCEEDED" in status_result.detail
 
     await store_group.conn.close()
 
@@ -1122,18 +1122,18 @@ async def test_e2e_failure_and_retry(tmp_path: Path) -> None:
 
     # 1. start → FAILED
     start_result = await tool.execute(action="start", pipeline_id="fail-pipeline")
-    run_id = start_result.split("run_id: ")[1].split("\n")[0].strip()
+    run_id = start_result.detail.split("run_id: ")[1].split("\n")[0].strip()
 
     await asyncio.sleep(0.3)
     status_result = await tool.execute(action="status", run_id=run_id)
-    assert "FAILED" in status_result
+    assert "FAILED" in status_result.detail
 
     # 2. retry → SUCCEEDED
     retry_result = await tool.execute(action="retry", run_id=run_id)
-    assert "Retrying" in retry_result
+    assert "Retrying" in retry_result.detail
 
     await asyncio.sleep(0.3)
     status_result = await tool.execute(action="status", run_id=run_id)
-    assert "SUCCEEDED" in status_result
+    assert "SUCCEEDED" in status_result.detail
 
     await store_group.conn.close()

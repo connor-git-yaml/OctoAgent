@@ -30,6 +30,10 @@ from pydantic import BaseModel
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
+from octoagent.core.models.tool_results import (
+    BehaviorWriteFileResult,
+    CanvasWriteResult,
+)
 
 from ..execution_context import get_current_execution_context
 from ._deps import ToolDeps, current_parent
@@ -147,11 +151,12 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="canvas",
         tags=["canvas", "artifact", "write"],
         manifest_ref="builtin://canvas.write",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime"],
         },
     )
-    async def canvas_write(name: str, content: str, description: str = "") -> str:
+    async def canvas_write(name: str, content: str, description: str = "") -> CanvasWriteResult:
         """在当前 task 下创建文本 artifact。"""
 
         _, context, parent_task = await current_parent(deps)
@@ -164,13 +169,13 @@ async def register(broker, deps: ToolDeps) -> None:
             session_id=context.session_id,
             source="builtin:canvas.write",
         )
-        return json.dumps(
-            {
-                "artifact_id": artifact.artifact_id,
-                "task_id": parent_task.task_id,
-                "name": artifact.name,
-            },
-            ensure_ascii=False,
+        return CanvasWriteResult(
+            status="written",
+            target=f"artifact:{artifact.artifact_id}",
+            preview=content[:200],
+            bytes_written=len(content.encode("utf-8")),
+            artifact_id=artifact.artifact_id,
+            task_id=parent_task.task_id,
         )
 
     @tool_contract(
@@ -179,6 +184,7 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="behavior",
         tags=["behavior", "file", "write", "context"],
         manifest_ref="builtin://behavior.write_file",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime"],
         },
@@ -187,15 +193,19 @@ async def register(broker, deps: ToolDeps) -> None:
         file_id: str,
         content: str,
         confirmed: bool = False,
-    ) -> str:
+    ) -> BehaviorWriteFileResult:
         """修改行为文件内容。file_id 为短名（如 USER.md），系统自动解析路径。"""
         from octoagent.core.behavior_workspace import resolve_write_path_by_file_id
 
         file_id = file_id.strip()
         if not file_id:
-            return json.dumps(
-                {"error": "MISSING_PARAM", "message": "file_id 不能为空"},
-                ensure_ascii=False,
+            return BehaviorWriteFileResult(
+                status="rejected",
+                target="behavior_workspace",
+                preview="file_id 不能为空",
+                reason="MISSING_PARAM: file_id 不能为空",
+                file_id="",
+                written=False,
             )
 
         # 从执行上下文获取 agent_slug 和 project_slug
@@ -212,27 +222,27 @@ async def register(broker, deps: ToolDeps) -> None:
                 project_slug=project_slug,
             )
         except ValueError as exc:
-            return json.dumps(
-                {"error": "INVALID_FILE_ID", "message": str(exc)},
-                ensure_ascii=False,
+            return BehaviorWriteFileResult(
+                status="rejected",
+                target="behavior_workspace",
+                preview=f"INVALID_FILE_ID: {exc}",
+                reason=f"INVALID_FILE_ID: {exc}",
+                file_id=file_id,
+                written=False,
             )
 
         # 字符预算检查
         budget_result = check_behavior_file_budget(file_id, content)
         if not budget_result["within_budget"]:
-            return json.dumps(
-                {
-                    "file_id": file_id,
-                    "written": False,
-                    "error": "BUDGET_EXCEEDED",
-                    "current_chars": budget_result["current_chars"],
-                    "budget_chars": budget_result["budget_chars"],
-                    "exceeded_by": budget_result["exceeded_by"],
-                    "message": (
-                        f"内容超出字符预算 {budget_result['exceeded_by']} 字符，请精简后重试"
-                    ),
-                },
-                ensure_ascii=False,
+            return BehaviorWriteFileResult(
+                status="rejected",
+                target=str(resolved),
+                preview=f"内容超出字符预算 {budget_result['exceeded_by']} 字符，请精简后重试",
+                reason=f"BUDGET_EXCEEDED: exceeded by {budget_result['exceeded_by']} chars",
+                file_id=file_id,
+                written=False,
+                chars_written=0,
+                budget_chars=budget_result["budget_chars"],
             )
 
         # 查找 review_mode
@@ -240,32 +250,18 @@ async def register(broker, deps: ToolDeps) -> None:
             file_id, BehaviorReviewMode.REVIEW_REQUIRED,
         )
 
-        # proposal 模式：review_required 且未确认时返回 proposal
+        # proposal 模式：review_required 且未确认时返回 proposal（status="skipped"）
         if review_mode == BehaviorReviewMode.REVIEW_REQUIRED and not confirmed:
-            # 读取当前内容用于对比
-            try:
-                if resolved.exists():
-                    current_content = resolved.read_text(encoding="utf-8")
-                    exists = True
-                else:
-                    current_content = ""
-                    exists = False
-            except Exception:
-                current_content = ""
-                exists = False
-            return json.dumps(
-                {
-                    "file_id": file_id,
-                    "proposal": True,
-                    "review_mode": review_mode.value if hasattr(review_mode, "value") else str(review_mode),
-                    "current_content": current_content,
-                    "proposed_content": content,
-                    "current_chars": len(current_content),
-                    "proposed_chars": len(content),
-                    "budget_chars": budget_result["budget_chars"],
-                    "message": "请向用户展示修改摘要并请求确认，确认后再次调用并设置 confirmed=true",
-                },
-                ensure_ascii=False,
+            return BehaviorWriteFileResult(
+                status="skipped",
+                target=str(resolved),
+                preview="请向用户展示修改摘要并请求确认，确认后再次调用并设置 confirmed=true",
+                reason="REVIEW_REQUIRED: 需要用户确认后再写入",
+                file_id=file_id,
+                written=False,
+                chars_written=0,
+                budget_chars=budget_result["budget_chars"],
+                proposal=True,
             )
 
         # 实际写入磁盘（confirmed=true 时直接信任 Agent 传入的 content）
@@ -273,9 +269,13 @@ async def register(broker, deps: ToolDeps) -> None:
             resolved.parent.mkdir(parents=True, exist_ok=True)
             resolved.write_text(content, encoding="utf-8")
         except Exception as exc:
-            return json.dumps(
-                {"error": "FILE_WRITE_ERROR", "message": str(exc)},
-                ensure_ascii=False,
+            return BehaviorWriteFileResult(
+                status="rejected",
+                target=str(resolved),
+                preview=f"文件写入失败: {exc}",
+                reason=f"FILE_WRITE_ERROR: {exc}",
+                file_id=file_id,
+                written=False,
             )
 
         # 记录 structlog 事件（FR-018）
@@ -311,15 +311,17 @@ async def register(broker, deps: ToolDeps) -> None:
 
         invalidate_behavior_pack_cache(project_root=deps.project_root)
 
-        result_payload: dict[str, Any] = {
-            "file_id": file_id,
-            "written": True,
-            "chars_written": len(content),
-            "budget_chars": budget_result["budget_chars"],
-        }
-        if onboarding_completed:
-            result_payload["onboarding_completed"] = True
-        return json.dumps(result_payload, ensure_ascii=False)
+        return BehaviorWriteFileResult(
+            status="written",
+            target=str(resolved),
+            preview=content[:200],
+            bytes_written=len(content.encode("utf-8")),
+            file_id=file_id,
+            written=True,
+            chars_written=len(content),
+            budget_chars=budget_result["budget_chars"],
+            onboarding_completed=onboarding_completed,
+        )
 
     @tool_contract(
         name="skills",

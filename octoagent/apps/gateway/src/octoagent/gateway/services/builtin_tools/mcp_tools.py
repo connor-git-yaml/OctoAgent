@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
+from octoagent.core.models.tool_results import McpInstallResult, McpUninstallResult
 
 from ._deps import ToolDeps
 
@@ -125,6 +126,7 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="mcp",
         tags=["mcp", "install"],
         manifest_ref="builtin://mcp.install",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
@@ -135,7 +137,7 @@ async def register(broker, deps: ToolDeps) -> None:
         env: str = "{}",
         command: str = "",
         args: str = "[]",
-    ) -> str:
+    ) -> McpInstallResult:
         """安装或注册一个 MCP server。
 
         支持三种模式：
@@ -163,37 +165,47 @@ async def register(broker, deps: ToolDeps) -> None:
         try:
             env_dict = json.loads(env) if env and env.strip() != "{}" else {}
         except json.JSONDecodeError as exc:
-            return json.dumps(
-                {"error": f"env 参数 JSON 格式不合法: {exc}"},
-                ensure_ascii=False,
+            return McpInstallResult(
+                status="rejected",
+                target="mcp-servers.json",
+                preview=f"env 参数 JSON 格式不合法: {exc}",
+                reason=f"env 参数 JSON 格式不合法: {exc}",
             )
 
         # local 模式：直接写入 mcp-servers.json 并触发发现
         if install_source == "local":
             if not package_name.strip():
-                return json.dumps(
-                    {"error": "local 模式下 package_name 用作 server 名称，不能为空"},
-                    ensure_ascii=False,
+                return McpInstallResult(
+                    status="rejected",
+                    target="mcp-servers.json",
+                    preview="local 模式下 package_name 不能为空",
+                    reason="local 模式下 package_name 用作 server 名称，不能为空",
                 )
             if not command.strip():
-                return json.dumps(
-                    {"error": "local 模式下 command 不能为空（如 node、python）"},
-                    ensure_ascii=False,
+                return McpInstallResult(
+                    status="rejected",
+                    target="mcp-servers.json",
+                    preview="local 模式下 command 不能为空",
+                    reason="local 模式下 command 不能为空（如 node、python）",
                 )
             try:
                 args_list = json.loads(args) if args and args.strip() != "[]" else []
                 if not isinstance(args_list, list):
                     raise ValueError("args 必须是 JSON 数组")
             except (json.JSONDecodeError, ValueError) as exc:
-                return json.dumps(
-                    {"error": f"args 参数格式不合法: {exc}"},
-                    ensure_ascii=False,
+                return McpInstallResult(
+                    status="rejected",
+                    target="mcp-servers.json",
+                    preview=f"args 参数格式不合法: {exc}",
+                    reason=f"args 参数格式不合法: {exc}",
                 )
 
             if deps.mcp_registry is None:
-                return json.dumps(
-                    {"error": "MCP Registry 未绑定"},
-                    ensure_ascii=False,
+                return McpInstallResult(
+                    status="rejected",
+                    target="mcp-servers.json",
+                    preview="MCP Registry 未绑定",
+                    reason="MCP Registry 未绑定",
                 )
 
             # 写入配置（格式：{"servers": [McpServerConfig, ...]}）
@@ -235,29 +247,27 @@ async def register(broker, deps: ToolDeps) -> None:
                 deps._pack_service.invalidate_pack()
                 await deps._pack_service.refresh()
 
-                return json.dumps(
-                    {
-                        "status": "registered",
-                        "server_name": server_name,
-                        "config_path": str(config_path),
-                        "command": command.strip(),
-                        "args": args_list,
-                        "env_keys": list(env_dict.keys()),
-                        "message": f"MCP server '{server_name}' 已注册到 {config_path}",
-                    },
-                    ensure_ascii=False,
+                return McpInstallResult(
+                    status="written",
+                    target=str(config_path),
+                    preview=f"MCP server '{server_name}' 已注册到 {config_path}",
+                    server_name=server_name,
                 )
             except Exception as exc:
-                return json.dumps(
-                    {"error": f"本地注册失败: {exc}"},
-                    ensure_ascii=False,
+                return McpInstallResult(
+                    status="rejected",
+                    target="mcp-servers.json",
+                    preview=f"本地注册失败: {exc}",
+                    reason=f"本地注册失败: {exc}",
                 )
 
         # npm/pip 模式：走 MCP Installer
         if deps.mcp_installer is None:
-            return json.dumps(
-                {"error": "MCP Installer 未绑定，无法安装 MCP server"},
-                ensure_ascii=False,
+            return McpInstallResult(
+                status="rejected",
+                target="mcp-servers.json",
+                preview="MCP Installer 未绑定，无法安装 MCP server",
+                reason="MCP Installer 未绑定，无法安装 MCP server",
             )
         try:
             task_id = await deps.mcp_installer.install(
@@ -265,20 +275,25 @@ async def register(broker, deps: ToolDeps) -> None:
                 package_name=package_name,
                 env=env_dict,
             )
-            return json.dumps(
-                {
-                    "status": "install_started",
-                    "task_id": task_id,
-                    "message": f"安装任务已启动，使用 mcp.install_status 查询进度（task_id={task_id}）",
-                },
-                ensure_ascii=False,
+            return McpInstallResult(
+                status="pending",
+                target=f"{install_source}:{package_name}",
+                preview=f"安装任务已启动，task_id={task_id}",
+                task_id=task_id,
             )
         except ValueError as exc:
-            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+            return McpInstallResult(
+                status="rejected",
+                target=f"{install_source}:{package_name}",
+                preview=str(exc),
+                reason=str(exc),
+            )
         except Exception as exc:
-            return json.dumps(
-                {"error": f"安装启动失败: {exc}"},
-                ensure_ascii=False,
+            return McpInstallResult(
+                status="rejected",
+                target=f"{install_source}:{package_name}",
+                preview=f"安装启动失败: {exc}",
+                reason=f"安装启动失败: {exc}",
             )
 
     @tool_contract(
@@ -339,33 +354,45 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="mcp",
         tags=["mcp", "uninstall"],
         manifest_ref="builtin://mcp.uninstall",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
     )
-    async def mcp_uninstall(server_id: str) -> str:
+    async def mcp_uninstall(server_id: str) -> McpUninstallResult:
         """卸载已安装的 MCP server。
 
         Args:
             server_id: 要卸载的 MCP server ID（通过 mcp.servers.list 查看）
         """
         if deps.mcp_installer is None:
-            return json.dumps(
-                {"error": "MCP Installer 未绑定"},
-                ensure_ascii=False,
+            return McpUninstallResult(
+                status="rejected",
+                target=server_id,
+                preview="MCP Installer 未绑定",
+                reason="MCP Installer 未绑定",
             )
         try:
             result = await deps.mcp_installer.uninstall(server_id)
-            return json.dumps(
-                {"status": "uninstalled", **result},
-                ensure_ascii=False,
+            return McpUninstallResult(
+                status="written",
+                target=server_id,
+                preview=f"MCP server '{server_id}' 已卸载",
+                server_id=server_id,
             )
         except ValueError as exc:
-            return json.dumps({"error": str(exc)}, ensure_ascii=False)
+            return McpUninstallResult(
+                status="rejected",
+                target=server_id,
+                preview=str(exc),
+                reason=str(exc),
+            )
         except Exception as exc:
-            return json.dumps(
-                {"error": f"卸载失败: {exc}"},
-                ensure_ascii=False,
+            return McpUninstallResult(
+                status="rejected",
+                target=server_id,
+                preview=f"卸载失败: {exc}",
+                reason=f"卸载失败: {exc}",
             )
 
     for handler in (

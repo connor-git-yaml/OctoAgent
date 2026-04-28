@@ -28,6 +28,7 @@ def tool_contract(
     timeout_seconds: float | None = None,
     output_truncate_threshold: int | None = None,
     path_escalation: bool = False,
+    produces_write: bool = False,
 ) -> Any:
     """工具契约声明装饰器 -- 对齐 spec FR-001/002
 
@@ -46,8 +47,12 @@ def tool_contract(
         version: 工具版本号，默认 "1.0.0"
         timeout_seconds: 声明式超时（秒），None 表示不超时
         output_truncate_threshold: 工具级输出裁切阈值（字符数）
+        produces_write: True 时声明此工具会产生持久化写入（FR-2.4），
+                        schema 反射期会检查 return type 必须是 WriteResult 子类
     """
     def decorator(func: F) -> F:
+        # produces_write 合并进 metadata，保持 _tool_meta["metadata"] 是单一字典
+        merged_metadata = {**(metadata or {}), "produces_write": produces_write}
         func._tool_meta = {  # type: ignore[attr-defined]
             "side_effect_level": side_effect_level,
             "tool_group": tool_group,
@@ -55,7 +60,7 @@ def tool_contract(
             "tags": list(tags or []),
             "worker_types": list(worker_types or []),
             "manifest_ref": manifest_ref,
-            "metadata": dict(metadata or {}),
+            "metadata": merged_metadata,
             "name": name or func.__name__,
             "version": version,
             "timeout_seconds": timeout_seconds,

@@ -34,6 +34,7 @@ from octoagent.core.models.delegation import (
 from octoagent.core.models.enums import TaskStatus
 from octoagent.core.models.task import RequesterInfo, TaskPointers
 from octoagent.core.store import StoreGroup
+from octoagent.core.models.tool_results import GraphPipelineResult
 from octoagent.tooling.decorators import tool_contract
 from octoagent.tooling.models import SideEffectLevel, ToolTier
 
@@ -148,6 +149,7 @@ class GraphPipelineTool:
         tags=["pipeline", "graph", "orchestration"],
         name="graph_pipeline",
         version="1.0.0",
+        produces_write=True,
     )
     async def execute(
         self,
@@ -161,37 +163,150 @@ class GraphPipelineTool:
         # 内部注入（不暴露给 LLM schema）
         task_id: str = "",
         session_metadata: dict[str, Any] | None = None,
-    ) -> str:
+    ) -> GraphPipelineResult:
         """发现、启动、监控和管理确定性 Pipeline 流程。"""
+        # 校验 action（所有 action 统一走 WriteResult 契约）
         if action not in _SUPPORTED_ACTIONS:
-            return (
-                f"Error: unknown action '{action}'. "
-                f"Supported actions: {', '.join(sorted(_SUPPORTED_ACTIONS))}."
+            msg = f"Error: unknown action '{action}'. Supported actions: {', '.join(sorted(_SUPPORTED_ACTIONS))}."
+            return GraphPipelineResult(
+                status="rejected",
+                target=run_id or pipeline_id or "pipeline",
+                preview=msg[:200],
+                reason=msg,
+                detail=msg,
+                action="start",  # 占位，表示意图失败
             )
 
+        # list / status 是只读查询，包装成 preview + detail 返回（读写统一契约）
         if action == "list":
-            return self._handle_list()
+            text = self._handle_list()
+            return GraphPipelineResult(
+                status="written",
+                target="pipeline_registry",
+                preview=text[:200],
+                detail=text,
+                action="start",  # list 无对应写 action，以最常见写 action 代替
+            )
+        elif action == "status":
+            text = await self._handle_status(run_id=run_id)
+            is_error = text.startswith("Error:")
+            return GraphPipelineResult(
+                status="rejected" if is_error else "written",
+                target=run_id,
+                preview=text[:200],
+                reason=text if is_error else None,
+                detail=text,
+                action="start",
+                run_id=run_id,
+            )
         elif action == "start":
-            return await self._handle_start(
+            text = await self._handle_start(
                 pipeline_id=pipeline_id,
                 params=params or {},
                 parent_task_id=task_id,
             )
-        elif action == "status":
-            return await self._handle_status(run_id=run_id)
+            # _handle_start 返回错误时 text 以 "Error:" 开头
+            if text.startswith("Error:"):
+                return GraphPipelineResult(
+                    status="rejected",
+                    target=pipeline_id,
+                    preview=text[:200],
+                    reason=text,
+                    detail=text,
+                    action="start",
+                )
+            # 从返回文本中提取 run_id / task_id
+            extracted_run_id = ""
+            extracted_task_id = ""
+            for line in text.splitlines():
+                if line.startswith("run_id:"):
+                    extracted_run_id = line.split(":", 1)[1].strip()
+                elif line.startswith("task_id:"):
+                    extracted_task_id = line.split(":", 1)[1].strip()
+            return GraphPipelineResult(
+                status="pending",
+                target=pipeline_id,
+                preview=f"Pipeline '{pipeline_id}' started, run_id={extracted_run_id}",
+                reason=f"后台执行中，使用 graph_pipeline(action='status', run_id='{extracted_run_id}') 追踪",
+                detail=text,
+                action="start",
+                run_id=extracted_run_id or None,
+                task_id=extracted_task_id or None,
+            )
         elif action == "resume":
-            return await self._handle_resume(
+            text = await self._handle_resume(
                 run_id=run_id,
                 input_data=input_data or {},
                 approved=approved,
             )
+            if text.startswith("Error:"):
+                return GraphPipelineResult(
+                    status="rejected",
+                    target=run_id,
+                    preview=text[:200],
+                    reason=text,
+                    detail=text,
+                    action="resume",
+                    run_id=run_id,
+                )
+            return GraphPipelineResult(
+                status="written",
+                target=run_id,
+                preview=text[:200],
+                detail=text,
+                action="resume",
+                run_id=run_id,
+            )
         elif action == "cancel":
-            return await self._handle_cancel(run_id=run_id)
+            text = await self._handle_cancel(run_id=run_id)
+            if text.startswith("Error:"):
+                return GraphPipelineResult(
+                    status="rejected",
+                    target=run_id,
+                    preview=text[:200],
+                    reason=text,
+                    detail=text,
+                    action="cancel",
+                    run_id=run_id,
+                )
+            return GraphPipelineResult(
+                status="written",
+                target=run_id,
+                preview=text[:200],
+                detail=text,
+                action="cancel",
+                run_id=run_id,
+            )
         elif action == "retry":
-            return await self._handle_retry(run_id=run_id)
+            text = await self._handle_retry(run_id=run_id)
+            if text.startswith("Error:"):
+                return GraphPipelineResult(
+                    status="rejected",
+                    target=run_id,
+                    preview=text[:200],
+                    reason=text,
+                    detail=text,
+                    action="retry",
+                    run_id=run_id,
+                )
+            return GraphPipelineResult(
+                status="written",
+                target=run_id,
+                preview=text[:200],
+                detail=text,
+                action="retry",
+                run_id=run_id,
+            )
 
         # 不应到达此处
-        return f"Error: unknown action '{action}'."
+        return GraphPipelineResult(
+            status="rejected",
+            target=run_id or pipeline_id or "pipeline",
+            preview=f"unknown action '{action}'",
+            reason=f"unknown action '{action}'",
+            detail=f"unknown action '{action}'",
+            action="start",
+        )
 
     # ============================================================
     # action="list"  (T-065-014)

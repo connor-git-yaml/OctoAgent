@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
+from octoagent.core.models.tool_results import FilesystemWriteTextResult
 
 from ._deps import ToolDeps, resolve_instance_root, resolve_and_check_path, truncate_text
 
@@ -127,6 +128,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         tags=["filesystem", "file", "write"],
         manifest_ref="builtin://filesystem.write_text",
         path_escalation=True,
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime"],
         },
@@ -135,7 +137,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         path: str,
         content: str,
         create_dirs: bool = True,
-    ) -> str:
+    ) -> FilesystemWriteTextResult:
         """在当前 project 内创建或覆盖文本文件。受路径访问策略保护。"""
 
         instance_root, project_slug = await resolve_instance_root(deps)
@@ -149,14 +151,15 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         relative = str(target.relative_to(instance_root))
-        return json.dumps(
-            {
-                "workspace_root": str(instance_root),
-                "path": relative,
-                "bytes_written": len(content.encode("utf-8")),
-                "created_dirs": dirs_created,
-            },
-            ensure_ascii=False,
+        bytes_written = len(content.encode("utf-8"))
+        return FilesystemWriteTextResult(
+            status="written",
+            target=str(target),
+            preview=content[:200],
+            bytes_written=bytes_written,
+            workspace_root=str(instance_root),
+            path=relative,
+            created_dirs=dirs_created,
         )
 
     for handler in (

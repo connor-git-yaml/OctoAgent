@@ -341,8 +341,8 @@ async def test_capability_pack_setup_quick_connect_tool_reuses_canonical_setup_f
 
         assert result.is_error is False
         payload = json.loads(result.output)
-        assert payload["success"] is True
-        assert payload["activation"]["proxy_url"] == "http://localhost:4000"
+        # setup.quick_connect 现在返回 SetupQuickConnectResult（WriteResult 子类）
+        assert payload["status"] == "written"
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

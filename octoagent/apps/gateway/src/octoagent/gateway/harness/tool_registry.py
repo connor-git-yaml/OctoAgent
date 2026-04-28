@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 log = structlog.get_logger()
 
@@ -67,6 +67,14 @@ class ToolEntry(BaseModel):
     description: str = ""
     """工具描述，LLM 可见。"""
 
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    """工具扩展元数据（Feature 084 T021.0）。
+
+    注册期由 register() 自动从 handler._tool_meta["metadata"] 同步，
+    调用方无需手动填写。
+    关键字段：produces_write（bool）—— WriteResult 契约检查依据。
+    """
+
 
 class ToolNotFoundError(KeyError):
     """dispatch 不存在的工具时抛出。"""
@@ -89,9 +97,29 @@ class ToolRegistry:
     def register(self, entry: ToolEntry) -> None:
         """注册工具。若工具名已存在则覆盖（热更新语义）。
 
+        注册期自动从 handler._tool_meta["metadata"] 同步 metadata（T021.0），
+        并调用 _enforce_write_result_contract 做 fail-fast 检查（防 F9 bypass）。
+
         Args:
             entry: 要注册的 ToolEntry。
         """
+        # 自动从 handler._tool_meta["metadata"] 同步（T021.0 F8 修复）
+        handler_meta: dict[str, Any] = (
+            getattr(entry.handler, "_tool_meta", None) or {}
+        ).get("metadata", {})
+        if handler_meta:
+            entry.metadata = {**entry.metadata, **handler_meta}
+
+        # 注册期 fail-fast：produces_write=True 的工具必须 return WriteResult 子类（防 F9）
+        try:
+            from octoagent.tooling.schema import _enforce_write_result_contract  # type: ignore[import]
+            _enforce_write_result_contract(
+                entry.handler,
+                entry.metadata.get("produces_write", False),
+            )
+        except ImportError:
+            pass  # tooling 包不可用时降级（测试环境）
+
         with self._lock:
             self._entries[entry.name] = entry
         log.debug("tool_registered", tool_name=entry.name, entrypoints=list(entry.entrypoints))

@@ -19,6 +19,12 @@ from pydantic import BaseModel
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
+from octoagent.core.models.tool_results import (
+    ConfigAddProviderResult,
+    ConfigSetModelAliasResult,
+    ConfigSyncResult,
+    SetupQuickConnectResult,
+)
 
 from ._deps import ToolDeps
 
@@ -93,6 +99,7 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="config",
         tags=["config", "provider", "add"],
         manifest_ref="builtin://config.add_provider",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
@@ -105,19 +112,25 @@ async def register(broker, deps: ToolDeps) -> None:
         base_url: str = "",
         enabled: bool | None = None,
         clear_base_url: bool = False,
-    ) -> str:
+    ) -> ConfigAddProviderResult:
         """添加或更新一个 LLM Provider 到 octoagent.yaml（单一事实源）。修改后需执行 config.sync 重新生成衍生配置，或使用 setup.quick_connect 一键保存并启用。"""
         config = _load_config(deps.project_root)
         if config is None:
-            return json.dumps(
-                {"error": "CONFIG_NOT_FOUND", "message": "octoagent.yaml 不存在"},
-                ensure_ascii=False,
+            return ConfigAddProviderResult(
+                status="rejected",
+                target="octoagent.yaml",
+                provider_id="",
+                action="added",
+                reason="CONFIG_NOT_FOUND: octoagent.yaml 不存在",
             )
         provider_id = provider_id.strip().lower()
         if not provider_id:
-            return json.dumps(
-                {"error": "MISSING_PARAM", "message": "provider_id 不能为空"},
-                ensure_ascii=False,
+            return ConfigAddProviderResult(
+                status="rejected",
+                target="octoagent.yaml",
+                provider_id="",
+                action="added",
+                reason="MISSING_PARAM: provider_id 不能为空",
             )
         existing_provider = next((p for p in config.providers if p.id == provider_id), None)
         resolved_name = name.strip() or (
@@ -167,18 +180,16 @@ async def register(broker, deps: ToolDeps) -> None:
         config.updated_at = date.today().isoformat()
         _save_config(config, deps.project_root)
         action = "updated" if found else "added"
-        return json.dumps(
-            {
-                "success": True,
-                "action": action,
-                "provider_id": provider_id,
-                "hint": (
-                    "执行 config.sync 重新生成 litellm-config.yaml；"
-                    "如需保存并启用真实模型，可继续执行 setup.quick_connect；"
-                    "也可使用 Web 设置页或 CLI `octo setup`。"
-                ),
-            },
-            ensure_ascii=False,
+        return ConfigAddProviderResult(
+            status="written",
+            target="octoagent.yaml",
+            provider_id=provider_id,
+            action=action,  # type: ignore[arg-type]
+            hint=(
+                "执行 config.sync 重新生成 litellm-config.yaml；"
+                "如需保存并启用真实模型，可继续执行 setup.quick_connect；"
+                "也可使用 Web 设置页或 CLI `octo setup`。"
+            ),
         )
 
     @tool_contract(
@@ -187,6 +198,7 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="config",
         tags=["config", "model", "alias", "set"],
         manifest_ref="builtin://config.set_model_alias",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
@@ -197,26 +209,38 @@ async def register(broker, deps: ToolDeps) -> None:
         model: str,
         description: str = "",
         thinking_level: str = "",
-    ) -> str:
+    ) -> ConfigSetModelAliasResult:
         """设置模型别名（如 main, cheap）到具体 Provider + 模型，写入 octoagent.yaml（单一事实源）。修改后需执行 config.sync 重新生成衍生配置，或使用 setup.quick_connect 一键保存并启用。"""
         config = _load_config(deps.project_root)
         if config is None:
-            return json.dumps(
-                {"error": "CONFIG_NOT_FOUND", "message": "octoagent.yaml 不存在"},
-                ensure_ascii=False,
+            return ConfigSetModelAliasResult(
+                status="rejected",
+                target="octoagent.yaml",
+                alias="",
+                provider="",
+                model="",
+                reason="CONFIG_NOT_FOUND: octoagent.yaml 不存在",
             )
         alias = alias.strip().lower()
         if not alias or not provider.strip() or not model.strip():
-            return json.dumps(
-                {"error": "MISSING_PARAM", "message": "alias, provider, model 都不能为空"},
-                ensure_ascii=False,
+            return ConfigSetModelAliasResult(
+                status="rejected",
+                target="octoagent.yaml",
+                alias=alias,
+                provider=provider,
+                model=model,
+                reason="MISSING_PARAM: alias, provider, model 都不能为空",
             )
         # 校验 provider 存在
         provider_ids = {p.id for p in config.providers}
         if provider.strip() not in provider_ids:
-            return json.dumps(
-                {"error": "UNKNOWN_PROVIDER", "message": f"Provider '{provider}' 不存在", "available": sorted(provider_ids)},
-                ensure_ascii=False,
+            return ConfigSetModelAliasResult(
+                status="rejected",
+                target="octoagent.yaml",
+                alias=alias,
+                provider=provider.strip(),
+                model=model.strip(),
+                reason=f"UNKNOWN_PROVIDER: Provider '{provider}' 不存在，可用: {sorted(provider_ids)}",
             )
         from octoagent.gateway.services.config.config_schema import ModelAlias as _ModelAlias
         kwargs: dict[str, Any] = {
@@ -232,19 +256,17 @@ async def register(broker, deps: ToolDeps) -> None:
         from datetime import date
         config.updated_at = date.today().isoformat()
         _save_config(config, deps.project_root)
-        return json.dumps(
-            {
-                "success": True,
-                "alias": alias,
-                "provider": provider.strip(),
-                "model": model.strip(),
-                "hint": (
-                    "执行 config.sync 重新生成 litellm-config.yaml；"
-                    "如需保存并启用真实模型，可继续执行 setup.quick_connect；"
-                    "也可使用 Web 设置页或 CLI `octo setup`。"
-                ),
-            },
-            ensure_ascii=False,
+        return ConfigSetModelAliasResult(
+            status="written",
+            target="octoagent.yaml",
+            alias=alias,
+            provider=provider.strip(),
+            model=model.strip(),
+            hint=(
+                "执行 config.sync 重新生成 litellm-config.yaml；"
+                "如需保存并启用真实模型，可继续执行 setup.quick_connect；"
+                "也可使用 Web 设置页或 CLI `octo setup`。"
+            ),
         )
 
     @tool_contract(
@@ -253,18 +275,20 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="config",
         tags=["config", "sync", "litellm"],
         manifest_ref="builtin://config.sync",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
     )
-    async def config_sync() -> str:
+    async def config_sync() -> ConfigSyncResult:
         """从 octoagent.yaml（单一事实源）重新生成 litellm-config.yaml（衍生配置）。等同于 CLI `octo config sync`。注意：本工具只同步衍生配置，不会自动重启 runtime 或切换到真实模型；如需一键保存并启用，请使用 setup.quick_connect 或 CLI `octo setup`。"""
         try:
             config = _load_config(deps.project_root)
             if config is None:
-                return json.dumps(
-                    {"error": "CONFIG_NOT_FOUND", "message": "octoagent.yaml 不存在"},
-                    ensure_ascii=False,
+                return ConfigSyncResult(
+                    status="rejected",
+                    target="octoagent.yaml",
+                    reason="CONFIG_NOT_FOUND: octoagent.yaml 不存在",
                 )
             # Feature 081 P4：不再生成 litellm-config.yaml；只做基础校验
             enabled_providers = [p.id for p in config.providers if p.enabled]
@@ -272,24 +296,17 @@ async def register(broker, deps: ToolDeps) -> None:
                 k for k, v in config.model_aliases.items()
                 if any(p.id == v.provider and p.enabled for p in config.providers)
             ]
-            return json.dumps(
-                {
-                    "success": True,
-                    "message": "Feature 081：Provider 直连后无衍生配置需要同步",
-                    "enabled_providers": enabled_providers,
-                    "enabled_aliases": enabled_aliases,
-                    "hint": (
-                        "这一步只会重新生成 litellm-config.yaml；"
-                        "如需启动或切换到真实模型，请使用 Web 设置页的\u201c连接真实模型\u201d"
-                        "或 CLI `octo setup`。"
-                    ),
-                },
-                ensure_ascii=False,
+            return ConfigSyncResult(
+                status="written",
+                target="octoagent.yaml",
+                enabled_providers=enabled_providers,
+                enabled_aliases=enabled_aliases,
             )
         except Exception as exc:
-            return json.dumps(
-                {"error": "SYNC_FAILED", "message": str(exc)},
-                ensure_ascii=False,
+            return ConfigSyncResult(
+                status="rejected",
+                target="octoagent.yaml",
+                reason=f"SYNC_FAILED: {exc}",
             )
 
     @tool_contract(
@@ -340,11 +357,12 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="setup",
         tags=["setup", "quick_connect", "activation"],
         manifest_ref="builtin://setup.quick_connect",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
     )
-    async def setup_quick_connect(draft_json: str) -> str:
+    async def setup_quick_connect(draft_json: str) -> SetupQuickConnectResult:
         """保存 Provider 凭证并激活模型连接。
 
         用户提供 API Key 后，通过此工具完成凭证持久化和 runtime activation。
@@ -376,9 +394,10 @@ async def register(broker, deps: ToolDeps) -> None:
         try:
             draft = _parse_setup_draft_json(draft_json)
         except ValueError as exc:
-            return json.dumps(
-                {"error": "INVALID_DRAFT_JSON", "message": str(exc)},
-                ensure_ascii=False,
+            return SetupQuickConnectResult(
+                status="rejected",
+                target="octoagent.yaml",
+                reason=f"INVALID_DRAFT_JSON: {exc}",
             )
 
         from octoagent.provider.dx.setup_governance_adapter import (
@@ -388,22 +407,37 @@ async def register(broker, deps: ToolDeps) -> None:
         adapter = LocalSetupGovernanceAdapter(deps.project_root)
         prepared = await adapter.prepare_wizard_draft(draft)
         result = await adapter.quick_connect(prepared)
-        payload: dict[str, Any] = {
-            "success": str(result.status) == "completed",
-            "status": str(result.status),
-            "code": result.code,
-            "message": result.message,
-        }
+        is_success = str(result.status) == "completed"
+        # F19 修复：保留旧 envelope 全部字段（success / code / activation / review / resource_refs）
+        # 让 web UI / CLI / LLM 不丢失激活信息和 resource refresh 清单
+        provider_id = ""
+        alias = ""
+        hint = result.message or ""
+        review_data: dict | None = None
+        activation_data: dict | None = None
+        resource_refs_list: list[str] = []
         if isinstance(result.data, dict):
             if isinstance(result.data.get("review"), dict):
-                payload["review"] = result.data["review"]
+                review_data = result.data["review"]
             if isinstance(result.data.get("activation"), dict):
-                payload["activation"] = result.data["activation"]
-            if result.data.get("resource_refs"):
-                payload["resource_refs"] = result.data["resource_refs"]
-        if not payload["success"]:
-            payload["error"] = result.code
-        return json.dumps(payload, ensure_ascii=False)
+                activation_data = result.data["activation"]
+                provider_id = activation_data.get("provider_id", "")
+                alias = activation_data.get("alias", "")
+            if isinstance(result.data.get("resource_refs"), list):
+                resource_refs_list = list(result.data["resource_refs"])
+        return SetupQuickConnectResult(
+            status="written" if is_success else "rejected",
+            target="octoagent.yaml",
+            provider_id=provider_id,
+            alias=alias,
+            hint=hint,
+            reason=None if is_success else f"{result.code}: {result.message}",
+            success=is_success,
+            code=None if is_success else result.code,
+            review=review_data,
+            activation=activation_data,
+            resource_refs=resource_refs_list,
+        )
 
     for handler in (
         config_inspect,

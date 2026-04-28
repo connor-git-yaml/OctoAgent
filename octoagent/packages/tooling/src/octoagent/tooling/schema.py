@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import inspect
+import typing
 from collections.abc import Callable
 from typing import Any
 
@@ -16,6 +17,53 @@ from pydantic_ai._function_schema import function_schema
 
 from .exceptions import SchemaReflectionError
 from .models import ToolMeta, ToolTier
+
+
+def _enforce_write_result_contract(handler: Callable[..., Any], produces_write: bool) -> None:
+    """检查 produces_write=True 工具的 return type 必须是 WriteResult 子类（FR-2.4）。
+
+    关键：必须用 typing.get_type_hints(func, include_extras=True) 解析 return annotation，
+    因为 14/15 个 builtin_tools 启用了 from __future__ import annotations，
+    导致 inspect.signature().return_annotation 是字符串而不是真实类型。
+
+    不抛出时：produces_write=False，直接返回（豁免 browser.* / terminal.exec / tts.speak 等）。
+    抛出时：SchemaReflectionError（复用现有异常，防 F13 回归）。
+
+    Args:
+        handler: 被检查的函数。
+        produces_write: 是否声明为写入工具。
+    """
+    if not produces_write:
+        return
+
+    # 延迟导入避免循环依赖（WriteResult 在 octoagent.core，不在 tooling 包）
+    try:
+        from octoagent.core.models.tool_results import WriteResult  # type: ignore[import]
+    except ImportError:
+        # 单元测试环境可能没有 core 包，允许降级（只记录警告，不阻断）
+        return
+
+    try:
+        hints = typing.get_type_hints(handler, include_extras=True)
+    except Exception as exc:
+        raise SchemaReflectionError(
+            f"{handler.__name__}: 解析类型注解失败（get_type_hints error）: {exc}"
+        ) from exc
+
+    return_type = hints.get("return")
+
+    # 检查 return type 是否是 WriteResult 或其子类
+    is_valid = (
+        isinstance(return_type, type)
+        and issubclass(return_type, WriteResult)
+    )
+
+    if not is_valid:
+        raise SchemaReflectionError(
+            f"{handler.__name__}: produces_write=True 要求 return type 是 WriteResult 子类，"
+            f"实际为 {return_type!r}。"
+            "请将 return type 改为 WriteResult 或其子类（如 FilesystemWriteTextResult）。"
+        )
 
 
 def reflect_tool_schema(func: Callable[..., Any]) -> ToolMeta:
@@ -44,6 +92,10 @@ def reflect_tool_schema(func: Callable[..., Any]) -> ToolMeta:
             f"函数 '{func.__name__}' 未附加 @tool_contract 装饰器，"
             "请先使用 @tool_contract 声明工具元数据"
         )
+
+    # 步骤 1.5: WriteResult 契约检查（FR-2.4）
+    produces_write: bool = tool_meta_dict.get("metadata", {}).get("produces_write", False)
+    _enforce_write_result_contract(func, produces_write)
 
     # 步骤 2: 检查类型注解完整性（FR-005, EC-1）
     _validate_type_annotations(func)

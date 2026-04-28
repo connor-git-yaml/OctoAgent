@@ -36,6 +36,7 @@ from pydantic import BaseModel
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
+from octoagent.core.models.tool_results import MemoryWriteResult
 
 from ..execution_context import get_current_execution_context
 from ._deps import (
@@ -321,6 +322,7 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="memory",
         tags=["memory", "write", "persist"],
         manifest_ref="builtin://memory.write",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
@@ -332,7 +334,7 @@ async def register(broker, deps: ToolDeps) -> None:
         evidence_refs: list[dict[str, str]] | None = None,
         scope_id: str = "",
         project_id: str = "",
-    ) -> str:
+    ) -> MemoryWriteResult:
         """将重要信息持久化为长期记忆（SoR 记录）。
 
         当用户透露偏好、事实、决策或其他值得长期记住的信息时，
@@ -349,24 +351,39 @@ async def register(broker, deps: ToolDeps) -> None:
         # 1. 参数校验
         subject_key = subject_key.strip()
         if not subject_key:
-            return json.dumps(
-                {"error": "MISSING_PARAM", "message": "subject_key 不能为空"},
-                ensure_ascii=False,
+            return MemoryWriteResult(
+                status="rejected",
+                target="memory_store",
+                preview="subject_key 不能为空",
+                reason="MISSING_PARAM: subject_key 不能为空",
+                memory_id="",
+                version=0,
+                action="create",
+                scope_id="",
             )
         content = content.strip()
         if not content:
-            return json.dumps(
-                {"error": "MISSING_PARAM", "message": "content 不能为空"},
-                ensure_ascii=False,
+            return MemoryWriteResult(
+                status="rejected",
+                target="memory_store",
+                preview="content 不能为空",
+                reason="MISSING_PARAM: content 不能为空",
+                memory_id="",
+                version=0,
+                action="create",
+                scope_id="",
             )
         partition = partition.strip().lower()
         if partition not in _VALID_PARTITIONS:
-            return json.dumps(
-                {
-                    "error": "INVALID_PARTITION",
-                    "message": f"无效的 partition 值 '{partition}'，有效值为: {', '.join(sorted(_VALID_PARTITIONS))}",
-                },
-                ensure_ascii=False,
+            return MemoryWriteResult(
+                status="rejected",
+                target="memory_store",
+                preview=f"无效的 partition 值 '{partition}'",
+                reason=f"INVALID_PARTITION: 有效值为 {', '.join(sorted(_VALID_PARTITIONS))}",
+                memory_id="",
+                version=0,
+                action="create",
+                scope_id="",
             )
 
         # 2. 解析 project/workspace/scope context
@@ -382,15 +399,27 @@ async def register(broker, deps: ToolDeps) -> None:
                 explicit_scope_id=scope_id,
             )
         except Exception as exc:
-            return json.dumps(
-                {"error": "SCOPE_UNRESOLVED", "message": f"无法解析 memory scope: {exc}"},
-                ensure_ascii=False,
+            return MemoryWriteResult(
+                status="rejected",
+                target="memory_store",
+                preview=f"无法解析 memory scope: {exc}",
+                reason=f"SCOPE_UNRESOLVED: {exc}",
+                memory_id="",
+                version=0,
+                action="create",
+                scope_id="",
             )
 
         if not scope_ids:
-            return json.dumps(
-                {"error": "SCOPE_UNRESOLVED", "message": "无法解析 memory scope，请确认 project 和 workspace 配置"},
-                ensure_ascii=False,
+            return MemoryWriteResult(
+                status="rejected",
+                target="memory_store",
+                preview="无法解析 memory scope",
+                reason="SCOPE_UNRESOLVED: 请确认 project 和 workspace 配置",
+                memory_id="",
+                version=0,
+                action="create",
+                scope_id="",
             )
 
         resolved_scope_id = scope_ids[0]
@@ -401,9 +430,15 @@ async def register(broker, deps: ToolDeps) -> None:
                 project=project,
             )
         except Exception as exc:
-            return json.dumps(
-                {"error": "INTERNAL_ERROR", "message": f"获取 memory 服务失败: {exc}"},
-                ensure_ascii=False,
+            return MemoryWriteResult(
+                status="rejected",
+                target="memory_store",
+                preview=f"获取 memory 服务失败: {exc}",
+                reason=f"INTERNAL_ERROR: {exc}",
+                memory_id="",
+                version=0,
+                action="create",
+                scope_id=resolved_scope_id,
             )
 
         # 4. 查询是否已存在 SoR → 决定 ADD 或 UPDATE
@@ -414,11 +449,11 @@ async def register(broker, deps: ToolDeps) -> None:
             existing = None
 
         if existing is not None:
-            action = WriteAction.UPDATE
+            write_action = WriteAction.UPDATE
             expected_version = existing.version
             action_label = "update"
         else:
-            action = WriteAction.ADD
+            write_action = WriteAction.ADD
             expected_version = None
             action_label = "add"
 
@@ -455,7 +490,7 @@ async def register(broker, deps: ToolDeps) -> None:
             proposal = await memory_service.propose_write(
                 scope_id=resolved_scope_id,
                 partition=mem_partition,
-                action=action,
+                action=write_action,
                 subject_key=subject_key,
                 content=content,
                 rationale="memory.write tool",
@@ -465,17 +500,29 @@ async def register(broker, deps: ToolDeps) -> None:
                 metadata={"source": "memory.write"},
             )
         except Exception as exc:
-            return json.dumps(
-                {"error": "PROPOSE_FAILED", "message": f"记忆写入提案失败: {exc}"},
-                ensure_ascii=False,
+            return MemoryWriteResult(
+                status="rejected",
+                target="memory_store",
+                preview=f"记忆写入提案失败: {exc}",
+                reason=f"PROPOSE_FAILED: {exc}",
+                memory_id="",
+                version=0,
+                action="create",
+                scope_id=resolved_scope_id,
             )
 
         try:
             validation = await memory_service.validate_proposal(proposal.proposal_id)
         except Exception as exc:
-            return json.dumps(
-                {"error": "VALIDATE_FAILED", "message": f"记忆写入验证失败: {exc}"},
-                ensure_ascii=False,
+            return MemoryWriteResult(
+                status="rejected",
+                target="memory_store",
+                preview=f"记忆写入验证失败: {exc}",
+                reason=f"VALIDATE_FAILED: {exc}",
+                memory_id="",
+                version=0,
+                action="create",
+                scope_id=resolved_scope_id,
             )
 
         if not validation.accepted:
@@ -486,23 +533,29 @@ async def register(broker, deps: ToolDeps) -> None:
                 scope_id=resolved_scope_id,
                 action=action_label,
             )
-            return json.dumps(
-                {
-                    "status": "rejected",
-                    "action": action_label,
-                    "subject_key": subject_key,
-                    "errors": validation.errors,
-                    "scope_id": resolved_scope_id,
-                },
-                ensure_ascii=False,
+            return MemoryWriteResult(
+                status="rejected",
+                target="memory_store",
+                preview=f"记忆写入被拒绝: {', '.join(str(e) for e in validation.errors)}",
+                reason=f"VALIDATION_REJECTED: {validation.errors}",
+                memory_id="",
+                version=0,
+                action="create",
+                scope_id=resolved_scope_id,
             )
 
         try:
             commit_result = await memory_service.commit_memory(proposal.proposal_id)
         except Exception as exc:
-            return json.dumps(
-                {"error": "COMMIT_FAILED", "message": f"记忆写入失败: {exc}"},
-                ensure_ascii=False,
+            return MemoryWriteResult(
+                status="rejected",
+                target="memory_store",
+                preview=f"记忆写入失败: {exc}",
+                reason=f"COMMIT_FAILED: {exc}",
+                memory_id="",
+                version=0,
+                action="create",
+                scope_id=resolved_scope_id,
             )
 
         _log.info(
@@ -515,17 +568,14 @@ async def register(broker, deps: ToolDeps) -> None:
             partition=partition,
         )
 
-        return json.dumps(
-            {
-                "status": "committed",
-                "action": action_label,
-                "subject_key": subject_key,
-                "memory_id": commit_result.memory_id,
-                "version": commit_result.version,
-                "scope_id": resolved_scope_id,
-                "partition": partition,
-            },
-            ensure_ascii=False,
+        return MemoryWriteResult(
+            status="written",
+            target="memory_store",
+            preview=f"{action_label}: {subject_key} → {content[:100]}",
+            memory_id=commit_result.memory_id,
+            version=commit_result.version,
+            action="create" if action_label == "add" else "update",
+            scope_id=resolved_scope_id,
         )
 
     for handler in (

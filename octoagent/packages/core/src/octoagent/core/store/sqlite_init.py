@@ -655,6 +655,52 @@ CREATE TABLE IF NOT EXISTS skill_pipeline_checkpoints (
 );
 """
 
+# Feature 084 Phase 2: snapshot_records 表（T019）
+# 存储工具调用写入结果的摘要快照（TTL 30 天）
+_SNAPSHOT_RECORDS_DDL = """
+CREATE TABLE IF NOT EXISTS snapshot_records (
+    id            TEXT PRIMARY KEY,
+    tool_call_id  TEXT NOT NULL UNIQUE,
+    result_summary TEXT NOT NULL,
+    timestamp     TEXT NOT NULL,
+    ttl_days      INTEGER NOT NULL DEFAULT 30,
+    expires_at    TEXT NOT NULL,
+    created_at    TEXT NOT NULL DEFAULT (datetime('now'))
+);
+"""
+
+_SNAPSHOT_RECORDS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_snapshot_records_expires_at ON snapshot_records(expires_at);",
+]
+
+# Feature 084 Phase 2: observation_candidates 表（T020）
+# 存储 Observation Routine 产生的候选事实（待用户确认），TTL 30 天
+_OBSERVATION_CANDIDATES_DDL = """
+CREATE TABLE IF NOT EXISTS observation_candidates (
+    id                TEXT PRIMARY KEY,
+    fact_content      TEXT NOT NULL,
+    fact_content_hash TEXT NOT NULL,
+    category          TEXT,
+    confidence        REAL,
+    status            TEXT NOT NULL DEFAULT 'pending',
+    source_turn_id    TEXT,
+    edited            INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at        TEXT NOT NULL,
+    promoted_at       TEXT,
+    user_id           TEXT NOT NULL
+);
+"""
+
+_OBSERVATION_CANDIDATES_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_obs_candidates_status ON observation_candidates(status);",
+    "CREATE INDEX IF NOT EXISTS idx_obs_candidates_expires_at ON observation_candidates(expires_at);",
+    (
+        "CREATE INDEX IF NOT EXISTS idx_obs_dedup "
+        "ON observation_candidates(source_turn_id, fact_content_hash);"
+    ),
+]
+
 # Feature 061: 审批覆盖持久化表
 # 存储用户 "always" 授权决策，绑定到 Agent 实例
 _APPROVAL_OVERRIDES_DDL = """
@@ -1478,6 +1524,9 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_SKILL_PIPELINE_RUNS_DDL)
     await conn.execute(_SKILL_PIPELINE_CHECKPOINTS_DDL)
     await conn.execute(_APPROVAL_OVERRIDES_DDL)
+    # Feature 084 Phase 2: 新增 snapshot_records + observation_candidates 表（T019/T020）
+    await conn.execute(_SNAPSHOT_RECORDS_DDL)
+    await conn.execute(_OBSERVATION_CANDIDATES_DDL)
     await _migrate_legacy_tables(conn)
 
     # 创建索引
@@ -1492,6 +1541,8 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _WORK_INDEXES
         + _AGENT_CONTEXT_INDEXES
         + _APPROVAL_OVERRIDES_INDEXES
+        + _SNAPSHOT_RECORDS_INDEXES
+        + _OBSERVATION_CANDIDATES_INDEXES
     ):
         await conn.execute(idx_sql)
 

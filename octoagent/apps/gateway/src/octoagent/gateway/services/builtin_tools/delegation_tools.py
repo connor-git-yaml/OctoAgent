@@ -19,6 +19,15 @@ from pydantic import BaseModel
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
+from octoagent.core.models.tool_results import (
+    ChildSpawnInfo,
+    SubagentsSpawnResult,
+    SubagentsKillResult,
+    SubagentsSteerResult,
+    WorkMergeResult,
+    WorkDeleteResult,
+    WorkSnapshot,
+)
 
 from ._deps import (
     ToolDeps,
@@ -84,6 +93,7 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="delegation",
         tags=["subagent", "child_task", "delegation"],
         manifest_ref="builtin://subagents.spawn",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime"],
         },
@@ -94,7 +104,7 @@ async def register(broker, deps: ToolDeps) -> None:
         worker_type: str = "general",
         target_kind: str = "subagent",
         title: str = "",
-    ) -> str:
+    ) -> SubagentsSpawnResult:
         """创建并启动 child task / subagent runtime。
 
         支持两种模式：
@@ -108,7 +118,7 @@ async def register(broker, deps: ToolDeps) -> None:
         if not items:
             raise RuntimeError("objective 或 objectives 至少需要提供一个")
 
-        launched = []
+        launched_raw = []
         for i, item in enumerate(items):
             child_title = title if len(items) == 1 and title else item[:60]
             payload = await launch_child(
@@ -121,10 +131,34 @@ async def register(broker, deps: ToolDeps) -> None:
                 ),
                 title=child_title,
             )
-            launched.append(payload)
-        return json.dumps(
-            {"requested": len(items), "created": len(launched), "children": launched},
-            ensure_ascii=False,
+            launched_raw.append(payload)
+
+        # 将 payload dict 转为 ChildSpawnInfo（防 F4 压扁，保留全部关联键）
+        children = [
+            ChildSpawnInfo(
+                task_id=p.get("task_id", ""),
+                work_id=p.get("work_id", ""),
+                session_id=p.get("session_id", ""),
+                worker_type=p.get("worker_type", ""),
+                objective=p.get("objective", ""),
+                tool_profile=p.get("tool_profile", ""),
+                parent_task_id=p.get("parent_task_id", ""),
+                parent_work_id=p.get("parent_work_id", ""),
+                target_kind=p.get("target_kind", ""),
+                title=p.get("title", ""),
+                thread_id=p.get("thread_id", ""),
+                worker_plan_id=p.get("worker_plan_id", ""),
+            )
+            for p in launched_raw
+        ]
+        child_ids = ", ".join(c.task_id for c in children if c.task_id)
+        return SubagentsSpawnResult(
+            status="written",
+            target="task_store",
+            preview=f"派发 {len(children)} 个子任务: {child_ids[:150]}",
+            requested=len(items),
+            created=len(children),
+            children=children,
         )
 
     @tool_contract(
@@ -133,6 +167,7 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="delegation",
         tags=["subagent", "cancel", "kill"],
         manifest_ref="builtin://subagents.kill",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
@@ -141,7 +176,7 @@ async def register(broker, deps: ToolDeps) -> None:
         task_id: str = "",
         work_id: str = "",
         reason: str = "cancelled by parent agent",
-    ) -> str:
+    ) -> SubagentsKillResult:
         """取消当前 work 之下的指定 child work / task。"""
 
         if deps._task_runner is None:
@@ -158,14 +193,23 @@ async def register(broker, deps: ToolDeps) -> None:
             target.work_id,
             reason=reason,
         )
-        return json.dumps(
-            {
-                "task_id": target.task_id,
-                "work_id": target.work_id,
-                "runtime_cancelled": runtime_cancelled,
-                "work": None if updated is None else updated.model_dump(mode="json"),
-            },
-            ensure_ascii=False,
+        work_snap = (
+            WorkSnapshot(
+                work_id=updated.work_id,
+                status=updated.status.value if hasattr(updated.status, "value") else str(updated.status),
+                title=getattr(updated, "title", ""),
+            )
+            if updated is not None
+            else None
+        )
+        return SubagentsKillResult(
+            status="written",
+            target=target.task_id,
+            preview=f"已取消 task_id={target.task_id}, work_id={target.work_id}",
+            task_id=target.task_id,
+            work_id=target.work_id,
+            runtime_cancelled=runtime_cancelled,
+            work=work_snap,
         )
 
     @tool_contract(
@@ -174,6 +218,7 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="delegation",
         tags=["subagent", "steer", "input"],
         manifest_ref="builtin://subagents.steer",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
@@ -183,7 +228,7 @@ async def register(broker, deps: ToolDeps) -> None:
         task_id: str = "",
         work_id: str = "",
         approval_id: str = "",
-    ) -> str:
+    ) -> SubagentsSteerResult:
         """向等待输入的 child runtime 附加 steering input。"""
 
         if deps._task_runner is None:
@@ -200,20 +245,16 @@ async def register(broker, deps: ToolDeps) -> None:
             approval_id=approval_id or None,
         )
         session = await deps.task_runner.get_execution_session(target.task_id)
-        return json.dumps(
-            {
-                "task_id": result.task_id,
-                "work_id": target.work_id,
-                "session_id": result.session_id,
-                "request_id": result.request_id,
-                "artifact_id": result.artifact_id,
-                "delivered_live": result.delivered_live,
-                "approval_id": result.approval_id,
-                "execution_session": None
-                if session is None
-                else session.model_dump(mode="json"),
-            },
-            ensure_ascii=False,
+        return SubagentsSteerResult(
+            status="written",
+            target=target.task_id,
+            preview=f"steering input 已附加到 task_id={target.task_id}",
+            session_id=result.session_id,
+            request_id=result.request_id,
+            artifact_id=result.artifact_id,
+            delivered_live=result.delivered_live,
+            approval_id=result.approval_id,
+            execution_session=None if session is None else session.model_dump(mode="json"),
         )
 
     @tool_contract(
@@ -222,11 +263,12 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="delegation",
         tags=["work", "merge", "child_work"],
         manifest_ref="builtin://work.merge",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
     )
-    async def work_merge(summary: str = "merged by builtin tool") -> str:
+    async def work_merge(summary: str = "merged by builtin tool") -> WorkMergeResult:
         """合并当前 work 的 child works。"""
 
         if deps._delegation_plane is None:
@@ -243,13 +285,22 @@ async def register(broker, deps: ToolDeps) -> None:
         if blocking:
             raise RuntimeError(f"child works still active: {', '.join(blocking)}")
         merged = await deps.delegation_plane.merge_work(context.work_id, summary=summary)
-        return json.dumps(
-            {
-                "work_id": context.work_id,
-                "merged": None if merged is None else merged.model_dump(mode="json"),
-                "child_work_ids": [item.work_id for item in children],
-            },
-            ensure_ascii=False,
+        merged_snap = (
+            WorkSnapshot(
+                work_id=merged.work_id,
+                status=merged.status.value if hasattr(merged.status, "value") else str(merged.status),
+                title=getattr(merged, "title", ""),
+            )
+            if merged is not None
+            else None
+        )
+        child_ids = [item.work_id for item in children]
+        return WorkMergeResult(
+            status="written",
+            target=context.work_id,
+            preview=f"合并 {len(child_ids)} 个 child works 到 {context.work_id}",
+            child_work_ids=child_ids,
+            merged=merged_snap,
         )
 
     @tool_contract(
@@ -258,11 +309,12 @@ async def register(broker, deps: ToolDeps) -> None:
         tool_group="delegation",
         tags=["work", "delete", "archive"],
         manifest_ref="builtin://work.delete",
+        produces_write=True,
         metadata={
             "entrypoints": ["agent_runtime", "web"],
         },
     )
-    async def work_delete(reason: str = "deleted by builtin tool") -> str:
+    async def work_delete(reason: str = "deleted by builtin tool") -> WorkDeleteResult:
         """软删除当前 work 及其已完成 child works。"""
 
         if deps._delegation_plane is None:
@@ -276,21 +328,30 @@ async def register(broker, deps: ToolDeps) -> None:
             for item in descendants
             if item.status.value not in WORK_TERMINAL_VALUES
         ]
-        current = await deps.stores.work_store.get_work(context.work_id)
-        if current is None:
+        current_work = await deps.stores.work_store.get_work(context.work_id)
+        if current_work is None:
             raise RuntimeError("current work no longer exists")
-        if current.status.value not in WORK_TERMINAL_VALUES:
-            active.insert(0, current.work_id)
+        if current_work.status.value not in WORK_TERMINAL_VALUES:
+            active.insert(0, current_work.work_id)
         if active:
             raise RuntimeError(f"work delete requires terminal status: {', '.join(active)}")
         deleted = await deps.delegation_plane.delete_work(context.work_id, reason=reason)
-        return json.dumps(
-            {
-                "work_id": context.work_id,
-                "deleted": None if deleted is None else deleted.model_dump(mode="json"),
-                "child_work_ids": [item.work_id for item in descendants],
-            },
-            ensure_ascii=False,
+        deleted_snap = (
+            WorkSnapshot(
+                work_id=deleted.work_id,
+                status=deleted.status.value if hasattr(deleted.status, "value") else str(deleted.status),
+                title=getattr(deleted, "title", ""),
+            )
+            if deleted is not None
+            else None
+        )
+        child_ids = [item.work_id for item in descendants]
+        return WorkDeleteResult(
+            status="written",
+            target=context.work_id,
+            preview=f"已软删除 work_id={context.work_id}（{len(child_ids)} 个子 work）",
+            child_work_ids=child_ids,
+            deleted=deleted_snap,
         )
 
     for handler in (

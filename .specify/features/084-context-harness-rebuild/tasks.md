@@ -185,7 +185,7 @@
 
 **目标**: SnapshotStore + user_profile 三工具 + OwnerProfile sync 上线，路径 A 完整打通（D2/D3/D4 三个断层根治）
 
-### T019 [P] SQLite 新增 snapshot_records 表 DDL [实现 / 1h]
+### T019 [x] [P] SQLite 新增 snapshot_records 表 DDL [实现 / 1h]
 **依赖**: T018  
 **目标文件**: `packages/core/src/octoagent/core/store/sqlite_init.py`  
 **验收**:
@@ -194,7 +194,7 @@
 - `CREATE INDEX IF NOT EXISTS idx_snapshot_records_expires_at` 已创建
 - migration 版本号递增，启动时自动执行
 
-### T020 [P] SQLite 新增 observation_candidates 表 DDL [实现 / 1h]
+### T020 [x] [P] SQLite 新增 observation_candidates 表 DDL [实现 / 1h]
 **依赖**: T018  
 **目标文件**: `packages/core/src/octoagent/core/store/sqlite_init.py`  
 **验收**:
@@ -202,7 +202,7 @@
 - 字段完整：`id`、`fact_content`、`fact_content_hash`、`category`、`confidence`、`status`（DEFAULT 'pending'）、`source_turn_id`、`edited`（DEFAULT 0）、`created_at`、`expires_at`、`promoted_at`、`user_id`
 - 三个索引创建：`idx_obs_candidates_status`、`idx_obs_candidates_expires_at`、`idx_obs_dedup(source_turn_id, fact_content_hash)`
 
-### T021 [P] 定义 10 个新增事件类型常量 [实现 / 1h]
+### T021 [x] [P] 定义 10 个新增事件类型常量 [实现 / 1h]
 **依赖**: T018  
 **目标文件**: `packages/core/src/octoagent/core/models/events.py`（或现有事件类型定义文件）  
 **验收**:
@@ -210,7 +210,7 @@
 - `APPROVAL_REQUESTED` 事件 schema 扩展字段：`threat_category`、`pattern_id`、`diff_content`（FR-10.2）
 - 已有事件不变
 
-### T021.0 ToolEntry 加 metadata 字段 + register 自动从 handler._tool_meta 同步 [实现 / 1.5h]
+### T021.0 [x] ToolEntry 加 metadata 字段 + register 自动从 handler._tool_meta 同步 [实现 / 1.5h]
 **依赖**: T018, T021.2（依赖 `_enforce_write_result_contract` 已 export，防 F12 循环依赖；改为串行而非并行）  
 **目标文件**: 
 - `octoagent/apps/gateway/src/octoagent/gateway/harness/tool_registry.py`（`ToolEntry` 加 `metadata` 字段；`register()` 内部从 handler 同步）
@@ -227,7 +227,7 @@
 - F9 修复：register() 路径独立触发 enforce，不依赖 broker reflect_tool_schema
 - FR-2.4 / SC-012 对应
 
-### T021.1 [P] 定义 WriteResult Pydantic 协议 + 写工具子类 [实现 / 2h]
+### T021.1 [x] [P] 定义 WriteResult Pydantic 协议 + 写工具子类 [实现 / 2h]
 **依赖**: T018  
 **目标文件**: `octoagent/packages/core/src/octoagent/core/models/tool_results.py`（新建）  
 **验收**:
@@ -248,7 +248,7 @@
 - 子类设计需对照各工具现有 `return json.dumps({...})` 中的字段，逐一保留
 - FR-2.4 / FR-2.7 / SC-012 对应
 
-### T021.2 [P] tool_contract 装饰器扩展 — produces_write 字段 + 注册期 enforce [实现 / 2h]
+### T021.2 [x] [P] tool_contract 装饰器扩展 — produces_write 字段 + 注册期 enforce [实现 / 2h]
 **依赖**: T021.1（**不依赖 T021.0**，独立 export `_enforce_write_result_contract` 函数；防 F12 循环依赖）  
 **目标文件**: 
 - `octoagent/packages/tooling/src/octoagent/tooling/decorators.py`（已有 `tool_contract`，加 `produces_write` 参数）
@@ -264,7 +264,7 @@
 - 写入 unit test 覆盖 `from __future__ import annotations` 场景（防 F1 回归）+ 一个现有 `_tool_meta` 工具的兼容性测试（防 F6 回归）
 - FR-2.4 / Constitution C3 对齐
 
-### T021.3 改造现存写入型工具到 WriteResult 子类 — config + mcp + delegation [重构 / 4h]
+### T021.3 [x] 改造现存写入型工具到 WriteResult 子类 — config + mcp + delegation [重构 / 4h]
 **依赖**: T021.1, T021.2  
 **目标文件**: 
 - `octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/config_tools.py`
@@ -284,7 +284,7 @@
 - 11 个工具迁移完成，注册期 schema 检查 100% 通过
 - 现有调用方（如 dashboard / CLI / web UI）能继续读到原结构化字段（task_id 等），不破坏 steer/kill/inspect 工作流；补回归测试覆盖关联键不丢失（如 `test_subagents_spawn_returns_children_with_task_ids`）
 
-### T021.4 改造现存写入型工具到 WriteResult 子类 — filesystem + memory + misc + pipeline [重构 / 3.5h]
+### T021.4 [x] 改造现存写入型工具到 WriteResult 子类 — filesystem + memory + misc + pipeline [重构 / 3.5h]
 **依赖**: T021.1, T021.2  
 **目标文件**: 
 - `octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/filesystem_tools.py`
@@ -305,7 +305,7 @@
 - 5 个写工具迁移完成（filesystem.write_text / memory.write / behavior.write_file / canvas.write / graph_pipeline），注册期 schema 检查通过
 - 现有 memory_runtime / memory_console / behavior / canvas / pipeline 服务 chain 同步适配；补回归测试 `test_memory_write_returns_memory_id_and_version` + `test_graph_pipeline_start_returns_pending_with_run_id`
 
-### T021.5 [P] 单元测试：WriteResult 契约一致性 + 注册期 enforce + 关联键保留 [测试 / 2.5h]
+### T021.5 [x] [P] 单元测试：WriteResult 契约一致性 + 注册期 enforce + 关联键保留 [测试 / 2.5h]
 **依赖**: T021.0, T021.2, T021.3, T021.4, T021.6（依赖 T021.0 的 ToolEntry.metadata 字段，否则扫描注册表会失败）  
 **目标文件**: `octoagent/apps/gateway/tests/tooling/test_write_result_contract.py`（新建）  
 **验收**:
@@ -321,7 +321,7 @@
 - `test_none_level_tools_unchanged`：side_effect_level=NONE 工具不受约束
 - SC-012 对应；CI 失败时阻断后续 Phase
 
-### T021.6 改造 ToolBroker 序列化路径 — BaseModel 输出走 model_dump_json [重构 / 1.5h]
+### T021.6 [x] 改造 ToolBroker 序列化路径 — BaseModel 输出走 model_dump_json [重构 / 1.5h]
 **依赖**: T021.1  
 **目标文件**: 
 - `octoagent/packages/tooling/src/octoagent/tooling/broker.py`（修改 `ToolBroker.execute()` 第 ~378 行）
