@@ -62,16 +62,33 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> ProviderRoute
 ### 后续修复（M5 阶段）
 
 - **Feature 081（LiteLLM 完全退役）** ✅: Provider 直连替代 LiteLLM Proxy；migrate-080 双对象迁移
-- **Feature 082（Bootstrap & Profile Integrity）** ✅: 修复"用户首次引导从未真实跑过"
+- **Feature 082（Bootstrap & Profile Integrity）** ⚠️→F084 退役: 修复"用户首次引导从未真实跑过"
   根本性漏洞——OwnerProfile 默认值清理 + 状态机加严 + 完成路径接入 +
   USER.md 动态生成 + 迁移命令 + 多 root 收敛。
-  详见 `docs/codebase-architecture/bootstrap-profile-flow.md`
+  **F084 Phase 4 整体退役**了 BootstrapSession 状态机 + UserMdRenderer +
+  bootstrap_orchestrator + bootstrap_commands CLI（详见 F084 节）。
 - **Feature 083（测试并发加速）** ✅（务实版本）: 修 thread shutdown hang（aiosqlite + asyncio
   executor）+ 修 fixture `os.environ` 污染 + `attach_input` 测试 race 加严等待。
   进程退出从 30+ 分钟 hang → ~20s（关键修复）。
   xdist 提速作为 opt-in（`pytest -n auto`，5.5x 提速但 task_runner 状态机测试有 race
   ~20% 失败率，治本超 F083 scope）。
   详见 `docs/codebase-architecture/testing-concurrency.md`
+- **Feature 084（Context + Harness 全栈重构）** ✅（仿 Hermes Agent 模式）:
+  替代 F082 的根本方案——
+  - **Harness 层**：中央 ToolRegistry（数据驱动 entrypoints）+ ToolsetResolver +
+    ThreatScanner（17+ pattern + invisible Unicode）+ SnapshotStore（冻结快照 +
+    Live State 二分，保护 prefix cache）+ ApprovalGate（session allowlist + SSE）+
+    DelegationManager（max_depth=2 / max_concurrent=3）
+  - **Context 层**：USER.md 是 SoT，OwnerProfile 退化为派生只读视图；
+    `user_profile.update/read/observe` 三工具 + Memory Candidates API（promote/
+    discard/bulk_discard with atomic claim + skipped_ids）+ Web UI 红点 badge
+  - **WriteResult 通用回显契约**：18+ 写工具 return type 强制 WriteResult 子类，
+    注册期 fail-fast；保留 task_id / memory_id / run_id 等关联键不压扁
+  - **退役**：BootstrapSession / BootstrapOrchestrator / UserMdRenderer /
+    bootstrap_integrity / bootstrap_commands CLI（净删 ~2400 行 dead code）
+  - **重装路径**：清 ~/.octoagent/data + behavior + octo update 重启
+    （bootstrap 完成由 USER.md 实质填充判定，不依赖任何旧表 / 状态机）
+  详见 `docs/codebase-architecture/harness-and-context.md`
 
 ## 协作行为准则
 

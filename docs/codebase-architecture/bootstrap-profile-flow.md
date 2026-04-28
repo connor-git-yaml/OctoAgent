@@ -1,8 +1,39 @@
-# Bootstrap & Profile 数据流（Feature 082）
+# Bootstrap & Profile 数据流（Feature 082 → F084 退役）
 
 > 作者：Connor
 > 引入版本：Feature 082（5 Phase，2026-04-27）
-> 状态：✅ 完成
+> **状态：⚠️ 已被 Feature 084 重构替代（2026-04-28）**
+>
+> ## 重要更新（F084 Phase 4 完成）
+>
+> F082 引入的三层抽象（BootstrapSession 状态机 + BootstrapSessionOrchestrator + UserMdRenderer）
+> 在 F084 中被识别为根因，Phase 4 已**整体退役**：
+>
+> - ❌ `BootstrapSession` 类 + `bootstrap_sessions` SQLite 表（DROP migration 自动执行）
+> - ❌ `BootstrapSessionOrchestrator` / `bootstrap_orchestrator.py`
+> - ❌ `BootstrapIntegrityChecker` / `bootstrap_integrity.py`
+> - ❌ `UserMdRenderer` / `user_md_renderer.py`
+> - ❌ `bootstrap.complete` 工具（替换为 `user_profile.update`）
+> - ❌ `octo bootstrap reset/migrate-082/rebuild-user-md` CLI
+>
+> ## F084 新流程（参考 Hermes Agent 模式）
+>
+> Bootstrap 完成判定不再走状态机，而是**直接判定 USER.md 是否实质填充**（内容 > 100 字符）：
+>
+> ```python
+> from octoagent.core.models.agent_context import _user_md_substantively_filled
+> bootstrap_completed = _user_md_substantively_filled(USER_MD_PATH)
+> ```
+>
+> 写入路径：`user_profile.update(operation="add", content="...")` →
+> `PolicyGate.check`（含 ThreatScanner）→ `SnapshotStore.append_entry`（fcntl.flock + atomic write）→
+> `MEMORY_ENTRY_ADDED` 事件 + `SnapshotRecord` 持久化 + `WriteResult` 回显。
+>
+> 完整新架构请参考 **`docs/codebase-architecture/harness-and-context.md`**（F084 主文档）。
+>
+> 下面 F082 内容**保留作为历史参考**，便于理解 F082→F084 演化。
+
+---
 
 ## 1. 历史问题
 
