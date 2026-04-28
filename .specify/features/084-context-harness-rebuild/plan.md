@@ -485,6 +485,195 @@ SUBAGENT_SPAWNED = "SUBAGENT_SPAWNED"
 SUBAGENT_RETURNED = "SUBAGENT_RETURNED"
 ```
 
+**新增协议（WriteResult Contract — FR-2.4 / FR-2.7）**（`packages/core/src/octoagent/core/models/tool_results.py` 新文件）：
+
+```python
+from typing import Literal
+from pydantic import BaseModel
+
+class WriteResult(BaseModel):
+    """所有"写入型工具"（produces_write=True）的统一返回类型（Constitution C3）。
+
+    覆盖：config / mcp / delegation / filesystem / memory / behavior / canvas / user_profile。
+    不覆盖：browser / terminal / tts / pipeline 等"执行类副作用"工具（语义不是产生新写入物）。
+    """
+    status: Literal["written", "skipped", "rejected", "pending"]  # pending 用于异步启动（mcp.install）
+    target: str                         # 文件路径 / DB 表名 / 子任务 ID / 异步 job ID
+    bytes_written: int | None = None
+    preview: str | None = None          # 前 200 字符摘要
+    mtime_iso: str | None = None        # 写入后的 ISO 8601 mtime（仅文件类）
+    reason: str | None = None           # 状态非 written 时的原因或异步任务说明
+```
+
+`tool_contract` 装饰器扩展（**实际路径**：`octoagent/packages/tooling/src/octoagent/tooling/decorators.py` + `schema.py`）：
+
+```python
+# decorators.py — 已有的 tool_contract 装饰器加 produces_write 参数（默认 False）
+# 关键：复用现有的 func._tool_meta 属性（不是新建 __tool_contract__），
+# 与 schema.py:41 的 getattr(func, "_tool_meta", None) 路径一致
+def tool_contract(
+    *,
+    side_effect_level: SideEffectLevel,
+    tool_group: str,
+    produces_write: bool = False,    # 新增（FR-2.4）
+    metadata: dict[str, Any] | None = None,
+    ...
+) -> Callable:
+    def decorator(func):
+        merged_metadata = {**(metadata or {}), "produces_write": produces_write}
+        func._tool_meta = {  # 现有属性，扩展 metadata
+            ...,
+            "metadata": merged_metadata,
+        }
+        return func
+    return decorator
+
+# schema.py — 已有的 reflect_tool_schema(func) 在现有 _tool_meta 读取路径上加 enforcement
+import typing
+
+def reflect_tool_schema(func: Callable) -> ToolMeta:
+    tool_meta_dict = getattr(func, "_tool_meta", None)
+    if tool_meta_dict is None:
+        raise ValueError(f"函数 '{func.__name__}' 未附加 @tool_contract 装饰器")
+    produces_write = tool_meta_dict.get("metadata", {}).get("produces_write", False)
+    _enforce_write_result_contract(func, produces_write)  # 新增检查
+    return ToolMeta(...)
+
+def _enforce_write_result_contract(handler, produces_write: bool) -> None:
+    if not produces_write:
+        return  # 只有显式声明的写工具才约束 return type
+    # 关键：必须用 get_type_hints 解析 string-form forward refs
+    # 因为 14/15 个 builtin_tools 启用了 from __future__ import annotations
+    hints = typing.get_type_hints(handler, include_extras=True)
+    return_type = hints.get('return')
+    if not (isinstance(return_type, type) and issubclass(return_type, WriteResult)):
+        raise SchemaReflectionError(  # 复用现有异常类（防 F13 回归）
+            f"{handler.__name__}: produces_write=True 要求 return type 是 WriteResult 子类，"
+            f"实际为 {return_type!r}"
+        )
+```
+
+**ToolEntry metadata 字段 + 注册期同步**（`octoagent/apps/gateway/src/octoagent/gateway/harness/tool_registry.py`）：
+
+当前 `ToolEntry` 只有 `name / entrypoints / toolset / handler / schema / side_effect_level / description` 字段，没有 metadata。SC-012 测试需要按 `metadata.produces_write=True` 扫描注册表，必须先给 ToolEntry 加这个字段：
+
+```python
+class ToolEntry(BaseModel):
+    ...（现有字段）
+    metadata: dict[str, Any] = Field(default_factory=dict)  # 新增
+
+def register(entry: ToolEntry) -> None:
+    # 注册期自动从 handler._tool_meta sync metadata，不需要修改 12 个 builtin_tools 的 register 调用
+    handler_meta = getattr(entry.handler, "_tool_meta", {}).get("metadata", {})
+    entry.metadata = {**entry.metadata, **handler_meta}
+
+    # 关键（防 F9）：register 路径独立触发 enforce，不依赖 broker.reflect_tool_schema
+    # 任何走 _registry_register 直接路径的工具都会被检查
+    from octoagent.tooling.schema import _enforce_write_result_contract
+    _enforce_write_result_contract(entry.handler, entry.metadata.get("produces_write", False))
+
+    _REGISTRY.register(entry)  # 现有 API（不是 add，防 F11 回归）
+```
+
+这样 ToolRegistry 与 broker 的 `_tool_meta` 对同一工具的 `produces_write` 标记保持一致，**且任一路径写入工具都触发 fail-fast**。Phase 1 已完成的 12 个 builtin_tools 的 `_registry_register(ToolEntry(...))` 调用代码无需改动（自动 sync + enforce 路径生效）。
+
+**ToolBroker 序列化路径同步改造**（`octoagent/packages/tooling/src/octoagent/tooling/broker.py:378`）：
+
+当前 `ToolBroker.execute()` 用 `output_str = str(raw_output)` 把工具输出转字符串。如果 handler 直接 return `WriteResult` 子类（Pydantic BaseModel），`str(model)` 返回 Python repr 字符串（`status='written' target='/tmp/f' ...`），不是 JSON。LLM / Web UI / CLI 解析 `task_id` / `children` / `memory_id` 等字段会失败。
+
+改造为：检测 `BaseModel` 类型用 `model_dump_json()`，否则保持 `str()`：
+
+```python
+# broker.py:378 替代
+from pydantic import BaseModel
+
+if raw_output is None:
+    output_str = ""
+elif isinstance(raw_output, BaseModel):
+    output_str = raw_output.model_dump_json()  # 保留所有字段为 JSON
+else:
+    output_str = str(raw_output)  # 老路径兼容（return JSON string 的工具）
+```
+
+**关键设计：每个写工具定义 WriteResult 子类，保留现有结构化字段**——避免压扁后丢失下游关联键（`task_id` / `work_id` / `session_id` / `artifact_id` / `memory_id` / `version` / `children[]` 等）。在 `tool_results.py` 同文件或 `octoagent.core.models` 内：
+
+```python
+class SubagentsSpawnResult(WriteResult):
+    requested: int
+    created: int
+    children: list[ChildSpawnInfo]   # 含 task_id / work_id / session_id
+
+class SubagentsKillResult(WriteResult):
+    task_id: str
+    work_id: str
+    runtime_cancelled: bool
+    work: WorkSnapshot | None
+
+class SubagentsSteerResult(WriteResult):
+    session_id: str
+    request_id: str
+    artifact_id: str | None
+    delivered_live: bool
+    approval_id: str | None
+
+class WorkMergeResult(WriteResult):
+    child_work_ids: list[str]
+    merged: WorkSnapshot | None
+
+class MemoryWriteResult(WriteResult):
+    memory_id: str
+    version: int
+    action: Literal["create", "update", "append"]
+    scope_id: str
+
+class CanvasWriteResult(WriteResult):
+    artifact_id: str
+    task_id: str
+
+class McpInstallResult(WriteResult):
+    """异步安装：通常 status="pending"，task_id 用于通过 mcp.install_status 追踪进度。
+    
+    yaml 配置写入是同步的，但实际包安装（npm/pip）是异步 job。
+    防 F14 回归：必须保留 task_id 让调用方继续追踪。
+    """
+    server_id: str
+    install_source: str
+    task_id: str | None = None  # status="pending" 时 MUST 必填（npm/pip 异步路径）；同步路径可为 None
+
+class GraphPipelineResult(WriteResult):
+    """Pipeline 编排结果（F15 修复：之前被误归到执行类豁免）。
+    
+    graph_pipeline.start 会创建 Task / 保存 Work / commit SQLite 事务 / 启动后台 run，
+    是真实持久化 state 写入，必须走 WriteResult 契约让调用方稳定追踪 run_id/task_id。
+    覆盖 action: start / resume / cancel / retry。
+    """
+    action: Literal["start", "resume", "cancel", "retry"]
+    run_id: str | None = None       # start 时返回；后续 action 必填
+    task_id: str | None = None      # 启动的 child task ID（用于追踪进度）
+    # status 语义：
+    # - "pending" + run_id + task_id：start 成功，后台 run 在执行
+    # - "written"：resume / cancel / retry 同步操作完成
+    # - "rejected" + reason：参数非法 / 状态机不允许
+# 其他工具按现有 return shape 一一定义
+```
+
+**现存写入型工具迁移清单**（FR-2.7，Phase 2 内一次完成；**真实工具名**已核对代码库）：
+
+| 模块 | 工具（真实 name） | 数量 | 子类 |
+|------|------|------|------|
+| `config_tools.py` | `config.add_provider` / `config.set_model_alias` / `config.sync` / `setup.quick_connect` | 4 | `Config*Result(WriteResult)` |
+| `mcp_tools.py` | `mcp.install` / `mcp.uninstall` | 2 | `Mcp*Result(WriteResult)` |
+| `delegation_tools.py` | `subagents.spawn` / `subagents.kill` / `subagents.steer` / `work.merge` / `work.delete` | 5 | `Subagents*Result` / `Work*Result` |
+| `filesystem_tools.py` | `filesystem.write_text` ⚠️（**不是 filesystem.write**） | 1 | `FilesystemWriteTextResult(WriteResult)` |
+| `memory_tools.py` | `memory.write` | 1 | `MemoryWriteResult(WriteResult)` |
+| `misc_tools.py` | `behavior.write_file` ⚠️ / `canvas.write` ⚠️（**无 misc 前缀**） | 2 | `BehaviorWriteFileResult` / `CanvasWriteResult` |
+| `pipeline_tool.py` | `graph_pipeline` ⚠️（F15 修复：从执行类移入；`action="start"` 创建 Task / save_work / commit DB） | 1 | `GraphPipelineResult`（保留 `run_id` / `task_id` / `action`） |
+| Phase 2 新增 | `user_profile.update` / `user_profile.observe` | 2 | `UserProfileUpdateResult` / `ObserveResult` |
+| **合计** | | **≥ 18** | |
+
+**显式不纳入清单的执行类工具**（`produces_write=False`，return type 不约束）：
+`browser.open` / `browser.navigate` / `browser.act`（浏览器 session 控制）/ `terminal.exec`（命令执行）/ `tts.speak`（音频输出）—— 这些工具的 `side_effect_level` 也是 REVERSIBLE+ 但不产生持久化写入物，强制 WriteResult 在语义上不准确，且会破坏现有调用方（web UI 显示 stdout / 浏览器 snapshot 等）。**注**：`graph_pipeline` 之前被误归到此类，R8 review 发现其实际写 Task/Work + commit DB，已移到写入型清单。
+
 **新增工具**（`tools/user_profile_tools.py`）：
 
 ```python
@@ -536,6 +725,10 @@ async def owner_profile_sync_on_startup(user_md_path: Path) -> None:
 - `grep -r "is_filled"` 结果为零（FR-9.5）
 - 单元测试：`test_snapshot_store_prefix_cache_immutable`（session 内系统提示不变）
 - 单元测试：`test_owner_profile_sync_from_usermd`
+- 单元测试：`test_write_result_contract_enforced_with_future_annotations`（注册期 `get_type_hints` 解析 `from __future__ import annotations` 的字符串注解，检查写工具 return type）
+- 单元测试：`test_all_produces_write_tools_return_write_result`（扫描注册表，`produces_write=True` 工具 ≥ 18 含 graph_pipeline 且 100% 合规）
+- 单元测试：`test_non_write_tools_unconstrained`（`browser.open` / `terminal.exec` / `tts.speak` 等 `produces_write=False` 工具 return type 不被约束；**注**：`graph_pipeline` 已移入写入型清单，不在此测试列表）
+- SC-012 满足：所有写入型工具迁移到 WriteResult，注册期 fail-fast 机制就位
 
 ---
 
