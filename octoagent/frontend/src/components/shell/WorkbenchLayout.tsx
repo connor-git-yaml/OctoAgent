@@ -10,6 +10,7 @@ import {
   formatSessionDisplayTitle,
   getValueAtPath,
 } from "../../workbench/utils";
+import { useMemoryCandidateCount } from "../../hooks/useMemoryCandidateCount";
 
 const WorkbenchContext = createContext<WorkbenchDataState | null>(null);
 const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
@@ -232,6 +233,7 @@ function ChatNavSection({
 
 export default function WorkbenchLayout() {
   const workbench = useWorkbenchData();
+  const memoryCandidateCount = useMemoryCandidateCount();
   const [navOpen, setNavOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -441,7 +443,17 @@ export default function WorkbenchLayout() {
                 }
                 onClick={() => setNavOpen(false)}
               >
-                <strong>{item.label}</strong>
+                <strong>
+                  {item.label}
+                  {item.to === "/memory" && memoryCandidateCount > 0 && (
+                    <span
+                      className="wb-nav-badge"
+                      aria-label={`${memoryCandidateCount} 条待确认记忆`}
+                    >
+                      {memoryCandidateCount}
+                    </span>
+                  )}
+                </strong>
                 <span>{renderNavDescription(item.to)}</span>
               </NavLink>
             ))}

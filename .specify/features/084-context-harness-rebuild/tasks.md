@@ -624,7 +624,7 @@
 - 每次 routine 运行结束时触发（或复用现有 daily cleanup 机制）
 - 30 天自动归档（J7 验收场景 4）
 
-### T053 [P] 前端：MemoryCandidates.tsx 页面组件 [实现 / 2h]
+### T053 [x] [P] 前端：MemoryCandidates.tsx 页面组件 [实现 / 2h]
 **依赖**: T050  
 **目标文件**: `apps/frontend/src/pages/MemoryCandidates.tsx`  
 **验收**:
@@ -633,7 +633,7 @@
 - 有 loading / empty state / error state
 - 路由注册到 Web UI 主导航（如 `/memory/candidates`）
 
-### T054 [P] 前端：CandidateCard.tsx 单条候选交互 [实现 / 2h]
+### T054 [x] [P] 前端：CandidateCard.tsx 单条候选交互 [实现 / 2h]
 **依赖**: T053  
 **目标文件**: `apps/frontend/src/components/memory/CandidateCard.tsx`  
 **验收**:
@@ -641,7 +641,7 @@
 - 操作后卡片从列表中移除（乐观更新）
 - 操作失败时 toast 提示并恢复状态
 
-### T055 [P] 前端：BatchRejectButton.tsx + 红点 badge [实现 / 1h]
+### T055 [x] [P] 前端：BatchRejectButton.tsx + 红点 badge [实现 / 1h]
 **依赖**: T053  
 **目标文件**:
 - `apps/frontend/src/components/memory/BatchRejectButton.tsx`
