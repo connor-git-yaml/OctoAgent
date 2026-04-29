@@ -267,7 +267,18 @@ class GraphPipelineResult(WriteResult):
     """启动的 child task ID，用于追踪进度。"""
 
     detail: str = ""
-    """完整文本内容（list / status 的人类可读输出），不受 preview 200 字符限制。"""
+    """完整文本内容（list / status 的人类可读输出），不受 preview 200 字符限制。
+
+    F086 T1 文档：本字段是 GraphPipelineResult **特有**扩展，违反 WriteResult.preview
+    的 200 字符上限设计原则（FR-2.4）。保留原因：
+    - routes/telegram.py:44-45 真实消费此字段做 Telegram 消息格式化（list / status 列表
+      工具需要完整内容展示给用户）
+    - graph_pipeline.list / status 等"信息展示型"action 本质是 read-like，不像
+      普通写工具 preview 只是回显
+    LLM context 影响：detail 可能 1-2KB+，调用方应优先读 preview，仅在需要完整列表时
+    读 detail；其他写工具子类**不要**复制此字段（应该用 preview 摘要 + 完整数据通过
+    target=资源 ID 由调用方查询）。
+    """
 
 
 # ---------------------------------------------------------------------------

@@ -289,6 +289,22 @@ class CapabilityPackService:
             for record in self._mcp_installer.list_installs():
                 mcp_install_source_map[record.server_id] = record.install_source
 
+        # F086 T2：删 _resolve_tool_entrypoints thin proxy（F084 D1 修复后留下的）
+        # 直接从 ToolRegistry 一次性取 name → entrypoints map，避免 O(N²) 查找
+        from octoagent.gateway.harness.tool_registry import get_registry as _get_registry
+        _registry_entries = _get_registry()._snapshot_entries()
+        _entrypoints_map: dict[str, list[str]] = {
+            e.name: sorted(e.entrypoints) for e in _registry_entries
+        }
+
+        def _resolve_entrypoints_for(tool_name: str) -> list[str]:
+            """ToolRegistry 命中 → 用 ToolEntry.entrypoints；未命中（如 mcp.* 动态工具）走降级。"""
+            if tool_name in _entrypoints_map:
+                return _entrypoints_map[tool_name]
+            if tool_name.startswith("mcp."):
+                return ["agent_runtime", "web"]
+            return ["agent_runtime"]
+
         tools = [
             BundledToolDefinition(
                 tool_name=meta.name,
@@ -301,7 +317,7 @@ class CapabilityPackService:
                 availability=self._resolve_tool_availability(meta.name),
                 availability_reason=self._resolve_tool_availability_reason(meta.name),
                 install_hint=self._resolve_tool_install_hint(meta.name),
-                entrypoints=self._resolve_tool_entrypoints(meta.name),
+                entrypoints=_resolve_entrypoints_for(meta.name),
                 metadata=self._enrich_mcp_metadata(
                     dict(meta.metadata), mcp_install_source_map
                 ),
@@ -1701,26 +1717,9 @@ class CapabilityPackService:
             return "安装 macOS say 或 Linux espeak 后再使用 tts.speak"
         return ""
 
-    @staticmethod
-    def _resolve_tool_entrypoints(tool_name: str) -> list[str]:
-        """从 ToolRegistry 查询工具的 entrypoints（Feature 084 D1 根治，删除硬编码 explicit 字典）。
-
-        优先从 ToolRegistry 读取工具的 entrypoints 声明（T012/T013 已迁移）。
-        ToolRegistry 未命中时（如 MCP 动态工具），对 mcp.* 返回 web+agent_runtime，
-        其余降级为 agent_runtime。
-        """
-        from octoagent.gateway.harness.tool_registry import get_registry
-        registry = get_registry()
-        # _snapshot_entries() 持有锁安全读副本，过滤出目标工具
-        if tool_name in registry:
-            # 直接遍历快照取第一个匹配（O(n) 但工具数量有限）
-            for entry in registry._snapshot_entries():
-                if entry.name == tool_name:
-                    return sorted(entry.entrypoints)
-        # 降级：mcp.* 动态工具默认 web+agent_runtime；其余默认 agent_runtime
-        if tool_name.startswith("mcp."):
-            return ["agent_runtime", "web"]
-        return ["agent_runtime"]
+    # F086 T2 删除：_resolve_tool_entrypoints thin proxy 已迁移为 inline helper
+    # 在 _build_capability_pack 内，避免 O(N²) 查找（每个 tool 单独遍历 registry）。
+    # F084 D1 根治后该函数仅是 ToolRegistry 的 thin wrapper，没有独立价值。
 
     @staticmethod
     def _validate_remote_url(url: str) -> str:
