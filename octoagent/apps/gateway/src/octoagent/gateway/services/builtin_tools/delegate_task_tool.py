@@ -37,7 +37,7 @@ from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
 from octoagent.tooling import reflect_tool_schema, tool_contract
 
-from ._deps import ToolDeps
+from ._deps import ToolDeps, WORK_TERMINAL_VALUES
 
 log = structlog.get_logger(__name__)
 
@@ -126,9 +126,13 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                                         ctx.work_id
                                     ) if ctx.work_id else []
                                     # 只统计直接活跃子任务（非终态）
+                                    # F44 修复：用 WORK_TERMINAL_VALUES 替代手写
+                                    # 7 个终态: SUCCEEDED/FAILED/CANCELLED/MERGED/ESCALATED/TIMED_OUT/DELETED
                                     active_children = [
                                         d.task_id for d in descendants
-                                        if getattr(d, "status", "") not in ("completed", "failed", "cancelled")
+                                        if (getattr(getattr(d, "status", None), "value",
+                                                   str(getattr(d, "status", ""))))
+                                            not in WORK_TERMINAL_VALUES
                                         and getattr(d, "parent_work_id", None) == ctx.work_id
                                     ]
                                 except Exception:
@@ -267,7 +271,12 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         import asyncio as _asyncio
 
         async def _wait_terminal() -> str:
-            terminal_states = {"completed", "failed", "cancelled"}
+            # F44 修复：原版 {"completed", "failed", "cancelled"} 错——
+            # TaskStatus 真终态是 SUCCEEDED / FAILED / CANCELLED / REJECTED
+            # （没有 "completed"，只有 "succeeded"），手写列表导致永远不命中终态 →
+            # _wait_terminal 死循环到 max_wait_seconds 超时。
+            # 用 TaskStatus 终态枚举值（小写匹配下面 .lower()）。
+            terminal_states = {"succeeded", "failed", "cancelled", "rejected"}
             poll_interval = 1.0
             while True:
                 if task_store is not None:
@@ -299,7 +308,8 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                 callback_mode=callback_mode,
             )
 
-        if terminal_status == "completed":
+        # F44 修复（同上）：TaskStatus 成功终态是 "succeeded" 不是 "completed"
+        if terminal_status == "succeeded":
             return DelegateTaskResult(
                 status="written",
                 target=f"task:{spawned_task_id}",

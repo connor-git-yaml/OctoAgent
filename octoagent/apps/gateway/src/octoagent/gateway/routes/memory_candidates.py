@@ -286,6 +286,9 @@ async def promote_candidate(
     edited = body.fact_content is not None and body.fact_content != str(row["fact_content"])
 
     # ThreatScanner + PolicyGate 统一内容安全扫描（Constitution C10）
+    # F43 修复（F085 T7 Codex high）：之前 PolicyGate 拒绝直接 raise，候选永远卡 promoting
+    # 状态——后续 promote 永远 409、discard 只允许 pending、UI 无法清理。
+    # 现在拒绝/异常路径都先回滚 promoting → pending 让候选可重试 / 清理。
     try:
         from octoagent.gateway.services.policy import PolicyGate
 
@@ -297,6 +300,7 @@ async def promote_candidate(
             extra_payload={"candidate_id": candidate_id},
         )
         if not _check.allowed:
+            await _rollback_promoting_to_pending(conn, candidate_id)
             raise HTTPException(
                 status_code=422,
                 detail=f"内容安全扫描拒绝：{_check.reason}",
@@ -304,6 +308,7 @@ async def promote_candidate(
     except HTTPException:
         raise
     except Exception as exc:
+        await _rollback_promoting_to_pending(conn, candidate_id)
         log.error(
             "memory_candidates_promote_threat_scan_failed",
             candidate_id=candidate_id,
@@ -458,6 +463,45 @@ async def promote_candidate(
         },
         _ensured_set=_ensured,
     )
+
+    # F45 修复（F085 T7 Codex medium）：promote 路径之前直接 append_entry 写 USER.md
+    # 但跳过了 user_profile.update 触发的 sync_owner_profile_from_user_md +
+    # apply_user_md_sync_to_owner_profile（F42 修复）→ 用户在 Web UI accept
+    # 候选 → USER.md 更新但 owner_profiles 表的 timezone/locale 不变 →
+    # 系统 prompt 注入用 owner_profile.timezone 仍是默认值 →
+    # 用户感知"已接受但 LLM 不记偏好"（与 F42 修复方向一致的状态漂移）。
+    # 修复：promote 成功后异步触发同 sync 路径让 OwnerProfile 派生视图刷新。
+    try:
+        from octoagent.core.models.agent_context import (
+            apply_user_md_sync_to_owner_profile,
+            sync_owner_profile_from_user_md,
+        )
+        cap = getattr(request.app.state, "capability_pack_service", None)
+        _tool_deps = getattr(cap, "_tool_deps", None)
+        _project_root = getattr(_tool_deps, "project_root", None) if _tool_deps else None
+        if _project_root is not None:
+            user_md = _project_root / "behavior" / "system" / "USER.md"
+
+            async def _sync_after_promote() -> None:
+                try:
+                    fields = await sync_owner_profile_from_user_md(user_md)
+                    await apply_user_md_sync_to_owner_profile(store_group, fields)
+                except Exception as _exc:  # noqa: BLE001
+                    log.warning(
+                        "memory_candidate_promote_sync_failed",
+                        candidate_id=candidate_id,
+                        error=str(_exc),
+                    )
+
+            import asyncio
+            asyncio.create_task(_sync_after_promote())
+    except Exception as _exc:  # noqa: BLE001
+        # sync 触发失败不阻断 promote return（OBSERVATION_PROMOTED 已写入）
+        log.warning(
+            "memory_candidate_promote_sync_trigger_failed",
+            candidate_id=candidate_id,
+            error=str(_exc),
+        )
 
     log.info(
         "memory_candidate_promoted",

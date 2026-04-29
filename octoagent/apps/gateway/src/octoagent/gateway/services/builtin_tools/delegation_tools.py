@@ -148,10 +148,17 @@ async def register(broker, deps: ToolDeps) -> None:
                                     descendants = await deps._delegation_plane.list_descendant_works(
                                         ctx.work_id
                                     )
+                                    # F44 修复（F085 T7 Codex high）：之前用
+                                    # ("completed", "failed", "cancelled") 错过 succeeded /
+                                    # merged / escalated / timed_out / deleted 共 7 终态中的 5 个
+                                    # → 历史成功 work 永远占容量配额 → CAPACITY_EXCEEDED 永远触发
+                                    # 改用 WORK_TERMINAL_VALUES 单一事实源
+                                    # （getattr(s, "value", str(s)) 兼容 status 是 enum / str 两种形态）
                                     active_children = [
                                         d.task_id for d in descendants
-                                        if getattr(d, "status", "") not in
-                                            ("completed", "failed", "cancelled")
+                                        if (getattr(getattr(d, "status", None), "value",
+                                                   str(getattr(d, "status", ""))))
+                                            not in WORK_TERMINAL_VALUES
                                         and getattr(d, "parent_work_id", None) == ctx.work_id
                                     ]
                                 except Exception:
