@@ -805,7 +805,7 @@
 
 **目标**: 端对端压测、边界场景验证、Constitution 合规审查
 
-### T071 [P] 端对端 5x 全量验收场景回归 [测试 / 2h]
+### T071 [x] [P] 端对端 5x 全量验收场景回归 [测试 / 2h]
 **依赖**: T070  
 **目标文件**: `apps/gateway/tests/e2e/test_acceptance_scenarios.py`  
 **验收**:
@@ -813,7 +813,7 @@
 - 每次运行结果记录到 structlog（pass/fail + duration）
 - 无任何 flaky test（5 次连续 pass 才算通过）
 
-### T072 [P] Threat Scanner 边界测试 + 性能基准 [测试 / 2h]
+### T072 [x] [P] Threat Scanner 边界测试 + 性能基准 [测试 / 2h]
 **依赖**: T070  
 **目标文件**: `apps/gateway/tests/harness/test_threat_scanner_boundary.py`  
 **验收**:
@@ -822,14 +822,14 @@
 - 单次扫描耗时 < 1ms（基准测试 1000 次平均值）
 - 任意 Unicode 输入（包括 emoji、CJK、特殊字符）不崩溃（property-based test）
 
-### T073 [P] SnapshotStore 并发写基准测试 [测试 / 1h]
+### T073 [x] [P] SnapshotStore 并发写基准测试 [测试 / 1h]
 **依赖**: T070  
 **目标文件**: `apps/gateway/tests/harness/test_snapshot_store_concurrent.py`  
 **验收**:
 - `test_concurrent_writes_no_data_loss`：10 个协程并发调用 `write_through`，最终文件内容完整（atomic rename 保证）
 - `test_prefix_cache_hit_rate_preserved`：同 session 多 turn，LLM provider cache 命中指标不降（可通过 mock ProviderRouter 验证 token 序列一致）
 
-### T074 [P] Observation Routine 压测 — 10 次运行完整性 [测试 / 1h]
+### T074 [x] [P] Observation Routine 压测 — 10 次运行完整性 [测试 / 1h]
 **依赖**: T070  
 **目标文件**: `apps/gateway/tests/integration/test_observation_routine_stress.py`  
 **验收**:
@@ -837,7 +837,7 @@
 - 每次运行后 `OBSERVATION_STAGE_COMPLETED` 事件（3 个 stage）写入确认
 - 10 次运行 candidates 总数 ≤ 50（队列上限保护生效）
 
-### T075 [P] Constitution 10 条逐条合规审查 [测试 / 2h]
+### T075 [x] [P] Constitution 10 条逐条合规审查 [测试 / 2h]
 **依赖**: T071  
 **目标文件**: `apps/gateway/tests/constitution/test_constitution_compliance.py`  
 **验收**:
@@ -852,7 +852,7 @@
 - C9 Agent Autonomy：`bootstrap.complete` grep 为零，工具调用时机由 LLM 决策
 - C10 Policy-Driven：ThreatScanner 统一在 PolicyGate 触发（工具层无自行拦截代码）
 
-### T076 Logfire / structlog 覆盖检查 + 最终收尾 [文档 / 1h]
+### T076 [x] Logfire / structlog 覆盖检查 + 最终收尾 [文档 / 1h]
 **依赖**: T075  
 **目标文件**: 各新模块（harness/、tools/、routines/）  
 **验收**:
