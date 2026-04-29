@@ -551,3 +551,99 @@ async def owner_profile_sync_on_startup(user_md_path: Path) -> dict[str, Any] | 
     日志/调用栈里清晰区分启动期 vs 写入后触发。
     """
     return await sync_owner_profile_from_user_md(user_md_path)
+
+
+# ---------------------------------------------------------------------------
+# F42 修复（白盒 + E2E review 暴露）：sync hook 真写库
+# ---------------------------------------------------------------------------
+# 之前：sync_owner_profile_from_user_md 只 return dict，注释说"具体写库由调用方完成"，
+# 但 main.py lifespan + user_profile.update 调用方都没真写库 →
+# owner_profiles 表的 timezone / locale / preferred_address 等永远是默认值 →
+# 系统 prompt 注入 owner_profile.timezone 永远是 "UTC" → 用户感知 LLM 不记偏好。
+# 影响范围：agent_context.py:250-265 / 3419-3421 等 5+ 处真消费这些字段。
+#
+# 修复：本 helper 把 sync return dict merge 进现有 OwnerProfile + save 写库。
+# 注意：DDL 不含 bootstrap_completed / last_synced_from_user_md 列（F35 维持
+# OwnerProfile 模型字段但表层不持久化，bootstrap 状态由 USER.md 实质填充判定），
+# helper 只 merge DDL 真有的字段（timezone / locale / preferred_address /
+# display_name / working_style）。
+
+async def apply_user_md_sync_to_owner_profile(
+    store_group: Any,  # StoreGroup（避免循环 import）
+    sync_fields: dict[str, Any] | None,
+    *,
+    owner_profile_id: str = "default-owner",
+) -> bool:
+    """把 sync_owner_profile_from_user_md 解析的字段落库（防 F42 audit gap）。
+
+    Args:
+        store_group: StoreGroup 实例（持有 agent_context_store）
+        sync_fields: sync_owner_profile_from_user_md 返回的 dict；None 时无操作
+        owner_profile_id: owner profile ID（默认 "default-owner"，与 startup_bootstrap 对齐）
+
+    Returns:
+        True：sync 成功落库；False：sync_fields 为空 / 写库失败 / store 不可用
+    """
+    if not sync_fields:
+        return False
+    if store_group is None:
+        return False
+    try:
+        store = store_group.agent_context_store
+    except AttributeError:
+        return False
+
+    try:
+        existing = await store.get_owner_profile(owner_profile_id)
+    except Exception as exc:
+        _sync_log.warning(
+            "apply_user_md_sync_get_failed",
+            owner_profile_id=owner_profile_id,
+            error=str(exc),
+        )
+        return False
+
+    # 构造 update payload — 只 merge DDL 真有的字段（OwnerProfile 模型有的额外字段
+    # 如 bootstrap_completed / last_synced_from_user_md 不在 DDL 列里，save 不会写）
+    PERSISTED_FIELDS = (
+        "timezone", "locale", "preferred_address", "display_name", "working_style",
+    )
+    if existing is None:
+        # 没有就用模型默认值创建
+        base = OwnerProfile(
+            owner_profile_id=owner_profile_id,
+            display_name="",
+            preferred_address="",
+            timezone="",
+            locale="",
+        )
+    else:
+        base = existing
+    base_dict = base.model_dump()
+    changed = False
+    for key in PERSISTED_FIELDS:
+        if key in sync_fields and sync_fields[key]:
+            new_val = str(sync_fields[key]).strip()
+            if new_val and base_dict.get(key) != new_val:
+                base_dict[key] = new_val
+                changed = True
+    if not changed:
+        return False  # 内容相同，无需写库
+
+    base_dict["updated_at"] = _utc_now()
+    new_profile = OwnerProfile(**base_dict)
+    try:
+        await store.save_owner_profile(new_profile)
+        _sync_log.info(
+            "apply_user_md_sync_saved",
+            owner_profile_id=owner_profile_id,
+            fields_updated=[k for k in PERSISTED_FIELDS if k in sync_fields],
+        )
+        return True
+    except Exception as exc:
+        _sync_log.error(
+            "apply_user_md_sync_save_failed",
+            owner_profile_id=owner_profile_id,
+            error=str(exc),
+        )
+        return False

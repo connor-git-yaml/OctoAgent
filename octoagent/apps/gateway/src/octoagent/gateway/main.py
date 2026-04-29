@@ -352,10 +352,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     app.state.snapshot_store = _snapshot_store
 
-    from octoagent.core.models.agent_context import owner_profile_sync_on_startup
+    from octoagent.core.models.agent_context import (
+        apply_user_md_sync_to_owner_profile,
+        owner_profile_sync_on_startup,
+    )
 
     try:
-        await owner_profile_sync_on_startup(_user_md_path)
+        # F42 修复：sync 后必须 apply 到 owner_profiles 表，否则 timezone /
+        # locale / preferred_address 等字段永远是默认值，被 system prompt 消费时
+        # 用户感知 LLM 不记得偏好（agent_context.py:250-265 / 3419-3421 共 5+ 处真消费）
+        _sync_fields = await owner_profile_sync_on_startup(_user_md_path)
+        await apply_user_md_sync_to_owner_profile(store_group, _sync_fields)
     except Exception as _exc:
         log.warning(
             "owner_profile_sync_on_startup_failed",

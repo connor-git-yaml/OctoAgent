@@ -259,13 +259,28 @@ async def register(broker, deps: ToolDeps) -> None:
             },
         )
 
-        # 6) 异步触发 OwnerProfile sync（T031 完整接入；当前桩位）
-        try:
-            from octoagent.core.models.agent_context import sync_owner_profile_from_user_md
-            asyncio.create_task(sync_owner_profile_from_user_md(user_md))
-        except (ImportError, AttributeError):
-            # T030 sync hook 还未实现时降级（不阻断写入）
-            pass
+        # 6) 异步触发 OwnerProfile sync 并真写库（T031 + F42 修复）
+        # 之前只 create_task(sync_owner_profile_from_user_md(...))，函数 return dict
+        # 但没人写库 → owner_profiles 表的 timezone / locale 等字段永远是默认值 →
+        # 系统 prompt 注入用 owner_profile.timezone 永远 "UTC" → 用户感知 LLM 不记偏好。
+        # 修复：sync + apply 串联，仍异步 task 不阻塞工具响应。
+        from octoagent.core.models.agent_context import (
+            apply_user_md_sync_to_owner_profile,
+            sync_owner_profile_from_user_md,
+        )
+
+        async def _sync_and_apply() -> None:
+            try:
+                fields = await sync_owner_profile_from_user_md(user_md)
+                await apply_user_md_sync_to_owner_profile(deps.stores, fields)
+            except Exception as exc:  # noqa: BLE001
+                import structlog
+                structlog.get_logger(__name__).warning(
+                    "user_profile_update_sync_apply_failed",
+                    error=str(exc),
+                )
+
+        asyncio.create_task(_sync_and_apply())
 
         return UserProfileUpdateResult(
             status="written",
