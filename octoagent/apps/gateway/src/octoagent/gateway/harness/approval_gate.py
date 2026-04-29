@@ -416,6 +416,10 @@ class ApprovalGate:
         try:
             from octoagent.core.models.task import Task
 
+            # F41 修复（同 PolicyGate）：Task 必填字段 requester / pointers
+            # 缺失会让 ValidationError 导致 audit task 创建失败 →
+            # APPROVAL_REQUESTED / APPROVAL_DECIDED 事件全部 silent 丢失。
+            from octoagent.core.models.task import RequesterInfo, TaskPointers
             now = datetime.now(timezone.utc)
             audit_task = Task(
                 task_id=task_id,
@@ -423,6 +427,8 @@ class ApprovalGate:
                 updated_at=now,
                 title="ApprovalGate 审计占位 Task（F084 Phase 3）",
                 trace_id=task_id,
+                requester=RequesterInfo(channel="system", sender_id=task_id),
+                pointers=TaskPointers(),
             )
             await self._task_store.create_task(audit_task)
             self._audit_task_ensured.add(task_id)

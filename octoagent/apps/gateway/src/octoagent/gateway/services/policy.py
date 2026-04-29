@@ -185,7 +185,13 @@ class PolicyGate:
 
         try:
             # 延迟 import 避免顶层循环依赖
-            from octoagent.core.models.task import Task
+            # F41 修复（白盒 + E2E review 暴露）：原版只传 task_id/created_at/title，
+            # 缺 Task 必填字段 requester（RequesterInfo channel + sender_id）→
+            # ValidationError 导致 audit task 永远创建失败 →
+            # _emit_blocked_event ensure 失败 silent return →
+            # MEMORY_ENTRY_BLOCKED 事件全部丢失（Constitution C2 violation）。
+            # 类似 operator_actions 的 system audit task 模式：channel="system" + sender_id=task_id
+            from octoagent.core.models.task import RequesterInfo, Task, TaskPointers
             now = datetime.now(timezone.utc)
             audit_task = Task(
                 task_id=task_id,
@@ -193,6 +199,8 @@ class PolicyGate:
                 updated_at=now,
                 title="PolicyGate 审计占位 Task（F084 Phase 2）",
                 trace_id=task_id,
+                requester=RequesterInfo(channel="system", sender_id=task_id),
+                pointers=TaskPointers(),
             )
             await self._task_store.create_task(audit_task)
             self._audit_task_ensured.add(task_id)
