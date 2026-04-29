@@ -17,6 +17,11 @@ from typing import Any
 from pydantic import BaseModel
 
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from octoagent.gateway.harness.delegation import (
+    DelegateTaskInput,
+    DelegationContext,
+    DelegationManager,
+)
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
 from octoagent.core.models.tool_results import (
@@ -118,9 +123,75 @@ async def register(broker, deps: ToolDeps) -> None:
         if not items:
             raise RuntimeError("objective 或 objectives 至少需要提供一个")
 
+        # F085 T2 修复（spec FR-5 安全 gap）：subagents.spawn 之前直接调
+        # launch_child 绕过 DelegationManager（max_depth=2 / max_concurrent=3 /
+        # blacklist），LLM 可创建无限递归 sub-agent。现在两条路径
+        # （subagents.spawn + delegate_task）都走 DelegationManager。
+        # 推断当前 task 深度 + 活跃子任务数（参照 delegate_task_tool.py 模式）
+        current_task_id = ""
+        current_depth = 0
+        active_children: list[str] = []
+        task_store = getattr(getattr(deps, "stores", None), "event_store", None)
+        try:
+            from ..execution_context import get_current_execution_context
+            ctx = get_current_execution_context()
+            if ctx:
+                current_task_id = ctx.task_id or ""
+                ts = getattr(getattr(deps, "stores", None), "task_store", None)
+                if ts and current_task_id:
+                    try:
+                        current_task = await ts.get_task(current_task_id)
+                        if current_task is not None:
+                            current_depth = getattr(current_task, "depth", 0) or 0
+                            if deps._delegation_plane is not None and ctx.work_id:
+                                try:
+                                    descendants = await deps._delegation_plane.list_descendant_works(
+                                        ctx.work_id
+                                    )
+                                    active_children = [
+                                        d.task_id for d in descendants
+                                        if getattr(d, "status", "") not in
+                                            ("completed", "failed", "cancelled")
+                                        and getattr(d, "parent_work_id", None) == ctx.work_id
+                                    ]
+                                except Exception:
+                                    pass
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        # 创建 DelegationManager（注入 stores，防 F24 audit task FK violation）
+        _stores = getattr(deps, "stores", None)
+        mgr = DelegationManager(
+            event_store=getattr(_stores, "event_store", None),
+            task_store=getattr(_stores, "task_store", None),
+        )
+
         launched_raw = []
+        skipped_objectives: list[tuple[str, str]] = []  # (objective, reject_reason)
         for i, item in enumerate(items):
             child_title = title if len(items) == 1 and title else item[:60]
+
+            # 每个 objective 独立做 DelegationManager 约束检查
+            # 失败：跳过该 objective（前面已派发的不撤销，但失败的不派发）
+            delegation_ctx = DelegationContext(
+                task_id=current_task_id or "_subagents_spawn_audit",
+                depth=current_depth,
+                target_worker=worker_type,
+                active_children=active_children,
+            )
+            task_input = DelegateTaskInput(
+                target_worker=worker_type,
+                task_description=item,
+                callback_mode="async",
+                max_wait_seconds=300,
+            )
+            gate_result = await mgr.delegate(delegation_ctx, task_input)
+            if not gate_result.success:
+                skipped_objectives.append((item, gate_result.reason))
+                continue
+
             payload = await launch_child(
                 deps,
                 objective=item,
@@ -132,6 +203,10 @@ async def register(broker, deps: ToolDeps) -> None:
                 title=child_title,
             )
             launched_raw.append(payload)
+            # 派发成功后更新 active_children，让后续 objective 看到约束累加
+            spawned_task_id = payload.get("task_id", "") if isinstance(payload, dict) else ""
+            if spawned_task_id:
+                active_children = active_children + [spawned_task_id]
 
         # 将 payload dict 转为 ChildSpawnInfo（防 F4 压扁，保留全部关联键）
         children = [
@@ -152,10 +227,29 @@ async def register(broker, deps: ToolDeps) -> None:
             for p in launched_raw
         ]
         child_ids = ", ".join(c.task_id for c in children if c.task_id)
+        # F085 T2: 全部 objective 被约束拒绝时返回 status="rejected" + reason
+        # 让 LLM 知道 spawn 实际未发生（防 LLM 误以为已派发然后用假 task_id 调 steer/kill）
+        if not children and skipped_objectives:
+            reasons_summary = "; ".join(f"[{obj[:40]}] {reason}"
+                                         for obj, reason in skipped_objectives[:3])
+            return SubagentsSpawnResult(
+                status="rejected",
+                target="task_store",
+                reason=f"DelegationManager 拒绝全部 {len(items)} 个 objective: {reasons_summary}",
+                preview=f"约束拒绝（max_depth=2 / max_concurrent=3 / blacklist）: {len(skipped_objectives)} 个被拒",
+                requested=len(items),
+                created=0,
+                children=[],
+            )
+
+        # 部分成功（含混合 reject 情况）
+        preview_parts = [f"派发 {len(children)} 个子任务: {child_ids[:120]}"]
+        if skipped_objectives:
+            preview_parts.append(f"约束拒绝 {len(skipped_objectives)} 个: {skipped_objectives[0][1][:80]}")
         return SubagentsSpawnResult(
             status="written",
             target="task_store",
-            preview=f"派发 {len(children)} 个子任务: {child_ids[:150]}",
+            preview=" | ".join(preview_parts)[:200],
             requested=len(items),
             created=len(children),
             children=children,
