@@ -396,52 +396,29 @@ class ApprovalGate:
     async def _ensure_audit_task(self, task_id: str) -> bool:
         """确保 audit task 在 tasks 表中存在（防 F24 FK violation）。
 
-        events 表 FK 到 tasks(task_id)，fallback audit task 不存在时
-        INSERT events 会抛 IntegrityError → audit 静默丢失。
-
-        参照 PolicyGate._ensure_audit_task 同模式。
+        F085 T3：委托至 packages/core/.../store/audit_task.ensure_system_audit_task
+        统一 helper（与 PolicyGate 共享，防 F41 schema 必填字段遗漏回归）；
+        本方法保留进程内幂等缓存避免每次都查 task_store。
         """
         if task_id in self._audit_task_ensured:
             return True
-        if self._task_store is None:
-            return False
-        try:
-            existing = await self._task_store.get_task(task_id)
-        except Exception as exc:
-            log.error("approval_gate_audit_task_get_failed", task_id=task_id, error=str(exc))
-            return False
-        if existing is not None:
-            self._audit_task_ensured.add(task_id)
-            return True
-        try:
-            from octoagent.core.models.task import Task
+        from octoagent.core.store.audit_task import ensure_system_audit_task
 
-            # F41 修复（同 PolicyGate）：Task 必填字段 requester / pointers
-            # 缺失会让 ValidationError 导致 audit task 创建失败 →
-            # APPROVAL_REQUESTED / APPROVAL_DECIDED 事件全部 silent 丢失。
-            from octoagent.core.models.task import RequesterInfo, TaskPointers
-            now = datetime.now(timezone.utc)
-            audit_task = Task(
-                task_id=task_id,
-                created_at=now,
-                updated_at=now,
-                title="ApprovalGate 审计占位 Task（F084 Phase 3）",
-                trace_id=task_id,
-                requester=RequesterInfo(channel="system", sender_id=task_id),
-                pointers=TaskPointers(),
-            )
-            await self._task_store.create_task(audit_task)
+        ok = await ensure_system_audit_task(
+            self._task_store,
+            task_id,
+            title="ApprovalGate 审计占位 Task（F084 Phase 3 / F085 T3）",
+        )
+        if ok:
             self._audit_task_ensured.add(task_id)
-            log.info("approval_gate_audit_task_created", task_id=task_id)
-            return True
-        except Exception as exc:
-            log.error(
-                "approval_gate_audit_task_create_failed",
+            log.info("approval_gate_audit_task_ensured", task_id=task_id)
+        else:
+            log.warning(
+                "approval_gate_audit_task_ensure_failed",
                 task_id=task_id,
-                error_type=type(exc).__name__,
-                error=str(exc),
+                hint="task_store 未注入 / 查询失败 / 创建失败",
             )
-            return False
+        return ok
 
     async def _emit_event(
         self,

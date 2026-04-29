@@ -152,68 +152,29 @@ class PolicyGate:
     async def _ensure_audit_task(self, task_id: str) -> bool:
         """确保 audit task 在 tasks 表中存在（防 F24 FK violation）。
 
-        events 表 FK 到 tasks(task_id)，无 execution context 的 web/registry 入口
-        调用 tool 时 task_id 走 fallback _POLICY_AUDIT_TASK_ID，但该 task 不存在
-        于 tasks 表 → INSERT events 抛 IntegrityError → audit 静默丢失。
-
-        本方法参照 operator_actions._ensure_operational_task 模式：
-        - 进程内幂等缓存，避免每次 BLOCK 都查 task_store
-        - 不存在则创建一个最小 Task 占位记录（type=audit）
-
-        Args:
-            task_id: audit task ID（如 _POLICY_AUDIT_TASK_ID）
-
-        Returns:
-            True：task 已存在或刚创建成功；False：task_store 不可用或失败
+        F085 T3：委托至 packages/core/.../store/audit_task.ensure_system_audit_task
+        统一 helper（PolicyGate + ApprovalGate 共享，防 F41 schema 必填字段
+        遗漏回归）；本方法保留进程内幂等缓存，避免每次 BLOCK 都查 task_store。
         """
         if task_id in self._audit_task_ensured:
             return True
-        if self._task_store is None:
-            return False
-        try:
-            existing = await self._task_store.get_task(task_id)
-        except Exception as exc:
-            log.error(
-                "policy_gate_audit_task_get_failed",
-                task_id=task_id,
-                error=str(exc),
-            )
-            return False
-        if existing is not None:
-            self._audit_task_ensured.add(task_id)
-            return True
+        from octoagent.core.store.audit_task import ensure_system_audit_task
 
-        try:
-            # 延迟 import 避免顶层循环依赖
-            # F41 修复（白盒 + E2E review 暴露）：原版只传 task_id/created_at/title，
-            # 缺 Task 必填字段 requester（RequesterInfo channel + sender_id）→
-            # ValidationError 导致 audit task 永远创建失败 →
-            # _emit_blocked_event ensure 失败 silent return →
-            # MEMORY_ENTRY_BLOCKED 事件全部丢失（Constitution C2 violation）。
-            # 类似 operator_actions 的 system audit task 模式：channel="system" + sender_id=task_id
-            from octoagent.core.models.task import RequesterInfo, Task, TaskPointers
-            now = datetime.now(timezone.utc)
-            audit_task = Task(
-                task_id=task_id,
-                created_at=now,
-                updated_at=now,
-                title="PolicyGate 审计占位 Task（F084 Phase 2）",
-                trace_id=task_id,
-                requester=RequesterInfo(channel="system", sender_id=task_id),
-                pointers=TaskPointers(),
-            )
-            await self._task_store.create_task(audit_task)
+        ok = await ensure_system_audit_task(
+            self._task_store,
+            task_id,
+            title="PolicyGate 审计占位 Task（F084 Phase 2 / F085 T3）",
+        )
+        if ok:
             self._audit_task_ensured.add(task_id)
-            log.info("policy_gate_audit_task_created", task_id=task_id)
-            return True
-        except Exception as exc:
-            log.error(
-                "policy_gate_audit_task_create_failed",
+            log.info("policy_gate_audit_task_ensured", task_id=task_id)
+        else:
+            log.warning(
+                "policy_gate_audit_task_ensure_failed",
                 task_id=task_id,
-                error_type=type(exc).__name__,
-                error=str(exc),
+                hint="task_store 未注入 / 查询失败 / 创建失败",
             )
-            return False
+        return ok
 
     async def _emit_blocked_event(
         self,
