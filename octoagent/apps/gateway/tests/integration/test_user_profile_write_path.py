@@ -175,7 +175,7 @@ async def test_path_a_add_entry_end_to_end(
 
     # 动态执行 user_profile.update 工具逻辑
     # 直接通过函数导入进行调用（不走 broker 注册路径）
-    from octoagent.gateway.tools.user_profile_tools import (
+    from octoagent.gateway.services.builtin_tools.user_profile_tools import (
         USER_MD_CHAR_LIMIT,
         ENTRY_SEPARATOR,
         _user_md_path,
@@ -356,7 +356,7 @@ async def test_path_a_char_limit_enforced(
     )
 
     from octoagent.gateway.harness.snapshot_store import CharLimitExceeded
-    from octoagent.gateway.tools.user_profile_tools import USER_MD_CHAR_LIMIT, ENTRY_SEPARATOR
+    from octoagent.gateway.services.builtin_tools.user_profile_tools import USER_MD_CHAR_LIMIT, ENTRY_SEPARATOR
 
     # 写入一条足够大的内容让总量超限
     large_content = "y" * 200  # 49900 + separator(~4) + 200 > 50000

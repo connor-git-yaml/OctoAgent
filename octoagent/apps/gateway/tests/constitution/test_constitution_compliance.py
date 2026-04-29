@@ -161,7 +161,7 @@ class TestC2EverythingIsEvent:
     @pytest.mark.asyncio
     async def test_memory_entry_added_event_on_write(self, store_group, db_conn, tmp_path: Path) -> None:
         """user_profile.update(add) 操作写入后有 MEMORY_ENTRY_ADDED 事件。"""
-        from octoagent.gateway.tools.user_profile_tools import (
+        from octoagent.gateway.services.builtin_tools.user_profile_tools import (
             USER_MD_CHAR_LIMIT,
             ENTRY_SEPARATOR,
             _make_preview,
@@ -278,7 +278,7 @@ class TestC3ToolsAreContracts:
     def test_user_profile_tools_module_uses_tool_contract(self) -> None:
         """user_profile_tools 模块包含 @tool_contract 装饰器调用（C3 单一事实源）。"""
         import inspect
-        import octoagent.gateway.tools.user_profile_tools as up_module
+        import octoagent.gateway.services.builtin_tools.user_profile_tools as up_module
         source = inspect.getsource(up_module)
         assert "@tool_contract" in source, (
             "C3：user_profile_tools 模块应使用 @tool_contract 装饰器"
@@ -291,7 +291,7 @@ class TestC3ToolsAreContracts:
     def test_user_profile_tools_declare_produces_write(self) -> None:
         """user_profile.update 和 user_profile.observe 声明 produces_write=True。"""
         import inspect
-        import octoagent.gateway.tools.user_profile_tools as up_module
+        import octoagent.gateway.services.builtin_tools.user_profile_tools as up_module
         source = inspect.getsource(up_module)
         assert "produces_write=True" in source, (
             "C3：写入型工具应声明 produces_write=True（WriteResult 契约）"
@@ -308,7 +308,7 @@ class TestC3ToolsAreContracts:
 
     def test_user_profile_update_input_schema_fields(self) -> None:
         """UserProfileUpdateInput schema 含 operation / content / old_text / target_text 字段。"""
-        from octoagent.gateway.tools.user_profile_tools import UserProfileUpdateInput
+        from octoagent.gateway.services.builtin_tools.user_profile_tools import UserProfileUpdateInput
         fields = UserProfileUpdateInput.model_fields
         assert "operation" in fields, "C3：UserProfileUpdateInput 应有 operation 字段"
         assert "content" in fields, "C3：UserProfileUpdateInput 应有 content 字段"
@@ -608,7 +608,7 @@ class TestC8Observability:
             "octoagent.gateway.harness.approval_gate",
             "octoagent.gateway.harness.delegation",
             "octoagent.gateway.routines.observation_promoter",
-            "octoagent.gateway.tools.user_profile_tools",
+            "octoagent.gateway.services.builtin_tools.user_profile_tools",
             "octoagent.gateway.services.policy",
         ],
     )
@@ -718,7 +718,7 @@ class TestC10PolicyDriven:
 
     def test_user_profile_tools_use_policy_gate_not_direct_scan(self) -> None:
         """user_profile_tools 通过 PolicyGate 调用 ThreatScanner，而非直接调用 scan()。"""
-        import octoagent.gateway.tools.user_profile_tools as up_module
+        import octoagent.gateway.services.builtin_tools.user_profile_tools as up_module
         source = inspect.getsource(up_module)
         # 应使用 PolicyGate 而非直接 threat_scan（直接 scan 调用应只在注释或导入行）
         assert "PolicyGate" in source, (

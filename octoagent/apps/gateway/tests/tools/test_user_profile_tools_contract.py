@@ -44,7 +44,7 @@ def test_user_profile_update_entrypoints_contain_web() -> None:
 
     验收标准：tool registry 中 user_profile.update 可被 web 入口点看到。
     """
-    from octoagent.gateway.tools.user_profile_tools import _TOOL_ENTRYPOINTS
+    from octoagent.gateway.services.builtin_tools.user_profile_tools import _TOOL_ENTRYPOINTS
 
     update_eps = _TOOL_ENTRYPOINTS.get("user_profile.update", frozenset())
     assert "web" in update_eps, (
@@ -54,7 +54,7 @@ def test_user_profile_update_entrypoints_contain_web() -> None:
 
 def test_user_profile_read_entrypoints_contain_web() -> None:
     """user_profile.read entrypoints 包含 "web" 入口点。"""
-    from octoagent.gateway.tools.user_profile_tools import _TOOL_ENTRYPOINTS
+    from octoagent.gateway.services.builtin_tools.user_profile_tools import _TOOL_ENTRYPOINTS
 
     read_eps = _TOOL_ENTRYPOINTS.get("user_profile.read", frozenset())
     assert "web" in read_eps
@@ -62,7 +62,7 @@ def test_user_profile_read_entrypoints_contain_web() -> None:
 
 def test_user_profile_observe_entrypoints_contain_web() -> None:
     """user_profile.observe entrypoints 包含 "web" 入口点。"""
-    from octoagent.gateway.tools.user_profile_tools import _TOOL_ENTRYPOINTS
+    from octoagent.gateway.services.builtin_tools.user_profile_tools import _TOOL_ENTRYPOINTS
 
     observe_eps = _TOOL_ENTRYPOINTS.get("user_profile.observe", frozenset())
     assert "web" in observe_eps
@@ -82,7 +82,7 @@ def test_user_profile_update_schema_matches_handler() -> None:
     - old_text: str (optional)
     - target_text: str (optional)
     """
-    from octoagent.gateway.tools.user_profile_tools import UserProfileUpdateInput
+    from octoagent.gateway.services.builtin_tools.user_profile_tools import UserProfileUpdateInput
 
     fields = UserProfileUpdateInput.model_fields
     assert "operation" in fields, "缺少 operation 字段"
@@ -104,7 +104,7 @@ def test_user_profile_read_schema_matches_handler() -> None:
     # 验证函数签名没有必填参数
     # 由于 user_profile_read 是闭包（在 register 函数内定义），
     # 通过模块级 _TOOL_ENTRYPOINTS 确认声明存在即可
-    from octoagent.gateway.tools.user_profile_tools import _TOOL_ENTRYPOINTS
+    from octoagent.gateway.services.builtin_tools.user_profile_tools import _TOOL_ENTRYPOINTS
 
     assert "user_profile.read" in _TOOL_ENTRYPOINTS, "user_profile.read 必须在 _TOOL_ENTRYPOINTS 中声明"
 
@@ -115,7 +115,7 @@ def test_user_profile_observe_schema_matches_handler() -> None:
     contracts/tools-contract.md schema 对齐检查。
     """
     # observe 工具的 handler 是闭包，通过 _TOOL_ENTRYPOINTS 验证注册声明
-    from octoagent.gateway.tools.user_profile_tools import _TOOL_ENTRYPOINTS
+    from octoagent.gateway.services.builtin_tools.user_profile_tools import _TOOL_ENTRYPOINTS
 
     assert "user_profile.observe" in _TOOL_ENTRYPOINTS, (
         "user_profile.observe 必须在 _TOOL_ENTRYPOINTS 中声明"
@@ -133,7 +133,7 @@ def test_user_profile_observe_schema_matches_handler() -> None:
 
 def test_policy_gate_is_imported_in_user_profile_tools() -> None:
     """验证 user_profile_tools 模块引用了 PolicyGate（不直接暴露 threat_scan 为主路径）。"""
-    import octoagent.gateway.tools.user_profile_tools as m
+    import octoagent.gateway.services.builtin_tools.user_profile_tools as m
     import octoagent.gateway.services.policy as p
 
     # PolicyGate 类应从 policy 模块导入

@@ -37,7 +37,7 @@ from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
 from octoagent.tooling import reflect_tool_schema, tool_contract
 
-from ..services.builtin_tools._deps import ToolDeps
+from ._deps import ToolDeps
 
 log = structlog.get_logger(__name__)
 
@@ -107,7 +107,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         task_store = getattr(getattr(deps, "stores", None), "task_store", None)
 
         try:
-            from ..services.execution_context import get_current_execution_context
+            from ..execution_context import get_current_execution_context
             ctx = get_current_execution_context()
             if ctx:
                 current_task_id = ctx.task_id or ""
@@ -185,7 +185,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         # 4. async 模式立即返回 task_id；sync 模式 wait + return
         # 5. SUBAGENT_RETURNED 事件由 task_runner 终态回调写入（非本工具职责）
         try:
-            from ..services.builtin_tools._deps import launch_child as _launch_child
+            from ._deps import launch_child as _launch_child
             launch_payload = await _launch_child(
                 deps,
                 objective=task_description,

@@ -129,7 +129,7 @@ async def _promote_candidate(
     3. 更新状态（promoting → promoted）
     4. 写 OBSERVATION_PROMOTED 事件
     """
-    from octoagent.gateway.tools.user_profile_tools import ENTRY_SEPARATOR, USER_MD_CHAR_LIMIT
+    from octoagent.gateway.services.builtin_tools.user_profile_tools import ENTRY_SEPARATOR, USER_MD_CHAR_LIMIT
 
     # 1. atomic claim
     cursor = await conn.execute(

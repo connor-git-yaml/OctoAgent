@@ -43,7 +43,7 @@ from octoagent.gateway.harness.threat_scanner import scan as threat_scan  # 保�
 from octoagent.gateway.services.policy import PolicyGate
 from octoagent.tooling import reflect_tool_schema, tool_contract
 
-from ..services.builtin_tools._deps import ToolDeps
+from ._deps import ToolDeps
 
 # ---------------------------------------------------------------------------
 # 常量
@@ -165,7 +165,7 @@ async def register(broker, deps: ToolDeps) -> None:
         # 1) PolicyGate 统一内容安全扫描（Constitution C10 统一入口，T035）
         # PolicyGate 内部调 ThreatScanner.scan()，工具层不直接拦截
         try:
-            from ..services.execution_context import get_current_execution_context
+            from ..execution_context import get_current_execution_context
             _ctx = get_current_execution_context()
             _task_id = (_ctx.task_id if _ctx else "") or ""
         except Exception:
@@ -373,7 +373,7 @@ async def register(broker, deps: ToolDeps) -> None:
         # 闸 2: PolicyGate 统一内容安全扫描（Constitution C10 统一入口，T035）
         # 位于队列长度检查之前——避免恶意内容浪费队列名额
         try:
-            from ..services.execution_context import get_current_execution_context
+            from ..execution_context import get_current_execution_context
             _obs_ctx = get_current_execution_context()
             _obs_task_id = (_obs_ctx.task_id if _obs_ctx else "") or ""
         except Exception:
@@ -521,7 +521,7 @@ async def _emit_event(deps: ToolDeps, *, event_type: EventType, payload: dict[st
     """
     AUDIT_TASK_ID = "_user_profile_audit"  # 与 operator_actions 占位 task_id 同模式
     try:
-        from ..services.execution_context import get_current_execution_context
+        from ..execution_context import get_current_execution_context
         context = get_current_execution_context()
         task_id = (context.task_id if context else "") or AUDIT_TASK_ID
     except Exception:

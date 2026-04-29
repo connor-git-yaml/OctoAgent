@@ -102,7 +102,7 @@ def test_delegate_task_entrypoints_agent_runtime_only() -> None:
 
     不含 web 的反向约束防止前端绕过 Agent 直接创建子任务。
     """
-    from octoagent.gateway.tools.delegate_task_tool import _ENTRYPOINTS
+    from octoagent.gateway.services.builtin_tools.delegate_task_tool import _ENTRYPOINTS
 
     assert "agent_runtime" in _ENTRYPOINTS, \
         "delegate_task entrypoints 必须含 agent_runtime"
@@ -114,7 +114,7 @@ def test_delegate_task_entrypoints_agent_runtime_only() -> None:
 
 def test_delegate_task_entrypoints_is_frozenset() -> None:
     """_ENTRYPOINTS 应是 frozenset（不可变，防运行时篡改）。"""
-    from octoagent.gateway.tools.delegate_task_tool import _ENTRYPOINTS
+    from octoagent.gateway.services.builtin_tools.delegate_task_tool import _ENTRYPOINTS
 
     assert isinstance(_ENTRYPOINTS, frozenset), \
         f"_ENTRYPOINTS 应是 frozenset，实际: {type(_ENTRYPOINTS)}"
@@ -132,7 +132,7 @@ def test_delegate_task_tool_file_has_registry_register_call() -> None:
 
     tool_file = Path(
         "/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/silly-noyce-22a8af/"
-        "octoagent/apps/gateway/src/octoagent/gateway/tools/delegate_task_tool.py"
+        "octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/delegate_task_tool.py"
     )
     assert tool_file.exists(), f"delegate_task_tool.py 不存在: {tool_file}"
 
@@ -157,7 +157,7 @@ def test_delegate_task_tool_file_has_registry_register_call() -> None:
 
 def test_delegate_task_tool_description_mentions_subagent() -> None:
     """ToolEntry description 包含子 Agent 语义描述（可读性 + 工具语义验证）。"""
-    from octoagent.gateway.tools.delegate_task_tool import _ENTRYPOINTS
+    from octoagent.gateway.services.builtin_tools.delegate_task_tool import _ENTRYPOINTS
 
     # 通过 ToolRegistry 查找 delegate_task 的注册信息
     # 注意：ToolRegistry 是延迟注册（register() 异步函数需要 broker + deps），
@@ -184,7 +184,7 @@ async def test_delegate_task_writes_spawned_event_via_real_handler(
     from unittest.mock import AsyncMock, MagicMock
 
     from octoagent.gateway.harness.delegation import DelegationManager
-    from octoagent.gateway.tools import delegate_task_tool
+    from octoagent.gateway.services.builtin_tools import delegate_task_tool
 
     # 监听 _emit_spawned_event 真实调用
     spawned_calls: list[dict] = []

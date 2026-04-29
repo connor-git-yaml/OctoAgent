@@ -155,7 +155,7 @@ async def _build_real_user_profile_handler(store_group, tmp_path: Path):
     本 helper 复刻该路径但只注册 user_profile_tools 一个模块（最小依赖）。
     """
     from unittest.mock import MagicMock
-    from octoagent.gateway.tools import user_profile_tools
+    from octoagent.gateway.services.builtin_tools import user_profile_tools
     from octoagent.gateway.services.builtin_tools._deps import ToolDeps
     from octoagent.gateway.harness.tool_registry import get_registry
 
