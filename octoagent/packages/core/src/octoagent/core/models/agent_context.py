@@ -197,15 +197,13 @@ class OwnerProfile(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
     version: int = Field(default=1, ge=1)
     last_synced_from_profile_at: datetime | None = Field(default=None)
-    # F084 Phase 2 T030：OwnerProfile 退化为派生只读视图（USER.md 是 SoT，FR-9.1）
-    bootstrap_completed: bool = Field(
-        default=False,
-        description="USER.md 实质填充后置 True（F084 Phase 4：bootstrap 完成状态新标准）",
-    )
-    last_synced_from_user_md: datetime | None = Field(
-        default=None,
-        description="最近一次从 USER.md 解析回填的时间戳（user_profile.update 写入后异步触发）",
-    )
+    # F085 T4: 删除 dead 字段 bootstrap_completed / last_synced_from_user_md
+    # - DDL 没有这两列（owner_profiles CREATE TABLE 列表 0 命中）
+    # - save_owner_profile INSERT 字段列表 0 命中 (永远不持久化)
+    # - F35 修复方案让 bootstrap 完成判定直接读 USER.md (_user_md_substantively_filled)，
+    #   不依赖 owner_profile.bootstrap_completed → 真消费方 0 处
+    # - F42 修复 PERSISTED_FIELDS 元组也明确不含这两字段
+    # 字段保留是 model 层 dead 噪音，无任何真实场景使用，本次清理。
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)
 
