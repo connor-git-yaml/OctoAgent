@@ -23,6 +23,13 @@ from contextlib import suppress
 
 import pytest
 
+# 暴露 helpers 内的 fixture 给同目录测试
+# pytest plugin 风格而不是 import *，保留 IDE 补全
+pytest_plugins = [
+    "apps.gateway.tests.e2e_live.helpers.fixtures_real_credentials",
+    "apps.gateway.tests.e2e_live.helpers.factories",
+]
+
 # ---------------------------------------------------------------------------
 # 凭证 env 清单（FR-7 锁定）
 # ---------------------------------------------------------------------------
