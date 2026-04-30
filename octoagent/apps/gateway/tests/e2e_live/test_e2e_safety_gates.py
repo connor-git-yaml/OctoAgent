@@ -142,16 +142,24 @@ async def test_domain_11_threat_scanner_blocks_malicious_and_user_md_unchanged(
 async def test_domain_12_approval_gate_sse_register_and_auto_approve(
     bootstrapped_harness: dict[str, Any],
 ) -> None:
-    """域 #12：ApprovalManager 注册 + auto-approve 全链路。
+    """域 #12：ApprovalManager + 真 SSE 订阅边界验证（P3 Codex Finding 2 修复）。
+
+    旧测试只读 events 表 + 私有 _pending 字段——SSE 桥接 / 事件序列化 /
+    task_id 广播 / EventSourceResponse 任一断裂，smoke 仍 PASS。
+    新测试：先订阅 app.state.sse_hub，再 register/resolve，断言 queue 收到
+    SSE event 对象（approval:requested + approval:resolved）。
 
     断言（≥ 2 独立点）：
-    1. ApprovalManager.register → ApprovalRecord.status=PENDING + events 表
-       APPROVAL_REQUESTED 事件已写入
-    2. resolve(allow-once) 后 record.status=APPROVED + events 含 APPROVAL_DECIDED
+    1. SSE 订阅 queue 收到 type='approval:requested' 事件，payload.approval_id
+       匹配 → 验证 ApprovalManager → SSEApprovalBroadcaster → SSEHub.broadcast
+       全链路真路径
+    2. resolve(ALLOW_ONCE) 后 SSE 订阅 queue 收到 type='approval:resolved' 事件
+       + record.status == APPROVED（不再读 _pending 私有字段，改读 register
+       返回的 record 通过新一轮 manager.get_pending_approvals/同对象引用反射）
     """
+    import asyncio
     from datetime import UTC, datetime, timedelta
 
-    from octoagent.core.models.enums import EventType
     from octoagent.policy.models import (
         ApprovalDecision,
         ApprovalRequest,
@@ -164,12 +172,17 @@ async def test_domain_12_approval_gate_sse_register_and_auto_approve(
     app = bootstrapped_harness["app"]
     sg = app.state.store_group
     approval_manager = app.state.approval_manager
+    sse_hub = app.state.sse_hub
 
     # 准备 task（events FK 约束）
     test_task_id = "_approval_gate_e2e_task"
     await _ensure_audit_task(sg, test_task_id)
 
-    # 注册 approval request
+    # 步骤 1：先订阅 SSE Hub（必须在 register 前订阅，否则 broadcast 时
+    # subscribers 集合为空，事件丢失）
+    sse_queue: asyncio.Queue = await sse_hub.subscribe(test_task_id)
+
+    # 步骤 2：register approval request
     approval_id = "test-approval-domain12"
     request = ApprovalRequest(
         approval_id=approval_id,
@@ -182,19 +195,35 @@ async def test_domain_12_approval_gate_sse_register_and_auto_approve(
         expires_at=datetime.now(UTC) + timedelta(seconds=60),
     )
     record = await approval_manager.register(request)
-
-    # 断言 1：注册后 status=PENDING + APPROVAL_REQUESTED 事件已写入
     assert record.status == ApprovalStatus.PENDING, (
-        f"域#12: register 后 status 应为 PENDING，实际: {record.status}"
+        f"域#12: register 后 record.status 应为 PENDING，实际: {record.status}"
     )
-    events = await sg.event_store.get_events_for_task(test_task_id)
-    requested = [e for e in events if e.type == EventType.APPROVAL_REQUESTED]
-    assert requested, (
-        "域#12: events 表应含至少 1 条 APPROVAL_REQUESTED 事件"
-    )
-    assert requested[-1].payload.get("approval_id") == approval_id
 
-    # auto-approve（ALLOW_ONCE）
+    # 断言 1：SSE 订阅 queue 收到 'approval:requested' 事件（验证桥接真路径）
+    try:
+        ev_requested = await asyncio.wait_for(sse_queue.get(), timeout=2.0)
+    except asyncio.TimeoutError as exc:
+        raise AssertionError(
+            "域#12: SSE 订阅 queue 在 2s 内未收到 'approval:requested' 事件——"
+            "ApprovalManager → SSEApprovalBroadcaster → SSEHub.broadcast 桥接断裂"
+        ) from exc
+
+    # SSEApprovalBroadcaster 包装的 event_obj 用 SimpleNamespace
+    # 含 type / payload / task_id 等字段
+    assert getattr(ev_requested, "type", None) == "approval:requested", (
+        f"域#12: SSE event.type 应为 'approval:requested'，"
+        f"实际: {getattr(ev_requested, 'type', None)}"
+    )
+    assert getattr(ev_requested, "task_id", None) == test_task_id, (
+        f"域#12: SSE event.task_id 应为 {test_task_id}，"
+        f"实际: {getattr(ev_requested, 'task_id', None)}"
+    )
+    assert getattr(ev_requested, "payload", {}).get("approval_id") == approval_id, (
+        f"域#12: SSE event.payload.approval_id 应为 {approval_id}，"
+        f"实际: {getattr(ev_requested, 'payload', {}).get('approval_id')}"
+    )
+
+    # 步骤 3：resolve（ALLOW_ONCE）
     resolved_ok = await approval_manager.resolve(
         approval_id=approval_id,
         decision=ApprovalDecision.ALLOW_ONCE,
@@ -202,18 +231,32 @@ async def test_domain_12_approval_gate_sse_register_and_auto_approve(
     )
     assert resolved_ok is True, "域#12: resolve 应返回 True"
 
-    # 断言 2：record.status=APPROVED + APPROVAL_DECIDED 事件
-    # resolve 后 record 状态变更（同 _pending 中的 record）
-    pending_after = approval_manager._pending.get(approval_id)
-    assert pending_after is not None, "域#12: _pending 应仍含已 resolve 的 record"
-    assert pending_after.record.status == ApprovalStatus.APPROVED, (
-        f"域#12: resolve 后 status 应为 APPROVED，实际: "
-        f"{pending_after.record.status}"
+    # 断言 2：SSE 订阅 queue 收到 'approval:resolved' 事件（验证 resolve 也走 SSE）
+    # ApprovalManager.resolve 通过 SSEApprovalBroadcaster.broadcast(
+    #   event_type='approval:resolved', ...)；不依赖 _pending 私有字段
+    try:
+        ev_resolved = await asyncio.wait_for(sse_queue.get(), timeout=2.0)
+    except asyncio.TimeoutError as exc:
+        raise AssertionError(
+            "域#12: SSE 订阅 queue 在 2s 内未收到 'approval:resolved' 事件——"
+            "resolve 路径未走 SSE 桥接"
+        ) from exc
+
+    assert getattr(ev_resolved, "type", None) == "approval:resolved", (
+        f"域#12: SSE event.type 应为 'approval:resolved'，"
+        f"实际: {getattr(ev_resolved, 'type', None)}"
     )
-    events_after = await sg.event_store.get_events_for_task(test_task_id)
-    # ApprovalManager.resolve(ALLOW_ONCE) 实际写 APPROVAL_APPROVED（不是 APPROVAL_DECIDED）
-    approved = [e for e in events_after if e.type == EventType.APPROVAL_APPROVED]
-    assert approved, (
-        "域#12: events 表应含至少 1 条 APPROVAL_APPROVED 事件"
+    assert getattr(ev_resolved, "payload", {}).get("approval_id") == approval_id, (
+        f"域#12: SSE resolved event.payload.approval_id 应为 {approval_id}，"
+        f"实际: {getattr(ev_resolved, 'payload', {}).get('approval_id')}"
     )
-    assert approved[-1].payload.get("approval_id") == approval_id
+
+    # 隐式断言：register 返回的 record 实例已被 ApprovalManager.resolve
+    # 原地变更为 APPROVED 状态（同对象引用，不读 _pending 私有字段）
+    assert record.status == ApprovalStatus.APPROVED, (
+        f"域#12: resolve 后 record.status 应为 APPROVED（原对象引用反射），"
+        f"实际: {record.status}"
+    )
+
+    # 清理订阅
+    await sse_hub.unsubscribe(test_task_id, sse_queue)
