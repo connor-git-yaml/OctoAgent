@@ -221,3 +221,24 @@ def _looks_like_quota_error(exc: BaseException) -> bool:
 def quota_skip_sanity_marker() -> str:
     """Sanity fixture：标记给 conftest test_quota_skip 用。"""
     return "ok"
+
+
+# ---------------------------------------------------------------------------
+# T-P2-14: 自动给 e2e_smoke / e2e_full 测试加 flaky marker
+# ---------------------------------------------------------------------------
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config,
+    items: list[pytest.Item],
+) -> None:
+    """给 e2e_smoke / e2e_full 测试自动加 ``@pytest.mark.flaky(reruns=1, reruns_delay=2)``。
+
+    单测 / 不带 e2e marker 的测试不加（原行为不变，不引入意外重试开销）。
+    """
+    # FR-23: rerun 一次 + 2s delay
+    flaky_marker = pytest.mark.flaky(reruns=1, reruns_delay=2)
+    for item in items:
+        markers = {m.name for m in item.iter_markers()}
+        if markers & {"e2e_smoke", "e2e_full"}:
+            item.add_marker(flaky_marker)
