@@ -212,16 +212,29 @@ def pytest_runtest_call(item: pytest.Item):  # type: ignore[no-untyped-def]
 
 
 def _looks_like_quota_error(exc: BaseException) -> bool:
-    """判断异常是否属于 quota / 429 / rate limit 类。"""
-    # error_type 协议（LLMCallError）
+    """判断异常是否属于 provider quota / 429 / rate limit 类。
+
+    F087 P2 fixup#2（Codex P2 high-2 闭环）：**禁止 generic substring 匹配**。
+    原实现把任何 `RuntimeError("...quota...")` 都转 SKIP，会把真 bug（如 OctoAgent
+    路由层的 RuntimeError 错误信息恰好含 "quota"）误判为 provider 配额耗尽，掩盖
+    实际故障。
+
+    现仅匹配两种**结构化协议**：
+      1. ``getattr(exc, "error_type", "") == "rate_limit"`` —— LLMCallError /
+         ProviderError 自有协议
+      2. ``getattr(exc, "status_code", 0) == 429`` —— HTTP-style 显式状态码
+
+    无任何 ``status_code`` / ``error_type`` 属性的异常（包括 generic ``RuntimeError``
+    / ``AssertionError``）一律视为非 quota，**正常 FAIL**。
+    """
+    # error_type 协议（LLMCallError / ProviderQuotaError）
     if getattr(exc, "error_type", "") == "rate_limit":
         return True
+    # status_code 协议（HTTP-style provider exception，含真 429）
     if getattr(exc, "status_code", 0) == 429:
         return True
-    # 关键字兜底
-    msg = str(exc).lower()
-    if "rate limit" in msg or "quota" in msg or "429" in msg:
-        return True
+    # **不再做 substring 匹配**：避免 RuntimeError("quota exhausted") 类
+    # generic 异常被误判 SKIP 掩盖真 bug（Codex P2 high-2 闭环）。
     return False
 
 

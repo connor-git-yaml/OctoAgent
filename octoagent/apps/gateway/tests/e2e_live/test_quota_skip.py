@@ -26,15 +26,46 @@ def test_quota_429_status_code_triggers_skip() -> None:
     raise _FakeLLMCallError("rate limited", error_type="rate_limit", status_code=429)
 
 
-def test_quota_message_keyword_triggers_skip() -> None:
-    """关键字"quota"在异常消息里 → 应转 SKIP。"""
-    raise RuntimeError("provider returned 429 quota exhausted")
+def test_quota_error_type_protocol_triggers_skip() -> None:
+    """模拟 error_type='rate_limit' 协议异常 → 应被 hook 转为 SKIP。"""
+    raise _FakeLLMCallError("rate limited", error_type="rate_limit", status_code=0)
+
+
+def test_generic_runtime_error_with_quota_word_does_NOT_skip() -> None:
+    """F087 P2 fixup#2 (Codex high-2 闭环)：generic RuntimeError 即使消息含 "quota"
+    也**不应**被转 SKIP——避免真 bug 被字符串匹配误判掩盖。
+
+    这条原是 ``test_quota_message_keyword_triggers_skip``（锁定危险宽行为），
+    现反向断言：generic RuntimeError 必须正常 FAIL。
+
+    用 ``_looks_like_quota_error`` 直接验证函数返回 False（避免在 hook 层验证
+    要起 subprocess pytest run）。
+    """
+    from apps.gateway.tests.e2e_live.conftest import _looks_like_quota_error
+
+    # generic RuntimeError 即使消息里含 "quota" / "429" / "rate limit" 都不应被识别
+    assert _looks_like_quota_error(RuntimeError("provider returned 429 quota exhausted")) is False
+    assert _looks_like_quota_error(RuntimeError("rate limit hit")) is False
+    assert _looks_like_quota_error(AssertionError("expected quota, got 200")) is False
+    assert _looks_like_quota_error(ValueError("429 in body")) is False
+
+
+def test_structured_quota_protocol_still_recognized() -> None:
+    """带 error_type / status_code 协议的异常仍被识别（积极路径不破坏）。"""
+    from apps.gateway.tests.e2e_live.conftest import _looks_like_quota_error
+
+    assert _looks_like_quota_error(
+        _FakeLLMCallError("rate limited", error_type="rate_limit", status_code=0)
+    ) is True
+    assert _looks_like_quota_error(
+        _FakeLLMCallError("rate limited", error_type="", status_code=429)
+    ) is True
+    # 无任一协议字段 → 不识别
+    assert _looks_like_quota_error(
+        _FakeLLMCallError("some msg", error_type="", status_code=200)
+    ) is False
 
 
 def test_normal_failure_still_fails() -> None:
-    """普通 ValueError 不被识别为 quota 错误，应正常 FAIL（这条本身需手动验证不变）。
-
-    本测试默认跑 PASS（断言不抛错）；要测 hook 不"过度热心"地把 ValueError 当 skip
-    需要 xfail 包装；为简化，这里用一条无副作用 PASS 占位。
-    """
+    """sanity placeholder：普通 PASS 测试不被 hook 干扰。"""
     assert True
