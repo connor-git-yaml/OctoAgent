@@ -166,8 +166,58 @@ def _alarm_handler(signum: int, frame: object) -> None:  # noqa: ARG001
 
 
 # ---------------------------------------------------------------------------
-# Codex 429 quota → SKIP hook（T-P2-13 留位，独立 fixture 内具体处理）
+# Codex 429 quota → SKIP hook（T-P2-13）
 # ---------------------------------------------------------------------------
 
-# 实际 quota 检测在测试代码内 catch 异常 + pytest.skip(...)，详见
-# helpers/fixtures_real_credentials.py 与 T-P2-13。conftest 仅提供 hook 注册位。
+
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_call(item: pytest.Item):  # type: ignore[no-untyped-def]
+    """e2e_live 测试遇到 429 / quota / rate_limit 异常 → 转换为 SKIP（不阻塞 commit）。
+
+    用 hookwrapper 包装 call phase：catch 测试抛出的异常，识别 quota
+    模式后改 raise ``pytest.skip.Exception``，pytest 当作 SKIP。
+
+    检测条件（任一即触发）：
+    - 异常 ``error_type == "rate_limit"``（``LLMCallError`` 协议）
+    - 异常 ``status_code == 429``
+    - 异常消息含 ``"quota"`` / ``"rate limit"`` / ``"429"`` 关键字
+    """
+    # 仅作用于 e2e_live / e2e_smoke / e2e_full 标记的测试
+    markers = {m.name for m in item.iter_markers()}
+    is_e2e = bool(markers & {"e2e_live", "e2e_smoke", "e2e_full"})
+
+    outcome = yield  # 执行测试
+
+    if not is_e2e:
+        return
+
+    excinfo = outcome.excinfo  # tuple (type, value, tb) | None
+    if excinfo is None:
+        return
+    exc = excinfo[1]
+    if _looks_like_quota_error(exc):
+        outcome.force_exception(
+            pytest.skip.Exception(
+                f"[E2E QUOTA SKIP] codex / provider quota exhausted: {exc!r}"
+            )
+        )
+
+
+def _looks_like_quota_error(exc: BaseException) -> bool:
+    """判断异常是否属于 quota / 429 / rate limit 类。"""
+    # error_type 协议（LLMCallError）
+    if getattr(exc, "error_type", "") == "rate_limit":
+        return True
+    if getattr(exc, "status_code", 0) == 429:
+        return True
+    # 关键字兜底
+    msg = str(exc).lower()
+    if "rate limit" in msg or "quota" in msg or "429" in msg:
+        return True
+    return False
+
+
+@pytest.fixture
+def quota_skip_sanity_marker() -> str:
+    """Sanity fixture：标记给 conftest test_quota_skip 用。"""
+    return "ok"
