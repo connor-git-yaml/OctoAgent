@@ -2,14 +2,18 @@
 
 把 ``main.py:lifespan`` 内 ~590 行 inline 逻辑抽离到独立类，目的：
 
-1. **e2e 测试可注入**：通过 4 个 DI 钩子（``credential_store`` /
-   ``llm_adapter`` / ``mcp_servers_dir`` / ``data_dir``），让测试可绕过
-   宿主 ``~/.octoagent`` 副作用，构造 hermetic 隔离。
-2. **生产路径 byte-for-byte 等价**：4 DI 全传 ``None`` 时行为与 F086
-   baseline 完全一致。
-3. **lifespan 收敛**：抽离后 ``main.py:lifespan`` ≤ 20 行，仅做
+1. **生产路径 byte-for-byte 等价**：4 DI 全传 ``None`` 时行为与 F086
+   baseline 完全一致（SC-6 锁定）。
+2. **lifespan 收敛**：抽离后 ``main.py:lifespan`` ≤ 20 行，仅做
    ``OctoHarness`` 三入口转发：``bootstrap`` / ``commit_to_app`` /
    ``shutdown``。
+3. **DI 钩子（P2 启用，P1 禁用）**：4 个 DI 入口（``credential_store`` /
+   ``llm_adapter`` / ``mcp_servers_dir`` / ``data_dir``）签名已锁定，但
+   bootstrap 内部尚未消费。**P1 阶段任一 override 非 ``None`` 立即 raise
+   ``NotImplementedError``**——避免静默失效造成的隔离漏洞（Codex F087-P1
+   adversarial review high finding：测试以为已隔离实际仍读宿主 ~/.octoagent）。
+   消费路径由 P2 接入：T-P2-3（mcp_servers_dir）/ T-P2-4 / T-P2-7
+   （credential_store）/ T-P2-8（llm_adapter / data_dir）。
 
 P1 阶段（本文件）只做骨架；11 段 ``_bootstrap_*`` 方法体由 T-P1-3..T-P1-5
 按 lifespan 内 ``# === _bootstrap_<name> START/END ===`` marker 区间
@@ -38,7 +42,7 @@ if TYPE_CHECKING:
 class OctoHarness:
     """FastAPI 应用 lifespan 装配器。
 
-    使用方式（生产）::
+    使用方式（生产，P1 唯一支持模式）::
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
@@ -50,26 +54,15 @@ class OctoHarness:
             finally:
                 await harness.shutdown(app)
 
-    使用方式（e2e 测试）::
+    DI 钩子状态（**P1 全部禁用，P2 接入**）：
+      * ``credential_store`` → P2 T-P2-7 接入（替换 ProviderRouter 凭据来源）
+      * ``llm_adapter`` → P2 T-P2-8 接入（替换 LLMService MessageAdapter）
+      * ``mcp_servers_dir`` → P2 T-P2-3/T-P2-4 接入（替换 McpInstallerService 安装目录）
+      * ``data_dir`` → P2 T-P2-8 接入（替换 DB / artifacts 默认根）
 
-        harness = OctoHarness(
-            project_root=tmp_path,
-            credential_store=fake_store,
-            llm_adapter=real_codex_adapter,
-            mcp_servers_dir=tmp_path / "mcp-servers",
-            data_dir=tmp_path,
-        )
-
-    DI 钩子语义：
-      * ``credential_store=None`` → 走 ``store_group.credential_store``（生产路径）
-      * ``llm_adapter=None`` → 按 ``OCTOAGENT_LLM_MODE`` env 决定 echo 还是
-        ``ProviderRouterMessageAdapter``（生产路径）
-      * ``mcp_servers_dir=None`` → 走 ``Path.home() / .octoagent / mcp-servers``
-        （生产路径）
-      * ``data_dir=None`` → 走 ``get_db_path()`` / ``get_artifacts_dir()``
-        env 解析（生产路径）
-
-    所有钩子默认 None ⇒ byte-for-byte 等价（SC-6 锁定）。
+    P1 阶段任一 override 非 ``None`` 立即 raise ``NotImplementedError``，
+    避免 e2e 测试误判已隔离实际仍读宿主 ``~/.octoagent``（Codex P087-P1 high
+    finding 闭环）。
     """
 
     def __init__(
@@ -81,6 +74,23 @@ class OctoHarness:
         mcp_servers_dir: Path | None = None,
         data_dir: Path | None = None,
     ) -> None:
+        # F087 P1 Codex high finding 闭环：DI 钩子 P1 禁用，避免静默失效
+        # （测试以为已隔离实际仍读宿主 ~/.octoagent）。P2 任务接入消费路径。
+        _disabled_overrides = [
+            ("credential_store", credential_store, "T-P2-7"),
+            ("llm_adapter", llm_adapter, "T-P2-8"),
+            ("mcp_servers_dir", mcp_servers_dir, "T-P2-3 / T-P2-4"),
+            ("data_dir", data_dir, "T-P2-8"),
+        ]
+        for name, value, p2_task in _disabled_overrides:
+            if value is not None:
+                raise NotImplementedError(
+                    f"OctoHarness.{name} DI override is reserved for F087 P2 "
+                    f"({p2_task}); P1 only does byte-for-byte equivalent lifespan "
+                    f"extraction. Passing non-None override would silently fall back "
+                    f"to host paths and break hermetic isolation."
+                )
+
         self._project_root = project_root
         self._credential_store_override = credential_store
         self._llm_adapter_override = llm_adapter
