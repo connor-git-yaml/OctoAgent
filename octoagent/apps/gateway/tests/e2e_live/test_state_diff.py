@@ -69,13 +69,12 @@ def test_sha256_dir_missing(tmp_path: Path) -> None:
 
 
 def test_module_singletons_snapshot_keys() -> None:
-    """快照含 5 个 expected keys。"""
+    """快照含 4 个 expected keys（_tiktoken_encoder 已从 reset 清单剔除）。"""
     snap = module_singletons_snapshot()
     assert "tool_registry_count" in snap
     assert "agent_context_llm_set" in snap
     assert "agent_context_router_set" in snap
     assert "execution_context_var" in snap
-    assert "tiktoken_encoder_set" in snap
 
 
 def test_module_singletons_snapshot_after_reset() -> None:
@@ -86,7 +85,6 @@ def test_module_singletons_snapshot_after_reset() -> None:
     assert snap["agent_context_llm_set"] is False
     assert snap["agent_context_router_set"] is False
     assert snap["execution_context_var"] == "None"
-    assert snap["tiktoken_encoder_set"] is False
 
 
 def test_snapshot_to_json_serializable() -> None:

@@ -389,9 +389,13 @@ class OctoHarness:
         store_group = self._store_group
         assert store_group is not None
 
-        # Feature 058: 确保 MCP 安装相关目录存在
-        # P1 保留 _DEFAULT_MCP_SERVERS_DIR 行为（DI 改 P2 做）
-        _mcp_servers_dir = Path.home() / ".octoagent" / "mcp-servers"
+        # Feature 058 + F087 P2 T-P2-16: 确保 MCP 安装相关目录存在
+        # 接入 mcp_servers_dir DI——None 时走宿主默认（生产 byte-for-byte 等价），
+        # e2e 注入 tmp 时彻底隔离（Path.home() 不再被调用）
+        if self._mcp_servers_dir is not None:
+            _mcp_servers_dir = self._mcp_servers_dir
+        else:
+            _mcp_servers_dir = Path.home() / ".octoagent" / "mcp-servers"
         _mcp_servers_dir.mkdir(parents=True, exist_ok=True)
         _ops_dir = project_root / "data" / "ops"
         _ops_dir.mkdir(parents=True, exist_ok=True)
@@ -611,7 +615,12 @@ class OctoHarness:
             # 这里需基于 main.py __file__ 解析（保持 byte-for-byte 等价）
             from .. import main as _main_module
             _builtin_pipelines = Path(_main_module.__file__).resolve().parents[5] / "pipelines"
-            _user_pipelines = Path.home() / ".octoagent" / "pipelines"
+            # F087 P2 T-P2-16: hermetic 隔离——data_dir 注入时 user_pipelines 走 data_dir,
+            # 否则走宿主 ~/.octoagent/pipelines（生产路径不变）
+            if self._data_dir is not None:
+                _user_pipelines = self._data_dir.parent / "pipelines"
+            else:
+                _user_pipelines = Path.home() / ".octoagent" / "pipelines"
             pipeline_registry = PipelineRegistry(
                 builtin_dir=_builtin_pipelines if _builtin_pipelines.is_dir() else None,
                 user_dir=_user_pipelines,

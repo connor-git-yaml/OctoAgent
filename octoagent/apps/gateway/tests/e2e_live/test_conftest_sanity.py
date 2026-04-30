@@ -59,11 +59,17 @@ def test_reset_module_state_clears_execution_context_var() -> None:
     assert _ec_mod._CURRENT_EXECUTION_CONTEXT.get() is None  # type: ignore[attr-defined]
 
 
-def test_reset_module_state_clears_tiktoken_encoder() -> None:
-    """_tiktoken_encoder 模块单例已 reset 为 None。"""
+def test_tiktoken_encoder_is_lazy_import_not_reset() -> None:
+    """_tiktoken_encoder 是 import-time lazy init，**不**在 reset 清单中。
+
+    sanity 验证：跑 e2e_live 时它仍持有原对象（不被 reset 破坏）。
+    """
     from octoagent.gateway.services import context_compaction as _cc_mod
 
-    assert _cc_mod._tiktoken_encoder is None  # type: ignore[attr-defined]
+    # tiktoken 装了就该非 None；没装则 None。两种都是合法 import-time 状态。
+    # 关键：不应被测试期间 reset 改变。
+    _ = _cc_mod._tiktoken_encoder  # type: ignore[attr-defined]
+    # 该值在 _reset_module_state 之外不被改
 
 
 def test_alarm_timeout_does_not_fire_for_fast_test() -> None:

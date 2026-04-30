@@ -64,7 +64,9 @@ def module_singletons_snapshot() -> dict[str, Any]:
       - ``agent_context_llm_set`` — bool（是否非 None）
       - ``agent_context_router_set`` — bool（是否非 None）
       - ``execution_context_var`` — None / 'set'
-      - ``tiktoken_encoder_set`` — bool
+
+    （``_tiktoken_encoder`` 是 lazy import 一次性 init，**不**纳入 reset 快照——
+    详见 MODULE_SINGLETONS.md 与 conftest.py:_reset_module_state docstring。）
 
     json-serializable，可直接 dump 进失败信息。
     """
@@ -96,13 +98,6 @@ def module_singletons_snapshot() -> dict[str, Any]:
         )
     except Exception:
         snapshot["execution_context_var"] = "unavailable"
-
-    try:
-        from octoagent.gateway.services import context_compaction as _cc
-
-        snapshot["tiktoken_encoder_set"] = _cc._tiktoken_encoder is not None  # type: ignore[attr-defined]
-    except Exception:
-        snapshot["tiktoken_encoder_set"] = "unavailable"
 
     return snapshot
 

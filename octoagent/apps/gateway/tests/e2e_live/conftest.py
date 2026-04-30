@@ -23,12 +23,15 @@ from contextlib import suppress
 
 import pytest
 
-# 暴露 helpers 内的 fixture 给同目录测试
-# pytest plugin 风格而不是 import *，保留 IDE 补全
-pytest_plugins = [
-    "apps.gateway.tests.e2e_live.helpers.fixtures_real_credentials",
-    "apps.gateway.tests.e2e_live.helpers.factories",
-]
+# 暴露 helpers 内的 fixture 给同目录测试。
+# 不能用 pytest_plugins（非 top-level conftest 不允许）。直接 import fixture
+# 函数让 pytest 通过模块作用域发现：fixture 必须出现在 conftest 模块本身。
+from apps.gateway.tests.e2e_live.helpers.factories import (  # noqa: F401
+    octo_harness_e2e,
+)
+from apps.gateway.tests.e2e_live.helpers.fixtures_real_credentials import (  # noqa: F401
+    real_codex_credential_store,
+)
 
 # ---------------------------------------------------------------------------
 # 凭证 env 清单（FR-7 锁定）
@@ -94,46 +97,51 @@ def _hermetic_environment(
 def _reset_module_state() -> Iterator[None]:
     """按 helpers/MODULE_SINGLETONS.md 清单逐条 reset。
 
-    清单内 5 条 stateful 单例（其余 grep 命中项已审视为无状态常量，不进 reset）：
+    清单内 4 条 stateful 单例（其余 grep 命中项已审视为无状态常量 / lazy
+    import 一次性 init，不进 reset）：
 
     1. ``harness.tool_registry._REGISTRY._entries.clear()``（保持单例 identity，
        仅清条目，下个测试需要时由 ``scan_and_register`` 重新填充）
     2. ``services.agent_context.AgentContextService._shared_llm_service = None``
     3. ``services.agent_context.AgentContextService._shared_provider_router = None``
     4. ``services.execution_context._CURRENT_EXECUTION_CONTEXT.set(None)``
-    5. ``services.context_compaction._tiktoken_encoder = None``
 
-    每个 reset 都用 ``with suppress(Exception)`` 兜底，避免某条 import 时机
-    问题导致 conftest 整体崩。但 import 成功后 reset 失败应 raise（暴露漏项）。
+    **不**包括 ``services.context_compaction._tiktoken_encoder``——它是 import-
+    time lazy init 的一次性 encoder 对象，不会被运行期写入；reset 为 None 反
+    而破坏其后续使用（test_context_compaction 因此连环挂）。
+    F087 P2 T-P2-7 在 hermetic 验证后修正本 reset 清单（MODULE_SINGLETONS.md
+    已标注 _tiktoken_encoder 为 lazy import，不需 reset）。
+
+    Yield 之后**也**重新 reset 一次：避免 e2e_live 跑过的副作用泄漏到全局后续
+    测试集（test_context_compaction 等依赖 ``AgentContextService._shared_*`` 默认值
+    None 的测试）。
     """
-    # 1. ToolRegistry singleton entries
-    with suppress(ImportError):
-        from octoagent.gateway.harness import tool_registry as _tr_mod
 
-        # 保留 _REGISTRY identity（多处持有引用），仅清空 entries
-        with _tr_mod._REGISTRY._lock:  # type: ignore[attr-defined]
-            _tr_mod._REGISTRY._entries.clear()  # type: ignore[attr-defined]
+    def _do_reset() -> None:
+        # 1. ToolRegistry singleton entries
+        with suppress(ImportError):
+            from octoagent.gateway.harness import tool_registry as _tr_mod
 
-    # 2/3. AgentContextService 类属性
-    with suppress(ImportError):
-        from octoagent.gateway.services.agent_context import AgentContextService
+            # 保留 _REGISTRY identity（多处持有引用），仅清空 entries
+            with _tr_mod._REGISTRY._lock:  # type: ignore[attr-defined]
+                _tr_mod._REGISTRY._entries.clear()  # type: ignore[attr-defined]
 
-        AgentContextService._shared_llm_service = None  # type: ignore[assignment]
-        AgentContextService._shared_provider_router = None  # type: ignore[assignment]
+        # 2/3. AgentContextService 类属性
+        with suppress(ImportError):
+            from octoagent.gateway.services.agent_context import AgentContextService
 
-    # 4. _CURRENT_EXECUTION_CONTEXT ContextVar
-    with suppress(ImportError):
-        from octoagent.gateway.services import execution_context as _ec_mod
+            AgentContextService._shared_llm_service = None  # type: ignore[assignment]
+            AgentContextService._shared_provider_router = None  # type: ignore[assignment]
 
-        _ec_mod._CURRENT_EXECUTION_CONTEXT.set(None)  # type: ignore[attr-defined]
+        # 4. _CURRENT_EXECUTION_CONTEXT ContextVar
+        with suppress(ImportError):
+            from octoagent.gateway.services import execution_context as _ec_mod
 
-    # 5. context_compaction tiktoken encoder
-    with suppress(ImportError):
-        from octoagent.gateway.services import context_compaction as _cc_mod
+            _ec_mod._CURRENT_EXECUTION_CONTEXT.set(None)  # type: ignore[attr-defined]
 
-        _cc_mod._tiktoken_encoder = None  # type: ignore[attr-defined]
-
+    _do_reset()
     yield
+    _do_reset()  # teardown：保证下个测试（甚至 e2e_live 之外）状态干净
 
 
 @pytest.fixture(autouse=True)

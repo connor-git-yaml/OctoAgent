@@ -269,12 +269,19 @@ def _warn_duplicate_instance_roots(project_root: Path) -> None:
 
     历史问题：``OCTOAGENT_PROJECT_ROOT`` 灵活性 + 不同启动场景在不同位置初始化
     文件骨架 → 产生 3 份 USER.md 等"幽灵副本"。
+
+    F087 P2 T-P2-16: ``Path.home()`` 失败时静默（e2e hermetic 隔离场景）；
+    这是仅 warning 性质的对账，宿主目录不可读不应阻断 bootstrap。
     """
-    candidates = [
-        Path.home() / ".octoagent" / "behavior" / "system" / "USER.md",
-        Path.home() / ".octoagent" / "app" / "behavior" / "system" / "USER.md",
-        Path.home() / ".octoagent" / "app" / "octoagent" / "behavior" / "system" / "USER.md",
-    ]
+    try:
+        candidates = [
+            Path.home() / ".octoagent" / "behavior" / "system" / "USER.md",
+            Path.home() / ".octoagent" / "app" / "behavior" / "system" / "USER.md",
+            Path.home() / ".octoagent" / "app" / "octoagent" / "behavior" / "system" / "USER.md",
+        ]
+    except (RuntimeError, OSError):
+        # hermetic 隔离场景（F087 P2 T-P2-16），跳过对账
+        return
     existing = [str(p) for p in candidates if p.exists()]
     if len(existing) > 1:
         log.warning(
