@@ -123,20 +123,92 @@ class OctoHarness:
         await self._bootstrap_control_plane(app)
 
     async def shutdown(self, app: FastAPI) -> None:
-        """对应 ``main.py:lifespan`` 内 ``yield`` 之后的 shutdown 段。"""
-        # T-P1-6 填充
-        raise NotImplementedError("OctoHarness.shutdown body in T-P1-6")
+        """对应 ``main.py:lifespan`` 内 ``yield`` 之后的 shutdown 段
+        （行 854-916）。byte-for-byte 等价。"""
+        import asyncio
+
+        from ..main import _BACKGROUND_TASK_SHUTDOWN_TIMEOUT_S, log as _log
+
+        # 关闭：尝试优雅等待后台任务完成，降低中断导致的任务丢失概率
+        background_tasks: set[asyncio.Task] = getattr(app.state, "background_tasks", set())
+        if background_tasks:
+            pending = [t for t in background_tasks if not t.done()]
+            if pending:
+                done, not_done = await asyncio.wait(
+                    pending,
+                    timeout=_BACKGROUND_TASK_SHUTDOWN_TIMEOUT_S,
+                )
+                if not_done:
+                    _log.warning(
+                        "background_tasks_shutdown_timeout",
+                        pending_count=len(not_done),
+                        timeout_s=_BACKGROUND_TASK_SHUTDOWN_TIMEOUT_S,
+                    )
+                    for task in not_done:
+                        task.cancel()
+                for task in done:
+                    try:
+                        task.result()
+                    except Exception as exc:
+                        _log.warning(
+                            "background_task_failed_before_shutdown",
+                            error_type=type(exc).__name__,
+                        )
+
+        # F084 Phase 3 T049：关闭 ObservationRoutine
+        if hasattr(app.state, "observation_routine") and app.state.observation_routine:
+            await app.state.observation_routine.stop()
+
+        # 关闭：停止 Watchdog 调度器
+        if hasattr(app.state, "watchdog_scheduler") and app.state.watchdog_scheduler:
+            app.state.watchdog_scheduler.shutdown(wait=False)
+            _log.info("watchdog_scheduler_stopped")
+        if hasattr(app.state, "automation_scheduler") and app.state.automation_scheduler:
+            await app.state.automation_scheduler.shutdown()
+
+        # Feature 058: 关闭 McpInstallerService 和 McpRegistryService（含 session pool）
+        if hasattr(app.state, "mcp_installer") and app.state.mcp_installer:
+            await app.state.mcp_installer.shutdown()
+        if hasattr(app.state, "mcp_registry") and app.state.mcp_registry:
+            await app.state.mcp_registry.shutdown()
+
+        # Feature 081 P1：ProxyProcessManager 已退役，无需 shutdown 子进程
+        # （app.state.proxy_manager 总是 None；P3 删除 control_plane bind_proxy_manager 后清理）
+
+        # 关闭：清理数据库连接
+        update_status_store = getattr(app.state, "update_status_store", None)
+        clear_runtime_state = (
+            getattr(update_status_store, "clear_runtime_state", None)
+            if update_status_store is not None
+            else None
+        )
+        if callable(clear_runtime_state):
+            clear_runtime_state()
+        if hasattr(app.state, "telegram_service") and app.state.telegram_service:
+            await app.state.telegram_service.shutdown()
+        if hasattr(app.state, "task_runner") and app.state.task_runner:
+            await app.state.task_runner.shutdown()
+        if hasattr(app.state, "store_group") and app.state.store_group:
+            await app.state.store_group.conn.close()
 
     def commit_to_app(self, app: FastAPI) -> None:
-        """一次性把 ``self._state`` 内全部条目挂到 ``app.state.*``。
+        """commit_to_app（F087 P1 设计）。
 
-        语义：bootstrap 期间各段把待挂载状态写到 ``self._state``；调用方
-        在 ``yield`` 前调一次 ``commit_to_app`` 完成统一挂载。生产路径
-        ``main.py:lifespan`` 已经是按属性逐个挂 ``app.state.xxx``，T-P1-6
-        会改为先收到 ``self._state`` → 再 commit。
+        生产路径下 ``bootstrap()`` 各 ``_bootstrap_*`` 段已经直接把 ``app.state.*``
+        挂好（保持 F086 byte-for-byte 等价语义），此方法当前为 no-op。
+
+        保留接口的目的：
+          1. 给后续 P2/e2e 测试场景留 hook（如需要在 yield 前做 sanity 校验
+             "关键 attr 都已挂"）。
+          2. 让调用方代码风格统一为 ``bootstrap → commit_to_app → yield → shutdown``，
+             与 plan §8.2 一致。
+
+        如果未来某段拆分为 "bootstrap 收集到 self._state → commit_to_app 写
+        app.state"，可在此方法 body 写 ``for k, v in self._state.items():
+        setattr(app.state, k, v)``。当前 self._state 一直保持空。
         """
-        # T-P1-6 填充
-        raise NotImplementedError("OctoHarness.commit_to_app body in T-P1-6")
+        # P1 阶段保持 no-op；不验证 attr 防止生产路径附加副作用
+        return None
 
     # ----- 11 段 _bootstrap_* 骨架（T-P1-3..T-P1-5 填充） -----
 
