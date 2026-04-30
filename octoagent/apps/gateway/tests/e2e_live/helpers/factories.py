@@ -88,29 +88,124 @@ async def octo_harness_e2e(
 # 复制后 P3/P4 新 case 用本文件版本；旧 acceptance 仍用旧位置；P5 一并清理。
 
 
-def _build_real_user_profile_handler(*args: Any, **kwargs: Any) -> Any:
-    """复制 placeholder——实际 body 在 T-P3 完成时按需从旧 acceptance 拷贝。
+async def _ensure_audit_task(sg: Any, task_id: str) -> None:
+    """确保审计 task 存在（外键约束）。从旧 acceptance_scenarios 复制。"""
+    from datetime import datetime, timezone
 
-    P2 阶段先建立函数符号，避免 helpers 包 import 时缺失。F087 P3 case 实际
-    需要时按 spec 附录 A.2 真正实现。"""
-    raise NotImplementedError(
-        "F087 P2: _build_real_user_profile_handler placeholder. "
-        "Implementation copied from old acceptance_scenarios in P3 task."
+    from octoagent.core.models.task import RequesterInfo, Task, TaskPointers
+
+    try:
+        existing = await sg.task_store.get_task(task_id)
+        if existing is not None:
+            return
+    except Exception:
+        pass
+    now = datetime.now(timezone.utc)
+    task = Task(
+        task_id=task_id,
+        created_at=now,
+        updated_at=now,
+        title=f"E2E 审计占位 task ({task_id})",
+        trace_id=task_id,
+        requester=RequesterInfo(channel="system", sender_id="system"),
+        pointers=TaskPointers(),
+    )
+    await sg.task_store.create_task(task)
+
+
+async def _insert_turn_events(conn: Any, turns: list[dict[str, Any]]) -> None:
+    """向 events 表写入模拟 turn 事件。从旧 acceptance_scenarios 复制。"""
+    import time
+    from datetime import datetime, timezone
+
+    from ulid import ULID
+
+    now = datetime.now(timezone.utc)
+    try:
+        await conn.execute(
+            """
+            INSERT OR IGNORE INTO tasks (task_id, created_at, updated_at, title, status, trace_id)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "_e2e_turns_task",
+                now.isoformat(),
+                now.isoformat(),
+                "e2e turns test task",
+                "running",
+                "_e2e_turns_task",
+            ),
+        )
+    except Exception:
+        pass
+
+    for i, turn in enumerate(turns):
+        payload_str = json.dumps(turn.get("payload", {}))
+        await conn.execute(
+            """
+            INSERT OR IGNORE INTO events (event_id, task_id, task_seq, ts, type, actor, payload, trace_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                str(ULID()),
+                "_e2e_turns_task",
+                i + 100 + int(time.time() * 1000) % 100000,
+                now.isoformat(),
+                "TASK_USER_MESSAGE",
+                "USER",
+                payload_str,
+                "_e2e_turns_task",
+            ),
+        )
+    await conn.commit()
+
+
+async def _build_real_user_profile_handler(
+    store_group: Any,
+    tmp_path: Path,
+) -> tuple[Any, Any, Path]:
+    """构造真实 user_profile.update handler（F38/F39 修复路径）。
+
+    从旧 acceptance_scenarios 复制；P5 T-P5-1 删除旧位置时本文件保留。
+    """
+    from unittest.mock import MagicMock
+
+    from octoagent.gateway.harness.snapshot_store import SnapshotStore
+    from octoagent.gateway.services.builtin_tools import user_profile_tools
+    from octoagent.gateway.services.builtin_tools._deps import ToolDeps
+
+    user_md = tmp_path / "behavior" / "system" / "USER.md"
+    user_md.parent.mkdir(parents=True, exist_ok=True)
+    if not user_md.exists():
+        user_md.write_text("", encoding="utf-8")
+
+    snap_store = SnapshotStore(conn=store_group.conn)
+    await snap_store.load_snapshot(
+        session_id="e2e-real-handler",
+        files={"USER.md": user_md},
     )
 
-
-async def _ensure_audit_task(*args: Any, **kwargs: Any) -> Any:
-    """同上，P3 实现时按需复制。"""
-    raise NotImplementedError(
-        "F087 P2: _ensure_audit_task placeholder; copy from old location in P3."
+    deps = ToolDeps(
+        project_root=tmp_path,
+        stores=store_group,
+        tool_broker=MagicMock(),
+        tool_index=MagicMock(),
+        skill_discovery=MagicMock(),
+        memory_console_service=MagicMock(),
+        memory_runtime_service=MagicMock(),
+        _snapshot_store=snap_store,
     )
 
+    captured_handlers: dict[str, Any] = {}
 
-async def _insert_turn_events(*args: Any, **kwargs: Any) -> Any:
-    """同上，P3 实现时按需复制。"""
-    raise NotImplementedError(
-        "F087 P2: _insert_turn_events placeholder; copy from old location in P3."
-    )
+    class _CaptureBroker:
+        async def try_register(self, meta: Any, handler: Any) -> None:
+            captured_handlers[meta.name] = handler
+
+    await user_profile_tools.register(_CaptureBroker(), deps)
+    handler = captured_handlers.get("user_profile.update")
+    assert handler is not None, "user_profile.update handler 应已注册"
+    return handler, snap_store, user_md
 
 
 def copy_local_instance_template(template_root: Path, dst_root: Path) -> None:
