@@ -74,22 +74,9 @@ class OctoHarness:
         mcp_servers_dir: Path | None = None,
         data_dir: Path | None = None,
     ) -> None:
-        # F087 P2 T-P2-4：mcp_servers_dir DI 已接入 _bootstrap_mcp（向 McpInstallerService
-        # 透传），fail-fast 移除。剩余 3 个 DI（credential_store / llm_adapter /
-        # data_dir）由 T-P2-8 一并接入并移除 fail-fast。
-        _disabled_overrides = [
-            ("credential_store", credential_store, "T-P2-8"),
-            ("llm_adapter", llm_adapter, "T-P2-8"),
-            ("data_dir", data_dir, "T-P2-8"),
-        ]
-        for name, value, p2_task in _disabled_overrides:
-            if value is not None:
-                raise NotImplementedError(
-                    f"OctoHarness.{name} DI override is reserved for F087 P2 "
-                    f"({p2_task}); current commit only接入 mcp_servers_dir 消费路径. "
-                    f"Passing non-None override would silently fall back to host paths "
-                    f"and break hermetic isolation."
-                )
+        # F087 P2 T-P2-8：4 个 DI 全部接入，fail-fast 全部移除。
+        # 任一 override 全 None 时 byte-for-byte 等价（生产路径行为不变）。
+        # e2e 注入时彻底隔离宿主 ~/.octoagent。Codex P1 high finding 闭环。
 
         self._project_root = project_root
         self._credential_store_override = credential_store
@@ -265,9 +252,17 @@ class OctoHarness:
         ProjectWorkspaceMigrationService = _main_module.ProjectWorkspaceMigrationService
 
         project_root = self._project_root
-        # 启动：初始化 Store
-        db_path = get_db_path()
-        artifacts_dir = get_artifacts_dir()
+        # F087 P2 T-P2-8: data_dir DI 接入。
+        # - None（生产）：走 get_db_path() / get_artifacts_dir() 读 env（OCTOAGENT_*）
+        #   或默认相对路径，byte-for-byte 等价。
+        # - 非 None（e2e）：data_dir 显式指向 tmp/data 根，db = data_dir/sqlite/octoagent.db
+        #   artifacts = data_dir/artifacts，彻底隔离宿主路径。
+        if self._data_dir is not None:
+            db_path = str(self._data_dir / "sqlite" / "octoagent.db")
+            artifacts_dir = self._data_dir / "artifacts"
+        else:
+            db_path = get_db_path()
+            artifacts_dir = get_artifacts_dir()
         store_group = await create_store_group(db_path, artifacts_dir)
         await init_memory_db(store_group.conn)
         migration_service = ProjectWorkspaceMigrationService(
@@ -506,16 +501,37 @@ class OctoHarness:
         # （同一个 http_client + 同一份 alias 缓存）。
         _llm_mode_env = _os.environ.get("OCTOAGENT_LLM_MODE", "").strip().lower()
 
+        # F087 P2 T-P2-8: credential_store DI 接入。
+        # - None（生产）：走 store_group.credential_store（默认 ~/.octoagent/auth-profiles.json）
+        # - 非 None（e2e）：使用 e2e fixture 注入的 tmp 副本（保护宿主 OAuth profile）
+        _cred_store = self._credential_store_override or getattr(
+            store_group, "credential_store", None
+        )
         provider_router = _ProviderRouter(
             project_root=project_root,
-            credential_store=getattr(store_group, "credential_store", None),
+            credential_store=_cred_store,
             event_store=store_group.event_store,
         )
         app.state.provider_router = provider_router
 
+        # F087 P2 T-P2-8: llm_adapter DI 接入。
+        # - None（生产）：走默认 EchoMessageAdapter / ProviderRouterMessageAdapter（按 _llm_mode_env）
+        # - 非 None（e2e）：用注入的 MessageAdapter（如真实 OAuth 流程的 ProviderRouterMessageAdapter
+        #   预先构造）
         # Feature 081 P4 修复（Codex F2）：保留 echo mode 安全语义。
         alias_registry = _build_runtime_alias_registry(project_root)
-        if _llm_mode_env == "echo":
+        if self._llm_adapter_override is not None:
+            # e2e 显式注入：直接用 override 作为 primary，echo 作为 fallback 保险
+            fallback_manager = FallbackManager(
+                primary=self._llm_adapter_override,
+                fallback=EchoMessageAdapter(),
+            )
+            llm_service = LLMService(
+                fallback_manager=fallback_manager,
+                alias_registry=alias_registry,
+            )
+            _log.info("llm_service_initialized", mode="adapter_override")
+        elif _llm_mode_env == "echo":
             # Echo mode：与 M0 行为一致，纯 echo primary，无 fallback
             fallback_manager = FallbackManager(
                 primary=EchoMessageAdapter(),
