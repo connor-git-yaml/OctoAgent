@@ -21,6 +21,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from ..services.frontdoor_auth import FrontDoorGuard
+
 if TYPE_CHECKING:
     from fastapi import FastAPI
     from octoagent.core.store import StoreGroup
@@ -139,20 +141,136 @@ class OctoHarness:
     # ----- 11 段 _bootstrap_* 骨架（T-P1-3..T-P1-5 填充） -----
 
     async def _bootstrap_paths(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_paths`` marker 段。"""
-        raise NotImplementedError("body in T-P1-3")
+        """对应 lifespan ``_bootstrap_paths`` marker 段。
+
+        T-P1-3 搬运：从 main.py:lifespan 行 291-305 byte-for-byte 复制。
+        """
+        # 局部引用复用 main.py 顶层 import / helper
+        from ..main import (
+            _build_update_service,
+            _build_update_status_store,
+            _persist_runtime_state,
+            _warn_duplicate_instance_roots,
+        )
+
+        project_root = self._project_root
+        _warn_duplicate_instance_roots(project_root)  # Feature 082 P4
+        app.state.project_root = project_root
+        app.state.front_door_guard = FrontDoorGuard(project_root)
+        app.state.update_status_store = _build_update_status_store(project_root)
+        app.state.update_service = _build_update_service(
+            project_root,
+            status_store=app.state.update_status_store,
+        )
+        _persist_runtime_state(
+            project_root,
+            store=app.state.update_status_store,
+        )
 
     async def _bootstrap_stores(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_stores`` marker 段。"""
-        raise NotImplementedError("body in T-P1-3")
+        """对应 lifespan ``_bootstrap_stores`` marker 段（行 307-318）。"""
+        from octoagent.core.config import get_artifacts_dir, get_db_path
+        from octoagent.core.store import create_store_group
+        from octoagent.memory import init_memory_db
+        from octoagent.provider.dx.project_migration import (
+            ProjectWorkspaceMigrationService,
+        )
+
+        project_root = self._project_root
+        # 启动：初始化 Store
+        db_path = get_db_path()
+        artifacts_dir = get_artifacts_dir()
+        store_group = await create_store_group(db_path, artifacts_dir)
+        await init_memory_db(store_group.conn)
+        migration_service = ProjectWorkspaceMigrationService(
+            project_root=project_root,
+            store_group=store_group,
+        )
+        app.state.project_migration_run = await migration_service.ensure_default_project()
+
+        # 跨段共享：tool_registry / owner_profile / runtime_services / llm 等都用
+        self._store_group = store_group
 
     async def _bootstrap_tool_registry_and_snapshot(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_tool_registry_and_snapshot`` marker 段。"""
-        raise NotImplementedError("body in T-P1-3")
+        """对应 lifespan ``_bootstrap_tool_registry_and_snapshot`` marker 段
+        （行 320-359）。"""
+        # F084 Phase 2 T033：ToolRegistry scan + SnapshotStore 单例 + OwnerProfile sync
+        # 启动顺序（防 F23 回归）：
+        #   DB init → ToolRegistry scan → ensure_filesystem_skeleton（创建 USER.md/MEMORY.md
+        #   骨架）→ ensure_startup_records → SnapshotStore.load_snapshot（此时文件已存在，
+        #   不会冻结空内容）→ OwnerProfile sync
+        from .tool_registry import get_registry, scan_and_register
+
+        project_root = self._project_root
+        store_group = self._store_group
+        assert store_group is not None  # 由 _bootstrap_stores 填充
+
+        # main.py 内 _builtin_tools_path = Path(__file__).resolve().parent / "tools"
+        # __file__ = apps/gateway/src/octoagent/gateway/main.py
+        # → tools = apps/gateway/src/octoagent/gateway/tools
+        # 这里 __file__ = .../gateway/harness/octo_harness.py，需 parent.parent / "tools"
+        from .. import main as _main_module
+        _builtin_tools_path = Path(_main_module.__file__).resolve().parent / "tools"
+        _tool_registry = get_registry()
+        scan_and_register(_tool_registry, _builtin_tools_path)
+
+        # Feature 056: clean install 后补齐文件系统骨架 + 默认 agent profile + bootstrap session
+        # 必须在 SnapshotStore.load_snapshot 之前——否则 clean install 上 USER.md 不存在，
+        # SnapshotStore 会冻结空字符串，整个进程生命周期 user_profile.read 返回空（F23）
+        from octoagent.core.behavior_workspace import ensure_filesystem_skeleton
+
+        skeleton_created = ensure_filesystem_skeleton(project_root)
+        if skeleton_created:
+            from ..main import log as _log
+            _log.info("filesystem_skeleton_created", paths=skeleton_created)
+
+        from ..services.startup_bootstrap import ensure_startup_records
+
+        await ensure_startup_records(store_group=store_group, project_root=project_root)
+
+        # 现在文件已存在（或刚被骨架创建），可以安全冻结快照
+        from .snapshot_store import SnapshotStore
+
+        _snapshot_store = SnapshotStore(conn=store_group.conn)
+        _user_md_path = project_root / "behavior" / "system" / "USER.md"
+        _memory_md_path = project_root / "behavior" / "system" / "MEMORY.md"
+        await _snapshot_store.load_snapshot(
+            session_id="__startup__",
+            files={
+                "USER.md": _user_md_path,
+                "MEMORY.md": _memory_md_path,
+            },
+        )
+        app.state.snapshot_store = _snapshot_store
+
+        # 跨段共享：owner_profile / executors / etc.
+        self._snapshot_store = _snapshot_store
+        self._user_md_path = _user_md_path
+        self._memory_md_path = _memory_md_path
 
     async def _bootstrap_owner_profile(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_owner_profile`` marker 段。"""
-        raise NotImplementedError("body in T-P1-3")
+        """对应 lifespan ``_bootstrap_owner_profile`` marker 段（行 361-379）。"""
+        from octoagent.core.models.agent_context import (
+            apply_user_md_sync_to_owner_profile,
+            owner_profile_sync_on_startup,
+        )
+        from ..main import log as _log
+
+        store_group = self._store_group
+        assert store_group is not None
+
+        try:
+            # F42 修复：sync 后必须 apply 到 owner_profiles 表，否则 timezone /
+            # locale / preferred_address 等字段永远是默认值，被 system prompt 消费时
+            # 用户感知 LLM 不记得偏好（agent_context.py:250-265 / 3419-3421 共 5+ 处真消费）
+            _sync_fields = await owner_profile_sync_on_startup(self._user_md_path)
+            await apply_user_md_sync_to_owner_profile(store_group, _sync_fields)
+        except Exception as _exc:
+            _log.warning(
+                "owner_profile_sync_on_startup_failed",
+                error_type=type(_exc).__name__,
+                error=str(_exc),
+            )
 
     async def _bootstrap_runtime_services(self, app: FastAPI) -> None:
         """对应 lifespan ``_bootstrap_runtime_services`` marker 段。"""
