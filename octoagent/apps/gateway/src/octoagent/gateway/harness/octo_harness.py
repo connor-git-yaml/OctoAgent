@@ -240,13 +240,19 @@ class OctoHarness:
         )
 
     async def _bootstrap_stores(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_stores`` marker 段（行 307-318）。"""
-        from octoagent.core.config import get_artifacts_dir, get_db_path
-        from octoagent.core.store import create_store_group
-        from octoagent.memory import init_memory_db
-        from octoagent.provider.dx.project_migration import (
-            ProjectWorkspaceMigrationService,
-        )
+        """对应 lifespan ``_bootstrap_stores`` marker 段（行 307-318）。
+
+        关键约束：``create_store_group`` / ``init_memory_db`` /
+        ``ProjectWorkspaceMigrationService`` / ``get_db_path`` /
+        ``get_artifacts_dir`` 通过 ``main`` 模块属性引用，保留 monkeypatch 路径。
+        """
+        from .. import main as _main_module
+
+        get_db_path = _main_module.get_db_path
+        get_artifacts_dir = _main_module.get_artifacts_dir
+        create_store_group = _main_module.create_store_group
+        init_memory_db = _main_module.init_memory_db
+        ProjectWorkspaceMigrationService = _main_module.ProjectWorkspaceMigrationService
 
         project_root = self._project_root
         # 启动：初始化 Store
@@ -345,26 +351,34 @@ class OctoHarness:
             )
 
     async def _bootstrap_runtime_services(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_runtime_services`` marker 段（行 381-455）。"""
+        """对应 lifespan ``_bootstrap_runtime_services`` marker 段（行 381-455）。
+
+        关键约束：``TelegramBotClient`` / ``TelegramStateStore`` /
+        ``TelegramGatewayService`` / ``SSEHub`` 等通过 ``main`` 模块属性引用
+        （而不是直接 import），保留测试通过 ``monkeypatch.setattr(gateway_main,
+        "TelegramBotClient", fake)`` 的可替换语义（F086 baseline 行为）。
+        """
         import asyncio
 
-        from octoagent.gateway.services.telegram_client import TelegramBotClient
         from octoagent.policy import ApprovalManager
         from octoagent.policy.approval_override_store import (
             ApprovalOverrideCache,
             ApprovalOverrideRepository,
         )
-        from octoagent.provider.dx.telegram_pairing import TelegramStateStore
         from octoagent.tooling import LargeOutputHandler, ToolBroker
 
+        from .. import main as _main_module
         from ..main import _resolve_telegram_polling_timeout
-        from ..services.sse_hub import SSEHub
-        from ..services.telegram import (
-            CompositeApprovalBroadcaster,
-            TelegramApprovalBroadcaster,
-            TelegramGatewayService,
-        )
-        from ..sse.approval_events import SSEApprovalBroadcaster
+
+        # 通过 _main_module 拿这些符号，保留 monkeypatch.setattr(main, "X", ...)
+        # 路径（baseline 行为）。
+        TelegramBotClient = _main_module.TelegramBotClient
+        TelegramStateStore = _main_module.TelegramStateStore
+        TelegramGatewayService = _main_module.TelegramGatewayService
+        CompositeApprovalBroadcaster = _main_module.CompositeApprovalBroadcaster
+        TelegramApprovalBroadcaster = _main_module.TelegramApprovalBroadcaster
+        SSEApprovalBroadcaster = _main_module.SSEApprovalBroadcaster
+        SSEHub = _main_module.SSEHub
 
         project_root = self._project_root
         store_group = self._store_group
@@ -447,20 +461,29 @@ class OctoHarness:
         self._asyncio = asyncio
 
     async def _bootstrap_llm(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_llm`` marker 段（行 457-525）。"""
+        """对应 lifespan ``_bootstrap_llm`` marker 段（行 457-525）。
+
+        关键约束：``EchoMessageAdapter`` / ``FallbackManager`` / ``LLMService``
+        通过 ``main`` 模块属性引用，保留 monkeypatch 路径。
+        ``ProviderRouter`` / ``ProviderRouterMessageAdapter`` 是 main.py 内部
+        延迟 import 的（不在顶层），保持原 import 行为。
+        """
         import asyncio
         import os as _os
 
         from octoagent.provider import (
-            EchoMessageAdapter,
-            FallbackManager,
             ProviderRouter as _ProviderRouter,
             ProviderRouterMessageAdapter,
         )
 
-        from ..main import _build_runtime_alias_registry, log as _log
+        from .. import main as _main_module
         from ..services.agent_context import AgentContextService
-        from ..services.llm_service import LLMService
+
+        EchoMessageAdapter = _main_module.EchoMessageAdapter
+        FallbackManager = _main_module.FallbackManager
+        LLMService = _main_module.LLMService
+        _build_runtime_alias_registry = _main_module._build_runtime_alias_registry
+        _log = _main_module.log
 
         project_root = self._project_root
         store_group = self._store_group
@@ -524,9 +547,14 @@ class OctoHarness:
         self._llm_mode_env = _llm_mode_env
 
     async def _bootstrap_capability_pack(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_capability_pack`` marker 段（行 527-557）。"""
-        from ..main import log as _log
-        from ..services.capability_pack import CapabilityPackService
+        """对应 lifespan ``_bootstrap_capability_pack`` marker 段（行 527-557）。
+
+        ``CapabilityPackService`` 通过 ``main`` 模块属性引用。
+        """
+        from .. import main as _main_module
+
+        CapabilityPackService = _main_module.CapabilityPackService
+        _log = _main_module.log
 
         project_root = self._project_root
         store_group = self._store_group
@@ -574,10 +602,17 @@ class OctoHarness:
 
         P1 内保留 ``_DEFAULT_MCP_SERVERS_DIR`` 默认行为（``McpInstallerService``
         DI 改造由 T-P2-3 完成）。
+
+        ``McpRegistryService`` 在 ``main.py`` 顶层 import，通过 ``main`` 模块
+        访问保留 monkeypatch 路径；``McpInstallerService`` / ``McpSessionPool``
+        是延迟 import（不在顶层），保持原行为。
         """
         from ..services.mcp_installer import McpInstallerService
-        from ..services.mcp_registry import McpRegistryService
         from ..services.mcp_session_pool import McpSessionPool
+
+        from .. import main as _main_module
+
+        McpRegistryService = _main_module.McpRegistryService
 
         project_root = self._project_root
         tool_broker = self._tool_broker
@@ -610,16 +645,23 @@ class OctoHarness:
             _tool_deps._snapshot_store = snapshot_store
 
     async def _bootstrap_executors(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_executors`` marker 段（行 591-709）。"""
-        from octoagent.skills import SkillRunner
-        from octoagent.skills.provider_model_client import ProviderModelClient
+        """对应 lifespan ``_bootstrap_executors`` marker 段（行 591-709）。
 
-        from ..main import log as _log
+        关键约束：``SkillRunner`` / ``ProviderModelClient`` /
+        ``AgentSessionTurnHook`` / ``DelegationPlaneService`` / ``LLMService`` /
+        ``TaskRunner`` 都在 ``main.py`` 顶层 import，通过 ``main`` 模块属性引用
+        保留 monkeypatch 路径。
+        """
         from ..services.agent_context import AgentContextService
-        from ..services.agent_session_turn_hook import AgentSessionTurnHook
-        from ..services.delegation_plane import DelegationPlaneService
-        from ..services.llm_service import LLMService
-        from ..services.task_runner import TaskRunner
+        from .. import main as _main_module
+
+        SkillRunner = _main_module.SkillRunner
+        ProviderModelClient = _main_module.ProviderModelClient
+        AgentSessionTurnHook = _main_module.AgentSessionTurnHook
+        DelegationPlaneService = _main_module.DelegationPlaneService
+        LLMService = _main_module.LLMService
+        TaskRunner = _main_module.TaskRunner
+        _log = _main_module.log
 
         project_root = self._project_root
         store_group = self._store_group
@@ -746,12 +788,14 @@ class OctoHarness:
             _orchestrator._snapshot_store = snapshot_store
 
     async def _bootstrap_optional_routines(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_optional_routines`` marker 段（行 711-787）。"""
+        """对应 lifespan ``_bootstrap_optional_routines`` marker 段（行 711-787）。
+
+        ``load_config`` 在 ``main.py`` 顶层 import，通过 ``main`` 模块访问保留
+        monkeypatch 路径；watchdog / observation_promoter / AsyncIOScheduler
+        都是延迟 import 的（不在顶层）。
+        """
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-        from octoagent.gateway.services.config.config_wizard import load_config
-
-        from ..main import log as _log
         from ..routines.observation_promoter import ObservationRoutine
         from ..services.watchdog.config import WatchdogConfig
         from ..services.watchdog.cooldown import CooldownRegistry
@@ -761,6 +805,11 @@ class OctoHarness:
             StateMachineDriftDetector,
         )
         from ..services.watchdog.scanner import WatchdogScanner
+
+        from .. import main as _main_module
+
+        load_config = _main_module.load_config
+        _log = _main_module.log
 
         project_root = self._project_root
         store_group = self._store_group
@@ -836,17 +885,22 @@ class OctoHarness:
         self._watchdog_config = watchdog_config
 
     async def _bootstrap_control_plane(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_control_plane`` marker 段（行 790-849）。"""
-        from octoagent.gateway.services.memory.memory_console_service import (
-            MemoryConsoleService,
-        )
+        """对应 lifespan ``_bootstrap_control_plane`` marker 段（行 790-849）。
 
-        from ..main import log as _log
-        from ..services.automation_scheduler import AutomationSchedulerService
-        from ..services.control_plane import ControlPlaneService
-        from ..services.operator_actions import OperatorActionService
-        from ..services.operator_inbox import OperatorInboxService
-        from ..services.task_journal import TaskJournalService
+        ``MemoryConsoleService`` / ``TaskJournalService`` /
+        ``OperatorInboxService`` / ``OperatorActionService`` /
+        ``ControlPlaneService`` / ``AutomationSchedulerService`` 都在 main.py
+        顶层 import，通过 ``main`` 模块属性引用保留 monkeypatch 路径。
+        """
+        from .. import main as _main_module
+
+        MemoryConsoleService = _main_module.MemoryConsoleService
+        TaskJournalService = _main_module.TaskJournalService
+        OperatorInboxService = _main_module.OperatorInboxService
+        OperatorActionService = _main_module.OperatorActionService
+        ControlPlaneService = _main_module.ControlPlaneService
+        AutomationSchedulerService = _main_module.AutomationSchedulerService
+        _log = _main_module.log
 
         project_root = self._project_root
         store_group = self._store_group
