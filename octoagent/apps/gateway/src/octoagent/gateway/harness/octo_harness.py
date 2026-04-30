@@ -790,10 +790,15 @@ class OctoHarness:
         await app.state.task_runner.startup()
 
         # Feature 079 Phase 4：启动时对账 auth-profiles ↔ octoagent.yaml
+        # F087 P2 Codex high finding 闭环（fixup）：传入 credential_store_override，
+        # 避免 e2e hermetic 隔离时 drift 检测仍读宿主 ~/.octoagent/auth-profiles.json
         try:
             from ..services.config.drift_check import detect_auth_config_drift
 
-            drift_records = detect_auth_config_drift(project_root)
+            drift_records = detect_auth_config_drift(
+                project_root,
+                credential_store=self._credential_store_override,
+            )
             if drift_records:
                 _log.warning(
                     "auth_config_drift_detected",

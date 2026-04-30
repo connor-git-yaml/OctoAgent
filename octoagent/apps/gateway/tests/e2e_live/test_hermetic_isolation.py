@@ -183,3 +183,76 @@ def test_di_consumption_no_fail_fast(tmp_path: Path, fake_credential_store) -> N
     assert harness._llm_adapter_override is not None
     assert harness._mcp_servers_dir == tmp_path / "mcp"
     assert harness._data_dir == tmp_path / "data"
+
+
+def test_drift_check_uses_credential_store_override(
+    tmp_path: Path,
+    fake_credential_store,
+) -> None:
+    """F087 P2 Codex high-1 finding 闭环验收：``_bootstrap_executors`` 内 drift
+    检测必须传入 credential_store_override，不得 fallback 到 ``CredentialStore()``
+    默认 ``~/.octoagent/auth-profiles.json``。
+
+    验证手段：直接调 ``detect_auth_config_drift`` 时，patch
+    ``CredentialStore.__init__`` 让默认构造抛 RuntimeError；如果 OctoHarness
+    正确传 override，drift 检测应用 override 不会触发默认构造。
+    """
+    from octoagent.gateway.services.config.drift_check import (
+        detect_auth_config_drift,
+    )
+
+    e2e_root = tmp_path / "octo_e2e_drift"
+    e2e_root.mkdir()
+
+    # patch CredentialStore.__init__ — 任何无参构造都抛错
+    original_init = type(fake_credential_store).__init__
+
+    def _strict_init(self, *args, **kwargs):
+        if not kwargs.get("store_path"):
+            raise RuntimeError(
+                "hermetic violation: drift_check fell back to default CredentialStore() "
+                "instead of using injected credential_store_override"
+            )
+        return original_init(self, *args, **kwargs)
+
+    with patch.object(type(fake_credential_store), "__init__", _strict_init):
+        # 传入 fake store override —— 不应触发默认构造
+        records = detect_auth_config_drift(
+            e2e_root,
+            credential_store=fake_credential_store,
+        )
+        # 不抛 = override 真生效
+        assert isinstance(records, list)
+
+
+async def test_octo_harness_executors_drift_check_uses_di(
+    tmp_path: Path,
+    fake_credential_store,
+) -> None:
+    """F087 P2 Codex high-1 finding 闭环验收：octo_harness._bootstrap_executors
+    内调 detect_auth_config_drift 必须传 credential_store_override。
+
+    验证：OctoHarness 实例化注入 fake store，直接读 ``_credential_store_override``
+    确保被持有；与 drift_check_uses_credential_store_override 联合证明 P2 修复
+    后 e2e 隔离时 drift 检测不会回退宿主 ~/.octoagent/auth-profiles.json。
+    """
+    from octoagent.gateway.harness.octo_harness import OctoHarness
+
+    harness = OctoHarness(
+        project_root=tmp_path,
+        credential_store=fake_credential_store,
+        mcp_servers_dir=tmp_path / "mcp",
+        data_dir=tmp_path / "data",
+    )
+
+    # P2 修复后 _bootstrap_executors 调 detect_auth_config_drift 时传
+    # credential_store=self._credential_store_override；该字段必须就是注入值。
+    assert harness._credential_store_override is fake_credential_store
+
+    # grep 实证 octo_harness.py:_bootstrap_executors 调用点是否带 credential_store=
+    import inspect
+    src = inspect.getsource(OctoHarness._bootstrap_executors)
+    assert "credential_store=self._credential_store_override" in src, (
+        "octo_harness._bootstrap_executors 调 detect_auth_config_drift 缺少 "
+        "credential_store=self._credential_store_override 参数（Codex P2 high-1 闭环）"
+    )
