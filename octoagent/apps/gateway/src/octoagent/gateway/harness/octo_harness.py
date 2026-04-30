@@ -1,4 +1,4 @@
-"""OctoHarness：FastAPI 应用启动 / 关闭装配器（Feature 087 P1）。
+"""OctoHarness：FastAPI 应用启动 / 关闭装配器（Feature 087 P1+P2）。
 
 把 ``main.py:lifespan`` 内 ~590 行 inline 逻辑抽离到独立类，目的：
 
@@ -7,17 +7,19 @@
 2. **lifespan 收敛**：抽离后 ``main.py:lifespan`` ≤ 20 行，仅做
    ``OctoHarness`` 三入口转发：``bootstrap`` / ``commit_to_app`` /
    ``shutdown``。
-3. **DI 钩子（P2 启用，P1 禁用）**：4 个 DI 入口（``credential_store`` /
-   ``llm_adapter`` / ``mcp_servers_dir`` / ``data_dir``）签名已锁定，但
-   bootstrap 内部尚未消费。**P1 阶段任一 override 非 ``None`` 立即 raise
-   ``NotImplementedError``**——避免静默失效造成的隔离漏洞（Codex F087-P1
-   adversarial review high finding：测试以为已隔离实际仍读宿主 ~/.octoagent）。
-   消费路径由 P2 接入：T-P2-3（mcp_servers_dir）/ T-P2-4 / T-P2-7
-   （credential_store）/ T-P2-8（llm_adapter / data_dir）。
+3. **DI 钩子（P2 全部启用）**：4 个 DI 入口已在 bootstrap 内真消费——
+   * ``credential_store`` → ``_bootstrap_llm`` 替换 ProviderRouter 凭据来源
+   * ``llm_adapter`` → ``_bootstrap_llm`` 替换 FallbackManager.primary
+   * ``mcp_servers_dir`` → ``_bootstrap_mcp`` / ``_bootstrap_runtime_services``
+     替换 McpInstallerService 安装目录与 mkdir 路径
+   * ``data_dir`` → ``_bootstrap_stores`` / ``_bootstrap_capability_pack``
+     替换 DB / artifacts / user_pipelines 默认根
 
-P1 阶段（本文件）只做骨架；11 段 ``_bootstrap_*`` 方法体由 T-P1-3..T-P1-5
-按 lifespan 内 ``# === _bootstrap_<name> START/END ===`` marker 区间
-逐段搬运。
+P1（commit ff39b5c..aae9786 + fixup 3c650e7）：lifespan 抽离 + 4 DI 签名锁定
++ fail-fast 校验防止静默失效（Codex P1 high finding 闭环）。
+P2（commit 5c31fe7 等 16 commits）：4 DI 全部接入 + fail-fast 全部移除 +
+hermetic 隔离回归测试（``test_hermetic_isolation.py`` 4 case patch
+``Path.home`` 验证不回退宿主 ~/.octoagent）。
 """
 
 from __future__ import annotations
@@ -42,7 +44,7 @@ if TYPE_CHECKING:
 class OctoHarness:
     """FastAPI 应用 lifespan 装配器。
 
-    使用方式（生产，P1 唯一支持模式）::
+    使用方式（生产）::
 
         @asynccontextmanager
         async def lifespan(app: FastAPI):
@@ -54,14 +56,27 @@ class OctoHarness:
             finally:
                 await harness.shutdown(app)
 
-    DI 钩子状态（**P1 全部禁用，P2 接入**）：
-      * ``credential_store`` → P2 T-P2-7 接入（替换 ProviderRouter 凭据来源）
-      * ``llm_adapter`` → P2 T-P2-8 接入（替换 LLMService MessageAdapter）
-      * ``mcp_servers_dir`` → P2 T-P2-3/T-P2-4 接入（替换 McpInstallerService 安装目录）
-      * ``data_dir`` → P2 T-P2-8 接入（替换 DB / artifacts 默认根）
+    使用方式（e2e 测试，P2 启用）::
 
-    P1 阶段任一 override 非 ``None`` 立即 raise ``NotImplementedError``，
-    避免 e2e 测试误判已隔离实际仍读宿主 ``~/.octoagent``（Codex P087-P1 high
+        harness = OctoHarness(
+            project_root=tmp_path,
+            credential_store=fake_store,
+            llm_adapter=stub_adapter,
+            mcp_servers_dir=tmp_path / "mcp-servers",
+            data_dir=tmp_path,
+        )
+        # bootstrap 内 4 DI 全部生效：~/.octoagent 不被触碰
+
+    DI 钩子状态（**P2 全部启用**）：
+      * ``credential_store`` → ``_bootstrap_llm`` 替换 ProviderRouter 凭据来源
+      * ``llm_adapter`` → ``_bootstrap_llm`` 替换 FallbackManager.primary
+      * ``mcp_servers_dir`` → ``_bootstrap_mcp`` / ``_bootstrap_runtime_services``
+        替换 McpInstallerService 安装目录与 mkdir 路径
+      * ``data_dir`` → ``_bootstrap_stores`` / ``_bootstrap_capability_pack``
+        替换 DB / artifacts / user_pipelines 默认根
+
+    所有 override 默认 ``None``：byte-for-byte 等价生产路径（SC-6）。
+    e2e 注入: 整条 bootstrap 不回退宿主 ``~/.octoagent``（Codex P087-P1 high
     finding 闭环）。
     """
 
