@@ -29,3 +29,6 @@ trace_log_init
    策略调整: P3 不真打 Codex OAuth LLM (真跑 OctoHarness 全 11 段 bootstrap +
    真调 builtin tool handler / ApprovalManager); 真打 LLM 留 P4 域 #5 Perplexity MCP
 [01:15:40] GATE_P3_DEVIATION: 接受现状 + 调 spec | smoke=集成层 / full=13 域真 LLM | T-P4-12 +5h
+[01:30:44] P3 Codex review: 2 high + 2 medium 全闭环 (4 fixup commits / 3016 passed)
+[01:30:44] P4 implement: STARTED | 12 tasks / 13 域真打 GPT-5.5 think-low via Codex OAuth + Perplexity MCP
+[03:33:38] P4 implement: COMPLETED | 12 task / 7 commits / 5 PASS smoke real-LLM + 4 PASS full + 5 SKIP-friendly / 全量 3024 passed (净增 +8/+5)
