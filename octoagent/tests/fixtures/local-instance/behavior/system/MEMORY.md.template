@@ -1,0 +1,7 @@
+# OctoAgent MEMORY 行为档案（F087 e2e 脱敏模板）
+
+> 本文件用于 e2e 测试 fixture，**不可写入真实记忆**。
+
+## Recent
+
+（空 — 由 e2e 测试逐场景写入）

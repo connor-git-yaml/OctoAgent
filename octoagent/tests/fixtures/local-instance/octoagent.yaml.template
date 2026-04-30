@@ -1,0 +1,39 @@
+# F087 e2e_live 脱敏 octoagent.yaml 模板
+# 用法：测试 fixture 把本文件 copy 到 tmp_dir 作为 e2e 实例 config 起点
+#
+# **本文件不得包含任何真实凭证 / token / API key 明文**
+# 所有 *_env 字段只存环境变量名（不是值）
+
+config_version: 1
+updated_at: "2026-04-30"
+
+providers:
+  - id: openai-codex
+    name: "OpenAI Codex (e2e fixture)"
+    auth_type: oauth
+    api_key_env: OPENAI_API_KEY
+    enabled: true
+
+model_aliases:
+  main:
+    provider: openai-codex
+    model: "gpt-5.5"
+    description: "F087 e2e 主力模型"
+    thinking_level: low
+  cheap:
+    provider: openai-codex
+    model: "gpt-5.5"
+    description: "F087 e2e 低成本探测模型"
+    thinking_level: low
+
+runtime:
+  llm_mode: provider_direct  # F081 后默认走 ProviderRouter 直连
+
+front_door:
+  mode: loopback
+  bearer_token_env: OCTOAGENT_FRONTDOOR_TOKEN
+  trusted_proxy_header: X-OctoAgent-Proxy-Auth
+  trusted_proxy_token_env: OCTOAGENT_TRUSTED_PROXY_TOKEN
+  trusted_proxy_cidrs:
+    - 127.0.0.1/32
+    - ::1/128
