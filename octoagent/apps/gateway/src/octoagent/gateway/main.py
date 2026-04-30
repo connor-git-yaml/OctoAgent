@@ -288,6 +288,7 @@ def _warn_duplicate_instance_roots(project_root: Path) -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """应用生命周期管理：启动时初始化 DB 和 LLM 组件，关闭时清理连接"""
+    # === _bootstrap_paths START (F087 P1 marker) ===
     project_root = _resolve_project_root()
     _warn_duplicate_instance_roots(project_root)  # Feature 082 P4
     app.state.project_root = project_root
@@ -301,7 +302,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         project_root,
         store=app.state.update_status_store,
     )
+    # === _bootstrap_paths END ===
 
+    # === _bootstrap_stores START (F087 P1 marker) ===
     # 启动：初始化 Store
     db_path = get_db_path()
     artifacts_dir = get_artifacts_dir()
@@ -312,7 +315,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         store_group=store_group,
     )
     app.state.project_migration_run = await migration_service.ensure_default_project()
+    # === _bootstrap_stores END ===
 
+    # === _bootstrap_tool_registry_and_snapshot START (F087 P1 marker) ===
     # F084 Phase 2 T033：ToolRegistry scan + SnapshotStore 单例 + OwnerProfile sync
     # 启动顺序（防 F23 回归）：
     #   DB init → ToolRegistry scan → ensure_filesystem_skeleton（创建 USER.md/MEMORY.md
@@ -351,7 +356,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         },
     )
     app.state.snapshot_store = _snapshot_store
+    # === _bootstrap_tool_registry_and_snapshot END ===
 
+    # === _bootstrap_owner_profile START (F087 P1 marker) ===
     from octoagent.core.models.agent_context import (
         apply_user_md_sync_to_owner_profile,
         owner_profile_sync_on_startup,
@@ -369,7 +376,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             error_type=type(_exc).__name__,
             error=str(_exc),
         )
+    # === _bootstrap_owner_profile END ===
 
+    # === _bootstrap_runtime_services START (F087 P1 marker) ===
     # Feature 058: 确保 MCP 安装相关目录存在
     _mcp_servers_dir = Path.home() / ".octoagent" / "mcp-servers"
     _mcp_servers_dir.mkdir(parents=True, exist_ok=True)
@@ -443,7 +452,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
     )
     app.state.tool_broker = tool_broker
+    # === _bootstrap_runtime_services END ===
 
+    # === _bootstrap_llm START (F087 P1 marker) ===
     # LLM 服务初始化
     # Feature 081 P1：LiteLLM Proxy 已退役，统一走 ProviderRouter 直连。
     # ProviderRouter 单例提前创建（早于 LLMService / CapabilityPackService / SkillRunner /
@@ -511,7 +522,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # 让所有 AgentContextService 实例（task / orchestrator / agent_session_turn_hook
     # 等多入口）都能拿到同一个 router 实例（无需修改 5 个调用签名）
     AgentContextService.set_provider_router(provider_router)
+    # === _bootstrap_llm END ===
 
+    # === _bootstrap_capability_pack START (F087 P1 marker) ===
     app.state.capability_pack_service = CapabilityPackService(
         project_root=project_root,
         store_group=store_group,
@@ -541,7 +554,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as exc:
         log.warning("pipeline_registry_init_skipped", error=str(exc))
         app.state.pipeline_registry = None
+    # === _bootstrap_capability_pack END ===
 
+    # === _bootstrap_mcp START (F087 P1 marker) ===
     # Feature 058: 创建 McpSessionPool 并注入 McpRegistryService
     from .services.mcp_session_pool import McpSessionPool
 
@@ -571,7 +586,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _tool_deps = getattr(app.state.capability_pack_service, "_tool_deps", None)
     if _tool_deps is not None and hasattr(_snapshot_store, "load_snapshot"):
         _tool_deps._snapshot_store = _snapshot_store
+    # === _bootstrap_mcp END ===
 
+    # === _bootstrap_executors START (F087 P1 marker) ===
     # Feature 081 P4 修复（Codex F2）：SkillRunner 仅在非 echo 模式下创建。
     # echo 模式必须保持纯 echo 行为——ProviderModelClient 会绕过 FallbackManager
     # 直连 provider，这违反了 echo 的离线/开发语义。
@@ -689,7 +706,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     _orchestrator = getattr(getattr(app.state, "task_runner", None), "_orchestrator", None)
     if _orchestrator is not None and hasattr(_snapshot_store, "format_for_system_prompt"):
         _orchestrator._snapshot_store = _snapshot_store
+    # === _bootstrap_executors END ===
 
+    # === _bootstrap_optional_routines START (F087 P1 marker) ===
     # F084 Phase 3 T049：启动 ObservationRoutine（feature flag 检查）
     from .routines.observation_promoter import ObservationRoutine
 
@@ -766,6 +785,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.watchdog_config = watchdog_config
     app.state.watchdog_scheduler = scheduler
     app.state.watchdog_scanner = watchdog_scanner
+    # === _bootstrap_optional_routines END ===
+
+    # === _bootstrap_control_plane START (F087 P1 marker) ===
     app.state.task_journal_service = TaskJournalService(store_group=store_group)
     app.state.operator_inbox_service = OperatorInboxService(
         store_group=store_group,
@@ -825,9 +847,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         scan_interval_seconds=watchdog_config.scan_interval_seconds,
         no_progress_threshold_seconds=watchdog_config.no_progress_threshold_seconds,
     )
+    # === _bootstrap_control_plane END ===
 
     yield
 
+    # === shutdown START (F087 P1 marker) ===
     # 关闭：尝试优雅等待后台任务完成，降低中断导致的任务丢失概率
     background_tasks: set[asyncio.Task] = getattr(app.state, "background_tasks", set())
     if background_tasks:
@@ -889,6 +913,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await app.state.task_runner.shutdown()
     if hasattr(app.state, "store_group") and app.state.store_group:
         await app.state.store_group.conn.close()
+    # === shutdown END ===
 
 
 def create_app() -> FastAPI:
