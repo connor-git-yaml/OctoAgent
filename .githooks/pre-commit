@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # F087 P3 T-P3-7/8/10: pre-commit hook 跑 e2e_smoke 套件，commit 前 ≤ 180s 反馈。
+# F087 P3 fixup#3 (Codex finding-3): portable timeout——不依赖 macOS 上需要
+# brew install coreutils 才有的 timeout 命令；改用内嵌 python3 watchdog（标准库
+# subprocess + signal，跨 macOS / Linux 一致行为）。
 #
 # 行为：
 #   - SKIP_E2E=1 git commit ...      → 立即 exit 0，输出 [E2E] skipped via SKIP_E2E=1
@@ -38,27 +41,55 @@ mkdir -p "${LOG_DIR}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_DIR}/pre-commit-${TIMESTAMP}.log"
 
-# ---- 跑 e2e_smoke（180s 总 timeout）----
-# macOS 默认无 timeout 命令；用 perl 实现轻量超时
-PYTEST_CMD="cd \"${OCTOAGENT_DIR}\" && uv run pytest -m e2e_smoke --maxfail=1 -q"
+# ---- 跑 e2e_smoke（180s portable watchdog）----
+# 用 python3 标准库实现 watchdog（subprocess + SIGTERM/SIGKILL 升级），
+# 不依赖 macOS 默认无的 timeout / gtimeout 命令。
+TIMEOUT_SECONDS=180
 
-if command -v timeout >/dev/null 2>&1; then
-  TIMEOUT_PREFIX="timeout 180"
-elif command -v gtimeout >/dev/null 2>&1; then
-  # macOS coreutils
-  TIMEOUT_PREFIX="gtimeout 180"
-else
-  # fallback: 不加超时（pytest 内部 SIGALRM 30s × 5 cases ≈ 150s 上限）
-  TIMEOUT_PREFIX=""
-fi
-
-# ---- 执行 + 捕获输出 ----
 set +e
-if [[ -n "${TIMEOUT_PREFIX}" ]]; then
-  bash -c "${TIMEOUT_PREFIX} ${PYTEST_CMD}" > "${LOG_FILE}" 2>&1
-else
-  bash -c "${PYTEST_CMD}" > "${LOG_FILE}" 2>&1
-fi
+python3 - "${OCTOAGENT_DIR}" "${LOG_FILE}" "${TIMEOUT_SECONDS}" <<'PYWATCHDOG' >/dev/null 2>&1
+import os
+import signal
+import subprocess
+import sys
+import time
+
+octoagent_dir, log_file, timeout_s = sys.argv[1], sys.argv[2], int(sys.argv[3])
+
+# 起子进程跑 pytest（写到 log_file）
+with open(log_file, "wb") as logf:
+    proc = subprocess.Popen(
+        ["uv", "run", "pytest", "-m", "e2e_smoke", "--maxfail=1", "-q"],
+        cwd=octoagent_dir,
+        stdout=logf,
+        stderr=subprocess.STDOUT,
+        # 新建独立 process group，便于一次性 SIGKILL 整个子树
+        preexec_fn=os.setsid,
+    )
+
+deadline = time.monotonic() + timeout_s
+while True:
+    rc = proc.poll()
+    if rc is not None:
+        sys.exit(rc)
+    if time.monotonic() >= deadline:
+        # 先 SIGTERM 整 process group，等 5s，再 SIGKILL
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
+        # exit code 124 与 GNU timeout 一致语义
+        sys.exit(124)
+    time.sleep(0.5)
+PYWATCHDOG
 EXIT_CODE=$?
 set -e
 
@@ -72,6 +103,16 @@ if [[ ${EXIT_CODE} -eq 0 ]]; then
 fi
 
 # ---- 失败：3 行核心 + 日志路径（FR-31 / T-P3-8 格式）----
+if [[ ${EXIT_CODE} -eq 124 ]]; then
+  # watchdog 超时（与 GNU timeout 一致语义）
+  echo "[E2E FAIL] timeout=${TIMEOUT_SECONDS}s (portable watchdog)"
+  echo "  expected: smoke 全 PASS 且 ≤ ${TIMEOUT_SECONDS}s 内完成"
+  echo "  actual:   pytest 子进程超时被 SIGKILL（process group 树清理）"
+  echo "  log: ${LOG_FILE}"
+  echo "  bypass: SKIP_E2E=1 git commit"
+  exit 1
+fi
+
 # 抓第一个失败的测试节点
 FAILED_NODE="$(grep -E "^FAILED " "${LOG_FILE}" | head -1 | awk '{print $2}' || echo "<unknown>")"
 DOMAIN_NAME="$(basename "${FAILED_NODE}" 2>/dev/null | cut -d':' -f1 || echo "<unknown>")"
