@@ -240,7 +240,11 @@
 
 ---
 
-## P4: full 套件 8 域（~3-4d）
+## P4: full 套件 13 域真 LLM（~3-4d）
+
+> **P3 决策修正**（GATE_P3_DEVIATION，2026-05-01）：smoke 套件作为集成层（不真打 LLM）；
+> P4 full 套件覆盖**全 13 能力域真打 GPT-5.5 think-low 1x**（原 8 full 域 + 新增 5 smoke 域真 LLM 版）。
+> 详见 spec.md FR-9 / FR-10 修正。
 
 ### T-P4-1: 域 #4 Memory observation→promote（test_e2e_memory_pipeline.py） [并行]
 - **依赖**：P3 完成
@@ -302,11 +306,17 @@
 - **DoD**：≥ 2 断言（routine_runs +1 `trigger_type="cron"` + 触发时刻误差 < 2s）
 - **关联**：FR-10, SC-1
 
-### T-P4-9: full 8 场景独立 PASS + 总耗时 ≤ 10min
-- **依赖**：T-P4-1..8
+### T-P4-12: 5 smoke 域真 LLM 版（GATE_P3_DEVIATION 闭环）
+- **依赖**：P3 完成 + Codex OAuth profile 可用
+- **工时**：~5h（5 域 × 1h 真打 LLM + setup）
+- **DoD**：新建 `test_e2e_smoke_real_llm.py`（标 `e2e_full + e2e_live`，**不进 e2e_smoke**）；5 个 case 对应 5 smoke 域（#1 #2 #3 #11 #12）真打 GPT-5.5 think-low；POST `/api/message` → 等任务完成 → 状态机断言（与 P3 集成层断言相同的 ≥ 2 断言点 + LLM 真选了正确工具）；每 case 单 LLM call timeout 120s；max_steps 10；与 P3 集成层共存（P3 负责快稳 / 本 task 负责真 LLM 验证）
+- **关联**：FR-10 修正, GATE_P3_DEVIATION 闭环, US-2
+
+### T-P4-9: full 13 域独立 PASS + 总耗时 ≤ 10min
+- **依赖**：T-P4-1..8, T-P4-12
 - **工时**：~1.5h
-- **DoD**：`uv run pytest -m e2e_full -q` 全 PASS；实测 ≤ 600s；含 #5 SKIP 路径不算 FAIL
-- **关联**：NFR-1, SC-3
+- **DoD**：`uv run pytest -m e2e_full -q` 全 13 域 PASS（8 原 full + 5 smoke 域真 LLM 版）；实测 ≤ 600s（含 LLM call ~30s × 13 ≈ 6.5min）；#5 Perplexity / quota 429 SKIP 路径不算 FAIL
+- **关联**：NFR-1, SC-3, FR-10 修正
 
 ---
 

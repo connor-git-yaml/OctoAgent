@@ -142,10 +142,12 @@ Codex Adversarial Review 能发现设计漏洞但**发现不了运行时漂移**
   - `_reset_module_state`：reset OctoAgent module 单例（清单见 FR-26）
 - **FR-8** [必须][MUST] 提供 `real_codex_credential_store` fixture：从宿主 `~/.octoagent/auth-profiles.json` **只读**复制到 tmp，构造 `CredentialStore(store_path=tmp)`；宿主不存在时 `pytest.skip`
 
-### 4.3 13 能力域测试
+### 4.3 13 能力域测试（**P3 决策修正：smoke = 集成层 / full = 真 LLM 验证**）
 
-- **FR-9** [必须][MUST] smoke 套件 5 域（#1 #2 #3 #11 #12）实现完整 e2e case，每场景 ≥ 2 断言点
-- **FR-10** [必须][MUST] full 套件 8 域（#4–#10 #13）实现完整 e2e case，每场景 ≥ 2 断言点
+> **背景**：P3 实测后发现"5 smoke × 5x 循环 × 真 LLM call 5-30s/次"与"pre-commit ≤ 180s"物理冲突。用户决策（GATE_P3_DEVIATION）：smoke 套件作为**集成层断言**（直调 handler / OctoHarness 跑通 / 状态机断言），full 套件 13 域**全部真打 LLM 1x**作为真实能力验证。
+
+- **FR-9** [必须][MUST] smoke 套件 5 域（#1 #2 #3 #11 #12）实现**集成层** e2e case：直调 handler / OctoHarness 真启动 / 状态机断言；每场景 ≥ 2 断言点；**不要求**真打 LLM；目标：byte-for-byte 等价 + 5x 循环稳定
+- **FR-10** [必须][MUST] full 套件覆盖**全 13 能力域**（5 smoke 域真 LLM 版 + 8 原 full 域）真打 GPT-5.5 think-low 1x；每场景 ≥ 2 断言点；目标：真实 LLM 选工具能力 + 全栈 transport / harness / handler 验证
 - **FR-11** [必须][MUST] **断言绝不依赖 LLM 字面输出**——以结构化断言为主：tool_call 序列、`WriteResult.status` / 关联 ID（task_id / memory_id / run_id）、SQLite state diff、events 表内容
 - **FR-12** [必须][MUST] 单 LLM call timeout = 120s（e2e fixture 覆盖 `ProviderRouter(timeout_s=120.0)`，**不改生产**）
 - **FR-13** [必须][MUST] LLM `max_steps` 上限 = 10
@@ -177,12 +179,13 @@ Codex Adversarial Review 能发现设计漏洞但**发现不了运行时漂移**
 
 #### OQ-4 决议（e2e_smoke pre-commit 预算）
 
-- **FR-22** [必须][MUST] e2e_smoke 套件总 timeout = **180s**；目标耗时 90-120s（5 场景 × 2 LLM call × 5s + setup/teardown/IO）
+- **FR-22** [必须][MUST] e2e_smoke 套件总 timeout = **180s**；P3 实测 ~3-15s（远低于上限，因为 smoke 不真打 LLM）
 - **FR-23** [必须][MUST] 单场景 timeout = 30s；网络抖动重试 1 次（`pytest-rerunfailures`）
 - **FR-24** [必须][MUST] 超时降级策略：
   - smoke 单场景超时 → FAIL（commit 阻塞）
   - 场景 #5（Perplexity，仅 full）远端故障 → 1 次 retry 后 SKIP（不 FAIL）
-- **FR-25** [必须][MUST] e2e_smoke LLM 调用预算 ≤ 10 次 / 次执行（避免 Codex OAuth 限频）
+  - **full 套件 LLM call 失败**：按 quota 协议（status_code=429 或 error_type=rate_limit）→ SKIP；其他真 bug → FAIL
+- **FR-25** [必须][MUST] e2e_smoke 不真打 LLM（FR-9 决策），无 LLM 调用预算约束；e2e_full 单次循环 LLM 调用预算 ≤ 13 域 × 2 call/域 ≈ 26 次（避免 Codex OAuth 限频）
 
 #### OQ-5 决议（module 单例 reset 全清单）
 

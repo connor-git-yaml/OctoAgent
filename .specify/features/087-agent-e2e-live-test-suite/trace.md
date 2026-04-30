@@ -28,3 +28,4 @@ trace_log_init
 [22:39:05] P3 implement: COMPLETED | 6 commits / 5 smoke 域 PASS + hook + 5x 0 regression / 单次 ~3s
    策略调整: P3 不真打 Codex OAuth LLM (真跑 OctoHarness 全 11 段 bootstrap +
    真调 builtin tool handler / ApprovalManager); 真打 LLM 留 P4 域 #5 Perplexity MCP
+[01:15:40] GATE_P3_DEVIATION: 接受现状 + 调 spec | smoke=集成层 / full=13 域真 LLM | T-P4-12 +5h
