@@ -91,9 +91,9 @@
 
 ### T-P2-4: OctoHarness._bootstrap_mcp 接入 mcp_servers_dir DI [并行]
 - **依赖**：T-P2-3
-- **工时**：~0.5h
-- **DoD**：`OctoHarness._bootstrap_mcp` 内 `McpInstallerService(..., mcp_servers_dir=self._mcp_servers_dir)`；生产路径默认 None；F086 测试全绿
-- **关联**：FR-2, FR-17
+- **工时**：~1h
+- **DoD**：`OctoHarness._bootstrap_mcp` 内 `McpInstallerService(..., mcp_servers_dir=self._mcp_servers_dir)`；生产路径默认 None；**移除 OctoHarness.__init__ 内 `mcp_servers_dir` 的 fail-fast 校验**（F087 P1 fixup commit 3c650e7 引入的 4-tuple 中删除对应行）；F086 测试全绿
+- **关联**：FR-2, FR-17, **Codex P1 high finding 闭环**
 
 ### T-P2-5: tests/fixtures/local-instance/ 脱敏模板 + .gitignore（R9 缓解）
 - **依赖**：T-P2-2
@@ -113,11 +113,11 @@
 - **DoD**：新建 `apps/gateway/tests/e2e_live/conftest.py`；含两条 autouse：(a) `_hermetic_environment`（清 5 类凭证 env + 重定向 4 个 OCTOAGENT_* env + 不动 HOME + PYTHONHASHSEED=0）；(b) `_reset_module_state`（按 T-P2-1 清单逐个 reset）；含 30s SIGALRM 单场景 timeout 装置
 - **关联**：FR-7, FR-26, R3 缓解
 
-### T-P2-8: 主 fixture octo_harness_e2e（4 DI 钩子 + timeout 120s + max_steps 10）
+### T-P2-8: OctoHarness 消费 credential_store/llm_adapter/data_dir + 主 fixture octo_harness_e2e
 - **依赖**：T-P2-4, T-P2-7
-- **工时**：~2h
-- **DoD**：新建 fixture `octo_harness_e2e` 在 conftest.py 或 helpers/factories.py；注入 `credential_store` / `llm_adapter` / `mcp_servers_dir=tmp/mcp-servers` / `data_dir=tmp`；`ProviderRouter(timeout_s=120.0)`；`max_steps=10`
-- **关联**：FR-2, FR-12, FR-13
+- **工时**：~3h
+- **DoD**：(1) **OctoHarness 内部接入 3 个 DI**：bootstrap 期间用 `self._credential_store_override or store_group.credential_store` 模式替换 ProviderRouter 凭据来源；同样模式替换 LLMService MessageAdapter；data_dir 替换 `get_db_path()` / `get_artifacts_dir()` 默认根（生产路径 4 override 全 None 时 byte-for-byte 等价不变）。(2) **同步移除 OctoHarness.__init__ 中 `credential_store` / `llm_adapter` / `data_dir` 的 fail-fast 校验**（与 T-P2-4 一并清空 fixup commit 3c650e7 的 4-tuple）。(3) 新建 fixture `octo_harness_e2e` 在 conftest.py 或 helpers/factories.py；注入 4 DI；`ProviderRouter(timeout_s=120.0)`；`max_steps=10`
+- **关联**：FR-2, FR-12, FR-13, **Codex P1 high finding 闭环**
 
 ### T-P2-9: real_codex_credential_store fixture（OAuth profile 隔离） [并行]
 - **依赖**：T-P2-7
@@ -161,6 +161,12 @@
 - **工时**：~1h
 - **DoD**：`run_domain(domain_id: int)` 函数读 13 域注册表，转发到对应 pytest 节点 ID；P5 CLI 直接复用
 - **关联**：FR-30
+
+### T-P2-16: hermetic 隔离回归测试（Codex P1 high finding 闭环 sanity）
+- **依赖**：T-P2-8（需 4 DI 全部消费完成）
+- **工时**：~1.5h
+- **DoD**：新建 `apps/gateway/tests/e2e_live/test_hermetic_isolation.py`（或加到 conftest sanity）；测试用 tmp `data_dir` / `mcp_servers_dir` / fake `credential_store` 构造 `OctoHarness`，触发完整 `bootstrap` + 一次 LLM 调用 + 一次 MCP install；用 `unittest.mock.patch("pathlib.Path.home")` 抛 RuntimeError 或 monkeypatch `os.environ["HOME"]` 到 `/nonexistent`，验证整条路径**不回退到宿主 ~/.octoagent**（任一访问立即报错或测试 FAIL）；F086 测试全绿
+- **关联**：FR-7, FR-26, NFR-5, **Codex P1 high finding 直接验收**
 
 ---
 
