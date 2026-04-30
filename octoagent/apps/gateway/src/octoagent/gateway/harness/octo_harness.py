@@ -74,21 +74,21 @@ class OctoHarness:
         mcp_servers_dir: Path | None = None,
         data_dir: Path | None = None,
     ) -> None:
-        # F087 P1 Codex high finding 闭环：DI 钩子 P1 禁用，避免静默失效
-        # （测试以为已隔离实际仍读宿主 ~/.octoagent）。P2 任务接入消费路径。
+        # F087 P2 T-P2-4：mcp_servers_dir DI 已接入 _bootstrap_mcp（向 McpInstallerService
+        # 透传），fail-fast 移除。剩余 3 个 DI（credential_store / llm_adapter /
+        # data_dir）由 T-P2-8 一并接入并移除 fail-fast。
         _disabled_overrides = [
-            ("credential_store", credential_store, "T-P2-7"),
+            ("credential_store", credential_store, "T-P2-8"),
             ("llm_adapter", llm_adapter, "T-P2-8"),
-            ("mcp_servers_dir", mcp_servers_dir, "T-P2-3 / T-P2-4"),
             ("data_dir", data_dir, "T-P2-8"),
         ]
         for name, value, p2_task in _disabled_overrides:
             if value is not None:
                 raise NotImplementedError(
                     f"OctoHarness.{name} DI override is reserved for F087 P2 "
-                    f"({p2_task}); P1 only does byte-for-byte equivalent lifespan "
-                    f"extraction. Passing non-None override would silently fall back "
-                    f"to host paths and break hermetic isolation."
+                    f"({p2_task}); current commit only接入 mcp_servers_dir 消费路径. "
+                    f"Passing non-None override would silently fall back to host paths "
+                    f"and break hermetic isolation."
                 )
 
         self._project_root = project_root
@@ -610,8 +610,10 @@ class OctoHarness:
     async def _bootstrap_mcp(self, app: FastAPI) -> None:
         """对应 lifespan ``_bootstrap_mcp`` marker 段（行 559-589）。
 
-        P1 内保留 ``_DEFAULT_MCP_SERVERS_DIR`` 默认行为（``McpInstallerService``
-        DI 改造由 T-P2-3 完成）。
+        F087 P2 T-P2-4：``self._mcp_servers_dir`` 透传给 ``McpInstallerService``。
+        生产路径默认 ``None`` 时 ``McpInstallerService`` 内部 fallback 到
+        ``_DEFAULT_MCP_SERVERS_DIR`` （``Path.home()/.octoagent/mcp-servers``），
+        byte-for-byte 等价。e2e 注入 tmp 路径时彻底隔离宿主 ``~/.octoagent``。
 
         ``McpRegistryService`` 在 ``main.py`` 顶层 import，通过 ``main`` 模块
         访问保留 monkeypatch 路径；``McpInstallerService`` / ``McpSessionPool``
@@ -638,10 +640,13 @@ class OctoHarness:
         )
         app.state.capability_pack_service.bind_mcp_registry(app.state.mcp_registry)
 
-        # Feature 058: 创建 McpInstallerService
+        # Feature 058 + F087 P2 T-P2-4: 创建 McpInstallerService
+        # mcp_servers_dir DI 透传——None 时 McpInstallerService 内部 fallback 到
+        # _DEFAULT_MCP_SERVERS_DIR（生产路径行为不变）；e2e 注入 tmp 路径完全隔离。
         mcp_installer = McpInstallerService(
             registry=app.state.mcp_registry,
             project_root=project_root,
+            mcp_servers_dir=self._mcp_servers_dir,
         )
         app.state.mcp_installer = mcp_installer
         app.state.capability_pack_service.bind_mcp_installer(mcp_installer)
