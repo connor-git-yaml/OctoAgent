@@ -54,7 +54,11 @@ _OCTOAGENT_PATH_ENVS: tuple[str, ...] = (
 )
 
 # 单场景 timeout（s）；超时 → SIGALRM → TimeoutError → pytest fail
-_SINGLE_SCENARIO_TIMEOUT_S = 30
+# F087 P3 e2e_smoke 集成层（不真打 LLM）：30s 足够
+# F087 P4 e2e_full 真打 GPT-5.5 think-low：单 LLM call 60-120s + 多步 → 提到 240s
+# （部分域如 routine cron / graph pipeline 多 step + LLM 调用，可能需要 ≥ 180s）
+_SINGLE_SCENARIO_TIMEOUT_SMOKE_S = 30
+_SINGLE_SCENARIO_TIMEOUT_FULL_S = 240
 
 
 @pytest.fixture(autouse=True)
@@ -145,18 +149,29 @@ def _reset_module_state() -> Iterator[None]:
 
 
 @pytest.fixture(autouse=True)
-def _scenario_alarm_timeout() -> Iterator[None]:
-    """SIGALRM 单场景 timeout（30s）。仅主线程可用。
+def _scenario_alarm_timeout(request: pytest.FixtureRequest) -> Iterator[None]:
+    """SIGALRM 单场景 timeout。仅主线程可用。
+
+    F087 P4 修正：按 marker 选 timeout：
+    - ``e2e_smoke``（集成层，不真打 LLM）：30s
+    - ``e2e_full``（真打 GPT-5.5 think-low）：240s
+    - 其它（默认）：30s
 
     异步测试也走主线程的 event loop，alarm 仍能打中。Pytest-asyncio "auto"
     模式 + asyncio.run 内部 await 时 SIGALRM 触发 → Python 在下一次回到
     主线程调度时 raise TimeoutError，足够标记测试 fail。
     """
+    markers = {m.name for m in request.node.iter_markers()}
+    if "e2e_full" in markers:
+        timeout_s = _SINGLE_SCENARIO_TIMEOUT_FULL_S
+    else:
+        timeout_s = _SINGLE_SCENARIO_TIMEOUT_SMOKE_S
+
     # signal.alarm 只在主线程可调用；非主线程跑（如 xdist worker）会报错
     # → 用 try/except 兜底，xdist 模式下退化为无 alarm 但不阻塞
     try:
-        signal.signal(signal.SIGALRM, _alarm_handler)
-        signal.alarm(_SINGLE_SCENARIO_TIMEOUT_S)
+        signal.signal(signal.SIGALRM, _make_alarm_handler(timeout_s))
+        signal.alarm(timeout_s)
     except ValueError:
         # 非主线程，跳过 alarm 装置（仍走 pytest 自身 timeout 兜底）
         yield
@@ -167,10 +182,12 @@ def _scenario_alarm_timeout() -> Iterator[None]:
         signal.alarm(0)  # 关闭 alarm
 
 
-def _alarm_handler(signum: int, frame: object) -> None:  # noqa: ARG001
-    raise TimeoutError(
-        f"F087 e2e_live single scenario exceeded {_SINGLE_SCENARIO_TIMEOUT_S}s timeout"
-    )
+def _make_alarm_handler(timeout_s: int):
+    def _handler(signum: int, frame: object) -> None:  # noqa: ARG001
+        raise TimeoutError(
+            f"F087 e2e_live single scenario exceeded {timeout_s}s timeout"
+        )
+    return _handler
 
 
 # ---------------------------------------------------------------------------

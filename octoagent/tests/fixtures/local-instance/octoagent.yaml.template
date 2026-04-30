@@ -1,29 +1,41 @@
-# F087 e2e_live 脱敏 octoagent.yaml 模板
+# F087 e2e_live 脱敏 octoagent.yaml 模板（v2 schema）
 # 用法：测试 fixture 把本文件 copy 到 tmp_dir 作为 e2e 实例 config 起点
 #
 # **本文件不得包含任何真实凭证 / token / API key 明文**
-# 所有 *_env 字段只存环境变量名（不是值）
+# 所有 *_env 字段只存环境变量名（不是值）；OAuth 走 ``auth.profile`` 引用
+# auth-profiles.json 内的 profile（由 ``real_codex_credential_store`` fixture 注入）
 
-config_version: 1
+config_version: 2
 updated_at: "2026-04-30"
 
 providers:
   - id: openai-codex
-    name: "OpenAI Codex (e2e fixture)"
-    auth_type: oauth
-    api_key_env: OPENAI_API_KEY
+    name: "OpenAI Codex (e2e fixture, ChatGPT Pro OAuth)"
     enabled: true
+    transport: openai_responses
+    api_base: https://chatgpt.com/backend-api/codex
+    auth:
+      kind: oauth
+      profile: openai-codex-default
+  - id: siliconflow
+    name: "SiliconFlow (e2e fallback)"
+    enabled: true
+    transport: openai_chat
+    api_base: https://api.siliconflow.cn/v1
+    auth:
+      kind: api_key
+      env: SILICONFLOW_API_KEY
 
 model_aliases:
   main:
     provider: openai-codex
     model: "gpt-5.5"
-    description: "F087 e2e 主力模型"
+    description: "F087 e2e 主力模型（GPT-5.5 think-low）"
     thinking_level: low
   cheap:
     provider: openai-codex
     model: "gpt-5.5"
-    description: "F087 e2e 低成本探测模型"
+    description: "F087 e2e 低成本探测模型（同 main，OAuth 不计 token 费）"
     thinking_level: low
 
 runtime:
