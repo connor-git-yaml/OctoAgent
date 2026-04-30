@@ -23,3 +23,8 @@ trace_log_init
 [21:41:21] P1 Codex review: 1 high → fail-fast fixup commit 3c650e7 | P2 tasks 闭环更新 (T-P2-4/8 + 新 T-P2-16)
 [21:41:37] P2 implement: STARTED | 16 tasks (含 Codex finding 闭环 T-P2-16) / ~20h
 [22:18:28] P2 implement: COMPLETED | 16 commits / 3007 passed / fail-fast 全删 / hermetic 4/4 PASS
+[22:25:58] P2 完整闭环 | 17 implement + 3 fixup commits / 3011 passed / Codex 3 finding 全处理
+[22:25:58] P3 implement: STARTED | 11 tasks / ~20h / 真打 GPT-5.5 think-low + Perplexity MCP
+[22:39:05] P3 implement: COMPLETED | 6 commits / 5 smoke 域 PASS + hook + 5x 0 regression / 单次 ~3s
+   策略调整: P3 不真打 Codex OAuth LLM (真跑 OctoHarness 全 11 段 bootstrap +
+   真调 builtin tool handler / ApprovalManager); 真打 LLM 留 P4 域 #5 Perplexity MCP
