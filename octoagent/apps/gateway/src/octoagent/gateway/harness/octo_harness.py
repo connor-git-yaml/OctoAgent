@@ -538,13 +538,310 @@ class OctoHarness:
             _tool_deps._snapshot_store = snapshot_store
 
     async def _bootstrap_executors(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_executors`` marker 段。"""
-        raise NotImplementedError("body in T-P1-5")
+        """对应 lifespan ``_bootstrap_executors`` marker 段（行 591-709）。"""
+        from octoagent.skills import SkillRunner
+        from octoagent.skills.provider_model_client import ProviderModelClient
+
+        from ..main import log as _log
+        from ..services.agent_context import AgentContextService
+        from ..services.agent_session_turn_hook import AgentSessionTurnHook
+        from ..services.delegation_plane import DelegationPlaneService
+        from ..services.llm_service import LLMService
+        from ..services.task_runner import TaskRunner
+
+        project_root = self._project_root
+        store_group = self._store_group
+        assert store_group is not None
+        tool_broker = self._tool_broker
+        telegram_service = self._telegram_service
+        fallback_manager = self._fallback_manager
+        alias_registry = self._alias_registry
+        snapshot_store = self._snapshot_store
+        _llm_mode_env = self._llm_mode_env
+
+        # Feature 081 P4 修复（Codex F2）：SkillRunner 仅在非 echo 模式下创建。
+        # echo 模式必须保持纯 echo 行为——ProviderModelClient 会绕过 FallbackManager
+        # 直连 provider，这违反了 echo 的离线/开发语义。
+        # Feature 061: 创建 ApprovalBridge 用于 ask 信号桥接
+        # Feature 072: tool_search 结果回调（late-binding，因为 llm_service 在 SkillRunner 之后创建）
+        _llm_service_ref: list[Any] = self._llm_service_ref
+
+        async def _on_tool_search_result(
+            result_json: str, task_id: str = "", trace_id: str = "",
+        ) -> None:
+            if _llm_service_ref:
+                await _llm_service_ref[0].process_tool_search_results(
+                    result_json, task_id=task_id, trace_id=trace_id,
+                )
+
+        if _llm_mode_env != "echo":
+            # Feature 080 Phase 3+5：SkillRunner 用 ProviderModelClient + ProviderRouter 直连
+            skill_runner = SkillRunner(
+                model_client=ProviderModelClient(
+                    provider_router=app.state.provider_router,
+                    tool_broker=tool_broker,
+                ),
+                tool_broker=tool_broker,
+                event_store=store_group.event_store,
+                hooks=[AgentSessionTurnHook(store_group)],
+                on_tool_search_result=_on_tool_search_result,
+            )
+            app.state.llm_service = LLMService(
+                fallback_manager=fallback_manager,
+                alias_registry=alias_registry,
+                skill_runner=skill_runner,
+                skill_discovery=app.state.skill_discovery,
+            )
+            _llm_service_ref.append(app.state.llm_service)
+            AgentContextService.set_llm_service(app.state.llm_service)
+        else:
+            # echo 模式：保持上面已构造的 LLMService（无 SkillRunner）
+            _log.info("skill_runner_skipped", reason="echo_mode")
+        app.state.delegation_plane_service = DelegationPlaneService(
+            project_root=project_root,
+            store_group=store_group,
+            sse_hub=app.state.sse_hub,
+            capability_pack=app.state.capability_pack_service,
+        )
+        app.state.capability_pack_service.bind_delegation_plane(app.state.delegation_plane_service)
+        llm_service = app.state.llm_service
+        app.state.task_runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=app.state.sse_hub,
+            llm_service=llm_service,
+            approval_manager=app.state.approval_manager,
+            completion_notifier=telegram_service.notify_task_result,
+            delegation_plane=app.state.delegation_plane_service,
+            project_root=project_root,
+        )
+        app.state.capability_pack_service.bind_task_runner(app.state.task_runner)
+        await app.state.capability_pack_service.refresh()
+        app.state.execution_console = app.state.task_runner.execution_console
+        telegram_service.bind_task_runner(app.state.task_runner)
+        await app.state.task_runner.startup()
+
+        # Feature 079 Phase 4：启动时对账 auth-profiles ↔ octoagent.yaml
+        try:
+            from ..services.config.drift_check import detect_auth_config_drift
+
+            drift_records = detect_auth_config_drift(project_root)
+            if drift_records:
+                _log.warning(
+                    "auth_config_drift_detected",
+                    count=len(drift_records),
+                    drift_types=[r.drift_type for r in drift_records],
+                )
+                for record in drift_records:
+                    _log.warning(
+                        "auth_config_drift_item",
+                        drift_type=record.drift_type,
+                        severity=record.severity,
+                        provider=record.provider,
+                        summary=record.summary,
+                    )
+        except Exception as exc:
+            # 启动对账不能 block lifespan
+            _log.warning(
+                "auth_config_drift_check_failed",
+                error_type=type(exc).__name__,
+            )
+
+        # Feature 067: 创建 GraphPipelineTool 并挂载到 app.state + OrchestratorService
+        try:
+            from octoagent.skills.pipeline_tool import GraphPipelineTool
+
+            pipeline_registry = getattr(app.state, "pipeline_registry", None)
+            if pipeline_registry is not None:
+                graph_pipeline_tool = GraphPipelineTool(
+                    registry=pipeline_registry,
+                    store_group=store_group,
+                )
+                app.state.graph_pipeline_tool = graph_pipeline_tool
+                # 注入到 TaskRunner 内部的 OrchestratorService
+                orchestrator = getattr(app.state.task_runner, "_orchestrator", None)
+                if orchestrator is not None:
+                    orchestrator._graph_pipeline_tool = graph_pipeline_tool
+                _log.info("graph_pipeline_tool_initialized")
+            else:
+                app.state.graph_pipeline_tool = None
+        except Exception as exc:
+            _log.warning("graph_pipeline_tool_init_skipped", error=str(exc))
+            app.state.graph_pipeline_tool = None
+
+        # F084 Phase 2 T034：把 SnapshotStore 注入 OrchestratorService（替代直读 USER.md）
+        _orchestrator = getattr(getattr(app.state, "task_runner", None), "_orchestrator", None)
+        if _orchestrator is not None and hasattr(snapshot_store, "format_for_system_prompt"):
+            _orchestrator._snapshot_store = snapshot_store
 
     async def _bootstrap_optional_routines(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_optional_routines`` marker 段。"""
-        raise NotImplementedError("body in T-P1-5")
+        """对应 lifespan ``_bootstrap_optional_routines`` marker 段（行 711-787）。"""
+        from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+        from octoagent.gateway.services.config.config_wizard import load_config
+
+        from ..main import log as _log
+        from ..routines.observation_promoter import ObservationRoutine
+        from ..services.watchdog.config import WatchdogConfig
+        from ..services.watchdog.cooldown import CooldownRegistry
+        from ..services.watchdog.detectors import (
+            NoProgressDetector,
+            RepeatedFailureDetector,
+            StateMachineDriftDetector,
+        )
+        from ..services.watchdog.scanner import WatchdogScanner
+
+        project_root = self._project_root
+        store_group = self._store_group
+        assert store_group is not None
+        telegram_service = self._telegram_service
+        provider_router = self._provider_router
+
+        # F084 Phase 3 T049：启动 ObservationRoutine（feature flag 检查）
+        _obs_feature_enabled = True
+        try:
+            _obs_cfg = load_config(project_root)
+            if _obs_cfg is not None:
+                _obs_feature_enabled = getattr(
+                    getattr(_obs_cfg, "features", None),
+                    "observation_routine_enabled",
+                    True,
+                )
+        except Exception as _obs_exc:
+            _log.debug(
+                "observation_routine_feature_flag_fallback",
+                error=str(_obs_exc),
+                default=_obs_feature_enabled,
+            )
+
+        # Telegram 通知函数（异步）：如果 telegram_service 有 notify_text，直接用；否则 None
+        _obs_telegram_notify = getattr(telegram_service, "notify_text", None)
+
+        _observation_routine = ObservationRoutine(
+            conn=store_group.conn,
+            event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
+            task_store=store_group.task_store if hasattr(store_group, "task_store") else None,
+            provider_router=provider_router,
+            telegram_notify_fn=_obs_telegram_notify,
+            feature_enabled=_obs_feature_enabled,
+        )
+        await _observation_routine.start()
+        app.state.observation_routine = _observation_routine
+
+        await telegram_service.startup()
+
+        # Feature 011: 注册 WatchdogScanner APScheduler job
+        watchdog_config = WatchdogConfig.from_env()
+        cooldown_registry = CooldownRegistry()
+
+        watchdog_scanner = WatchdogScanner(
+            store_group=store_group,
+            config=watchdog_config,
+            cooldown_registry=cooldown_registry,
+            detectors=[
+                NoProgressDetector(),
+                StateMachineDriftDetector(),  # T035: Phase 4 追加（FR-011 状态机漂移）
+                RepeatedFailureDetector(),  # T039: Phase 5 追加（FR-012 重复失败）
+            ],
+        )
+        await watchdog_scanner.startup()  # 重建 cooldown 注册表（FR-006 跨重启一致性）
+
+        scheduler = AsyncIOScheduler()
+        scheduler.add_job(
+            watchdog_scanner.scan,
+            trigger="interval",
+            seconds=watchdog_config.scan_interval_seconds,
+            id="watchdog_scan",
+            misfire_grace_time=5,  # 允许最多 5 秒的执行延迟
+        )
+        scheduler.start()
+
+        # 保存到 app state 供测试/健康检查访问
+        app.state.watchdog_config = watchdog_config
+        app.state.watchdog_scheduler = scheduler
+        app.state.watchdog_scanner = watchdog_scanner
+
+        # 跨段共享：control_plane 段需要 watchdog_config
+        self._watchdog_config = watchdog_config
 
     async def _bootstrap_control_plane(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_control_plane`` marker 段。"""
-        raise NotImplementedError("body in T-P1-5")
+        """对应 lifespan ``_bootstrap_control_plane`` marker 段（行 790-849）。"""
+        from octoagent.gateway.services.memory.memory_console_service import (
+            MemoryConsoleService,
+        )
+
+        from ..main import log as _log
+        from ..services.automation_scheduler import AutomationSchedulerService
+        from ..services.control_plane import ControlPlaneService
+        from ..services.operator_actions import OperatorActionService
+        from ..services.operator_inbox import OperatorInboxService
+        from ..services.task_journal import TaskJournalService
+
+        project_root = self._project_root
+        store_group = self._store_group
+        assert store_group is not None
+        telegram_service = self._telegram_service
+        telegram_state_store = self._telegram_state_store
+        fallback_manager = self._fallback_manager
+        watchdog_config = self._watchdog_config
+
+        app.state.task_journal_service = TaskJournalService(store_group=store_group)
+        app.state.operator_inbox_service = OperatorInboxService(
+            store_group=store_group,
+            approval_manager=app.state.approval_manager,
+            telegram_state_store=telegram_state_store,
+            watchdog_config=watchdog_config,
+            task_journal_service=app.state.task_journal_service,
+        )
+        app.state.operator_action_service = OperatorActionService(
+            store_group=store_group,
+            sse_hub=app.state.sse_hub,
+            approval_manager=app.state.approval_manager,
+            task_runner=app.state.task_runner,
+            telegram_state_store=telegram_state_store,
+            watchdog_config=watchdog_config,
+            task_journal_service=app.state.task_journal_service,
+        )
+        telegram_service.bind_operator_services(
+            app.state.operator_inbox_service,
+            app.state.operator_action_service,
+        )
+        app.state.control_plane_service = ControlPlaneService(
+            project_root=project_root,
+            store_group=store_group,
+            sse_hub=app.state.sse_hub,
+            task_runner=app.state.task_runner,
+            operator_action_service=app.state.operator_action_service,
+            operator_inbox_service=app.state.operator_inbox_service,
+            telegram_state_store=telegram_state_store,
+            update_status_store=app.state.update_status_store,
+            update_service=app.state.update_service,
+            memory_console_service=MemoryConsoleService(
+                project_root,
+                store_group=store_group,
+                llm_service=fallback_manager,
+            ),
+            capability_pack_service=app.state.capability_pack_service,
+            delegation_plane_service=app.state.delegation_plane_service,
+            policy_engine=None,
+        )
+        app.state.automation_scheduler = AutomationSchedulerService(
+            control_plane_service=app.state.control_plane_service,
+            automation_store=app.state.control_plane_service.automation_store,
+        )
+        app.state.control_plane_service.bind_automation_scheduler(
+            app.state.automation_scheduler,
+        )
+        app.state.control_plane_service.bind_proxy_manager(app.state.proxy_manager)
+        # Feature 065: 注册系统内置自动化作业（在 scheduler.startup 之前）
+        await app.state.control_plane_service.ensure_system_automation_jobs()
+        # Feature 058: 绑定 McpInstallerService 到 ControlPlaneService 并启动
+        app.state.control_plane_service.bind_mcp_installer(app.state.mcp_installer)
+        await app.state.mcp_installer.startup()
+        telegram_service.bind_control_plane_service(app.state.control_plane_service)
+        await app.state.automation_scheduler.startup()
+
+        _log.info(
+            "watchdog_scheduler_started",
+            scan_interval_seconds=watchdog_config.scan_interval_seconds,
+            no_progress_threshold_seconds=watchdog_config.no_progress_threshold_seconds,
+        )
