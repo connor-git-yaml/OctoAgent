@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# F087 P3 T-P3-7/8/10: pre-commit hook 跑 e2e_smoke 套件，commit 前 ≤ 180s 反馈。
+#
+# 行为：
+#   - SKIP_E2E=1 git commit ...      → 立即 exit 0，输出 [E2E] skipped via SKIP_E2E=1
+#   - 否则                            → cd octoagent && uv run pytest -m e2e_smoke -q
+#                                        --maxfail=1 总 timeout 180s
+#
+# 失败输出（FR-31）：3 行核心 + 日志路径，不刷屏；不全量 dump LLM 响应。
+#
+# bypass 文档：
+#   - 紧急 commit 用 SKIP_E2E=1 git commit -m "..."
+#   - 网络不可用 / OAuth profile 失效时 e2e 自然 SKIP（不阻断 commit）
+#
+# 安装：在 worktree 根执行 `make install-hooks` 或
+#       `git config core.hooksPath .githooks`
+
+set -e
+
+# ---- bypass 路径 ----
+if [[ "${SKIP_E2E:-0}" == "1" ]]; then
+  echo "[E2E] skipped via SKIP_E2E=1"
+  exit 0
+fi
+
+# ---- 定位 repo / octoagent 子目录 ----
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+OCTOAGENT_DIR="${REPO_ROOT}/octoagent"
+
+if [[ ! -d "${OCTOAGENT_DIR}" ]]; then
+  echo "[E2E SKIP] octoagent/ 子目录不存在 (REPO_ROOT=${REPO_ROOT})"
+  exit 0
+fi
+
+# ---- 日志路径 ----
+LOG_DIR="${HOME}/.octoagent/logs/e2e"
+mkdir -p "${LOG_DIR}"
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+LOG_FILE="${LOG_DIR}/pre-commit-${TIMESTAMP}.log"
+
+# ---- 跑 e2e_smoke（180s 总 timeout）----
+# macOS 默认无 timeout 命令；用 perl 实现轻量超时
+PYTEST_CMD="cd \"${OCTOAGENT_DIR}\" && uv run pytest -m e2e_smoke --maxfail=1 -q"
+
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_PREFIX="timeout 180"
+elif command -v gtimeout >/dev/null 2>&1; then
+  # macOS coreutils
+  TIMEOUT_PREFIX="gtimeout 180"
+else
+  # fallback: 不加超时（pytest 内部 SIGALRM 30s × 5 cases ≈ 150s 上限）
+  TIMEOUT_PREFIX=""
+fi
+
+# ---- 执行 + 捕获输出 ----
+set +e
+if [[ -n "${TIMEOUT_PREFIX}" ]]; then
+  bash -c "${TIMEOUT_PREFIX} ${PYTEST_CMD}" > "${LOG_FILE}" 2>&1
+else
+  bash -c "${PYTEST_CMD}" > "${LOG_FILE}" 2>&1
+fi
+EXIT_CODE=$?
+set -e
+
+# ---- 处理结果 ----
+if [[ ${EXIT_CODE} -eq 0 ]]; then
+  # 成功：单行总结 + 日志路径
+  PASS_LINE="$(grep -E "^[0-9]+ passed" "${LOG_FILE}" | tail -1 || echo "smoke ok")"
+  echo "[E2E PASS] ${PASS_LINE}"
+  echo "  log: ${LOG_FILE}"
+  exit 0
+fi
+
+# ---- 失败：3 行核心 + 日志路径（FR-31 / T-P3-8 格式）----
+# 抓第一个失败的测试节点
+FAILED_NODE="$(grep -E "^FAILED " "${LOG_FILE}" | head -1 | awk '{print $2}' || echo "<unknown>")"
+DOMAIN_NAME="$(basename "${FAILED_NODE}" 2>/dev/null | cut -d':' -f1 || echo "<unknown>")"
+# 抓第一行 AssertionError 描述（不全 dump）
+EXPECTED_LINE="$(grep -E "AssertionError|assert " "${LOG_FILE}" | head -1 | sed 's/^[[:space:]]*//' | cut -c1-200 || echo "<no assertion captured>")"
+
+echo "[E2E FAIL] domain=${DOMAIN_NAME}"
+echo "  expected: smoke 5 域全 PASS"
+echo "  actual:   ${EXPECTED_LINE}"
+echo "  log: ${LOG_FILE}"
+echo "  bypass: SKIP_E2E=1 git commit"
+
+exit 1
