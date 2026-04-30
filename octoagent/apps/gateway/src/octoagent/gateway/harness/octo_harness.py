@@ -273,24 +273,269 @@ class OctoHarness:
             )
 
     async def _bootstrap_runtime_services(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_runtime_services`` marker 段。"""
-        raise NotImplementedError("body in T-P1-4")
+        """对应 lifespan ``_bootstrap_runtime_services`` marker 段（行 381-455）。"""
+        import asyncio
+
+        from octoagent.gateway.services.telegram_client import TelegramBotClient
+        from octoagent.policy import ApprovalManager
+        from octoagent.policy.approval_override_store import (
+            ApprovalOverrideCache,
+            ApprovalOverrideRepository,
+        )
+        from octoagent.provider.dx.telegram_pairing import TelegramStateStore
+        from octoagent.tooling import LargeOutputHandler, ToolBroker
+
+        from ..main import _resolve_telegram_polling_timeout
+        from ..services.sse_hub import SSEHub
+        from ..services.telegram import (
+            CompositeApprovalBroadcaster,
+            TelegramApprovalBroadcaster,
+            TelegramGatewayService,
+        )
+        from ..sse.approval_events import SSEApprovalBroadcaster
+
+        project_root = self._project_root
+        store_group = self._store_group
+        assert store_group is not None
+
+        # Feature 058: 确保 MCP 安装相关目录存在
+        # P1 保留 _DEFAULT_MCP_SERVERS_DIR 行为（DI 改 P2 做）
+        _mcp_servers_dir = Path.home() / ".octoagent" / "mcp-servers"
+        _mcp_servers_dir.mkdir(parents=True, exist_ok=True)
+        _ops_dir = project_root / "data" / "ops"
+        _ops_dir.mkdir(parents=True, exist_ok=True)
+
+        app.state.store_group = store_group
+
+        # 初始化 SSEHub
+        app.state.sse_hub = SSEHub()
+
+        telegram_state_store = TelegramStateStore(project_root)
+        telegram_service = TelegramGatewayService(
+            project_root=project_root,
+            store_group=store_group,
+            sse_hub=app.state.sse_hub,
+            state_store=telegram_state_store,
+            bot_client=TelegramBotClient(project_root),
+            polling_timeout_s=_resolve_telegram_polling_timeout(project_root),
+        )
+        app.state.telegram_service = telegram_service
+        app.state.telegram_state_store = telegram_state_store
+
+        # Feature 070: ApprovalManager + Override 持久化（不再使用 PolicyEngine）
+        sse_broadcaster = SSEApprovalBroadcaster(app.state.sse_hub)
+        approval_broadcaster = CompositeApprovalBroadcaster(
+            sse_broadcaster,
+            TelegramApprovalBroadcaster(telegram_service),
+        )
+
+        approval_override_cache = ApprovalOverrideCache()
+        approval_override_repo = ApprovalOverrideRepository(
+            conn=store_group.conn,
+            cache=approval_override_cache,
+            event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
+        )
+
+        approval_manager = ApprovalManager(
+            event_store=store_group.event_store if hasattr(store_group, "event_store") else None,
+            sse_broadcaster=approval_broadcaster,
+        )
+        approval_manager._override_repo = approval_override_repo
+        approval_manager._override_cache = approval_override_cache
+        await approval_manager.recover_from_store()
+
+        app.state.approval_override_repo = approval_override_repo
+        app.state.approval_override_cache = approval_override_cache
+        app.state.approval_manager = approval_manager
+
+        # Feature 070: ToolBroker 直接接收权限依赖，不再注册权限 Hook
+        tool_broker = ToolBroker(
+            event_store=store_group.event_store,
+            artifact_store=store_group.artifact_store,
+            override_cache=approval_override_cache,
+            approval_manager=approval_manager,
+        )
+        tool_broker.add_hook(
+            LargeOutputHandler(
+                artifact_store=store_group.artifact_store,
+                event_store=store_group.event_store,
+                event_broadcaster=app.state.sse_hub,
+                context_window_tokens=128_000,
+            )
+        )
+        app.state.tool_broker = tool_broker
+
+        # 跨段共享
+        self._telegram_service = telegram_service
+        self._telegram_state_store = telegram_state_store
+        self._approval_override_cache = approval_override_cache
+        self._approval_manager = approval_manager
+        self._tool_broker = tool_broker
+        # asyncio import 留给 _bootstrap_llm 内 background_tasks 用
+        self._asyncio = asyncio
 
     async def _bootstrap_llm(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_llm`` marker 段。"""
-        raise NotImplementedError("body in T-P1-4")
+        """对应 lifespan ``_bootstrap_llm`` marker 段（行 457-525）。"""
+        import asyncio
+        import os as _os
+
+        from octoagent.provider import (
+            EchoMessageAdapter,
+            FallbackManager,
+            ProviderRouter as _ProviderRouter,
+            ProviderRouterMessageAdapter,
+        )
+
+        from ..main import _build_runtime_alias_registry, log as _log
+        from ..services.agent_context import AgentContextService
+        from ..services.llm_service import LLMService
+
+        project_root = self._project_root
+        store_group = self._store_group
+        assert store_group is not None
+
+        # LLM 服务初始化
+        # Feature 081 P1：LiteLLM Proxy 已退役，统一走 ProviderRouter 直连。
+        # ProviderRouter 单例提前创建（早于 LLMService / CapabilityPackService / SkillRunner /
+        # Memory 等服务），让所有 LLM + embedding 调用共享同一个 router 实例
+        # （同一个 http_client + 同一份 alias 缓存）。
+        _llm_mode_env = _os.environ.get("OCTOAGENT_LLM_MODE", "").strip().lower()
+
+        provider_router = _ProviderRouter(
+            project_root=project_root,
+            credential_store=getattr(store_group, "credential_store", None),
+            event_store=store_group.event_store,
+        )
+        app.state.provider_router = provider_router
+
+        # Feature 081 P4 修复（Codex F2）：保留 echo mode 安全语义。
+        alias_registry = _build_runtime_alias_registry(project_root)
+        if _llm_mode_env == "echo":
+            # Echo mode：与 M0 行为一致，纯 echo primary，无 fallback
+            fallback_manager = FallbackManager(
+                primary=EchoMessageAdapter(),
+                fallback=None,
+            )
+            llm_service = LLMService(
+                fallback_manager=fallback_manager,
+                alias_registry=alias_registry,
+            )
+            _log.info("llm_service_initialized", mode="echo")
+        else:
+            # Provider 直连：FallbackManager.primary = ProviderRouterMessageAdapter
+            fallback_manager = FallbackManager(
+                primary=ProviderRouterMessageAdapter(provider_router),
+                fallback=EchoMessageAdapter(),
+            )
+            llm_service = LLMService(
+                fallback_manager=fallback_manager,
+                alias_registry=alias_registry,
+            )
+            _log.info("llm_service_initialized", mode="provider_direct")
+        # Feature 081 P1：保留这两个 attr 兼容现有 health/control_plane 引用
+        app.state.litellm_client = None
+        app.state.proxy_manager = None
+
+        app.state.llm_service = llm_service
+        # Feature 067: 注入 LLMService 到 AgentContextService
+        AgentContextService.set_llm_service(llm_service)
+        app.state.alias_registry = alias_registry
+        app.state.background_tasks: set[asyncio.Task] = set()
+
+        # 让所有 AgentContextService 实例都拿到同一个 router 实例
+        AgentContextService.set_provider_router(provider_router)
+
+        # 跨段共享
+        self._provider_router = provider_router
+        self._fallback_manager = fallback_manager
+        self._alias_registry = alias_registry
+        self._llm_mode_env = _llm_mode_env
 
     async def _bootstrap_capability_pack(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_capability_pack`` marker 段。"""
-        raise NotImplementedError("body in T-P1-4")
+        """对应 lifespan ``_bootstrap_capability_pack`` marker 段（行 527-557）。"""
+        from ..main import log as _log
+        from ..services.capability_pack import CapabilityPackService
+
+        project_root = self._project_root
+        store_group = self._store_group
+        assert store_group is not None
+        tool_broker = self._tool_broker
+        approval_override_cache = self._approval_override_cache
+        provider_router = self._provider_router
+
+        app.state.capability_pack_service = CapabilityPackService(
+            project_root=project_root,
+            store_group=store_group,
+            tool_broker=tool_broker,
+            approval_override_cache=approval_override_cache,
+            # Feature 080 Phase 5：把 router 注入到 capability_pack
+            provider_router=provider_router,
+        )
+        # Feature 057: 挂载 SkillDiscovery 到 app.state 供依赖注入
+        app.state.skill_discovery = app.state.capability_pack_service.skill_discovery
+
+        # Feature 065: 创建 PipelineRegistry 并挂载到 app.state 供 REST API 依赖注入
+        try:
+            from octoagent.skills.pipeline_registry import PipelineRegistry
+
+            # 原 main.py 内 _builtin_pipelines = Path(__file__).resolve().parents[5] / "pipelines"
+            # __file__ = apps/gateway/src/octoagent/gateway/main.py
+            # parents[5] = repo root（octoagent/）
+            # → /pipelines（在 repo root）
+            # 这里需基于 main.py __file__ 解析（保持 byte-for-byte 等价）
+            from .. import main as _main_module
+            _builtin_pipelines = Path(_main_module.__file__).resolve().parents[5] / "pipelines"
+            _user_pipelines = Path.home() / ".octoagent" / "pipelines"
+            pipeline_registry = PipelineRegistry(
+                builtin_dir=_builtin_pipelines if _builtin_pipelines.is_dir() else None,
+                user_dir=_user_pipelines,
+                project_dir=project_root / "pipelines" if project_root else None,
+            )
+            pipeline_registry.scan()
+            app.state.pipeline_registry = pipeline_registry
+        except Exception as exc:
+            _log.warning("pipeline_registry_init_skipped", error=str(exc))
+            app.state.pipeline_registry = None
 
     async def _bootstrap_mcp(self, app: FastAPI) -> None:
-        """对应 lifespan ``_bootstrap_mcp`` marker 段。
+        """对应 lifespan ``_bootstrap_mcp`` marker 段（行 559-589）。
 
         P1 内保留 ``_DEFAULT_MCP_SERVERS_DIR`` 默认行为（``McpInstallerService``
         DI 改造由 T-P2-3 完成）。
         """
-        raise NotImplementedError("body in T-P1-4")
+        from ..services.mcp_installer import McpInstallerService
+        from ..services.mcp_registry import McpRegistryService
+        from ..services.mcp_session_pool import McpSessionPool
+
+        project_root = self._project_root
+        tool_broker = self._tool_broker
+        snapshot_store = self._snapshot_store
+
+        # Feature 058: 创建 McpSessionPool 并注入 McpRegistryService
+        mcp_session_pool = McpSessionPool()
+        app.state.mcp_session_pool = mcp_session_pool
+        app.state.mcp_registry = McpRegistryService(
+            project_root=project_root,
+            tool_broker=tool_broker,
+            session_pool=mcp_session_pool,
+        )
+        app.state.capability_pack_service.bind_mcp_registry(app.state.mcp_registry)
+
+        # Feature 058: 创建 McpInstallerService
+        mcp_installer = McpInstallerService(
+            registry=app.state.mcp_registry,
+            project_root=project_root,
+        )
+        app.state.mcp_installer = mcp_installer
+        app.state.capability_pack_service.bind_mcp_installer(mcp_installer)
+
+        await app.state.capability_pack_service.startup()
+
+        # F084 Phase 2 T033：startup 后把 SnapshotStore 注入 ToolDeps
+        # （startup 内部执行 _register_builtin_tools 创建 ToolDeps，之后才可注入）
+        _tool_deps = getattr(app.state.capability_pack_service, "_tool_deps", None)
+        if _tool_deps is not None and hasattr(snapshot_store, "load_snapshot"):
+            _tool_deps._snapshot_store = snapshot_store
 
     async def _bootstrap_executors(self, app: FastAPI) -> None:
         """对应 lifespan ``_bootstrap_executors`` marker 段。"""
