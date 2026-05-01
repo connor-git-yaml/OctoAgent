@@ -287,7 +287,8 @@ async def _run_scenario_observation_promote(store_group, tmp_path: Path) -> None
     await conn.execute("DELETE FROM observation_candidates WHERE status = 'pending'")
     await conn.commit()
 
-    await _ensure_audit_task(store_group, "_observation_routine_audit")
+    # F088 修复后：ObservationRoutine._ensure_audit_task 已委托 ensure_system_audit_task
+    # helper，会自动创建 _observation_routine_audit task；此处不再需要预 seed work-around。
     turns = [
         {"payload": {"content": "用户喜欢早起运动，每天 6 点起床跑步，已坚持两年"}},
         {"payload": {"content": "工作领域专注 AI 基础设施，有 5 年以上平台工程经验"}},

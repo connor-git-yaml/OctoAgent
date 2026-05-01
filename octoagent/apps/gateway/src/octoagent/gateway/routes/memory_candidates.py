@@ -107,6 +107,45 @@ async def _rollback_promoting_to_pending(conn: Any, candidate_id: str) -> None:
         )
 
 
+async def _ensure_candidates_audit_task_or_500(
+    task_store: Any | None,
+    _ensured_set: set[str],
+) -> None:
+    """在产生副作用前 ensure audit task；失败抛 HTTPException(500)。
+
+    F088 followup（Codex adversarial review）：之前 _emit_event 内部 ensure
+    采用 silent log——若 task_store 未注入 / DB 锁 / 字段错，audit 链断裂会被
+    吞掉，promote 仍照常写 USER.md + 标 promoted 但 OBSERVATION_PROMOTED
+    事件丢失，违反 C2「Everything is an Event」不变量。
+    本 helper 把 audit ensure 提前到副作用之前——确定性失败立即 fail-loud
+    return 500，副作用未发生；happy path 把 task_id 加入 _ensured set，
+    后续 _emit_event 跳过 ensure（幂等）直接写事件。
+    """
+    if _CANDIDATES_AUDIT_TASK_ID in _ensured_set:
+        return
+    from octoagent.core.store.audit_task import ensure_system_audit_task
+
+    ok = await ensure_system_audit_task(
+        task_store,
+        _CANDIDATES_AUDIT_TASK_ID,
+        title="Memory Candidates 审计占位 Task（F084 Phase 3 / F085 T3）",
+    )
+    if not ok:
+        log.error(
+            "memory_candidates_audit_task_ensure_failed",
+            task_id=_CANDIDATES_AUDIT_TASK_ID,
+            hint="task_store 未注入 / 查询失败 / 创建失败；操作已取消以保护 C2 审计不变量",
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "audit task ensure 失败（task_store 未注入或创建失败）；"
+                "操作已取消以保护 C2 审计不变量"
+            ),
+        )
+    _ensured_set.add(_CANDIDATES_AUDIT_TASK_ID)
+
+
 async def _emit_event(
     event_store: Any,
     task_store: Any | None,
@@ -115,33 +154,33 @@ async def _emit_event(
     payload: dict[str, Any],
     _ensured_set: set[str] | None = None,
 ) -> None:
-    """写审计事件（防 F22：使用真实 schema 字段 + append_event_committed）。"""
+    """写审计事件（防 F22：使用真实 schema 字段 + append_event_committed）。
+
+    调用前必须先调 _ensure_candidates_audit_task_or_500（happy path）；
+    本函数内部仍保留幂等防御 ensure 路径，但通常 set 已含 task_id 直接跳过。
+    Event append 失败仍 silent log（与 PolicyGate / ApprovalGate / user_profile_tools
+    一致的 fail-soft pattern——副作用已生效，audit 失败不再回滚业务）。
+    """
     if event_store is None:
         return
 
-    # 确保 audit task 存在（防 F24 FK 违反）
+    # 防御性二次 ensure（happy path 已 set 跳过；仅极端绕过场景兜底）。
     if _ensured_set is not None and _CANDIDATES_AUDIT_TASK_ID not in _ensured_set:
-        if task_store is not None:
-            try:
-                existing = await task_store.get_task(_CANDIDATES_AUDIT_TASK_ID)
-                if existing is None:
-                    from octoagent.core.models.task import Task
+        from octoagent.core.store.audit_task import ensure_system_audit_task
 
-                    now = datetime.now(timezone.utc)
-                    audit_task = Task(
-                        task_id=_CANDIDATES_AUDIT_TASK_ID,
-                        created_at=now,
-                        updated_at=now,
-                        title="Memory Candidates 审计占位 Task（F084 Phase 3）",
-                        trace_id=_CANDIDATES_AUDIT_TASK_ID,
-                    )
-                    await task_store.create_task(audit_task)
-                _ensured_set.add(_CANDIDATES_AUDIT_TASK_ID)
-            except Exception as exc:
-                log.error(
-                    "memory_candidates_audit_task_ensure_failed",
-                    error=str(exc),
-                )
+        ok = await ensure_system_audit_task(
+            task_store,
+            _CANDIDATES_AUDIT_TASK_ID,
+            title="Memory Candidates 审计占位 Task（F084 Phase 3 / F085 T3）",
+        )
+        if ok:
+            _ensured_set.add(_CANDIDATES_AUDIT_TASK_ID)
+        else:
+            log.warning(
+                "memory_candidates_audit_task_ensure_failed_late",
+                task_id=_CANDIDATES_AUDIT_TASK_ID,
+                hint="副作用已生效后 ensure 仍失败，audit 事件可能丢失",
+            )
 
     try:
         task_seq = await event_store.get_next_task_seq(_CANDIDATES_AUDIT_TASK_ID)
@@ -280,6 +319,15 @@ async def promote_candidate(
             status_code=409,
             detail=f"候选 {candidate_id} 已被并发 promote 抢占（atomic claim 失败）",
         )
+
+    # F088 followup（Codex review）：claim 之后、副作用之前 ensure audit task。
+    # 失败立即回滚 claim 并 return 500——确保 audit 链断裂时不产生 USER.md 写入
+    # 与 status update（防止 fail-soft 路径下 promote 看似成功但 audit 事件丢失）。
+    try:
+        await _ensure_candidates_audit_task_or_500(task_store, _ensured)
+    except HTTPException:
+        await _rollback_promoting_to_pending(conn, candidate_id)
+        raise
 
     # 决定最终 fact_content（edit+accept 时使用 body.fact_content）
     fact_content = body.fact_content if body.fact_content is not None else str(row["fact_content"])
@@ -552,6 +600,10 @@ async def discard_candidate(
             detail=f"候选 {candidate_id} 状态为 {row['status']}，不可 discard",
         )
 
+    # F088 followup（Codex review）：UPDATE 前 ensure audit task。失败立即 500，
+    # 候选保持 pending，避免 fail-soft 下 status 改 rejected 但 OBSERVATION_DISCARDED 丢失。
+    await _ensure_candidates_audit_task_or_500(task_store, _ensured)
+
     try:
         await conn.execute(
             "UPDATE observation_candidates SET status = 'rejected' WHERE id = ?",
@@ -601,6 +653,10 @@ async def bulk_discard_candidates(
     event_store = getattr(store_group, "event_store", None)
     task_store = getattr(store_group, "task_store", None)
     _ensured: set[str] = set()
+
+    # F088 followup（Codex review）：UPDATE 前 ensure audit task。失败立即 500，
+    # 候选保持原 pending 状态，避免 fail-soft 下批量改 rejected 但事件丢失。
+    await _ensure_candidates_audit_task_or_500(task_store, _ensured)
 
     # F29 修复 (Codex medium)：先 SELECT 真实 pending IDs，再 UPDATE，
     # 然后用 cursor.rowcount 校验。响应只回传实际被 reject 的候选；

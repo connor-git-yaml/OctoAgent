@@ -236,42 +236,32 @@ class DelegationManager:
     # ---------------------------------------------------------------------------
 
     async def _ensure_audit_task(self, task_id: str) -> bool:
-        """确保 audit task 存在（防 F24 FK violation）。"""
+        """确保 audit task 存在（防 F24 FK violation）。
+
+        F088 修复：本路径之前手写 Task(...) 漏 requester/pointers 必填字段
+        → pydantic ValidationError → audit task 创建失败 → SUBAGENT_SPAWNED /
+        SUBAGENT_COMPLETED 事件 silent 丢失。统一委托至 ensure_system_audit_task
+        helper（与 PolicyGate / ApprovalGate 同 pattern）。
+        """
         if task_id in self._audit_task_ensured:
             return True
-        if self._task_store is None:
-            return False
-        try:
-            existing = await self._task_store.get_task(task_id)
-        except Exception as exc:
-            log.error("delegation_audit_task_get_failed", task_id=task_id, error=str(exc))
-            return False
-        if existing is not None:
-            self._audit_task_ensured.add(task_id)
-            return True
-        try:
-            from octoagent.core.models.task import Task
+        from octoagent.core.store.audit_task import ensure_system_audit_task
 
-            now = datetime.now(timezone.utc)
-            audit_task = Task(
-                task_id=task_id,
-                created_at=now,
-                updated_at=now,
-                title="DelegationManager 审计占位 Task（F084 Phase 3）",
-                trace_id=task_id,
-            )
-            await self._task_store.create_task(audit_task)
+        ok = await ensure_system_audit_task(
+            self._task_store,
+            task_id,
+            title="DelegationManager 审计占位 Task（F084 Phase 3 / F085 T3）",
+        )
+        if ok:
             self._audit_task_ensured.add(task_id)
-            log.info("delegation_audit_task_created", task_id=task_id)
-            return True
-        except Exception as exc:
-            log.error(
-                "delegation_audit_task_create_failed",
+            log.info("delegation_audit_task_ensured", task_id=task_id)
+        else:
+            log.warning(
+                "delegation_audit_task_ensure_failed",
                 task_id=task_id,
-                error_type=type(exc).__name__,
-                error=str(exc),
+                hint="task_store 未注入 / 查询失败 / 创建失败",
             )
-            return False
+        return ok
 
     async def _emit_spawned_event(
         self,

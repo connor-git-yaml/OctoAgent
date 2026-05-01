@@ -783,43 +783,27 @@ class ObservationRoutine:
     async def _ensure_audit_task(self, task_id: str) -> bool:
         """确保 audit task 在 tasks 表中存在（防 F24 FK violation）。
 
-        参照 PolicyGate / ApprovalGate 同 pattern。
+        F088 修复：本路径之前手写 Task(...) 漏 requester/pointers 必填字段
+        → pydantic ValidationError → audit task 创建失败 → OBSERVATION_*
+        事件 silent 丢失。统一委托至 ensure_system_audit_task helper
+        （与 PolicyGate / ApprovalGate 同 pattern）。
         """
         if task_id in self._audit_task_ensured:
             return True
-        if self._task_store is None:
-            return False
+        from octoagent.core.store.audit_task import ensure_system_audit_task
 
-        try:
-            existing = await self._task_store.get_task(task_id)
-        except Exception as exc:
-            log.error("observation_audit_task_get_failed", task_id=task_id, error=str(exc))
-            return False
-
-        if existing is not None:
+        ok = await ensure_system_audit_task(
+            self._task_store,
+            task_id,
+            title="ObservationRoutine 审计占位 Task（F084 Phase 3 / F085 T3）",
+        )
+        if ok:
             self._audit_task_ensured.add(task_id)
-            return True
-
-        try:
-            from octoagent.core.models.task import Task
-
-            now = datetime.now(timezone.utc)
-            audit_task = Task(
+            log.info("observation_audit_task_ensured", task_id=task_id)
+        else:
+            log.warning(
+                "observation_audit_task_ensure_failed",
                 task_id=task_id,
-                created_at=now,
-                updated_at=now,
-                title="ObservationRoutine 审计占位 Task（F084 Phase 3）",
-                trace_id=task_id,
+                hint="task_store 未注入 / 查询失败 / 创建失败",
             )
-            await self._task_store.create_task(audit_task)
-            self._audit_task_ensured.add(task_id)
-            log.info("observation_audit_task_created", task_id=task_id)
-            return True
-        except Exception as exc:
-            log.error(
-                "observation_audit_task_create_failed",
-                task_id=task_id,
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
-            return False
+        return ok
