@@ -72,10 +72,15 @@ async def harness_real_llm(octo_harness_e2e: dict[str, Any]) -> dict[str, Any]:
     await harness.bootstrap(app)
     harness.commit_to_app(app)
 
+    # F087 final fixup#14（Codex final medium-4 闭环）：路由注册带 front_door 保护
+    from fastapi import Depends
+
+    from octoagent.gateway.deps import require_front_door_access
     from octoagent.gateway.routes import message, tasks
 
-    app.include_router(message.router, tags=["message"])
-    app.include_router(tasks.router, tags=["tasks"])
+    protected = [Depends(require_front_door_access)]
+    app.include_router(message.router, tags=["message"], dependencies=protected)
+    app.include_router(tasks.router, tags=["tasks"], dependencies=protected)
 
     return {"harness": harness, "app": app, "project_root": project_root}
 

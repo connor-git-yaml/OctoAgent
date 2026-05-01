@@ -24,42 +24,64 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Sequence
+from typing import NamedTuple, Sequence
 
 import click
 
 
-# 13 域注册表（与 spec §13 对齐）
-# CLI 单跑某域用 ``-k`` keyword 匹配（pytest 不支持 prefix node ID）。
-# (domain_id, display_name, marker, file_path, test_keyword)
-_DOMAIN_REGISTRY: tuple[tuple[int, str, str, str, str], ...] = (
-    (1, "工具调用基础", "e2e_smoke",
-     "apps/gateway/tests/e2e_live/test_e2e_basic_tool_context.py", "test_domain_1_"),
-    (2, "USER.md 全链路", "e2e_smoke",
-     "apps/gateway/tests/e2e_live/test_e2e_basic_tool_context.py", "test_domain_2_"),
-    (3, "Context 冻结快照", "e2e_smoke",
-     "apps/gateway/tests/e2e_live/test_e2e_basic_tool_context.py", "test_domain_3_"),
-    (4, "Memory observation→promote", "e2e_full",
-     "apps/gateway/tests/e2e_live/test_e2e_memory_pipeline.py", "test_domain_4_"),
-    (5, "真实 Perplexity MCP", "e2e_full",
-     "apps/gateway/tests/e2e_live/test_e2e_mcp_skill_pipeline.py", "test_domain_5_"),
-    (6, "Skill 调用", "e2e_full",
-     "apps/gateway/tests/e2e_live/test_e2e_mcp_skill_pipeline.py", "test_domain_6_"),
-    (7, "Graph Pipeline", "e2e_full",
-     "apps/gateway/tests/e2e_live/test_e2e_mcp_skill_pipeline.py", "test_domain_7_"),
-    (8, "delegate_task", "e2e_full",
-     "apps/gateway/tests/e2e_live/test_e2e_delegation_a2a.py", "test_domain_8_"),
-    (9, "Sub-agent max_depth=2", "e2e_full",
-     "apps/gateway/tests/e2e_live/test_e2e_delegation_a2a.py", "test_domain_9_"),
-    (10, "A2A 通信", "e2e_full",
-     "apps/gateway/tests/e2e_live/test_e2e_delegation_a2a.py", "test_domain_10_"),
-    (11, "ThreatScanner block", "e2e_smoke",
-     "apps/gateway/tests/e2e_live/test_e2e_safety_gates.py", "test_domain_11_"),
-    (12, "ApprovalGate SSE", "e2e_smoke",
-     "apps/gateway/tests/e2e_live/test_e2e_safety_gates.py", "test_domain_12_"),
-    (13, "Routine cron / webhook", "e2e_full",
-     "apps/gateway/tests/e2e_live/test_e2e_routine.py", "test_domain_13_"),
+# F087 final fixup#14（Codex final medium-5 闭环）：DOMAIN_REGISTRY 单一事实源。
+# helpers/domain_runner.py 改为 thin wrapper import 本模块，避免双源 + node id
+# schema 漂移（旧 helpers DOMAIN_REGISTRY 用精确 node id 不能匹配带后缀的 test
+# 函数；本注册表用 file + keyword 模式 `-k <keyword>`，pytest 真能匹配）。
+
+
+class DomainSpec(NamedTuple):
+    """13 能力域注册表条目（CLI / helpers/domain_runner 共用）。"""
+
+    domain_id: int
+    name: str
+    marker: str  # "e2e_smoke" / "e2e_full"
+    file_path: str  # pytest 文件路径（运行时 cwd=octoagent/）
+    pytest_keyword: str  # `pytest <file> -k <keyword>` 匹配前缀
+
+
+# 13 域注册表（与 spec §13 对齐）。
+DOMAIN_REGISTRY: tuple[DomainSpec, ...] = (
+    DomainSpec(1, "工具调用基础", "e2e_smoke",
+               "apps/gateway/tests/e2e_live/test_e2e_basic_tool_context.py", "test_domain_1_"),
+    DomainSpec(2, "USER.md 全链路", "e2e_smoke",
+               "apps/gateway/tests/e2e_live/test_e2e_basic_tool_context.py", "test_domain_2_"),
+    DomainSpec(3, "Context 冻结快照", "e2e_smoke",
+               "apps/gateway/tests/e2e_live/test_e2e_basic_tool_context.py", "test_domain_3_"),
+    DomainSpec(4, "Memory observation→promote", "e2e_full",
+               "apps/gateway/tests/e2e_live/test_e2e_memory_pipeline.py", "test_domain_4_"),
+    DomainSpec(5, "真实 Perplexity MCP", "e2e_full",
+               "apps/gateway/tests/e2e_live/test_e2e_mcp_skill_pipeline.py", "test_domain_5_"),
+    DomainSpec(6, "Skill 调用", "e2e_full",
+               "apps/gateway/tests/e2e_live/test_e2e_mcp_skill_pipeline.py", "test_domain_6_"),
+    DomainSpec(7, "Graph Pipeline", "e2e_full",
+               "apps/gateway/tests/e2e_live/test_e2e_mcp_skill_pipeline.py", "test_domain_7_"),
+    DomainSpec(8, "delegate_task", "e2e_full",
+               "apps/gateway/tests/e2e_live/test_e2e_delegation_a2a.py", "test_domain_8_"),
+    DomainSpec(9, "Sub-agent max_depth=2", "e2e_full",
+               "apps/gateway/tests/e2e_live/test_e2e_delegation_a2a.py", "test_domain_9_"),
+    DomainSpec(10, "A2A 通信", "e2e_full",
+               "apps/gateway/tests/e2e_live/test_e2e_delegation_a2a.py", "test_domain_10_"),
+    DomainSpec(11, "ThreatScanner block", "e2e_smoke",
+               "apps/gateway/tests/e2e_live/test_e2e_safety_gates.py", "test_domain_11_"),
+    DomainSpec(12, "ApprovalGate SSE", "e2e_smoke",
+               "apps/gateway/tests/e2e_live/test_e2e_safety_gates.py", "test_domain_12_"),
+    DomainSpec(13, "Routine cron / webhook", "e2e_full",
+               "apps/gateway/tests/e2e_live/test_e2e_routine.py", "test_domain_13_"),
 )
+
+
+def find_domain(domain_id: int) -> DomainSpec | None:
+    """在 DOMAIN_REGISTRY 内查找指定 domain_id；找不到返回 None。"""
+    for d in DOMAIN_REGISTRY:
+        if d.domain_id == domain_id:
+            return d
+    return None
 
 
 def _logs_dir() -> Path:
@@ -169,14 +191,13 @@ def _run_marker(marker: str, extra_args: Sequence[str] = ()) -> int:
 
 def _run_domain(domain_id: int) -> int:
     """单跑某域。返回 pytest exit code。"""
-    spec = next((d for d in _DOMAIN_REGISTRY if d[0] == domain_id), None)
+    spec = find_domain(domain_id)
     if spec is None:
         print(f"[F087 e2e] 未知 domain_id={domain_id}; 用 --list 查看")
         return 2
-    domain_id, name, marker, file_path, keyword = spec
-    print(f"[F087 e2e] running domain #{domain_id} ({name}) ...")
+    print(f"[F087 e2e] running domain #{spec.domain_id} ({spec.name}) ...")
     # pytest 用 file_path + -k keyword 精确匹配；keyword 是函数名前缀
-    cmd = [sys.executable, "-m", "pytest", file_path, "-k", keyword, "-q"]
+    cmd = [sys.executable, "-m", "pytest", spec.file_path, "-k", spec.pytest_keyword, "-q"]
     proc = subprocess.run(cmd, capture_output=True, text=True)
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
@@ -191,8 +212,8 @@ def _list_domains() -> int:
     print("F087 e2e 13 能力域:")
     print(f"{'#':>3}  {'marker':>9}  name")
     print("-" * 50)
-    for domain_id, name, marker, _file, _kw in _DOMAIN_REGISTRY:
-        print(f"#{domain_id:>2}  [{marker:>9}]  {name}")
+    for d in DOMAIN_REGISTRY:
+        print(f"#{d.domain_id:>2}  [{d.marker:>9}]  {d.name}")
     return 0
 
 
