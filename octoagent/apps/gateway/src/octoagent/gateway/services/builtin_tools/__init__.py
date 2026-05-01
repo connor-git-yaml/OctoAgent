@@ -11,16 +11,16 @@ F085 T6：原 gateway/tools/ 目录（仅 user_profile_tools / delegate_task_too
 "防 F20 critical" workaround。
 """
 
-from ._deps import ToolDeps
 from . import (
     browser_tools,
     config_tools,
     delegate_task_tool,
     delegation_tools,
     filesystem_tools,
+    graph_pipeline_tool,
     mcp_tools,
-    misc_tools,
     memory_tools,
+    misc_tools,
     network_tools,
     runtime_tools,
     session_tools,
@@ -28,6 +28,7 @@ from . import (
     terminal_tools,
     user_profile_tools,
 )
+from ._deps import ToolDeps
 
 
 async def register_all(broker, deps: ToolDeps) -> None:
@@ -52,6 +53,7 @@ async def register_all(broker, deps: ToolDeps) -> None:
     # 不再需要从 gateway/tools/ 显式 import workaround。
     await user_profile_tools.register(broker, deps)
     await delegate_task_tool.register(broker, deps)
+    await graph_pipeline_tool.register(broker, deps)
 
 
 def list_for_entrypoint(entrypoint: str) -> list:

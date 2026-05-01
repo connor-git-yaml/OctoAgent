@@ -320,7 +320,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     #   不会冻结空内容）→ OwnerProfile sync
     from .harness.tool_registry import scan_and_register, get_registry
 
-    _builtin_tools_path = Path(__file__).resolve().parent / "tools"
+    # F085 T6 后 builtin tools 真实位置：services/builtin_tools/
+    # （旧 gateway/tools/ 目录已合并；本调用扫不到 module-level register 调用，
+    # 当前所有工具靠 register_all 显式 import 完成注册——AST 扫描保留作为
+    # 未来添加顶层 register(ToolEntry(...)) 的接入点）
+    _builtin_tools_path = Path(__file__).resolve().parent / "services" / "builtin_tools"
     _tool_registry = get_registry()
     scan_and_register(_tool_registry, _builtin_tools_path)
 
@@ -663,7 +667,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             error_type=type(exc).__name__,
         )
 
-    # Feature 067: 创建 GraphPipelineTool 并挂载到 app.state + OrchestratorService
+    # Feature 067 + F087 followup: 创建 GraphPipelineTool 并挂载到三个消费点
+    # - app.state.graph_pipeline_tool: routes/pipelines.py / 测试 fixture 直读
+    # - orchestrator._graph_pipeline_tool: DELEGATE_GRAPH 路由分支（向后兼容）
+    # - tool_deps._graph_pipeline_tool: services/builtin_tools/graph_pipeline_tool.py
+    #   broker handler late-bind（CORE 工具 1 跳路径，LLM 直接 tool_call）
     try:
         from octoagent.skills.pipeline_tool import GraphPipelineTool
 
@@ -678,6 +686,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             orchestrator = getattr(app.state.task_runner, "_orchestrator", None)
             if orchestrator is not None:
                 orchestrator._graph_pipeline_tool = graph_pipeline_tool
+            # late-bind 到 ToolDeps，供 builtin_tools/graph_pipeline_tool.py 的
+            # broker handler 调用（与 _snapshot_store 同 pattern）
+            _tool_deps_for_pipeline = getattr(
+                app.state.capability_pack_service, "_tool_deps", None,
+            )
+            if _tool_deps_for_pipeline is not None:
+                _tool_deps_for_pipeline._graph_pipeline_tool = graph_pipeline_tool
             log.info("graph_pipeline_tool_initialized")
         else:
             app.state.graph_pipeline_tool = None

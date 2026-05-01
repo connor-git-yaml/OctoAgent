@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -47,6 +46,7 @@ class ToolDeps:
     _mcp_installer: Any = None
     _pack_service: Any = None  # 弱引用回 CapabilityPackService
     _snapshot_store: Any = None  # F084 Phase 2 T022-T025
+    _graph_pipeline_tool: Any = None  # GraphPipelineTool 实例（lifespan 内 late-bind）
 
     @property
     def task_runner(self):

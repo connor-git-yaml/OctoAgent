@@ -417,9 +417,11 @@ class TestCoreToolSet:
         defaults = CoreToolSet.default()
         assert "tool_search" in defaults.tool_names
 
-    def test_default_has_9_tools(self) -> None:
+    def test_default_has_10_tools(self) -> None:
         defaults = CoreToolSet.default()
-        assert len(defaults.tool_names) == 9
+        # 9 核心工具 + graph_pipeline（治本 1 跳路径，避免绕 tool_search 慢路径）
+        assert len(defaults.tool_names) == 10
+        assert "graph_pipeline" in defaults.tool_names
 
     def test_is_core(self) -> None:
         ts = CoreToolSet(tool_names=["tool_search", "echo"])

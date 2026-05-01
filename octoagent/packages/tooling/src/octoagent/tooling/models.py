@@ -356,6 +356,7 @@ class CoreToolSet(BaseModel):
             "web.search",          # 联网搜索
             "web.fetch",           # 网页读取
             "skills",              # 技能调用
+            "graph_pipeline",      # Pipeline 编排（system prompt 已宣传，直接 1 跳调用）
         ])
 
     def is_core(self, tool_name: str) -> bool:
