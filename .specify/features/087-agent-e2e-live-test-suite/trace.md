@@ -32,3 +32,11 @@ trace_log_init
 [01:30:44] P3 Codex review: 2 high + 2 medium 全闭环 (4 fixup commits / 3016 passed)
 [01:30:44] P4 implement: STARTED | 12 tasks / 13 域真打 GPT-5.5 think-low via Codex OAuth + Perplexity MCP
 [03:33:38] P4 implement: COMPLETED | 12 task / 7 commits / 5 PASS smoke real-LLM + 4 PASS full + 5 SKIP-friendly / 全量 3024 passed (净增 +8/+5)
+[13:08:38] P4 Codex 6 finding 全闭环 + spawn task (memory_candidates bug 独立 fix)
+[13:08:38] P5 implement: STARTED | 10 tasks (T-P5-1..7 via sub-agent + T-P5-8/9/10 主线 final Codex review)
+[13:10:00] P5 T-P5-1/2/7 已在 sub-agent 启动前由主线先行 commit (f2d511e/1456103/058563f)
+[13:10:43] P5 T-P5-3: 5x 循环 e2e_smoke 5/5 PASS | total 22s / avg 4s/iter / P95 5s | 0 regression
+[13:13:54] P5 T-P5-4: SC-7 sha256 跑 octo e2e full (11 passed / 3 skipped / 132.85s) | 4 path 跑前后完全一致 (USER.md=MISSING / MEMORY.md=MISSING / auth-profiles.json=1d71f48d... / mcp-servers/=EMPTY)
+[13:14:00] P5 T-P5-5: SC-8 secrets grep | 330 hit 全 negative (env var name ref / placeholder / docstring) / 0 真凭证泄漏
+[13:18:00] P5 T-P5-6: 全量回归 | 3006 passed / 15 skipped / 1 xfailed / 1 xpassed / 0 failed (211.99s)
+[13:18:00] P5 T-P5-1..7 sub-agent 部分 COMPLETED | 待主线 T-P5-8/9/10 final Codex review + push
