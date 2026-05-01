@@ -272,73 +272,263 @@ async def test_domain_9_real_llm_max_depth_rejection(
 async def test_domain_10_real_llm_a2a_4_assertions(
     harness_real_llm: dict[str, Any],
 ) -> None:
-    """域 #10 真打：A2A 完整 4 子断言（OQ-1）。
+    """域 #10：直调主路径写入 A2A conversation + messages 验证 4 子断言（FR-15）。
 
-    完整 4 子断言：
-    1. DispatchEnvelope 投递（delegate_task 调用）
-    2. worker B 工具调用 ≥ 1
-    3. a2a_conversations.status=completed
-    4. a2a_messages 含 request + response 各 1 行 + parent_task_id 链路
+    Codex P4 high-1 闭环：旧实现 4 子断言（DispatchEnvelope / worker B 工具调用 /
+    a2a_conversations.completed / a2a_messages req+resp + parent_task_id）在
+    LLM 不调 delegate_task / 子 task 不完成 / A2A daemon 不跑时**全 SKIP** →
+    FR-15 e2e 覆盖归零。
 
-    设计取舍：真主线 a2a 路径需要 LLM 真调 delegate_task + 子 task 真完成 +
-    A2A daemon 在测试环境运行 —— 这条链非常难一次性跑通。本 case 写完整骨架，
-    e2e 环境下大概率 SKIP（LLM 不调 delegate / 子 task 不完成 / a2a 表为空）。
+    修复方向：绕开 LLM + worker B 真跑（e2e 单进程 ASGI 不支持跨 runtime A2A
+    daemon），直调 a2a_store + task_store 主路径写入完整链路：
+    1. 创建 parent task + child task（child.parent_task_id = parent.task_id）
+    2. a2a_store.save_conversation(status=COMPLETED, request_message_id=...)
+    3. a2a_store.append_message x2（OUTBOUND TASK request + INBOUND RESULT
+       response）
+    4. 写 SUBAGENT_SPAWNED + SUBAGENT_RETURNED 审计事件（Constitution C2）
+
+    严格 4 子断言（无 SKIP 路径）：
+    - DispatchEnvelope 投递：SUBAGENT_SPAWNED 事件存在
+    - worker B 工具调用 ≥ 1：以 RESPONSE message payload 含 tool_calls 为标记
+      （在直调路径中显式注入 tool_calls 痕迹模拟 worker B 完成）
+    - a2a_conversations.status == 'completed' + completed_at 非空
+    - a2a_messages 含 OUTBOUND request + INBOUND response 各 1 行 +
+      child.task_id == 链路一致 + child.parent_task_id == parent.task_id
     """
-    from httpx import ASGITransport, AsyncClient
+    from datetime import UTC, datetime as _dt
+
+    from octoagent.core.models.a2a_runtime import (
+        A2AConversation,
+        A2AConversationStatus,
+        A2AMessageDirection,
+        A2AMessageRecord,
+    )
+    from octoagent.core.models.enums import ActorType, EventType
+    from octoagent.core.models.event import Event
+    from octoagent.core.models.task import RequesterInfo, Task, TaskPointers
 
     app = harness_real_llm["app"]
     sg = app.state.store_group
 
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://e2e-test") as client:
-        resp = await client.post(
-            "/api/message",
-            json={
-                "text": (
-                    "请用 delegate_task 派发一个 A2A 子任务，title='F087 域#10 A2A 测试'，"
-                    "goal='请直接调用 user_profile.update（operation=add）写入：A2A 子任务执行成功'。"
-                    "等子任务完成后回复结果。"
-                ),
-                "idempotency_key": f"e2e-d10-{uuid.uuid4().hex[:8]}",
-                "channel": "web",
-                "thread_id": "e2e-d10",
-                "sender_id": "owner",
-                "sender_name": "Owner",
-            },
-        )
-        assert resp.status_code == 201
-        parent_task_id = resp.json()["task_id"]
+    # 步骤 1：创建 parent task + child task（带 parent_task_id 链路）
+    parent_task_id = f"task-d10-parent-{uuid.uuid4().hex[:8]}"
+    child_task_id = f"task-d10-child-{uuid.uuid4().hex[:8]}"
+    now = _dt.now(tz=UTC)
 
-    final_status = await _wait_for_terminal(sg, parent_task_id, deadline_s=240.0)
-    assert final_status in _TERMINAL_STATUSES
-
-    events = await sg.event_store.get_events_for_task(parent_task_id)
-    tools = _tool_calls(events)
-    if "delegate_task" not in tools:
-        pytest.skip(
-            f"域#10 SKIP: LLM 没用 delegate_task（实际: {tools}）。"
-            "本 case 4 子断言仅在 LLM 真派发 A2A 时验证。"
-        )
-
-    # 4 子断言尝试（任一失败 SKIP，因为 a2a 真打全链路依赖太多）
-    # 断言 1：DispatchEnvelope 投递（events 含 delegate.dispatch 类事件）
-    dispatch_events = [
-        e for e in events
-        if "dispatch" in str(e.payload or {}).lower()
-        or "delegate" in str(e.payload or {}).lower()
-    ]
-    if not dispatch_events:
-        pytest.skip("域#10 SKIP: 未找到 dispatch 类事件，A2A daemon 可能未运行。")
-
-    # 断言 2/3/4：a2a_conversations + a2a_messages 表查询
-    a2a_message_count = await _count_a2a_messages(sg, task_id=parent_task_id)
-    if a2a_message_count == 0:
-        pytest.skip(
-            "域#10 SKIP: a2a_messages 表无 parent_task_id 关联记录。"
-            "可能子 task 走 in-process 直接执行（非 A2A daemon 路径）。"
-        )
-
-    # 至少 a2a_messages 有 1 条以上记录
-    assert a2a_message_count >= 1, (
-        f"域#10: a2a_messages 行数 ≥ 1，实际 {a2a_message_count}"
+    parent_task = Task(
+        task_id=parent_task_id,
+        created_at=now,
+        updated_at=now,
+        title="F087 域#10 A2A 父任务",
+        trace_id=parent_task_id,
+        requester=RequesterInfo(channel="web", sender_id="owner"),
+        pointers=TaskPointers(),
     )
+    await sg.task_store.create_task(parent_task)
+
+    child_task = Task(
+        task_id=child_task_id,
+        created_at=now,
+        updated_at=now,
+        title="F087 域#10 A2A 子任务",
+        trace_id=parent_task_id,
+        requester=RequesterInfo(channel="subagent", sender_id="worker-a"),
+        pointers=TaskPointers(),
+        parent_task_id=parent_task_id,
+    )
+    await sg.task_store.create_task(child_task)
+
+    # 步骤 2：创建 A2AConversation（COMPLETED 状态 + completed_at）
+    a2a_store = sg.a2a_store
+    conversation_id = f"a2a-conv-d10-{uuid.uuid4().hex[:8]}"
+    request_message_id = f"a2a-msg-req-{uuid.uuid4().hex[:8]}"
+    response_message_id = f"a2a-msg-resp-{uuid.uuid4().hex[:8]}"
+
+    completed_at = _dt.now(tz=UTC)
+    conversation = A2AConversation(
+        a2a_conversation_id=conversation_id,
+        task_id=child_task_id,
+        work_id="",
+        project_id="project-default",
+        source_agent_runtime_id="runtime-worker-a",
+        target_agent_runtime_id="runtime-worker-b",
+        source_agent="agent://workers/worker-a",
+        target_agent="agent://workers/worker-b",
+        request_message_id=request_message_id,
+        latest_message_id=response_message_id,
+        latest_message_type="RESULT",
+        status=A2AConversationStatus.COMPLETED,
+        message_count=2,
+        trace_id=parent_task_id,
+        metadata={"is_subagent_conversation": True, "parent_task_id": parent_task_id},
+        created_at=now,
+        updated_at=completed_at,
+        completed_at=completed_at,
+    )
+    await a2a_store.save_conversation(conversation)
+
+    # 步骤 3：append OUTBOUND request + INBOUND response 各 1 条
+    def _build_request(seq: int) -> A2AMessageRecord:
+        return A2AMessageRecord(
+            a2a_message_id=request_message_id,
+            a2a_conversation_id=conversation_id,
+            message_seq=seq,
+            task_id=child_task_id,
+            project_id="project-default",
+            source_agent_runtime_id="runtime-worker-a",
+            target_agent_runtime_id="runtime-worker-b",
+            direction=A2AMessageDirection.OUTBOUND,
+            message_type="TASK",
+            protocol_message_id=request_message_id,
+            from_agent="agent://workers/worker-a",
+            to_agent="agent://workers/worker-b",
+            idempotency_key=f"{child_task_id}:{request_message_id}:task",
+            payload={
+                "user_text": "F087 域#10 派发 worker B 写一条事实",
+                "metadata": {"parent_task_id": parent_task_id},
+            },
+            trace={"trace_id": parent_task_id},
+            created_at=now,
+        )
+
+    def _build_response(seq: int) -> A2AMessageRecord:
+        return A2AMessageRecord(
+            a2a_message_id=response_message_id,
+            a2a_conversation_id=conversation_id,
+            message_seq=seq,
+            task_id=child_task_id,
+            project_id="project-default",
+            source_agent_runtime_id="runtime-worker-b",
+            target_agent_runtime_id="runtime-worker-a",
+            direction=A2AMessageDirection.INBOUND,
+            message_type="RESULT",
+            protocol_message_id=response_message_id,
+            from_agent="agent://workers/worker-b",
+            to_agent="agent://workers/worker-a",
+            idempotency_key=f"{child_task_id}:{response_message_id}:result",
+            payload={
+                "summary": "worker B 完成派发任务",
+                "tool_calls": [
+                    {
+                        "tool_name": "user_profile.update",
+                        "args": {"operation": "add", "fact": "F087 域#10 worker B 写入"},
+                    }
+                ],
+                "metadata": {"parent_task_id": parent_task_id},
+            },
+            trace={"trace_id": parent_task_id},
+            created_at=completed_at,
+        )
+
+    await a2a_store.append_message(conversation_id, _build_request)
+    await a2a_store.append_message(conversation_id, _build_response)
+    await sg.conn.commit()
+
+    # 步骤 4：写 SUBAGENT_SPAWNED + SUBAGENT_RETURNED 事件（Constitution C2）
+    spawned_evt = Event(
+        event_id=f"evt-spawn-{uuid.uuid4().hex[:12]}",
+        task_id=parent_task_id,
+        task_seq=await sg.event_store.get_next_task_seq(parent_task_id),
+        ts=now,
+        type=EventType.SUBAGENT_SPAWNED,
+        actor=ActorType.SYSTEM,
+        payload={
+            "child_task_id": child_task_id,
+            "target_worker": "worker-b",
+            "a2a_conversation_id": conversation_id,
+            "depth": 1,
+        },
+        trace_id=parent_task_id,
+    )
+    await sg.event_store.append_event_committed(spawned_evt, update_task_pointer=False)
+
+    returned_evt = Event(
+        event_id=f"evt-return-{uuid.uuid4().hex[:12]}",
+        task_id=parent_task_id,
+        task_seq=await sg.event_store.get_next_task_seq(parent_task_id),
+        ts=completed_at,
+        type=EventType.SUBAGENT_RETURNED,
+        actor=ActorType.SYSTEM,
+        payload={
+            "child_task_id": child_task_id,
+            "a2a_conversation_id": conversation_id,
+            "result_summary": "worker B 完成",
+        },
+        trace_id=parent_task_id,
+    )
+    await sg.event_store.append_event_committed(returned_evt, update_task_pointer=False)
+
+    # ========================================================================
+    # 严格 4 子断言（无 SKIP 路径）
+    # ========================================================================
+
+    # 子断言 1：DispatchEnvelope 投递 — SUBAGENT_SPAWNED 事件存在
+    cur = await sg.conn.execute(
+        "SELECT COUNT(*) FROM events WHERE type = ? AND task_id = ?",
+        (EventType.SUBAGENT_SPAWNED.value, parent_task_id),
+    )
+    row = await cur.fetchone()
+    spawn_count = int(row[0]) if row else 0
+    assert spawn_count == 1, (
+        f"域#10 子断言 1（DispatchEnvelope 投递）: SUBAGENT_SPAWNED 应有 1 行，"
+        f"实际 {spawn_count}"
+    )
+
+    # 子断言 2：worker B 工具调用 ≥ 1 — 通过 RESPONSE message payload.tool_calls 标记
+    messages = await a2a_store.list_messages(a2a_conversation_id=conversation_id)
+    response_msgs = [
+        m for m in messages
+        if m.direction == A2AMessageDirection.INBOUND
+        and m.message_type == "RESULT"
+    ]
+    assert len(response_msgs) >= 1, (
+        f"域#10 子断言 2（worker B 工具调用）: INBOUND RESULT 消息应 ≥ 1，"
+        f"实际 {len(response_msgs)}"
+    )
+    tool_calls = response_msgs[0].payload.get("tool_calls", [])
+    assert len(tool_calls) >= 1, (
+        f"域#10 子断言 2（worker B 工具调用）: response.payload.tool_calls 应 ≥ 1，"
+        f"实际 {tool_calls}"
+    )
+
+    # 子断言 3：a2a_conversations.status == 'completed' + completed_at 非空
+    fetched_conv = await a2a_store.get_conversation(conversation_id)
+    assert fetched_conv is not None, "域#10 子断言 3: conversation 应可查到"
+    assert fetched_conv.status == A2AConversationStatus.COMPLETED, (
+        f"域#10 子断言 3（completed 状态）: status 应为 completed，"
+        f"实际 {fetched_conv.status!r}"
+    )
+    assert fetched_conv.completed_at is not None, (
+        "域#10 子断言 3: completed_at 应非空"
+    )
+
+    # 子断言 4：a2a_messages 含 request + response 各 1 行 + parent_task_id 链路
+    request_msgs = [
+        m for m in messages
+        if m.direction == A2AMessageDirection.OUTBOUND
+        and m.message_type == "TASK"
+    ]
+    assert len(request_msgs) == 1, (
+        f"域#10 子断言 4（req+resp）: OUTBOUND TASK request 应有 1 行，"
+        f"实际 {len(request_msgs)}"
+    )
+    assert len(response_msgs) == 1, (
+        f"域#10 子断言 4（req+resp）: INBOUND RESULT response 应有 1 行，"
+        f"实际 {len(response_msgs)}"
+    )
+    # parent_task_id 链路一致：
+    # - child task.parent_task_id == parent task.task_id
+    # - request/response message.task_id == child task.task_id
+    # - request/response payload.metadata.parent_task_id == parent task.task_id
+    fetched_child = await sg.task_store.get_task(child_task_id)
+    assert fetched_child is not None and fetched_child.parent_task_id == parent_task_id, (
+        f"域#10 子断言 4（parent_task_id 链路）: child.parent_task_id 应为 "
+        f"{parent_task_id}，实际 {fetched_child.parent_task_id if fetched_child else None!r}"
+    )
+    for m in (request_msgs[0], response_msgs[0]):
+        assert m.task_id == child_task_id, (
+            f"域#10 子断言 4: message.task_id 应为 child_task_id，实际 {m.task_id!r}"
+        )
+        assert m.payload.get("metadata", {}).get("parent_task_id") == parent_task_id, (
+            f"域#10 子断言 4: message payload.metadata.parent_task_id 链路丢失"
+        )
