@@ -4831,8 +4831,28 @@ class TestControlPlaneApi:
         )
 
         assert run_resp.status_code == 202
-        # /api/control/resources/automation 资源路由已移除，
-        # 仅验证 create + run action 可正常返回即可。
+        run_payload = run_resp.json()["result"]["data"]
+        run_id = run_payload["run_id"]
+
+        # 等 scheduler 后台 _execute_job → record_automation_run_status 链路跑完。
+        # 这条路径之前因 coordinator stub 签名错配（summary/result_code → error）
+        # 一直默默抛 TypeError，但旧测试只断言 202 故未暴露——见 followup#3。
+        scheduler = control_plane_app.state.automation_scheduler
+        store = control_plane_app.state.control_plane_service.automation_store
+        deadline = asyncio.get_event_loop().time() + 5.0
+        while scheduler._background_tasks and asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(0.05)
+        assert not scheduler._background_tasks, "scheduler background task 未在 5s 内完成"
+
+        final_run = store.get_run(run_id)
+        assert final_run is not None, "run record 应被持久化"
+        assert final_run.status == "succeeded", (
+            f"diagnostics.refresh 应成功，但 run.status={final_run.status} / "
+            f"summary={final_run.summary} / result_code={final_run.result_code}"
+        )
+        assert final_run.result_code == "DIAGNOSTICS_REFRESHED"
+        assert final_run.summary, "summary 不应为空"
+        assert final_run.completed_at is not None, "completed_at 应被写入"
 
     async def test_automation_projection_and_actions_scope_to_selected_project(
         self,

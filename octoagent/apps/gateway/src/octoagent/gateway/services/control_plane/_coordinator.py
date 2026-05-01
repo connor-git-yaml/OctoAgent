@@ -1018,13 +1018,20 @@ class ControlPlaneService:
 
     async def record_automation_run_status(
         self,
-        run: Any,
         *,
+        run: Any,
         status: str,
-        error: str | None = None,
-    ) -> None:
-        await self._automation_service.record_automation_run_status(
-            run, status=status, error=error,
+        summary: str,
+        result_code: str,
+        resource_refs: list[ControlPlaneResourceRef] | None = None,
+    ) -> Any:
+        return await self._automation_service.record_automation_run_status(
+            run=run,
+            status=status,
+            summary=summary,
+            result_code=result_code,
+            resource_refs=resource_refs,
+            publish_event=self._publish_resource_event,
         )
 
     async def create_automation_run(
