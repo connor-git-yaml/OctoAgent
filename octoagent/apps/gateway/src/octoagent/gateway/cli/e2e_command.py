@@ -80,20 +80,19 @@ def _format_logs_path(log_file: Path) -> str:
 
 
 def _write_skip_log(stdout: str, stderr: str) -> Path | None:
-    """SKIP 留痕到 ``~/.octoagent/logs/e2e/quota-skip-<ts>.log``。
+    """SKIP 留痕到 ``~/.octoagent/logs/e2e/e2e-skip-<ts>.log``。
 
-    仅在 stdout 含 quota / rate_limit / SKIP 类关键字时写。
+    F087 P4 fixup#5（Codex P4 medium-5 闭环）：
+    - 文件名从 ``quota-skip-`` 改为 ``e2e-skip-``（不限定原因为 quota）
+    - 不再依赖关键词检测——caller（``_run_marker``）已基于 ``_count_skipped``
+      判断 skipped > 0 才调本函数；本函数始终写 log
+    - 写入内容含 ``-r s`` 输出的 skipped case nodeid + reason 详情
     """
-    pattern = re.compile(
-        r"(quota|rate.?limit|429|skipped|skip.+(quota|rate))",
-        re.IGNORECASE,
-    )
-    if not pattern.search(stdout) and not pattern.search(stderr):
-        return None
     ts = time.strftime("%Y%m%d-%H%M%S")
-    log_file = _logs_dir() / f"quota-skip-{ts}.log"
+    log_file = _logs_dir() / f"e2e-skip-{ts}.log"
     log_file.write_text(
-        f"=== F087 e2e SKIP log @ {ts} ===\n\n"
+        f"=== F087 e2e SKIP log @ {ts} ===\n"
+        f"(包含 -r s 输出的 skipped case nodeid + reason)\n\n"
         f"---- STDOUT ----\n{stdout}\n\n"
         f"---- STDERR ----\n{stderr}\n",
         encoding="utf-8",
@@ -114,29 +113,57 @@ def _format_failure_summary(stdout: str, stderr: str, log_file: Path | None) -> 
 
 
 def _run_pytest(node_or_marker: str, extra_args: Sequence[str] = ()) -> subprocess.CompletedProcess:
-    """跑 pytest 子进程并返回结果。"""
+    """跑 pytest 子进程并返回结果。
+
+    F087 P4 fixup#5（Codex P4 medium-5 闭环）：默认加 ``-r s`` 让 pytest 输出
+    skipped case nodeid + reason，便于 ``_write_skip_log`` 抓取详细信息。
+    """
+    base_args = ["-r", "s"]
     if node_or_marker.startswith("-m "):
-        cmd = [sys.executable, "-m", "pytest"] + node_or_marker.split() + list(extra_args)
+        cmd = [sys.executable, "-m", "pytest"] + node_or_marker.split() + base_args + list(extra_args)
     else:
-        cmd = [sys.executable, "-m", "pytest", node_or_marker] + list(extra_args)
+        cmd = [sys.executable, "-m", "pytest", node_or_marker] + base_args + list(extra_args)
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
+def _count_skipped(stdout: str) -> int:
+    """从 pytest 输出抓 skipped 数。
+
+    pytest summary 形如 "9 passed, 5 skipped, 1 warning in 165s"——抓
+    "<N> skipped" 模式。
+    """
+    m = re.search(r"(\d+)\s+skipped", stdout)
+    return int(m.group(1)) if m else 0
+
+
 def _run_marker(marker: str, extra_args: Sequence[str] = ()) -> int:
-    """跑 pytest -m <marker> 并返回退出码。"""
+    """跑 pytest -m <marker> 并返回退出码。
+
+    F087 P4 fixup#5（Codex P4 medium-5 闭环）：
+    skipped > 0 时**始终**写 log（即使 returncode=0）。原实现仅 returncode!=0
+    才写，导致 9 PASS / 5 SKIP 场景永远不留痕，T-P4-11 失效。
+    """
     print(f"[F087 e2e] running pytest -m {marker} ...")
     proc = _run_pytest(f"-m {marker}", extra_args)
     sys.stdout.write(proc.stdout)
     sys.stderr.write(proc.stderr)
 
-    if proc.returncode != 0:
+    skipped_count = _count_skipped(proc.stdout)
+
+    # P4 fixup#5：returncode=0 但有 skip 也写 log
+    if skipped_count > 0:
         log_file = _write_skip_log(proc.stdout, proc.stderr)
         if log_file:
-            print(f"\n[E2E SKIP] quota / rate-limit detected, log: {_format_logs_path(log_file)}")
-        else:
-            print("\n[E2E FAIL]")
-            print(_format_failure_summary(proc.stdout, proc.stderr, log_file))
-            print("  bypass: SKIP_E2E=1 git commit")
+            print(
+                f"\n[E2E SKIP] {skipped_count} test(s) skipped, log: "
+                f"{_format_logs_path(log_file)}"
+            )
+
+    if proc.returncode != 0:
+        # 真实 FAIL（returncode!=0）单独提示
+        print("\n[E2E FAIL]")
+        print(_format_failure_summary(proc.stdout, proc.stderr, None))
+        print("  bypass: SKIP_E2E=1 git commit")
     return proc.returncode
 
 
