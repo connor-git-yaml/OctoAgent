@@ -19,10 +19,13 @@ F087 之前的 e2e 测试集中在 `apps/gateway/tests/e2e/test_acceptance_scena
    `helpers/MODULE_SINGLETONS.md` 清单逐条 reset 5 项 module 级单例
    （`_REGISTRY` / `AgentContextService` 两类属性 / `_CURRENT_EXECUTION_CONTEXT`
    ContextVar / `_tiktoken_encoder`）；不动 `HOME`（子进程依赖）。
-3. **直调主路径**：smoke 在集成层（DI 注入 stub transport）；full 8 域中 4 个域
-   （#5 mcp.install / #4 memory promote / #8/#9/#10 delegation）已在 P4 fixup
-   阶段下沉为**直调主路径**，绕开 LLM 决策不确定性，断言固定行为
-   （详见 §9 GATE_P3_DEVIATION）。
+3. **直调主路径**：smoke 在集成层（DI 注入 stub transport）；full 8 域中 3 个域
+   （#4 memory promote / #8/#9/#10 delegation）在 P4 fixup 阶段下沉为
+   **直调主路径**，绕开 LLM 决策不确定性，断言固定行为
+   （详见 §9 GATE_P3_DEVIATION）。**域 #5 fixup#12** 改为真 e2e（真 npm install
+   `openrouter-mcp` + 真启 stdio MCP server + 真调远端 OpenRouter Perplexity
+   `ask_model` 工具），但走 **manual gate**——`OCTOAGENT_E2E_PERPLEXITY_API_KEY`
+   env 未设置时 SKIP，CI / pre-commit / `octo e2e smoke|full` 默认不跑真打。
 4. **OctoHarness 内置 120s ProviderRouter timeout**：单测内不会无限挂在网络上。
    外加 30s SIGALRM 单场景 watchdog（`signal.alarm(30)` 包 e2e 函数体；仅主线程
    生效，pytest-asyncio "auto" 模式下 e2e 在主线程）。
@@ -35,12 +38,12 @@ F087 之前的 e2e 测试集中在 `apps/gateway/tests/e2e/test_acceptance_scena
 | 2 | USER.md 全链路（threat scanner 通过） | e2e_smoke | `test_e2e_basic_tool_context.py` |
 | 3 | 冻结快照 + Live State 二分（prefix cache 不爆） | e2e_smoke | `test_e2e_basic_tool_context.py` |
 | 4 | Memory observation → promote → audit | e2e_full | `test_e2e_memory_pipeline.py` |
-| 5 | 真实 Perplexity MCP install + invoke | e2e_full | `test_e2e_mcp_skill_pipeline.py` |
+| 5 | 真实 Perplexity MCP install + invoke（**manual gate**：需 `OCTOAGENT_E2E_PERPLEXITY_API_KEY`，否则 SKIP；走真 npm install `openrouter-mcp` + 真启 server + 真调 `ask_model` 远端 OpenRouter Perplexity）| e2e_full | `test_e2e_mcp_skill_pipeline.py` |
 | 6 | Skill 调用（强类型 contract） | e2e_full | `test_e2e_mcp_skill_pipeline.py` |
 | 7 | Graph Pipeline（DAG checkpoint） | e2e_full | `test_e2e_mcp_skill_pipeline.py` |
 | 8 | `delegate_task`（worker 派发） | e2e_full | `test_e2e_delegation_a2a.py` |
 | 9 | Sub-agent `max_depth=2` 边界 | e2e_full | `test_e2e_delegation_a2a.py` |
-| 10 | A2A-Lite 双向通信 | e2e_full | `test_e2e_delegation_a2a.py` |
+| 10 | A2A-Lite 双向通信（schema 集成，详见下方边界说明） | e2e_full | `test_e2e_delegation_a2a.py` |
 | 11 | ThreatScanner block（恶意 prompt + USER.md 不变） | e2e_smoke | `test_e2e_safety_gates.py` |
 | 12 | ApprovalGate session allowlist + SSE 审批 | e2e_smoke | `test_e2e_safety_gates.py` |
 | 13 | Routine cron + webhook 触发 | e2e_full | `test_e2e_routine.py` |
@@ -49,6 +52,31 @@ smoke = 5 域（#1 #2 #3 #11 #12）；full = 8 域（其余）。注册表权威
 `tests/e2e_live/helpers/domain_runner.py::DOMAIN_REGISTRY` 与
 `gateway/cli/e2e_command.py::_DOMAIN_REGISTRY` 双源（CLI 单跑用 `-k` keyword 匹配，
 pytest 不支持 prefix node ID）；改 13 域必须同步两处。
+
+### 2.1 域 #10（A2A）e2e 边界说明
+
+F087 域 #10 测试性质：**A2A 数据 schema + 关联键 + 状态机 + 审计完整性的集成
+测试**，**不验证跨 runtime 真触发**。
+
+为何不真跨 runtime 跑：
+- worker B 真跑需 SkillRunner.run(model_client) → 真打 LLM，决策不 deterministic
+  且消耗 quota
+- `A2AConversationStatus.COMPLETED` 状态转换由 orchestrator A2A inbound handler
+  在 worker A 收到 INBOUND RESULT 时触发，需要双 agent runtime 完整跑通
+- 单进程 ASGI test app 不支持跨 agent runtime daemon（A2A 投递依赖 agent runtime
+  独立 lifecycle）
+
+域 #10 测试策略：直调主路径 `task_store.create_task` / `a2a_store.save_conversation`
+/ `a2a_store.append_message` / `event_store.append_event_committed` +
+`A2AConversation` / `A2AMessageRecord` Pydantic 模型 + `EventType.SUBAGENT_SPAWNED`
+等枚举，验证 4 子断言（详见 spec.md FR-15）。
+
+跨 runtime 真触发 e2e 推迟到 F088+（接入 worker B inline asyncio daemon + A2A
+poll task）。F087 范围内由 unit / integration 测试覆盖：
+- `tests/unit/services/test_subagent_lifecycle.py` — `spawn_subagent` /
+  `_create_subagent_executor` / `SubagentExecutor._record_a2a_message` 主路径
+- `tests/integration/test_a2a_dispatch_flow.py` — A2A daemon + outbound /
+  inbound 完整流转
 
 ## 3. 跑法
 

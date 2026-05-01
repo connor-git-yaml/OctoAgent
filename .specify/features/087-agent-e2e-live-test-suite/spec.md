@@ -30,7 +30,7 @@ Codex Adversarial Review 能发现设计漏洞但**发现不了运行时漂移**
 | 11 | ThreatScanner block | **smoke** | ThreatScanner |
 | 12 | ApprovalGate（SSE）| **smoke** | ApprovalManager |
 | 4 | Memory observation→promote | full | ObservationRoutine + Candidates API |
-| 5 | MCP 调用（真实 Perplexity）| full | `mcp.install` + `mcp__perplexity__search` |
+| 5 | MCP 调用（真实 Perplexity，manual gate）| full | npm install `openrouter-mcp` + 真启 server + `mcp.openrouter_mcp.ask_model` 真打 `perplexity/sonar-pro-search`；需 `OCTOAGENT_E2E_PERPLEXITY_API_KEY` env 否则 SKIP |
 | 6 | Skill 调用 | full | SkillRunner |
 | 7 | Graph Pipeline | full | `graph_pipeline.start/status` |
 | 8 | delegate_task / Worker 派发 | full | DelegationPlaneService |
@@ -157,11 +157,16 @@ Codex Adversarial Review 能发现设计漏洞但**发现不了运行时漂移**
 
 #### OQ-1 决议（A2A e2e 测点）— 能力域 #10 含以下子断言
 
-- **FR-15** [必须][MUST] 能力域 #10（A2A）至少覆盖以下测点：
-  - 父任务 worker A 调 `delegate_task` → DelegationPlaneService 创建 `Work` + 写 `A2AConversation` + 投递 `DispatchEnvelope`
-  - worker B 起 AgentSessionTurn 消费 envelope → 工具调用至少 1 次
-  - SQLite `a2a_conversations` 表 status 转 `completed`，`a2a_messages` 表至少含 request + response 各 1 行
-  - parent_task_id 链路完整（子 task.parent_task_id == 父 task.id）
+- **FR-15** [必须][MUST] 能力域 #10（A2A）覆盖**数据 schema + 关联键 + 状态机 + 审计**完整性，4 子断言：
+  - **DispatchEnvelope 投递**：parent task 的 `events` 表存在 1 行 `SUBAGENT_SPAWNED` 事件（payload 含 `child_task_id` + `target_worker` + `a2a_conversation_id`）
+  - **worker B 工具调用 ≥ 1**：`a2a_messages` 表 INBOUND RESULT 消息 `payload.tool_calls` 数组 ≥ 1 条
+  - **Conversation 状态完成**：`a2a_conversations.status == 'completed'` + `completed_at` 非空
+  - **Req/Resp + parent_task_id 链路完整**：OUTBOUND TASK request 1 行 + INBOUND RESULT response 1 行；child task `parent_task_id == parent.task_id`；message `task_id == child.task_id`；message `payload.metadata.parent_task_id == parent.task_id`
+- **FR-15.1** [必须][MUST] **e2e 边界**：F087 域 #10 测试是**A2A 数据 schema 集成测试**（直调 `task_store` / `a2a_store` / `event_store` 主路径函数 + `EventType.SUBAGENT_SPAWNED` 等枚举），**不验证跨 runtime 真触发**。理由：
+  - worker B 真跑需 SkillRunner + LLM call（不 deterministic + 触发 quota）
+  - `A2AConversationStatus.COMPLETED` 转换由 orchestrator A2A inbound handler 触发，需要双 runtime 完整跑通
+  - 单进程 ASGI test app 不支持跨 agent runtime daemon
+- **FR-15.2** [可选][MAY] 真跨 runtime e2e（worker B inline asyncio task daemon + A2A poll + 完整 LLM 闭环）**推迟到 F088+**；F087 范围内由 unit / integration 测试覆盖（参见 `tests/unit/test_subagent_lifecycle.py` 等）
 
 #### OQ-2 决议（mcp_servers_dir 隔离）— **选择 A：生产代码加 DI**
 
@@ -213,7 +218,7 @@ Codex Adversarial Review 能发现设计漏洞但**发现不了运行时漂移**
 
 - **FR-33** [必须][MUST] 所有 secrets 通过 env var 注入：`OPENAI_API_KEY` / `SILICONFLOW_API_KEY` / `OPENROUTER_API_KEY` / Codex auth-profiles 路径
 - **FR-34** [必须][MUST] **绝不**将 secrets 提交到 git（包括 fixture 文件 / 测试数据 / 默认 config）
-- **FR-35** [必须][MUST] OPENROUTER_API_KEY 通过 `mcp.install(env={...})` 显式注入（McpInstaller `_SAFE_ENV_KEYS` 不透传），fixture 从宿主 `~/.octoagent/data/ops/mcp-servers.json` 读后 redact 落日志
+- **FR-35** [必须][MUST] OPENROUTER_API_KEY 通过 `mcp.install(env={...})` 显式注入（McpInstaller `_SAFE_ENV_KEYS` 不透传）；e2e 真打 manual gate：`OCTOAGENT_E2E_PERPLEXITY_API_KEY` env 未设置时域 #5 SKIP；CI / pre-commit / `octo e2e smoke|full` 默认不跑真打。设置 env 后 fixup#12 走 npm install + 真启 server + 真调 OpenRouter Perplexity 全链路（package: `openrouter-mcp` v2.0.1, tool: `ask_model`，model: `perplexity/sonar-pro-search`）
 
 ### 4.7 Key Entities
 
