@@ -2,6 +2,10 @@
 
 定义 TOOL_BATCH_STARTED / TOOL_BATCH_COMPLETED 和
 CONTEXT_COMPACTION_COMPLETED 事件的 payload 契约。
+
+⚠️ Status: 已退役（F087 followup 清理，2026-05-01）。Feature 064 整体
+（含 SubagentExecutor / 事件 payload schema）已被 ``task_runner`` 路径替代；
+本文件保留为历史契约证据。完整退役说明见 ../spec.md 顶部 banner。
 """
 
 from __future__ import annotations

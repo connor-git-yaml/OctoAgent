@@ -189,9 +189,11 @@
 
 **改善方向**：设置 WAITING_INPUT 的最大等待时间（如 30min），超过后自动超时。
 
-### Subagent 设计评估
+### Subagent 设计评估（已退役 — F087 followup 死代码清理 2026-05-01）
 
-整体合理。独立 AsyncioTask + 独立 SkillRunner + A2A 通信 + `kill_subagent` 优雅清理。资源限制（max_steps=100, max_duration=1800s）比 Worker（200, 7200s）更保守，符合预期。
+> 历史评估：曾设计为独立 AsyncioTask + 独立 SkillRunner + A2A 通信 + `kill_subagent` 优雅清理。资源限制（max_steps=100, max_duration=1800s）比 Worker（200, 7200s）更保守。
+>
+> **现状**：in-process `SubagentExecutor` 路径已被 Feature 084+ 的 `task_runner` 路径替代，`subagent_lifecycle.py` 整文件作为孤悬死代码删除。当前生产派子任务路径见 `docs/codebase-architecture/e2e-testing.md` §2.1。
 
 ### Graph Pipeline 设计评估
 

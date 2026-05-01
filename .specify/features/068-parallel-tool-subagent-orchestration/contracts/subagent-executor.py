@@ -1,6 +1,11 @@
 """Feature 064 P1-A: SubagentExecutor 设计契约。
 
 定义 Subagent 独立执行循环的接口和行为规范。
+
+⚠️ Status: 已退役（F087 followup 清理，2026-05-01）。本契约描述的
+``SubagentExecutor`` / ``spawn_subagent`` 路径已被 Feature 084+ 的 ``task_runner``
+路径替代（见 ../spec.md 顶部 banner）；运行时代码已删除。本文件保留为历史
+契约证据，不指导新工作。
 """
 
 from __future__ import annotations

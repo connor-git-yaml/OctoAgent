@@ -400,20 +400,6 @@ class SkillManifestModel(BaseModel):
     resource_limits: dict[str, Any] = Field(default_factory=dict)
     # 从 SKILL.md frontmatter 的 resource_limits 字段读取
 
-    # Feature 064 P1-A: Subagent 心跳和并发控制
-    heartbeat_interval_steps: int = Field(
-        default=5,
-        ge=1,
-        le=100,
-        description="Subagent 心跳上报间隔（每 N 个 step 上报一次）",
-    )
-    max_concurrent_subagents: int = Field(
-        default=5,
-        ge=1,
-        le=20,
-        description="单个 Worker 最大并发 Subagent 数",
-    )
-
     # Feature 064 P2-A: 上下文压缩配置
     compaction_model_alias: str | None = Field(
         default=None,

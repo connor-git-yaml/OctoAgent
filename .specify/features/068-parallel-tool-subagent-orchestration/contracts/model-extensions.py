@@ -1,6 +1,12 @@
 """Feature 064 数据模型扩展契约。
 
 定义所有需要新增或扩展的字段，精确对应源码文件中的改动位置。
+
+⚠️ Status: 已退役（F087 followup 清理，2026-05-01）。SubagentExecutor 相关
+字段（``SkillManifest.heartbeat_interval_steps`` / ``max_concurrent_subagents``）
+作为孤儿字段一并清理；保留字段（``Task.parent_task_id`` /
+``SkillExecutionContext.parent_task_id``）已被 ``task_runner`` 路径继续使用。
+完整退役说明见 ../spec.md 顶部 banner。本文件保留为历史契约证据。
 """
 
 from __future__ import annotations

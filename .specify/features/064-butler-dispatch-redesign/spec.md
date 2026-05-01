@@ -10,6 +10,8 @@ research: research/dispatch-architecture-comparison.md
 
 # Feature 064: Butler Dispatch Redesign
 
+> **⚠️ Note (F087 followup 2026-05-01)**: 本 spec Phase 2 计划复用的 `SubagentExecutor` / `spawn_subagent_v2()` / `drain_subagent_results()` / `SubagentSpawnParams` / `SubagentSpawnContext` 等接口，已在 F087 followup 死代码清理时随 `subagent_lifecycle.py` 整文件一并删除。如本 spec 后续推进实施，需基于 Feature 084+ 当前的 `task_runner.launch_child_task` 路径重新规划 Phase 2（详见 `docs/codebase-architecture/e2e-testing.md` §2.1）。Phase 1 内容（包括 Butler dispatch 主路径、move-to-agent 改名等）不受影响。
+
 ## 1. 动机
 
 ### 1.1 现状问题

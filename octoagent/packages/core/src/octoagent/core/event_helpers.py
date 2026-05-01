@@ -1,7 +1,7 @@
-"""统一的 Task 事件发射辅助函数 — Feature 064 P3 优化 3。
+"""统一的 Task 事件发射辅助函数。
 
-将 SkillRunner._emit_event() 和 SubagentExecutor._emit_event() 中的
-重复逻辑提取为独立函数，消除代码重复。
+封装 ``Event`` 构造与 ``event_store.append_event`` 调用，供 ``SkillRunner``
+等需要写 Task 事件的组件复用。
 """
 
 from __future__ import annotations

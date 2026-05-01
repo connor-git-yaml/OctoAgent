@@ -1,8 +1,6 @@
 """SSEHub -- 内存中事件广播器
 
 每个订阅者持有一个 asyncio.Queue，支持 subscribe/unsubscribe/broadcast。
-
-Feature 064 P1-B 扩展：broadcast() 支持 parent_task_id 双路广播。
 """
 
 import asyncio
@@ -43,37 +41,22 @@ class SSEHub:
         if not self._subscribers[task_id]:
             del self._subscribers[task_id]
 
-    async def broadcast(
-        self,
-        task_id: str,
-        event: Event,
-        parent_task_id: str | None = None,
-    ) -> None:
+    async def broadcast(self, task_id: str, event: Event) -> None:
         """向指定任务的所有订阅者广播事件
-
-        Feature 064 P1-B 扩展：当 parent_task_id 非 None 时，
-        事件同时广播到 task_id 和 parent_task_id 的订阅者（事件冒泡）。
 
         Args:
             task_id: 任务 ID
             event: 要广播的事件
-            parent_task_id: 父任务 ID（Subagent 事件冒泡用，可选）
         """
-        # 收集所有需要广播的 task_id
-        target_ids = [task_id]
-        if parent_task_id and parent_task_id != task_id:
-            target_ids.append(parent_task_id)
+        dead_queues = []
+        for queue in self._subscribers.get(task_id, set()):
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                dead_queues.append(queue)
 
-        for tid in target_ids:
-            dead_queues = []
-            for queue in self._subscribers.get(tid, set()):
-                try:
-                    queue.put_nowait(event)
-                except asyncio.QueueFull:
-                    dead_queues.append(queue)
-
-            # 清理已满的队列
-            for q in dead_queues:
-                self._subscribers[tid].discard(q)
-            if tid in self._subscribers and not self._subscribers[tid]:
-                del self._subscribers[tid]
+        # 清理已满的队列
+        for q in dead_queues:
+            self._subscribers[task_id].discard(q)
+        if task_id in self._subscribers and not self._subscribers[task_id]:
+            del self._subscribers[task_id]

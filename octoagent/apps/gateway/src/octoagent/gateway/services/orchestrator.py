@@ -436,10 +436,6 @@ class OrchestratorService:
         if workers:
             self._workers.update(workers)
 
-        # Feature 064 P1-B: Subagent 结果注入队列
-        # key = parent_task_id, value = asyncio.Queue 存放结果摘要
-        self._subagent_result_queues: dict[str, asyncio.Queue] = {}
-
         # Feature 064 P2-B: 通知服务（可选注入，不注入时不影响现有行为）
         self._notification_service = notification_service
 
@@ -489,96 +485,6 @@ class OrchestratorService:
                 to_status=to_status,
                 exc_info=True,
             )
-
-    # ----- Feature 064 P1-B: SubagentResultQueue -----
-
-    async def enqueue_subagent_result(
-        self,
-        *,
-        parent_task_id: str,
-        child_task_id: str,
-        subagent_name: str,
-        status: str,
-        summary: str,
-        artifact_count: int,
-    ) -> None:
-        """Subagent 完成后将结果放入队列，父 Worker 在下一步 generate() 前消费。
-
-        同时写入 A2A_MESSAGE_RECEIVED 事件到父 Task（事件冒泡 FR-064-22）。
-        """
-        if not parent_task_id:
-            return
-
-        # 写入 A2A_MESSAGE_RECEIVED 事件到父 Task
-        try:
-            now = datetime.now(UTC)
-            task_seq = await self._stores.event_store.get_next_task_seq(parent_task_id)
-            event = Event(
-                event_id=f"evt-{ULID()}",
-                task_id=parent_task_id,
-                task_seq=task_seq,
-                ts=now,
-                type=EventType.A2A_MESSAGE_RECEIVED,
-                actor=ActorType.SYSTEM,
-                payload={
-                    "source": "subagent",
-                    "child_task_id": child_task_id,
-                    "subagent_name": subagent_name,
-                    "status": status,
-                    "summary": summary[:500] if summary else "",
-                    "artifact_count": artifact_count,
-                },
-                trace_id="",
-            )
-            await self._stores.event_store.append_event(event)
-            await self._stores.conn.commit()
-
-            # SSE 双路广播到父 Task 订阅者
-            if self._sse_hub:
-                await self._sse_hub.broadcast(parent_task_id, event)
-        except Exception:
-            log.warning(
-                "subagent_result_event_failed",
-                parent_task_id=parent_task_id,
-                child_task_id=child_task_id,
-                exc_info=True,
-            )
-
-        # 将结果放入 Queue 供父 Worker SkillRunner 消费
-        if parent_task_id not in self._subagent_result_queues:
-            self._subagent_result_queues[parent_task_id] = asyncio.Queue()
-
-        result_message = (
-            f"[Subagent Result] Subagent '{subagent_name}' "
-            f"(task: {child_task_id}) completed:\n"
-            f"Status: {status}\n"
-            f"Summary: {summary}\n"
-            f"Artifacts: {artifact_count} items"
-        )
-        self._subagent_result_queues[parent_task_id].put_nowait(result_message)
-
-    def drain_subagent_results(self, parent_task_id: str) -> list[str]:
-        """消费父 Task 的所有待处理 Subagent 结果。
-
-        由 SkillRunner（或 LiteLLMSkillClient）在 generate() 前调用。
-        返回按到达顺序排列的结果消息列表。
-        """
-        queue = self._subagent_result_queues.get(parent_task_id)
-        if queue is None or queue.empty():
-            return []
-
-        results: list[str] = []
-        while not queue.empty():
-            try:
-                results.append(queue.get_nowait())
-            except asyncio.QueueEmpty:
-                break
-
-        # 清理空 Queue，防止无界增长
-        if queue.empty():
-            self._subagent_result_queues.pop(parent_task_id, None)
-
-        return results
 
     async def dispatch_prepared(self, envelope: DispatchEnvelope) -> WorkerResult:
         """执行已完成 preflight 的 dispatch envelope。"""

@@ -1,6 +1,10 @@
 """Feature 064 P2-A: ContextCompactor 设计契约。
 
 定义上下文压缩器的接口和行为规范。
+
+⚠️ Status: 已退役（F087 followup 清理，2026-05-01）。Feature 064 整体已被
+``task_runner`` 路径替代；本文件保留为历史契约证据。完整退役说明见 ../spec.md
+顶部 banner。
 """
 
 from __future__ import annotations

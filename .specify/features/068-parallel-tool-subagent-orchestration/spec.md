@@ -15,10 +15,18 @@ research_ref: "064-parallel-tool-subagent-orchestration/research/prior-research-
 
 # Feature 064: 并行工具调用 + Subagent 编排增强
 
+> **⚠️ Status: 已退役（F087 followup 清理，2026-05-01）**
+>
+> 本 spec 描述的 in-process `SubagentExecutor` 路径（`apps/gateway/src/octoagent/gateway/services/subagent_lifecycle.py`）已被 Feature 084+ 的 `task_runner` 路径替代，原代码已作为孤悬死代码清理删除（净删 ~2k 行）。
+>
+> **当前生产派子任务路径**：`delegate_task` tool → `DelegationManager.delegate` (gate) → `_launch_child` → `pack_service._launch_child_task` → `task_runner.launch_child_task`。
+>
+> 本目录文档保留作为**历史决策证据**，不用于指导新工作。新人请阅读 `docs/codebase-architecture/e2e-testing.md` 与 `apps/gateway/src/octoagent/gateway/services/task_runner.py`。
+
 **Feature Branch**: `feat/064-parallel-tool-subagent-orchestration`
 **Created**: 2026-03-19
 **Updated**: 2026-03-19
-**Status**: Draft
+**Status**: 已退役（旧 Status: Draft）
 **Input**: 前置深度调研（Claude Code / OpenClaw / Agent Zero / OctoAgent 四系统源码级对比），覆盖并行工具调用、Subagent 独立执行循环、上下文压缩、后台执行通知等六个子系统。
 
 ---
