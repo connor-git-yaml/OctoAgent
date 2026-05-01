@@ -127,16 +127,25 @@ async def bootstrapped_harness_real_llm(
     await harness.bootstrap(app)
     harness.commit_to_app(app)
 
-    # 手动挂 routes（e2e bypass front_door）
+    # F087 P4 fixup#6（Codex P4 medium-6 闭环）：注册路由时**带 front_door
+    # 保护**，与生产 main.py:340-359 路径一致。fixture 模板 octoagent.yaml
+    # 配 ``front_door.mode: loopback``；ASGITransport 默认 client.host =
+    # "testclient" ∈ _LOOPBACK_HOSTS，自动通过 loopback 模式校验。
+    # 生产对 owner-facing API 的 require_front_door_access Depends wiring
+    # 不再被 e2e bypass，安全边界回归可见。
+    from fastapi import Depends
+
+    from octoagent.gateway.deps import require_front_door_access
     from octoagent.gateway.routes import (
         approvals,
         message,
         tasks,
     )
 
-    app.include_router(message.router, tags=["message"])
-    app.include_router(tasks.router, tags=["tasks"])
-    app.include_router(approvals.router, tags=["approvals"])
+    protected = [Depends(require_front_door_access)]
+    app.include_router(message.router, tags=["message"], dependencies=protected)
+    app.include_router(tasks.router, tags=["tasks"], dependencies=protected)
+    app.include_router(approvals.router, tags=["approvals"], dependencies=protected)
 
     return {
         "harness": harness,
