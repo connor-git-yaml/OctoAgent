@@ -724,7 +724,7 @@ async def call_with_fallback(self, messages, model_alias):
 
 5. **单进程 TaskRunner**：`task_runner.py:59` — `_running_jobs` 是内存字典，不支持多进程水平扩展
 
-6. **Subagent 结果队列内存态**：`orchestrator.py:438` — `_subagent_result_queues` 是内存字典，进程重启后丢失
+6. ~~**Subagent 结果队列内存态**~~ — 已退役（F087 followup 死代码清理 2026-05-01）：原 `_subagent_result_queues` 字段仅服务 in-process `SubagentExecutor` 路径，生产改走 `task_runner` 路径后随死代码一并删除
 
 7. **CostTracker 依赖 litellm 内置定价**：成本计算依赖 `litellm.completion_cost()`，自定义模型或私有部署可能返回 `cost_unavailable=True`
 

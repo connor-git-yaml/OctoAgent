@@ -790,9 +790,9 @@ _AGENT_CONTEXT_INDEXES = [
     # 逻辑身份单写约束（防并发 race 双写）：同一 (project, role, profile) 在 active
     # 状态下只能有一条 runtime row。worker 按 worker_profile_id 区分，main 按
     # agent_profile_id 区分；profile_id 为空时不参与（兼容历史脏数据）。
-    # 排除 `subagent-%`：subagent 是 worker spawn 的独立 child runtime，与 parent
-    # 共享 worker_profile_id 是合法语义（subagent_lifecycle.spawn_subagent 已经
-    # 用 `subagent-{ULID}` 作为 PK 前缀来区分）。
+    # 排除 `subagent-%` 前缀：历史上预留给 subagent runtime 命名空间，避免与 worker
+    # 唯一约束冲突；当前生产路径（task_runner）不再创建 subagent- 前缀的 runtime，
+    # 但保留 schema 约束以兼容历史数据。
     (
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runtimes_active_worker_unique "
         "ON agent_runtimes(project_id, worker_profile_id) "
