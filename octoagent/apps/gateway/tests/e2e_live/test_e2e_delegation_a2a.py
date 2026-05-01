@@ -173,72 +173,95 @@ async def test_domain_8_real_llm_delegate_task(
 async def test_domain_9_real_llm_max_depth_rejection(
     harness_real_llm: dict[str, Any],
 ) -> None:
-    """域 #9 真打：构造 max_depth 超限场景 → DelegationManager 拒绝。
+    """域 #9：直调 DelegationManager.delegate(depth=2) 验证 max_depth 拒绝。
 
-    设计取舍：直接通过 ExecutionContext 注入 depth=3 的伪 context 调
-    delegate_task —— 因为真打 LLM 走 3 层嵌套委派需要 5+ 分钟，e2e 不现实。
+    Codex P4 high-4 闭环：旧实现给 ExecutionContext 塞不存在的 delegation_depth
+    字段，主线 max_depth 不读 ExecutionContext，结果实际按 depth=0 跑 → 未被
+    拒绝时 SKIP。修复方向：绕开 LLM + ExecutionContext，直调主路径
+    DelegationManager.delegate(DelegationContext(depth=2)) 验证拒绝行为。
 
     断言（≥ 2 独立点）：
-    1. delegate_task 调用结果 is_error=True 或 status=blocked
-    2. events 含 delegation.rejected / max_depth 相关事件
+    1. DelegateResult.success is False
+    2. error_code == "depth_exceeded" + reason 含 max_depth 文案
+    3. 进程内无 child task 被创建（task_store 无新增 task）
+    4. events 表无 SUBAGENT_SPAWNED 事件（FR-5.2 + Constitution C4）
     """
-    from octoagent.tooling.models import ExecutionContext, PermissionPreset
+    from octoagent.gateway.harness.delegation import (
+        DelegateTaskInput,
+        DelegationContext,
+        DelegationManager,
+    )
+    from octoagent.core.models.enums import EventType
 
     app = harness_real_llm["app"]
     sg = app.state.store_group
-    tool_broker = app.state.tool_broker
 
-    # 验证 delegate_task 已注册
-    if "delegate_task" not in tool_broker._registry:
-        pytest.skip("域#9 SKIP: delegate_task 未注册到 tool_broker。")
+    # 跑前快照：task_store / event_store 行数
+    conn = sg.conn
+    cur = await conn.execute("SELECT COUNT(*) FROM tasks")
+    row = await cur.fetchone()
+    tasks_before = int(row[0]) if row else 0
 
-    # 注：构造 depth=3 的 context（max_depth=2，超限）
-    # 真主线 max_depth 在 DelegationManager；通过深 context 调 delegate_task 应被拒
-    test_task_id = "_e2e_d9_max_depth"
-    from apps.gateway.tests.e2e_live.helpers.factories import _ensure_audit_task
-
-    await _ensure_audit_task(sg, test_task_id)
-
-    # 构造一个 depth=3 的 context（如果支持）；否则用 PermissionPreset.FULL 调一次
-    # 注：ExecutionContext 是否有 depth 字段由主线决定
-    try:
-        ctx = ExecutionContext(
-            task_id=test_task_id,
-            trace_id=test_task_id,
-            caller="e2e_d9",
-            permission_preset=PermissionPreset.FULL,
-        )
-        # 尝试设置 depth（可能不存在）
-        if hasattr(ctx, "delegation_depth"):
-            ctx = ctx.model_copy(update={"delegation_depth": 3})  # type: ignore[call-arg]
-    except Exception as exc:
-        pytest.skip(f"域#9 SKIP: ExecutionContext 不支持 depth 字段或构造失败: {exc}")
-
-    result = await tool_broker.execute(
-        tool_name="delegate_task",
-        args={
-            "title": "F087 域#9 max_depth 测试",
-            "goal": "应被 DelegationManager 拒绝",
-            "target_worker": "main",
-        },
-        context=ctx,
+    # 直接构造 DelegationManager（注入真实 stores，复用 audit task 流程）
+    mgr = DelegationManager(
+        event_store=sg.event_store,
+        task_store=sg.task_store,
     )
 
-    # 断言 1：调用 is_error=True 或 result 含 blocked
-    if not result.is_error:
-        # 主线可能在 result.output 内标 blocked
-        import json as _json
+    # 构造 depth=2 的 ctx；child_depth = 2 + 1 = 3 > MAX_DEPTH=2 → 必拒
+    ctx = DelegationContext(
+        task_id="_e2e_d9_max_depth_parent",
+        depth=2,
+        target_worker="main",
+        active_children=[],
+    )
+    task_input = DelegateTaskInput(
+        target_worker="main",
+        task_description="F087 域#9 max_depth 边界测试，应被 DelegationManager 拒绝",
+        callback_mode="async",
+    )
 
-        try:
-            payload = _json.loads(result.output) if result.output else {}
-        except Exception:
-            payload = {}
-        if payload.get("status") not in {"blocked", "rejected"} and "max_depth" not in str(payload).lower():
-            pytest.skip(
-                f"域#9 SKIP: depth=3 ctx 调 delegate_task 主线允许，未拒绝。"
-                f"主线 max_depth 实现可能在更上层（DelegationManager 直接拦），"
-                f"e2e 通过 ExecutionContext 注入不能模拟。result={result}"
-            )
+    result = await mgr.delegate(ctx, task_input)
+
+    # 断言 1：派发被拒（success=False）
+    assert result.success is False, (
+        f"域#9: depth=2 + 1=3 > MAX_DEPTH=2 应被拒，实际 success={result.success}"
+    )
+    # 断言 2：error_code == "depth_exceeded"
+    assert result.error_code == "depth_exceeded", (
+        f"域#9: error_code 应为 depth_exceeded，实际 {result.error_code!r}"
+    )
+    # 断言 3：reason 含深度超限相关字样（人类可读 reason，FR-5.2）
+    assert result.reason and (
+        "max" in result.reason.lower()
+        or "超过最大值" in result.reason
+        or "depth" in result.reason.lower()
+    ), (
+        f"域#9: reason 应含深度超限相关文案，实际 {result.reason!r}"
+    )
+    # 断言 4：child_task_id is None（被拒不创建子任务）
+    assert result.child_task_id is None, (
+        f"域#9: 被拒派发不应有 child_task_id，实际 {result.child_task_id!r}"
+    )
+
+    # 断言 5：tasks 表无新增（DelegationManager 拒绝不创建 task）
+    cur = await conn.execute("SELECT COUNT(*) FROM tasks")
+    row = await cur.fetchone()
+    tasks_after = int(row[0]) if row else 0
+    assert tasks_after == tasks_before, (
+        f"域#9: 被拒派发不应创建 task，行数 {tasks_before} → {tasks_after}"
+    )
+
+    # 断言 6：无 SUBAGENT_SPAWNED 事件（Constitution C4 失败不写审计）
+    cur = await conn.execute(
+        "SELECT COUNT(*) FROM events WHERE type = ? AND task_id = ?",
+        (EventType.SUBAGENT_SPAWNED.value, ctx.task_id),
+    )
+    row = await cur.fetchone()
+    spawned_count = int(row[0]) if row else 0
+    assert spawned_count == 0, (
+        f"域#9: 被拒派发不应写 SUBAGENT_SPAWNED，实际 {spawned_count} 行"
+    )
 
 
 # ---------------------------------------------------------------------------
