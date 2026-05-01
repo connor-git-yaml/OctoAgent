@@ -269,31 +269,46 @@ async def test_domain_9_real_llm_max_depth_rejection(
 # ---------------------------------------------------------------------------
 
 
-async def test_domain_10_real_llm_a2a_4_assertions(
+async def test_domain_10_a2a_schema_integration(
     harness_real_llm: dict[str, Any],
 ) -> None:
-    """域 #10：直调主路径写入 A2A conversation + messages 验证 4 子断言（FR-15）。
+    """域 #10：A2A 数据 schema + 关联键 + 状态机 + 审计完整性集成测试（FR-15）。
 
-    Codex P4 high-1 闭环：旧实现 4 子断言（DispatchEnvelope / worker B 工具调用 /
-    a2a_conversations.completed / a2a_messages req+resp + parent_task_id）在
-    LLM 不调 delegate_task / 子 task 不完成 / A2A daemon 不跑时**全 SKIP** →
-    FR-15 e2e 覆盖归零。
+    **e2e 边界说明（FR-15.1 / FR-15.2 / docs/codebase-architecture/e2e-testing.md
+    §2.1）**：本测试是 **A2A 数据 schema 集成测试**，**不验证跨 runtime 真触发**。
 
-    修复方向：绕开 LLM + worker B 真跑（e2e 单进程 ASGI 不支持跨 runtime A2A
-    daemon），直调 a2a_store + task_store 主路径写入完整链路：
-    1. 创建 parent task + child task（child.parent_task_id = parent.task_id）
-    2. a2a_store.save_conversation(status=COMPLETED, request_message_id=...)
-    3. a2a_store.append_message x2（OUTBOUND TASK request + INBOUND RESULT
-       response）
-    4. 写 SUBAGENT_SPAWNED + SUBAGENT_RETURNED 审计事件（Constitution C2）
+    为何不真跨 runtime 跑：
+    1. worker B 真跑需 SkillRunner.run(model_client) → 真打 LLM，决策不
+       deterministic 且消耗 quota
+    2. `A2AConversationStatus.COMPLETED` 转换由 orchestrator A2A inbound handler
+       在 worker A 收到 INBOUND RESULT 时触发，需要双 agent runtime 完整跑通
+    3. 单进程 ASGI test app 不支持跨 agent runtime daemon（A2A 投递依赖
+       agent runtime 独立 lifecycle）
+
+    本测试策略：直调主路径 `task_store.create_task` /
+    `a2a_store.save_conversation` / `a2a_store.append_message` /
+    `event_store.append_event_committed` + `A2AConversation` /
+    `A2AMessageRecord` Pydantic 模型 + `EventType.SUBAGENT_SPAWNED` 等枚举，
+    验证 4 子断言（schema / 关联键 / 状态 / 审计）。
+
+    跨 runtime 真触发 e2e 推迟到 F088+。F087 范围内由 unit / integration 测试
+    覆盖（`tests/unit/services/test_subagent_lifecycle.py` 等，详见
+    `docs/codebase-architecture/e2e-testing.md` §2.1）。
+
+    Codex P4 high-1 闭环（fixup#9）+ Codex final critical-1 闭环（fixup#13）：
+    本测试旧名 ``test_domain_10_real_llm_a2a_4_assertions`` 容易误导成"真打
+    LLM e2e"，实际 fixup#9 已经选了"直调主路径"策略；fixup#13 重命名 +
+    docstring 显式说明边界，spec.md FR-15.1 / FR-15.2 明确为约定文档。
 
     严格 4 子断言（无 SKIP 路径）：
-    - DispatchEnvelope 投递：SUBAGENT_SPAWNED 事件存在
-    - worker B 工具调用 ≥ 1：以 RESPONSE message payload 含 tool_calls 为标记
-      （在直调路径中显式注入 tool_calls 痕迹模拟 worker B 完成）
-    - a2a_conversations.status == 'completed' + completed_at 非空
-    - a2a_messages 含 OUTBOUND request + INBOUND response 各 1 行 +
-      child.task_id == 链路一致 + child.parent_task_id == parent.task_id
+    - 子断言 1（DispatchEnvelope 投递）：SUBAGENT_SPAWNED 事件存在
+    - 子断言 2（worker B 工具调用）：RESPONSE message payload 含 tool_calls ≥ 1
+    - 子断言 3（COMPLETED 状态）：a2a_conversations.status == 'completed' +
+      completed_at 非空
+    - 子断言 4（req+resp + 链路）：a2a_messages 含 OUTBOUND request + INBOUND
+      response 各 1 行 + child.parent_task_id == parent.task_id +
+      message.task_id == child.task_id +
+      message.payload.metadata.parent_task_id == parent.task_id
     """
     from datetime import UTC, datetime as _dt
 
