@@ -801,7 +801,9 @@ class ObservationRoutine:
             return True
 
         try:
-            from octoagent.core.models.task import Task
+            # F087 final Codex high-3 闭环：Task.requester 必填，原缺字段
+            # 触发 Pydantic 验证失败 → audit task 创建失败 → events 写入因 FK 拒绝
+            from octoagent.core.models.task import RequesterInfo, Task, TaskPointers
 
             now = datetime.now(timezone.utc)
             audit_task = Task(
@@ -809,6 +811,11 @@ class ObservationRoutine:
                 created_at=now,
                 updated_at=now,
                 title="ObservationRoutine 审计占位 Task（F084 Phase 3）",
+                requester=RequesterInfo(
+                    channel="system",
+                    sender_id="observation_routine_audit",
+                ),
+                pointers=TaskPointers(),
                 trace_id=task_id,
             )
             await self._task_store.create_task(audit_task)

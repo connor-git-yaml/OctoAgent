@@ -120,12 +120,20 @@ async def _emit_event(
         return
 
     # 确保 audit task 存在（防 F24 FK 违反）
+    # F087 final Codex high-3 闭环：Task 模型 requester 是 required（无 default），
+    # 原实现缺 RequesterInfo / TaskPointers 导致 Pydantic 验证错误 → 创建失败
+    # → 后续 events 写入因 FK (task_id) 拒绝。线上首次 promote 实际丢 audit 事件
+    # （Constitution C2「Everything is an Event」违反）。
     if _ensured_set is not None and _CANDIDATES_AUDIT_TASK_ID not in _ensured_set:
         if task_store is not None:
             try:
                 existing = await task_store.get_task(_CANDIDATES_AUDIT_TASK_ID)
                 if existing is None:
-                    from octoagent.core.models.task import Task
+                    from octoagent.core.models.task import (
+                        RequesterInfo,
+                        Task,
+                        TaskPointers,
+                    )
 
                     now = datetime.now(timezone.utc)
                     audit_task = Task(
@@ -133,6 +141,12 @@ async def _emit_event(
                         created_at=now,
                         updated_at=now,
                         title="Memory Candidates 审计占位 Task（F084 Phase 3）",
+                        # 系统占位 task，requester 标系统渠道（Task.requester 必填）
+                        requester=RequesterInfo(
+                            channel="system",
+                            sender_id="memory_candidates_audit",
+                        ),
+                        pointers=TaskPointers(),  # 默认空指针
                         trace_id=_CANDIDATES_AUDIT_TASK_ID,
                     )
                     await task_store.create_task(audit_task)

@@ -155,13 +155,12 @@ async def test_domain_4_real_llm_memory_observation_increments_rows(
         user_md.write_text("§ 初始条目：测试占位\n", encoding="utf-8")
     user_md_before = user_md.read_text(encoding="utf-8")
 
-    # 预先 seed memory_candidates audit task（防 F24 FK 违反）
-    # 注：生产 memory_candidates.py 创建 audit task 时缺 requester / pointers 字段
-    # 触发 Pydantic ValidationError → audit task 不存在 → events 表 FOREIGN KEY 拒绝。
-    # 测试侧用 factory helper 预先创建 audit task 让 promote 写事件路径走通。
-    from apps.gateway.tests.e2e_live.helpers.factories import _ensure_audit_task
-
-    await _ensure_audit_task(sg, "_memory_candidates_audit")
+    # F087 final Codex high-3 闭环：生产 memory_candidates.py 内 audit task
+    # 创建 bug（缺 requester / pointers）已在 commit <fixup#11> 修复 → 删除原
+    # `_ensure_audit_task` pre-seed work-around，让 e2e 真触发空库 audit 路径。
+    # 验证生产路径：promote 调用时由 _emit_event 内 _ensured_set 自动创建
+    # audit task → events 写入成功 → MEMORY_ENTRY_ADDED + OBSERVATION_PROMOTED
+    # 真落 events 表（Constitution C2 闭环）。
 
     # 步骤 1：直接 INSERT 一条 candidate（绕开 LLM memory.observe 不确定性）
     fact_text = (
