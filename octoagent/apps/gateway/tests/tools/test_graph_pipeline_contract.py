@@ -70,8 +70,13 @@ async def test_graph_pipeline_handler_rejects_when_tool_unbound() -> None:
 
 
 @pytest.mark.asyncio
-async def test_graph_pipeline_handler_forwards_to_underlying_tool() -> None:
-    """handler 调通时把所有参数 + execution_context.task_id 转发给 underlying.execute。"""
+async def test_graph_pipeline_handler_forwards_to_underlying_tool(monkeypatch) -> None:
+    """handler 调通时把所有参数 + execution_context.task_id 转发给 underlying.execute。
+
+    F088 followup security 修复后，start / 操作类 action 必须有 task 上下文，
+    所以本测试模拟 gateway execution_context 已绑定的场景（即 task_service
+    process_task_with_llm 主路径）。
+    """
     from octoagent.core.models.tool_results import GraphPipelineResult
     from octoagent.gateway.services.builtin_tools.graph_pipeline_tool import register
 
@@ -91,6 +96,14 @@ async def test_graph_pipeline_handler_forwards_to_underlying_tool() -> None:
 
     deps = MagicMock()
     deps._graph_pipeline_tool = fake_underlying
+
+    # 模拟 gateway execution_context 已绑定（start 的 task gate 要求）
+    fake_ctx = MagicMock()
+    fake_ctx.task_id = "parent-task-001"
+    monkeypatch.setattr(
+        "octoagent.gateway.services.execution_context.get_current_execution_context",
+        lambda: fake_ctx,
+    )
 
     captured: dict = {}
 
@@ -114,7 +127,9 @@ async def test_graph_pipeline_handler_forwards_to_underlying_tool() -> None:
     assert kwargs["action"] == "start"
     assert kwargs["pipeline_id"] == "echo-test"
     assert kwargs["params"] == {"input": "hello"}
-    assert "task_id" in kwargs  # 从 execution_context 注入（None 也算注入）
+    assert kwargs["task_id"] == "parent-task-001"
+    # F088 followup security：approved 永远 None，禁止 LLM 自批
+    assert kwargs["approved"] is None
 
 
 @pytest.mark.asyncio

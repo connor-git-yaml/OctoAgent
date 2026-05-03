@@ -1070,6 +1070,7 @@ class CapabilityPackService:
             "memory",
             "supervision",
             "delegation",
+            "orchestration",  # F088 followup: graph_pipeline 等编排型工具
             "mcp",
             "skills",
             "runtime",
@@ -1162,6 +1163,10 @@ class CapabilityPackService:
             "subagents.list",
             "subagents.steer",
             "mcp.tools.list",
+            # F088 followup: graph_pipeline 走 profile-first 候选，绕开
+            # stored_profile.default_tool_groups 过滤 —— 升级前已存的 profile
+            # 不会含 "orchestration" 工具组，但仍能挂载 graph_pipeline。
+            "graph_pipeline",
         ]
 
     @staticmethod
@@ -1658,6 +1663,19 @@ class CapabilityPackService:
             return BuiltinToolAvailabilityStatus.AVAILABLE
         if tool_name == "tts.speak" and not self._tts_binary():
             return BuiltinToolAvailabilityStatus.INSTALL_REQUIRED
+        # F088 followup: graph_pipeline 依赖 GraphPipelineTool 实例（pipeline_registry
+        # 初始化失败 / startup 顺序异常时未绑定）。降级时不能挂载完整 schema 给 LLM，
+        # 否则 LLM 调用必然 rejected → 重试循环。
+        # _tool_deps._graph_pipeline_tool 由 main.py lifespan 在构造完 GraphPipelineTool
+        # 后注入；构造失败路径不注入，此处 None → UNAVAILABLE。
+        if tool_name == "graph_pipeline":
+            graph_tool = (
+                getattr(self._tool_deps, "_graph_pipeline_tool", None)
+                if self._tool_deps is not None
+                else None
+            )
+            if graph_tool is None:
+                return BuiltinToolAvailabilityStatus.UNAVAILABLE
         return BuiltinToolAvailabilityStatus.AVAILABLE
 
     def _resolve_tool_availability_reason(self, tool_name: str) -> str:
@@ -1693,6 +1711,14 @@ class CapabilityPackService:
             return ""
         if tool_name == "tts.speak" and not self._tts_binary():
             return "system_tts_binary_missing"
+        if tool_name == "graph_pipeline":
+            graph_tool = (
+                getattr(self._tool_deps, "_graph_pipeline_tool", None)
+                if self._tool_deps is not None
+                else None
+            )
+            if graph_tool is None:
+                return "graph_pipeline_tool_unbound"
         return ""
 
     def _resolve_tool_install_hint(self, tool_name: str) -> str:
