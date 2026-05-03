@@ -89,6 +89,26 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> ProviderRoute
   - **重装路径**：清 ~/.octoagent/data + behavior + octo update 重启
     （bootstrap 完成由 USER.md 实质填充判定，不依赖任何旧表 / 状态机）
   详见 `docs/codebase-architecture/harness-and-context.md`
+- **Feature 087（Agent e2e Live Test Suite）** ✅: 替换旧 `test_acceptance_scenarios.py`
+  5 域循环为 13 能力域 e2e_live 套件——
+  - **OctoHarness 抽离**：`gateway/harness/octo_harness.py` 暴露 4 个 DI 钩子
+    （`credential_store` / `secret_store` / `transport_factory` / `clock`）；
+    内置 120s ProviderRouter timeout + 30s SIGALRM 单测 watchdog
+  - **13 能力域**：smoke 5（#1 工具调用基础 / #2 USER.md 全链路 / #3 冻结快照 /
+    #11 ThreatScanner block / #12 ApprovalGate SSE）+ full 8（Memory promote /
+    Perplexity MCP / Skill / Graph Pipeline / delegate_task / max_depth /
+    A2A / Routine cron）；smoke=集成层 + DI stub，full 中 4 域直调主路径绕开
+    LLM 不确定性（GATE_P3_DEVIATION）
+  - **Hermetic 隔离**：双 autouse fixture 重置 5 类凭证 env / 4 个 OCTOAGENT_*
+    路径 env / 5 项 module 单例（清单见 `MODULE_SINGLETONS.md`）
+  - **pre-commit hook**：`make install-hooks`（worktree-aware）→ commit 自动跑
+    `pytest -m e2e_smoke` 180s portable watchdog（python3 SIGTERM→SIGKILL，
+    不依赖 macOS `gtimeout`）；`SKIP_E2E=1` 紧急 bypass
+  - **`octo e2e` CLI**：4 模式（smoke / full / `<id>` / `--list` / `--loop=N`）
+  - **不变量**：≥ 3026 passed / 0 regression（P5 实测 3006 passed + 1 rerun，
+    单测 race 是 F083 已知工程债）；smoke 5x 循环 4s/iter；SC-7 跑前后
+    USER.md / auth-profiles.json / mcp-servers/ sha256 完全一致
+  详见 `docs/codebase-architecture/e2e-testing.md`
 
 ## 协作行为准则
 

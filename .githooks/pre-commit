@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+# F087 P3 T-P3-7/8/10: pre-commit hook 跑 e2e_smoke 套件，commit 前 ≤ 180s 反馈。
+# F087 P3 fixup#3 (Codex finding-3): portable timeout——不依赖 macOS 上需要
+# brew install coreutils 才有的 timeout 命令；改用内嵌 python3 watchdog（标准库
+# subprocess + signal，跨 macOS / Linux 一致行为）。
+#
+# 行为：
+#   - SKIP_E2E=1 git commit ...      → 立即 exit 0，输出 [E2E] skipped via SKIP_E2E=1
+#   - 否则                            → cd octoagent && uv run pytest -m e2e_smoke -q
+#                                        --maxfail=1 总 timeout 180s
+#
+# 失败输出（FR-31）：3 行核心 + 日志路径，不刷屏；不全量 dump LLM 响应。
+#
+# bypass 文档：
+#   - 紧急 commit 用 SKIP_E2E=1 git commit -m "..."
+#   - 网络不可用 / OAuth profile 失效时 e2e 自然 SKIP（不阻断 commit）
+#
+# 安装：在 worktree 根执行 `make install-hooks` 或
+#       `git config core.hooksPath .githooks`
+
+set -e
+
+# ---- bypass 路径 ----
+if [[ "${SKIP_E2E:-0}" == "1" ]]; then
+  echo "[E2E] skipped via SKIP_E2E=1"
+  exit 0
+fi
+
+# ---- 定位 repo / octoagent 子目录 ----
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+OCTOAGENT_DIR="${REPO_ROOT}/octoagent"
+
+if [[ ! -d "${OCTOAGENT_DIR}" ]]; then
+  echo "[E2E SKIP] octoagent/ 子目录不存在 (REPO_ROOT=${REPO_ROOT})"
+  exit 0
+fi
+
+# ---- 日志路径 ----
+LOG_DIR="${HOME}/.octoagent/logs/e2e"
+mkdir -p "${LOG_DIR}"
+TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
+LOG_FILE="${LOG_DIR}/pre-commit-${TIMESTAMP}.log"
+
+# ---- 跑 e2e_smoke（180s portable watchdog）----
+# 用 python3 标准库实现 watchdog（subprocess + SIGTERM/SIGKILL 升级），
+# 不依赖 macOS 默认无的 timeout / gtimeout 命令。
+TIMEOUT_SECONDS=180
+
+set +e
+python3 - "${OCTOAGENT_DIR}" "${LOG_FILE}" "${TIMEOUT_SECONDS}" <<'PYWATCHDOG' >/dev/null 2>&1
+import os
+import signal
+import subprocess
+import sys
+import time
+
+octoagent_dir, log_file, timeout_s = sys.argv[1], sys.argv[2], int(sys.argv[3])
+
+# 起子进程跑 pytest（写到 log_file）
+with open(log_file, "wb") as logf:
+    proc = subprocess.Popen(
+        ["uv", "run", "pytest", "-m", "e2e_smoke", "--maxfail=1", "-q"],
+        cwd=octoagent_dir,
+        stdout=logf,
+        stderr=subprocess.STDOUT,
+        # 新建独立 process group，便于一次性 SIGKILL 整个子树
+        preexec_fn=os.setsid,
+    )
+
+deadline = time.monotonic() + timeout_s
+while True:
+    rc = proc.poll()
+    if rc is not None:
+        sys.exit(rc)
+    if time.monotonic() >= deadline:
+        # 先 SIGTERM 整 process group，等 5s，再 SIGKILL
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            proc.wait()
+        # exit code 124 与 GNU timeout 一致语义
+        sys.exit(124)
+    time.sleep(0.5)
+PYWATCHDOG
+EXIT_CODE=$?
+set -e
+
+# ---- 处理结果 ----
+if [[ ${EXIT_CODE} -eq 0 ]]; then
+  # 成功：单行总结 + 日志路径
+  PASS_LINE="$(grep -E "^[0-9]+ passed" "${LOG_FILE}" | tail -1 || echo "smoke ok")"
+  echo "[E2E PASS] ${PASS_LINE}"
+  echo "  log: ${LOG_FILE}"
+  exit 0
+fi
+
+# ---- 失败：3 行核心 + 日志路径（FR-31 / T-P3-8 格式）----
+if [[ ${EXIT_CODE} -eq 124 ]]; then
+  # watchdog 超时（与 GNU timeout 一致语义）
+  echo "[E2E FAIL] timeout=${TIMEOUT_SECONDS}s (portable watchdog)"
+  echo "  expected: smoke 全 PASS 且 ≤ ${TIMEOUT_SECONDS}s 内完成"
+  echo "  actual:   pytest 子进程超时被 SIGKILL（process group 树清理）"
+  echo "  log: ${LOG_FILE}"
+  echo "  bypass: SKIP_E2E=1 git commit"
+  exit 1
+fi
+
+# 抓第一个失败的测试节点
+FAILED_NODE="$(grep -E "^FAILED " "${LOG_FILE}" | head -1 | awk '{print $2}' || echo "<unknown>")"
+DOMAIN_NAME="$(basename "${FAILED_NODE}" 2>/dev/null | cut -d':' -f1 || echo "<unknown>")"
+# 抓第一行 AssertionError 描述（不全 dump）
+EXPECTED_LINE="$(grep -E "AssertionError|assert " "${LOG_FILE}" | head -1 | sed 's/^[[:space:]]*//' | cut -c1-200 || echo "<no assertion captured>")"
+
+echo "[E2E FAIL] domain=${DOMAIN_NAME}"
+echo "  expected: smoke 5 域全 PASS"
+echo "  actual:   ${EXPECTED_LINE}"
+echo "  log: ${LOG_FILE}"
+echo "  bypass: SKIP_E2E=1 git commit"
+
+exit 1

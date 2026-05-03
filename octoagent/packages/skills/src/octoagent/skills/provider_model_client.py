@@ -409,6 +409,29 @@ class ProviderModelClient:
         # reasoning：从 manifest 推断（与现有 LiteLLMSkillClient 行为对齐）
         reasoning = self._resolve_reasoning(manifest)
 
+        # F087 followup：从 execution_context.metadata 读 force_tool_choice。
+        # 用途：e2e 测试 / 上层服务强制 LLM 选定目标工具（绕开 LLM 自主决策不
+        # 确定性）。值可为：
+        # - 字符串："auto" / "required" / "none"（Anthropic "required" → any）
+        # - dict：OpenAI Chat 格式 {"type": "function", "function": {"name": "x"}}
+        # - JSON 字符串：上述 dict 的 JSON 编码（用于 NormalizedMessage.metadata
+        #   只接受 dict[str, str] 的场景，自动 decode）
+        # ProviderClient 内部按 transport 转换。
+        force_tool_choice = execution_context.metadata.get("force_tool_choice")
+        if isinstance(force_tool_choice, str):
+            stripped = force_tool_choice.strip()
+            if stripped.startswith("{") and stripped.endswith("}"):
+                try:
+                    force_tool_choice = json.loads(stripped)
+                except json.JSONDecodeError:
+                    log.warning(
+                        "provider_model_client_force_tool_choice_json_decode_failed",
+                        raw=stripped[:200],
+                    )
+                    force_tool_choice = None
+        elif not isinstance(force_tool_choice, dict):
+            force_tool_choice = None
+
         log.debug(
             "provider_model_client_generate",
             key=key,
@@ -419,6 +442,7 @@ class ProviderModelClient:
             model=resolved.model_name,
             transport=resolved.client.runtime.transport.value,
             tools_count=len(tools),
+            force_tool_choice=force_tool_choice if force_tool_choice else None,
         )
 
         content, tool_calls, metadata = await resolved.client.call(
@@ -427,6 +451,7 @@ class ProviderModelClient:
             tools=tools,
             model_name=resolved.model_name,
             reasoning=reasoning,
+            tool_choice=force_tool_choice,
         )
 
         return self._append_assistant_and_build_envelope(

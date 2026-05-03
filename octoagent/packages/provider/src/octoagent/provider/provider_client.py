@@ -285,6 +285,7 @@ class ProviderClient:
         tools: list[dict[str, Any]],
         model_name: str,
         reasoning: dict[str, Any] | None = None,
+        tool_choice: dict[str, Any] | str | None = None,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         """按 transport 路由到对应协议实现。
 
@@ -299,6 +300,13 @@ class ProviderClient:
                 ``Qwen/Qwen3.5-32B``）
             reasoning: 可选的 reasoning 配置（如 ``{type: "enabled",
                 budget_tokens: 8000}``，仅 Responses API + Anthropic 用到）
+            tool_choice: 可选 tool_choice override。None（默认）→ 沿用旧行为
+                ``"auto"``（或 extra_body 中的覆盖值）；字符串如 ``"auto"`` /
+                ``"required"`` / ``"none"``；dict 如 OpenAI 的
+                ``{"type": "function", "function": {"name": "graph_pipeline"}}``
+                或 Anthropic 的 ``{"type": "tool", "name": "graph_pipeline"}``。
+                F087 followup 引入：让 e2e 测试 / 上层服务能强制 LLM 选定目标
+                工具，避免 LLM 自主决策的不确定性。**仅 ``tools`` 非空时生效**。
 
         Returns:
             ``(content, tool_calls, metadata)`` triple
@@ -311,6 +319,7 @@ class ProviderClient:
                 tools=tools,
                 model_name=model_name,
                 reasoning=reasoning,
+                tool_choice=tool_choice,
             )
         except LLMCallError as exc:
             # F3 修复：401 和 403 都触发 auth refresh。某些 provider/网关把
@@ -347,6 +356,7 @@ class ProviderClient:
                 tools=tools,
                 model_name=model_name,
                 reasoning=reasoning,
+                tool_choice=tool_choice,
             )
 
     async def _dispatch(
@@ -358,6 +368,7 @@ class ProviderClient:
         tools: list[dict[str, Any]],
         model_name: str,
         reasoning: dict[str, Any] | None,
+        tool_choice: dict[str, Any] | str | None = None,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         if self._runtime.transport == ProviderTransport.OPENAI_RESPONSES:
             return await self._call_openai_responses(
@@ -367,6 +378,7 @@ class ProviderClient:
                 tools=tools,
                 model_name=model_name,
                 reasoning=reasoning,
+                tool_choice=tool_choice,
             )
         if self._runtime.transport == ProviderTransport.OPENAI_CHAT:
             return await self._call_openai_chat(
@@ -375,6 +387,7 @@ class ProviderClient:
                 history=history,
                 tools=tools,
                 model_name=model_name,
+                tool_choice=tool_choice,
             )
         if self._runtime.transport == ProviderTransport.ANTHROPIC_MESSAGES:
             return await self._call_anthropic_messages(
@@ -384,6 +397,7 @@ class ProviderClient:
                 tools=tools,
                 model_name=model_name,
                 reasoning=reasoning,
+                tool_choice=tool_choice,
             )
         raise NotImplementedError(f"unsupported transport: {self._runtime.transport}")
 
@@ -398,6 +412,7 @@ class ProviderClient:
         tools: list[dict[str, Any]],
         model_name: str,
         reasoning: dict[str, Any] | None,
+        tool_choice: dict[str, Any] | str | None = None,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         """OpenAI Responses API 协议实现（直连，无中间代理）。
 
@@ -442,7 +457,30 @@ class ProviderClient:
                 else t  # 已是 flat 格式，直接用
                 for t in tools
             ]
-            body["tool_choice"] = "auto"
+            # F087 followup：tool_choice 可注入。
+            # 优先级：函数参数 > extra_body 已注入 > 默认 "auto"。
+            # Responses API 的 dict 格式：{"type": "function", "name": "<fn_name>"}
+            # 工具名需做点→双下划线转换（与 tools 的 name 字段保持一致）。
+            if tool_choice is not None:
+                if isinstance(tool_choice, dict) and "function" in tool_choice:
+                    # OpenAI Chat 格式 {"type": "function", "function": {"name": "x"}}
+                    # → Responses 格式 {"type": "function", "name": "<converted>"}
+                    fn = tool_choice.get("function", {}) or {}
+                    body["tool_choice"] = {
+                        "type": "function",
+                        "name": _to_fn_name(str(fn.get("name", ""))),
+                    }
+                elif isinstance(tool_choice, dict) and "name" in tool_choice:
+                    # 已是 Responses 格式
+                    body["tool_choice"] = {
+                        "type": str(tool_choice.get("type", "function")),
+                        "name": _to_fn_name(str(tool_choice.get("name", ""))),
+                    }
+                else:
+                    # 字符串形式："auto" / "required" / "none"
+                    body["tool_choice"] = tool_choice
+            else:
+                body.setdefault("tool_choice", "auto")
 
         if reasoning is not None:
             body["reasoning"] = reasoning
@@ -623,6 +661,7 @@ class ProviderClient:
         history: list[dict[str, Any]],
         tools: list[dict[str, Any]],
         model_name: str,
+        tool_choice: dict[str, Any] | str | None = None,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         """OpenAI Chat Completions API 协议（直连 provider，无中间代理）。
 
@@ -653,7 +692,25 @@ class ProviderClient:
 
         if tools:
             body["tools"] = tools
-            body["tool_choice"] = "auto"
+            # F087 followup：tool_choice 可注入。
+            # 优先级：函数参数 > extra_body 已注入 > 默认 "auto"。
+            # OpenAI Chat Completions 格式：
+            # - 字符串："auto" / "required" / "none"
+            # - dict：{"type": "function", "function": {"name": "<fn_name>"}}
+            # 注意 fn_name 需要从工具名（含 "."）转换为 "__" 形式，与 tools schema
+            # 中的 function.name 字段保持一致；不然 LLM 视作未知工具。
+            if tool_choice is not None:
+                if isinstance(tool_choice, dict) and "function" in tool_choice:
+                    fn = tool_choice.get("function", {}) or {}
+                    body["tool_choice"] = {
+                        "type": "function",
+                        "function": {"name": _to_fn_name(str(fn.get("name", "")))},
+                    }
+                else:
+                    # 字符串或其他 dict 直接透传
+                    body["tool_choice"] = tool_choice
+            else:
+                body.setdefault("tool_choice", "auto")
 
         target_url = f"{self._runtime.api_base}/v1/chat/completions"
         target_headers: dict[str, str] = {
@@ -853,6 +910,7 @@ class ProviderClient:
         tools: list[dict[str, Any]],
         model_name: str,
         reasoning: dict[str, Any] | None,
+        tool_choice: dict[str, Any] | str | None = None,
     ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
         """Anthropic Messages API 协议（直连 api.anthropic.com）。
 
@@ -956,7 +1014,14 @@ class ProviderClient:
         if full_system:
             body["system"] = full_system
 
-        if tools:
+        # F087 followup Codex review high-1 闭环：Anthropic 'none' 语义必须真禁用工具。
+        # 原实现 'none' 时跳过 tool_choice 设置，但 tools 仍在 body 中 + extra_body
+        # 预置 tool_choice 也不被覆盖 → 调用方以为禁用工具，Claude 仍可能调用。
+        # 修复：'none' 时**主动移除** body["tools"] 和 body.pop("tool_choice", None)，
+        # 走"无工具"路径（Anthropic 收不到 tools 列表自然不会调工具）。
+        _disable_tools = tool_choice == "none"
+
+        if tools and not _disable_tools:
             # OpenAI Chat 格式 → Anthropic 格式：{name, description, input_schema}
             body["tools"] = [
                 {
@@ -978,6 +1043,31 @@ class ProviderClient:
                 }
                 for t in tools
             ]
+            # F087 followup：Anthropic tool_choice 注入。
+            # Anthropic 格式（与 OpenAI 不同）：
+            # - {"type": "auto"} / {"type": "any"} / {"type": "tool", "name": "x"}
+            # 优先级：函数参数 > extra_body > Anthropic 默认（不传则模型自决）。
+            if tool_choice is not None:
+                if isinstance(tool_choice, dict) and "function" in tool_choice:
+                    # OpenAI 格式 → Anthropic 格式
+                    fn = tool_choice.get("function", {}) or {}
+                    body["tool_choice"] = {
+                        "type": "tool",
+                        "name": _from_fn_name(str(fn.get("name", ""))),
+                    }
+                elif isinstance(tool_choice, dict):
+                    # 已是 Anthropic 格式或近似格式
+                    body["tool_choice"] = tool_choice
+                elif tool_choice == "required":
+                    body["tool_choice"] = {"type": "any"}
+                elif tool_choice == "auto":
+                    body["tool_choice"] = {"type": "auto"}
+
+        # F087 followup Codex review high-1 闭环：'none' 显式禁用工具
+        # 不论 tools 是否传入、不论 extra_body 是否预置 tool_choice，强制清除
+        if _disable_tools:
+            body.pop("tools", None)
+            body.pop("tool_choice", None)
 
         if reasoning is not None:
             body["thinking"] = reasoning

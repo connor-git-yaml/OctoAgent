@@ -1,0 +1,37 @@
+# F087 fixture 严格 gitignore（R9 缓解 + Codex P2 medium-1 闭环）
+#
+# 策略：default-deny + whitelist。任何非显式白名单的文件都不进 git，避免 editor
+# 备份 / 手动 .bak / .old / .orig 等真实凭证文件被误 commit。
+
+# Default-deny：忽略所有内容
+*
+
+# Whitelist：明确允许进 git 的文件类型
+!.gitignore
+!README.md
+!*.template
+!*.template.*
+!*/
+
+# 显式黑名单（即使 whitelist 命中也强制忽略，双保险）
+*.real
+*.local
+*.bak
+*.backup
+*.old
+*.orig
+*.tmp
+*.swp
+*.swo
+*~
+.DS_Store
+auth-profiles*.json
+*.env
+.env.*
+mcp-servers.json
+*api_key*
+*API_KEY*
+*token*
+*TOKEN*
+*secret*
+*SECRET*

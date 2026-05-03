@@ -22,6 +22,11 @@ TURN_SCOPED_CONTROL_KEYS = frozenset(
         "approval_id",
         "approval_token",
         "delegation_pause",
+        # F087 followup：e2e 测试 / 上层服务可在此注入 LLM tool_choice 强制选定。
+        # 值为 JSON 字符串（OpenAI Chat 格式 dict 编码），由 ProviderModelClient
+        # decode 后透传给 ProviderClient。生产路径默认不传 → 沿用 LLM 自主决策
+        # 行为，无副作用。挂在 turn-scoped：每轮独立，不在 task 内残留。
+        "force_tool_choice",
     }
 )
 

@@ -279,3 +279,189 @@ async def test_generate_clear_history_invalidates_router_cache(tmp_path: Path) -
             assert called_models[-1] == "Qwen/Qwen3.5-72B"
     finally:
         await router.aclose()
+
+
+# ---------------------------------------------------------------------------
+# F087 followup：force_tool_choice 透传 + JSON 字符串 decode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_passes_force_tool_choice_dict_from_metadata(tmp_path: Path) -> None:
+    """execution_context.metadata["force_tool_choice"] dict → 透传给 ProviderClient.call。"""
+    _write_config(
+        tmp_path,
+        """
+        config_version: 1
+        updated_at: "2026-04-26"
+        providers:
+          - id: siliconflow
+            name: SiliconFlow
+            auth_type: api_key
+            api_key_env: SILICONFLOW_API_KEY
+            enabled: true
+        model_aliases:
+          main:
+            provider: siliconflow
+            model: Qwen/Qwen3.5-32B
+        """,
+    )
+    router = ProviderRouter(
+        project_root=tmp_path,
+        credential_store=CredentialStore(store_path=tmp_path / "auth-profiles.json"),
+    )
+    try:
+        captured: list[Any] = []
+
+        async def _capture_call(**kwargs: Any):
+            captured.append(kwargs.get("tool_choice"))
+            return ("ok", [], {"token_usage": {}})
+
+        client = ProviderModelClient(provider_router=router, tool_broker=None)
+        manifest = _make_manifest()
+        ctx = SkillExecutionContext(
+            task_id="t-fc-1",
+            trace_id="tr-fc-1",
+            conversation_messages=[],
+            metadata={
+                "force_tool_choice": {
+                    "type": "function",
+                    "function": {"name": "graph_pipeline"},
+                },
+            },
+        )
+
+        from octoagent.provider import ProviderClient
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr(ProviderClient, "call", AsyncMock(side_effect=_capture_call))
+            await client.generate(
+                manifest=manifest, execution_context=ctx, prompt="hi",
+                feedback=[], attempt=1, step=1,
+            )
+
+        assert captured == [
+            {"type": "function", "function": {"name": "graph_pipeline"}}
+        ], f"force_tool_choice dict 应原样透传给 ProviderClient.call，实际: {captured}"
+    finally:
+        await router.aclose()
+
+
+@pytest.mark.asyncio
+async def test_generate_decodes_force_tool_choice_json_string_from_metadata(
+    tmp_path: Path,
+) -> None:
+    """execution_context.metadata["force_tool_choice"] JSON 字符串 → 自动 decode 后透传。
+
+    用途：``NormalizedMessage.metadata`` 字段类型限定 ``dict[str, str]``，
+    e2e 测试 / 上层服务无法直接放 dict，只能 JSON 编码。本路径覆盖 decode。
+    """
+    import json as _json
+
+    _write_config(
+        tmp_path,
+        """
+        config_version: 1
+        updated_at: "2026-04-26"
+        providers:
+          - id: siliconflow
+            name: SiliconFlow
+            auth_type: api_key
+            api_key_env: SILICONFLOW_API_KEY
+            enabled: true
+        model_aliases:
+          main:
+            provider: siliconflow
+            model: Qwen/Qwen3.5-32B
+        """,
+    )
+    router = ProviderRouter(
+        project_root=tmp_path,
+        credential_store=CredentialStore(store_path=tmp_path / "auth-profiles.json"),
+    )
+    try:
+        captured: list[Any] = []
+
+        async def _capture_call(**kwargs: Any):
+            captured.append(kwargs.get("tool_choice"))
+            return ("ok", [], {"token_usage": {}})
+
+        client = ProviderModelClient(provider_router=router, tool_broker=None)
+        manifest = _make_manifest()
+        ctx = SkillExecutionContext(
+            task_id="t-fc-2",
+            trace_id="tr-fc-2",
+            conversation_messages=[],
+            metadata={
+                "force_tool_choice": _json.dumps(
+                    {"type": "function", "function": {"name": "delegate_task"}}
+                ),
+            },
+        )
+
+        from octoagent.provider import ProviderClient
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr(ProviderClient, "call", AsyncMock(side_effect=_capture_call))
+            await client.generate(
+                manifest=manifest, execution_context=ctx, prompt="hi",
+                feedback=[], attempt=1, step=1,
+            )
+
+        assert captured == [
+            {"type": "function", "function": {"name": "delegate_task"}}
+        ], f"JSON 字符串应被 decode 为 dict 后透传，实际: {captured}"
+    finally:
+        await router.aclose()
+
+
+@pytest.mark.asyncio
+async def test_generate_force_tool_choice_default_is_none(tmp_path: Path) -> None:
+    """metadata 不含 force_tool_choice → 透传 None（保持 ProviderClient 默认 "auto"）。"""
+    _write_config(
+        tmp_path,
+        """
+        config_version: 1
+        updated_at: "2026-04-26"
+        providers:
+          - id: siliconflow
+            name: SiliconFlow
+            auth_type: api_key
+            api_key_env: SILICONFLOW_API_KEY
+            enabled: true
+        model_aliases:
+          main:
+            provider: siliconflow
+            model: Qwen/Qwen3.5-32B
+        """,
+    )
+    router = ProviderRouter(
+        project_root=tmp_path,
+        credential_store=CredentialStore(store_path=tmp_path / "auth-profiles.json"),
+    )
+    try:
+        captured: list[Any] = []
+
+        async def _capture_call(**kwargs: Any):
+            captured.append(kwargs.get("tool_choice"))
+            return ("ok", [], {"token_usage": {}})
+
+        client = ProviderModelClient(provider_router=router, tool_broker=None)
+        manifest = _make_manifest()
+        ctx = _make_ctx(task_id="t-fc-3", trace_id="tr-fc-3")  # metadata={}
+
+        from octoagent.provider import ProviderClient
+
+        with pytest.MonkeyPatch().context() as mp:
+            mp.setattr(ProviderClient, "call", AsyncMock(side_effect=_capture_call))
+            await client.generate(
+                manifest=manifest, execution_context=ctx, prompt="hi",
+                feedback=[], attempt=1, step=1,
+            )
+
+        assert captured == [None], (
+            f"未设置 force_tool_choice 时应传 None（让 ProviderClient 用默认 auto），"
+            f"实际: {captured}"
+        )
+    finally:
+        await router.aclose()

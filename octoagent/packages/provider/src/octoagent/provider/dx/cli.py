@@ -96,6 +96,15 @@ main.add_command(project_group)
 main.add_command(secrets_group)
 main.add_command(cleanup_group)  # Feature 082 P4
 
+# Feature 087 P4 T-P4-10：octo e2e CLI（懒加载，避免 gateway 包 import 循环）
+try:
+    from octoagent.gateway.cli.e2e_command import e2e as _e2e_cmd
+
+    main.add_command(_e2e_cmd)
+except ImportError:
+    # gateway 包不可用时不阻塞 CLI（理论上不会发生）
+    pass
+
 
 @main.command()
 @click.option(
