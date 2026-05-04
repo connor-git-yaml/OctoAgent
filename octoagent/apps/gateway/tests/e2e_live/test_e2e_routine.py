@@ -50,61 +50,48 @@ async def test_domain_13_routine_cron_jobs_registered(
     """域 #13：routine cron jobs 注册成功（无需等真触发）。
 
     断言（≥ 2 独立点）：
-    1. ``app.state.scheduler`` 存在 + 至少注册了 1 个 cron job
-    2. system jobs ``system:memory-consolidate`` / ``system:memory-profile-generate``
-       至少之一在 jobs 列表
+    1. ``app.state.control_plane_service`` 与 ``app.state.automation_scheduler``
+       双双存在（``OctoHarness._bootstrap_control_plane`` 必经路径）
+    2. ``control_plane_service.automation_store.list_jobs()`` 包含两个 system
+       job：``system:memory-consolidate`` + ``system:memory-profile-generate``
 
-    SKIP 路径：
-    - scheduler 未启用（control_plane 在 e2e 环境关闭） → SKIP
+    历史决策（已修正）：原版本在 scheduler is None / list_jobs 异常 / jobs 为空
+    时都 SKIP，把 silent failure 当通过；并且错把 ``automation_store`` 当作
+    ``AutomationSchedulerService`` 的 public property（实际只在
+    ``ControlPlaneService`` 上暴露）。本次改为通过 control_plane_service 读
+    automation_store + hard fail with diagnostics —— ensure_system_automation_jobs
+    是 control_plane bootstrap 的必经调用（octo_harness.py:1030），任一缺失即
+    bootstrap 链路有真实 bug。
     """
     app = harness_real_llm["app"]
 
-    # OctoHarness shutdown 段引用 attr 名：watchdog_scheduler / automation_scheduler
-    scheduler = (
-        getattr(app.state, "automation_scheduler", None)
-        or getattr(app.state, "watchdog_scheduler", None)
+    control_plane = getattr(app.state, "control_plane_service", None)
+    scheduler = getattr(app.state, "automation_scheduler", None)
+    assert control_plane is not None, (
+        "域#13: app.state.control_plane_service 不应为 None；"
+        f"app.state.attrs={sorted(vars(app.state).keys())[:20]}"
     )
-    if scheduler is None:
-        pytest.skip(
-            "域#13 SKIP: app.state.{automation,watchdog}_scheduler 不存在；"
-            "control_plane / automation_service 可能在 e2e 环境关闭"
-        )
+    assert scheduler is not None, (
+        "域#13: app.state.automation_scheduler 不应为 None；"
+        "OctoHarness._bootstrap_control_plane 应已构造 AutomationSchedulerService"
+    )
 
-    # 断言 1：scheduler 存在 + automation_store 有 jobs
-    # AutomationSchedulerService 通过 automation_store.list_jobs() 暴露
-    jobs: list[Any] = []
-    if hasattr(scheduler, "automation_store"):
-        try:
-            jobs = list(scheduler.automation_store.list_jobs())
-        except Exception as exc:
-            pytest.skip(f"域#13 SKIP: automation_store.list_jobs() 失败: {exc}")
-    elif hasattr(scheduler, "get_jobs"):
-        try:
-            jobs = list(scheduler.get_jobs())
-        except Exception as exc:
-            pytest.skip(f"域#13 SKIP: scheduler.get_jobs() 失败: {exc}")
+    # automation_store 的 public 入口在 ControlPlaneService（_coordinator.py:207）
+    # AutomationSchedulerService 只持有私有 _automation_store
+    jobs = list(control_plane.automation_store.list_jobs())
 
-    if not jobs:
-        pytest.skip(
-            f"域#13 SKIP: scheduler ({type(scheduler).__name__}) 无 jobs；"
-            "可能 control_plane bootstrap 跳过 system jobs 注册"
-        )
-
-    assert len(jobs) >= 1, f"域#13: 应至少 1 个 cron job。实际: {len(jobs)}"
-
-    # 断言 2：尝试取 job ids 验证 system jobs（job_id 通常 system:memory-consolidate 等）
-    job_ids = []
+    job_ids: list[str] = []
     for j in jobs:
         for attr in ("job_id", "id", "name"):
             v = getattr(j, attr, None)
             if v:
-                job_ids.append(v)
+                job_ids.append(str(v))
                 break
 
-    system_jobs = [
-        jid for jid in job_ids
-        if "system" in str(jid).lower() or "memory" in str(jid).lower()
-    ]
-    assert system_jobs or job_ids, (
-        f"域#13: 应有 system/memory 类 cron job 或至少 1 个 job。实际: {job_ids}"
+    expected = {"system:memory-consolidate", "system:memory-profile-generate"}
+    actual = {jid for jid in job_ids if jid.startswith("system:")}
+    missing = expected - actual
+    assert not missing, (
+        f"域#13: ensure_system_automation_jobs 应注册 {expected}，"
+        f"实际 system jobs={actual}, 全部 jobs={job_ids}"
     )

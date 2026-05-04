@@ -208,6 +208,67 @@ async def _build_real_user_profile_handler(
     return handler, snap_store, user_md
 
 
+async def submit_message_with_control_metadata(
+    *,
+    app: Any,
+    text: str,
+    control_metadata: dict[str, Any],
+    thread_id: str = "e2e-thread",
+    sender_id: str = "owner",
+    sender_name: str = "Owner",
+) -> str:
+    """提交消息时注入 trusted control_metadata（如 force_tool_choice）。
+
+    e2e 专用。绕开 ``/api/message`` HTTP route——该 route 故意不接 control_metadata
+    （trust boundary：禁止外部 HTTP 直接控 LLM 行为）。本 helper 直调
+    ``TaskService.create_task`` 内部入口，把 control_metadata 写进 USER_MESSAGE
+    event payload；后续 ``merge_control_metadata`` 会按 turn 生命周期合并到
+    ``execution_context.metadata``，``ProviderModelClient`` 从中读
+    ``force_tool_choice`` 透传给 ProviderRouter。
+
+    适用：F087 域 #7（强制 graph_pipeline）/ 域 #8b（强制 delegate_task）等
+    需要消除 LLM 决策不确定性的 e2e。
+
+    Args:
+        app: FastAPI 实例（需 ``app.state.store_group`` / ``app.state.sse_hub`` /
+             ``app.state.task_runner``）。
+        text: 用户消息文本。
+        control_metadata: trusted control 字典，如
+            ``{"force_tool_choice": {"type": "function", "function": {"name": "graph_pipeline"}}}``。
+            未在 ``connection_metadata.CONTROL_METADATA_KEYS`` 白名单的 key 会被
+            ``normalize_control_metadata`` 静默丢弃。
+        thread_id / sender_id / sender_name: 消息属性。
+
+    Returns:
+        新建 task 的 task_id。
+    """
+    import uuid
+
+    from octoagent.core.models.message import NormalizedMessage
+    from octoagent.gateway.services.task_service import TaskService
+
+    msg = NormalizedMessage(
+        channel="web",
+        thread_id=thread_id,
+        sender_id=sender_id,
+        sender_name=sender_name,
+        text=text,
+        idempotency_key=f"e2e-fc-{uuid.uuid4().hex[:8]}",
+        control_metadata=control_metadata,
+    )
+
+    sg = app.state.store_group
+    sse_hub = app.state.sse_hub
+    service = TaskService(sg, sse_hub)
+    task_id, _ = await service.create_task(msg)
+
+    task_runner = getattr(app.state, "task_runner", None)
+    if task_runner is not None:
+        await task_runner.enqueue(task_id, msg.text)
+
+    return task_id
+
+
 def copy_local_instance_template(template_root: Path, dst_root: Path) -> None:
     """把 ``tests/fixtures/local-instance/`` 模板复制到 e2e tmp dst_root。
 
@@ -233,4 +294,5 @@ __all__ = [
     "_ensure_audit_task",
     "_insert_turn_events",
     "copy_local_instance_template",
+    "submit_message_with_control_metadata",
 ]

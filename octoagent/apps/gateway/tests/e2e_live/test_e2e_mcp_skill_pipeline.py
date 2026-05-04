@@ -468,35 +468,68 @@ async def test_domain_6_real_llm_skill_call(
 async def test_domain_7_real_llm_graph_pipeline(
     harness_real_llm: dict[str, Any],
 ) -> None:
-    """域 #7 真打：LLM 触发 graph_pipeline 编排（保持原有 SKIP-friendly 实现）。
+    """域 #7：graph_pipeline 系统挂载链路 + LLM 真实调用（双层断言）。
 
-    F087 followup 重要发现（详见 followup feat 1ddbff4 commit body）：
-      ``graph_pipeline`` 工具**不在** tool_broker 注册表中——它仅以
-      ``app.state.graph_pipeline_tool`` 形式存在，并通过 ``OrchestratorService.
-      _resolve_graph_pipeline_tool()`` 在 ``DELEGATE_GRAPH`` 决策路径下被调用。
-      LLM 不能直接 tool_call ``graph_pipeline`` 工具——故 followup feat 让
-      tool_choice 可注入虽然链路打通了，但对本域意义不大（无 broker 注册的目标
-      工具可强制）。系统真实路径：LLM → ``tool_search`` query "pipeline" →
-      orchestrator promote graph_pipeline → 后续轮 LLM 调用 promoted tool。
+    历史决策（已修正）：原版本走自由 LLM 决策 + SKIP-friendly 兜底，且 SKIP
+    文案声称 "graph_pipeline 工具不在 broker 注册"——该说法已被
+    720d045 + c981ba5 推翻（broker 注册 + capability_pack 挂载链路均已就绪，
+    详见两 commit body 与 capability_pack.py:1666-1721 / graph_pipeline_tool.py
+    register 函数）。
 
-      故本测试保留 SKIP-friendly 实现，验证 LLM 自然调起 pipeline / tool_search
-      类工具的能力（与 P4 fixup 前同源）。force_tool_choice 强制选 graph_pipeline
-      不可行——targets 必须在 broker.discover() 中。tool_choice 注入能力本身
-      由 unit test (test_provider_client_tool_choice.py) + delegate_task / cron.list
-      域（broker 真注册的工具）e2e 验证。
+    本测试拆分为两层断言：
 
-    断言（≥ 2 独立点）：
-    1. 任务达终态
-    2. tool_calls 含 graph_pipeline / pipeline.* / tool_search 类工具
-       （graph_pipeline 经 orchestrator DELEGATE_GRAPH 决策；tool_search 经
-       LLM 自主决策；任一即视为本域真打成功）
+    层 1（系统层，确定性）：
+        graph_pipeline 在 ToolBroker 真注册 + tool_meta.side_effect_level
+        == IRREVERSIBLE + tool_group == "orchestration"。这是 720d045 +
+        c981ba5 必须保持的契约——回归即 hard fail。
 
-    SKIP 路径：LLM 决定不用 graph/pipeline/tool_search 类（用普通 skill 替代）→ SKIP
+    层 2（LLM 行为层，best-effort + SKIP-friendly）：
+        发出明确"调 graph_pipeline action=list"指令，断言 LLM 真选了
+        graph_pipeline / pipeline / tool_search 类工具。LLM 当前 fixture
+        模型在 inline skill manifest 下不一定看到 graph_pipeline schema
+        （capability_pack mount → inline manifest tools_allowed 链路在
+        hermetic env 下尚未稳定），LLM 决策不命中走 SKIP（不是 FAIL）。
+        命中由 follow-up feature 跟进。
     """
-    from httpx import ASGITransport, AsyncClient
-
     app = harness_real_llm["app"]
     sg = app.state.store_group
+
+    # ---------------- 层 1：系统挂载契约（hard assertion） ----------------
+    # 拆两步：注册 + 运行时可用性。Codex Finding #1 闭环——单测注册不等于
+    # capability_pack 真把 graph_pipeline 挂给 LLM；c981ba5 的 _graph_pipeline_tool
+    # is None → UNAVAILABLE 分支若未生效会让"工具被假挂载但实际 rejected"逃过。
+    broker = getattr(app.state, "tool_broker", None) or getattr(
+        app.state, "broker", None
+    )
+    assert broker is not None, "域#7 层1.1: app.state.tool_broker / broker 应存在"
+
+    discovered = await broker.discover()
+    discovered_names = {
+        getattr(meta, "name", "") or getattr(meta, "tool_name", "")
+        for meta in discovered
+    }
+    assert "graph_pipeline" in discovered_names, (
+        "域#7 层1.1: graph_pipeline 必须在 broker.discover() 中（720d045 契约）。"
+        f" 实际发现 {len(discovered_names)} 个工具，缺 graph_pipeline；"
+        f" 抽样: {sorted(discovered_names)[:15]}"
+    )
+
+    capability_pack_service = getattr(app.state, "capability_pack_service", None)
+    assert capability_pack_service is not None, (
+        "域#7 层1.2: app.state.capability_pack_service 应存在"
+    )
+    from octoagent.gateway.services.capability_pack import BuiltinToolAvailabilityStatus
+
+    availability = capability_pack_service._resolve_tool_availability("graph_pipeline")
+    assert availability == BuiltinToolAvailabilityStatus.AVAILABLE, (
+        f"域#7 层1.2: graph_pipeline 运行时应 AVAILABLE（c981ba5 契约：要求 "
+        f"_tool_deps._graph_pipeline_tool 已注入），实际 {availability}。"
+        " 排查方向：octo_harness graph_pipeline_tool_init_skipped warning / "
+        "pipeline_registry 初始化失败。"
+    )
+
+    # ---------------- 层 2：LLM 真实选择（SKIP-friendly） ----------------
+    from httpx import ASGITransport, AsyncClient
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://e2e-test") as client:
@@ -504,9 +537,9 @@ async def test_domain_7_real_llm_graph_pipeline(
             "/api/message",
             json={
                 "text": (
-                    "请你使用 graph_pipeline 工具运行任意一个可用的 pipeline，"
-                    "或者用 tool_search 找到一个 pipeline 类工具并执行。"
-                    "你必须真的调用工具。"
+                    "请你调用 graph_pipeline 工具列出可用 pipeline（action='list'），"
+                    "或用 tool_search 找到 pipeline 类工具。"
+                    "你必须真的调用工具，不能仅口头回复。"
                 ),
                 "idempotency_key": f"e2e-d7-{uuid.uuid4().hex[:8]}",
                 "channel": "web",
@@ -519,7 +552,7 @@ async def test_domain_7_real_llm_graph_pipeline(
         task_id = resp.json()["task_id"]
 
     final_status = await _wait_for_terminal(sg, task_id)
-    assert final_status in _TERMINAL_STATUSES, f"域#7: 应达终态，实际 {final_status}"
+    assert final_status in _TERMINAL_STATUSES, f"域#7 层2: 应达终态，实际 {final_status}"
 
     events = await sg.event_store.get_events_for_task(task_id)
     tools = _tool_calls(events)
@@ -529,10 +562,8 @@ async def test_domain_7_real_llm_graph_pipeline(
     ]
     if not graph_related:
         pytest.skip(
-            f"域#7 SKIP: LLM 没选 graph/pipeline 类工具（用了 {tools}）。"
-            "本 case 仅在 LLM 真选时才能验证。graph_pipeline 工具不在 broker 注册，"
-            "无法用 force_tool_choice 强制（详见 followup feat 1ddbff4 commit body）。"
+            f"域#7 层2 SKIP（GATE_P3_DEVIATION）: LLM 未选 graph/pipeline/tool_search "
+            f"类工具（实际 tools={tools}）。层1 系统挂载契约已 PASS。"
+            "follow-up：让 inline skill 把 graph_pipeline schema 真传给 LLM。"
         )
-
-    # 至少有 1 个 graph 类工具调用
-    assert graph_related, f"域#7: 应有 graph 类调用，实际: {tools}"
+    assert graph_related, f"域#7 层2: 应有 graph 类调用，实际 {tools}"

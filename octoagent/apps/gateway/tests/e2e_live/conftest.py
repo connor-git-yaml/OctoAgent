@@ -284,3 +284,77 @@ def pytest_collection_modifyitems(
         markers = {m.name for m in item.iter_markers()}
         if markers & {"e2e_smoke", "e2e_full"}:
             item.add_marker(flaky_marker)
+
+
+# ---------------------------------------------------------------------------
+# SKIP 审计日志：把 e2e_smoke / e2e_full 的 SKIP 写到 worktree-local pytest cache
+# ---------------------------------------------------------------------------
+#
+# 背景：CLI ``octo e2e`` 路径已有 SKIP 写盘（cli/e2e_command.py:_run_marker），
+# 但用 ``pytest -m e2e_smoke`` / IDE / pre-commit hook 直跑时不走 CLI，
+# SKIP 信号被吞。本钩子让"GATE_P3_DEVIATION 型 SKIP"（如 LLM 决策不命中
+# graph_pipeline / delegate_task）随时落盘，便于观察 LLM 命中率趋势。
+#
+# Codex Finding #3 闭环：日志写到 ``<rootdir>/.pytest_cache/e2e-skip-logs/``，
+# 而非宿主 ``~/.octoagent/logs/``。理由：
+#   1. hermetic fixture 不动 HOME（子进程依赖），写宿主会污染真实 OctoAgent 实例
+#   2. 多 worktree 并发跑时不同 .pytest_cache 自然隔离，避免同名文件竞写
+#   3. .pytest_cache/ 在 worktree gitignore 中，不会进 commit
+
+
+def pytest_runtest_logreport(report: pytest.TestReport) -> None:
+    """把 e2e_smoke / e2e_full 的 SKIP（call phase）追加到 pytest cache 日志。
+
+    仅记录 call phase 的 SKIP；setup/teardown SKIP（如 fixture 错误）不记。
+    日志格式 JSON Lines（一行一个 SKIP）。pytest config 暴露 rootdir 给我们用。
+    """
+    import json
+    import time
+
+    if report.when != "call" or not report.skipped:
+        return
+
+    keywords = report.keywords or {}
+    if not (keywords.get("e2e_smoke") or keywords.get("e2e_full")):
+        return
+
+    longrepr = report.longrepr
+    if isinstance(longrepr, tuple) and len(longrepr) == 3:
+        reason = str(longrepr[2])
+    else:
+        reason = str(longrepr or "")
+
+    log_dir = _SKIP_LOG_DIR
+    if log_dir is None:
+        return
+
+    try:
+        log_dir.mkdir(parents=True, exist_ok=True)
+        date_tag = time.strftime("%Y%m%d")
+        log_file = log_dir / f"e2e-skip-marker-{date_tag}.log"
+        marker = "e2e_smoke" if keywords.get("e2e_smoke") else "e2e_full"
+        entry = {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "marker": marker,
+            "nodeid": report.nodeid,
+            "reason": reason[:600],
+        }
+        with log_file.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except Exception:
+        # 日志失败绝不影响测试结果
+        pass
+
+
+# 模块级缓存：pytest_configure 时按 rootdir 解析；钩子直接复用，避免每条
+# SKIP 都重新计算路径。
+_SKIP_LOG_DIR = None  # type: ignore[var-annotated]
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """缓存 e2e SKIP 日志目录到模块级变量（worktree-local pytest cache）。"""
+    from pathlib import Path
+
+    global _SKIP_LOG_DIR
+    rootdir = Path(str(config.rootdir))
+    _SKIP_LOG_DIR = rootdir / ".pytest_cache" / "e2e-skip-logs"

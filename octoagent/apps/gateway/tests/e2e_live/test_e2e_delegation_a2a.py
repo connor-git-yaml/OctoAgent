@@ -113,19 +113,56 @@ async def _count_a2a_messages(sg: Any, task_id: str | None = None) -> int:
 async def test_domain_8_real_llm_delegate_task(
     harness_real_llm: dict[str, Any],
 ) -> None:
-    """域 #8 真打：LLM 调 delegate_task → 子 task 创建。
+    """域 #8：delegate_task 系统挂载链路 + LLM 真实调用（双层断言）。
 
-    断言（≥ 2 独立点）：
-    1. 任务 succeeded 或 awaiting_delegation
-    2. tool_calls 含 delegate_task
-    3. (可选) 子 task 创建（task_store 出现 parent_task_id == 当前 task）
+    历史决策（已修正）：原版本仅"LLM 真选 delegate_task 才验证子任务事件"，
+    LLM 决策不命中走 SKIP——把"LLM 走神"伪装成通过。本次拆为双层：
 
-    SKIP 路径：LLM 没用 delegate_task → SKIP（不 FAIL）
+    层 1（系统层，确定性）：
+        delegate_task 必须在 ToolBroker 注册（Feature 084 Phase 3 T045 契约，
+        不可回归）。这层断言不依赖 LLM。
+
+    层 2（LLM 行为层，best-effort + SKIP-friendly）：
+        发出明确"调 delegate_task"指令，断言 LLM 真选 + 子任务真创建。
+        LLM 当前 fixture 模型在 inline skill 下不一定真选 delegate_task
+        （capability_pack mount → inline manifest tools_allowed 链路在
+        hermetic env 下尚未稳定），不命中走 SKIP（不是 FAIL）。
     """
-    from httpx import ASGITransport, AsyncClient
-
+    # ---------------- 层 1：系统挂载契约（hard assertion） ----------------
+    # 拆两步：注册 + 运行时可用性。Codex Finding #1 闭环——避免"被注册但其实
+    # _task_runner is None → UNAVAILABLE"的假阳性挂载漏过 review。
     app = harness_real_llm["app"]
     sg = app.state.store_group
+
+    broker = getattr(app.state, "tool_broker", None) or getattr(
+        app.state, "broker", None
+    )
+    assert broker is not None, "域#8 层1.1: app.state.tool_broker / broker 应存在"
+
+    discovered = await broker.discover()
+    discovered_names = {
+        getattr(meta, "name", "") or getattr(meta, "tool_name", "")
+        for meta in discovered
+    }
+    assert "delegate_task" in discovered_names, (
+        "域#8 层1.1: delegate_task 必须在 broker.discover()（Feature 084 T045 契约）。"
+        f" 抽样工具: {sorted(discovered_names)[:15]}"
+    )
+
+    capability_pack_service = getattr(app.state, "capability_pack_service", None)
+    assert capability_pack_service is not None, (
+        "域#8 层1.2: app.state.capability_pack_service 应存在"
+    )
+    from octoagent.gateway.services.capability_pack import BuiltinToolAvailabilityStatus
+
+    availability = capability_pack_service._resolve_tool_availability("delegate_task")
+    assert availability == BuiltinToolAvailabilityStatus.AVAILABLE, (
+        f"域#8 层1.2: delegate_task 运行时应 AVAILABLE（task_runner / delegation_plane "
+        f"等依赖应已绑定），实际 {availability}。"
+    )
+
+    # ---------------- 层 2：LLM 真实选择（SKIP-friendly） ----------------
+    from httpx import ASGITransport, AsyncClient
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://e2e-test") as client:
@@ -148,24 +185,23 @@ async def test_domain_8_real_llm_delegate_task(
         task_id = resp.json()["task_id"]
 
     final_status = await _wait_for_terminal(sg, task_id)
-    assert final_status in _TERMINAL_STATUSES, f"域#8: 应达终态，实际 {final_status}"
+    assert final_status in _TERMINAL_STATUSES, f"域#8 层2: 应达终态，实际 {final_status}"
 
     events = await sg.event_store.get_events_for_task(task_id)
     tools = _tool_calls(events)
     if "delegate_task" not in tools:
         pytest.skip(
-            f"域#8 SKIP: LLM 没用 delegate_task（实际: {tools}）。"
-            "本 case 仅在 LLM 真选 delegate_task 时验证。"
+            f"域#8 层2 SKIP（GATE_P3_DEVIATION）: LLM 未选 delegate_task "
+            f"（实际 tools={tools}）。层1 系统挂载契约已 PASS。"
         )
 
-    # delegate_task 调用了 → 验证子任务存在
-    # 简单按 events 表 child_task_created 类事件验证
+    # delegate_task 调用了 → 验证子任务存在（事件层兜底）
     child_events = [
         e for e in events
         if "child" in str(e.payload or {}).lower() or "delegate" in str(e.payload or {}).lower()
     ]
     assert child_events, (
-        "域#8: delegate_task 调用后应有 child / delegate 类事件。"
+        "域#8 层2: delegate_task 调用后应有 child / delegate 类事件。"
         f"events 数: {len(events)}"
     )
 
