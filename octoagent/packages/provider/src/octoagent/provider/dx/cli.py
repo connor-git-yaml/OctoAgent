@@ -437,10 +437,23 @@ def onboard(channel: str, restart: bool, status_only: bool) -> None:
         console.print(_render_summary(result))
         from .setup_governance_adapter import LocalSetupGovernanceAdapter
 
-        review_result = await LocalSetupGovernanceAdapter(Path(project_root)).review()
-        review = review_result.data.get("review", {})
-        if isinstance(review, dict):
-            console.print(_render_setup_review_panel(review))
+        try:
+            review_result = await LocalSetupGovernanceAdapter(Path(project_root)).review()
+            review = review_result.data.get("review", {})
+            if isinstance(review, dict):
+                console.print(_render_setup_review_panel(review))
+        except RuntimeError as exc:
+            if not status_only:
+                raise
+            console.print(
+                _render_setup_review_panel(
+                    {
+                        "ready": False,
+                        "risk_level": "unknown",
+                        "blocking_reasons": [f"gateway 不可达：{exc}"],
+                    }
+                )
+            )
         if result.doctor_guidance is not None:
             panel = format_guidance_panel(result.doctor_guidance)
             if panel is not None:

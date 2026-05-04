@@ -130,9 +130,14 @@ def test_delegate_task_tool_file_has_registry_register_call() -> None:
     import ast
     from pathlib import Path
 
-    tool_file = Path(
-        "/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/silly-noyce-22a8af/"
-        "octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/delegate_task_tool.py"
+    tool_file = (
+        Path(__file__).resolve().parents[2]
+        / "src"
+        / "octoagent"
+        / "gateway"
+        / "services"
+        / "builtin_tools"
+        / "delegate_task_tool.py"
     )
     assert tool_file.exists(), f"delegate_task_tool.py 不存在: {tool_file}"
 
