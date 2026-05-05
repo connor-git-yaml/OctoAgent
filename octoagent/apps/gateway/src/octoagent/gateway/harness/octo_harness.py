@@ -784,6 +784,45 @@ class OctoHarness:
             project_root=project_root,
         )
         app.state.capability_pack_service.bind_task_runner(app.state.task_runner)
+
+        # F088 followup（Codex adversarial F1 闭环）：GraphPipelineTool 构造 + 注入必须
+        # 发生在 capability_pack.refresh() **之前**——pack.tools[*].availability 在 refresh
+        # 时按 _tool_deps._graph_pipeline_tool 是否非空快照（capability_pack.py:1671-1678）。
+        # 若推迟到 refresh 之后再注入，graph_pipeline 永久冻结成 UNAVAILABLE → 进 blocked_tools
+        # 而非 mounted_names → LLM 第一轮 tools schema 看不到 graph_pipeline → F087 域 #7 永远 SKIP。
+        # 早期版本试图用第二次 refresh() 修正，但那次 refresh 会触发 McpRegistryService.refresh()
+        # → unregister 已注册 MCP 工具 + 重开 sessions，与 task_runner.startup() 拉起的
+        # orphan/queued task 形成竞态（启动恢复任务可能在 schema 构建期间命中清空状态）。
+        # 提前到这里一次性正确，无需二次 refresh，竞态彻底消除。
+        try:
+            from octoagent.skills.pipeline_tool import GraphPipelineTool
+
+            pipeline_registry = getattr(app.state, "pipeline_registry", None)
+            if pipeline_registry is not None:
+                graph_pipeline_tool = GraphPipelineTool(
+                    registry=pipeline_registry,
+                    store_group=store_group,
+                )
+                app.state.graph_pipeline_tool = graph_pipeline_tool
+                # 注入到 TaskRunner 内部的 OrchestratorService（task_runner 已在 :777 创建）
+                orchestrator = getattr(app.state.task_runner, "_orchestrator", None)
+                if orchestrator is not None:
+                    orchestrator._graph_pipeline_tool = graph_pipeline_tool
+                # late-bind 到 ToolDeps，供 builtin_tools/graph_pipeline_tool.py 的 broker
+                # handler 调用（与 _snapshot_store 同 pattern；capability_pack.py:1669/1673/
+                # 1716 真消费此字段）。必须在 capability_pack.refresh() 之前完成。
+                _tool_deps_for_pipeline = getattr(
+                    app.state.capability_pack_service, "_tool_deps", None,
+                )
+                if _tool_deps_for_pipeline is not None:
+                    _tool_deps_for_pipeline._graph_pipeline_tool = graph_pipeline_tool
+                _log.info("graph_pipeline_tool_initialized")
+            else:
+                app.state.graph_pipeline_tool = None
+        except Exception as exc:
+            _log.warning("graph_pipeline_tool_init_skipped", error=str(exc))
+            app.state.graph_pipeline_tool = None
+
         await app.state.capability_pack_service.refresh()
         app.state.execution_console = app.state.task_runner.execution_console
         telegram_service.bind_task_runner(app.state.task_runner)
@@ -819,36 +858,6 @@ class OctoHarness:
                 "auth_config_drift_check_failed",
                 error_type=type(exc).__name__,
             )
-
-        # Feature 067: 创建 GraphPipelineTool 并挂载到 app.state + OrchestratorService
-        try:
-            from octoagent.skills.pipeline_tool import GraphPipelineTool
-
-            pipeline_registry = getattr(app.state, "pipeline_registry", None)
-            if pipeline_registry is not None:
-                graph_pipeline_tool = GraphPipelineTool(
-                    registry=pipeline_registry,
-                    store_group=store_group,
-                )
-                app.state.graph_pipeline_tool = graph_pipeline_tool
-                # 注入到 TaskRunner 内部的 OrchestratorService
-                orchestrator = getattr(app.state.task_runner, "_orchestrator", None)
-                if orchestrator is not None:
-                    orchestrator._graph_pipeline_tool = graph_pipeline_tool
-                # F087 squash merge port from master 720d045：late-bind 到 ToolDeps，
-                # 供 services/builtin_tools/graph_pipeline_tool.py 的 broker handler 调用
-                # （与 _snapshot_store 同 pattern；capability_pack.py:1669/1673/1716 真消费此字段）
-                _tool_deps_for_pipeline = getattr(
-                    app.state.capability_pack_service, "_tool_deps", None,
-                )
-                if _tool_deps_for_pipeline is not None:
-                    _tool_deps_for_pipeline._graph_pipeline_tool = graph_pipeline_tool
-                _log.info("graph_pipeline_tool_initialized")
-            else:
-                app.state.graph_pipeline_tool = None
-        except Exception as exc:
-            _log.warning("graph_pipeline_tool_init_skipped", error=str(exc))
-            app.state.graph_pipeline_tool = None
 
         # F084 Phase 2 T034：把 SnapshotStore 注入 OrchestratorService（替代直读 USER.md）
         _orchestrator = getattr(getattr(app.state, "task_runner", None), "_orchestrator", None)

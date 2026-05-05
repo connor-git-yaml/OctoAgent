@@ -357,6 +357,9 @@ class CoreToolSet(BaseModel):
             "web.fetch",           # 网页读取
             "skills",              # 技能调用
             "graph_pipeline",      # Pipeline 编排（system prompt 已宣传，直接 1 跳调用）
+            "delegate_task",       # Sub-agent 派发（与 graph_pipeline 同 agent_runtime 入口；
+                                   # 不进 Core 会被压成 deferred → 强制走 tool_search 两跳链路 →
+                                   # F087 e2e 域 #8 在 240s SIGALRM 内永远来不及 → SKIP）
         ])
 
     def is_core(self, tool_name: str) -> bool:

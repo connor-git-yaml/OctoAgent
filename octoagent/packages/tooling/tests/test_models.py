@@ -417,11 +417,13 @@ class TestCoreToolSet:
         defaults = CoreToolSet.default()
         assert "tool_search" in defaults.tool_names
 
-    def test_default_has_10_tools(self) -> None:
+    def test_default_has_11_tools(self) -> None:
         defaults = CoreToolSet.default()
-        # 9 核心工具 + graph_pipeline（治本 1 跳路径，避免绕 tool_search 慢路径）
-        assert len(defaults.tool_names) == 10
+        # 9 核心工具 + graph_pipeline + delegate_task（agent_runtime 入口的两个 1 跳工具，
+        # 避免绕 tool_search 慢路径触发 e2e timeout）
+        assert len(defaults.tool_names) == 11
         assert "graph_pipeline" in defaults.tool_names
+        assert "delegate_task" in defaults.tool_names
 
     def test_is_core(self) -> None:
         ts = CoreToolSet(tool_names=["tool_search", "echo"])
