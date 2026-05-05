@@ -93,7 +93,12 @@ from .connection_metadata import (
 from .context_budget import ContextBudgetPlanner
 from .context_compaction import CompiledTaskContext, ContextCompactionService
 from .execution_context import bind_execution_context
-from .runtime_control import is_recall_planner_skip, runtime_context_from_metadata
+from .runtime_control import (
+    RUNTIME_CONTEXT_JSON_KEY,
+    encode_runtime_context,
+    is_recall_planner_skip,
+    runtime_context_from_metadata,
+)
 
 log = structlog.get_logger()
 
@@ -896,6 +901,11 @@ class TaskService:
             merged.get("work_id", "")
         ).strip():
             merged["work_id"] = runtime_context.work_id
+        # F091 Final Codex M1 闭环：把 explicit runtime_context 序列化进 metadata，
+        # 让下游 LLMService（仅从 metadata 解析）能拿到与 task_service caller 一致的
+        # runtime_context，避免 single_loop_executor flag 与 delegation_mode 不一致的 split-brain。
+        if runtime_context is not None and RUNTIME_CONTEXT_JSON_KEY not in merged:
+            merged[RUNTIME_CONTEXT_JSON_KEY] = encode_runtime_context(runtime_context)
         return merged
 
     @staticmethod

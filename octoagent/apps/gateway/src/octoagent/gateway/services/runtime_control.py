@@ -99,16 +99,23 @@ def is_recall_planner_skip(
 ) -> bool:
     """当前轮次是否跳过 recall planner。
 
-    F091 Phase C 读取优先级：
-    1. runtime_context.recall_planner_mode == "skip" → True（显式跳过）
-    2. recall_planner_mode == "full" → False（明确跑完整 planner）
-    3. recall_planner_mode == "auto" → raise NotImplementedError（保留 F100 启用语义；
-       不允许 F091 时通过 fallback 隐式赋予 "auto" 行为，避免提前锁死设计空间）
-    4. runtime_context = None → fallback metadata flag（兼容期；F100 删）
+    F091 Phase C/Final-review 修复（Codex M2 闭环）：
+    `recall_planner_mode` 仅在 `delegation_mode` 已显式时（非 "unspecified"）作为权威。
+    当 `delegation_mode == "unspecified"`（默认值）时，必须 fallback 到 metadata flag——
+    否则"默认 RuntimeControlContext + metadata['single_loop_executor']=True"在旧逻辑里
+    会 skip recall planner，新逻辑因 recall_planner_mode 默认 "full" 反而不 skip，行为变了。
+
+    读取优先级：
+    1. runtime_context.delegation_mode != "unspecified"（已显式）→ 看 recall_planner_mode：
+       - "skip" → True
+       - "full" → False
+       - "auto" → raise NotImplementedError（防止 F091 隐式定义；F100 启用）
+    2. runtime_context.delegation_mode == "unspecified" 或 runtime_context = None
+       → fallback metadata flag（保持旧逻辑等价）
 
     F100 收口：实施 "auto" 实际语义（依 delegation_mode 自动决议）+ 删除 metadata fallback。
     """
-    if runtime_context is not None:
+    if runtime_context is not None and runtime_context.delegation_mode != "unspecified":
         if runtime_context.recall_planner_mode == "skip":
             return True
         if runtime_context.recall_planner_mode == "full":
@@ -118,4 +125,5 @@ def is_recall_planner_skip(
             'RecallPlannerMode "auto" not implemented in F091; F100 will enable.'
             ' Use "skip" or "full" explicitly.'
         )
-    return is_single_loop_main_active(runtime_context, metadata)
+    # delegation_mode = unspecified（默认）或 runtime_context = None → fallback metadata flag
+    return metadata_flag(metadata, "single_loop_executor")

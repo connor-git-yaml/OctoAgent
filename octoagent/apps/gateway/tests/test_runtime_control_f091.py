@@ -85,26 +85,39 @@ class TestIsSingleLoopMainActive:
 class TestIsRecallPlannerSkip:
     """读取优先级：runtime_context.recall_planner_mode → fallback is_single_loop_main_active。"""
 
-    def test_skip_mode_returns_true(self) -> None:
-        ctx = _make_context(recall_planner_mode="skip")
+    def test_skip_mode_with_explicit_delegation_returns_true(self) -> None:
+        """recall_planner_mode = skip + delegation_mode 显式 → True。"""
+        ctx = _make_context(delegation_mode="main_inline", recall_planner_mode="skip")
         assert is_recall_planner_skip(ctx, {}) is True
 
     def test_skip_mode_overrides_metadata(self) -> None:
-        """recall_planner_mode = skip 优先于 metadata flag false。"""
-        ctx = _make_context(recall_planner_mode="skip")
+        """recall_planner_mode = skip + delegation_mode 显式 优先于 metadata flag false。"""
+        ctx = _make_context(delegation_mode="main_inline", recall_planner_mode="skip")
         assert is_recall_planner_skip(ctx, {"single_loop_executor": False}) is True
 
-    def test_full_mode_returns_false(self) -> None:
-        ctx = _make_context(recall_planner_mode="full")
+    def test_full_mode_with_explicit_delegation_returns_false(self) -> None:
+        """recall_planner_mode = full + delegation_mode 显式 → False。"""
+        ctx = _make_context(delegation_mode="main_delegate", recall_planner_mode="full")
         assert is_recall_planner_skip(ctx, {}) is False
 
-    def test_full_mode_overrides_metadata(self) -> None:
-        """recall_planner_mode = full 优先于 metadata flag true。"""
-        ctx = _make_context(recall_planner_mode="full")
+    def test_full_mode_overrides_metadata_when_delegation_explicit(self) -> None:
+        """recall_planner_mode = full + delegation_mode 显式 优先于 metadata flag true。"""
+        ctx = _make_context(delegation_mode="main_delegate", recall_planner_mode="full")
         assert is_recall_planner_skip(ctx, {"single_loop_executor": True}) is False
 
-    def test_auto_mode_raises_not_implemented(self) -> None:
-        """recall_planner_mode = auto 必须 raise NotImplementedError（F100 启用前不允许 fallback 隐式语义）。
+    def test_default_context_falls_back_to_metadata(self) -> None:
+        """Final Codex M2 闭环：delegation_mode = unspecified（默认）时 recall_planner_mode 不权威，
+        fallback metadata flag——保持与旧逻辑等价。"""
+        ctx = _make_context()  # delegation_mode = unspecified, recall_planner_mode = full（默认）
+        # 默认 ctx + metadata flag True → 应 skip（旧逻辑）
+        assert is_recall_planner_skip(ctx, {"single_loop_executor": True}) is True
+        # 默认 ctx + metadata flag False → 应不 skip
+        assert is_recall_planner_skip(ctx, {"single_loop_executor": False}) is False
+        # 默认 ctx + 无 metadata → 默认 False
+        assert is_recall_planner_skip(ctx, {}) is False
+
+    def test_auto_mode_raises_not_implemented_when_delegation_explicit(self) -> None:
+        """recall_planner_mode = auto + delegation_mode 显式 → raise NotImplementedError。
 
         Codex M1 闭环：F091 不可通过 fallback 隐式定义 "auto" 行为，避免锁死 F100 设计空间。
         """
@@ -123,7 +136,7 @@ class TestIsRecallPlannerSkip:
             is_recall_planner_skip(ctx_delegate, {})
 
     def test_runtime_context_none_falls_back_to_metadata(self) -> None:
-        """runtime_context = None 时 fallback 到 single_loop_main_active 路径。"""
+        """runtime_context = None 时 fallback 到 metadata flag。"""
         assert is_recall_planner_skip(None, {"single_loop_executor": True}) is True
         assert is_recall_planner_skip(None, {"single_loop_executor": False}) is False
 

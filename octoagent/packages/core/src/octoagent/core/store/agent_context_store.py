@@ -29,6 +29,8 @@ from ..models.agent_context import (
     WorkerProfileOriginKind,
     WorkerProfileRevision,
     WorkerProfileStatus,
+    normalize_runtime_role,
+    normalize_session_kind,
 )
 
 
@@ -1254,7 +1256,10 @@ class SqliteAgentContextStore:
             project_id=row["project_id"],
             agent_profile_id=row["agent_profile_id"],
             worker_profile_id=row["worker_profile_id"],
-            role=AgentRuntimeRole(row["role"]),
+            # F091 Final Codex HIGH 闭环：用 normalize 兜底处理 legacy "butler" 数据
+            # （F091 Phase B 删除启动 migration 后，跳版本升级 / Docker volume / backup 恢复
+            # 等场景下旧 butler 行不会再被自动迁移；store 层兜底保证读取不报 ValueError）
+            role=normalize_runtime_role(row["role"]),
             name=row["name"],
             persona_summary=row["persona_summary"],
             status=AgentRuntimeStatus(row["status"]),
@@ -1273,7 +1278,8 @@ class SqliteAgentContextStore:
         return AgentSession(
             agent_session_id=row["agent_session_id"],
             agent_runtime_id=row["agent_runtime_id"],
-            kind=AgentSessionKind(row["kind"]),
+            # F091 Final Codex HIGH 闭环：用 normalize 兜底处理 legacy "butler_main" 数据
+            kind=normalize_session_kind(row["kind"]),
             status=AgentSessionStatus(row["status"]),
             project_id=row["project_id"],
             surface=row["surface"],
