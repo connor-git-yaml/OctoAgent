@@ -205,8 +205,13 @@ from .control_plane import (
     WorkProjectionItem,
 )
 from .delegation import (
+    TASK_TO_WORK_STATUS,
     VALID_WORK_TRANSITIONS,
+    WORK_STATUSES_REQUIRING_CONTEXT,
     WORK_TERMINAL_STATUSES,
+    WORK_TO_TASK_STATUS,
+    WORKER_TO_TASK_STATUS,
+    WORKER_TO_WORK_STATUS,
     DelegationEnvelope,
     DelegationResult,
     DelegationTargetKind,
@@ -214,7 +219,11 @@ from .delegation import (
     WorkKind,
     WorkStatus,
     WorkTransitionError,
+    task_status_to_work_status,
     validate_work_transition,
+    work_status_to_task_status,
+    worker_state_to_task_status,
+    worker_state_to_work_status,
 )
 from .enums import (
     TERMINAL_STATES,
@@ -520,6 +529,16 @@ __all__ = [
     "Work",
     "DelegationEnvelope",
     "DelegationResult",
+    # F091 状态机映射函数
+    "TASK_TO_WORK_STATUS",
+    "WORK_TO_TASK_STATUS",
+    "WORK_STATUSES_REQUIRING_CONTEXT",
+    "WORKER_TO_WORK_STATUS",
+    "WORKER_TO_TASK_STATUS",
+    "task_status_to_work_status",
+    "work_status_to_task_status",
+    "worker_state_to_work_status",
+    "worker_state_to_task_status",
     # Skill Pipeline
     "PipelineNodeType",
     "PipelineRunStatus",
