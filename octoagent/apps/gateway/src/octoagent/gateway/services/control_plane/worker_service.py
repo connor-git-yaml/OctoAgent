@@ -1380,6 +1380,7 @@ class WorkerProfileDomainService(DomainServiceBase):
             scope=profile.scope,
             project_id=profile.project_id,
             name=profile.name,
+            kind="worker",
             persona_summary=profile.summary,
             model_alias=profile.model_alias,
             tool_profile=profile.tool_profile,

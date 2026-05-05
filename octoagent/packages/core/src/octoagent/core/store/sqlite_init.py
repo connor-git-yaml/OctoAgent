@@ -288,6 +288,7 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     scope                   TEXT NOT NULL DEFAULT 'system',
     project_id              TEXT NOT NULL DEFAULT '',
     name                    TEXT NOT NULL,
+    kind                    TEXT NOT NULL DEFAULT 'main',
     persona_summary         TEXT NOT NULL DEFAULT '',
     instruction_overlays    TEXT NOT NULL DEFAULT '[]',
     model_alias             TEXT NOT NULL DEFAULT 'main',
@@ -996,6 +997,13 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     if owner_profile_columns and "last_synced_from_profile_at" not in owner_profile_columns:
         await conn.execute(
             "ALTER TABLE owner_profiles ADD COLUMN last_synced_from_profile_at TEXT"
+        )
+
+    # Feature 090 D2：agent_profiles 加 kind 列（main/worker/subagent，显式标记 Agent 类型）
+    agent_profile_columns = await _table_columns(conn, "agent_profiles")
+    if agent_profile_columns and "kind" not in agent_profile_columns:
+        await conn.execute(
+            "ALTER TABLE agent_profiles ADD COLUMN kind TEXT NOT NULL DEFAULT 'main'"
         )
 
     session_context_columns = await _table_columns(conn, "session_context_states")

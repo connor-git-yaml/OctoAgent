@@ -42,16 +42,17 @@ class SqliteAgentContextStore:
         await self._conn.execute(
             """
             INSERT INTO agent_profiles (
-                profile_id, scope, project_id, name, persona_summary,
+                profile_id, scope, project_id, name, kind, persona_summary,
                 instruction_overlays, model_alias, tool_profile, policy_refs,
                 memory_access_policy, context_budget_policy, bootstrap_template_ids,
                 metadata, version, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(profile_id) DO UPDATE SET
                 scope = excluded.scope,
                 project_id = excluded.project_id,
                 name = excluded.name,
+                kind = excluded.kind,
                 persona_summary = excluded.persona_summary,
                 instruction_overlays = excluded.instruction_overlays,
                 model_alias = excluded.model_alias,
@@ -69,6 +70,7 @@ class SqliteAgentContextStore:
                 profile.scope.value,
                 profile.project_id,
                 profile.name,
+                profile.kind,
                 profile.persona_summary,
                 self._dump(profile.instruction_overlays),
                 profile.model_alias,
@@ -1176,11 +1178,21 @@ class SqliteAgentContextStore:
 
     @classmethod
     def _row_to_agent_profile(cls, row: aiosqlite.Row) -> AgentProfile:
+        # Feature 090 D2: kind 列兜底
+        # - SQLite Row 不支持 .get()；migration 未跑或异常数据时用 try/KeyError 兜底
+        # - Literal 类型 Pydantic 严格校验，未知值统一兜底为 "main"
+        try:
+            kind_value = row["kind"] or "main"
+        except (KeyError, IndexError):
+            kind_value = "main"
+        if kind_value not in ("main", "worker", "subagent"):
+            kind_value = "main"
         return AgentProfile(
             profile_id=row["profile_id"],
             scope=row["scope"],
             project_id=row["project_id"],
             name=row["name"],
+            kind=kind_value,
             persona_summary=row["persona_summary"],
             instruction_overlays=cls._load(row["instruction_overlays"], []),
             model_alias=row["model_alias"],

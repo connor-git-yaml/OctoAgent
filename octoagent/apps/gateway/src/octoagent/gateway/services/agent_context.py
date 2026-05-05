@@ -2820,6 +2820,7 @@ class AgentContextService:
                 "优先遵守当前 Root Agent 的静态配置、工具边界和 project 约束。",
                 "在工具不足或 connector 未就绪时，明确说明原因与下一步。",
             ],
+            kind="worker",
             model_alias=worker_profile.model_alias or "main",
             tool_profile=worker_profile.tool_profile or "standard",
             policy_refs=[],

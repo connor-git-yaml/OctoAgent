@@ -636,6 +636,7 @@ class AgentProfileDomainService(DomainServiceBase):
             scope=AgentProfileScope.PROJECT,
             project_id="",
             name=worker_name,
+            kind="worker",
             persona_summary=project_goal,
             model_alias=model_alias,
             tool_profile=tool_profile,

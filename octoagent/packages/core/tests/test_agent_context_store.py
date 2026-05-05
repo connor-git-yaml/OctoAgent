@@ -100,6 +100,8 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
 
     assert stored_profile is not None
     assert stored_profile.persona_summary == "负责 Alpha 项目的连续协作。"
+    # F090 D2: 默认 AgentProfile.kind="main" 持久化
+    assert stored_profile.kind == "main"
     assert stored_overlay is not None
     assert stored_overlay.assistant_identity_overrides["assistant_name"] == "Alpha Agent"
     assert stored_session is not None
@@ -112,6 +114,47 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
         limit=5,
     )
     assert [item.context_frame_id for item in frames] == ["context-frame-alpha"]
+
+    await store_group.conn.close()
+
+
+async def test_agent_profile_kind_persists_round_trip(tmp_path: Path) -> None:
+    """F090 D2: AgentProfile.kind 字段持久化 round-trip 验证。
+
+    覆盖：kind="worker" save → load 后保持 / kind="main" 默认值 / kind="subagent"。
+    """
+    store_group = await create_store_group(
+        str(tmp_path / "agent-kind.db"),
+        str(tmp_path / "artifacts"),
+    )
+
+    main_profile = AgentProfile(
+        profile_id="kind-main-001",
+        name="Main",
+    )
+    worker_profile = AgentProfile(
+        profile_id="kind-worker-001",
+        name="Worker",
+        kind="worker",
+    )
+    subagent_profile = AgentProfile(
+        profile_id="kind-subagent-001",
+        name="Subagent",
+        kind="subagent",
+    )
+
+    await store_group.agent_context_store.save_agent_profile(main_profile)
+    await store_group.agent_context_store.save_agent_profile(worker_profile)
+    await store_group.agent_context_store.save_agent_profile(subagent_profile)
+    await store_group.conn.commit()
+
+    loaded_main = await store_group.agent_context_store.get_agent_profile("kind-main-001")
+    loaded_worker = await store_group.agent_context_store.get_agent_profile("kind-worker-001")
+    loaded_subagent = await store_group.agent_context_store.get_agent_profile("kind-subagent-001")
+
+    assert loaded_main is not None and loaded_main.kind == "main"
+    assert loaded_worker is not None and loaded_worker.kind == "worker"
+    assert loaded_subagent is not None and loaded_subagent.kind == "subagent"
 
     await store_group.conn.close()
 

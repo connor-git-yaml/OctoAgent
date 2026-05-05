@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
+
+
+# Feature 090 D2: 显式化 worker kind，消除 _is_worker_behavior_profile 的 metadata 探测
+# - "main": 主 Agent（默认）
+# - "worker": 来自 WorkerProfile 的镜像 Agent
+# - "subagent": 临时 Subagent（F097 启用）
+AgentProfileKind = Literal["main", "worker", "subagent"]
 
 
 # Feature 061: 权限 Preset 系统默认值（单一事实源）
@@ -118,12 +125,21 @@ class MemoryNamespaceKind(StrEnum):
 
 
 class AgentProfile(BaseModel):
-    """主 Agent / automation / delegation 可消费的正式 profile。"""
+    """主 Agent / automation / delegation 可消费的正式 profile。
+
+    Feature 090 D2: 新增 ``kind`` 字段显式标记 Agent 类型，消除
+    ``_is_worker_behavior_profile`` 通过 metadata 字符串探测的隐式判断。
+    完全合并 WorkerProfile→AgentProfile 留给 M6 F107 Capability Layer Refactor。
+    """
 
     profile_id: str = Field(min_length=1)
     scope: AgentProfileScope = AgentProfileScope.SYSTEM
     project_id: str = Field(default="")
     name: str = Field(min_length=1)
+    kind: AgentProfileKind = Field(
+        default="main",
+        description="Agent 类型：main（主 Agent）/ worker（WorkerProfile 镜像）/ subagent（F097）",
+    )
     persona_summary: str = Field(default="")
     instruction_overlays: list[str] = Field(default_factory=list)
     model_alias: str = Field(default="main")

@@ -13,6 +13,7 @@ from octoagent.core.behavior_workspace import (
     BehaviorLoadProfile,
     OnboardingState,
     _default_content_for_file,
+    _is_worker_behavior_profile,
     _onboarding_state_path,
     ensure_filesystem_skeleton,
     load_onboarding_state,
@@ -49,6 +50,56 @@ def _setup_skeleton(tmp_path: Path) -> Path:
     """创建 behavior 目录骨架，返回 project_root。"""
     ensure_filesystem_skeleton(tmp_path, project_slug="default", agent_slug="main")
     return tmp_path
+
+
+# ============================================================================
+# Feature 090 D2: AgentProfile.kind 显式标记 worker
+# ============================================================================
+
+
+class TestAgentProfileKindFlag:
+    """F090 D2: 验证 _is_worker_behavior_profile 优先读 kind 字段。"""
+
+    def test_kind_worker_recognized(self) -> None:
+        """新建 AgentProfile(kind="worker") 直接被识别为 worker。"""
+        profile = AgentProfile(
+            profile_id="test-w-001",
+            name="Worker",
+            kind="worker",
+        )
+        assert _is_worker_behavior_profile(profile) is True
+
+    def test_kind_main_not_recognized_as_worker(self) -> None:
+        """默认 kind="main" 的 AgentProfile 不被识别为 worker。"""
+        profile = AgentProfile(
+            profile_id="test-m-001",
+            name="Main",
+        )
+        assert profile.kind == "main"
+        assert _is_worker_behavior_profile(profile) is False
+
+    def test_metadata_fallback_for_legacy_data(self) -> None:
+        """老数据：kind 字段未填（默认 main）但 metadata 携带 worker_profile_mirror，仍走 fallback 识别为 worker。"""
+        profile = AgentProfile(
+            profile_id="test-legacy-001",
+            name="Legacy Worker",
+            metadata={
+                "source_kind": "worker_profile_mirror",
+                "source_worker_profile_id": "wp-001",
+            },
+        )
+        assert profile.kind == "main"
+        assert _is_worker_behavior_profile(profile) is True
+
+    def test_kind_worker_overrides_metadata(self) -> None:
+        """显式 kind=worker 优先（无需 metadata 携带 source_kind）。"""
+        profile = AgentProfile(
+            profile_id="test-w-002",
+            name="Pure Kind Worker",
+            kind="worker",
+        )
+        assert profile.metadata == {}
+        assert _is_worker_behavior_profile(profile) is True
 
 
 # ============================================================================
