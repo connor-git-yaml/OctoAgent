@@ -56,9 +56,9 @@ from octoagent.core.models import (
     TurnExecutorKind,
     Work,
     WorkerDispatchedPayload,
+    WorkerDispatchState,
     WorkerResult,
     WorkerReturnedPayload,
-    WorkerSession,
     WorkStatus,
 )
 from octoagent.core.store import StoreGroup
@@ -2477,7 +2477,7 @@ class OrchestratorService:
         self,
         *,
         envelope: DispatchEnvelope,
-        session: WorkerSession,
+        session: WorkerDispatchState,
         summary: str = "",
         state: TaskStatus = TaskStatus.RUNNING,
     ) -> None:

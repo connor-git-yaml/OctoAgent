@@ -13,7 +13,7 @@ from octoagent.core.models import (
     PartType,
     TaskStatus,
     WorkerResult,
-    WorkerSession,
+    WorkerDispatchState,
 )
 from octoagent.protocol import (
     A2AArtifactMapper,
@@ -303,7 +303,7 @@ class TestAdaptersAndFixtures:
             name="reply",
             parts=[ArtifactPart(type=PartType.TEXT, content="hello world")],
         )
-        session = WorkerSession(
+        session = WorkerDispatchState(
             session_id="session-001",
             dispatch_id="dispatch-001",
             task_id="task-001",
@@ -368,7 +368,7 @@ class TestAdaptersAndFixtures:
         assert heartbeat.payload.summary == "step-2"
 
     def test_heartbeat_preserves_internal_status_metadata(self) -> None:
-        session = WorkerSession(
+        session = WorkerDispatchState(
             session_id="session-approval-001",
             dispatch_id="dispatch-001",
             task_id="task-001",

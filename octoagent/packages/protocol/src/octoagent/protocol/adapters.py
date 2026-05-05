@@ -9,8 +9,8 @@ from octoagent.core.models import (
     Artifact,
     DispatchEnvelope,
     TaskStatus,
+    WorkerDispatchState,
     WorkerResult,
-    WorkerSession,
 )
 
 from .mappers import A2AArtifactMapper, A2AStateMapper
@@ -252,7 +252,7 @@ def build_cancel_message(
 
 
 def build_heartbeat_message(
-    session: WorkerSession,
+    session: WorkerDispatchState,
     *,
     context_id: str,
     trace_id: str,

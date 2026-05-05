@@ -27,7 +27,7 @@ class A2AMessageDirection(StrEnum):
 
 
 class A2AConversation(BaseModel):
-    """MainAgentSession -> WorkerSession 的 durable carrier。"""
+    """主 AgentSession ↔ Worker AgentSession 的 durable 双向 carrier。"""
 
     a2a_conversation_id: str = Field(min_length=1)
     task_id: str = Field(default="")

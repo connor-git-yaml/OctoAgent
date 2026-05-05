@@ -259,9 +259,9 @@ from .orchestrator import (
     OrchestratorRequest,
     RuntimeControlContext,
     TurnExecutorKind,
+    WorkerDispatchState,
     WorkerResult,
     WorkerRuntimeState,
-    WorkerSession,
 )
 from .payloads import (
     A2AMessageAuditPayload,
@@ -595,9 +595,9 @@ __all__ = [
     "OrchestratorRequest",
     "DispatchEnvelope",
     "RuntimeControlContext",
+    "WorkerDispatchState",
     "WorkerResult",
     "WorkerRuntimeState",
-    "WorkerSession",
     # Control Plane
     "ControlPlaneActor",
     "ControlPlaneCapability",

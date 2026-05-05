@@ -1,7 +1,7 @@
 """Worker Runtime（Feature 009）
 
 职责：
-1) WorkerSession 运行态管理（loop_step/max_steps/tool_profile/backend）
+1) WorkerDispatchState 运行态管理（loop_step/max_steps/tool_profile/backend）
 2) backend 选择（disabled/preferred/required）
 3) privileged profile 显式授权 gate
 4) 分层超时（先实现 max_exec，first/between 作为配置保留）
@@ -28,9 +28,9 @@ from octoagent.core.models import (
     ExecutionSessionState,
     HumanInputPolicy,
     TaskStatus,
+    WorkerDispatchState,
     WorkerResult,
     WorkerRuntimeState,
-    WorkerSession,
 )
 from octoagent.core.store import StoreGroup
 from ulid import ULID
@@ -187,7 +187,7 @@ class WorkerRuntimeA2AObserver(Protocol):
         self,
         *,
         envelope: DispatchEnvelope,
-        session: WorkerSession,
+        session: WorkerDispatchState,
         summary: str = "",
         state: TaskStatus = TaskStatus.RUNNING,
     ) -> None:
@@ -439,7 +439,7 @@ class WorkerRuntime:
             if isinstance(candidate, str) and candidate.strip():
                 durable_agent_session_id = candidate.strip()
                 break
-        session = WorkerSession(
+        session = WorkerDispatchState(
             session_id=durable_agent_session_id or resumed_session_id or str(ULID()),
             dispatch_id=envelope.dispatch_id,
             task_id=envelope.task_id,
@@ -836,7 +836,7 @@ class WorkerRuntime:
         *,
         envelope: DispatchEnvelope,
         worker_id: str,
-        session: WorkerSession,
+        session: WorkerDispatchState,
         retryable: bool,
         summary: str,
         error_type: str,

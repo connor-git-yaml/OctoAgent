@@ -162,8 +162,12 @@ class WorkerResult(BaseModel):
     tool_profile: str = Field(default="standard", description="工具权限级别")
 
 
-class WorkerSession(BaseModel):
-    """Worker Runtime 会话。"""
+class WorkerDispatchState(BaseModel):
+    """Worker Runtime 单次 dispatch 的瞬时状态计数器。
+
+    Feature 090: 从 ``WorkerSession`` 重命名以消除与 ``AgentSession``（持久化长期会话）
+    的命名歧义。本对象不持久化，生命期等于一次 dispatch。
+    """
 
     session_id: str = Field(description="会话 ID")
     dispatch_id: str = Field(description="派发 ID")
@@ -179,7 +183,7 @@ class WorkerSession(BaseModel):
     backend: str = Field(default="inline", description="执行后端")
 
     @model_validator(mode="after")
-    def _validate_loop(self) -> "WorkerSession":
+    def _validate_loop(self) -> "WorkerDispatchState":
         if self.loop_step > self.max_steps:
             raise ValueError(
                 f"loop_step({self.loop_step}) cannot exceed max_steps({self.max_steps})"
