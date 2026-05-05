@@ -93,7 +93,7 @@ from .connection_metadata import (
 from .context_budget import ContextBudgetPlanner
 from .context_compaction import CompiledTaskContext, ContextCompactionService
 from .execution_context import bind_execution_context
-from .runtime_control import runtime_context_from_metadata
+from .runtime_control import is_recall_planner_skip, runtime_context_from_metadata
 
 log = structlog.get_logger()
 
@@ -1041,7 +1041,8 @@ class TaskService:
         precomputed_plan = self._parse_precomputed_recall_plan(dispatch_metadata)
         if precomputed_plan is not None:
             return precomputed_plan
-        if self._metadata_flag(dispatch_metadata, "single_loop_executor"):
+        # F091 Phase C: 优先读 runtime_context.recall_planner_mode == "skip"；fallback metadata flag
+        if is_recall_planner_skip(runtime_context, dispatch_metadata):
             return None
         if not self._supports_recall_planning(llm_service):
             return None

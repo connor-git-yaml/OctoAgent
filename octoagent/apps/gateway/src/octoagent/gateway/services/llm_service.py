@@ -33,6 +33,8 @@ from octoagent.skills.limits import get_global_defaults, merge_usage_limits
 from octoagent.skills.models import UsageLimits, _MAX_STEPS_HARD_CEILING
 from octoagent.tooling.models import ToolSearchResult
 
+from .runtime_control import is_single_loop_main_active, runtime_context_from_metadata
+
 from .tool_promotion import ToolPromotionService
 from pydantic import BaseModel, Field
 
@@ -215,6 +217,10 @@ class LLMService:
 
     supports_agent_decision_phase = True
     supports_recall_planning_phase = True
+    # F091 Phase C: 保留 supports_single_loop_executor 类属性作为 duck-typed mock 区分点
+    # （SlowLLMService / CancellableLLMService 等测试 mock 不继承 LLMService，
+    #  通过 getattr fallback 读不到该属性 → 默认 False → 走非 single_loop 路径，
+    #  这是测试 fixture 的预期行为）。F100 评估是否能完全移除。
     supports_single_loop_executor = True
 
     def __init__(
@@ -372,7 +378,9 @@ class LLMService:
             return None
 
         worker_type = self._normalize_worker_type(metadata.get("selected_worker_type", ""))
-        single_loop_executor = self._metadata_flag(metadata, "single_loop_executor")
+        # F091 Phase C: 优先读 runtime_context.delegation_mode；fallback metadata flag（兼容期）
+        runtime_context = runtime_context_from_metadata(metadata)
+        single_loop_executor = is_single_loop_main_active(runtime_context, metadata)
         base_description = self._build_skill_description(
             worker_type,
             selected_tools,

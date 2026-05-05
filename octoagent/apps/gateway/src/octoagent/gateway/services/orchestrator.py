@@ -102,6 +102,7 @@ from .runtime_control import (
     RUNTIME_CONTEXT_JSON_KEY,
     RUNTIME_CONTEXT_KEY,
     encode_runtime_context,
+    is_single_loop_main_active,
     runtime_context_from_metadata,
 )
 from .task_service import TaskService
@@ -758,7 +759,9 @@ class OrchestratorService:
             else 0
         )
         stored_rev = metadata.get("_pack_revision", 0)
-        if self._metadata_flag(metadata, "single_loop_executor") and pack_rev == stored_rev:
+        # F091 Phase C: 优先读 runtime_context.delegation_mode == "main_inline"；fallback metadata flag
+        runtime_context_for_check = request.runtime_context or runtime_context_from_metadata(metadata)
+        if is_single_loop_main_active(runtime_context_for_check, metadata) and pack_rev == stored_rev:
             return request
         worker_type = self._resolve_single_loop_worker_type(request)
         selection = await self._resolve_single_loop_tool_selection(
@@ -874,6 +877,8 @@ class OrchestratorService:
         )
 
     def _is_single_loop_main_eligible(self, request: OrchestratorRequest) -> bool:
+        # F091 Phase C: 保留 getattr fallback 作为 duck-typed mock 区分点
+        # （非 LLMService 子类的 mock 通过缺少属性表明"不支持 single_loop"）
         if not bool(getattr(self._llm_service, "supports_single_loop_executor", False)):
             return False
         if request.worker_capability not in {"", "llm_generation"}:
@@ -1014,7 +1019,11 @@ class OrchestratorService:
         self,
         request: OrchestratorRequest,
     ) -> tuple[AgentDecision | None, dict[str, Any]]:
-        if self._metadata_flag(request.metadata, "single_loop_executor"):
+        # F091 Phase C: 优先读 runtime_context.delegation_mode；fallback metadata flag
+        runtime_context_for_check = request.runtime_context or runtime_context_from_metadata(
+            request.metadata
+        )
+        if is_single_loop_main_active(runtime_context_for_check, request.metadata):
             return None, {}
         if not self._is_routing_decision_eligible(request):
             return None, {}
@@ -1398,6 +1407,9 @@ class OrchestratorService:
         Phase 1 (Feature 064): 主 Agent 直接执行条件：
         1. LLMService 支持 tool calling（supports_single_loop_executor）
         2. 请求满足主 Agent 决策资格（非子任务、非 spawned 等）
+
+        F091 Phase C: 保留 getattr fallback 作为 duck-typed mock 区分点
+        （非 LLMService 子类的 mock 通过缺少属性表明"不支持 single_loop"）。
         """
         if not bool(getattr(self._llm_service, "supports_single_loop_executor", False)):
             return False
