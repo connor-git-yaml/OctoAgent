@@ -209,3 +209,223 @@ def test_list_tools_empty_filter_returns_all(tmp_path: Path) -> None:
     )
     names = {t.registered_name for t in registry.list_tools()}
     assert names == {"mcp.alpha.one", "mcp.beta.two"}
+
+
+class _StubSessionPool:
+    """记录 close 调用 + 维护 known_server_names；不真启子进程。"""
+
+    def __init__(self, initial_names: set[str]) -> None:
+        self._names = set(initial_names)
+        self.close_calls: list[str] = []
+
+    def known_server_names(self) -> set[str]:
+        return set(self._names)
+
+    async def close(self, server_name: str) -> None:
+        self.close_calls.append(server_name)
+        self._names.discard(server_name)
+
+    async def open(self, server_name: str, config) -> None:  # noqa: ANN001
+        # 不应被调用：测试用 disabled / 空 configs 走不到 enabled-loop
+        raise AssertionError(f"unexpected open() in stale-close test: {server_name}")
+
+    async def close_all(self) -> None:  # pragma: no cover - 未触发
+        for name in list(self._names):
+            await self.close(name)
+
+
+@pytest.mark.asyncio
+async def test_refresh_closes_session_pool_entries_for_deleted_servers(
+    tmp_path: Path,
+) -> None:
+    """删除 config 后 refresh 必须关闭 pool 里残留的 stale entry（修资源泄漏）。
+
+    Bug 复现路径：
+    1. configs 中有 alpha + beta，pool 中亦有；
+    2. delete_config('alpha')；mcp-servers.json 不再含 alpha；
+    3. refresh() 跑 _refresh_locked —— 旧实现只在 enabled-loop 中处理 disabled
+       config 的 close，对完全删除的 alpha 不 enumerate，alpha 在 pool 中残留。
+
+    本测试覆盖：refresh 末尾的 diff-close 段调用 pool.close('alpha')。
+    """
+    config_path = tmp_path / "mcp-servers.json"
+    config_path.write_text(
+        json.dumps({"servers": [{"name": "beta", "command": "/bin/echo"}]}),
+        encoding="utf-8",
+    )
+    pool = _StubSessionPool(initial_names={"alpha", "beta"})
+
+    from octoagent.gateway.services.mcp_registry import McpRegistryService
+
+    registry = McpRegistryService(
+        project_root=tmp_path,
+        tool_broker=_StubToolBroker(),  # type: ignore[arg-type]
+        config_path=config_path,
+        session_pool=pool,
+    )
+
+    # 用 server_configs 覆盖避免触发 enabled-loop 内的 _session_pool.open
+    # （要真启子进程，不在本单测 scope 内）；override 设为空 list = "configs
+    # 不再有任何 server" 的极端 case。
+    registry._server_configs_override = []  # type: ignore[attr-defined]
+
+    await registry.refresh()
+
+    # alpha + beta 都不再在 configs 中（override = []），diff-close 应同时关掉两个
+    assert sorted(pool.close_calls) == ["alpha", "beta"]
+    assert pool.known_server_names() == set()
+
+
+@pytest.mark.asyncio
+async def test_refresh_does_not_close_active_servers(tmp_path: Path) -> None:
+    """diff-close 不能误关掉仍在 configs 列表中的 server。"""
+    config_path = tmp_path / "mcp-servers.json"
+    config_path.write_text(
+        json.dumps({"servers": [{"name": "alpha", "command": "/bin/echo"}]}),
+        encoding="utf-8",
+    )
+    pool = _StubSessionPool(initial_names={"alpha"})
+
+    from octoagent.gateway.services.mcp_registry import McpServerConfig
+
+    registry = McpRegistryService(
+        project_root=tmp_path,
+        tool_broker=_StubToolBroker(),  # type: ignore[arg-type]
+        config_path=config_path,
+        session_pool=pool,
+        # 用 disabled config override 避免走 enabled-loop 实际 spawn
+        server_configs=[
+            McpServerConfig(name="alpha", command="/bin/echo", enabled=False)
+        ],
+    )
+
+    await registry.refresh()
+
+    # alpha 仍在 configs 中（虽然 disabled），不该被 diff-close 段关掉。
+    # 但 enabled-loop 内的 disabled-close 会调一次 close。这里我们关心的是
+    # diff-close 不重复关，且不误关任何不在 stale 集合中的 server。
+    # 期望：close 只来自 disabled-close 一次。
+    assert pool.close_calls == ["alpha"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_diff_close_swallows_pool_exception(tmp_path: Path) -> None:
+    """单个 stale close 抛错不能阻断后续 refresh 流程。"""
+
+    class _FailingPool(_StubSessionPool):
+        async def close(self, server_name: str) -> None:
+            self.close_calls.append(server_name)
+            raise RuntimeError(f"simulated close failure: {server_name}")
+
+    pool = _FailingPool(initial_names={"alpha", "beta"})
+    registry = McpRegistryService(
+        project_root=tmp_path,
+        tool_broker=_StubToolBroker(),  # type: ignore[arg-type]
+        config_path=tmp_path / "mcp-servers.json",
+        session_pool=pool,
+    )
+    registry._server_configs_override = []  # type: ignore[attr-defined]
+
+    # 即使 close 抛错，refresh() 不能 propagate 异常 —— 主流程必须继续
+    await registry.refresh()
+    # 两个 stale server 都应尝试关闭过（即使第一个抛错，第二个仍跑）
+    assert sorted(pool.close_calls) == ["alpha", "beta"]
+
+
+@pytest.mark.asyncio
+async def test_refresh_skips_diff_close_when_config_load_fatal(
+    tmp_path: Path,
+) -> None:
+    """Codex F1 high-1：fatal config 解析失败时 diff-close 必须跳过，避免误关全部 pool。
+
+    一次手抖损坏 mcp-servers.json（非法 JSON / 错误 shape），_load_configs()
+    返回空 [] 并设 last_config_error。若 diff-close 仍按"empty configs"推 stale，
+    会把所有现存 server 一键全关——比 bug 本身（资源泄漏）更危险。
+
+    应保守保留上一次的 pool 状态，等用户修好 config 再正常 refresh。
+    """
+    # 写入非法 JSON
+    config_path = tmp_path / "mcp-servers.json"
+    config_path.write_text("{not valid json", encoding="utf-8")
+
+    pool = _StubSessionPool(initial_names={"alpha", "beta"})
+    registry = McpRegistryService(
+        project_root=tmp_path,
+        tool_broker=_StubToolBroker(),  # type: ignore[arg-type]
+        config_path=config_path,
+        session_pool=pool,
+    )
+    # 不用 _server_configs_override —— 真走 _load_configs 路径触发 last_config_error
+
+    await registry.refresh()
+
+    # last_config_error 应被设
+    assert registry.last_config_error != ""
+    # 两个 server 在 pool 中都应保留，**未被 diff-close 误关**
+    assert pool.close_calls == []
+    assert pool.known_server_names() == {"alpha", "beta"}
+
+
+@pytest.mark.asyncio
+async def test_refresh_partial_config_still_runs_diff_close(
+    tmp_path: Path,
+) -> None:
+    """Codex F2 high-1：部分 item 校验失败的 partial 配置仍必须做 diff-close。
+
+    关键场景（Codex F2 命中）：
+    - mcp-servers.json 含两个 server：alpha（合法）+ broken（缺 command 字段）
+    - pool 之前 track 三个 server：alpha + broken + ghost（已删）
+    - refresh 期望：
+      * alpha 留在 pool（合法 + 仍 enabled）
+      * broken 因 item 校验失败 last_config_error 非空，但 alpha 还在 → partial 不是 fatal
+      * ghost 不在 valid configs 中，必须被 diff-close 清理
+
+    旧 guard `bool(last_config_error)` 把这种 partial 当 fatal，跳过整个 diff-close，
+    ghost 资源泄漏。新 guard `bool(error) and not configs` 仅在完全无 valid config
+    时才跳过。
+    """
+    config_path = tmp_path / "mcp-servers.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "servers": [
+                    {"name": "alpha", "command": "/bin/echo"},
+                    # broken：缺 command（McpServerConfig 校验失败 → 跳过这一项 +
+                    # 设 last_config_error）
+                    {"name": "broken"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    pool = _StubSessionPool(initial_names={"alpha", "broken", "ghost"})
+    registry = McpRegistryService(
+        project_root=tmp_path,
+        tool_broker=_StubToolBroker(),  # type: ignore[arg-type]
+        config_path=config_path,
+        session_pool=pool,
+    )
+
+    await registry.refresh()
+
+    # last_config_error 设了（broken 校验失败）
+    assert registry.last_config_error != ""
+    # 但 alpha 仍是 valid config，不是 fatal —— diff-close 必须跑
+    valid_names = {c.name for c in registry._load_configs()}
+    assert valid_names == {"alpha"}, (
+        f"_load_configs partial 行为应过滤 broken，留 alpha：实际 {valid_names}"
+    )
+    # ghost（不在合法 configs 中，但在 pool 中）必须被 diff-close 清理
+    assert "ghost" in pool.close_calls, (
+        f"Codex F2 high-1: partial config 下 ghost 应被 diff-close 清理；"
+        f"实际 close_calls={pool.close_calls}"
+    )
+    # broken 也不在合法 configs 中（校验失败被过滤），同样应被清理
+    assert "broken" in pool.close_calls, (
+        "broken 因 item 校验失败被过滤，不在 valid configs，应被 diff-close 清理"
+    )
+    # alpha 仍在 valid configs，不应被 diff-close 误关
+    assert "alpha" not in pool.close_calls
+    # 收尾：alpha 仍在 pool，broken/ghost 已清理
+    assert pool.known_server_names() == {"alpha"}

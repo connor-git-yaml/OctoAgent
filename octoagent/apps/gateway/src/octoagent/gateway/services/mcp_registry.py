@@ -12,12 +12,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import structlog
 from mcp import ClientSession
 from mcp import types as mcp_types
 from mcp.client.stdio import StdioServerParameters, stdio_client
 from octoagent.core.models import BuiltinToolAvailabilityStatus
 from octoagent.tooling import SideEffectLevel, ToolBroker, ToolMeta
 from pydantic import BaseModel, Field
+
+log = structlog.get_logger()
 
 _DEFAULT_MCP_CONFIG_PATH = Path("data/ops/mcp-servers.json")
 
@@ -116,9 +119,41 @@ class McpRegistryService:
 
     async def _refresh_locked(self) -> None:
         configs = self._load_configs()
+        # Codex F1 high-1 / F2 high-1：_load_configs() 有两类失败：
+        # 1) **fatal**：JSON 解析失败 / shape 错误 → return [] + last_config_error 非空
+        # 2) **partial**：能解析出 list，部分 item 校验失败 → return 合法 configs +
+        #    last_config_error 非空（最后一个 item 的错误）
+        #
+        # 旧 guard `bool(last_config_error)` 把 partial 当 fatal 处理，绕过 diff-close
+        # （Codex F2 high-1 命中场景：用户删除 server #6，同一文件 server #2 有 typo →
+        # 删除后 #6 在 pool 中残留泄漏）。
+        #
+        # 正确判定：fatal 仅在"配置完全无法解析（configs 完全为空且 error 非空）"时生效。
+        # partial 仍按 valid configs 推 stale 集合，正常 diff-close。
+        config_load_fatal = bool(self._last_config_error) and not configs
         await self._clear_registered_tools()
         self._server_records = {}
         self._tool_records = {}
+
+        # 关闭"已删除（即不在最新 configs 列表）"的 server 的持久连接 +
+        # 子进程。下面 enabled-loop 内只对 disabled config 调 close，对完全
+        # 删除的 config 不再 enumerate，导致 session_pool 残留 + stdio 子进程
+        # 不死，资源泄漏。在重建 records 之前先做 diff-close。
+        if self._session_pool is not None and not config_load_fatal:
+            current_names = {config.name for config in configs}
+            stale_names = self._session_pool.known_server_names() - current_names
+            for stale in stale_names:
+                try:
+                    await self._session_pool.close(stale)
+                except Exception as exc:
+                    # Codex F1 medium-1：close 失败不阻断 refresh，但必须留痕，
+                    # 不能 except: pass 静默。close 异常通常是子进程已僵死或
+                    # exit_stack 自身已坏，运维需要可观测信号。
+                    log.warning(
+                        "mcp_session_pool_diff_close_failed",
+                        server_name=stale,
+                        error=f"{type(exc).__name__}: {exc}",
+                    )
 
         for config in configs:
             record = McpServerRecord(
