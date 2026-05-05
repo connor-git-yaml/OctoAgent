@@ -24,6 +24,13 @@ log = structlog.get_logger()
 
 _DEFAULT_MCP_CONFIG_PATH = Path("data/ops/mcp-servers.json")
 
+# MCP proxy tool 默认 broker.execute 超时（秒）。
+# 防止 SkillRunner 等"无外层 wait_for"路径在 stdio 远端 hang 时永久阻塞。
+# 90s 兼顾 OpenRouter / Perplexity 等远端 LLM tool 的合理上限；call_tool
+# 内部本就由 broker._invoke_handler 用 asyncio.wait_for 包装，到点抛
+# TimeoutError → broker emit TOOL_CALL_FAILED 事件。
+_DEFAULT_MCP_TOOL_TIMEOUT_S = 90.0
+
 
 def _utc_now() -> datetime:
     return datetime.now(tz=UTC)
@@ -507,6 +514,7 @@ class McpRegistryService:
             parameters_json_schema=self._normalize_json_schema(tool.inputSchema),
             side_effect_level=self._side_effect_level(tool),
             tool_group="mcp",
+            timeout_seconds=_DEFAULT_MCP_TOOL_TIMEOUT_S,
             tags=["mcp", config.name, tool.name],
             worker_types=["ops", "research", "dev", "general"],
             manifest_ref=f"mcp://{config.name}/{tool.name}",
