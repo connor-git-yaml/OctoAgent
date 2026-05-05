@@ -85,7 +85,12 @@ class AgentRuntimeStatus(StrEnum):
 
 
 def normalize_runtime_role(value: str) -> AgentRuntimeRole:
-    """旧数据兼容：butler → MAIN。butler 值已通过数据迁移 (_migrate_butler_naming) 清除，此函数保留用于处理极端情况。"""
+    """旧数据兼容：butler → MAIN。
+
+    数据防御层（Feature 063 引入），处理极端情况下遗留的旧枚举值。
+    F091 Phase B 起删除启动 migration（_migrate_butler_naming），此函数作为
+    最后一道防御保留——store 读取层若需兜底应显式调用此函数。
+    """
     if value == "butler":
         return AgentRuntimeRole.MAIN
     return AgentRuntimeRole(value)
@@ -99,7 +104,12 @@ class AgentSessionKind(StrEnum):
 
 
 def normalize_session_kind(value: str) -> AgentSessionKind:
-    """旧数据兼容：butler_main → MAIN_BOOTSTRAP。butler_main 值已通过数据迁移 (_migrate_butler_naming) 清除，此函数保留用于处理极端情况。"""
+    """旧数据兼容：butler_main → MAIN_BOOTSTRAP。
+
+    数据防御层（Feature 063 引入），处理极端情况下遗留的旧枚举值。
+    F091 Phase B 起删除启动 migration（_migrate_butler_naming），此函数作为
+    最后一道防御保留——store 读取层若需兜底应显式调用此函数。
+    """
     if value == "butler_main":
         return AgentSessionKind.MAIN_BOOTSTRAP
     return AgentSessionKind(value)

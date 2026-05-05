@@ -34,7 +34,7 @@
 │                         │         │         │                        │
 │              ┌──────────┘         │         └──────────┐             │
 │              ▼                    ▼                    ▼             │
-│     Butler Direct          Butler Inline       DelegationPlane       │
+│     Main Direct            Main Inline         DelegationPlane       │
 │     Execution              Decision            .prepare_dispatch()   │
 │         │                     │                       │              │
 │         │                     │                       ▼              │
@@ -183,7 +183,7 @@ dispatch()
 
 ### 2.5 决策分支详解
 
-**分支 A：Butler Direct Execution（最常见路径）**
+**分支 A：Main Direct Execution（最常见路径）**
 
 条件（`orchestrator.py:1432-1441`）：
 - `LLMService.supports_single_loop_executor == True`
@@ -195,7 +195,7 @@ dispatch()
 3. `TaskService.ensure_task_running()` — 状态转 RUNNING
 4. `TaskService.process_task_with_llm()` — 调用主 LLM
 
-**分支 B：Butler Inline Decision**
+**分支 B：Main Inline Decision**
 
 条件：`decide_agent_routing()` 返回非 None 的 `AgentDecision`（目前仅 Pipeline trigger_hint 匹配）
 

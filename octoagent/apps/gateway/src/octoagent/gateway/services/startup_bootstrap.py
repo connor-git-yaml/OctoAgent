@@ -58,12 +58,6 @@ async def ensure_startup_records(
     # 确保主 Agent 有 AgentRuntime + AgentSession（多 Session 侧边栏的前置条件）
     await ensure_main_runtime_and_session(store_group, project, agent_profile)
 
-    # 数据迁移：清理历史遗留的 " Butler" 后缀
-    await _migrate_butler_suffix(store_group, agent_profile)
-
-    # 数据迁移：将 butler → main 命名迁移到新的枚举值
-    await _migrate_butler_naming(store_group.conn)
-
     await store_group.conn.commit()
 
     # agent profile 确定后，用正确的 slug 补齐 agent-private 行为文件
@@ -326,44 +320,3 @@ async def ensure_default_project_agent_profile(
     return None
 
 
-async def _migrate_butler_naming(conn) -> None:
-    """启动时将 butler → main 命名迁移。"""
-    await conn.execute("UPDATE agent_runtimes SET role = 'main' WHERE role = 'butler'")
-    await conn.execute("UPDATE agent_sessions SET kind = 'main_bootstrap' WHERE kind = 'butler_main'")
-    await conn.execute("UPDATE memory_namespaces SET kind = 'agent_private' WHERE kind = 'butler_private'")
-    await conn.commit()
-
-
-async def _migrate_butler_suffix(
-    store_group: StoreGroup,
-    agent_profile: AgentProfile,
-) -> None:
-    """数据迁移：清理历史遗留的 ' Butler' 后缀。
-
-    旧版本硬编码 f"{project.name} Butler" 作为 Agent Profile 名字。
-    此函数在启动时检查并去除后缀。
-    """
-    if not agent_profile.name.endswith(" Butler"):
-        return
-
-    new_name = agent_profile.name.removesuffix(" Butler")
-    updated = agent_profile.model_copy(update={"name": new_name})
-    await store_group.agent_context_store.save_agent_profile(updated)
-
-    # 同步更新 AgentRuntime.name
-    runtimes = await store_group.agent_context_store.list_agent_runtimes(
-        role=AgentRuntimeRole.MAIN,
-        project_id=agent_profile.project_id,
-    )
-    for rt in runtimes:
-        if rt.name.endswith(" Butler"):
-            await store_group.agent_context_store.save_agent_runtime(
-                rt.model_copy(update={"name": rt.name.removesuffix(" Butler")})
-            )
-
-    log.info(
-        "butler_suffix_migrated",
-        profile_id=agent_profile.profile_id,
-        old_name=agent_profile.name,
-        new_name=new_name,
-    )
