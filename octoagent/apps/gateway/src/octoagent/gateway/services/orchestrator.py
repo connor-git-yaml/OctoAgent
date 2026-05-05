@@ -762,6 +762,23 @@ class OrchestratorService:
         # F091 Phase C: 优先读 runtime_context.delegation_mode == "main_inline"；fallback metadata flag
         runtime_context_for_check = request.runtime_context or runtime_context_from_metadata(metadata)
         if is_single_loop_main_active(runtime_context_for_check, metadata) and pack_rev == stored_rev:
+            # F091 Phase D medium #1 闭环：short-circuit 前确保 runtime_context.delegation_mode == "main_inline"
+            # 兼容 case：metadata flag = True 但 runtime_context.delegation_mode = "unspecified"
+            # （caller 预填 metadata flag 但未显式 patch runtime_context）。
+            # 需补 patch 让 runtime_context 与完整路径输出对称，避免单/双轨不一致。
+            if (
+                runtime_context_for_check is None
+                or runtime_context_for_check.delegation_mode != "main_inline"
+            ):
+                patched_runtime_context = self._with_delegation_mode(
+                    request=request,
+                    metadata=metadata,
+                    delegation_mode="main_inline",
+                    recall_planner_mode="skip",
+                )
+                return request.model_copy(
+                    update={"runtime_context": patched_runtime_context}
+                )
             return request
         worker_type = self._resolve_single_loop_worker_type(request)
         selection = await self._resolve_single_loop_tool_selection(

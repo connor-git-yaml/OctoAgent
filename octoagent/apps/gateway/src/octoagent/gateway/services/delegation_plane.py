@@ -11,6 +11,7 @@ from typing import Any
 from octoagent.core.models import (
     WORK_TERMINAL_STATUSES,
     ActorType,
+    DelegationMode,
     DelegationResult,
     DelegationTargetKind,
     DispatchEnvelope,
@@ -159,6 +160,8 @@ class DelegationPlaneService:
             context_frame_id=context_frame_id,
             route_reason=initial_route_reason,
             worker_capability=request.worker_capability,
+            # F091 Phase D medium #2 闭环：DelegationPlane 标准路径显式写 delegation_mode
+            delegation_mode=self._delegation_mode_for_target_kind(initial_target_kind),
         )
         work = Work(
             work_id=work_id,
@@ -242,6 +245,18 @@ class DelegationPlaneService:
         )
         selection = self._selection_from_run(pipeline_run)
         work_status = self._work_status_from_pipeline(pipeline_run.status)
+        # F091 Phase D Codex finding 闭环：pipeline 解析后取最终 target_kind 再重写
+        # delegation_mode + turn_executor_kind，避免 initial_target_kind=WORKER 但
+        # 最终 _select_target_kind=SUBAGENT 的 split 不一致（Work 显 subagent 而
+        # runtime_context 仍是 main_delegate）。
+        final_target_kind = DelegationTargetKind(
+            str(
+                pipeline_run.state_snapshot.get(
+                    "target_kind",
+                    DelegationTargetKind.WORKER.value,
+                )
+            )
+        )
         resolved_runtime_context = runtime_context.model_copy(
             update={
                 "pipeline_run_id": pipeline_run.run_id,
@@ -256,23 +271,19 @@ class DelegationPlaneService:
                 "inherited_context_owner_profile_id": inherited_agent_profile_id,
                 "delegation_target_profile_id": requested_worker_profile_id,
                 "turn_executor_kind": self._turn_executor_kind_for_target_kind(
-                    initial_target_kind
+                    final_target_kind
                 ),
                 "agent_profile_id": session_owner_profile_id,
                 "context_frame_id": context_frame_id,
+                "delegation_mode": self._delegation_mode_for_target_kind(
+                    final_target_kind
+                ),
             }
         )
         updated_work = work.model_copy(
             update={
                 "status": work_status,
-                "target_kind": DelegationTargetKind(
-                    str(
-                        pipeline_run.state_snapshot.get(
-                            "target_kind",
-                            DelegationTargetKind.WORKER.value,
-                        )
-                    )
-                ),
+                "target_kind": final_target_kind,
                 "selected_worker_type": str(
                     pipeline_run.state_snapshot.get(
                         "selected_worker_type",
@@ -291,14 +302,7 @@ class DelegationPlaneService:
                 "effective_worker_snapshot_id": effective_worker_snapshot_id,
                 "pipeline_run_id": pipeline_run.run_id,
                 "turn_executor_kind": self._turn_executor_kind_for_target_kind(
-                    DelegationTargetKind(
-                        str(
-                            pipeline_run.state_snapshot.get(
-                                "target_kind",
-                                DelegationTargetKind.WORKER.value,
-                            )
-                        )
-                    )
+                    final_target_kind
                 ),
                 "metadata": {
                     **work.metadata,
@@ -851,6 +855,7 @@ class DelegationPlaneService:
         context_frame_id: str,
         route_reason: str,
         worker_capability: str,
+        delegation_mode: DelegationMode,
     ) -> RuntimeControlContext:
         return RuntimeControlContext(
             task_id=request.task_id,
@@ -879,8 +884,25 @@ class DelegationPlaneService:
             turn_executor_kind=turn_executor_kind,
             agent_profile_id=agent_profile_id,
             context_frame_id=context_frame_id,
+            delegation_mode=delegation_mode,
             metadata=dict(request.metadata),
         )
+
+    @staticmethod
+    def _delegation_mode_for_target_kind(
+        target_kind: DelegationTargetKind,
+    ) -> DelegationMode:
+        """F091 Phase D medium #2 闭环：根据 DelegationTargetKind 推断 delegation_mode。
+
+        - SUBAGENT → "subagent"
+        - WORKER / ACP_RUNTIME / GRAPH_AGENT / FALLBACK → "main_delegate"
+          （都是主 Agent 派给外部 worker 性质，统一为 "main_delegate"；
+           F092 评估是否需细分新枚举值）
+        worker_inline 路径不在此推断（属于 worker 内部自跑，由调用方单独写）。
+        """
+        if target_kind is DelegationTargetKind.SUBAGENT:
+            return "subagent"
+        return "main_delegate"
 
     def _build_definition(self):
         from octoagent.core.models import (
