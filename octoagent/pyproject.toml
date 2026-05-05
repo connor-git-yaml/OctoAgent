@@ -27,6 +27,7 @@ dev = [
     "octoagent-sdk",
     "pytest-xdist>=3.8.0",
     "pytest-rerunfailures>=14.0",
+    "psutil>=5.9",
 ]
 
 [tool.uv.sources]

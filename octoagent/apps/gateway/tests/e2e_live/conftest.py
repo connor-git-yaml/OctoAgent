@@ -1,6 +1,6 @@
 """F087 e2e_live conftest（P2 T-P2-7 双 autouse fixture + 30s SIGALRM）。
 
-两条 autouse fixture：
+三条 autouse fixture：
 
 1. ``_hermetic_environment``（function 级）：清空 5 类凭证 env、重定向 4 个
    ``OCTOAGENT_*`` 路径 env 到 tmp、固定 ``PYTHONHASHSEED=0``、**不动 HOME**
@@ -9,6 +9,11 @@
    清单逐条 reset 5 项 stateful 单例（``_REGISTRY`` / ``AgentContextService``
    两类属性 / ``_CURRENT_EXECUTION_CONTEXT`` ContextVar /
    ``_tiktoken_encoder``）。
+3. ``_assert_no_stub_subprocess_leak``（function 级，F089 review #5）：
+   case setup 时记 baseline child pid 集合，teardown diff，
+   新增 child 进程 cmdline 含 ``stub_server.py`` 则 raise——
+   surface fixture teardown 静默吞掉的 stdio stub 子进程残留。
+   真 MCP server（npx/node 启动）不命中。
 
 外加 30s SIGALRM 单场景 timeout 装置（``signal.alarm(30)`` 包裹 e2e function）。
 SIGALRM 仅在主线程可用——在 pytest-asyncio "auto" 模式下 e2e 在主线程跑，OK。
@@ -146,6 +151,88 @@ def _reset_module_state() -> Iterator[None]:
     _do_reset()
     yield
     _do_reset()  # teardown：保证下个测试（甚至 e2e_live 之外）状态干净
+
+
+# ---------------------------------------------------------------------------
+# F089 stub MCP server stdio 子进程 leak 检测（兜底防线）
+# ---------------------------------------------------------------------------
+# 主防护链路（治本）：
+#   1. ``mcp_session_pool._close_entry_unlocked`` / ``close_all`` 在 F089
+#      Codex review #2 闭环里改为 collect-and-raise——任意 server stdio
+#      关闭失败都会向上抛到 ``mcp_registry.shutdown`` → ``OctoHarness.shutdown``。
+#   2. ``octo_harness_e2e`` fixture teardown（factories.py）F089 review #1
+#      闭环移除 ``except: pass`` 兜底，shutdown 异常自然 surface 让 pytest
+#      把 case 标记为 ERROR。
+# 真 MCP server（perplexity / 其它 npx/node 启动）的 leak 由上述链路兜住，
+# 无需在子进程层做泛匹配（避免误伤 codex CLI / npm / pip 等无关 child）。
+#
+# 本 autouse fixture 是 F089 stub 子进程专项保险——
+# F089 L1.5 namespace isolation case 不主动 unregister stub server 时，
+# 即便上述链路全过（如 stub server 不通过 mcp_session_pool 而由 case 直接
+# Popen），仍能从 child pid + cmdline 维度抓住 ``stub_server.py`` 残留。
+#
+# 检测策略：
+#   - setup 记 baseline child pid 集合
+#   - teardown diff 出新增 child；其中 cmdline 含 "stub_server.py" → raise
+
+
+def _capture_baseline_child_pids() -> set[int]:
+    """记录当前进程的所有子进程 pid（含递归）。
+
+    抽成纯函数便于 self-test 直接驱动；autouse fixture 与回归测试共用。
+    """
+    import psutil
+
+    me = psutil.Process(os.getpid())
+    try:
+        return {p.pid for p in me.children(recursive=True)}
+    except psutil.NoSuchProcess:
+        return set()
+
+
+def _detect_stub_subprocess_leak(baseline_pids: set[int]) -> list[str]:
+    """diff 当前 children 与 baseline，返回 cmdline 含 ``stub_server.py`` 的泄漏列表。"""
+    import psutil
+
+    me = psutil.Process(os.getpid())
+    leaked: list[str] = []
+    try:
+        children = me.children(recursive=True)
+    except psutil.NoSuchProcess:
+        return leaked
+    for proc in children:
+        if proc.pid in baseline_pids:
+            continue
+        try:
+            cmdline = " ".join(proc.cmdline())
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+        if "stub_server.py" in cmdline:
+            leaked.append(f"pid={proc.pid} cmdline={cmdline!r}")
+    return leaked
+
+
+@pytest.fixture(autouse=True)
+def _assert_no_stub_subprocess_leak() -> Iterator[None]:
+    """检测 e2e case 是否泄漏 stub MCP server stdio 子进程。
+
+    F089 review Finding #5 闭环：fixture teardown 静默吞异常时无法发现 OS
+    层 stub server 子进程残留。autouse setup 记 baseline child pid 集合，
+    teardown diff 后，新增 child 进程 cmdline 含 ``stub_server.py`` 则
+    raise——pytest 当作 fixture teardown ERROR，case 即便已 PASS 也会被标
+    记为 ERROR 暴露 leak。
+
+    真 MCP server（perplexity 等 npx/node 启动，cmdline 不含 ``stub_server
+    .py`` 字面）不命中本检测，避免误伤 F087 已有 case。
+    """
+    baseline_pids = _capture_baseline_child_pids()
+    yield
+    leaked = _detect_stub_subprocess_leak(baseline_pids)
+    if leaked:
+        raise AssertionError(
+            "F089 stub MCP server subprocess leak detected:\n  "
+            + "\n  ".join(leaked)
+        )
 
 
 @pytest.fixture(autouse=True)

@@ -71,12 +71,16 @@ async def octo_harness_e2e(
     app = FastAPI()
     yield {"harness": harness, "app": app, "project_root": project_root}
 
-    # teardown：调 shutdown 释放资源（仅当 bootstrap 实际跑过）
-    try:
-        await harness.shutdown(app)
-    except Exception:
-        # bootstrap 未跑或部分失败时 shutdown 可能 raise，e2e fixture 兜底
-        pass
+    # teardown：调 shutdown 释放资源
+    # F089 Codex adversarial review Finding #1 (high) 闭环：
+    # 旧实现 ``except: pass`` / 中间版 ``except: log.error`` 都吞掉
+    # ``harness.shutdown(app)`` 异常——这条路径覆盖 mcp_installer /
+    # mcp_registry / task_runner / DB 连接等所有生产 shutdown 子步骤，
+    # 任一失败都应让 e2e 真 fail，而不是靠日志兜底。
+    # ``OctoHarness.shutdown`` 自身用 ``hasattr(app.state, ...)`` 守卫，
+    # 未 bootstrap 时各分支 no-op 安全完成、不抛异常，因此**不需要**
+    # 额外 try/except 容忍"未 bootstrap"——直接 await，错误自然上抛。
+    await harness.shutdown(app)
 
 
 # ---------------------------------------------------------------------------

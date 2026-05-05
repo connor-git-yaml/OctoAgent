@@ -182,10 +182,18 @@ class McpSessionPool:
             await self._close_entry_unlocked(server_name)
 
     async def _close_entry_unlocked(self, server_name: str) -> None:
-        """在已持有 lock 的情况下关闭 entry。"""
+        """在已持有 lock 的情况下关闭 entry。
+
+        F089 Codex adversarial review #2 闭环：旧实现把 ``exit_stack.aclose()``
+        异常 ``log.warning`` 后吞掉，导致 stdio 子进程未真正退出但调用方拿不
+        到错误信号。改"先做完 entry 状态清理（pop + reset 字段，保留幂等
+        语义）→ 末尾 raise"模式，保证 ``_entries`` 状态一致同时把异常上抛
+        给 ``close`` / ``close_all`` 调用方。
+        """
         entry = self._entries.pop(server_name, None)
         if entry is None:
             return
+        close_error: Exception | None = None
         if entry.exit_stack is not None:
             try:
                 await entry.exit_stack.aclose()
@@ -195,15 +203,26 @@ class McpSessionPool:
                     server_name=server_name,
                     error=str(exc),
                 )
+                close_error = exc
         entry.session = None
         entry.exit_stack = None
         entry.status = "disconnected"
         log.info("mcp_session_closed", server_name=server_name)
+        if close_error is not None:
+            raise close_error
 
     async def close_all(self) -> None:
-        """关闭所有连接。用于系统 shutdown。"""
+        """关闭所有连接。用于系统 shutdown。
+
+        F089 Codex adversarial review #2 闭环：保持 best-effort（任一 server
+        关闭失败不应阻塞其它 server 关闭），但收集所有错误后统一 raise，
+        避免 stdio 子进程 leak 在 shutdown 路径被 silent 吞掉。
+        - 单错：直接 raise
+        - 多错：``ExceptionGroup`` 包装
+        """
         async with self._lock:
             names = list(self._entries.keys())
+        errors: list[Exception] = []
         for name in names:
             try:
                 await self.close(name)
@@ -213,6 +232,15 @@ class McpSessionPool:
                     server_name=name,
                     error=str(exc),
                 )
+                errors.append(exc)
+        if not errors:
+            return
+        if len(errors) == 1:
+            raise errors[0]
+        raise ExceptionGroup(
+            "mcp_session_pool.close_all 部分 server 关闭失败",
+            errors,
+        )
 
     # ── 健康检查 ─────────────────────────────────────────────
 
