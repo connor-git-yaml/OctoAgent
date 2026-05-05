@@ -14,5 +14,12 @@ octoagent/.venv
 octoagent/packages/provider/.env
 octoagent/packages/provider/.env.litellm
 
+# Claude Code 本地配置（hooks / permissions / pre-commit gate 等）。
+# git-untracked 但每个 worktree 都需要——之前漏挂导致新建 worktree 时
+# Claude Code 状态不完整。
+# 注：``.agent-config/shared.md`` 与 ``.agent-config/templates`` 已是 git
+# tracked，新 worktree 通过 git checkout 自然带上，无需软链。
+.claude/settings.local.json
+
 # 可选：如果你希望所有 worktree 共用前端依赖，再取消这一行注释。
 # octoagent/frontend/node_modules
