@@ -35,9 +35,11 @@ from octoagent.core.models import (
     AgentSessionKind,
     AgentDecision,
     AgentDecisionMode,
+    DelegationMode,
     DelegationResult,
     DelegationTargetKind,
     DispatchEnvelope,
+    RecallPlannerMode,
     Event,
     EventCausality,
     EventType,
@@ -48,6 +50,7 @@ from octoagent.core.models import (
     OrchestratorRequest,
     RecallPlan,
     RiskLevel,
+    RuntimeControlContext,
     SessionContextState,
     TaskHeartbeatPayload,
     TaskStatus,
@@ -814,10 +817,59 @@ class OrchestratorService:
                     "agent_profile_id",
                     selection.effective_tool_universe.profile_id,
                 )
+        # Feature 090 D1: 同步显式 runtime_context 字段（与 metadata flag 双轨）
+        # F090 范围下 metadata flag 保留为兼容期；F091/F100 完成后切换到单轨。
+        updated_runtime_context = self._with_delegation_mode(
+            request=request,
+            metadata=updated_metadata,
+            delegation_mode="main_inline",
+            recall_planner_mode="skip",
+        )
         return request.model_copy(
             update={
                 "route_reason": route_reason,
                 "metadata": updated_metadata,
+                "runtime_context": updated_runtime_context,
+            }
+        )
+
+    @staticmethod
+    def _with_delegation_mode(
+        *,
+        request: OrchestratorRequest,
+        metadata: dict[str, Any],
+        delegation_mode: DelegationMode,
+        recall_planner_mode: RecallPlannerMode = "full",
+    ) -> RuntimeControlContext:
+        """Feature 090 D1: 在现有 runtime_context 上 patch delegation_mode + recall_planner_mode。
+
+        Base context 解析顺序（与 task_service / delegation_plane 保持一致）：
+        1. ``request.runtime_context``（OrchestratorRequest 显式字段）
+        2. ``metadata["runtime_context"] / metadata["runtime_context_json"]``
+           （chat 路径在 metadata 携带的冻结 RuntimeControlContext）
+        3. 都没有时，从 OrchestratorRequest 字段构造最小可用 base
+           （task_id / trace_id / contract_version / hop_count / max_hops / tool_profile / metadata）
+
+        这样可避免 dispatch() 显式传 runtime_context=None 时丢失 chat 路径
+        通过 metadata["runtime_context_json"] 透传的 task_id/project_id/thread_id 等冻结上下文。
+        """
+        base = request.runtime_context or runtime_context_from_metadata(metadata)
+        if base is None:
+            base = RuntimeControlContext(
+                task_id=request.task_id,
+                trace_id=request.trace_id,
+                contract_version=request.contract_version,
+                hop_count=request.hop_count,
+                max_hops=request.max_hops,
+                tool_profile=request.tool_profile,
+                worker_capability=request.worker_capability,
+                route_reason=request.route_reason,
+                metadata=dict(metadata),
+            )
+        return base.model_copy(
+            update={
+                "delegation_mode": delegation_mode,
+                "recall_planner_mode": recall_planner_mode,
             }
         )
 

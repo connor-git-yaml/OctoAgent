@@ -4,7 +4,7 @@ Feature 008: 冻结控制平面契约，支持后续多 Worker 扩展。
 """
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -28,6 +28,28 @@ class TurnExecutorKind(StrEnum):
     SELF = "self"
     WORKER = "worker"
     SUBAGENT = "subagent"
+
+
+# Feature 090 D1: 显式化派发模式枚举值（替代 metadata["single_loop_executor"] 隐式 flag）
+# - "main_inline": 主 Agent 自跑（原 single_loop_executor=True 的主路径）
+# - "main_delegate": 主 Agent 派给 worker（原 single_loop_executor=False / 标准 Delegation）
+# - "worker_inline": worker 自跑（原 worker 端 single_loop 路径）
+# - "subagent": Subagent 临时执行（F097 启用）
+# - "unspecified": 显式表示尚未由 _prepare_single_loop_request 决策（默认值，兼容期）
+DelegationMode = Literal[
+    "unspecified",
+    "main_inline",
+    "main_delegate",
+    "worker_inline",
+    "subagent",
+]
+
+
+# Feature 090 D1: 显式化 recall planner 行为（替代靠 metadata["single_loop_executor"] 推断）
+# - "full": 跑完整 recall planner（默认）
+# - "skip": 跳过 recall planner（原 single_loop_executor 主路径下的语义）
+# - "auto": 由系统按 delegation_mode 推断（保留扩展位）
+RecallPlannerMode = Literal["full", "skip", "auto"]
 
 
 class RuntimeControlContext(BaseModel):
@@ -62,6 +84,14 @@ class RuntimeControlContext(BaseModel):
     turn_executor_kind: TurnExecutorKind = Field(
         default=TurnExecutorKind.SELF,
         description="当前轮次执行者语义",
+    )
+    delegation_mode: DelegationMode = Field(
+        default="unspecified",
+        description="本次派发的执行模式（F090 D1 显式化 metadata['single_loop_executor']）",
+    )
+    recall_planner_mode: RecallPlannerMode = Field(
+        default="full",
+        description="Recall planner 行为模式（F090 D1 显式化）",
     )
     agent_profile_id: str = Field(
         default="",

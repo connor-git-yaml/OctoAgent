@@ -257,6 +257,8 @@ from .operator_inbox import (
 from .orchestrator import (
     DispatchEnvelope,
     OrchestratorRequest,
+    DelegationMode,
+    RecallPlannerMode,
     RuntimeControlContext,
     TurnExecutorKind,
     WorkerDispatchState,
@@ -594,6 +596,8 @@ __all__ = [
     # Feature 008: Orchestrator Models
     "OrchestratorRequest",
     "DispatchEnvelope",
+    "DelegationMode",
+    "RecallPlannerMode",
     "RuntimeControlContext",
     "WorkerDispatchState",
     "WorkerResult",
