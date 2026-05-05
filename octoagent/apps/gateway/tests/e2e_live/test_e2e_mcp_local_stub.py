@@ -71,7 +71,10 @@ _STUB_SERVER_SOURCE = textwrap.dedent(
 
 
 def _write_stub_server(target_dir: Path) -> Path:
-    path = target_dir / "octoagent_e2e_mcp_stub.py"
+    # 命名沿用 e2e_live/conftest.py 的 leak detector 约定（cmdline 含
+    # ``stub_server.py`` 触发 ``_assert_no_stub_subprocess_leak`` autouse
+    # fixture 自动覆盖泄漏检查，F089 review #5 闭环）。
+    path = target_dir / "octoagent_e2e_stub_server.py"
     path.write_text(_STUB_SERVER_SOURCE, encoding="utf-8")
     return path
 

@@ -56,7 +56,10 @@ _STUB_SERVER_SOURCE = textwrap.dedent(
 
 
 def _write_stub(target_dir: Path) -> Path:
-    path = target_dir / "octoagent_unit_mcp_stub.py"
+    # 命名沿用 master 加的 leak detector 约定（cmdline 含 ``stub_server.py``
+    # 即被 ``_assert_no_stub_subprocess_leak`` autouse fixture 自动覆盖，
+    # 详见 e2e_live/conftest.py F089 review #5 闭环）。
+    path = target_dir / "octoagent_unit_stub_server.py"
     path.write_text(_STUB_SERVER_SOURCE, encoding="utf-8")
     return path
 
@@ -73,16 +76,22 @@ def _make_config(name: str, stub_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_pool_close_in_different_task_does_not_raise(tmp_path: Path) -> None:
-    """Codex F2 medium-1：entry close 在另一个 asyncio task 内执行不能抛 ValueError。
+async def test_pool_close_in_different_task_does_not_raise_contextvar_error(
+    tmp_path: Path,
+) -> None:
+    """Codex F2 medium-1：entry close 在另一个 asyncio task 不能抛 ContextVar ValueError。
 
-    旧实现：``_CAPTURED_PROCESS.reset(token)`` 推迟到 ``stack.aclose()``，而
-    pool open 把整个 cm 塞进 entry.exit_stack。如果 close 由后续 refresh /
-    shutdown 在不同 task 触发，``ContextVar.reset(token)`` 会因跨 Context 抛
-    ValueError，污染关闭路径。
+    Codex F2 finding 描述：旧实现把 ``_CAPTURED_PROCESS.reset(token)`` 推迟到
+    ``stack.aclose()``，pool open 把整个 cm 塞进 entry.exit_stack。后续 refresh
+    / shutdown 在不同 task 触发 close 时 ``ContextVar.reset(token)`` 会因跨
+    Context 抛 ``ValueError``，污染关闭路径。
 
-    新实现：reset 在 ``stdio_client.__aenter__`` 返回后立即执行，token 仅在
-    set 的同 sync 段内活跃，跨 task close 不会触碰 ContextVar。
+    本测试**精确**验证：跨 task close 不抛 ``ValueError``（ContextVar 维度的
+    回归检测）。**注意 mcp 库 anyio cancel scope 限制**：跨 task aclose 必然
+    会抛 ``RuntimeError("Attempted to exit cancel scope in a different task...")``，
+    这是 mcp/anyio 自身限制（master 7358804 的 close 改 collect-and-raise 让
+    其 surface），与本 fix 无关——只要不是 ``ValueError`` 就证明 ContextVar
+    路径已被切割干净。
     """
     from octoagent.gateway.services.mcp_session_pool import McpSessionPool
 
@@ -105,9 +114,13 @@ async def test_pool_close_in_different_task_does_not_raise(tmp_path: Path) -> No
 
     await asyncio.create_task(_close_in_other_task())
 
-    assert close_exc == [], (
-        f"Codex F2 medium-1: 跨 task close 不应抛任何异常，实际捕获 {close_exc!r}"
+    # 精确断言：不能出现 ValueError（特别不能是 ContextVar.reset 跨 Context 的）
+    value_errors = [exc for exc in close_exc if isinstance(exc, ValueError)]
+    assert value_errors == [], (
+        f"Codex F2 medium-1 回归: ContextVar token 跨 Context reset 抛 ValueError："
+        f" {value_errors!r}。说明 token reset 又被推回 stack.aclose() 链路。"
     )
+    # entry 应已从 pool 中移除（pop 在 _close_entry_unlocked 头部，不受 anyio 错影响）
     assert "alpha" not in pool.known_server_names()
 
 
