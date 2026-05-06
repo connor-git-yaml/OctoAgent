@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 
 from octoagent.core.models import (
     WORK_TERMINAL_STATUSES,
@@ -33,6 +33,11 @@ from octoagent.core.models.payloads import ToolIndexSelectedPayload
 from octoagent.skills import PipelineNodeOutcome, SkillPipelineEngine
 from ulid import ULID
 
+from ..harness.delegation import (
+    DelegateTaskInput,
+    DelegationContext,
+    DelegationManager,
+)
 from .agent_context import (
     build_scope_aware_session_id,
     legacy_session_id_for_task,
@@ -46,6 +51,10 @@ from .connection_metadata import (
 from .runtime_control import encode_runtime_context, runtime_context_from_metadata
 from .task_service import TaskService
 
+# F092 Phase A：spawn_child 内部用 WORK_TERMINAL_STATUSES 派生终态值集合
+# （从 core.models 直接派生，避免反向 import builtin_tools._deps）
+_WORK_TERMINAL_VALUES = frozenset(s.value for s in WORK_TERMINAL_STATUSES)
+
 
 @dataclass(slots=True)
 class DelegationPlan:
@@ -56,6 +65,37 @@ class DelegationPlan:
     tool_selection: DynamicToolSelection
     dispatch_envelope: DispatchEnvelope | None
     deferred_reason: str = ""
+
+
+@dataclass(frozen=True)
+class SpawnChildResult:
+    """F092 Phase A：plane.spawn_child 统一返回值。
+
+    字段与 capability_pack._launch_child_task 当前返回 dict 1:1 映射，不引入假关联键
+    （work_id / session_id 不在 _launch_child_task 返回字段中，保留留给调用方按 work_store 查询）。
+
+    status 三态：
+    - "written"        — gate 通过 + launch 成功；其他字段填充
+    - "rejected"       — DelegationManager.delegate gate 拒绝（depth/concurrent/blacklist）
+    - "launch_raised"  — gate 通过但 _launch_child_task raise（task_runner 未就绪 / 数据校验失败 / 等）
+    """
+
+    status: Literal["written", "rejected", "launch_raised"]
+    # status="written" 时的业务字段（与 _launch_child_task 返回 dict 对齐）
+    task_id: str = ""
+    created: bool = False
+    thread_id: str = ""
+    target_kind: str = ""
+    worker_type: str = ""
+    tool_profile: str = ""
+    parent_task_id: str = ""
+    parent_work_id: str = ""
+    title: str = ""
+    objective: str = ""
+    worker_plan_id: str = ""
+    # status != "written" 时的失败字段
+    error_code: str = ""  # gate 失败时由 DelegateResult.error_code 提供
+    reason: str = ""      # gate 失败 reason 或 launch raise 异常文本
 
 
 class DelegationPlaneService:
@@ -161,7 +201,7 @@ class DelegationPlaneService:
             route_reason=initial_route_reason,
             worker_capability=request.worker_capability,
             # F091 Phase D medium #2 闭环：DelegationPlane 标准路径显式写 delegation_mode
-            delegation_mode=self._delegation_mode_for_target_kind(initial_target_kind),
+            delegation_mode=self.delegation_mode_for_target_kind(initial_target_kind),
         )
         work = Work(
             work_id=work_id,
@@ -275,7 +315,7 @@ class DelegationPlaneService:
                 ),
                 "agent_profile_id": session_owner_profile_id,
                 "context_frame_id": context_frame_id,
-                "delegation_mode": self._delegation_mode_for_target_kind(
+                "delegation_mode": self.delegation_mode_for_target_kind(
                     final_target_kind
                 ),
             }
@@ -889,20 +929,188 @@ class DelegationPlaneService:
         )
 
     @staticmethod
-    def _delegation_mode_for_target_kind(
+    def delegation_mode_for_target_kind(
         target_kind: DelegationTargetKind,
     ) -> DelegationMode:
-        """F091 Phase D medium #2 闭环：根据 DelegationTargetKind 推断 delegation_mode。
+        """根据 DelegationTargetKind 推断 delegation_mode。
 
         - SUBAGENT → "subagent"
         - WORKER / ACP_RUNTIME / GRAPH_AGENT / FALLBACK → "main_delegate"
           （都是主 Agent 派给外部 worker 性质，统一为 "main_delegate"；
-           F092 评估是否需细分新枚举值）
-        worker_inline 路径不在此推断（属于 worker 内部自跑，由调用方单独写）。
+           F098 H3-B 解绑时再考虑细分）
+
+        F091 Phase D medium #2 引入；F092 Phase A 提为 public（去 `_` 前缀，
+        与 plane 其他 public API 命名对齐）。worker_inline 路径不在此推断。
         """
         if target_kind is DelegationTargetKind.SUBAGENT:
             return "subagent"
         return "main_delegate"
+
+    async def spawn_child(
+        self,
+        *,
+        parent_task,
+        parent_work,
+        objective: str,
+        worker_type: str,
+        target_kind: str,
+        tool_profile: str,
+        title: str,
+        spawned_by: str,
+        plan_id: str = "",
+        emit_audit_event: bool = False,
+        callback_mode: str = "async",
+        audit_task_fallback: str = "_delegate_task_audit",
+        delegation_manager: DelegationManager | None = None,
+    ) -> SpawnChildResult:
+        """F092 Phase A：统一 spawn 编排入口。
+
+        装配顺序（必须与原 builtin_tools 旁路一致——零行为变更）：
+        1. 推断 depth + active_children（容错：list_descendant_works 失败时降级为 []）
+        2. DelegationManager.delegate gate（depth/concurrent/blacklist，失败时返回 rejected）
+        3. capability_pack._launch_child_task（内部仍调 _enforce_child_target_kind_policy
+           + 调 task_runner.launch_child_task）
+           - launch raise → 捕获 + 返回 launch_raised
+        4. 仅 emit_audit_event=True 时调 mgr._emit_spawned_event
+           （subagents.spawn 当前不写此事件 → emit_audit_event=False；
+            delegate_task_tool 当前写此事件 → emit_audit_event=True）
+
+        Args:
+            parent_task: 父任务对象（必须含 .task_id / .depth / .thread_id 等字段）
+            parent_work: 父 Work 对象（必须含 .work_id），用于查 list_descendant_works
+            objective / worker_type / target_kind / tool_profile / title / spawned_by / plan_id:
+                透传给 capability_pack._launch_child_task
+            emit_audit_event: 是否写 SUBAGENT_SPAWNED 审计事件（仅 delegate_task 路径设 True
+                以保持现有行为；subagents.spawn 路径必须为 False）
+            callback_mode: 仅在 emit_audit_event=True 时用作 SUBAGENT_SPAWNED payload
+            audit_task_fallback: DelegationContext.task_id fallback。默认 `_delegate_task_audit`
+                与 delegate_task_tool 历史路径对齐；subagents.spawn 历史路径用
+                `_subagents_spawn_audit`，**Phase C 切换时必须显式传入 `audit_task_fallback="_subagents_spawn_audit"`**
+                以保持零行为变更（Codex MEDIUM 2 修订）。
+            delegation_manager: 测试用 DI 钩子；None 时按 stores 默认构造
+
+        Returns:
+            SpawnChildResult：status ∈ {"written", "rejected", "launch_raised"}。
+        """
+        # 1. 推断 depth + active_children
+        # depth 来源（保持原 builtin_tools 旁路语义，零行为变更）：
+        # 1) 优先从 task_store.get_task(current_task_id) 取 canonical depth
+        # 2) 回查失败 / store 不可用 → 降级到 parent_task.depth
+        # 3) parent_task 也不可用 → 0
+        current_task_id = ""
+        current_depth = 0
+        active_children: list[str] = []
+        if parent_task is not None:
+            current_task_id = getattr(parent_task, "task_id", "") or ""
+            current_depth = int(getattr(parent_task, "depth", 0) or 0)
+        task_store = getattr(self._stores, "task_store", None)
+        if task_store is not None and current_task_id:
+            try:
+                refreshed = await task_store.get_task(current_task_id)
+                if refreshed is not None:
+                    current_depth = int(getattr(refreshed, "depth", 0) or 0)
+            except Exception:
+                # 回查失败 → 降级到 parent_task.depth（已在上方设置）
+                pass
+        if parent_work is not None:
+            try:
+                descendants = await self.list_descendant_works(
+                    getattr(parent_work, "work_id", "") or ""
+                )
+                active_children = [
+                    d.task_id
+                    for d in descendants
+                    if (
+                        getattr(getattr(d, "status", None), "value",
+                                str(getattr(d, "status", "")))
+                    )
+                    not in _WORK_TERMINAL_VALUES
+                    and getattr(d, "parent_work_id", None)
+                    == getattr(parent_work, "work_id", None)
+                ]
+            except Exception:
+                # 容错：list_descendant_works 失败时降级（与原 builtin_tools 容错一致）
+                active_children = []
+
+        # 2. DelegationManager.delegate gate
+        mgr = delegation_manager
+        if mgr is None:
+            event_store = getattr(self._stores, "event_store", None)
+            task_store = getattr(self._stores, "task_store", None)
+            mgr = DelegationManager(
+                event_store=event_store,
+                task_store=task_store,
+            )
+        delegation_ctx = DelegationContext(
+            task_id=current_task_id or audit_task_fallback,
+            depth=current_depth,
+            target_worker=worker_type,
+            active_children=active_children,
+        )
+        gate_input = DelegateTaskInput(
+            target_worker=worker_type,
+            task_description=objective,
+            callback_mode=callback_mode,  # type: ignore[arg-type]
+            max_wait_seconds=300,
+        )
+        gate_result = await mgr.delegate(delegation_ctx, gate_input)
+        if not gate_result.success:
+            return SpawnChildResult(
+                status="rejected",
+                error_code=gate_result.error_code or "",
+                reason=gate_result.reason or "",
+            )
+
+        # 3. capability_pack._launch_child_task（内部调 _enforce_child_target_kind_policy）
+        try:
+            payload = await self._capability_pack._launch_child_task(
+                parent_task=parent_task,
+                parent_work=parent_work,
+                objective=objective,
+                worker_type=worker_type,
+                target_kind=target_kind,
+                tool_profile=tool_profile,
+                title=title,
+                spawned_by=spawned_by,
+                plan_id=plan_id,
+            )
+        except Exception as exc:
+            return SpawnChildResult(
+                status="launch_raised",
+                reason=f"{type(exc).__name__}: {exc}",
+            )
+
+        spawned_task_id = payload.get("task_id", "") if isinstance(payload, dict) else ""
+
+        # 4. 仅 emit_audit_event=True 时写 SUBAGENT_SPAWNED 审计事件
+        # （_emit_spawned_event 内部已 try/except 吞异常，不影响主流程）
+        if emit_audit_event and spawned_task_id:
+            try:
+                await mgr._emit_spawned_event(
+                    task_id=current_task_id or audit_task_fallback,
+                    child_task_id=spawned_task_id,
+                    target_worker=worker_type,
+                    depth=current_depth,
+                    task_description=objective,
+                    callback_mode=callback_mode,
+                )
+            except Exception:
+                pass
+
+        return SpawnChildResult(
+            status="written",
+            task_id=spawned_task_id,
+            created=bool(payload.get("created", False)),
+            thread_id=str(payload.get("thread_id", "")),
+            target_kind=str(payload.get("target_kind", "")),
+            worker_type=str(payload.get("worker_type", "")),
+            tool_profile=str(payload.get("tool_profile", "")),
+            parent_task_id=str(payload.get("parent_task_id", "")),
+            parent_work_id=str(payload.get("parent_work_id", "")),
+            title=str(payload.get("title", "")),
+            objective=str(payload.get("objective", "")),
+            worker_plan_id=str(payload.get("worker_plan_id", "")),
+        )
 
     def _build_definition(self):
         from octoagent.core.models import (
