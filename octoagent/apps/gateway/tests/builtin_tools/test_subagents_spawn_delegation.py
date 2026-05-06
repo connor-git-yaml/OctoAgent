@@ -1,11 +1,16 @@
-"""F085 T2 测试：subagents.spawn 接入 DelegationManager 约束验证。
+"""F085 T2 / F092 Phase C 测试：subagents.spawn → plane.spawn_child 切换后行为。
 
-验证 subagents.spawn 在 DelegationManager 约束下行为正确（spec FR-5 安全 gap 修复）：
-- depth ≥ MAX_DEPTH (2)：reject，不实际派发
-- active_children ≥ MAX_CONCURRENT_CHILDREN (3)：reject
-- target_worker 在 blacklist：reject
-- 正常路径：通过约束 + launch_child 派发
-- 部分成功：批量 objectives 中部分超约束 → 已派发的不撤销，超约束的不派发
+F092 Phase C 修订：
+- 原测试 monkeypatch `launch_child` helper（已删除，工具层不再直接调）
+- 改为 mock plane.spawn_child；底层 DelegationManager gate 集成已由
+  test_delegation_plane_spawn_child.py（plane 层 16 测试）覆盖
+- 工具层测试仅验证：spawn 循环 / skipped_objectives 聚合 / status="written"|"rejected" 决策
+
+验证 subagents.spawn 工具层逻辑（不再覆盖底层 gate，已在 plane 单测覆盖）：
+- 单 objective 成功路径 → status=written / created=1
+- 批量 partial reject → status=written + created=N + preview 含约束拒绝信息
+- 批量 all reject → status=rejected
+- emit_audit_event=False 透传给 plane（保持 subagents.spawn 不写审计事件不变量）
 """
 
 from __future__ import annotations
@@ -22,6 +27,7 @@ from octoagent.core.models.task import RequesterInfo, Task, TaskPointers
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 from octoagent.gateway.services.builtin_tools.delegation_tools import register
+from octoagent.gateway.services.delegation_plane import SpawnChildResult
 
 
 # ---------------------------------------------------------------------------
@@ -29,9 +35,33 @@ from octoagent.gateway.services.builtin_tools.delegation_tools import register
 # ---------------------------------------------------------------------------
 
 
+def _make_written(task_id: str, objective: str = "", title: str = "") -> SpawnChildResult:
+    return SpawnChildResult(
+        status="written",
+        task_id=task_id,
+        created=True,
+        thread_id=f"thread-{task_id}",
+        target_kind="subagent",
+        worker_type="general",
+        tool_profile="default",
+        parent_task_id="parent-task",
+        parent_work_id="parent-work",
+        title=title,
+        objective=objective,
+    )
+
+
+def _make_rejected(reason: str, error_code: str = "CAPACITY_EXCEEDED") -> SpawnChildResult:
+    return SpawnChildResult(
+        status="rejected",
+        error_code=error_code,
+        reason=reason,
+    )
+
+
 @pytest_asyncio.fixture
 async def deps_with_stores(tmp_path: Path):
-    """构造真实 ToolDeps（含 store_group），mock pack_service 用于 launch_child。"""
+    """构造 ToolDeps（含 store_group + mock plane / pack_service）。"""
     artifacts_dir = tmp_path / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
     store_group = await create_store_group(
@@ -39,7 +69,7 @@ async def deps_with_stores(tmp_path: Path):
         artifacts_dir=str(artifacts_dir),
     )
 
-    # 预创建 audit task 防 FK violation
+    # 预创建 audit task 防 FK violation（保留以兼容历史）
     audit_task = Task(
         task_id="_subagents_spawn_audit",
         created_at=datetime.now(tz=timezone.utc),
@@ -51,23 +81,8 @@ async def deps_with_stores(tmp_path: Path):
     )
     await store_group.task_store.create_task(audit_task)
 
-    # mock pack_service：launch_child 内部调用
     pack_service_mock = MagicMock()
     pack_service_mock._effective_tool_profile_for_objective.return_value = "default"
-    pack_service_mock._launch_child_task = AsyncMock(side_effect=lambda **kwargs: {
-        "task_id": f"child-{kwargs.get('objective', 'unknown')[:20]}",
-        "work_id": "work-1",
-        "session_id": "sess-1",
-        "worker_type": kwargs.get("worker_type", "general"),
-        "objective": kwargs.get("objective", ""),
-        "tool_profile": "default",
-        "parent_task_id": "",
-        "parent_work_id": "",
-        "target_kind": "subagent",
-        "title": kwargs.get("title", ""),
-        "thread_id": "default",
-        "worker_plan_id": "",
-    })
 
     deps = ToolDeps(
         project_root=tmp_path,
@@ -85,32 +100,47 @@ async def deps_with_stores(tmp_path: Path):
     await store_group.conn.close()
 
 
-async def _get_spawn_handler(deps: ToolDeps, monkeypatch=None):
-    """注册 delegation_tools 后从 broker 捕获 subagents.spawn handler。
+async def _bind_mock_plane_and_capture_handler(
+    deps: ToolDeps,
+    monkeypatch,
+    *,
+    spawn_child_side_effect=None,
+    spawn_child_return_value=None,
+):
+    """注入 mock plane + 捕获 subagents.spawn handler。
 
-    若传 monkeypatch 则 mock launch_child（避免 execution_context 依赖）；
-    返回真实 spawn handler 用于测 DelegationManager 约束逻辑。
+    设置 deps._delegation_plane = MagicMock；
+    spawn_child = AsyncMock with side_effect / return_value；
+    同时 monkeypatch current_work_context 提供 parent_task / parent_work
+    （用 monkeypatch 而非直接 setattr，避免污染其他测试）。
     """
-    if monkeypatch is not None:
-        from octoagent.gateway.services.builtin_tools import delegation_tools as _dt
+    mock_plane = MagicMock()
+    if spawn_child_side_effect is not None:
+        mock_plane.spawn_child = AsyncMock(side_effect=spawn_child_side_effect)
+    elif spawn_child_return_value is not None:
+        mock_plane.spawn_child = AsyncMock(return_value=spawn_child_return_value)
+    else:
+        mock_plane.spawn_child = AsyncMock(return_value=_make_written("default-task"))
+    deps._delegation_plane = mock_plane
 
-        async def _mock_launch_child(deps, *, objective, worker_type, target_kind,
-                                       tool_profile="minimal", title=""):
-            return {
-                "task_id": f"child-{objective[:20]}",
-                "work_id": "work-1",
-                "session_id": "sess-1",
-                "worker_type": worker_type,
-                "objective": objective,
-                "tool_profile": tool_profile,
-                "parent_task_id": "",
-                "parent_work_id": "",
-                "target_kind": target_kind,
-                "title": title,
-                "thread_id": "default",
-                "worker_plan_id": "",
-            }
-        monkeypatch.setattr(_dt, "launch_child", _mock_launch_child)
+    fake_context = MagicMock(work_id="parent-work-id")
+    fake_parent_task = MagicMock(task_id="parent-task-id", depth=0,
+                                  thread_id="parent-thread")
+
+    async def _fake_current_work_context(_deps):
+        return fake_context, fake_parent_task
+
+    fake_parent_work = MagicMock(work_id="parent-work-id")
+
+    async def _fake_get_work(work_id):
+        return fake_parent_work
+
+    deps.stores.work_store.get_work = _fake_get_work  # type: ignore[assignment]
+
+    # 用 monkeypatch.setattr 替换 delegation_tools 模块的 current_work_context 引用
+    # （测试结束后自动还原，避免污染 test_capability_pack_tools 等其他测试）
+    from octoagent.gateway.services.builtin_tools import delegation_tools as _dt
+    monkeypatch.setattr(_dt, "current_work_context", _fake_current_work_context)
 
     captured: dict[str, Any] = {}
 
@@ -121,80 +151,127 @@ async def _get_spawn_handler(deps: ToolDeps, monkeypatch=None):
     await register(_CaptureBroker(), deps)
     handler = captured.get("subagents.spawn")
     assert handler is not None, "subagents.spawn 未注册"
-    return handler
+    return handler, mock_plane
 
 
 # ---------------------------------------------------------------------------
-# T2 验证测试
+# 工具层测试（plane 已 mock，不覆盖底层 DelegationManager gate）
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
 async def test_spawn_passes_when_no_constraints(deps_with_stores, monkeypatch) -> None:
-    """正常路径：无 execution context 时 depth=0 / active_children=[]，约束通过 + 派发成功。"""
-    handler = await _get_spawn_handler(deps_with_stores, monkeypatch)
+    """正常路径：plane.spawn_child 返回 written → 工具返回 status=written。"""
+    handler, mock_plane = await _bind_mock_plane_and_capture_handler(
+        deps_with_stores, monkeypatch,
+        spawn_child_return_value=_make_written("child-1"),
+    )
     result = await handler(objective="find latest news")
-    assert result.status == "written", f"expected written, got {result.status}: {result.reason}"
+
+    assert result.status == "written"
     assert result.requested == 1
     assert result.created == 1
     assert len(result.children) == 1
-    assert result.children[0].task_id  # 真实派发产生 task_id
+    assert result.children[0].task_id == "child-1"
+
+    # 验证调用 plane.spawn_child 时传了正确的关键参数
+    assert mock_plane.spawn_child.await_count == 1
+    call_kwargs = mock_plane.spawn_child.await_args.kwargs
+    assert call_kwargs["spawned_by"] == "subagents_spawn"
+    assert call_kwargs["emit_audit_event"] is False  # 关键：subagents.spawn 不写审计
+    assert call_kwargs["audit_task_fallback"] == "_subagents_spawn_audit"
 
 
 @pytest.mark.asyncio
 async def test_spawn_partial_reject_keeps_successful(deps_with_stores, monkeypatch) -> None:
-    """批量 objectives + active_children 累加：第 4 个会触发 max_concurrent=3 拒绝。
+    """批量 5 objectives，前 3 written + 后 2 rejected → status=written + created=3 + preview 含约束拒绝。"""
+    side_effect_values = [
+        _make_written(f"child-{i}", objective=f"task {i}") for i in range(3)
+    ] + [
+        _make_rejected("活跃子任务数 3 ≥ 3", error_code="CAPACITY_EXCEEDED")
+        for _ in range(2)
+    ]
 
-    DelegationManager 看到当前 spawn 已派发 3 个后，第 4 个 reject。
-    前 3 个真派发不撤销。
-    """
-    handler = await _get_spawn_handler(deps_with_stores, monkeypatch)
-    objectives = [f"task {i}" for i in range(5)]  # 5 个，第 4-5 应被拒
-    result = await handler(objectives=objectives)
+    handler, mock_plane = await _bind_mock_plane_and_capture_handler(
+        deps_with_stores, monkeypatch,
+        spawn_child_side_effect=side_effect_values,
+    )
+    result = await handler(objectives=[f"task {i}" for i in range(5)])
 
-    # F085: DelegationManager max_concurrent=3 → 前 3 个派发，后 2 个 reject
     assert result.status == "written", f"部分成功应是 written: {result.status} / {result.reason}"
     assert result.requested == 5
-    assert result.created == 3, f"应只创建 3 个（max_concurrent=3），实际 {result.created}"
-    # preview 应说明部分约束拒绝
-    assert "约束拒绝" in (result.preview or ""), f"preview 应提到约束拒绝: {result.preview}"
+    assert result.created == 3
+    assert "约束拒绝" in (result.preview or "")
+    assert mock_plane.spawn_child.await_count == 5
 
 
 @pytest.mark.asyncio
 async def test_spawn_all_blocked_returns_rejected(deps_with_stores, monkeypatch) -> None:
-    """全部 objective 被约束拒绝时 status=rejected（防 LLM 误以为派发成功用假 task_id）。
-
-    用 monkeypatch 把 MAX_CONCURRENT_CHILDREN 临时改成 0 触发全拒。
-    """
-    from octoagent.gateway.harness import delegation as _delegation
-
-    monkeypatch.setattr(_delegation.DelegationManager, "MAX_CONCURRENT_CHILDREN", 0)
-    handler = await _get_spawn_handler(deps_with_stores, monkeypatch)
+    """全部 objective 被 plane.spawn_child 拒绝 → status=rejected（防 LLM 误以为派发成功）。"""
+    handler, _ = await _bind_mock_plane_and_capture_handler(
+        deps_with_stores, monkeypatch,
+        spawn_child_side_effect=[
+            _make_rejected("max_concurrent=0", error_code="CAPACITY_EXCEEDED")
+            for _ in range(2)
+        ],
+    )
     result = await handler(objectives=["a", "b"])
 
-    assert result.status == "rejected", f"全拒应是 rejected: {result.status}"
+    assert result.status == "rejected"
     assert result.created == 0
     assert len(result.children) == 0
-    assert "约束" in (result.reason or "") or "DelegationManager" in (result.reason or "")
+    assert "DelegationManager" in (result.reason or "")
 
 
 @pytest.mark.asyncio
 async def test_spawn_blocks_when_target_blacklisted(deps_with_stores, monkeypatch) -> None:
-    """blacklist 命中时 reject 该 objective（不实际派发）。
-
-    通过 monkeypatch 在 spawn 内部构造 DelegationManager 时注入 blacklist。
-    """
-    # 重写 DelegationManager.__init__ 默认带 blacklist={"general"}
-    from octoagent.gateway.harness import delegation as _delegation
-    _orig_init = _delegation.DelegationManager.__init__
-
-    def _patched_init(self, **kwargs):
-        kwargs.setdefault("blacklist", {"general"})
-        _orig_init(self, **kwargs)
-    monkeypatch.setattr(_delegation.DelegationManager, "__init__", _patched_init)
-
-    handler = await _get_spawn_handler(deps_with_stores, monkeypatch)
+    """blacklist 命中（plane 返回 rejected with blacklist_blocked）→ 工具返回 rejected。"""
+    handler, _ = await _bind_mock_plane_and_capture_handler(
+        deps_with_stores, monkeypatch,
+        spawn_child_return_value=_make_rejected(
+            "目标 Worker 'general' 在黑名单中", error_code="blacklist_blocked"
+        ),
+    )
     result = await handler(objective="something", worker_type="general")
 
-    assert result.status == "rejected", f"blacklisted worker 应 reject: {result.status}"
-    assert "blacklist" in (result.reason or "").lower() or "黑名单" in (result.reason or "")
+    assert result.status == "rejected"
+    assert "黑名单" in (result.reason or "") or "blacklist" in (result.reason or "").lower()
+
+
+@pytest.mark.asyncio
+async def test_spawn_propagates_launch_raise_from_plane(deps_with_stores, monkeypatch) -> None:
+    """plane.spawn_child raise（含 enforce / task_runner 错误）→ subagents.spawn
+    propagate 给 broker（保持 F085 worker→worker 拒绝 invariant：result.is_error=True）。"""
+    handler, _ = await _bind_mock_plane_and_capture_handler(
+        deps_with_stores, monkeypatch,
+        spawn_child_side_effect=RuntimeError(
+            "worker runtime cannot delegate to another worker"
+        ),
+    )
+
+    # spawn_child raise → subagents.spawn handler propagate（不 catch）
+    with pytest.raises(RuntimeError, match="worker runtime cannot delegate"):
+        await handler(objective="test enforce raise", target_kind="worker")
+
+
+@pytest.mark.asyncio
+async def test_spawn_batch_propagates_raise_at_second_objective(
+    deps_with_stores, monkeypatch
+) -> None:
+    """batch loop 中第 2 个 spawn_child raise → propagate（不返回 partial payload）。
+    Codex Phase C MEDIUM 2 锁定：旧行为是 raise 直接 propagate，已派发的前 N-1 个不会
+    出现在工具结果中（因为 raise 跳出 handler）。"""
+    handler, mock_plane = await _bind_mock_plane_and_capture_handler(
+        deps_with_stores, monkeypatch,
+        spawn_child_side_effect=[
+            _make_written("child-0", objective="task 0"),
+            RuntimeError("worker runtime cannot delegate to another worker"),
+            _make_written("child-2", objective="task 2"),  # 不会被调到
+        ],
+    )
+
+    with pytest.raises(RuntimeError, match="worker runtime cannot delegate"):
+        await handler(objectives=[f"task {i}" for i in range(3)], target_kind="subagent")
+
+    # 第 1 个已成功（mock 返回 written），第 2 个 raise propagate；第 3 个未被调
+    assert mock_plane.spawn_child.await_count == 2  # 不是 3

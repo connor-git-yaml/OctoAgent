@@ -17,11 +17,6 @@ from typing import Any
 from pydantic import BaseModel
 
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
-from octoagent.gateway.harness.delegation import (
-    DelegateTaskInput,
-    DelegationContext,
-    DelegationManager,
-)
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
 from octoagent.core.models.tool_results import (
@@ -36,13 +31,12 @@ from octoagent.core.models.tool_results import (
 
 from ._deps import (
     ToolDeps,
+    WORK_TERMINAL_VALUES,
     coerce_objectives,
     current_parent,
     current_work_context,
     descendant_works_for_current_context,
-    launch_child,
     resolve_child_work,
-    WORK_TERMINAL_VALUES,
 )
 
 # 各工具 entrypoints 声明（Feature 084 D1 根治 + Codex F2 收紧）
@@ -123,115 +117,76 @@ async def register(broker, deps: ToolDeps) -> None:
         if not items:
             raise RuntimeError("objective 或 objectives 至少需要提供一个")
 
-        # F085 T2 修复（spec FR-5 安全 gap）：subagents.spawn 之前直接调
-        # launch_child 绕过 DelegationManager（max_depth=2 / max_concurrent=3 /
-        # blacklist），LLM 可创建无限递归 sub-agent。现在两条路径
-        # （subagents.spawn + delegate_task）都走 DelegationManager。
-        # 推断当前 task 深度 + 活跃子任务数（参照 delegate_task_tool.py 模式）
-        current_task_id = ""
-        current_depth = 0
-        active_children: list[str] = []
-        task_store = getattr(getattr(deps, "stores", None), "event_store", None)
-        try:
-            from ..execution_context import get_current_execution_context
-            ctx = get_current_execution_context()
-            if ctx:
-                current_task_id = ctx.task_id or ""
-                ts = getattr(getattr(deps, "stores", None), "task_store", None)
-                if ts and current_task_id:
-                    try:
-                        current_task = await ts.get_task(current_task_id)
-                        if current_task is not None:
-                            current_depth = getattr(current_task, "depth", 0) or 0
-                            if deps._delegation_plane is not None and ctx.work_id:
-                                try:
-                                    descendants = await deps._delegation_plane.list_descendant_works(
-                                        ctx.work_id
-                                    )
-                                    # F44 修复（F085 T7 Codex high）：之前用
-                                    # ("completed", "failed", "cancelled") 错过 succeeded /
-                                    # merged / escalated / timed_out / deleted 共 7 终态中的 5 个
-                                    # → 历史成功 work 永远占容量配额 → CAPACITY_EXCEEDED 永远触发
-                                    # 改用 WORK_TERMINAL_VALUES 单一事实源
-                                    # （getattr(s, "value", str(s)) 兼容 status 是 enum / str 两种形态）
-                                    active_children = [
-                                        d.task_id for d in descendants
-                                        if (getattr(getattr(d, "status", None), "value",
-                                                   str(getattr(d, "status", ""))))
-                                            not in WORK_TERMINAL_VALUES
-                                        and getattr(d, "parent_work_id", None) == ctx.work_id
-                                    ]
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+        # F092 Phase C：旁路逻辑（DelegationManager 直接 new + launch_child helper）
+        # 已收敛到 plane.spawn_child 单一编排入口。
+        # 关键不变量保持（行为零变更）：
+        # - F085 T2: gate（depth/concurrent/blacklist）必走，spawn_child 内置
+        # - F44/F085 T7: WORK_TERMINAL_VALUES 单一事实源（spawn_child 内 _WORK_TERMINAL_VALUES）
+        # - subagents.spawn 历史不写 SUBAGENT_SPAWNED 审计事件 → emit_audit_event=False
+        # - audit task fallback 历史用 "_subagents_spawn_audit" → 显式覆盖
+        # - batch loop 内 active_children 累加 → 通过 additional_active_children 传递
+        if deps._delegation_plane is None:
+            raise RuntimeError("delegation plane is not bound for subagents.spawn")
 
-        # 创建 DelegationManager（注入 stores，防 F24 audit task FK violation）
-        _stores = getattr(deps, "stores", None)
-        mgr = DelegationManager(
-            event_store=getattr(_stores, "event_store", None),
-            task_store=getattr(_stores, "task_store", None),
-        )
+        # 解析当前 work / task 上下文（替代原 launch_child helper 内部解析）
+        # 不 try/except——保持原 launch_child helper 行为：context 解析失败 / parent_work
+        # 不存在时 raise propagate 给 broker（result.is_error=True，与原行为等价）
+        context, parent_task = await current_work_context(deps)
+        parent_work = await deps.stores.work_store.get_work(context.work_id)
+        if parent_work is None:
+            raise RuntimeError(f"current work not found: {context.work_id}")
 
-        launched_raw = []
+        launched_raw: list[Any] = []
         skipped_objectives: list[tuple[str, str]] = []  # (objective, reject_reason)
-        for i, item in enumerate(items):
+        accumulated_task_ids: list[str] = []
+        for item in items:
             child_title = title if len(items) == 1 and title else item[:60]
-
-            # 每个 objective 独立做 DelegationManager 约束检查
-            # 失败：跳过该 objective（前面已派发的不撤销，但失败的不派发）
-            delegation_ctx = DelegationContext(
-                task_id=current_task_id or "_subagents_spawn_audit",
-                depth=current_depth,
-                target_worker=worker_type,
-                active_children=active_children,
+            tool_profile = deps._pack_service._effective_tool_profile_for_objective(
+                objective=item,
             )
-            task_input = DelegateTaskInput(
-                target_worker=worker_type,
-                task_description=item,
-                callback_mode="async",
-                max_wait_seconds=300,
-            )
-            gate_result = await mgr.delegate(delegation_ctx, task_input)
-            if not gate_result.success:
-                skipped_objectives.append((item, gate_result.reason))
-                continue
 
-            payload = await launch_child(
-                deps,
+            # spawn_child 不捕获 launch raise——直接 propagate（保持原 subagents.spawn
+            # 行为：enforce raise / task_runner raise 都 propagate 给 broker → result.is_error=True）
+            spawn_result = await deps.delegation_plane.spawn_child(
+                parent_task=parent_task,
+                parent_work=parent_work,
                 objective=item,
                 worker_type=worker_type,
                 target_kind=target_kind,
-                tool_profile=deps._pack_service._effective_tool_profile_for_objective(
-                    objective=item,
-                ),
+                tool_profile=tool_profile,
                 title=child_title,
+                spawned_by="subagents_spawn",
+                emit_audit_event=False,  # 关键：保持原 subagents.spawn 历史不写审计行为
+                audit_task_fallback="_subagents_spawn_audit",
+                additional_active_children=list(accumulated_task_ids),
             )
-            launched_raw.append(payload)
-            # 派发成功后更新 active_children，让后续 objective 看到约束累加
-            spawned_task_id = payload.get("task_id", "") if isinstance(payload, dict) else ""
-            if spawned_task_id:
-                active_children = active_children + [spawned_task_id]
 
-        # 将 payload dict 转为 ChildSpawnInfo（防 F4 压扁，保留全部关联键）
+            if spawn_result.status == "rejected":
+                skipped_objectives.append((item, spawn_result.reason))
+                continue
+            # status == "written"
+            launched_raw.append(spawn_result)
+            if spawn_result.task_id:
+                accumulated_task_ids.append(spawn_result.task_id)
+
+        # 将 SpawnChildResult 转为 ChildSpawnInfo（防 F4 压扁，保留全部关联键）
+        # 注：spawn_result 不含 work_id / session_id（原 dict 也不含；保持等价）
         children = [
             ChildSpawnInfo(
-                task_id=p.get("task_id", ""),
-                work_id=p.get("work_id", ""),
-                session_id=p.get("session_id", ""),
-                worker_type=p.get("worker_type", ""),
-                objective=p.get("objective", ""),
-                tool_profile=p.get("tool_profile", ""),
-                parent_task_id=p.get("parent_task_id", ""),
-                parent_work_id=p.get("parent_work_id", ""),
-                target_kind=p.get("target_kind", ""),
-                title=p.get("title", ""),
-                thread_id=p.get("thread_id", ""),
-                worker_plan_id=p.get("worker_plan_id", ""),
+                task_id=r.task_id,
+                work_id="",
+                session_id="",
+                worker_type=r.worker_type,
+                objective=r.objective,
+                tool_profile=r.tool_profile,
+                parent_task_id=r.parent_task_id,
+                parent_work_id=r.parent_work_id,
+                target_kind=r.target_kind,
+                title=r.title,
+                thread_id=r.thread_id,
+                worker_plan_id=r.worker_plan_id,
             )
-            for p in launched_raw
+            for r in launched_raw
         ]
         child_ids = ", ".join(c.task_id for c in children if c.task_id)
         # F085 T2: 全部 objective 被约束拒绝时返回 status="rejected" + reason

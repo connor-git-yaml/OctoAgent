@@ -32,12 +32,11 @@ from ulid import ULID
 
 from octoagent.core.models.enums import ActorType, EventType, SideEffectLevel
 from octoagent.core.models.tool_results import DelegateTaskResult
-from octoagent.gateway.harness.delegation import DelegateTaskInput, DelegationContext, DelegationManager
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
 from octoagent.tooling import reflect_tool_schema, tool_contract
 
-from ._deps import ToolDeps, WORK_TERMINAL_VALUES
+from ._deps import ToolDeps, current_work_context
 
 log = structlog.get_logger(__name__)
 
@@ -97,111 +96,68 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                 callback_mode=callback_mode,
             )
 
-        # 解析当前执行上下文（获取 task_id 和深度信息）
-        # F2 修复（Codex high）：必须从运行时状态推断深度和活跃子任务数，
-        # 不能硬编码 depth=0 / active_children=[]，否则深度/并发约束形同虚设
-        current_task_id = ""
-        current_depth = 0
-        active_children: list[str] = []
-
-        task_store = getattr(getattr(deps, "stores", None), "task_store", None)
-
-        try:
-            from ..execution_context import get_current_execution_context
-            ctx = get_current_execution_context()
-            if ctx:
-                current_task_id = ctx.task_id or ""
-                # 从 execution context 推断深度（work_id chain 或 depth 字段）
-                # Phase 3 轻量实现：查当前 task 的 depth 字段（如存在）
-                if task_store and current_task_id:
-                    try:
-                        current_task = await task_store.get_task(current_task_id)
-                        if current_task is not None:
-                            current_depth = getattr(current_task, "depth", 0) or 0
-                            # active_children：查 task_store 中以 current_task_id 为 parent 的活跃子任务
-                            # Phase 3 轻量：使用 context 的 work_id chain 推断（如 delegation_plane 可用）
-                            if deps._delegation_plane is not None:
-                                try:
-                                    descendants = await deps._delegation_plane.list_descendant_works(
-                                        ctx.work_id
-                                    ) if ctx.work_id else []
-                                    # 只统计直接活跃子任务（非终态）
-                                    # F44 修复：用 WORK_TERMINAL_VALUES 替代手写
-                                    # 7 个终态: SUCCEEDED/FAILED/CANCELLED/MERGED/ESCALATED/TIMED_OUT/DELETED
-                                    active_children = [
-                                        d.task_id for d in descendants
-                                        if (getattr(getattr(d, "status", None), "value",
-                                                   str(getattr(d, "status", ""))))
-                                            not in WORK_TERMINAL_VALUES
-                                        and getattr(d, "parent_work_id", None) == ctx.work_id
-                                    ]
-                                except Exception:
-                                    pass
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-        # 构建 DelegationContext（使用真实运行时状态，不再硬编码）
-        delegation_ctx = DelegationContext(
-            task_id=current_task_id or _DELEGATE_AUDIT_TASK_ID,
-            depth=current_depth,
-            target_worker=target_worker,
-            active_children=active_children,
-        )
-
-        # 构建 DelegateTaskInput
-        task_input = DelegateTaskInput(
-            target_worker=target_worker,
-            task_description=task_description,
-            callback_mode=callback_mode,  # type: ignore[arg-type]
-            max_wait_seconds=max_wait_seconds,
-        )
-
-        # 初始化 DelegationManager（注入 event_store / task_store）
-        event_store = getattr(getattr(deps, "stores", None), "event_store", None)
-        task_store = getattr(getattr(deps, "stores", None), "task_store", None)
-        mgr = DelegationManager(
-            event_store=event_store,
-            task_store=task_store,
-        )
-
-        # 调用 DelegationManager.delegate()（检查 depth/concurrent/blacklist + 写 SUBAGENT_SPAWNED）
-        result = await mgr.delegate(delegation_ctx, task_input)
-
-        if not result.success:
+        # F092 Phase C：旁路 DelegationManager + launch_child 已收敛到 plane.spawn_child。
+        # 不变量保持（行为零变更）：
+        # - F2 修复（depth/active_children 真实推断）→ spawn_child 内 task_store.get_task 优先
+        # - F26 修复（真实派发，非 stub）→ spawn_child 内调 capability_pack._launch_child_task
+        # - F34 修复（SUBAGENT_SPAWNED 审计写真实 child_task_id）→ emit_audit_event=True
+        # - F44 修复（WORK_TERMINAL_VALUES 单一事实源）→ spawn_child 内 _WORK_TERMINAL_VALUES
+        # - audit task fallback 保持 _DELEGATE_AUDIT_TASK_ID（spawn_child 默认对齐此值）
+        if deps._delegation_plane is None:
             return DelegateTaskResult(
                 status="rejected",
                 target="delegate_task",
-                reason=result.reason,
+                reason="delegation plane is not bound for delegate_task",
                 child_task_id=None,
                 target_worker=target_worker,
                 callback_mode=callback_mode,
             )
 
-        # F26 修复（Codex 独立 review high）：把 stub 替换为真实派发——
-        # 调用 launch_child（与 subagents.spawn 同路径，复用现有 Worker Runtime）。
-        # 这样 DelegationManager 的 gate 检查 + 真实子任务创建串联起来：
-        # 1. DelegationManager.delegate 做 gate 检查（depth/concurrent/blacklist），不写事件
-        # 2. launch_child 实际创建 child task（task_runner 接管 lifecycle）
-        # 3. F34 修复：launch_child 成功后调 mgr._emit_spawned_event 写真实 child_task_id
-        #    （旧实现 delegate_task_tool 不写事件 → 违反 FR-5.5 / Constitution C2 审计要求）
-        # 4. async 模式立即返回 task_id；sync 模式 wait + return
-        # 5. SUBAGENT_RETURNED 事件由 task_runner 终态回调写入（非本工具职责）
+        # task_store 局部变量保留（sync 模式下 _wait_terminal 仍需）
+        task_store = getattr(getattr(deps, "stores", None), "task_store", None)
+
+        # 解析当前 work / task 上下文（spawn_child 需要 parent_task / parent_work）
         try:
-            from ._deps import launch_child as _launch_child
-            launch_payload = await _launch_child(
-                deps,
+            context, parent_task = await current_work_context(deps)
+            parent_work = await deps.stores.work_store.get_work(context.work_id)
+            if parent_work is None:
+                raise RuntimeError(f"current work not found: {context.work_id}")
+        except Exception as exc:
+            return DelegateTaskResult(
+                status="rejected",
+                target="delegate_task",
+                reason=f"无法解析当前 work 上下文: {type(exc).__name__}: {exc}",
+                child_task_id=None,
+                target_worker=target_worker,
+                callback_mode=callback_mode,
+            )
+
+        # 调用 plane.spawn_child（统一编排入口：gate + launch + audit emit）
+        # spawn_child 对 launch raise 不捕获 → 此处必须 try/except（保持原
+        # delegate_task 行为：launch raise → DelegateTaskResult(rejected)）
+        tool_profile = (
+            deps._pack_service._effective_tool_profile_for_objective(
+                objective=task_description,
+            )
+            if deps._pack_service is not None
+            else "default"
+        )
+        try:
+            spawn_result = await deps.delegation_plane.spawn_child(
+                parent_task=parent_task,
+                parent_work=parent_work,
                 objective=task_description,
                 worker_type=target_worker,
                 target_kind="subagent",
-                tool_profile=deps._pack_service._effective_tool_profile_for_objective(
-                    objective=task_description,
-                ) if deps._pack_service is not None else "default",
+                tool_profile=tool_profile,
                 title=task_description[:60],
+                spawned_by="delegate_task_tool",
+                emit_audit_event=True,  # F34: SUBAGENT_SPAWNED 审计事件必须写
+                callback_mode=callback_mode,
+                audit_task_fallback=_DELEGATE_AUDIT_TASK_ID,
             )
         except Exception as exc:
-            # launch_child 失败 → 真实派发被拒绝（非 stub 限制）
+            # launch raise（含 enforce / task_runner 错误）→ 包成 rejected
             return DelegateTaskResult(
                 status="rejected",
                 target="delegate_task",
@@ -214,34 +170,17 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                 callback_mode=callback_mode,
             )
 
-        spawned_task_id = (launch_payload or {}).get("task_id", "") if isinstance(launch_payload, dict) else ""
+        if spawn_result.status == "rejected":
+            return DelegateTaskResult(
+                status="rejected",
+                target="delegate_task",
+                reason=spawn_result.reason,
+                child_task_id=None,
+                target_worker=target_worker,
+                callback_mode=callback_mode,
+            )
 
-        # F34 修复（Codex independent review high）：launch_child 成功后写
-        # SUBAGENT_SPAWNED 审计事件（FR-5.5 / Constitution C2 / C4）。
-        # 旧实现完全不写此事件，导致真实派发的 child_task_id 在事件流中没有溯源记录，
-        # 违反 C2 "所有写操作必有审计事件" + C4 "不可逆操作两阶段记录"。
-        if spawned_task_id:
-            try:
-                await mgr._emit_spawned_event(
-                    task_id=current_task_id or _DELEGATE_AUDIT_TASK_ID,
-                    child_task_id=spawned_task_id,
-                    target_worker=target_worker,
-                    depth=current_depth,
-                    task_description=task_description,
-                    callback_mode=callback_mode,
-                )
-            except Exception as exc:  # noqa: BLE001
-                # 审计写失败不阻断已派发的子任务（task_runner 已在跑），
-                # 但 ERROR 级日志显眼标记 audit drop（与其他事件路径一致）
-                import structlog as _structlog_module
-                _structlog_module.get_logger(__name__).error(
-                    "delegate_task_spawned_event_failed",
-                    parent_task_id=current_task_id,
-                    child_task_id=spawned_task_id,
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                    hint="Constitution C2 风险：SUBAGENT_SPAWNED 事件未持久化",
-                )
+        spawned_task_id = spawn_result.task_id
 
         # async 模式：立即返回 spawned + task_id（FR-5.1）
         if callback_mode == "async":

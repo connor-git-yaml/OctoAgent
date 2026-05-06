@@ -74,13 +74,17 @@ class SpawnChildResult:
     字段与 capability_pack._launch_child_task 当前返回 dict 1:1 映射，不引入假关联键
     （work_id / session_id 不在 _launch_child_task 返回字段中，保留留给调用方按 work_store 查询）。
 
-    status 三态：
-    - "written"        — gate 通过 + launch 成功；其他字段填充
-    - "rejected"       — DelegationManager.delegate gate 拒绝（depth/concurrent/blacklist）
-    - "launch_raised"  — gate 通过但 _launch_child_task raise（task_runner 未就绪 / 数据校验失败 / 等）
+    status 二态：
+    - "written"   — gate 通过 + launch 成功；业务字段填充
+    - "rejected"  — DelegationManager.delegate gate 拒绝（depth/concurrent/blacklist）；error_code/reason 填充
+
+    注：launch_child_task raise（含 enforce_child_target_kind_policy / task_runner
+    未就绪 / 数据校验失败）由 spawn_child 不捕获，直接 propagate 给调用方处理。
+    这样 subagents.spawn 路径保持原 propagate 给 broker 的行为（F085 worker→worker
+    拒绝 invariant）；delegate_task 路径自行 try/except 包成 rejected。
     """
 
-    status: Literal["written", "rejected", "launch_raised"]
+    status: Literal["written", "rejected"]
     # status="written" 时的业务字段（与 _launch_child_task 返回 dict 对齐）
     task_id: str = ""
     created: bool = False
@@ -961,6 +965,7 @@ class DelegationPlaneService:
         emit_audit_event: bool = False,
         callback_mode: str = "async",
         audit_task_fallback: str = "_delegate_task_audit",
+        additional_active_children: list[str] | None = None,
         delegation_manager: DelegationManager | None = None,
     ) -> SpawnChildResult:
         """F092 Phase A：统一 spawn 编排入口。
@@ -970,7 +975,8 @@ class DelegationPlaneService:
         2. DelegationManager.delegate gate（depth/concurrent/blacklist，失败时返回 rejected）
         3. capability_pack._launch_child_task（内部仍调 enforce_child_target_kind_policy
            + 调 task_runner.launch_child_task）
-           - launch raise → 捕获 + 返回 launch_raised
+           - **不捕获 raise**——直接 propagate 给调用方（保持原 builtin_tools 旁路语义：
+             subagents.spawn propagate 给 broker；delegate_task 自己 try/except 包成 rejected）
         4. 仅 emit_audit_event=True 时调 mgr._emit_spawned_event
            （subagents.spawn 当前不写此事件 → emit_audit_event=False；
             delegate_task_tool 当前写此事件 → emit_audit_event=True）
@@ -987,10 +993,15 @@ class DelegationPlaneService:
                 与 delegate_task_tool 历史路径对齐；subagents.spawn 历史路径用
                 `_subagents_spawn_audit`，**Phase C 切换时必须显式传入 `audit_task_fallback="_subagents_spawn_audit"`**
                 以保持零行为变更（Codex MEDIUM 2 修订）。
+            additional_active_children: 额外的活跃子任务 task_id 列表（合并到 store 查到的
+                active_children，去重）。subagents.spawn 在 batch loop 中需要把已派发成功的
+                task_id 累加进来，让后续 objective 的 gate 检查正确累计；delegate_task_tool
+                单次调用时无需传。**若不传则等价于空列表**。
             delegation_manager: 测试用 DI 钩子；None 时按 stores 默认构造
 
         Returns:
-            SpawnChildResult：status ∈ {"written", "rejected", "launch_raised"}。
+            SpawnChildResult：status ∈ {"written", "rejected"}。
+            launch raise（enforce / task_runner 等）直接 propagate，由调用方 try/except。
         """
         # 1. 推断 depth + active_children
         # depth 来源（保持原 builtin_tools 旁路语义，零行为变更）：
@@ -1031,6 +1042,13 @@ class DelegationPlaneService:
             except Exception:
                 # 容错：list_descendant_works 失败时降级（与原 builtin_tools 容错一致）
                 active_children = []
+        # 合并 batch loop 中调用方累加的 task_id（subagents.spawn 多 objective 场景）
+        if additional_active_children:
+            seen = set(active_children)
+            for tid in additional_active_children:
+                if tid and tid not in seen:
+                    active_children.append(tid)
+                    seen.add(tid)
 
         # 2. DelegationManager.delegate gate
         mgr = delegation_manager
@@ -1062,28 +1080,29 @@ class DelegationPlaneService:
             )
 
         # 3. capability_pack._launch_child_task（内部调 enforce_child_target_kind_policy）
-        try:
-            payload = await self._capability_pack._launch_child_task(
-                parent_task=parent_task,
-                parent_work=parent_work,
-                objective=objective,
-                worker_type=worker_type,
-                target_kind=target_kind,
-                tool_profile=tool_profile,
-                title=title,
-                spawned_by=spawned_by,
-                plan_id=plan_id,
-            )
-        except Exception as exc:
-            return SpawnChildResult(
-                status="launch_raised",
-                reason=f"{type(exc).__name__}: {exc}",
-            )
+        # 关键：不捕获 raise——由调用方决定如何处理。原因：
+        # - subagents.spawn 路径原行为是 enforce raise / launch raise propagate 给 broker
+        #   → result.is_error=True（保持 F085 worker→worker 拒绝 invariant）
+        # - delegate_task 路径原行为是自己 try/except → 包成 DelegateTaskResult(rejected)
+        # 由 spawn_child 不区分，按 propagate 处理；调用方各自 try/except
+        payload = await self._capability_pack._launch_child_task(
+            parent_task=parent_task,
+            parent_work=parent_work,
+            objective=objective,
+            worker_type=worker_type,
+            target_kind=target_kind,
+            tool_profile=tool_profile,
+            title=title,
+            spawned_by=spawned_by,
+            plan_id=plan_id,
+        )
 
         spawned_task_id = payload.get("task_id", "") if isinstance(payload, dict) else ""
 
         # 4. 仅 emit_audit_event=True 时写 SUBAGENT_SPAWNED 审计事件
-        # （_emit_spawned_event 内部已 try/except 吞异常，不影响主流程）
+        # （_emit_spawned_event 内部已 try/except 吞异常 + 写自己的 error log；
+        #  此处的外层 except 仅防意外异常逃逸破坏 spawn_child 主流程，
+        #  与原 delegate_task_tool 行为一致：审计失败不阻断已派发的子任务）
         if emit_audit_event and spawned_task_id:
             try:
                 await mgr._emit_spawned_event(
@@ -1094,8 +1113,18 @@ class DelegationPlaneService:
                     task_description=objective,
                     callback_mode=callback_mode,
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                # 与原 delegate_task_tool 一致：ERROR 级 log 标记 audit drop
+                import structlog as _structlog_module
+                _structlog_module.get_logger(__name__).error(
+                    "spawn_child_audit_emit_failed",
+                    parent_task_id=current_task_id or audit_task_fallback,
+                    child_task_id=spawned_task_id,
+                    spawned_by=spawned_by,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                    hint="Constitution C2 风险：SUBAGENT_SPAWNED 事件未持久化",
+                )
 
         return SpawnChildResult(
             status="written",

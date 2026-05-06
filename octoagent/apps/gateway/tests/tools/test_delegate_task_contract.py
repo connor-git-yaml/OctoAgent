@@ -181,49 +181,60 @@ def test_delegate_task_tool_description_mentions_subagent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_delegate_task_writes_spawned_event_via_real_handler(
+async def test_delegate_task_passes_emit_audit_event_true_to_plane(
     tmp_path,
     monkeypatch,
 ) -> None:
-    """delegate_task 工具真实派发后写入 SUBAGENT_SPAWNED 事件（防 F34 回归）。"""
+    """delegate_task 工具调 plane.spawn_child 时必须传 emit_audit_event=True
+    + audit_task_fallback=_DELEGATE_AUDIT_TASK_ID（F34 不变量：SUBAGENT_SPAWNED 事件
+    由 plane 在 spawn_child 内部写入）。底层"实际写事件"行为由
+    test_delegation_plane_spawn_child.test_emit_audit_event_true_calls_emit_spawned_event
+    覆盖；本测试只验证工具层传对了参数。"""
     from unittest.mock import AsyncMock, MagicMock
 
-    from octoagent.gateway.harness.delegation import DelegationManager
     from octoagent.gateway.services.builtin_tools import delegate_task_tool
+    from octoagent.gateway.services.builtin_tools._deps import current_work_context as _orig_cwc
+    from octoagent.gateway.services.delegation_plane import SpawnChildResult
 
-    # 监听 _emit_spawned_event 真实调用
-    spawned_calls: list[dict] = []
-
-    async def _spy_emit(self, **kwargs):
-        spawned_calls.append(kwargs)
-        return None
-
-    monkeypatch.setattr(DelegationManager, "_emit_spawned_event", _spy_emit)
-
-    # mock launch_child 返回 fake task_id
     fake_task_id = "child-task-fake-001"
-    fake_launch_payload = {
-        "task_id": fake_task_id,
-        "work_id": "work-fake-001",
-        "session_id": "session-fake-001",
-    }
-    monkeypatch.setattr(
-        "octoagent.gateway.services.builtin_tools._deps.launch_child",
-        AsyncMock(return_value=fake_launch_payload),
+
+    # mock plane.spawn_child 返回 written
+    mock_plane = MagicMock()
+    mock_plane.spawn_child = AsyncMock(
+        return_value=SpawnChildResult(
+            status="written",
+            task_id=fake_task_id,
+            created=True,
+            target_kind="subagent",
+            worker_type="general",
+            tool_profile="default",
+        )
     )
 
-    # 构造最小 deps（覆盖 _pack_service / stores 接口）
+    # mock current_work_context（无 execution_context 时降级到 spawn_child 内部容错）
+    fake_context = MagicMock(work_id="parent-work-id")
+    fake_parent_task = MagicMock(task_id="parent-task-id", depth=0,
+                                  thread_id="parent-thread")
+
+    async def _fake_current_work_context(_deps):
+        return fake_context, fake_parent_task
+
+    monkeypatch.setattr(delegate_task_tool, "current_work_context",
+                        _fake_current_work_context)
+
+    # 构造 deps
     deps = MagicMock()
     deps.project_root = tmp_path
     deps._pack_service = MagicMock()
     deps._pack_service._effective_tool_profile_for_objective = MagicMock(return_value="default")
-    deps._delegation_plane = None
+    deps._delegation_plane = mock_plane
+    deps.delegation_plane = mock_plane  # property access fallback
     deps.stores = MagicMock()
     deps.stores.event_store = MagicMock()
     deps.stores.task_store = MagicMock()
-    deps.stores.task_store.get_task = AsyncMock(return_value=None)
+    deps.stores.work_store = MagicMock()
+    deps.stores.work_store.get_work = AsyncMock(return_value=MagicMock(work_id="parent-work-id"))
 
-    # 通过 broker stub 注册 + 拿到 handler
     captured_handler = None
 
     class _BrokerStub:
@@ -235,7 +246,6 @@ async def test_delegate_task_writes_spawned_event_via_real_handler(
     await delegate_task_tool.register(_BrokerStub(), deps)
     assert captured_handler is not None, "delegate_task_handler 未被注册"
 
-    # 调用真实 handler（async 模式立即返回）
     result = await captured_handler(
         target_worker="general",
         task_description="测试派发",
@@ -243,16 +253,18 @@ async def test_delegate_task_writes_spawned_event_via_real_handler(
         max_wait_seconds=300,
     )
 
-    # 断言 launch_child 成功 + SUBAGENT_SPAWNED 事件被写
     assert getattr(result, "status", "") == "written", \
-        f"期望真实派发成功，实际 status={getattr(result, 'status', None)}"
+        f"期望真实派发成功，实际 status={getattr(result, 'status', None)}: {result.reason}"
     assert getattr(result, "child_task_id", "") == fake_task_id
 
-    # F34 关键断言：真实 _emit_spawned_event 被调用，且 child_task_id 来自 launch_child
-    assert len(spawned_calls) == 1, \
-        f"期望 _emit_spawned_event 被调用 1 次，实际 {len(spawned_calls)} 次（防 F34 回归）"
-    call_kwargs = spawned_calls[0]
-    assert call_kwargs["child_task_id"] == fake_task_id
-    assert call_kwargs["target_worker"] == "general"
-    assert call_kwargs["task_description"] == "测试派发"
+    # F34 不变量验证（参数层）：plane.spawn_child 收到 emit_audit_event=True
+    assert mock_plane.spawn_child.await_count == 1
+    call_kwargs = mock_plane.spawn_child.await_args.kwargs
+    assert call_kwargs["spawned_by"] == "delegate_task_tool"
+    assert call_kwargs["emit_audit_event"] is True, \
+        "F34 不变量：delegate_task 必须传 emit_audit_event=True 让 plane 写 SUBAGENT_SPAWNED"
+    assert call_kwargs["audit_task_fallback"] == "_delegate_task_audit"
     assert call_kwargs["callback_mode"] == "async"
+    assert call_kwargs["target_kind"] == "subagent"
+    assert call_kwargs["worker_type"] == "general"
+    assert call_kwargs["objective"] == "测试派发"
