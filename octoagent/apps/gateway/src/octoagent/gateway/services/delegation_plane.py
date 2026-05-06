@@ -968,7 +968,7 @@ class DelegationPlaneService:
         装配顺序（必须与原 builtin_tools 旁路一致——零行为变更）：
         1. 推断 depth + active_children（容错：list_descendant_works 失败时降级为 []）
         2. DelegationManager.delegate gate（depth/concurrent/blacklist，失败时返回 rejected）
-        3. capability_pack._launch_child_task（内部仍调 _enforce_child_target_kind_policy
+        3. capability_pack._launch_child_task（内部仍调 enforce_child_target_kind_policy
            + 调 task_runner.launch_child_task）
            - launch raise → 捕获 + 返回 launch_raised
         4. 仅 emit_audit_event=True 时调 mgr._emit_spawned_event
@@ -1061,7 +1061,7 @@ class DelegationPlaneService:
                 reason=gate_result.reason or "",
             )
 
-        # 3. capability_pack._launch_child_task（内部调 _enforce_child_target_kind_policy）
+        # 3. capability_pack._launch_child_task（内部调 enforce_child_target_kind_policy）
         try:
             payload = await self._capability_pack._launch_child_task(
                 parent_task=parent_task,

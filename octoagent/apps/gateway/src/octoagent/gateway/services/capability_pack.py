@@ -1241,7 +1241,7 @@ class CapabilityPackService:
     ) -> dict[str, Any]:
         if self._task_runner is None:
             raise RuntimeError("task runner is not bound for child task launch")
-        self._enforce_child_target_kind_policy(target_kind)
+        self.enforce_child_target_kind_policy(target_kind)
         child_id = str(ULID())
         child_thread_id = f"{parent_task.thread_id}:child:{child_id[:8]}"
         child_message = NormalizedMessage(
@@ -1279,7 +1279,16 @@ class CapabilityPackService:
         }
 
     @staticmethod
-    def _enforce_child_target_kind_policy(target_kind: str) -> None:
+    def enforce_child_target_kind_policy(target_kind: str) -> None:
+        """Worker→Worker 委托禁止策略（F084 引入；F092 Phase B 提为 public）。
+
+        当前 runtime/turn_executor 是 WORKER 时，禁止 target_kind=WORKER 的派发。
+        F098 H3-B 解绑会移除此约束（Worker→Worker 解绑），F092 不动语义。
+
+        提为 public 的原因：与 plane 已 public 化的 delegation_mode_for_target_kind
+        命名对齐；F098 时 plane 可能需要在 PlaneRequest 阶段预查询。当前 F092 范围
+        plane 不显式调用此方法（保持原顺序：gate → enforce 在 _launch_child_task 内继承）。
+        """
         normalized_target_kind = str(target_kind).strip().lower()
         if normalized_target_kind != DelegationTargetKind.WORKER.value:
             return
