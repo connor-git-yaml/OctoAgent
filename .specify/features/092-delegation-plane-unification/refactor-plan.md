@@ -392,6 +392,19 @@ grep -n "task_runner.launch_child_task" apps/gateway/src/octoagent/gateway/servi
 
 ---
 
+## Phase C 实施偏离归档（Codex per-Phase C review 修订）
+
+> 实施时与 Phase A spec 不同的关键设计决策，按 CLAUDE.local.md "Phase 跳过 / 偏离必须显式归档"原则记录。
+
+| 偏离 | Phase A spec | Phase C 实施 | 理由 |
+|------|--------------|--------------|------|
+| **SpawnChildResult 三态 → 二态** | written / rejected / launch_raised；spawn_child 内 try/except 捕获 launch error 包成 launch_raised | written / rejected；launch error 直接 propagate，由调用方 try/except | 原 builtin_tools 旁路下，subagents.spawn 的 enforce raise / launch raise 都直接 propagate 给 broker（result.is_error=True），F085 worker→worker 拒绝 invariant 依赖此 propagate；统一捕获破坏行为零变更 |
+| **additional_active_children 参数** | spec 未列；spawn_child 仅查 store 计算 active_children | spawn_child 接受 `additional_active_children: list[str] \| None = None` 参数，合并 store 查询结果（去重）| Phase C 实施 subagents.spawn batch loop 时发现：每个 objective 调用一次 spawn_child，需累加已派发的 task_id 让后续 objective 的 gate 检查正确累计；store 查询不能反映"尚在 batch 内但已 spawn"的子任务 |
+| **subagents.spawn 上下文失败处理** | 默认假设 success | 不 try/except current_work_context / get_work（失败 raise 给 broker）| Codex Phase C HIGH 2 修订：保持原 launch_child helper 失败 propagate 行为，零行为变更 |
+| **plane._emit_spawned_event 失败 ERROR log** | docstring 仅注"内部已 try/except"| 加显式 ERROR log（与原 delegate_task_tool 行为一致）| Codex Phase C MEDIUM 1 修订：可观测性不退化 |
+
+---
+
 ## Codex review pre-Phase 3 闭环（2026-05-06）
 
 | Severity | Title | 处理 |
