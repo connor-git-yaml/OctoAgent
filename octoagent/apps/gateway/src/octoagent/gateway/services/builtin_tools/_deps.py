@@ -272,32 +272,6 @@ def coerce_objectives(objectives: list[str] | str) -> list[str]:
     return [item.strip() for item in str(objectives).splitlines() if item.strip()]
 
 
-async def launch_child(
-    deps: ToolDeps,
-    *,
-    objective: str,
-    worker_type: str,
-    target_kind: str,
-    tool_profile: str = "minimal",
-    title: str = "",
-) -> dict[str, Any]:
-    """启动子任务并返回结果字典。"""
-    context, parent_task = await current_work_context(deps)
-    parent_work = await deps.stores.work_store.get_work(context.work_id)
-    if parent_work is None:
-        raise RuntimeError(f"current work not found: {context.work_id}")
-    return await deps._pack_service._launch_child_task(
-        parent_task=parent_task,
-        parent_work=parent_work,
-        objective=objective,
-        worker_type=worker_type,
-        target_kind=target_kind,
-        tool_profile=tool_profile,
-        title=title,
-        spawned_by="builtin_tool",
-    )
-
-
 async def descendant_works_for_current_context(
     deps: ToolDeps,
 ) -> tuple[Any, list[Any]]:
