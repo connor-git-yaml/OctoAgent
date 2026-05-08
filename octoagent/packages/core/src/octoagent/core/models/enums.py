@@ -211,6 +211,9 @@ class EventType(StrEnum):
     SUBAGENT_SPAWNED = "SUBAGENT_SPAWNED"                    # DelegationManager 派发子任务
     SUBAGENT_RETURNED = "SUBAGENT_RETURNED"                  # 子任务返回结果
 
+    # Feature 093 Phase A: AgentSessionTurn 持久化事件（main / worker session 统一）
+    AGENT_SESSION_TURN_PERSISTED = "AGENT_SESSION_TURN_PERSISTED"  # mixin 写 turn 入库后 emit
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""
