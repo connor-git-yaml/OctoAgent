@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import sqlite3
 from dataclasses import dataclass, field
@@ -74,6 +73,7 @@ from octoagent.gateway.services.memory.memory_retrieval_profile import (
 from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 from ulid import ULID
 
+from .agent_context_turn_writer import AgentContextTurnWriterMixin
 from .agent_decision import (
     build_behavior_tool_guide_block,
     build_runtime_hint_bundle,
@@ -544,7 +544,7 @@ class SessionReplayProjection:
     dropped_orphan_tool_results: int = 0
 
 
-class AgentContextService:
+class AgentContextService(AgentContextTurnWriterMixin):
     """统一装配 AgentProfile / bootstrap / recency / memory。"""
 
     # 启动时由 main.py 设置，所有实例共享
@@ -1761,49 +1761,6 @@ class AgentContextService:
             dropped_orphan_tool_results=replay.dropped_orphan_tool_results,
         )
 
-    async def _append_agent_session_turn(
-        self,
-        *,
-        agent_session_id: str,
-        task_id: str,
-        kind: AgentSessionTurnKind,
-        role: str,
-        summary: str,
-        tool_name: str = "",
-        artifact_ref: str = "",
-        metadata: dict[str, Any] | None = None,
-        dedupe_key: str = "",
-    ) -> AgentSessionTurn | None:
-        summary = str(summary).strip()
-        if not agent_session_id.strip() or not summary:
-            return None
-        if dedupe_key.strip():
-            existing = await self._stores.agent_context_store.get_agent_session_turn_by_dedupe_key(
-                agent_session_id=agent_session_id,
-                dedupe_key=dedupe_key,
-            )
-            if existing is not None:
-                return existing
-        turn_seq = await self._stores.agent_context_store.get_next_agent_session_turn_seq(
-            agent_session_id
-        )
-        turn = AgentSessionTurn(
-            agent_session_turn_id=str(ULID()),
-            agent_session_id=agent_session_id,
-            task_id=task_id,
-            turn_seq=turn_seq,
-            kind=kind,
-            role=role,
-            tool_name=tool_name,
-            artifact_ref=artifact_ref,
-            summary=summary,
-            dedupe_key=dedupe_key,
-            metadata=dict(metadata or {}),
-            created_at=datetime.now(tz=UTC),
-        )
-        await self._stores.agent_context_store.save_agent_session_turn(turn)
-        return turn
-
     @classmethod
     def _append_session_transcript_entries(
         cls,
@@ -1963,67 +1920,6 @@ class AgentContextService:
                         }
                     )
                 )
-
-    async def record_tool_call_turn(
-        self,
-        *,
-        agent_session_id: str,
-        task_id: str,
-        tool_name: str,
-        arguments: dict[str, Any],
-    ) -> None:
-        tool_name = str(tool_name).strip()
-        if not agent_session_id.strip() or not tool_name:
-            return
-        summary = truncate_chars(
-            f"{tool_name}({json.dumps(arguments, ensure_ascii=False, sort_keys=True)})",
-            720,
-        )
-        await self._append_agent_session_turn(
-            agent_session_id=agent_session_id,
-            task_id=task_id,
-            kind=AgentSessionTurnKind.TOOL_CALL,
-            role="assistant",
-            tool_name=tool_name,
-            summary=summary,
-            metadata={"arguments": dict(arguments)},
-        )
-        await self._stores.conn.commit()
-
-    async def record_tool_result_turn(
-        self,
-        *,
-        agent_session_id: str,
-        task_id: str,
-        tool_name: str,
-        output: str,
-        is_error: bool,
-        error: str | None = None,
-        artifact_ref: str | None = None,
-        duration_ms: int = 0,
-    ) -> None:
-        tool_name = str(tool_name).strip()
-        if not agent_session_id.strip() or not tool_name:
-            return
-        result_preview = output if not is_error else (error or output)
-        summary = truncate_chars(" ".join(str(result_preview).split()), 720)
-        if not summary:
-            summary = "[empty tool result]"
-        await self._append_agent_session_turn(
-            agent_session_id=agent_session_id,
-            task_id=task_id,
-            kind=AgentSessionTurnKind.TOOL_RESULT,
-            role="tool",
-            tool_name=tool_name,
-            artifact_ref=str(artifact_ref or "").strip(),
-            summary=summary,
-            metadata={
-                "is_error": bool(is_error),
-                "error": str(error or "").strip(),
-                "duration_ms": int(duration_ms or 0),
-            },
-        )
-        await self._stores.conn.commit()
 
     # Feature 067: _record_memory_writeback + _record_private_tool_evidence_writeback 已删除
     # 记忆提取统一由 SessionMemoryExtractor 从完整会话上下文中提取有意义的事实
