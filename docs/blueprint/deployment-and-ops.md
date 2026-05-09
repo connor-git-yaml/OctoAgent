@@ -405,6 +405,22 @@ Event 表的 `schema_version` 字段（§8.1）提供版本化基础：
   4. 校验 `PRAGMA integrity_check` + projection 一致性
   5. 启动新版本
 
+#### 12.6.1.1 F094 migrate-094（Worker Memory Parity 存量迁移占位）
+
+F094 引入 `octo memory migrate-094` CLI 命令组（dry-run / apply / rollback 三段式）：
+
+- **背景**：F063 Migration 已把 WORKER_PRIVATE scope 的 SoR 记录全部迁到 PROJECT_SHARED，但 audit metadata 未保留 (memory_id → 原 scope_id) mapping——意味着无法可靠反推存量 worker 私有 fact 的归属
+- **降级方案 A**（GATE_DESIGN 用户拍板 + Codex spec review 锁定）：CLI 完整 + 底层 no-op
+  - `dry-run` 输出 `total_facts_to_migrate=0` + `reason="F063_legacy_no_provenance"` + 当前 `memory_namespaces` 表的 kind 分布快照；不写库
+  - `apply` 写一条 `memory_maintenance_runs` 审计记录（`idempotency_key="octoagent.memory.migration.094.worker_memory_parity.noop.v1"` / `metadata.no_op=true`），SoR 表零修改
+  - `rollback <run_id>` 删除审计记录，rollback 后 idempotency 失效，可重新 apply
+- **数据库路径**：默认 `core/config.get_db_path()`（`data/sqlite/octoagent.db`，可通过 `OCTOAGENT_DB_PATH` env 覆盖）；`--db-path` CLI 参数显式 override
+- **使用流程**：
+  1. `octo memory migrate-094 --dry-run` 确认输出符合预期
+  2. `octo memory migrate-094 --apply --yes` 写审计记录（确认提示可用 `--yes` 跳过）
+  3. 如需回滚：`octo memory migrate-094 --rollback <run_id> --yes`
+- **未来若引入 worker 私有数据需要迁移**：改用新 migrate-NNN 命令而不是回头改 migrate-094 语义（避免破坏已执行的幂等性）
+
 #### 12.6.2 配置兼容性
 
 - 配置文件版本化（`config_version` 字段）

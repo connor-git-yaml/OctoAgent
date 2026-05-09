@@ -335,3 +335,49 @@ def memory_db_path_via_fixture(tmp_path):
 
     asyncio.run(_build())
     return db_path
+
+
+# ---------------------------------------------------------------------------
+# Codex Final review MED-2 闭环: CLI 自足入口验证
+# ---------------------------------------------------------------------------
+
+
+async def test_med2_apply_self_initializes_memory_schema(tmp_path) -> None:
+    """Codex Final MED-2 闭环: run_apply 在 schema 完全未初始化的空数据库上
+    应能成功 (apply 内部先调用 init_memory_db 兜底)。"""
+    db_path = str(tmp_path / "f094_self_init.db")
+    # 用裸 sqlite 创建空文件，**不**跑 init
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("CREATE TABLE _placeholder (x INTEGER)")
+        await conn.commit()
+
+    # 直接 apply 应成功（init_memory_db 兜底建表 + 列）
+    result = await run_apply(db_path)
+    assert result["status"] == "succeeded"
+    assert result["no_op"] is True
+    # 验证 memory_maintenance_runs 表 + 列已创建
+    async with aiosqlite.connect(db_path) as conn:
+        cursor = await conn.execute("PRAGMA table_info(memory_maintenance_runs)")
+        rows = await cursor.fetchall()
+        cols = {str(r[1]) for r in rows}
+        assert "idempotency_key" in cols
+        assert "requested_by" in cols
+
+
+async def test_med2_dry_run_self_initializes_memory_schema(tmp_path) -> None:
+    """Codex Final MED-2 闭环: run_dry_run 在 schema 缺失时也应自足初始化。"""
+    db_path = str(tmp_path / "f094_dry_self_init.db")
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("CREATE TABLE _placeholder (x INTEGER)")
+        await conn.commit()
+
+    result = await run_dry_run(db_path)
+    assert result["total_facts_to_migrate"] == 0
+    assert result["reason"] == _REASON
+    # init 后 memory_namespaces 表应存在（即使为空）
+    async with aiosqlite.connect(db_path) as conn:
+        cursor = await conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_maintenance_runs'"
+        )
+        row = await cursor.fetchone()
+        assert row is not None

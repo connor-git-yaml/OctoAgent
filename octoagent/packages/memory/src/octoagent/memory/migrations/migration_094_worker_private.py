@@ -105,9 +105,16 @@ async def _existing_run_id(conn: aiosqlite.Connection) -> str | None:
 
 
 async def run_dry_run(db_path: str) -> dict[str, object]:
-    """F094 E2 dry-run: 输出零迁移记录 + reason + namespace 分布快照；不写库。"""
+    """F094 E2 dry-run: 输出零迁移记录 + reason + namespace 分布快照；不写库。
+
+    Codex Final review MED-2 闭环：先 init_memory_db 做 schema 兜底，让 CLI
+    自足；dry-run 是只读但若 schema 缺失会 query failure。
+    """
+    from octoagent.memory.store.sqlite_init import init_memory_db
+
     async with aiosqlite.connect(db_path) as conn:
         conn.row_factory = aiosqlite.Row
+        await init_memory_db(conn)
         distribution = await _namespace_kind_distribution(conn)
         # F094 降级方案 A：可迁移记录恒为 0（F063 已抹掉 provenance）
         result: dict[str, object] = {
@@ -130,10 +137,20 @@ async def run_apply(
     """F094 E2 apply: 写一条 memory_maintenance_runs 审计记录（no-op）；幂等短路。
 
     Returns dict 含 run_id（新建或已存在）+ status / reason / no_op flag。
+
+    Codex Final review MED-2 闭环：CLI 自足入口——打开连接后先 init_memory_db
+    做 schema 兜底（已存在表/列时 IF NOT EXISTS / ALTER TABLE 兜底安全幂等）。
+    这样独立跑 octo memory migrate-094 也能成功，不强制要求外部先跑 OctoAgent
+    服务进程或 octo update。
     """
+    # 局部导入避免循环依赖（migration 模块被多处复用）
+    from octoagent.memory.store.sqlite_init import init_memory_db
+
     async with aiosqlite.connect(db_path) as conn:
         conn.row_factory = aiosqlite.Row
-        # 幂等短路
+        # F094 Final review MED-2: CLI 自足入口——先做 schema 兜底
+        await init_memory_db(conn)
+        # 幂等短路（init 后再查 idempotency_key）
         existing = await _existing_run_id(conn)
         if existing is not None:
             return {
@@ -146,13 +163,13 @@ async def run_apply(
             }
         if not await _table_exists(conn, "memory_maintenance_runs"):
             raise RuntimeError(
-                "memory_maintenance_runs 表不存在；请先运行 init_memory_db"
+                "memory_maintenance_runs 表不存在；init_memory_db 兜底失败"
             )
         columns = await _table_columns(conn, "memory_maintenance_runs")
         if "idempotency_key" not in columns or "requested_by" not in columns:
             raise RuntimeError(
                 "memory_maintenance_runs 缺 idempotency_key / requested_by 列；"
-                "请先运行 init_memory_db（F094 C1 ALTER TABLE 兜底）。"
+                "init_memory_db ALTER TABLE 兜底未生效。"
             )
         run_id = str(uuid4())
         now_iso = datetime.now(tz=UTC).isoformat()
@@ -200,9 +217,15 @@ async def run_apply(
 
 async def run_rollback(db_path: str, run_id: str) -> dict[str, object]:
     """F094 E3 rollback: DELETE 指定 run_id 的审计记录；rollback 后 idempotency
-    失效，可重新 apply。"""
+    失效，可重新 apply。
+
+    Codex Final review MED-2 闭环：先 init_memory_db 做 schema 兜底（CLI 自足）。
+    """
+    from octoagent.memory.store.sqlite_init import init_memory_db
+
     async with aiosqlite.connect(db_path) as conn:
         conn.row_factory = aiosqlite.Row
+        await init_memory_db(conn)
         if not await _table_exists(conn, "memory_maintenance_runs"):
             raise RuntimeError("memory_maintenance_runs 表不存在")
         cursor = await conn.execute(
