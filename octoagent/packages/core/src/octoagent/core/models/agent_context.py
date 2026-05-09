@@ -20,6 +20,36 @@ AgentProfileKind = Literal["main", "worker", "subagent"]
 DEFAULT_PERMISSION_PRESET = "normal"
 
 
+# F094 D1: Worker memory recall 默认偏好集中常量
+#
+# 之前 baseline gateway 服务层内有一个私有硬编码默认值函数；F094 块 D 把
+# 5 个 key 的硬编码挪到 core models 层（与 AgentProfile / MemoryNamespaceKind
+# 同文件），让 gateway dispatch 路径与 F107 (WorkerProfile/AgentProfile 合并)
+# 都从单一 SoT 读。
+#
+# 用 MappingProxyType 锁成只读，防止未来调用方意外原地 mutate（Codex Phase D
+# LOW-2 闭环：当前唯一调用点用 dict unpacking 不会污染，但加 read-only 防御
+# 让 F107 接入时不需要担心 mutation race）。读取方仍可用 dict unpacking
+# `{**DEFAULT_...}` 构造可变副本（baseline merge 顺序兼容）。
+#
+# 行为零变更约束（spec NFR-1 / Codex spec LOW-7 闭环）：
+# - 5 个 key 与 baseline 完全一致
+# - merge 顺序保留 baseline `{**defaults, **existing}`：existing 覆盖 defaults
+from types import MappingProxyType
+from typing import Mapping
+
+_DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES_RAW: dict[str, Any] = {
+    "prefetch_mode": "hint_first",
+    "planner_enabled": True,
+    "scope_limit": 4,
+    "per_scope_limit": 4,
+    "max_hits": 8,
+}
+DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES: Mapping[str, Any] = MappingProxyType(
+    _DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES_RAW
+)
+
+
 def resolve_permission_preset(*profiles: Any, fallback: str = DEFAULT_PERMISSION_PRESET) -> str:
     """从 profile 链中解析 permission_preset。
 

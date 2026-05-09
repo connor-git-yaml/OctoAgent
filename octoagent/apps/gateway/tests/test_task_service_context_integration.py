@@ -2854,3 +2854,235 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
         assert "|" not in sid, f"composite session not migrated: {sid}"
 
     await store_group_2.conn.close()
+
+
+# ---------------------------------------------------------------------------
+# F094 Phase D: 行为零变更清理 + Codex spec LOW-7 闭环（merge order 保留）
+# ---------------------------------------------------------------------------
+
+
+async def test_f094_d2_worker_default_memory_recall_matches_baseline(
+    tmp_path: Path,
+) -> None:
+    """F094 D2 verbatim: 新建 Worker AgentProfile（无 existing memory_recall）时，
+    `context_budget_policy["memory_recall"]` 5 个 key 与 F093 baseline 硬编码值
+    完全一致（行为零变更）。"""
+    from octoagent.gateway.services.agent_context import AgentContextService
+
+    store_group = await create_store_group(
+        str(tmp_path / "f094-d2.db"),
+        str(tmp_path / "artifacts"),
+    )
+    try:
+        await _seed_project_context(store_group)
+        await store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id="singleton:f094-d2",
+                scope=AgentProfileScope.PROJECT,
+                project_id="project-alpha",
+                name="F094 D2 Worker",
+                summary="F094 行为零变更测试。",
+                tool_profile="standard",
+                status=WorkerProfileStatus.ACTIVE,
+                origin_kind=WorkerProfileOriginKind.BUILTIN,
+                active_revision=1,
+            )
+        )
+        service = AgentContextService(store_group, project_root=tmp_path)
+        # 无 existing_profile：merged_memory_recall = defaults 全部
+        mirrored = await service._ensure_agent_profile_from_worker_profile(
+            "singleton:f094-d2"
+        )
+        assert mirrored is not None
+        memory_recall = mirrored.context_budget_policy.get("memory_recall", {})
+
+        # 5 个 key 与 baseline 完全一致（NFR-1 行为零变更断言）
+        assert memory_recall == {
+            "prefetch_mode": "hint_first",
+            "planner_enabled": True,
+            "scope_limit": 4,
+            "per_scope_limit": 4,
+            "max_hits": 8,
+        }
+    finally:
+        await store_group.conn.close()
+
+
+async def test_f094_d4_immutable_defaults_constant_cannot_be_mutated(
+    tmp_path: Path,
+) -> None:
+    """F094 D4 (Codex Phase D LOW-2 闭环): DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES
+    是 MappingProxyType 只读 mapping——直接 mutate 必须抛 TypeError。
+
+    既验证防止未来污染，又锁住 module-level 不变性。"""
+    from octoagent.core.models.agent_context import (
+        DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
+    )
+
+    # 直接 mutate 必须 raise（MappingProxyType 不允许 setitem）
+    import pytest as _pytest
+
+    with _pytest.raises(TypeError):
+        DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES["scope_limit"] = 999  # type: ignore[index]
+    with _pytest.raises(TypeError):
+        del DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES["scope_limit"]  # type: ignore[arg-type]
+    # 但 dict unpacking 创建可变副本必须正常
+    copy = {**DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES}
+    copy["scope_limit"] = 999
+    assert DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES["scope_limit"] == 4  # 不污染
+
+
+async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
+    """F094 D4 / D5 (Codex Phase D LOW-4 闭环): 覆盖 existing memory_recall 三类
+    edge case：(1) 空 dict → 全 defaults；(2) 完整 5 key override → 全 existing；
+    (3) 非 dict（非法）→ 触发 _memory_recall_preferences 防御 → 视为空。"""
+    from octoagent.gateway.services.agent_context import AgentContextService
+
+    store_group = await create_store_group(
+        str(tmp_path / "f094-d5-edge.db"),
+        str(tmp_path / "artifacts"),
+    )
+    try:
+        await _seed_project_context(store_group)
+        await store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id="singleton:f094-d5-edge",
+                scope=AgentProfileScope.PROJECT,
+                project_id="project-alpha",
+                name="F094 D5 Edge Worker",
+                summary="edge case 测试。",
+                tool_profile="standard",
+                status=WorkerProfileStatus.ACTIVE,
+                origin_kind=WorkerProfileOriginKind.BUILTIN,
+                active_revision=1,
+            )
+        )
+        service = AgentContextService(store_group, project_root=tmp_path)
+
+        baseline_defaults = {
+            "prefetch_mode": "hint_first",
+            "planner_enabled": True,
+            "scope_limit": 4,
+            "per_scope_limit": 4,
+            "max_hits": 8,
+        }
+
+        # Edge 1: existing memory_recall = {} → 全 defaults
+        existing_empty = AgentProfile(
+            profile_id="agent-profile-edge-empty",
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name="empty",
+            persona_summary="",
+            context_budget_policy={"memory_recall": {}},
+        )
+        mirrored_empty = await service._ensure_agent_profile_from_worker_profile(
+            "singleton:f094-d5-edge",
+            existing_profile=existing_empty,
+        )
+        assert mirrored_empty is not None
+        assert mirrored_empty.context_budget_policy["memory_recall"] == baseline_defaults
+
+        # Edge 2: existing memory_recall = 完整 5 key override → 全 existing
+        full_override = {
+            "prefetch_mode": "agent_led",
+            "planner_enabled": False,
+            "scope_limit": 99,
+            "per_scope_limit": 7,
+            "max_hits": 21,
+        }
+        existing_full = AgentProfile(
+            profile_id="agent-profile-edge-full",
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name="full",
+            persona_summary="",
+            context_budget_policy={"memory_recall": full_override},
+        )
+        mirrored_full = await service._ensure_agent_profile_from_worker_profile(
+            "singleton:f094-d5-edge",
+            existing_profile=existing_full,
+        )
+        assert mirrored_full is not None
+        assert mirrored_full.context_budget_policy["memory_recall"] == full_override
+
+        # Edge 3: existing memory_recall 非 dict（非法）→ baseline _memory_recall_preferences
+        # 防御 isinstance dict 返回空 → merge = defaults 全部
+        existing_bad = AgentProfile(
+            profile_id="agent-profile-edge-bad",
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name="bad",
+            persona_summary="",
+            context_budget_policy={"memory_recall": "not_a_dict"},
+        )
+        mirrored_bad = await service._ensure_agent_profile_from_worker_profile(
+            "singleton:f094-d5-edge",
+            existing_profile=existing_bad,
+        )
+        assert mirrored_bad is not None
+        assert mirrored_bad.context_budget_policy["memory_recall"] == baseline_defaults
+    finally:
+        await store_group.conn.close()
+
+
+async def test_f094_d5_existing_profile_overrides_module_defaults(
+    tmp_path: Path,
+) -> None:
+    """F094 D5 (Codex spec LOW-7 闭环): merge 顺序保留 baseline `{**defaults, **existing}`
+    —— existing profile 含部分自定义 memory_recall 时，最终 merged 是 defaults 与
+    existing override 的合并（existing 优先）。
+
+    构造 existing memory_recall = {scope_limit: 10}，断言：
+    - scope_limit = 10（existing override）
+    - 其他 4 key = defaults（hint_first / True / 4 / 8）
+    """
+    from octoagent.gateway.services.agent_context import AgentContextService
+
+    store_group = await create_store_group(
+        str(tmp_path / "f094-d5.db"),
+        str(tmp_path / "artifacts"),
+    )
+    try:
+        await _seed_project_context(store_group)
+        await store_group.agent_context_store.save_worker_profile(
+            WorkerProfile(
+                profile_id="singleton:f094-d5",
+                scope=AgentProfileScope.PROJECT,
+                project_id="project-alpha",
+                name="F094 D5 Worker",
+                summary="F094 merge order 测试。",
+                tool_profile="standard",
+                status=WorkerProfileStatus.ACTIVE,
+                origin_kind=WorkerProfileOriginKind.BUILTIN,
+                active_revision=1,
+            )
+        )
+        service = AgentContextService(store_group, project_root=tmp_path)
+        # 构造 existing AgentProfile 含 partial memory_recall override
+        existing = AgentProfile(
+            profile_id="agent-profile-f094-d5-existing",
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name="F094 D5 Existing",
+            persona_summary="existing override 测试。",
+            context_budget_policy={
+                "memory_recall": {"scope_limit": 10},  # 仅 override scope_limit
+            },
+        )
+        mirrored = await service._ensure_agent_profile_from_worker_profile(
+            "singleton:f094-d5",
+            existing_profile=existing,
+        )
+        assert mirrored is not None
+        memory_recall = mirrored.context_budget_policy.get("memory_recall", {})
+
+        # existing scope_limit=10 覆盖 default 4
+        assert memory_recall["scope_limit"] == 10
+        # 其他 4 key 来自 defaults
+        assert memory_recall["prefetch_mode"] == "hint_first"
+        assert memory_recall["planner_enabled"] is True
+        assert memory_recall["per_scope_limit"] == 4
+        assert memory_recall["max_hits"] == 8
+    finally:
+        await store_group.conn.close()

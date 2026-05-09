@@ -12,7 +12,10 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import structlog
-from octoagent.core.models.agent_context import resolve_permission_preset
+from octoagent.core.models.agent_context import (
+    DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
+    resolve_permission_preset,
+)
 from octoagent.core.behavior_workspace import (
     build_behavior_bootstrap_template_ids,
     load_onboarding_state,
@@ -180,19 +183,11 @@ def _memory_recall_preferences(agent_profile: AgentProfile | None) -> dict[str, 
     return raw if isinstance(raw, dict) else {}
 
 
-def _default_worker_memory_recall_preferences(
-    worker_profile: WorkerProfile | None,
-) -> dict[str, Any]:
-    if worker_profile is None:
-        return {}
-    # 所有自定义 Agent 统一视为 general，直接返回固定默认值。
-    return {
-        "prefetch_mode": "hint_first",
-        "planner_enabled": True,
-        "scope_limit": 4,
-        "per_scope_limit": 4,
-        "max_hits": 8,
-    }
+# F094 D3: 私有硬编码 worker memory recall 默认值函数已删除（5 个 key 迁移到
+# packages/core/src/octoagent/core/models/agent_context.py 的
+# DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES module-level 常量，单一 SoT）。
+# 唯一调用点 `_ensure_agent_profile_from_worker_profile` 已改用 import 常量；
+# merge 顺序 `{**defaults, **existing}` 保持 baseline 一致。
 
 
 def _memory_recall_planner_enabled(agent_profile: AgentProfile | None) -> bool:
@@ -2745,8 +2740,13 @@ class AgentContextService(AgentContextTurnWriterMixin):
             include_project_shared=bool(worker_profile.project_id),
             include_project_agent=bool(worker_profile.project_id),
         )
+        # F094 D2: 默认值改读 module-level 常量 DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES
+        # （core/models/agent_context.py 单一 SoT）；保留 baseline merge 顺序
+        # `{**defaults, **existing}`：existing profile override defaults（Codex
+        # spec LOW-7 闭环）。worker_profile 不再用作 defaults gate（baseline 仅
+        # 当 worker_profile is None 时返回空字典；F094 直接用 module 常量）。
         merged_memory_recall = {
-            **_default_worker_memory_recall_preferences(worker_profile),
+            **DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
             **(
                 dict(_memory_recall_preferences(existing_profile))
                 if existing_profile is not None
