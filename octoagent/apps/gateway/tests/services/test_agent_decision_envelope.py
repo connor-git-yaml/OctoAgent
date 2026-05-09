@@ -12,7 +12,10 @@ from __future__ import annotations
 from octoagent.core.behavior_workspace import (
     BehaviorLoadProfile,
     build_default_behavior_workspace_files,
+    ensure_filesystem_skeleton,
     get_profile_allowlist,
+    materialize_agent_behavior_files,
+    resolve_behavior_agent_slug,
 )
 from octoagent.core.models.agent_context import AgentProfile
 from octoagent.core.models.behavior import (
@@ -22,8 +25,12 @@ from octoagent.core.models.behavior import (
     BehaviorVisibility,
 )
 from octoagent.gateway.services.agent_decision import (
+    _generate_behavior_pack_id,
     build_behavior_layers,
     build_behavior_slice_envelope,
+    invalidate_behavior_pack_cache,
+    make_behavior_pack_loaded_payload,
+    resolve_behavior_pack,
 )
 
 
@@ -386,4 +393,313 @@ class TestFullProfileBehaviorZeroChange:
 
         assert envelope_ids < full_file_ids, (
             "Worker envelope 必为 FULL files 的真子集；不应包含 FULL 没有的文件"
+        )
+
+
+# ============================================================================
+# F095 Phase D: BEHAVIOR_PACK_LOADED + pack_id 改造（infrastructure ready）
+# ============================================================================
+
+
+class TestBehaviorPackIdGeneration:
+    """F095 Phase D: pack_id 从 f"behavior-pack:{profile_id}" 改造为 hash 化。
+
+    旧策略不区分 load_profile / content；F096 BEHAVIOR_PACK_USED 通过 pack_id
+    引用具体 LOADED 实例必须区分。
+    """
+
+    def test_pack_id_format(self) -> None:
+        """pack_id 包含 profile_id + load_profile + 16-char hex digest。"""
+        files = [
+            BehaviorPackFile(
+                file_id="AGENTS.md",
+                layer=BehaviorLayerKind.ROLE,
+                content="x",
+                visibility=BehaviorVisibility.SHARED,
+                share_with_workers=True,
+                source_kind="test",
+                budget_chars=100,
+                original_char_count=1,
+                effective_char_count=1,
+            ),
+        ]
+        pack_id = _generate_behavior_pack_id(
+            profile_id="prof-1",
+            load_profile=BehaviorLoadProfile.WORKER,
+            source_chain=["chain-a"],
+            files=files,
+        )
+        assert pack_id.startswith("behavior-pack:prof-1:worker:")
+        digest = pack_id.split(":")[-1]
+        assert len(digest) == 16, f"digest should be 16-char hex, got {digest!r}"
+
+    def test_pack_id_deterministic(self) -> None:
+        """同 input 同 output（cache 一致性）。"""
+        files = [
+            BehaviorPackFile(file_id="AGENTS.md", layer=BehaviorLayerKind.ROLE, content="x"),
+        ]
+        a = _generate_behavior_pack_id(profile_id="p", load_profile=BehaviorLoadProfile.WORKER, source_chain=["s"], files=files)
+        b = _generate_behavior_pack_id(profile_id="p", load_profile=BehaviorLoadProfile.WORKER, source_chain=["s"], files=files)
+        assert a == b, "同 input pack_id 必相同"
+
+    def test_pack_id_changes_with_load_profile(self) -> None:
+        """同 profile / 同 content / 不同 load_profile → 不同 pack_id（F096 USED 引用前提）。"""
+        files = [
+            BehaviorPackFile(file_id="AGENTS.md", layer=BehaviorLayerKind.ROLE, content="x"),
+        ]
+        a = _generate_behavior_pack_id(profile_id="p", load_profile=BehaviorLoadProfile.WORKER, source_chain=["s"], files=files)
+        b = _generate_behavior_pack_id(profile_id="p", load_profile=BehaviorLoadProfile.FULL, source_chain=["s"], files=files)
+        assert a != b, "同 profile 不同 load_profile 必不同 pack_id"
+
+    def test_pack_id_changes_with_content(self) -> None:
+        """同 profile / 同 load_profile / 不同 content → 不同 pack_id。"""
+        f1 = [BehaviorPackFile(file_id="AGENTS.md", layer=BehaviorLayerKind.ROLE, content="x", original_char_count=1, effective_char_count=1)]
+        f2 = [BehaviorPackFile(file_id="AGENTS.md", layer=BehaviorLayerKind.ROLE, content="y" * 100, original_char_count=100, effective_char_count=100)]
+        a = _generate_behavior_pack_id(profile_id="p", load_profile=BehaviorLoadProfile.WORKER, source_chain=["s"], files=f1)
+        b = _generate_behavior_pack_id(profile_id="p", load_profile=BehaviorLoadProfile.WORKER, source_chain=["s"], files=f2)
+        assert a != b, "同 profile 不同 content 必不同 pack_id"
+
+    def test_pack_id_changes_same_length_different_content(self) -> None:
+        """Codex Phase D HIGH-1 闭环：同 file_id + 同 char_count + 不同 content → 不同 pack_id。
+
+        baseline bug：原实现只用 file_id + char_count，同长度不同内容会撞 pack_id，
+        破坏 F096 BEHAVIOR_PACK_USED → BEHAVIOR_PACK_LOADED 引用。修复后必须区分。
+        """
+        body_a = "AAAAAAAAAA"  # 10 chars
+        body_b = "BBBBBBBBBB"  # 10 chars，相同长度
+        assert len(body_a) == len(body_b)
+        f1 = [BehaviorPackFile(
+            file_id="AGENTS.md",
+            layer=BehaviorLayerKind.ROLE,
+            content=body_a,
+            original_char_count=len(body_a),
+            effective_char_count=len(body_a),
+        )]
+        f2 = [BehaviorPackFile(
+            file_id="AGENTS.md",
+            layer=BehaviorLayerKind.ROLE,
+            content=body_b,
+            original_char_count=len(body_b),
+            effective_char_count=len(body_b),
+        )]
+        a = _generate_behavior_pack_id(profile_id="p", load_profile=BehaviorLoadProfile.WORKER, source_chain=["s"], files=f1)
+        b = _generate_behavior_pack_id(profile_id="p", load_profile=BehaviorLoadProfile.WORKER, source_chain=["s"], files=f2)
+        assert a != b, (
+            "同 file_id + 同 char_count + 不同 content 必产生不同 pack_id "
+            "（content 必进 sha256 摘要）"
+        )
+
+
+class TestResolveBehaviorPackCacheStateMarking:
+    """F095 Phase D: resolve_behavior_pack 三条 cache miss 路径标 cache_state + pack_source。"""
+
+    def test_empty_dir_marked_as_default_via_source_kind(self, tmp_path: Path) -> None:
+        """空目录场景 → 所有 file.source_kind == 'default_template' → pack_source='default'。
+
+        Codex Phase D MED-2 闭环：原 _resolve_filesystem_behavior_pack 不返回 None，
+        无论是否真有磁盘文件都标 'filesystem'，导致 F096 audit source 失真。修复方案：
+        按 file.source_kind 实测区分——所有文件 source_kind='default_template' →
+        pack_source='default'；任一 filesystem 来源 → 'filesystem'。
+        """
+        invalidate_behavior_pack_cache()
+        profile = AgentProfile(profile_id="phase-d-default", name="P", kind="main")
+        pack = resolve_behavior_pack(
+            agent_profile=profile,
+            project_root=tmp_path,  # 空目录
+            load_profile=BehaviorLoadProfile.MINIMAL,
+        )
+        assert pack.metadata.get("cache_state") == "miss", "首次 resolve cache miss"
+        assert pack.metadata.get("pack_source") == "default", (
+            f"空目录所有 file.source_kind='default_template' → pack_source='default'；"
+            f"实际 pack_source={pack.metadata.get('pack_source')!r}"
+        )
+        # 显式断言：所有 file.source_kind 真的都是 default_template
+        for f in pack.files:
+            assert f.source_kind == "default_template", (
+                f"空目录所有 file.source_kind 应是 default_template，{f.file_id} 实际 {f.source_kind!r}"
+            )
+
+    def test_filesystem_path_marked_as_miss_with_filesystem_source(self, tmp_path: Path) -> None:
+        """filesystem 路径（已 ensure_filesystem_skeleton + materialize）标 pack_source='filesystem'。"""
+        invalidate_behavior_pack_cache()
+        ensure_filesystem_skeleton(tmp_path, project_slug="default", agent_slug="main")
+        profile = AgentProfile(profile_id="phase-d-fs", name="Main Agent", kind="main")
+        agent_slug = resolve_behavior_agent_slug(profile)
+        materialize_agent_behavior_files(
+            tmp_path, agent_slug=agent_slug, agent_name=profile.name, is_worker_profile=False
+        )
+        pack = resolve_behavior_pack(
+            agent_profile=profile,
+            project_root=tmp_path,
+            load_profile=BehaviorLoadProfile.WORKER,
+        )
+        assert pack.metadata.get("cache_state") == "miss"
+        assert pack.metadata.get("pack_source") == "filesystem", (
+            f"filesystem skeleton 已就位应走 filesystem 路径，实际 pack_source={pack.metadata.get('pack_source')!r}"
+        )
+
+    def test_mtime_invalidation_re_marks_miss_with_new_pack_id(self, tmp_path: Path) -> None:
+        """Codex Phase D LOW-4 闭环：filesystem 文件修改后 cache 失效，重新 resolve 应：
+
+        1. 再次返回 cache_state="miss"（caller 据此重新 emit）
+        2. 新 pack_id 与旧不同（content 变更后 hash digest 不同）
+        """
+        invalidate_behavior_pack_cache()
+        ensure_filesystem_skeleton(tmp_path, project_slug="default", agent_slug="main")
+        worker_profile = AgentProfile(profile_id="phase-d-mtime", name="W", kind="worker")
+        agent_slug = resolve_behavior_agent_slug(worker_profile)
+        materialize_agent_behavior_files(
+            tmp_path, agent_slug=agent_slug, agent_name=worker_profile.name, is_worker_profile=True,
+        )
+
+        # 第一次 resolve：cache miss
+        first = resolve_behavior_pack(
+            agent_profile=worker_profile,
+            project_root=tmp_path,
+            load_profile=BehaviorLoadProfile.WORKER,
+        )
+        first_pack_id = first.pack_id
+        assert first.metadata.get("cache_state") == "miss"
+
+        # 第二次 resolve：cache hit（无 cache_state="miss"）
+        second = resolve_behavior_pack(
+            agent_profile=worker_profile,
+            project_root=tmp_path,
+            load_profile=BehaviorLoadProfile.WORKER,
+        )
+        assert second.metadata.get("cache_state") != "miss"
+
+        # 修改一个 filesystem 文件 mtime + 内容（触发 cache 失效）
+        from octoagent.core.behavior_workspace import behavior_agent_dir
+        soul_path = behavior_agent_dir(tmp_path.resolve(), agent_slug) / "SOUL.md"
+        assert soul_path.exists(), "前置：materialize 已写入 SOUL.md"
+        # 修改内容使 sha256 变化
+        original = soul_path.read_text(encoding="utf-8")
+        soul_path.write_text(original + "\n# F095 Phase D LOW-4 mtime test marker\n", encoding="utf-8")
+        # 强制 mtime 推进（在 macOS 上某些 fs 可能精度问题）
+        import os
+        import time
+        time.sleep(0.01)
+        os.utime(soul_path, None)
+
+        # 第三次 resolve：cache 失效后再次 miss + 新 pack_id
+        third = resolve_behavior_pack(
+            agent_profile=worker_profile,
+            project_root=tmp_path,
+            load_profile=BehaviorLoadProfile.WORKER,
+        )
+        assert third.metadata.get("cache_state") == "miss", (
+            "filesystem 文件修改后 cache 失效，重新 resolve 应再次标 miss"
+        )
+        assert third.pack_id != first_pack_id, (
+            f"content 改变后 pack_id 必变；first={first_pack_id!r} third={third.pack_id!r}"
+        )
+
+    def test_cache_hit_does_not_mark_cache_state_miss(self, tmp_path: Path) -> None:
+        """cache hit 时返回的 pack 不应有 cache_state='miss'（caller 据此跳 emit）。"""
+        invalidate_behavior_pack_cache()
+        profile = AgentProfile(profile_id="phase-d-cache", name="C", kind="main")
+        # 第一次：miss
+        first = resolve_behavior_pack(
+            agent_profile=profile,
+            project_root=tmp_path,
+            load_profile=BehaviorLoadProfile.MINIMAL,
+        )
+        assert first.metadata.get("cache_state") == "miss"
+        # 第二次：hit
+        second = resolve_behavior_pack(
+            agent_profile=profile,
+            project_root=tmp_path,
+            load_profile=BehaviorLoadProfile.MINIMAL,
+        )
+        assert second.metadata.get("cache_state") != "miss", (
+            f"cache hit 时不应标 cache_state='miss'，实际 {second.metadata.get('cache_state')!r}"
+        )
+        assert "pack_source" not in second.metadata or second.metadata.get("pack_source") != "filesystem"
+
+
+class TestMakeBehaviorPackLoadedPayload:
+    """F095 Phase D: make_behavior_pack_loaded_payload helper（F096 实施时调用）。"""
+
+    def test_payload_fields_completeness(self, tmp_path: Path) -> None:
+        """payload 含全部 10 字段，与 BehaviorPackLoadedPayload schema 对齐。"""
+        invalidate_behavior_pack_cache()
+        profile = AgentProfile(profile_id="phase-d-payload", name="P", kind="worker")
+        pack = resolve_behavior_pack(
+            agent_profile=profile,
+            project_root=tmp_path,
+            load_profile=BehaviorLoadProfile.WORKER,
+        )
+        payload = make_behavior_pack_loaded_payload(
+            pack, agent_profile=profile, load_profile=BehaviorLoadProfile.WORKER
+        )
+
+        # 10 个字段全验证
+        assert payload.pack_id == pack.pack_id
+        assert payload.agent_id == "phase-d-payload"
+        assert payload.agent_kind == "worker"
+        assert payload.load_profile == "worker"
+        assert payload.pack_source in {"default", "filesystem", "metadata_raw_pack"}
+        assert payload.file_count == len(pack.files)
+        assert payload.file_ids == [f.file_id for f in pack.files]
+        assert payload.source_chain == list(pack.source_chain)
+        assert payload.cache_state == "miss"
+        # is_advanced_included：default fallback path 在 WORKER profile 不含 SOUL/HEARTBEAT/IDENTITY 文件吗？
+        # 实际看 build_default_behavior_pack_files 走 include_advanced=False，所以 default 路径无 ADVANCED 文件
+        assert isinstance(payload.is_advanced_included, bool)
+
+    def test_ac_7b_double_agent_id_consistency(self) -> None:
+        """AC-7b partial 验证：F095 helper 生成的 payload.agent_id == agent_profile.profile_id。
+
+        Codex Phase D MED-3 闭环：F094 RecallFrame schema 实际**没有 agent_id 字段**
+        （它使用 ``agent_runtime_id`` / ``agent_session_id`` / ``task_id``）。AC-7b
+        双 agent 一致性的真实路径是间接关联：
+            payload.agent_id (= AgentProfile.profile_id)
+            → AgentRuntime.profile_id
+            → RecallFrame.agent_runtime_id
+        本测试只验证 F095 自身：payload.agent_id 来自 AgentProfile.profile_id；
+        间接关联完整验证由 F096 集成测覆盖（用 AgentRuntime 表的 profile_id ↔
+        runtime_id 映射对齐两侧 audit）。
+        """
+        profile = AgentProfile(profile_id="prod-worker-9999", name="W", kind="worker")
+        files = [BehaviorPackFile(file_id="AGENTS.md", layer=BehaviorLayerKind.ROLE, content="x")]
+        pack = BehaviorPack(
+            pack_id="behavior-pack:prod-worker-9999:worker:abcd1234deadbeef",
+            profile_id="prod-worker-9999",
+            scope="agent",
+            source_chain=["test"],
+            files=files,
+            layers=build_behavior_layers(files),
+            metadata={"cache_state": "miss", "pack_source": "default"},
+        )
+        payload = make_behavior_pack_loaded_payload(
+            pack, agent_profile=profile, load_profile=BehaviorLoadProfile.WORKER
+        )
+        # AC-7b：双 agent_id 一致性 — F095 payload.agent_id 与 F094 RecallFrame.agent_id 同 source
+        assert payload.agent_id == profile.profile_id, (
+            f"AC-7b 守护：payload.agent_id 必须来自 AgentProfile.profile_id，"
+            f"以保证与 F094 RecallFrame.agent_id 一致；payload={payload.agent_id!r} vs "
+            f"profile={profile.profile_id!r}"
+        )
+
+    def test_advanced_included_flag_filesystem_worker_path(self, tmp_path: Path) -> None:
+        """worker profile + filesystem 路径 + materialize advanced → is_advanced_included=True。"""
+        invalidate_behavior_pack_cache()
+        worker_profile = AgentProfile(profile_id="phase-d-adv", name="W", kind="worker")
+        ensure_filesystem_skeleton(tmp_path, project_slug="default", agent_slug="main")
+        agent_slug = resolve_behavior_agent_slug(worker_profile)
+        materialize_agent_behavior_files(
+            tmp_path, agent_slug=agent_slug, agent_name=worker_profile.name, is_worker_profile=True
+        )
+        pack = resolve_behavior_pack(
+            agent_profile=worker_profile,
+            project_root=tmp_path,
+            load_profile=BehaviorLoadProfile.WORKER,
+        )
+        payload = make_behavior_pack_loaded_payload(
+            pack, agent_profile=worker_profile, load_profile=BehaviorLoadProfile.WORKER
+        )
+        assert payload.is_advanced_included is True, (
+            f"materialize 后 advanced 文件已写入 → payload.is_advanced_included 必为 True；"
+            f"实际 file_ids={payload.file_ids}"
         )

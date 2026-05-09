@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -23,6 +24,7 @@ from octoagent.core.models import (
     BehaviorLayerKind,
     BehaviorPack,
     BehaviorPackFile,
+    BehaviorPackLoadedPayload,
     BehaviorSliceEnvelope,
     BehaviorWorkspace,
     AgentDecision,
@@ -122,6 +124,58 @@ def is_worker_behavior_profile(agent_profile: AgentProfile) -> bool:
     )
 
 
+def _generate_behavior_pack_id(
+    *,
+    profile_id: str,
+    load_profile: BehaviorLoadProfile,
+    source_chain: list[str],
+    files: list[BehaviorPackFile],
+) -> str:
+    """F095 Phase D: 生成 BehaviorPack.pack_id（hash 化，可被 F096 USED 引用）。
+
+    旧策略 ``f"behavior-pack:{profile_id}"`` 不区分 load_profile / content，导致
+    同一 profile 的 FULL / WORKER / MINIMAL pack 共享 pack_id，无法支撑 F096
+    BEHAVIOR_PACK_USED 事件按 pack_id 引用具体 LOADED 实例。
+
+    新策略：profile_id + load_profile + source_chain + 每个文件的 content sha256 → 16-char hex。
+    每个 BehaviorPackFile.content 进 sha256 摘要（不只看 char_count）—— 同长度不同内容
+    必产生不同 pack_id（Codex Phase D HIGH-1 闭环）。
+    """
+    content_digests = []
+    for f in files:
+        body = (f.content or "").encode("utf-8")
+        body_digest = hashlib.sha256(body).hexdigest()[:16]
+        content_digests.append(f"{f.file_id}:{f.original_char_count}:{body_digest}")
+    content_summary = "|".join(content_digests)
+    digest_input = (
+        f"{profile_id}|{load_profile.value}|{','.join(source_chain)}|{content_summary}"
+    )
+    digest = hashlib.sha256(digest_input.encode("utf-8")).hexdigest()[:16]
+    return f"behavior-pack:{profile_id}:{load_profile.value}:{digest}"
+
+
+def _make_pack_with_loaded_metadata(
+    pack: BehaviorPack,
+    *,
+    pack_source: str,
+) -> BehaviorPack:
+    """F095 Phase D: 在 BehaviorPack.metadata 标 cache_state="miss" + pack_source。
+
+    供 caller 检测 cache miss + 调用 helper make_behavior_pack_loaded_payload(pack, ...)
+    生成 BEHAVIOR_PACK_LOADED event payload。F095 不在此处 emit（sync/async 边界），
+    实际 EventStore 接入由 F096 实现。
+    """
+    return pack.model_copy(
+        update={
+            "metadata": {
+                **pack.metadata,
+                "cache_state": "miss",
+                "pack_source": pack_source,
+            }
+        }
+    )
+
+
 def resolve_behavior_pack(
     *,
     agent_profile: AgentProfile,
@@ -142,7 +196,16 @@ def resolve_behavior_pack(
     if cached_entry is not None:
         cached_pack, source_paths, cached_mtime_ns = cached_entry
         if _check_behavior_mtime(source_paths, cached_mtime_ns):
-            return cached_pack
+            # F095 Phase D: cache hit 不 emit；返回 metadata 中已无 cache_state="miss"
+            # 标记的 pack（caller 据此判断是否 emit）
+            return cached_pack.model_copy(
+                update={
+                    "metadata": {
+                        k: v for k, v in cached_pack.metadata.items()
+                        if k not in {"cache_state", "pack_source"}
+                    }
+                }
+            )
         # 文件已修改，清除旧缓存重新加载
         del _behavior_pack_cache[cache_key]
 
@@ -155,6 +218,27 @@ def resolve_behavior_pack(
         load_profile=load_profile,
     )
     if filesystem_pack is not None:
+        # F095 Phase D: 改造 pack_id（hash 化）+ 标 cache_state="miss" / pack_source
+        # Codex Phase D MED-2 闭环：filesystem_pack 不区分"空目录走 default 模板" vs
+        # "有真实磁盘文件"——按 file.source_kind 实测区分。所有 file source_kind=
+        # default_template → pack_source="default"；任一 filesystem 来源 → "filesystem"。
+        any_filesystem_source = any(
+            f.source_kind != "default_template" for f in filesystem_pack.files
+        )
+        pack_source = "filesystem" if any_filesystem_source else "default"
+        filesystem_pack = filesystem_pack.model_copy(
+            update={
+                "pack_id": _generate_behavior_pack_id(
+                    profile_id=agent_profile.profile_id,
+                    load_profile=load_profile,
+                    source_chain=filesystem_pack.source_chain,
+                    files=filesystem_pack.files,
+                ),
+            }
+        )
+        filesystem_pack = _make_pack_with_loaded_metadata(
+            filesystem_pack, pack_source=pack_source
+        )
         fs_paths = _collect_behavior_source_paths(filesystem_pack, project_root or Path.cwd())
         _behavior_pack_cache[cache_key] = (filesystem_pack, fs_paths, _max_mtime_ns(fs_paths))
         return filesystem_pack
@@ -171,6 +255,18 @@ def resolve_behavior_pack(
                         or ["agent_profile.metadata:behavior_pack"],
                     }
                 )
+            # F095 Phase D: pack_id 改造 + metadata 标
+            pack = pack.model_copy(
+                update={
+                    "pack_id": _generate_behavior_pack_id(
+                        profile_id=agent_profile.profile_id,
+                        load_profile=load_profile,
+                        source_chain=pack.source_chain,
+                        files=pack.files,
+                    ),
+                }
+            )
+            pack = _make_pack_with_loaded_metadata(pack, pack_source="metadata_raw_pack")
             _behavior_pack_cache[cache_key] = (pack, [], 0)  # metadata 来源无磁盘文件
             return pack
         except Exception:
@@ -193,8 +289,15 @@ def resolve_behavior_pack(
         "fallback_requires_boundary_note": True,
         "delegate_after_clarification_for_realtime": True,
     }
+    # F095 Phase D: pack_id 改造（hash 化）
+    pack_id = _generate_behavior_pack_id(
+        profile_id=agent_profile.profile_id,
+        load_profile=load_profile,
+        source_chain=source_chain,
+        files=files,
+    )
     result = BehaviorPack(
-        pack_id=f"behavior-pack:{agent_profile.profile_id}",
+        pack_id=pack_id,
         profile_id=agent_profile.profile_id,
         scope=agent_profile.scope.value,
         source_chain=source_chain,
@@ -205,10 +308,53 @@ def resolve_behavior_pack(
             "resolved_from": "default_templates",
             "overlay_order": list(BEHAVIOR_OVERLAY_ORDER),
             "file_budgets": dict(BEHAVIOR_FILE_BUDGETS),
+            # F095 Phase D: cache miss 标记
+            "cache_state": "miss",
+            "pack_source": "default",
         },
     )
     _behavior_pack_cache[cache_key] = (result, [], 0)  # default templates 无磁盘文件
     return result
+
+
+def make_behavior_pack_loaded_payload(
+    pack: BehaviorPack,
+    *,
+    agent_profile: AgentProfile,
+    load_profile: BehaviorLoadProfile,
+) -> BehaviorPackLoadedPayload:
+    """F095 Phase D: 从 BehaviorPack 构造 BEHAVIOR_PACK_LOADED 事件 payload。
+
+    使用模式（推荐路径）：
+
+        pack = resolve_behavior_pack(...)
+        if pack.metadata.get("cache_state") == "miss":
+            payload = make_behavior_pack_loaded_payload(
+                pack, agent_profile=agent_profile, load_profile=load_profile
+            )
+            # F096 实施：await event_store.append_event(_make_event(EventType.BEHAVIOR_PACK_LOADED, payload))
+
+    F094 协同（Codex Phase D MED-3 闭环）：F094 RecallFrame schema **没有 agent_id
+    字段**（实际是 ``agent_runtime_id`` / ``agent_session_id``）。AC-7b 双 agent 一致
+    性的真实路径是间接关联：
+    ``payload.agent_id == AgentProfile.profile_id``  →
+    ``AgentRuntime.profile_id``  →  ``RecallFrame.agent_runtime_id``。F096 集成测
+    通过 AgentRuntime 表的 (profile_id ↔ runtime_id) 映射对齐两侧 audit。
+    """
+    advanced_file_ids = {"SOUL.md", "HEARTBEAT.md", "IDENTITY.md"}
+    is_advanced = bool(advanced_file_ids & {f.file_id for f in pack.files})
+    return BehaviorPackLoadedPayload(
+        pack_id=pack.pack_id,
+        agent_id=agent_profile.profile_id,
+        agent_kind=str(getattr(agent_profile, "kind", "main") or "main"),
+        load_profile=load_profile.value,
+        pack_source=str(pack.metadata.get("pack_source", "unknown")),
+        file_count=len(pack.files),
+        file_ids=[f.file_id for f in pack.files],
+        source_chain=list(pack.source_chain),
+        cache_state=str(pack.metadata.get("cache_state", "miss")),
+        is_advanced_included=is_advanced,
+    )
 
 
 def build_default_behavior_pack_files(

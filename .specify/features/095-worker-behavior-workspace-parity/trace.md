@@ -91,13 +91,36 @@ F094 并行: feature/094-worker-memory-parity（独立 worktree）
 | Phase A Codex review | 3 finding（0 high）：F1 测试空断言（修）/ F2 FULL zero-change 缺显式断言（加）/ F3 worker_slice metadata 字段语义变更（已 docstring 说明 + Phase 0 contract audit 闭环）| 闭环 |
 | Phase A 测试（review 闭环后）| `test_agent_decision_envelope.py` + `test_behavior_workspace.py` = 63 passed | PASS |
 
-## Phase D 工程约束记录（T0.3 推动）
+## Phase B 实施记录
 
-由于 `resolve_behavior_pack` 是 sync，`EventStore.append_event` 是 async，Phase D 实施时 emit 路径有 4 选项：
+| 项 | 结果 |
+|----|------|
+| 模板新建 | SOUL.worker.md (~30 行) + HEARTBEAT.worker.md (~40 行) |
+| variant 注册 | _BEHAVIOR_TEMPLATE_VARIANTS 加 (SOUL.md, True) + (HEARTBEAT.md, True)；最终 3 个 worker variant |
+| 测试 | TestWorkerVariantTemplates (5) + TestWorkerWorkspaceFilesInit (3, 含 kind="worker" 路径) |
+| 全量回归 | 3133 passed, 0 regression |
+| Codex per-Phase review | 4 finding 闭环（2 medium + 2 low）：MED1 Memory 越权 / MED2 A2A 提前固化 / LOW1 fixture 路径覆盖 / LOW2 断言过脆 |
+| commit | c1d2fd0 |
 
-- **选项 A**：把 emit 上推到 async caller（如 `build_agent_decision_messages` 的 async 调用方）
-- **选项 B**：sync 桥接 `asyncio.create_task`（需 event loop 上下文）
-- **选项 C**：callback injection（resolve_behavior_pack 接收 emit callback，由 caller 决定是 sync log 还是 async event）
-- **选项 D（推荐）**：让 sync resolve 返回 `(pack, cache_state)`，async caller 调用 `await emit_behavior_pack_loaded_event(...)`
+## Phase C 实施记录
 
-实施时按最简路径处理（选项 D）；如代码结构不允许，再降级。Phase D 实施时记录决策。
+| 项 | 结果 |
+|----|------|
+| 白名单扩展 | _PROFILE_ALLOWLIST[WORKER] 5 → 8 文件（去 BOOTSTRAP，加 USER + SOUL + HEARTBEAT）|
+| 测试断言更新 | 3 个老断言反转 + 5 个新增（TestPhaseCWorkerAllowlistExpansion + e2e filesystem + e2e worker pack）|
+| 全量回归 | 3139 passed, 0 regression |
+| Codex per-Phase review | 3 finding（1 HIGH + 2 MEDIUM）：HIGH1 已 materialize 主 Agent 版迁移问题 → **deferred-followup**（推迟到 F107 capability layer refactor，completion-report 留人工迁移指引）；MED2/MED3 测试覆盖加 worker filesystem e2e |
+| commit | f7c5e48 |
+
+## Phase D 工程约束（T0.3 + Phase D 实施前实测）
+
+`resolve_behavior_pack` sync；`EventStore.append_event` async；agent_decision.py 全文件 sync；
+所有 production caller（worker_service.py:168 / 255、agent_service.py:111）调用 `build_behavior_system_summary` 也是 sync。
+**没有现成的 async 边界**让 emit 直接接入。
+
+实施选项：
+- **选项 A**（最 invasive）：把整条调用链改 async — 影响 worker_service / agent_service / 外层 control_plane
+- **选项 B**（脆弱）：`asyncio.get_running_loop().create_task()` fire-and-forget — task 异常无人捕获 + reliability 问题
+- **选项 C**（推荐）：metadata 标 cache_state + pack_source；提供 helper `make_behavior_pack_loaded_event_payload`；caller 接入推迟到一个明确 async 边界（F096 实施时一并接入）
+
+**当前决策**：Phase D 简化为 minimal 实现，spec AC-5 调整为分两阶段 — F095 提供 infrastructure（pack_id 改造 + payload schema + helper + 单测），实际 EventStore 接入推迟到 F096。理由：避免 F095 invasive 修改 worker_service/agent_service 调用链 async 化，同时 F096 自己定义 BEHAVIOR_PACK_USED 事件本就需要接入 EventStore，可一并完成。

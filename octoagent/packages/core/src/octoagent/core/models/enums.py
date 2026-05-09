@@ -214,6 +214,11 @@ class EventType(StrEnum):
     # Feature 093 Phase A: AgentSessionTurn 持久化事件（main / worker session 统一）
     AGENT_SESSION_TURN_PERSISTED = "AGENT_SESSION_TURN_PERSISTED"  # mixin 写 turn 入库后 emit
 
+    # Feature 095 Phase D: BehaviorPack cache miss 事件
+    # F095 提供 infrastructure（payload schema + helper）；实际 EventStore 接入由 F096 实现。
+    # F096 BEHAVIOR_PACK_USED 通过 pack_id 引用此 LOADED 事件做行为可审计。
+    BEHAVIOR_PACK_LOADED = "BEHAVIOR_PACK_LOADED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

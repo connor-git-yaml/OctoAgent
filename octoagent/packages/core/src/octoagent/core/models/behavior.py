@@ -287,6 +287,32 @@ class BehaviorSliceEnvelope(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class BehaviorPackLoadedPayload(BaseModel):
+    """F095 Phase D: BEHAVIOR_PACK_LOADED 事件 payload schema。
+
+    F095 提供 schema + helper；实际 EventStore.append_event 接入由 F096 实现
+    （F096 BEHAVIOR_PACK_USED 通过 pack_id 引用此 payload 做行为可审计）。
+
+    F094 协同（Codex Phase D MED-3 闭环）：F094 RecallFrame schema 实际**没有
+    agent_id 字段**，它使用 `agent_runtime_id` / `agent_session_id` / `task_id`。
+    AC-7b 双 agent 一致性的真实路径是间接关联：
+    ``payload.agent_id == AgentProfile.profile_id`` →
+    ``AgentRuntime.profile_id`` → ``RecallFrame.agent_runtime_id``。
+    F096 集成测时按此链路对齐两侧 audit。
+    """
+
+    pack_id: str = Field(min_length=1, description="BehaviorPack 唯一标识；hash 生成，可被 F096 USED 引用")
+    agent_id: str = Field(min_length=1, description="AgentProfile.profile_id；F096 集成测通过 AgentRuntime.profile_id 关联到 F094 RecallFrame.agent_runtime_id")
+    agent_kind: str = Field(description="main / worker / subagent；与 AgentProfile.kind 对齐")
+    load_profile: str = Field(description="BehaviorLoadProfile.value：full / worker / minimal")
+    pack_source: str = Field(description="filesystem / default / metadata_raw_pack 三条 cache miss 路径")
+    file_count: int = Field(ge=0)
+    file_ids: list[str] = Field(default_factory=list)
+    source_chain: list[str] = Field(default_factory=list)
+    cache_state: str = Field(default="miss", description="预留：恒为 'miss'，将来 F096 USED 可记 'hit'")
+    is_advanced_included: bool = Field(default=False, description="是否含 ADVANCED 层文件（IDENTITY/SOUL/HEARTBEAT）")
+
+
 class BehaviorFileChange(BaseModel):
     file_id: str = Field(min_length=1)
     summary: str = Field(default="")
