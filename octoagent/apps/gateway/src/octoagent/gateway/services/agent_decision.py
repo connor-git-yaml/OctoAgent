@@ -321,17 +321,29 @@ def build_behavior_slice_envelope(pack: BehaviorPack) -> BehaviorSliceEnvelope:
 
     Feature 063 T2.6: 改用 BehaviorLoadProfile.WORKER 白名单过滤，
     替代原有的 ad-hoc share_with_workers 过滤。
+
+    Feature 095 Phase A: 收敛双过滤——白名单是唯一过滤源；
+    BehaviorPackFile.share_with_workers 字段保留作为 UI / behavior_commands 的
+    显示提示，但**不再参与 envelope 过滤**。这样修复了一个隐性 bug：
+    IDENTITY.md (share_with_workers=False) 即使在 WORKER 白名单内也曾被
+    share_with_workers AND 子句剥离，导致 IDENTITY.worker.md 模板渲染了
+    Worker 永远看不到。
+
+    `BehaviorSliceEnvelope.shared_file_ids` 字段名保留以维持向后兼容，但
+    语义已变更：**现在 = "WORKER profile 白名单内文件 ID 列表"**，不再是
+    "share_with_workers=True 的文件 ID 列表"。下游消费者若仍按旧语义解读
+    会观察到字段集合变化（特别是 IDENTITY.md 现在出现在列表内）。
+    `metadata["shared_file_count"]` / `["private_file_count"]` 同此变更。
     """
     worker_allowlist = get_profile_allowlist(BehaviorLoadProfile.WORKER)
-    # 同时保持 share_with_workers 兼容：取交集
     shared_files = [
         item for item in pack.files
-        if item.share_with_workers and item.file_id in worker_allowlist
+        if item.file_id in worker_allowlist
     ]
     shared_ids = [item.file_id for item in shared_files]
     shared_layers = build_behavior_layers(shared_files)
     return BehaviorSliceEnvelope(
-        summary="Worker 仅继承 WORKER profile 定义的行为子集，不继承主 Agent 私有偏好全集。",
+        summary="Worker 加载 WORKER profile 白名单定义的行为子集，不继承主 Agent 私有偏好全集。",
         shared_file_ids=shared_ids,
         layers=shared_layers,
         metadata={

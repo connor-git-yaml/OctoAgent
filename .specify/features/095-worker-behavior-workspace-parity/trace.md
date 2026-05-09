@@ -69,4 +69,35 @@ F094 并行: feature/094-worker-memory-parity（独立 worktree）
 - plan.md v0.2
 - codex-review-spec-plan.md（review #1 闭环表）
 - trace.md（本文件）
-- tasks.md（in progress）
+- tasks.md（已 commit cfcc24d）
+
+## Phase 0 实测发现（开工前）
+
+| 项 | 实测结论 |
+|----|----------|
+| T0.1 e2e_smoke baseline | pre-commit hook 8 passed, 3197 deselected, 13.58s（cfcc24d 提交时通过）|
+| T0.2 envelope contract audit | `shared_file_ids` 4 处命中：envelope 构造（agent_decision:335）、metadata（338-339）、metadata 转发（471）、Field 定义（models/behavior.py:285）；**无业务消费者依赖 share_with_workers=True 旧语义** → 选项 A（保留字段名 + docstring 说明）安全 |
+| T0.3 EventStore 接口 | `EventStore.append_event(event)` 是 **async**；agent_decision.py 全文件 sync 函数 → **Phase D 工程约束**：emit 必须从 async caller 发出，不能在 `resolve_behavior_pack` 内直接 emit |
+| T0.4 BehaviorPack.pack_id | 字段**已存在**（`models/behavior.py:99` `pack_id: str = Field(default="")`）；当前生成 `f"behavior-pack:{profile_id}"`（无 load_profile 维度，无 hash 内容）→ Phase D 扩展为含 load_profile + content hash |
+| T0.5 Worker 创建入口 | production 仅 2 处：`worker_service.py:1383` `kind="worker"` + `agent_service.py:639` `kind="worker"` → Phase C 集成测覆盖至少其中之一 |
+
+## Phase A 实施记录
+
+| 时间 | 项 | 结果 |
+|------|----|------|
+| Phase A 实施 | `build_behavior_slice_envelope` 移除 `share_with_workers AND` 子句；docstring 显式说明语义变更 | done |
+| Phase A 测试 | 新增 `test_agent_decision_envelope.py` 含 10 个测试（5 envelope + 2 ordering + 2 FULL zero-change + 1 ROLE source_file_ids）| done |
+| Phase A 全量回归 | 3088 passed, 10 skipped, 113 e2e deselected, 0 regression | PASS |
+| Phase A Codex review | 3 finding（0 high）：F1 测试空断言（修）/ F2 FULL zero-change 缺显式断言（加）/ F3 worker_slice metadata 字段语义变更（已 docstring 说明 + Phase 0 contract audit 闭环）| 闭环 |
+| Phase A 测试（review 闭环后）| `test_agent_decision_envelope.py` + `test_behavior_workspace.py` = 63 passed | PASS |
+
+## Phase D 工程约束记录（T0.3 推动）
+
+由于 `resolve_behavior_pack` 是 sync，`EventStore.append_event` 是 async，Phase D 实施时 emit 路径有 4 选项：
+
+- **选项 A**：把 emit 上推到 async caller（如 `build_agent_decision_messages` 的 async 调用方）
+- **选项 B**：sync 桥接 `asyncio.create_task`（需 event loop 上下文）
+- **选项 C**：callback injection（resolve_behavior_pack 接收 emit callback，由 caller 决定是 sync log 还是 async event）
+- **选项 D（推荐）**：让 sync resolve 返回 `(pack, cache_state)`，async caller 调用 `await emit_behavior_pack_loaded_event(...)`
+
+实施时按最简路径处理（选项 D）；如代码结构不允许，再降级。Phase D 实施时记录决策。
