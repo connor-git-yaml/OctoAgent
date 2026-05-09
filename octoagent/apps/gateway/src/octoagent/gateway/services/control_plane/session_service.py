@@ -331,6 +331,9 @@ class SessionDomainService(DomainServiceBase):
                 memory_namespace_ids=list(item.memory_namespace_ids),
                 memory_hit_count=len(item.memory_hits),
                 degraded_reason=item.degraded_reason,
+                # F094 C7: 投影双字段（向 Web UI / F096 audit 提供数据基础）
+                queried_namespace_kinds=[k.value for k in item.queried_namespace_kinds],
+                hit_namespace_kinds=[k.value for k in item.hit_namespace_kinds],
                 created_at=item.created_at,
             )
             for item in recall_frames

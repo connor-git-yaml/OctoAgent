@@ -444,6 +444,14 @@ class RecallFrame(BaseModel):
     budget: dict[str, Any] = Field(default_factory=dict)
     degraded_reason: str = Field(default="")
     metadata: dict[str, Any] = Field(default_factory=dict)
+    # F094 C4: 双字段语义区分（Codex MED-5 闭环 / spec §2.2 Gap-4）
+    # queried = 本次 recall 实际查询了哪些 namespace kind（去重；从 resolved
+    #           namespaces 派生）
+    # hit     = 本次 recall 实际有 hit 命中的 namespace kind（从
+    #           memory_hits[i].metadata.namespace_kind 归一化生成）
+    # F096 audit 双查询模式：「曾查过私有」vs「实际命中私有」语义不同。
+    queried_namespace_kinds: list[MemoryNamespaceKind] = Field(default_factory=list)
+    hit_namespace_kinds: list[MemoryNamespaceKind] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=_utc_now)
 
 

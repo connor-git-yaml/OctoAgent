@@ -144,6 +144,9 @@ class RecallFrameItem(BaseModel):
     memory_namespace_ids: list[str] = Field(default_factory=list)
     memory_hit_count: int = Field(default=0, ge=0)
     degraded_reason: str = Field(default="")
+    # F094 C7: 双字段维度（spec §2.2 Gap-4 / Codex MED-5 闭环）
+    queried_namespace_kinds: list[str] = Field(default_factory=list)
+    hit_namespace_kinds: list[str] = Field(default_factory=list)
     created_at: datetime | None = None
 
 

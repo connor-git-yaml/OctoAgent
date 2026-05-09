@@ -860,11 +860,26 @@ class SqliteAgentContextStore:
         )
         return namespace
 
-    async def get_memory_namespace(self, namespace_id: str) -> MemoryNamespace | None:
-        row = await self._fetchone(
-            "SELECT * FROM memory_namespaces WHERE namespace_id = ?",
-            (namespace_id,),
-        )
+    async def get_memory_namespace(
+        self,
+        namespace_id: str,
+        *,
+        include_archived: bool = False,
+    ) -> MemoryNamespace | None:
+        # F094 C7b: 默认过滤 archived 记录（active 业务路径）；显式 include
+        # 仅供控制台 / 审计场景使用，让 dedupe 后的 archived 数据不被业务路径
+        # 意外读回（破坏三元组 unique 约束的语义意图）。
+        if include_archived:
+            row = await self._fetchone(
+                "SELECT * FROM memory_namespaces WHERE namespace_id = ?",
+                (namespace_id,),
+            )
+        else:
+            row = await self._fetchone(
+                "SELECT * FROM memory_namespaces "
+                "WHERE namespace_id = ? AND archived_at IS NULL",
+                (namespace_id,),
+            )
         return self._row_to_memory_namespace(row) if row is not None else None
 
     async def list_memory_namespaces(
@@ -873,7 +888,9 @@ class SqliteAgentContextStore:
         project_id: str | None = None,
         agent_runtime_id: str | None = None,
         kind: MemoryNamespaceKind | None = None,
+        include_archived: bool = False,
     ) -> list[MemoryNamespace]:
+        # F094 C7b: 同 get_memory_namespace，默认仅返回 active 记录。
         clauses: list[str] = []
         args: list[object] = []
         if project_id:
@@ -885,6 +902,8 @@ class SqliteAgentContextStore:
         if kind is not None:
             clauses.append("kind = ?")
             args.append(kind.value)
+        if not include_archived:
+            clauses.append("archived_at IS NULL")
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = await self._fetchall(
             f"""
@@ -1032,15 +1051,19 @@ class SqliteAgentContextStore:
         return frame
 
     async def save_recall_frame(self, frame: RecallFrame) -> RecallFrame:
+        # F094 C5: 持久化双字段（queried_namespace_kinds / hit_namespace_kinds）
+        # list[MemoryNamespaceKind] → JSON list of str values（enum value）。
         await self._conn.execute(
             """
             INSERT INTO recall_frames (
                 recall_frame_id, agent_runtime_id, agent_session_id,
                 context_frame_id, task_id, project_id, query,
                 recent_summary, memory_namespace_ids, memory_hits, source_refs,
-                budget, degraded_reason, metadata, created_at
+                budget, degraded_reason, metadata,
+                queried_namespace_kinds, hit_namespace_kinds,
+                created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(recall_frame_id) DO UPDATE SET
                 agent_runtime_id = excluded.agent_runtime_id,
                 agent_session_id = excluded.agent_session_id,
@@ -1055,6 +1078,8 @@ class SqliteAgentContextStore:
                 budget = excluded.budget,
                 degraded_reason = excluded.degraded_reason,
                 metadata = excluded.metadata,
+                queried_namespace_kinds = excluded.queried_namespace_kinds,
+                hit_namespace_kinds = excluded.hit_namespace_kinds,
                 created_at = excluded.created_at
             """,
             (
@@ -1072,6 +1097,8 @@ class SqliteAgentContextStore:
                 self._dump(frame.budget),
                 frame.degraded_reason,
                 self._dump(frame.metadata),
+                self._dump([k.value for k in frame.queried_namespace_kinds]),
+                self._dump([k.value for k in frame.hit_namespace_kinds]),
                 frame.created_at.isoformat(),
             ),
         )
@@ -1126,16 +1153,25 @@ class SqliteAgentContextStore:
         self,
         *,
         agent_session_id: str | None = None,
+        agent_runtime_id: str | None = None,
         context_frame_id: str | None = None,
         task_id: str | None = None,
         project_id: str | None = None,
+        queried_namespace_kind: MemoryNamespaceKind | None = None,
+        hit_namespace_kind: MemoryNamespaceKind | None = None,
         limit: int = 20,
     ) -> list[RecallFrame]:
+        # F094 C7: 加 agent_runtime_id / queried_namespace_kind /
+        # hit_namespace_kind 过滤维度。namespace_kind 字段是 JSON list，
+        # SQLite EXISTS + json_each 拆开后按 kind value 等值匹配。
         clauses: list[str] = []
         args: list[object] = []
         if agent_session_id:
             clauses.append("agent_session_id = ?")
             args.append(agent_session_id)
+        if agent_runtime_id:
+            clauses.append("agent_runtime_id = ?")
+            args.append(agent_runtime_id)
         if context_frame_id:
             clauses.append("context_frame_id = ?")
             args.append(context_frame_id)
@@ -1145,6 +1181,18 @@ class SqliteAgentContextStore:
         if project_id:
             clauses.append("project_id = ?")
             args.append(project_id)
+        if queried_namespace_kind is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM json_each(queried_namespace_kinds) "
+                "WHERE json_each.value = ?)"
+            )
+            args.append(queried_namespace_kind.value)
+        if hit_namespace_kind is not None:
+            clauses.append(
+                "EXISTS (SELECT 1 FROM json_each(hit_namespace_kinds) "
+                "WHERE json_each.value = ?)"
+            )
+            args.append(hit_namespace_kind.value)
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = await self._fetchall(
             f"""
@@ -1450,6 +1498,12 @@ class SqliteAgentContextStore:
 
     @classmethod
     def _row_to_recall_frame(cls, row: aiosqlite.Row) -> RecallFrame:
+        # F094 C5: 反序列化双字段。当列存在时（新建库 + ALTER 兜底已生效），
+        # JSON list[str] → list[MemoryNamespaceKind]。当列不存在时（极旧库
+        # 在升级前调用），row 索引会 raise IndexError——按 NFR-3 不做静默
+        # fallback，让上游 init_db / _migrate_legacy_tables 先跑过再说。
+        queried_raw = cls._load(row["queried_namespace_kinds"], [])
+        hit_raw = cls._load(row["hit_namespace_kinds"], [])
         return RecallFrame(
             recall_frame_id=row["recall_frame_id"],
             agent_runtime_id=row["agent_runtime_id"],
@@ -1465,6 +1519,8 @@ class SqliteAgentContextStore:
             budget=cls._load(row["budget"], {}),
             degraded_reason=row["degraded_reason"],
             metadata=cls._load(row["metadata"], {}),
+            queried_namespace_kinds=[MemoryNamespaceKind(v) for v in queried_raw],
+            hit_namespace_kinds=[MemoryNamespaceKind(v) for v in hit_raw],
             created_at=datetime.fromisoformat(row["created_at"]),
         )
 

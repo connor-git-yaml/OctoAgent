@@ -797,6 +797,59 @@ class AgentContextService(AgentContextTurnWriterMixin):
         )
         context_frame_id = str(ULID())
         recall_frame_id = str(ULID())
+        # F094 C6: 双字段语义（spec §2.2 Gap-4 / Codex MED-5 闭环）
+        # queried = 本次 recall 查询了哪些 namespace kind（去重；从
+        #           resolved memory_namespaces 派生，与 memory_namespace_ids
+        #           对应）
+        # hit     = 本次 recall 实际命中的 namespace kind（从
+        #           memory_hits[i].metadata.namespace_kind 归一化生成；
+        #           agent_context.py:2986+/3105+ 的 scope_entry_map 已注入此字段）
+        # NFR-3 一致性（Codex Phase C MED-2 闭环）：
+        # - 缺失 metadata.namespace_kind 或 invalid enum 值都视为数据完整性
+        #   异常，往 recall_frame.degraded_reason 累加显式标记；不静默吞掉。
+        # - 不直接 raise（避免破坏 recall 主返回路径），但通过 degraded_reason
+        #   让上游 audit 路径可观测到（F096 audit 必须能识别 degraded 状态）。
+        queried_namespace_kinds = sorted(
+            {ns.kind for ns in memory_namespaces},
+            key=lambda k: k.value,
+        )
+        hit_kinds_raw: set[MemoryNamespaceKind] = set()
+        audit_anomalies: list[str] = []
+        for hit_index, item in enumerate(memory_hits):
+            metadata_payload = getattr(item, "metadata", None) or {}
+            kind_value = metadata_payload.get("namespace_kind")
+            if not isinstance(kind_value, str) or not kind_value:
+                # 缺失字段：scope_entry_map 应该为每个 hit.scope_id 注入 namespace_kind
+                # （agent_context.py:3208-3250 _build_memory_scope_entries），缺失
+                # 意味着数据完整性异常——audit 层面 raise，不静默。
+                audit_anomalies.append(
+                    f"hit[{hit_index}].metadata.namespace_kind missing "
+                    f"(scope_id={getattr(item, 'scope_id', '?')})"
+                )
+                continue
+            try:
+                hit_kinds_raw.add(MemoryNamespaceKind(kind_value))
+            except ValueError:
+                # 未知 enum 值——可能是 schema drift / 数据损坏；
+                # audit 层面记录，不影响 recall 主返回。
+                audit_anomalies.append(
+                    f"hit[{hit_index}].metadata.namespace_kind invalid "
+                    f"(value={kind_value!r})"
+                )
+        hit_namespace_kinds = sorted(hit_kinds_raw, key=lambda k: k.value)
+        if audit_anomalies:
+            anomaly_label = "; ".join(audit_anomalies)
+            log.warning(
+                "recall_frame_audit_anomaly",
+                recall_frame_id=recall_frame_id,
+                anomalies=audit_anomalies,
+            )
+            # 累加到 degraded_reason 让 F096 audit 可识别
+            degraded_reason = (
+                f"{degraded_reason}; F094_audit_anomaly: {anomaly_label}"
+                if degraded_reason
+                else f"F094_audit_anomaly: {anomaly_label}"
+            )
         recall_frame = RecallFrame(
             recall_frame_id=recall_frame_id,
             agent_runtime_id=agent_runtime.agent_runtime_id,
@@ -821,6 +874,8 @@ class AgentContextService(AgentContextTurnWriterMixin):
                 "worker_capability": worker_capability or "",
                 "dispatch_metadata": dict(dispatch_metadata),
             },
+            queried_namespace_kinds=queried_namespace_kinds,
+            hit_namespace_kinds=hit_namespace_kinds,
             created_at=datetime.now(tz=UTC),
         )
         frame = ContextFrame(

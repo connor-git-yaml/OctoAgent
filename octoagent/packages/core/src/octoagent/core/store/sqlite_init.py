@@ -610,6 +610,8 @@ CREATE TABLE IF NOT EXISTS recall_frames (
     budget               TEXT NOT NULL DEFAULT '{}',
     degraded_reason      TEXT NOT NULL DEFAULT '',
     metadata             TEXT NOT NULL DEFAULT '{}',
+    queried_namespace_kinds TEXT NOT NULL DEFAULT '[]',
+    hit_namespace_kinds     TEXT NOT NULL DEFAULT '[]',
     created_at           TEXT NOT NULL
 );
 """
@@ -871,6 +873,14 @@ _AGENT_CONTEXT_INDEXES = [
         "CREATE INDEX IF NOT EXISTS idx_memory_namespaces_runtime_kind "
         "ON memory_namespaces(agent_runtime_id, kind, updated_at DESC);"
     ),
+    # F094 C2: 三元组 (project_id, agent_runtime_id, kind) 在 active 路径上必须唯一。
+    # 用 partial unique index（archived_at IS NULL）兼容 dedupe 后的 archived 数据，
+    # 既避免破坏 baseline 已存在的 namespace 记录，又强制新写入的业务路径唯一。
+    (
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_namespaces_unique_triple "
+        "ON memory_namespaces(project_id, agent_runtime_id, kind) "
+        "WHERE archived_at IS NULL;"
+    ),
     (
         "CREATE INDEX IF NOT EXISTS idx_worker_profiles_scope_project "
         "ON worker_profiles(scope, project_id, status, updated_at DESC);"
@@ -1120,6 +1130,29 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     if agent_runtime_columns and agent_session_columns:
         await _merge_composite_agent_identity_rows(conn)
 
+    # F094 C2：memory_namespaces 三元组 (project_id, agent_runtime_id, kind) 在
+    # active 路径必须唯一。partial unique index 创建前先清掉同三元组的重复 active
+    # records（保留每组 created_at DESC 最新 1 条；其他 archived_at 标记 + metadata
+    # 加 archived_reason="F094_dedupe_unique_constraint_setup"）。这样 partial
+    # unique index 才能成功创建，且 baseline 已有数据不丢失（仅归档）。
+    namespace_columns = await _table_columns(conn, "memory_namespaces")
+    if namespace_columns:
+        await _archive_duplicate_memory_namespaces(conn)
+
+    # F094 C3：recall_frames 补 queried_namespace_kinds + hit_namespace_kinds 列
+    # （F096 audit 双查询模式：曾查过私有 vs 实际命中私有）
+    recall_columns = await _table_columns(conn, "recall_frames")
+    if recall_columns and "queried_namespace_kinds" not in recall_columns:
+        await conn.execute(
+            "ALTER TABLE recall_frames "
+            "ADD COLUMN queried_namespace_kinds TEXT NOT NULL DEFAULT '[]'"
+        )
+    if recall_columns and "hit_namespace_kinds" not in recall_columns:
+        await conn.execute(
+            "ALTER TABLE recall_frames "
+            "ADD COLUMN hit_namespace_kinds TEXT NOT NULL DEFAULT '[]'"
+        )
+
     # F084 Phase 4 T068：DROP bootstrap_sessions 表（bootstrap_session 状态机已退役）
     # bootstrap 完成状态由 owner_profile.bootstrap_completed + USER.md 实质填充判断替代。
     await conn.execute("DROP TABLE IF EXISTS bootstrap_sessions")
@@ -1188,6 +1221,69 @@ async def _merge_composite_agent_identity_rows(conn: aiosqlite.Connection) -> No
     finally:
         if fk_was_on:
             await conn.execute("PRAGMA foreign_keys = ON")
+
+
+async def _archive_duplicate_memory_namespaces(conn: aiosqlite.Connection) -> None:
+    """F094 C2：对违反三元组 unique 约束的 memory_namespaces 历史脏数据做 archive。
+
+    保留每组 (project_id, agent_runtime_id, kind) 中 archived_at IS NULL 的 1 条；
+    其他设 archived_at = now() + metadata 加 archived_reason，让 partial unique
+    index `idx_memory_namespaces_unique_triple` 能成功创建。
+
+    Winner 选择优先级（Codex Phase C HIGH-1 闭环）：
+    1. 优先保留 namespace_id == build_memory_namespace_id() 派生 canonical id 的
+       那一条——避免归档 resolver 依赖的 canonical id 后续触发 unique 冲突
+       （baseline build_memory_namespace_id 形态：
+         memory_namespace:{kind}|project:{project_id 或 default}|runtime:{runtime_id}）
+    2. 否则按 created_at DESC + namespace_id DESC tie-break（确定性）
+
+    既保留 baseline 数据（不删），又确保新业务路径下三元组真唯一。
+
+    Codex Phase C LOW-4 闭环：metadata 用 json_valid 防御 malformed JSON，避免
+    legacy 损坏数据中断 init。
+    """
+    now_iso = datetime.now(UTC).isoformat()
+    # canonical_pattern 与 build_memory_namespace_id() 一一对应：
+    #   memory_namespace:{kind}|project:{project_or_default}[|runtime:{runtime}]
+    canonical_pattern_sql = (
+        "'memory_namespace:' || kind || '|project:' || "
+        "CASE WHEN project_id = '' THEN 'default' ELSE project_id END || "
+        "CASE WHEN agent_runtime_id != '' "
+        "     THEN '|runtime:' || agent_runtime_id ELSE '' END"
+    )
+    metadata_safe_sql = (
+        "CASE WHEN json_valid(COALESCE(metadata, '{}')) "
+        "     THEN COALESCE(metadata, '{}') ELSE '{}' END"
+    )
+    await conn.execute(
+        f"""
+        UPDATE memory_namespaces
+        SET archived_at = ?,
+            updated_at = ?,
+            metadata = json_set(
+                {metadata_safe_sql},
+                '$.archived_reason',
+                'F094_dedupe_unique_constraint_setup'
+            )
+        WHERE archived_at IS NULL
+          AND namespace_id NOT IN (
+              SELECT namespace_id FROM (
+                  SELECT namespace_id,
+                         ROW_NUMBER() OVER (
+                             PARTITION BY project_id, agent_runtime_id, kind
+                             ORDER BY
+                                 CASE WHEN namespace_id = {canonical_pattern_sql}
+                                      THEN 0 ELSE 1 END,
+                                 created_at DESC,
+                                 namespace_id DESC
+                         ) AS rn
+                  FROM memory_namespaces
+                  WHERE archived_at IS NULL
+              ) WHERE rn = 1
+          )
+        """,
+        (now_iso, now_iso),
+    )
 
 
 async def _archive_extra_active_rows(conn: aiosqlite.Connection) -> None:

@@ -204,7 +204,9 @@ CREATE TABLE IF NOT EXISTS memory_maintenance_runs (
     metadata          TEXT NOT NULL DEFAULT '{}',
     started_at        TEXT NOT NULL,
     finished_at       TEXT,
-    backend_state     TEXT NOT NULL DEFAULT 'healthy'
+    backend_state     TEXT NOT NULL DEFAULT 'healthy',
+    idempotency_key   TEXT NOT NULL DEFAULT '',
+    requested_by      TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -304,6 +306,31 @@ _INDEXES = [
 ]
 
 
+async def _table_columns(conn: aiosqlite.Connection, table_name: str) -> set[str]:
+    """读取表列名集合。"""
+    cursor = await conn.execute(f"PRAGMA table_info({table_name})")
+    rows = await cursor.fetchall()
+    return {str(row[1]) for row in rows}
+
+
+async def _migrate_legacy_memory_tables(conn: aiosqlite.Connection) -> None:
+    """对已有旧 memory 表执行最小 schema 迁移。"""
+    # F094 C1：memory_maintenance_runs 补 idempotency_key + requested_by 列
+    # （F063 migration 写这两列时它们其实不在 canonical DDL 里——历史 bug
+    # 修复 + F094 migrate-094 的 idempotency 依赖）
+    maintenance_columns = await _table_columns(conn, "memory_maintenance_runs")
+    if maintenance_columns and "idempotency_key" not in maintenance_columns:
+        await conn.execute(
+            "ALTER TABLE memory_maintenance_runs "
+            "ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''"
+        )
+    if maintenance_columns and "requested_by" not in maintenance_columns:
+        await conn.execute(
+            "ALTER TABLE memory_maintenance_runs "
+            "ADD COLUMN requested_by TEXT NOT NULL DEFAULT ''"
+        )
+
+
 async def init_memory_db(conn: aiosqlite.Connection) -> None:
     """初始化 memory 相关 SQLite schema。"""
 
@@ -322,6 +349,8 @@ async def init_memory_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_INGEST_RUNS_DDL)
     await conn.execute(_DERIVED_RECORDS_DDL)
     await conn.execute(_MAINTENANCE_RUNS_DDL)
+
+    await _migrate_legacy_memory_tables(conn)
 
     for sql in _INDEXES:
         await conn.execute(sql)
