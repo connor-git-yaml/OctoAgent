@@ -316,3 +316,155 @@ async def test_console_consolidation_entry_preserved():
     assert hasattr(ConsolidationService, "consolidate_scope")
     # consolidate_all_pending 是 Scheduler 入口
     assert hasattr(ConsolidationService, "consolidate_all_pending")
+
+
+# ---------------------------------------------------------------------------
+# Feature 093 Phase B：SessionMemoryExtractor 不跑 worker session 断言
+# ---------------------------------------------------------------------------
+
+
+async def _setup_worker_session_with_turns(store):
+    """构造 WORKER_INTERNAL session + 3 条 turn，用于验证 extractor 跳过。"""
+    runtime = AgentRuntime(
+        agent_runtime_id="rt-worker-skip-001",
+        project_id="proj-worker-skip",
+        name="Worker Skip Runtime",
+    )
+    await store.save_agent_runtime(runtime)
+
+    session = AgentSession(
+        agent_session_id="sess-worker-skip-001",
+        agent_runtime_id="rt-worker-skip-001",
+        kind=AgentSessionKind.WORKER_INTERNAL,
+        project_id="proj-worker-skip",
+    )
+    await store.save_agent_session(session)
+
+    turns_data = [
+        (1, AgentSessionTurnKind.USER_MESSAGE, "user", "", "Worker 用户消息"),
+        (2, AgentSessionTurnKind.TOOL_CALL, "assistant", "worker.tool", "工具调用"),
+        (3, AgentSessionTurnKind.TOOL_RESULT, "tool", "worker.tool", "工具结果"),
+    ]
+    for seq, kind, role, tool_name, summary in turns_data:
+        await store.save_agent_session_turn(
+            AgentSessionTurn(
+                agent_session_turn_id=f"turn-worker-skip-{seq:03d}",
+                agent_session_id="sess-worker-skip-001",
+                turn_seq=seq,
+                kind=kind,
+                role=role,
+                tool_name=tool_name,
+                summary=summary,
+            )
+        )
+    return session
+
+
+@pytest.mark.asyncio
+async def test_session_memory_extractor_skips_worker_session(
+    store: SqliteAgentContextStore,
+):
+    """Feature 093 Phase B：SessionMemoryExtractor 不跑 WORKER_INTERNAL session。
+
+    通过 _EXTRACTABLE_SESSION_KINDS 白名单显式跳过：
+    - skipped_reason="unsupported_session_kind"
+    - memory_cursor_seq 仍为 0（cursor 不被推进）
+    - LLM 不被调用（早 return）
+
+    F094 接入 Worker memory（AGENT_PRIVATE namespace）时凭借 cursor=0 启动零返工。
+    """
+    session = await _setup_worker_session_with_turns(store)
+
+    extractor, llm_service, _memory_service = _make_integration_extractor(store)
+
+    result = await extractor.extract_and_commit(
+        agent_session=session,
+        project=None,
+    )
+
+    assert result.skipped_reason == "unsupported_session_kind"
+    assert result.turns_processed == 0
+    assert result.facts_committed == 0
+
+    # cursor 没被推进，留给 F094
+    reloaded = await store.get_agent_session("sess-worker-skip-001")
+    assert reloaded is not None
+    assert reloaded.memory_cursor_seq == 0
+
+    # LLM 不被调用——早 return
+    llm_service.call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_session_memory_extractor_skips_direct_worker_session(
+    store: SqliteAgentContextStore,
+):
+    """Feature 093 Phase B：SessionMemoryExtractor 不跑 DIRECT_WORKER session。
+
+    DIRECT_WORKER 与 WORKER_INTERNAL 同样属于 worker 维度，F093 一并退出白名单。
+    """
+    runtime = AgentRuntime(
+        agent_runtime_id="rt-direct-worker-skip",
+        project_id="proj-direct-worker-skip",
+        name="Direct Worker",
+    )
+    await store.save_agent_runtime(runtime)
+    session = AgentSession(
+        agent_session_id="sess-direct-worker-skip",
+        agent_runtime_id="rt-direct-worker-skip",
+        kind=AgentSessionKind.DIRECT_WORKER,
+        project_id="proj-direct-worker-skip",
+    )
+    await store.save_agent_session(session)
+    await store.save_agent_session_turn(
+        AgentSessionTurn(
+            agent_session_turn_id="turn-direct-worker-001",
+            agent_session_id="sess-direct-worker-skip",
+            turn_seq=1,
+            kind=AgentSessionTurnKind.USER_MESSAGE,
+            role="user",
+            summary="direct worker 消息",
+        )
+    )
+
+    extractor, llm_service, _memory_service = _make_integration_extractor(store)
+
+    result = await extractor.extract_and_commit(
+        agent_session=session,
+        project=None,
+    )
+
+    assert result.skipped_reason == "unsupported_session_kind"
+    reloaded = await store.get_agent_session("sess-direct-worker-skip")
+    assert reloaded is not None
+    assert reloaded.memory_cursor_seq == 0
+    llm_service.call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_session_memory_extractor_still_runs_main_session(
+    store: SqliteAgentContextStore,
+    setup_full_session: AgentSession,
+):
+    """Feature 093 Phase B regression guard：MAIN_BOOTSTRAP 仍走 extractor 主流程。
+
+    白名单缩为 {MAIN_BOOTSTRAP} 后必须确认 main session 不被误伤。
+    """
+    extractor, llm_service, _memory_service = _make_integration_extractor(
+        store,
+        llm_response_json=[],
+    )
+
+    session = await store.get_agent_session("sess-int-001")
+    assert session is not None
+    assert session.kind is AgentSessionKind.MAIN_BOOTSTRAP
+
+    result = await extractor.extract_and_commit(
+        agent_session=session,
+        project=None,
+    )
+
+    # main session 仍跑（即使 LLM 返回空数组）：skipped_reason 不是 unsupported_session_kind
+    assert result.skipped_reason != "unsupported_session_kind"
+    # LLM 被调用一次
+    llm_service.call.assert_called_once()

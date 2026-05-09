@@ -49,10 +49,24 @@ _PARTITION_MAP: dict[str, MemoryPartition] = {
 _MAX_TURNS_PER_EXTRACTION = 50
 
 # Session kinds 白名单 -- 仅这些 kind 触发记忆提取
+#
+# Feature 093 Phase B：移除 WORKER_INTERNAL / DIRECT_WORKER（baseline 含 worker
+# kinds 是预备性占位，从未真正消费 worker 维度记忆）。F093 显式让 extractor
+# 不跑 worker，让 F094 接入 Worker memory（AGENT_PRIVATE namespace）时不会撞
+# 上"worker 已被处理过"的脏 cursor 状态。SUBAGENT_INTERNAL baseline 本来就不
+# 在白名单。
+#
+# F094 接入点（Codex Phase B finding-MED Q6 闭环）：
+# 1. 恢复 WORKER_INTERNAL / DIRECT_WORKER 加回此白名单 **不够**——
+#    ``_resolve_scope_id()`` 当前只解析 ``PROJECT_SHARED`` / fallback 到
+#    ``memory/auto/{project_id}``，没有按 worker session 解析 ``AGENT_PRIVATE`` /
+#    ``WORKER_PRIVATE`` namespace；F094 必须先扩 ``_resolve_scope_id()`` 支持
+#    worker private scope 才能启用，否则 worker 提取会误写到 main 的 scope 上。
+# 2. baseline 中已存在的 worker session（``memory_cursor_seq > 0``）— F094 必须
+#    决定迁移策略：保留旧 cursor / 重放到新 namespace / 标记不可迁移
+#    （Codex Phase B finding-LOW Q2）。
 _EXTRACTABLE_SESSION_KINDS = frozenset({
     AgentSessionKind.MAIN_BOOTSTRAP,
-    AgentSessionKind.WORKER_INTERNAL,
-    AgentSessionKind.DIRECT_WORKER,
 })
 
 # LLM 提取 prompt
