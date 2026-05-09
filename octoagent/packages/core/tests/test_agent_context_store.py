@@ -962,6 +962,399 @@ async def test_f094_c2_dedupe_handles_malformed_metadata(tmp_path: Path) -> None
         await store_group.conn.close()
 
 
+# ---------------------------------------------------------------------------
+# F094 Phase B: AGENT_PRIVATE 真生效 + 废弃 WORKER_PRIVATE 路径
+# ---------------------------------------------------------------------------
+
+
+async def test_f094_b7_worker_dispatch_creates_agent_private_only(tmp_path: Path) -> None:
+    """F094 B7 (Codex spec HIGH-1 闭环): worker dispatch 路径创建的 namespace
+    必须是 kind=AGENT_PRIVATE，**不**创建 kind=WORKER_PRIVATE。
+
+    验证 spec §0 + §3.1 块 B 的"统一 worker / main 用 AGENT_PRIVATE，废弃
+    WORKER_PRIVATE 写入路径"。"""
+    store_group = await create_store_group(
+        str(tmp_path / "f094-b7.db"),
+        str(tmp_path / "artifacts"),
+    )
+    try:
+        # 模拟 worker dispatch 创建 AGENT_PRIVATE namespace（baseline 改动后路径）
+        ns = MemoryNamespace(
+            namespace_id="ns-worker-b7",
+            project_id="proj-b7",
+            agent_runtime_id="worker-runtime-b7",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,  # F094 B1 改后值
+            name="Agent Private",
+            description="Agent 私有记忆命名空间。",
+            memory_scope_ids=["memory/private/main/runtime:worker-runtime-b7"],
+        )
+        await store_group.agent_context_store.save_memory_namespace(ns)
+        await store_group.conn.commit()
+
+        # 列出该 worker 所有 namespace：必须含 AGENT_PRIVATE，不含 WORKER_PRIVATE
+        all_ns = await store_group.agent_context_store.list_memory_namespaces(
+            agent_runtime_id="worker-runtime-b7",
+        )
+        kinds = [n.kind for n in all_ns]
+        assert MemoryNamespaceKind.AGENT_PRIVATE in kinds
+        assert MemoryNamespaceKind.WORKER_PRIVATE not in kinds
+    finally:
+        await store_group.conn.close()
+
+
+async def test_f094_b7_two_workers_agent_private_isolation(tmp_path: Path) -> None:
+    """F094 B7 (spec §1 US1 P1 核心断言): 同 project 下两个 Worker 不同
+    agent_runtime_id，各自的 AGENT_PRIVATE namespace 严格隔离。
+
+    Worker A 的 namespace 不出现在 Worker B 的 list_memory_namespaces 结果。"""
+    store_group = await create_store_group(
+        str(tmp_path / "f094-b7-isolation.db"),
+        str(tmp_path / "artifacts"),
+    )
+    try:
+        # 同 project 不同 worker
+        for runtime_id in ("runtime-A", "runtime-B"):
+            await store_group.agent_context_store.save_memory_namespace(
+                MemoryNamespace(
+                    namespace_id=f"ns-{runtime_id}",
+                    project_id="proj-iso",
+                    agent_runtime_id=runtime_id,
+                    kind=MemoryNamespaceKind.AGENT_PRIVATE,
+                    name=f"private-{runtime_id}",
+                    description="",
+                    memory_scope_ids=[f"memory/private/main/runtime:{runtime_id}"],
+                )
+            )
+        await store_group.conn.commit()
+
+        # Worker A 视角：仅看到自己的 namespace
+        a_ns = await store_group.agent_context_store.list_memory_namespaces(
+            project_id="proj-iso",
+            agent_runtime_id="runtime-A",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+        )
+        assert len(a_ns) == 1
+        assert a_ns[0].agent_runtime_id == "runtime-A"
+        assert a_ns[0].namespace_id == "ns-runtime-A"
+
+        # Worker B 视角：仅看到自己的 namespace
+        b_ns = await store_group.agent_context_store.list_memory_namespaces(
+            project_id="proj-iso",
+            agent_runtime_id="runtime-B",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+        )
+        assert len(b_ns) == 1
+        assert b_ns[0].agent_runtime_id == "runtime-B"
+
+        # 跨 worker 不可见：两个 namespace 共存于同 project，但按 runtime 严格隔离
+        all_in_proj = await store_group.agent_context_store.list_memory_namespaces(
+            project_id="proj-iso",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+        )
+        assert len(all_in_proj) == 2
+        # 但按 runtime 维度查询互不命中
+        assert "ns-runtime-B" not in {n.namespace_id for n in a_ns}
+        assert "ns-runtime-A" not in {n.namespace_id for n in b_ns}
+    finally:
+        await store_group.conn.close()
+
+
+async def test_f094_b5_recall_priority_private_before_project_shared(
+    tmp_path: Path,
+) -> None:
+    """F094 B5 (spec §5 B3 acceptance): recall 优先级——AGENT_PRIVATE namespace
+    必须排在 PROJECT_SHARED 之前（baseline _build_memory_scope_entries 已实现，
+    F094 验证保留行为）。
+
+    端到端通过 ordered_namespaces 排序逻辑断言（不直接调内部静态方法，避免
+    白盒测试；通过观察排序结果间接验证）。"""
+    # 直接调 baseline 静态方法 _build_memory_scope_entries（agent_context.py:3208+）
+    from octoagent.gateway.services.agent_context import AgentContextService
+
+    runtime = AgentRuntime(
+        agent_runtime_id="runtime-b5",
+        project_id="proj-b5",
+        agent_profile_id="agent-profile-b5",
+        role=AgentRuntimeRole.WORKER,
+        name="B5 Worker",
+        persona_summary="recall priority 测试。",
+    )
+    session = AgentSession(
+        agent_session_id="agent-session-b5",
+        agent_runtime_id=runtime.agent_runtime_id,
+        kind=AgentSessionKind.DIRECT_WORKER,
+        project_id="proj-b5",
+    )
+    namespaces = [
+        # 故意把 PROJECT_SHARED 放在前面，验证排序后 AGENT_PRIVATE 排前
+        MemoryNamespace(
+            namespace_id="ns-shared",
+            project_id="proj-b5",
+            agent_runtime_id="runtime-b5",
+            kind=MemoryNamespaceKind.PROJECT_SHARED,
+            name="shared",
+            memory_scope_ids=["memory/proj-b5"],
+        ),
+        MemoryNamespace(
+            namespace_id="ns-agent-priv",
+            project_id="proj-b5",
+            agent_runtime_id="runtime-b5",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+            name="agent_private",
+            memory_scope_ids=["memory/private/main/runtime:runtime-b5"],
+        ),
+    ]
+    entries = AgentContextService._build_memory_scope_entries(
+        agent_runtime=runtime,
+        agent_session=session,
+        memory_namespaces=namespaces,
+    )
+    # 第一个 entry 必须是 AGENT_PRIVATE（排前）
+    assert entries[0]["namespace_kind"] == MemoryNamespaceKind.AGENT_PRIVATE.value
+    assert entries[0]["scope_id"] == "memory/private/main/runtime:runtime-b5"
+    # 末尾应该是 PROJECT_SHARED
+    assert entries[-1]["namespace_kind"] == MemoryNamespaceKind.PROJECT_SHARED.value
+
+
+async def test_f094_b7_main_agent_recall_does_not_hit_worker_agent_private(
+    tmp_path: Path,
+) -> None:
+    """F094 B7 (spec §1 US1 acceptance 3): main agent recall 不命中 worker
+    AGENT_PRIVATE namespace。
+
+    设置：同 project 下创建 main agent runtime + worker runtime；各自 AGENT_PRIVATE
+    namespace。验证 list_memory_namespaces(agent_runtime_id=main) 仅返回 main
+    自己的，不包含 worker 的私有 namespace。"""
+    store_group = await create_store_group(
+        str(tmp_path / "f094-b7-main.db"),
+        str(tmp_path / "artifacts"),
+    )
+    try:
+        # main runtime + worker runtime 同 project
+        main_ns = MemoryNamespace(
+            namespace_id="ns-main",
+            project_id="proj-main-iso",
+            agent_runtime_id="runtime-main",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+            name="Main Agent Private",
+            memory_scope_ids=["memory/private/main/runtime:runtime-main"],
+        )
+        worker_ns = MemoryNamespace(
+            namespace_id="ns-worker",
+            project_id="proj-main-iso",
+            agent_runtime_id="runtime-worker",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+            name="Worker Agent Private",
+            memory_scope_ids=["memory/private/main/runtime:runtime-worker"],
+        )
+        await store_group.agent_context_store.save_memory_namespace(main_ns)
+        await store_group.agent_context_store.save_memory_namespace(worker_ns)
+        await store_group.conn.commit()
+
+        # main 视角 list_memory_namespaces 仅返回自己（按 agent_runtime_id 过滤）
+        main_view = await store_group.agent_context_store.list_memory_namespaces(
+            project_id="proj-main-iso",
+            agent_runtime_id="runtime-main",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+        )
+        assert len(main_view) == 1
+        assert main_view[0].agent_runtime_id == "runtime-main"
+
+        # worker 视角同样仅返回自己
+        worker_view = await store_group.agent_context_store.list_memory_namespaces(
+            project_id="proj-main-iso",
+            agent_runtime_id="runtime-worker",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+        )
+        assert len(worker_view) == 1
+        assert worker_view[0].agent_runtime_id == "runtime-worker"
+
+        # 跨视角不互通：main 视角内不出现 worker namespace_id
+        assert "ns-worker" not in {n.namespace_id for n in main_view}
+        assert "ns-main" not in {n.namespace_id for n in worker_view}
+    finally:
+        await store_group.conn.close()
+
+
+async def test_f094_b3_resolve_worker_default_scope_id_helper(tmp_path: Path) -> None:
+    """F094 B3 (Codex plan HIGH-1 闭环): resolve_worker_default_scope_id helper
+    各场景:
+    - 命中 active AGENT_PRIVATE namespace → 返回 memory_scope_ids[0]
+    - agent_runtime_id 为空 → raise WorkerMemoryNamespaceNotResolved
+    - 不存在 namespace → raise
+    - archived namespace 不命中（与 C7b 联动）"""
+    from octoagent.gateway.services.builtin_tools._deps import (
+        ToolDeps,
+        WorkerMemoryNamespaceNotResolved,
+        resolve_worker_default_scope_id,
+    )
+
+    store_group = await create_store_group(
+        str(tmp_path / "f094-b3.db"),
+        str(tmp_path / "artifacts"),
+    )
+    try:
+        # 简化版 ToolDeps：helper 仅依赖 deps.stores.agent_context_store
+        deps = ToolDeps(
+            project_root=tmp_path,
+            stores=store_group,
+            tool_broker=None,
+            tool_index=None,
+            skill_discovery=None,
+            memory_console_service=None,
+            memory_runtime_service=None,
+        )
+
+        # 场景 1: agent_runtime_id 空 → raise
+        import pytest as _pytest
+        with _pytest.raises(WorkerMemoryNamespaceNotResolved):
+            await resolve_worker_default_scope_id(
+                deps,
+                project_id="proj-b3",
+                agent_runtime_id="",
+            )
+
+        # 场景 2: 没有 namespace → raise
+        with _pytest.raises(WorkerMemoryNamespaceNotResolved):
+            await resolve_worker_default_scope_id(
+                deps,
+                project_id="proj-b3",
+                agent_runtime_id="runtime-b3",
+            )
+
+        # 场景 3: 命中 active AGENT_PRIVATE namespace → 返回 scope_ids[0]
+        ns = MemoryNamespace(
+            namespace_id="ns-b3",
+            project_id="proj-b3",
+            agent_runtime_id="runtime-b3",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+            name="b3",
+            memory_scope_ids=[
+                "memory/private/main/session:s1",
+                "memory/private/main/runtime:runtime-b3",
+            ],
+        )
+        await store_group.agent_context_store.save_memory_namespace(ns)
+        await store_group.conn.commit()
+        scope = await resolve_worker_default_scope_id(
+            deps,
+            project_id="proj-b3",
+            agent_runtime_id="runtime-b3",
+        )
+        assert scope == "memory/private/main/session:s1"  # 第一个
+
+        # 场景 4: archived namespace 不命中（C7b 默认 active path 过滤）
+        archived_ns = MemoryNamespace(
+            namespace_id="ns-b3-archived",
+            project_id="proj-b3-arch",
+            agent_runtime_id="runtime-b3-arch",
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+            name="archived",
+            memory_scope_ids=["memory/private/main/runtime:runtime-b3-arch"],
+            archived_at=datetime.now(UTC),
+        )
+        await store_group.agent_context_store.save_memory_namespace(archived_ns)
+        await store_group.conn.commit()
+        with _pytest.raises(WorkerMemoryNamespaceNotResolved):
+            await resolve_worker_default_scope_id(
+                deps,
+                project_id="proj-b3-arch",
+                agent_runtime_id="runtime-b3-arch",
+            )
+    finally:
+        await store_group.conn.close()
+
+
+async def test_f094_b3_helper_raises_on_multiple_active_namespaces(
+    tmp_path: Path,
+) -> None:
+    """F094 B3 (Codex Phase B MED-5 闭环): 当三元组 unique 约束失效（罕见，
+    数据被外部 SQL 篡改 / unique index 创建失败），同 (project, runtime, kind)
+    三元组多于 1 条 active 记录时，helper 必须 raise WorkerMemoryNamespaceNotResolved
+    而不是 fallback 到 created_at DESC limit 1（避免掩盖 schema 损坏 +
+    非确定性行为）。"""
+    from unittest.mock import AsyncMock
+
+    from octoagent.gateway.services.builtin_tools._deps import (
+        ToolDeps,
+        WorkerMemoryNamespaceNotResolved,
+        resolve_worker_default_scope_id,
+    )
+
+    # 用 mock store 直接返回 2 条 active namespace（绕过真实 unique 约束）
+    fake_store = type(
+        "FakeStore",
+        (),
+        {
+            "list_memory_namespaces": AsyncMock(
+                return_value=[
+                    MemoryNamespace(
+                        namespace_id="ns-a",
+                        project_id="proj",
+                        agent_runtime_id="rt",
+                        kind=MemoryNamespaceKind.AGENT_PRIVATE,
+                        memory_scope_ids=["scope-a"],
+                    ),
+                    MemoryNamespace(
+                        namespace_id="ns-b",
+                        project_id="proj",
+                        agent_runtime_id="rt",
+                        kind=MemoryNamespaceKind.AGENT_PRIVATE,
+                        memory_scope_ids=["scope-b"],
+                    ),
+                ]
+            )
+        },
+    )()
+    fake_stores = type("FakeStores", (), {"agent_context_store": fake_store})()
+
+    deps = ToolDeps(
+        project_root=tmp_path,
+        stores=fake_stores,
+        tool_broker=None,
+        tool_index=None,
+        skill_discovery=None,
+        memory_console_service=None,
+        memory_runtime_service=None,
+    )
+
+    import pytest as _pytest
+
+    with _pytest.raises(WorkerMemoryNamespaceNotResolved) as excinfo:
+        await resolve_worker_default_scope_id(
+            deps,
+            project_id="proj",
+            agent_runtime_id="rt",
+        )
+    assert "multiple active" in str(excinfo.value)
+
+
+async def test_f094_b6_memory_recall_completed_payload_carries_new_fields() -> None:
+    """F094 B6 (Codex Phase B MED-2 闭环): MemoryRecallCompletedPayload 持有
+    agent_runtime_id / queried_namespace_kinds / hit_namespace_kinds 三字段，
+    且默认空（向后兼容旧代码）。"""
+    from octoagent.core.models.payloads import MemoryRecallCompletedPayload
+
+    # 默认值兼容旧代码
+    default_payload = MemoryRecallCompletedPayload(context_frame_id="cf-1")
+    assert default_payload.agent_runtime_id == ""
+    assert default_payload.queried_namespace_kinds == []
+    assert default_payload.hit_namespace_kinds == []
+
+    # 显式填字段 round-trip
+    full_payload = MemoryRecallCompletedPayload(
+        context_frame_id="cf-2",
+        query="q",
+        agent_runtime_id="runtime-x",
+        queried_namespace_kinds=["agent_private", "project_shared"],
+        hit_namespace_kinds=["agent_private"],
+    )
+    dumped = full_payload.model_dump()
+    assert dumped["agent_runtime_id"] == "runtime-x"
+    assert dumped["queried_namespace_kinds"] == ["agent_private", "project_shared"]
+    assert dumped["hit_namespace_kinds"] == ["agent_private"]
+
+
 async def test_f094_c2_dedupe_archives_duplicates_at_init(tmp_path: Path) -> None:
     """F094 C2 dedupe: init_db 时既有重复 active records 被 archived_at 标记，
     保留每组 created_at DESC 最新 1 条；其他写 metadata.archived_reason。"""

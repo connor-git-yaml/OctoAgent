@@ -1049,7 +1049,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         task_id="worker-task-alpha",
     )
     worker_private_scope_ids = build_private_memory_scope_ids(
-        kind=MemoryNamespaceKind.WORKER_PRIVATE,
+        kind=MemoryNamespaceKind.AGENT_PRIVATE,
         agent_runtime_id=worker_runtime_id,
         agent_session_id=worker_agent_session_id,
     )
@@ -1147,7 +1147,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
     assert frame.memory_hits == []
     assert frame.budget["memory_recall"]["recall_owner_role"] == AgentRuntimeRole.WORKER.value
     assert any(
-        item["namespace_kind"] == MemoryNamespaceKind.WORKER_PRIVATE.value
+        item["namespace_kind"] == MemoryNamespaceKind.AGENT_PRIVATE.value
         for item in frame.budget["memory_recall"]["scope_entries"]
     )
     assert frame.budget["memory_recall"]["prefetch_mode"] == "hint_first"
@@ -1207,10 +1207,10 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
     )
     assert {item.kind for item in namespaces} == {
         MemoryNamespaceKind.PROJECT_SHARED,
-        MemoryNamespaceKind.WORKER_PRIVATE,
+        MemoryNamespaceKind.AGENT_PRIVATE,
     }
     worker_private_namespace = next(
-        item for item in namespaces if item.kind is MemoryNamespaceKind.WORKER_PRIVATE
+        item for item in namespaces if item.kind is MemoryNamespaceKind.AGENT_PRIVATE
     )
     assert worker_private_namespace.memory_scope_ids == worker_private_scope_ids
 
@@ -1270,7 +1270,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         task_id="worker-task-alpha-2",
     )
     worker_private_scope_ids = build_private_memory_scope_ids(
-        kind=MemoryNamespaceKind.WORKER_PRIVATE,
+        kind=MemoryNamespaceKind.AGENT_PRIVATE,
         agent_runtime_id=worker_runtime_id,
         agent_session_id=worker_agent_session_id,
     )
@@ -1466,7 +1466,7 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         task_id="worker-task-alpha-2",
     )
     worker_private_scope_ids = build_private_memory_scope_ids(
-        kind=MemoryNamespaceKind.WORKER_PRIVATE,
+        kind=MemoryNamespaceKind.AGENT_PRIVATE,
         agent_runtime_id=worker_runtime_id,
         agent_session_id=worker_agent_session_id,
     )
@@ -1672,7 +1672,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
         task_id="worker-task-alpha-1",
     )
     first_private_scope_ids = build_private_memory_scope_ids(
-        kind=MemoryNamespaceKind.WORKER_PRIVATE,
+        kind=MemoryNamespaceKind.AGENT_PRIVATE,
         agent_runtime_id=worker_runtime_id,
         agent_session_id=first_agent_session_id,
     )
@@ -1708,7 +1708,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
     assert any(
         entry["scope_id"] == first_private_scope_ids[1]
         and entry["scope_kind"] == "runtime_private"
-        and entry["namespace_kind"] == MemoryNamespaceKind.WORKER_PRIVATE.value
+        and entry["namespace_kind"] == MemoryNamespaceKind.AGENT_PRIVATE.value
         for entry in second_frame.budget["memory_recall"]["scope_entries"]
     )
 
@@ -1912,7 +1912,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         task_id="worker-tool-task-1",
     )
     first_private_scope_ids = build_private_memory_scope_ids(
-        kind=MemoryNamespaceKind.WORKER_PRIVATE,
+        kind=MemoryNamespaceKind.AGENT_PRIVATE,
         agent_runtime_id=worker_runtime_id,
         agent_session_id=first_agent_session_id,
     )
@@ -1974,7 +1974,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
     assert any(
         entry["scope_id"] == first_private_scope_ids[1]
         and entry["scope_kind"] == "runtime_private"
-        and entry["namespace_kind"] == MemoryNamespaceKind.WORKER_PRIVATE.value
+        and entry["namespace_kind"] == MemoryNamespaceKind.AGENT_PRIVATE.value
         for entry in second_frame.budget["memory_recall"]["scope_entries"]
     )
     prompt = second_llm_service.calls[0]["prompt_or_messages"]

@@ -32,6 +32,11 @@ class ExecutionRuntimeContext:
     work_id: str = ""
     runtime_kind: str = ""
     agent_session_id: str = ""
+    # F094 B0: agent_runtime_id 接线（Codex plan MED-2 闭环）
+    # 工具层（如 memory.write）需要按 agent_runtime_id 解析 worker 私有 namespace。
+    # 来源：dispatch_metadata / compiled_context.effective_agent_runtime_id；
+    # 由 orchestrator + worker_runtime 两个构造点填充。
+    agent_runtime_id: str = ""
     runtime_context: RuntimeControlContext | None = None
     resume_state_snapshot: dict[str, Any] | None = None
     _resume_input_consumed: bool = field(default=False, init=False, repr=False)

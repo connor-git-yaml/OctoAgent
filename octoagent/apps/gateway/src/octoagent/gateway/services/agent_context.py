@@ -2370,11 +2370,16 @@ class AgentContextService(AgentContextTurnWriterMixin):
             await self._stores.agent_context_store.save_memory_namespace(project_namespace)
             namespaces.append(project_namespace)
 
-        private_kind = (
-            MemoryNamespaceKind.WORKER_PRIVATE
-            if agent_runtime.role is AgentRuntimeRole.WORKER
-            else MemoryNamespaceKind.AGENT_PRIVATE
-        )
+        # F094 B1: worker / main 统一用 AGENT_PRIVATE namespace（Codex spec HIGH-1
+        # 闭环）。baseline 中 WORKER_PRIVATE 路径已废弃——新 dispatch 不再生成
+        # `kind=worker_private` 记录；既有 baseline worker_private namespace records
+        # 保留不动（spec §2.2 Gap-6 决策 + Open-11 选 A）。
+        # `build_private_memory_scope_ids` 函数本身不动（避免 namespace.memory_scope_ids
+        # 字段已有数据破坏）；新 dispatch 下 worker 的 scope_id 形态变成
+        # `memory/private/main/...`（owner=main）——上游识别 worker 归属应靠
+        # MemoryNamespace 表 (project_id, agent_runtime_id, kind=AGENT_PRIVATE) 三元组，
+        # 不依赖 scope_id 字符串解析（spec §0 锁定 + Codex MED-5 闭环）。
+        private_kind = MemoryNamespaceKind.AGENT_PRIVATE
         private_namespace_id = self._build_memory_namespace_id(
             kind=private_kind,
             project_id=project_id,
@@ -2394,16 +2399,8 @@ class AgentContextService(AgentContextTurnWriterMixin):
                     "project_id": project_id,
                     "agent_runtime_id": agent_runtime.agent_runtime_id,
                     "kind": private_kind,
-                    "name": (
-                        "Worker Private"
-                        if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
-                        else "Agent Private"
-                    ),
-                    "description": (
-                        "Worker 私有记忆命名空间。"
-                        if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
-                        else "Agent 私有记忆命名空间。"
-                    ),
+                    "name": "Agent Private",
+                    "description": "Agent 私有记忆命名空间。",
                     "memory_scope_ids": private_scope_ids,
                     "metadata": {
                         **private_existing.metadata,
@@ -2419,16 +2416,8 @@ class AgentContextService(AgentContextTurnWriterMixin):
                 project_id=project_id,
                 agent_runtime_id=agent_runtime.agent_runtime_id,
                 kind=private_kind,
-                name=(
-                    "Worker Private"
-                    if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
-                    else "Agent Private"
-                ),
-                description=(
-                    "Worker 私有记忆命名空间。"
-                    if private_kind is MemoryNamespaceKind.WORKER_PRIVATE
-                    else "Agent 私有记忆命名空间。"
-                ),
+                name="Agent Private",
+                description="Agent 私有记忆命名空间。",
                 memory_scope_ids=private_scope_ids,
                 metadata={
                     "source": "agent_context.resolve",

@@ -495,6 +495,9 @@ class WorkerRuntime:
                     work_id=str(envelope.metadata.get("work_id", "")),
                     runtime_kind=runtime_kind,
                     agent_session_id=str(envelope.metadata.get("agent_session_id", "")),
+                    # F094 B0: agent_runtime_id 透传供 memory.write 工具按
+                    # AGENT_PRIVATE namespace 解析（Codex plan MED-2 闭环）
+                    agent_runtime_id=str(envelope.metadata.get("agent_runtime_id", "")),
                     runtime_context=envelope.runtime_context,
                     resume_state_snapshot=envelope.resume_state_snapshot,
                 )

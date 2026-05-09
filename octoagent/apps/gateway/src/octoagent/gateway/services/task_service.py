@@ -1645,6 +1645,46 @@ class TaskService:
                 session_id=session_id,
                 source="delayed-recall-result",
             )
+            # F094 B6 (Codex Phase B MED-2 闭环): 从 ContextFrame 派生 agent_runtime_id
+            # + queried_namespace_kinds（resolved namespaces 的 kind 集合），从
+            # recall.hits 的 metadata.namespace_kind 派生 hit_namespace_kinds。
+            # 任一获取失败仅 log，不破坏 emit 主路径（audit 维度可缺）。
+            audit_agent_runtime_id = ""
+            audit_queried_kinds: list[str] = []
+            audit_hit_kinds: list[str] = []
+            try:
+                ctx_frame = await self._stores.agent_context_store.get_context_frame(
+                    context_frame_id
+                )
+                if ctx_frame is not None:
+                    audit_agent_runtime_id = ctx_frame.agent_runtime_id or ""
+                    queried_kind_set: set[str] = set()
+                    for ns_id in ctx_frame.memory_namespace_ids:
+                        ns_obj = await self._stores.agent_context_store.get_memory_namespace(
+                            ns_id, include_archived=True
+                        )
+                        if ns_obj is not None:
+                            queried_kind_set.add(ns_obj.kind.value)
+                    audit_queried_kinds = sorted(queried_kind_set)
+            except Exception as audit_exc:
+                log.warning(
+                    "memory_recall_completed_audit_lookup_failed",
+                    error=str(audit_exc),
+                    context_frame_id=context_frame_id,
+                )
+            try:
+                hit_kind_set: set[str] = set()
+                for hit in recall.hits:
+                    metadata_obj = getattr(hit, "metadata", None) or {}
+                    kind_value = metadata_obj.get("namespace_kind")
+                    if isinstance(kind_value, str) and kind_value:
+                        hit_kind_set.add(kind_value)
+                audit_hit_kinds = sorted(hit_kind_set)
+            except Exception as audit_exc:
+                log.warning(
+                    "memory_recall_completed_audit_hit_kinds_failed",
+                    error=str(audit_exc),
+                )
             event = await self._append_event_only_with_retry(
                 task_id=task_id,
                 event_builder=lambda seq: Event(
@@ -1672,6 +1712,10 @@ class TaskService:
                             else ""
                         ),
                         degraded_reasons=list(recall.degraded_reasons),
+                        # F094 B6 新字段
+                        agent_runtime_id=audit_agent_runtime_id,
+                        queried_namespace_kinds=audit_queried_kinds,
+                        hit_namespace_kinds=audit_hit_kinds,
                     ).model_dump(),
                     trace_id=trace_id,
                     causality=EventCausality(

@@ -131,7 +131,16 @@ class MemoryRecallScheduledPayload(BaseModel):
 
 
 class MemoryRecallCompletedPayload(BaseModel):
-    """delayed recall materialize 完成事件 payload。"""
+    """delayed recall materialize 完成事件 payload。
+
+    F094 B6: 加 worker / agent 维度审计字段。
+    - agent_runtime_id: 触发 recall 的 runtime
+    - queried_namespace_kinds: 本次 recall 查询了哪些 namespace kind（去重，
+      与 RecallFrame.queried_namespace_kinds 派生路径相同）
+    - hit_namespace_kinds: 本次 recall 实际有 hit 命中的 namespace kind（与
+      RecallFrame.hit_namespace_kinds 一致）
+    F096 audit endpoint 可订阅这些字段做"曾查过私有"vs"实际命中私有"两类查询。
+    """
 
     context_frame_id: str = Field(default="")
     query: str = Field(default="")
@@ -142,6 +151,10 @@ class MemoryRecallCompletedPayload(BaseModel):
     backend: str = Field(default="")
     backend_state: str = Field(default="")
     degraded_reasons: list[str] = Field(default_factory=list)
+    # F094 B6: worker / agent 维度（默认空 list 保持向后兼容）
+    agent_runtime_id: str = Field(default="")
+    queried_namespace_kinds: list[str] = Field(default_factory=list)
+    hit_namespace_kinds: list[str] = Field(default_factory=list)
 
 
 class MemoryRecallFailedPayload(BaseModel):

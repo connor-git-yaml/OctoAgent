@@ -11,10 +11,25 @@ from pathlib import Path
 from typing import Any
 
 from octoagent.core.behavior_workspace import project_root_dir
-from octoagent.core.models import WORK_TERMINAL_STATUSES, ProjectBindingType
+from octoagent.core.models import (
+    WORK_TERMINAL_STATUSES,
+    MemoryNamespaceKind,
+    ProjectBindingType,
+)
 
 from ..execution_context import get_current_execution_context
 from ..task_service import TaskService
+
+
+class WorkerMemoryNamespaceNotResolved(Exception):
+    """F094 B3 (NFR-3): worker 默认 memory namespace 解析失败时显式 raise。
+
+    场景：
+    - 调用方未传 scope_id + agent_runtime_id 非空
+    - MemoryNamespace 表未找到 (project_id, agent_runtime_id, AGENT_PRIVATE) 的
+      active 记录（worker dispatch 路径应该已经创建过；缺失意味着上游 dispatch
+      未跑或被破坏，需要显式 fail-fast 让上游可观测）
+    """
 
 _MEMORY_BINDING_TYPES = {
     ProjectBindingType.SCOPE,
@@ -122,6 +137,58 @@ async def resolve_runtime_project_context(
         project_id="",
     )
     return project, workspace, task
+
+
+async def resolve_worker_default_scope_id(
+    deps: ToolDeps,
+    *,
+    project_id: str,
+    agent_runtime_id: str,
+) -> str:
+    """F094 B3 (Codex plan HIGH-1 闭环): worker / main agent 默认写入 fact 时，
+    按 (project_id, agent_runtime_id, AGENT_PRIVATE) 三元组解析 worker 私有
+    namespace 的第一个 scope_id。
+
+    与 Codex plan §0.1 锁定的注入点对齐：memory.write 工具不再走
+    `session_memory_extractor._resolve_scope_id`（那是 SessionMemoryExtractor
+    内部函数，仅 main_bootstrap 走），而是用此独立 helper。
+
+    成功路径：返回 namespace.memory_scope_ids[0]（保留 baseline scope_id 形态
+    `memory/private/{owner}/...`，spec §0 锁定不动 build_private_memory_scope_ids
+    函数本身）。
+
+    失败路径（NFR-3 显式 raise）：未命中 namespace 或 namespace 没有 scope_ids。
+    """
+    if not agent_runtime_id:
+        raise WorkerMemoryNamespaceNotResolved(
+            "agent_runtime_id is empty; cannot resolve AGENT_PRIVATE namespace"
+        )
+    namespaces = await deps.stores.agent_context_store.list_memory_namespaces(
+        project_id=project_id or None,
+        agent_runtime_id=agent_runtime_id,
+        kind=MemoryNamespaceKind.AGENT_PRIVATE,
+        # F094 C7b: 默认 active path（include_archived=False）；archived 数据
+        # 不参与业务路径。
+    )
+    if not namespaces:
+        raise WorkerMemoryNamespaceNotResolved(
+            f"no AGENT_PRIVATE namespace for "
+            f"(project_id={project_id!r}, agent_runtime_id={agent_runtime_id!r})"
+        )
+    if len(namespaces) > 1:
+        # 三元组 partial unique index（C2）保证同三元组在 archived_at IS NULL
+        # 路径上唯一；多于 1 条意味着 schema 约束失效——显式 raise。
+        raise WorkerMemoryNamespaceNotResolved(
+            f"multiple active AGENT_PRIVATE namespaces for "
+            f"(project_id={project_id!r}, agent_runtime_id={agent_runtime_id!r}); "
+            f"unique constraint violation"
+        )
+    namespace = namespaces[0]
+    if not namespace.memory_scope_ids:
+        raise WorkerMemoryNamespaceNotResolved(
+            f"AGENT_PRIVATE namespace {namespace.namespace_id!r} has no scope_ids"
+        )
+    return namespace.memory_scope_ids[0]
 
 
 async def resolve_memory_scope_ids(

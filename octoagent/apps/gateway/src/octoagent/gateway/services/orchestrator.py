@@ -1374,6 +1374,9 @@ class OrchestratorService:
             work_id=str(request.metadata.get("work_id", "")),
             runtime_kind=runtime_kind,
             agent_session_id=str(request.metadata.get("agent_session_id", "")),
+            # F094 B0: agent_runtime_id 从 dispatch metadata 透传，让 memory.write
+            # 工具层能解析当前 agent 的 AGENT_PRIVATE namespace（Codex plan MED-2 闭环）
+            agent_runtime_id=str(request.metadata.get("agent_runtime_id", "")),
             runtime_context=request.runtime_context,
         )
 

@@ -12,9 +12,11 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from typing import Any
 
 import structlog
+from ulid import ULID
 
 from octoagent.memory import (
     EvidenceRef,
@@ -36,6 +38,9 @@ from pydantic import BaseModel
 from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
+from octoagent.core.models import MemoryNamespaceKind
+from octoagent.core.models.enums import ActorType, EventType
+from octoagent.core.models.event import Event
 from octoagent.core.models.tool_results import MemoryWriteResult
 
 from ..execution_context import get_current_execution_context
@@ -43,6 +48,8 @@ from ._deps import (
     ToolDeps,
     current_parent,
     resolve_memory_scope_ids,
+    resolve_worker_default_scope_id,
+    WorkerMemoryNamespaceNotResolved,
     resolve_runtime_project_context,
 )
 
@@ -387,17 +394,81 @@ async def register(broker, deps: ToolDeps) -> None:
             )
 
         # 2. 解析 project/workspace/scope context
+        # F094 B4 (Codex plan HIGH-1 + Phase B HIGH-1 闭环): scope 解析三段式
+        # - 调用方显式传 scope_id：走 resolve_memory_scope_ids 白名单（兼容显式
+        #   PROJECT_SHARED 写）；同时 captured 对应 namespace_id/kind 给 audit emit
+        # - 未传 scope_id + agent_runtime_id 非空：fail closed，必须解析到
+        #   AGENT_PRIVATE namespace；解析失败 → 立即返回 SCOPE_UNRESOLVED rejected
+        #   （NFR-3 显式失败，不静默降级到 PROJECT_SHARED——避免 worker 私有 fact
+        #   被错误写到共享 scope）
+        # - 未传 scope_id + agent_runtime_id 空（legacy / 无上下文调用）：走 baseline
+        #   resolve_memory_scope_ids
+        captured_namespace_id = ""
+        captured_namespace_kind = ""
         try:
             project, workspace, task = await resolve_runtime_project_context(
                 deps,
                 project_id=project_id,
             )
-            scope_ids = await resolve_memory_scope_ids(
-                deps,
-                task=task,
-                project=project,
-                explicit_scope_id=scope_id,
-            )
+
+            resolved_scope_id = ""
+            scope_ids: list[str] = []
+            explicit_scope_provided = bool(scope_id.strip())
+
+            try:
+                exec_ctx = get_current_execution_context()
+                agent_runtime_id_val = (exec_ctx.agent_runtime_id or "").strip()
+            except RuntimeError:
+                agent_runtime_id_val = ""
+
+            if not explicit_scope_provided and agent_runtime_id_val:
+                # F094 B4 HIGH-1 fail-closed 路径：必须解析到 AGENT_PRIVATE
+                try:
+                    worker_scope = await resolve_worker_default_scope_id(
+                        deps,
+                        project_id=(project.project_id if project is not None else ""),
+                        agent_runtime_id=agent_runtime_id_val,
+                    )
+                    resolved_scope_id = worker_scope
+                    scope_ids = [worker_scope]
+                    # captured namespace 信息 给 emit 复用（避免 commit 后反查 race）
+                    matched_namespaces = (
+                        await deps.stores.agent_context_store.list_memory_namespaces(
+                            project_id=(
+                                project.project_id if project is not None else None
+                            ),
+                            agent_runtime_id=agent_runtime_id_val,
+                            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+                        )
+                    )
+                    if matched_namespaces:
+                        captured_namespace_id = matched_namespaces[0].namespace_id
+                        captured_namespace_kind = matched_namespaces[0].kind.value
+                except WorkerMemoryNamespaceNotResolved as exc:
+                    return MemoryWriteResult(
+                        status="rejected",
+                        target="memory_store",
+                        preview=f"无法解析 worker private namespace: {exc}",
+                        reason=(
+                            f"SCOPE_UNRESOLVED: F094 NFR-3 fail-closed: "
+                            f"agent_runtime_id={agent_runtime_id_val} 但未找到"
+                            f" active AGENT_PRIVATE namespace；上游 dispatch 路径"
+                            f" 应该已经创建过——请检查 agent_context.resolve 与"
+                            f" memory_namespaces 表数据一致性。原始异常: {exc}"
+                        ),
+                        memory_id="",
+                        version=0,
+                        action="create",
+                        scope_id="",
+                    )
+            else:
+                # 显式 scope_id 或 legacy 无 agent_runtime_id 路径走 baseline
+                scope_ids = await resolve_memory_scope_ids(
+                    deps,
+                    task=task,
+                    project=project,
+                    explicit_scope_id=scope_id,
+                )
         except Exception as exc:
             return MemoryWriteResult(
                 status="rejected",
@@ -422,7 +493,47 @@ async def register(broker, deps: ToolDeps) -> None:
                 scope_id="",
             )
 
-        resolved_scope_id = scope_ids[0]
+        if not resolved_scope_id:
+            resolved_scope_id = scope_ids[0]
+
+        # F094 B6 (Codex Phase B MED-3 闭环): 显式 scope_id 路径或 legacy 路径
+        # 也尝试解析对应 namespace，避免 audit emit 缺字段。失败时留空（degraded）。
+        if not captured_namespace_id and resolved_scope_id:
+            try:
+                lookup_runtime = agent_runtime_id_val or None
+                ns_candidates = (
+                    await deps.stores.agent_context_store.list_memory_namespaces(
+                        project_id=(
+                            project.project_id if project is not None else None
+                        ),
+                        agent_runtime_id=lookup_runtime,
+                    )
+                )
+                for ns in ns_candidates:
+                    if resolved_scope_id in ns.memory_scope_ids:
+                        captured_namespace_id = ns.namespace_id
+                        captured_namespace_kind = ns.kind.value
+                        break
+                # 显式 PROJECT_SHARED 路径下 lookup_runtime 可能为空，仍能通过
+                # project_id + scope_id contains 匹配到 PROJECT_SHARED namespace
+                if not captured_namespace_id:
+                    ns_project_wide = (
+                        await deps.stores.agent_context_store.list_memory_namespaces(
+                            project_id=(
+                                project.project_id if project is not None else None
+                            ),
+                        )
+                    )
+                    for ns in ns_project_wide:
+                        if resolved_scope_id in ns.memory_scope_ids:
+                            captured_namespace_id = ns.namespace_id
+                            captured_namespace_kind = ns.kind.value
+                            break
+            except Exception as ns_exc:
+                _log.warning(
+                    "memory_write_namespace_lookup_failed",
+                    error=str(ns_exc),
+                )
 
         # 3. 获取 MemoryService
         try:
@@ -567,6 +678,70 @@ async def register(broker, deps: ToolDeps) -> None:
             scope_id=resolved_scope_id,
             partition=partition,
         )
+
+        # F094 B6 (Codex plan MED-4 闭环): memory.write commit 成功后**新增** emit
+        # MEMORY_ENTRY_ADDED 事件——baseline 该事件主要由 user_profile.update /
+        # memory_candidates.promote emit；F094 让 memory.write 也成为可审计来源，
+        # payload 含 worker / agent 维度（namespace_kind / namespace_id /
+        # agent_runtime_id / agent_session_id）让 F096 audit 可订阅。
+        # 失败不阻断主路径（memory write 已成功）；emit 异常仅 log。
+        try:
+            exec_ctx_for_event = None
+            try:
+                exec_ctx_for_event = get_current_execution_context()
+            except RuntimeError:
+                pass
+            audit_task_id = (
+                (exec_ctx_for_event.task_id if exec_ctx_for_event else "")
+                or "_memory_write_audit"
+            )
+            agent_runtime_id_for_event = (
+                exec_ctx_for_event.agent_runtime_id
+                if exec_ctx_for_event
+                else ""
+            )
+            agent_session_id_for_event = (
+                exec_ctx_for_event.agent_session_id
+                if exec_ctx_for_event
+                else ""
+            )
+            # F094 B6 (Codex Phase B MED-3 闭环): 直接用 scope 解析阶段 captured
+            # 的 namespace 信息（捕获时机在 commit 前，避免 commit-后反查 race +
+            # archive race）。captured_namespace_kind/_id 在 scope 解析时已填充。
+            namespace_kind_value = captured_namespace_kind
+            namespace_id_value = captured_namespace_id
+            event_store = deps.stores.event_store
+            task_seq = await event_store.get_next_task_seq(audit_task_id)
+            event = Event(
+                event_id=str(ULID()),
+                task_id=audit_task_id,
+                task_seq=task_seq,
+                ts=datetime.now(timezone.utc),
+                type=EventType.MEMORY_ENTRY_ADDED,
+                actor=ActorType.SYSTEM,
+                payload={
+                    "tool": "memory.write",
+                    "action": action_label,
+                    "memory_id": commit_result.memory_id,
+                    "version": commit_result.version,
+                    "scope_id": resolved_scope_id,
+                    "subject_key": subject_key,
+                    "partition": partition,
+                    # F094 B6 新字段：worker / agent 维度
+                    "agent_runtime_id": agent_runtime_id_for_event,
+                    "agent_session_id": agent_session_id_for_event,
+                    "namespace_kind": namespace_kind_value,
+                    "namespace_id": namespace_id_value,
+                },
+                trace_id=audit_task_id,
+            )
+            await event_store.append_event_committed(event, update_task_pointer=False)
+        except Exception as event_exc:
+            _log.warning(
+                "memory_write_event_emit_failed",
+                error=str(event_exc),
+                memory_id=commit_result.memory_id,
+            )
 
         return MemoryWriteResult(
             status="written",
