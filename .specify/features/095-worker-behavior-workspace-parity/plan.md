@@ -108,7 +108,7 @@ rg -n "class EventStore|def record_event|EventStore\\.record_event" octoagent/ -
 Phase D 必须给 `BehaviorPack` 加 `pack_id` 字段。决策点：
 - pack_id 生成策略：UUID4 / hash(profile_id + load_profile + source_chain + content) / Composite
   - 推荐：`hash(profile_id + load_profile.value + source_chain joined + sha256(layers content))`，让 cache hit 时如果有 emit 也能引用相同 pack_id
-- pack_id 类型：str（hex 32 chars 或 64 chars）
+- pack_id 类型：str，格式 `behavior-pack:{profile_id}:{load_profile}:{16-char hex digest}`（实施时定为 16 hex；碰撞概率 2^-64 对单用户单 worktree 可忽略；如 F096 audit 跨用户场景需要扩到 32/64 hex 再调）
 - 是否进 cache key？否（cache key 已是 profile_id + slug + root + load_profile）
 - 与 BehaviorPack.pack_id 已有字段冲突？grep 确认：
 
@@ -282,7 +282,7 @@ Phase D 实施前必须把 schema 演进路径定下来。
 
 1. `octoagent/packages/core/src/octoagent/core/models/behavior.py`
    - `BehaviorPack` model 增 `pack_id: str` 字段
-   - 字段生成策略：`hash(profile_id + load_profile.value + source_chain joined + sha256(layers content))`，hex 64 chars
+   - 字段生成策略：`hash(profile_id + load_profile.value + source_chain joined + per-file sha256(content))`，**16-char hex digest**（实施时定，对应单用户场景；F096 跨用户需要时再扩位宽）
    - 字段在所有构造点填充（`resolve_behavior_pack` 三条路径）
    - SQL schema 影响检查：grep `BehaviorPack` 是否进 SQL（如不进则免迁移）
 

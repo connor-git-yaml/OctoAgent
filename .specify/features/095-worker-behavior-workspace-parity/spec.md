@@ -144,29 +144,37 @@
 **And** 已有的 `share_with_workers` 字段保留，UI / `behavior_commands` 输出仍显示。
 **And** `BehaviorSliceEnvelope.shared_file_ids` 字段名保留但 docstring 显式说明语义变更（"profile 白名单文件 ID 列表"）。
 
-### AC-4：Worker advanced 模板自动初始化（覆盖所有 Worker 创建入口）
+### AC-4（v0.3 调整）：Worker advanced 模板自动初始化 + production 路径覆盖
 
-**Given** 一个 Worker AgentProfile 首次创建，
-**When** `build_default_behavior_workspace_files(include_advanced=True)` 被任一 Worker 创建路径调用（plan §0.6 列出的 N 个入口），
-**Then** 渲染 IDENTITY.worker.md / SOUL.worker.md / HEARTBEAT.worker.md 三个 variant 模板。
-**And** 至少一个集成测试覆盖 `delegate_task → Worker workspace 初始化` 端到端。
+**v0.3 调整原因**：实施时确认 Worker 创建 production 路径在 `agent_service.py:683-688`
+（`ensure_filesystem_skeleton` → `materialize_agent_behavior_files(is_worker_profile=True)`），
+而非由 `delegate_task` tool 直接触发——`delegate_task` 是消息派发而非 Worker AgentProfile
+首次创建。spec AC-4 测试范围调整为覆盖真实 production 路径。
 
-### AC-5：BEHAVIOR_PACK_LOADED 事件可追溯（含 pack_source / pack_id）
+**AC-4a Worker 创建路径模板派发**：Given 一个 Worker AgentProfile 首次创建（`kind="worker"` 或 metadata 携带 `worker_profile_mirror`），When `build_default_behavior_workspace_files(include_advanced=True)` 被调用（任一 Worker 创建路径），Then 渲染 IDENTITY.worker.md / SOUL.worker.md / HEARTBEAT.worker.md 三个 variant 模板。
 
-**Given** 任一 `resolve_behavior_pack` 调用，
-**When** 命中 cache miss（filesystem / metadata raw_pack / default 三条路径之一），
-**Then** emit 一条 `BEHAVIOR_PACK_LOADED` event 写入 EventStore，payload 包含：
-- `pack_id`（BehaviorPack 新增字段，UUID 或 hash）
-- `agent_id`（`agent_profile.profile_id`）
-- `agent_kind`（main / worker / subagent）
-- `load_profile`（`load_profile.value`）
-- `pack_source`（"filesystem" / "default" / "metadata_raw_pack"）
-- `file_count` / `file_ids` / `source_chain`
-- `cache_state`（恒为 "miss"）
-- `is_advanced_included`（bool）
+**AC-4b Production filesystem 路径端到端**：Given `ensure_filesystem_skeleton + materialize_agent_behavior_files(is_worker_profile=True)` 模拟 production worker 创建路径（与 `agent_service.py:683-688` 同序），When `resolve_behavior_workspace(load_profile=WORKER)`，Then 返回的 workspace.files 包含 8 文件含 worker variant 内容（SOUL "服务对象 = 主 Agent" / HEARTBEAT "通过当前 Worker 回报通道" 等特征短语）。
 
-**And** cache hit 时不重复 emit（不污染事件流）。
-**And** F096 USED 事件可通过 `pack_id` 引用此 LOADED 事件。
+**`delegate_task` tool 集成测推迟到 F096**：F096 实施 BEHAVIOR_PACK_USED 事件 + EventStore 接入时，自然需要 dispatch 端到端测，可一并覆盖 `delegate_task → worker_service.create_worker → workspace 初始化 → BEHAVIOR_PACK_LOADED emit` 完整路径。F095 提供的 helper / fixture 可被 F096 复用。
+
+### AC-5：BEHAVIOR_PACK_LOADED schema + pack_id 可追溯（F095 范围 infrastructure；emit 推迟 F096）
+
+**v0.3 调整原因**：实施时发现 sync/async 边界硬约束（`resolve_behavior_pack` sync + `EventStore.append_event` async + 所有 production caller 都 sync），完整接入 EventStore 需要 invasive async refactor 超出 F095 minimal 范围。**用户 Phase D 范围决策已确认采用 infrastructure ready + emit 推迟 F096 方案**。
+
+**F095 范围（已实施）**：
+
+**AC-5a Schema + helper ready**：Given 任一 `resolve_behavior_pack` 调用，When 命中 cache miss，Then 返回的 `BehaviorPack` 在 `metadata` 标记 `cache_state="miss"` + `pack_source`（"filesystem" / "default"）；caller 可调用 `make_behavior_pack_loaded_payload(pack, agent_profile, load_profile)` 生成 `BehaviorPackLoadedPayload` 实例（10 字段对齐下方）。
+
+**AC-5b Cache hit 不污染**：cache hit 时返回的 pack 不带 `cache_state="miss"`/`pack_source` 标记，caller 据此跳过 emit。
+
+**AC-5c Pack_id F096 引用前提**：`BehaviorPack.pack_id` hash 化（profile_id + load_profile + source_chain + per-file content sha256），同 input → 同 pack_id；同 file_id 同字符数不同内容 → 不同 pack_id。F096 BEHAVIOR_PACK_USED 事件通过 `pack_id` 关联到 F095 LOADED schema。
+
+**Payload 字段（BehaviorPackLoadedPayload）**：`pack_id` / `agent_id` / `agent_kind` / `load_profile` / `pack_source` / `file_count` / `file_ids` / `source_chain` / `cache_state` / `is_advanced_included`。
+
+**F096 范围（推迟）**：
+- 实际 EventStore.append_event 接入 BEHAVIOR_PACK_LOADED 事件（async caller 注入）
+- BEHAVIOR_PACK_USED 事件每次 LLM 决策环 emit
+- 通过 pack_id 双向关联 LOADED ↔ USED 形成完整可审计链路
 
 ### AC-6：行为零变更（所有 non-WORKER profile）
 
@@ -178,7 +186,24 @@
 
 **AC-7a 文件级低冲突**：Given F095 完成后的 commit chain，When `git diff baseline..HEAD --stat`，Then 不改动 F094 域文件清单（`packages/memory/`、RecallFrame schema、`agent_context.py` recall planner 区域、migrate-094 CLI）。
 
-**AC-7b 集成验证**：Given F094 合入 master 后 F095 rebase 完成，When Worker dispatch 端到端执行，Then 同一 dispatch 同时产生：BEHAVIOR_PACK_LOADED 事件含正确 `agent_id` + RecallFrame 持久化含正确 `agent_id`，两者 `agent_id` 一致。
+**AC-7b（v0.3 调整）F094/F095 间接关联 partial 验证**：
+
+实施时发现 F094 RecallFrame schema **没有 agent_id 字段**（实际是 `agent_runtime_id` / `agent_session_id` / `task_id` / `project_id`），AC-7b 无法直接做"双 agent_id 一致性"的端到端断言。
+
+**实际间接关联路径**：
+```
+F095 BehaviorPackLoadedPayload.agent_id (= AgentProfile.profile_id)
+    ↓
+AgentRuntime.profile_id（生产时 worker dispatch 创建 AgentRuntime）
+    ↓
+F094 RecallFrame.agent_runtime_id
+```
+
+**F095 范围（已实施 partial 验证）**：单测 `test_ac_7b_double_agent_id_consistency` 验证 F095 自身：`payload.agent_id == agent_profile.profile_id`，保证 F095 helper 生成的 payload.agent_id 与 AgentProfile.profile_id 同 source。
+
+**F096 范围（完整集成验证推迟）**：F096 集成测覆盖 AgentRuntime 表的 (profile_id ↔ runtime_id) 映射，对齐两侧 audit；同一 worker dispatch 产生的 BEHAVIOR_PACK_LOADED.agent_id 经 AgentRuntime 关联到 RecallFrame.agent_runtime_id 必一致。
+
+理由：完整 dispatch e2e 集成测需要 BEHAVIOR_PACK_LOADED 事件真实 emit 到 EventStore（AC-5 推迟到 F096），此时 F095 单独跑端到端集成测无对齐对象；F096 接入 EventStore 后两个集成测合并实施更高效。
 
 ---
 

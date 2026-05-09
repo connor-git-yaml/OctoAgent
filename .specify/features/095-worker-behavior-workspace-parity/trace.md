@@ -124,3 +124,40 @@ F094 并行: feature/094-worker-memory-parity（独立 worktree）
 - **选项 C**（推荐）：metadata 标 cache_state + pack_source；提供 helper `make_behavior_pack_loaded_event_payload`；caller 接入推迟到一个明确 async 边界（F096 实施时一并接入）
 
 **当前决策**：Phase D 简化为 minimal 实现，spec AC-5 调整为分两阶段 — F095 提供 infrastructure（pack_id 改造 + payload schema + helper + 单测），实际 EventStore 接入推迟到 F096。理由：避免 F095 invasive 修改 worker_service/agent_service 调用链 async 化，同时 F096 自己定义 BEHAVIOR_PACK_USED 事件本就需要接入 EventStore，可一并完成。
+
+
+## Phase D 实施记录
+
+| 项 | 结果 |
+|----|------|
+| EventType.BEHAVIOR_PACK_LOADED 新增 | done |
+| BehaviorPackLoadedPayload schema (10 字段) | done |
+| _generate_behavior_pack_id helper（hash 化）| done |
+| resolve_behavior_pack 三路径标 cache_state="miss" + pack_source（按 source_kind 区分）| done |
+| make_behavior_pack_loaded_payload sync helper | done |
+| 测试 +11（pack_id 4 / cache state 3 / payload 3 / mtime invalidation 1）| 89 passed |
+| 全量回归 vs F094-merged baseline | 3191 passed, 0 net regression |
+| Codex per-Phase review | 4 finding 闭环（HIGH1 pack_id sha256 / MED2 source_kind 区分 / MED3 RecallFrame 字段名澄清 / LOW4 mtime 测试）|
+| commit | bbf2b4d |
+
+## Phase E 实施记录（Final + 收尾）
+
+| 项 | 结果 |
+|----|------|
+| rebase F094-merged master | 0 冲突；4 commits 重新编号 |
+| 全量回归 vs F094-merged baseline | 3191 passed, 0 net regression（除已知 ThreatScanner baseline flake）|
+| Final cross-Phase Codex review | 6 finding 闭环（2 HIGH spec/plan 与实施不一致 / 3 MED 收尾制品 + AC-4 + SOUL F094 冲突 / 1 LOW pack_id 长度）|
+| spec/plan v0.3 修订 | AC-5 调为分两阶段 + AC-7b 间接关联 partial + AC-4 production 路径覆盖 + plan pack_id 长度 |
+| SOUL.worker.md 修订（Final MED3）| 区分 AGENT_PRIVATE memory（任务自身事实，F094 已启用）vs USER 偏好（回报主 Agent）|
+| CLAUDE.local.md F095 行更新 | 完整状态描述 + 关键决策 + deferred-followup |
+| docs/blueprint.md 审计 | grep 无相关章节，无需同步 |
+| docs/codebase-architecture/harness-and-context.md | handoff.md 留接口（Harness 结构未变；F107 同步更稳）|
+| completion-report.md | 已产出 |
+| handoff.md | 已产出（F096 接口 + F107 deferred）|
+
+## 总览
+
+- 5 commits（5df00ec docs / 1a09d2d Phase A / 69d69c8 Phase B / a665fc1 Phase C / bbf2b4d Phase D）+ 本 Phase E 收尾 commit
+- 全部 35 Codex finding 闭环或显式 deferred（F096：BEHAVIOR_PACK_LOADED EventStore 接入 + AC-7b 完整集成测；F107：已 materialize 主 Agent 版迁移）
+- 用户拍板节点：GATE_DESIGN v0.1 → v0.2 翻转 USER/BOOTSTRAP；Phase D 范围简化决策；F094 已合 master rebase 启动
+- 测试：89 F095 测试 / 3191 全量 0 net regression
