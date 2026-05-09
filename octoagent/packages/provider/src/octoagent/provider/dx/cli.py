@@ -19,6 +19,7 @@ from .behavior_commands import behavior_group
 from .chat_import_commands import import_cmd
 from .cleanup_commands import cleanup_group  # Feature 082 P4
 from .config_commands import _resolve_project_root, config
+from .memory_commands import memory  # F094 E1: octo memory migrate-094 命令组
 from .console_output import create_console, render_panel
 from .project_commands import project_group
 from .secret_commands import secrets_group
@@ -95,6 +96,7 @@ main.add_command(verify)
 main.add_command(project_group)
 main.add_command(secrets_group)
 main.add_command(cleanup_group)  # Feature 082 P4
+main.add_command(memory)  # F094 E1: octo memory migrate-094 命令组
 
 # Feature 087 P4 T-P4-10：octo e2e CLI（懒加载，避免 gateway 包 import 循环）
 try:
