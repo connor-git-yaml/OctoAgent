@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from octoagent.core.behavior_workspace import (
+    _BEHAVIOR_TEMPLATE_VARIANTS,
     _PROFILE_ALLOWLIST,
     ALL_BEHAVIOR_FILE_IDS,
     BEHAVIOR_FILE_BUDGETS,
@@ -15,6 +16,8 @@ from octoagent.core.behavior_workspace import (
     _default_content_for_file,
     _is_worker_behavior_profile,
     _onboarding_state_path,
+    _template_name_for_file,
+    build_default_behavior_workspace_files,
     ensure_filesystem_skeleton,
     load_onboarding_state,
     mark_onboarding_completed,
@@ -603,3 +606,162 @@ class TestDefaultTemplateContentDomains:
         assert "自检" in content or "检查" in content
         assert "进度" in content or "报告" in content
         assert "收口" in content
+
+
+# ============================================================================
+# F095 Phase B: Worker 私有模板（SOUL.worker.md / HEARTBEAT.worker.md）+ variant 注册
+# ============================================================================
+
+
+class TestWorkerVariantTemplates:
+    """F095 Phase B: _BEHAVIOR_TEMPLATE_VARIANTS 含 IDENTITY/SOUL/HEARTBEAT 共 3 个 worker variant。"""
+
+    def test_variants_contain_three_worker_entries(self) -> None:
+        """Phase B 后 variant 表含 3 个 worker variant 条目。"""
+        worker_entries = {
+            file_id
+            for (file_id, is_worker), _template_name in _BEHAVIOR_TEMPLATE_VARIANTS.items()
+            if is_worker is True
+        }
+        assert worker_entries == {"IDENTITY.md", "SOUL.md", "HEARTBEAT.md"}, (
+            f"Phase B worker variant 应为 {{IDENTITY, SOUL, HEARTBEAT}}，实际 {worker_entries}"
+        )
+
+    def test_template_dispatch_worker_profile(self) -> None:
+        """is_worker_profile=True 时 IDENTITY/SOUL/HEARTBEAT 派发 worker variant。"""
+        assert _template_name_for_file(file_id="IDENTITY.md", is_worker_profile=True) == "IDENTITY.worker.md"
+        assert _template_name_for_file(file_id="SOUL.md", is_worker_profile=True) == "SOUL.worker.md"
+        assert _template_name_for_file(file_id="HEARTBEAT.md", is_worker_profile=True) == "HEARTBEAT.worker.md"
+
+    def test_template_dispatch_main_profile(self) -> None:
+        """is_worker_profile=False 时派发主 variant（行为零变更守护）。"""
+        assert _template_name_for_file(file_id="IDENTITY.md", is_worker_profile=False) == "IDENTITY.main.md"
+        # SOUL/HEARTBEAT 主版没有 .main.md variant，fall through 到 file_id 自己
+        assert _template_name_for_file(file_id="SOUL.md", is_worker_profile=False) == "SOUL.md"
+        assert _template_name_for_file(file_id="HEARTBEAT.md", is_worker_profile=False) == "HEARTBEAT.md"
+
+    def test_worker_variant_content_no_placeholder_leak(self) -> None:
+        """worker variant 渲染后不漏 __AGENT_NAME__ / __PROJECT_LABEL__ 等 placeholder。"""
+        for file_id in ("IDENTITY.md", "SOUL.md", "HEARTBEAT.md"):
+            content = _default_content_for_file(
+                file_id=file_id,
+                is_worker_profile=True,
+                agent_name="WorkerBot",
+                project_label="atom",
+            )
+            for placeholder in ("__AGENT_NAME__", "__PROJECT_LABEL__"):
+                assert placeholder not in content, (
+                    f"{file_id} worker variant 渲染后不应残留 placeholder {placeholder}"
+                )
+
+    def test_worker_variant_h1_philosophy_guard(self) -> None:
+        """worker variant 内容必含 H1 哲学守护关键词（主 Agent / A2A / 不主动对话用户）。"""
+        # SOUL.worker.md: 必含"主 Agent" + "A2A"
+        soul = _default_content_for_file(
+            file_id="SOUL.md",
+            is_worker_profile=True,
+            agent_name="W",
+            project_label="p",
+        )
+        assert "主 Agent" in soul, "SOUL.worker.md 必显式提及主 Agent（H1 哲学守护）"
+        assert "A2A" in soul, "SOUL.worker.md 必显式提及 A2A 状态机回报通道"
+        assert "不主动" in soul or "不直接" in soul, (
+            "SOUL.worker.md 必显式约束不主动 / 不直接与用户对话（H1 守护）"
+        )
+
+        # HEARTBEAT.worker.md: 必含"主 Agent" + "A2A" + escalate
+        hb = _default_content_for_file(
+            file_id="HEARTBEAT.md",
+            is_worker_profile=True,
+            agent_name="W",
+            project_label="p",
+        )
+        assert "主 Agent" in hb, "HEARTBEAT.worker.md 必显式提及主 Agent"
+        assert "A2A" in hb, "HEARTBEAT.worker.md 必显式提及 A2A"
+        assert "escalate" in hb.lower() or "回报" in hb, (
+            "HEARTBEAT.worker.md 必含 escalate / 回报 关键路径"
+        )
+
+
+class TestWorkerWorkspaceFilesInit:
+    """F095 Phase B: build_default_behavior_workspace_files 在 worker profile 派发 worker variant。"""
+
+    def test_worker_advanced_files_use_worker_variants(self, tmp_path: Path) -> None:
+        """Worker AgentProfile + include_advanced=True → IDENTITY/SOUL/HEARTBEAT 用 worker variant。"""
+        worker_profile = _make_worker_profile()
+        files = build_default_behavior_workspace_files(
+            agent_profile=worker_profile,
+            project_name="atom",
+            project_slug="atom",
+            include_advanced=True,
+        )
+        files_by_id = {f.file_id: f for f in files}
+
+        for fid in ("IDENTITY.md", "SOUL.md", "HEARTBEAT.md"):
+            assert fid in files_by_id, f"{fid} 应在 worker advanced files 中"
+
+        # IDENTITY worker 内容必含 specialist / Worker / Butler 关键词
+        assert "specialist" in files_by_id["IDENTITY.md"].content or "Worker" in files_by_id["IDENTITY.md"].content
+        # SOUL worker 内容必含哲学守护关键词
+        assert "主 Agent" in files_by_id["SOUL.md"].content
+        # HEARTBEAT worker 内容必含 A2A / 主 Agent
+        assert "A2A" in files_by_id["HEARTBEAT.md"].content
+
+    def test_main_advanced_files_use_main_variants(self, tmp_path: Path) -> None:
+        """Main AgentProfile + include_advanced=True → IDENTITY 用 main variant；SOUL/HEARTBEAT 用通用版（行为零变更）。
+
+        Codex Phase B finding LOW2 闭环：用更稳定的 Worker-only 完整片段断言，而非通用词汇
+        ("不主动" / "不直接")——避免通用 SOUL.md 未来合法演进时误警。
+        """
+        main_profile = _make_main_profile()
+        files = build_default_behavior_workspace_files(
+            agent_profile=main_profile,
+            project_name="atom",
+            project_slug="atom",
+            include_advanced=True,
+        )
+        files_by_id = {f.file_id: f for f in files}
+
+        # IDENTITY 必使用 main variant
+        assert "IDENTITY.md" in files_by_id
+
+        # SOUL 主版不应含 worker variant 特有的完整短语
+        soul_main = files_by_id["SOUL.md"].content
+        worker_only_fragments = (
+            "服务对象 = 主 Agent",
+            "通过当前 Worker 回报通道",
+            "不主动与用户对话",
+        )
+        for fragment in worker_only_fragments:
+            assert fragment not in soul_main, (
+                f"主 Agent SOUL 不应含 Worker variant 专属片段 {fragment!r}；行为零变更守护"
+            )
+
+    def test_worker_variants_via_kind_attribute(self) -> None:
+        """Codex Phase B finding LOW1 闭环：覆盖 production worker 创建路径（kind="worker"）。
+
+        production 的 worker 创建路径（worker_service.py:1383 / agent_service.py:639）用
+        `kind="worker"` 显式标记；前面的 `_make_worker_profile()` 用 metadata fallback——
+        本测试单独覆盖 kind 显式路径 → build_default_behavior_workspace_files → worker variant 派发。
+        """
+        worker_via_kind = AgentProfile(
+            profile_id="prod-worker-001",
+            name="Prod Worker",
+            kind="worker",
+        )
+        files = build_default_behavior_workspace_files(
+            agent_profile=worker_via_kind,
+            project_name="atom",
+            project_slug="atom",
+            include_advanced=True,
+        )
+        files_by_id = {f.file_id: f for f in files}
+
+        for fid in ("IDENTITY.md", "SOUL.md", "HEARTBEAT.md"):
+            assert fid in files_by_id, f"{fid} 应在 worker advanced files 中"
+
+        assert "主 Agent" in files_by_id["SOUL.md"].content, (
+            "kind=worker 路径必须派发 SOUL.worker.md（含 H1 哲学守护）"
+        )
+        assert "服务对象 = 主 Agent" in files_by_id["SOUL.md"].content
+        assert "A2A" in files_by_id["HEARTBEAT.md"].content

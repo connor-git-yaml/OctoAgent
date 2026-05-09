@@ -100,6 +100,11 @@ _BEHAVIOR_TEMPLATE_PACKAGE = "octoagent.core.behavior_templates"
 _BEHAVIOR_TEMPLATE_VARIANTS = {
     ("IDENTITY.md", False): "IDENTITY.main.md",
     ("IDENTITY.md", True): "IDENTITY.worker.md",
+    # F095 Phase B: SOUL/HEARTBEAT worker variant 派发——
+    # is_worker_profile=True 时使用 SOUL.worker.md / HEARTBEAT.worker.md
+    # 模板内容显式约束 Worker 不主动与用户对话（H1 哲学守护）+ 通过 A2A 回报主 Agent
+    ("SOUL.md", True): "SOUL.worker.md",
+    ("HEARTBEAT.md", True): "HEARTBEAT.worker.md",
 }
 
 
