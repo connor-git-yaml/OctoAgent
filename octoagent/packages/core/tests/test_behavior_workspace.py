@@ -21,7 +21,9 @@ from octoagent.core.behavior_workspace import (
     ensure_filesystem_skeleton,
     load_onboarding_state,
     mark_onboarding_completed,
+    materialize_agent_behavior_files,
     measure_behavior_total_size,
+    resolve_behavior_agent_slug,
     resolve_behavior_workspace,
     save_onboarding_state,
     truncate_behavior_content,
@@ -276,16 +278,27 @@ class TestBehaviorLoadProfile:
     def test_full_profile_includes_all_files(self) -> None:
         assert _PROFILE_ALLOWLIST[BehaviorLoadProfile.FULL] == frozenset(ALL_BEHAVIOR_FILE_IDS)
 
-    def test_worker_profile_includes_5_files(self) -> None:
+    def test_worker_profile_includes_8_files(self) -> None:
+        """F095 Phase C: WORKER 白名单从 5 文件扩到 8 文件（去 BOOTSTRAP 加 USER + SOUL + HEARTBEAT）。"""
         worker_set = _PROFILE_ALLOWLIST[BehaviorLoadProfile.WORKER]
-        expected = {"AGENTS.md", "TOOLS.md", "IDENTITY.md", "PROJECT.md", "KNOWLEDGE.md"}
+        expected = {
+            "AGENTS.md", "TOOLS.md", "IDENTITY.md", "PROJECT.md", "KNOWLEDGE.md",
+            "USER.md", "SOUL.md", "HEARTBEAT.md",
+        }
         assert worker_set == expected
-        assert len(worker_set) == 5
+        assert len(worker_set) == 8
 
-    def test_worker_profile_excludes_private(self) -> None:
+    def test_worker_profile_excludes_bootstrap_only(self) -> None:
+        """F095 Phase C: BOOTSTRAP.md 仍排除（主 Agent 用户首次见面脚本，违反 H1）。"""
         worker_set = _PROFILE_ALLOWLIST[BehaviorLoadProfile.WORKER]
-        for excluded in ("USER.md", "SOUL.md", "HEARTBEAT.md", "BOOTSTRAP.md"):
-            assert excluded not in worker_set
+        assert "BOOTSTRAP.md" not in worker_set, (
+            "BOOTSTRAP.md 不应在 Worker 白名单（spec §6.2 决策：主 Agent 用户首次见面脚本）"
+        )
+        # USER/SOUL/HEARTBEAT 现在应在 worker 白名单内（与 v0.1 baseline 不同）
+        for included in ("USER.md", "SOUL.md", "HEARTBEAT.md"):
+            assert included in worker_set, (
+                f"{included} 应在 Worker 白名单（v0.2 修订决策）"
+            )
 
     def test_minimal_profile_includes_4_files(self) -> None:
         minimal_set = _PROFILE_ALLOWLIST[BehaviorLoadProfile.MINIMAL]
@@ -319,20 +332,89 @@ class TestResolveWithLoadProfile:
             assert fid in file_ids, f"{fid} 应在 FULL profile 中"
 
     def test_worker_profile_returns_subset(self, tmp_path: Path) -> None:
+        """F095 Phase C: WORKER profile 含 USER/SOUL/HEARTBEAT；excluded 集只剩 BOOTSTRAP。
+
+        baseline 行为：advanced 文件（IDENTITY/SOUL/HEARTBEAT）需要 filesystem 上有
+        实际文件才进 workspace（agent_service.py:683-688 调用 materialize_agent_behavior_files
+        在 worker 创建时已写入）。本测试模拟 production 路径（用 main profile 验证
+        通用 advanced 文件进 WORKER profile 也是可行的；后续 test_worker_profile_e2e_with_worker_variants
+        覆盖 worker variant 特征）。
+        """
         _setup_skeleton(tmp_path)
         profile = _make_main_profile()
-
+        # F095 Phase C: 模拟 production main agent 创建（同一 fixture 验证 file 集合）
+        agent_slug = resolve_behavior_agent_slug(profile)
+        materialize_agent_behavior_files(
+            tmp_path, agent_slug=agent_slug, agent_name=profile.name, is_worker_profile=False
+        )
         workspace = resolve_behavior_workspace(
             project_root=tmp_path,
             agent_profile=profile,
             load_profile=BehaviorLoadProfile.WORKER,
         )
         file_ids = {f.file_id for f in workspace.files}
-        # WORKER 应只包含白名单文件
-        for fid in ("AGENTS.md", "TOOLS.md", "PROJECT.md", "KNOWLEDGE.md"):
-            assert fid in file_ids, f"{fid} 应在 WORKER profile 中"
-        for excluded in ("USER.md", "SOUL.md", "HEARTBEAT.md", "BOOTSTRAP.md"):
-            assert excluded not in file_ids, f"{excluded} 不应在 WORKER profile 中"
+        # WORKER profile 应含全部 8 个白名单文件（前提：advanced 已 materialize）
+        for fid in (
+            "AGENTS.md", "TOOLS.md", "PROJECT.md", "KNOWLEDGE.md",
+            "USER.md", "SOUL.md", "HEARTBEAT.md", "IDENTITY.md",
+        ):
+            assert fid in file_ids, (
+                f"{fid} 应在 WORKER profile 中"
+            )
+        # excluded 集只剩 BOOTSTRAP（spec §6.2 决策）
+        assert "BOOTSTRAP.md" not in file_ids, (
+            "BOOTSTRAP.md 不应在 WORKER profile（H1 守护）"
+        )
+
+    def test_worker_profile_e2e_filesystem_with_worker_variants(self, tmp_path: Path) -> None:
+        """F095 Phase C: 真正的 filesystem e2e（Codex Phase C MED3 闭环）。
+
+        模拟 production worker 创建路径（agent_service.py:678-688）：
+        ensure_filesystem_skeleton → materialize_agent_behavior_files(is_worker_profile=True)
+        → resolve_behavior_workspace(load_profile=WORKER) → 验证 SOUL/HEARTBEAT 内容
+        含 worker variant 特征短语。
+        """
+        _setup_skeleton(tmp_path)
+        worker_profile = AgentProfile(
+            profile_id="prod-worker-fs",
+            name="Prod Worker FS",
+            kind="worker",
+        )
+        agent_slug = resolve_behavior_agent_slug(worker_profile)
+        # 注意：is_worker_profile=True 写入 worker variant 模板（SOUL.worker.md / HEARTBEAT.worker.md）
+        materialize_agent_behavior_files(
+            tmp_path,
+            agent_slug=agent_slug,
+            agent_name=worker_profile.name,
+            is_worker_profile=True,
+        )
+
+        workspace = resolve_behavior_workspace(
+            project_root=tmp_path,
+            agent_profile=worker_profile,
+            load_profile=BehaviorLoadProfile.WORKER,
+        )
+        files_by_id = {f.file_id: f for f in workspace.files}
+
+        # filesystem e2e 应含 8 个白名单文件（包括 advanced 3 个）
+        expected_in_workspace = {
+            "AGENTS.md", "TOOLS.md", "PROJECT.md", "KNOWLEDGE.md",
+            "USER.md", "SOUL.md", "HEARTBEAT.md", "IDENTITY.md",
+        }
+        assert expected_in_workspace.issubset(files_by_id.keys()), (
+            f"Worker filesystem e2e 应含 8 文件，缺少 {expected_in_workspace - files_by_id.keys()}"
+        )
+        assert "BOOTSTRAP.md" not in files_by_id, "BOOTSTRAP.md 不应出现（spec §6.2 守护 H1）"
+
+        # 关键：SOUL/HEARTBEAT/IDENTITY 应是 worker variant 内容（含 worker 特征短语）
+        assert "服务对象 = 主 Agent" in files_by_id["SOUL.md"].content, (
+            "filesystem e2e SOUL.md 应是 SOUL.worker.md 内容（含 worker 特征短语）"
+        )
+        assert "通过当前 Worker 回报通道" in files_by_id["HEARTBEAT.md"].content, (
+            "filesystem e2e HEARTBEAT.md 应是 HEARTBEAT.worker.md 内容"
+        )
+        # IDENTITY worker variant
+        assert "specialist" in files_by_id["IDENTITY.md"].content or "Worker" in files_by_id["IDENTITY.md"].content
 
     def test_minimal_profile_returns_minimal_subset(self, tmp_path: Path) -> None:
         _setup_skeleton(tmp_path)

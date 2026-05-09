@@ -117,7 +117,11 @@ class BehaviorLoadProfile(StrEnum):
     """Agent 角色对应的行为文件加载级别。"""
 
     FULL = "full"  # 主 Agent：全部 9 个文件
-    WORKER = "worker"  # Worker：AGENTS + TOOLS + IDENTITY + PROJECT + KNOWLEDGE
+    # F095 Phase C: WORKER 白名单从 5 文件扩到 8 文件，含 USER + SOUL + HEARTBEAT；
+    # 不含 BOOTSTRAP（实测内容是主 Agent 用户首次见面对话脚本，违反 H1）。
+    # IDENTITY/SOUL/HEARTBEAT 通过 _BEHAVIOR_TEMPLATE_VARIANTS 派发 worker variant
+    # 模板（已在 Phase B 就位），扩白名单不会让 Worker 看到主 Agent 通用模板。
+    WORKER = "worker"  # Worker：AGENTS + TOOLS + IDENTITY + PROJECT + KNOWLEDGE + USER + SOUL + HEARTBEAT
     MINIMAL = "minimal"  # Subagent：AGENTS + TOOLS + IDENTITY + USER
 
 
@@ -125,6 +129,9 @@ _PROFILE_ALLOWLIST: dict[BehaviorLoadProfile, frozenset[str]] = {
     BehaviorLoadProfile.FULL: frozenset(ALL_BEHAVIOR_FILE_IDS),
     BehaviorLoadProfile.WORKER: frozenset({
         "AGENTS.md", "TOOLS.md", "IDENTITY.md", "PROJECT.md", "KNOWLEDGE.md",
+        # F095 Phase C 新增：USER（用户长期偏好）+ SOUL（worker variant）+
+        # HEARTBEAT（worker variant）；H1 哲学由 SOUL.worker.md 内容守护。
+        "USER.md", "SOUL.md", "HEARTBEAT.md",
     }),
     BehaviorLoadProfile.MINIMAL: frozenset({
         "AGENTS.md", "TOOLS.md", "IDENTITY.md", "USER.md",

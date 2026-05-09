@@ -11,8 +11,10 @@ from __future__ import annotations
 
 from octoagent.core.behavior_workspace import (
     BehaviorLoadProfile,
+    build_default_behavior_workspace_files,
     get_profile_allowlist,
 )
+from octoagent.core.models.agent_context import AgentProfile
 from octoagent.core.models.behavior import (
     BehaviorLayerKind,
     BehaviorPack,
@@ -104,17 +106,28 @@ class TestBuildBehaviorSliceEnvelope:
         assert identity_in_envelope, "IDENTITY 应在 envelope 内"
         assert identity_share_flag is False, "前置条件：IDENTITY share_with_workers=False"
 
-    def test_envelope_excludes_files_outside_worker_allowlist(self) -> None:
-        """Phase A 阶段（白名单未扩展前）：USER/SOUL/HEARTBEAT/BOOTSTRAP 不在 envelope。"""
+    def test_envelope_excludes_bootstrap_md(self) -> None:
+        """spec §6.2 永久守护：BOOTSTRAP.md 不应进 Worker envelope（主 Agent 用户首次见面脚本）。"""
         pack = _full_pack_baseline()
         envelope = build_behavior_slice_envelope(pack)
+        assert "BOOTSTRAP.md" not in envelope.shared_file_ids, (
+            "BOOTSTRAP.md 永远不在 Worker envelope（主 Agent 用户首次见面脚本，违反 H1）"
+        )
 
+    def test_envelope_includes_files_in_worker_allowlist_dynamic(self) -> None:
+        """envelope 应包含 WORKER allowlist 中所有 BehaviorPack 内存在的文件。
+
+        动态断言（不硬编码 5/8 文件）：避免 Phase C 白名单扩展导致此测试失效。
+        """
+        pack = _full_pack_baseline()
+        envelope = build_behavior_slice_envelope(pack)
         worker_allowlist = get_profile_allowlist(BehaviorLoadProfile.WORKER)
-        # Phase A baseline allowlist = {AGENTS, TOOLS, IDENTITY, PROJECT, KNOWLEDGE}
-        for excluded in ("USER.md", "SOUL.md", "HEARTBEAT.md", "BOOTSTRAP.md"):
-            assert excluded not in envelope.shared_file_ids, (
-                f"{excluded} 不应在 Phase A envelope 内（不在白名单 {sorted(worker_allowlist)})"
-            )
+        pack_ids = {f.file_id for f in pack.files}
+        expected = pack_ids & worker_allowlist
+        assert set(envelope.shared_file_ids) == expected, (
+            f"envelope shared_file_ids 应等于 pack ∩ allowlist = {sorted(expected)}, "
+            f"实际 {sorted(envelope.shared_file_ids)}"
+        )
 
     def test_envelope_metadata_counts_match_whitelist(self) -> None:
         """metadata shared_file_count + private_file_count = total。"""
@@ -127,22 +140,25 @@ class TestBuildBehaviorSliceEnvelope:
         assert shared == len(envelope.shared_file_ids)
 
     def test_envelope_shared_file_ids_semantics_v2(self) -> None:
-        """AC-3: shared_file_ids 现在是"WORKER 白名单内文件 ID 列表"，不再是"share_with_workers=True 列表"。
+        """AC-3: shared_file_ids 语义 = "WORKER 白名单内文件 ID 列表"，而不是"share_with_workers=True 列表"。
 
-        断言验证：如果按旧语义（share_with_workers=True 子集），结果会少 IDENTITY；
-        按新语义（白名单子集），IDENTITY 必须在内。
+        断言验证：IDENTITY.md（share_with_workers=False）必出现在 envelope（修复 baseline bug）；
+        envelope 集合 = pack ∩ WORKER_allowlist。
+
+        动态断言：随 Phase C 扩白名单时仍正确，不需手改 expected。
         """
         pack = _full_pack_baseline()
         envelope = build_behavior_slice_envelope(pack)
+        worker_allowlist = get_profile_allowlist(BehaviorLoadProfile.WORKER)
+        pack_ids = {f.file_id for f in pack.files}
 
-        # 旧语义：share_with_workers=True 子集 = AGENTS, USER, PROJECT, KNOWLEDGE, TOOLS, BOOTSTRAP（6 个）
-        # 与白名单交集 = AGENTS, PROJECT, KNOWLEDGE, TOOLS（4 个）+ IDENTITY 不会出现 ← baseline bug
-        # 新语义（v0.2）：白名单子集 = AGENTS, IDENTITY, PROJECT, KNOWLEDGE, TOOLS（5 个）
-        expected_v2 = {"AGENTS.md", "IDENTITY.md", "PROJECT.md", "KNOWLEDGE.md", "TOOLS.md"}
-        assert set(envelope.shared_file_ids) == expected_v2, (
-            f"Phase A envelope shared_file_ids 应等于白名单子集 {expected_v2}，"
-            f"实际 {set(envelope.shared_file_ids)}"
+        # 关键断言 1：IDENTITY 必在内（baseline bug 修复）
+        assert "IDENTITY.md" in envelope.shared_file_ids, (
+            "IDENTITY.md（share_with_workers=False）应在 envelope 内（v0.2 语义守护）"
         )
+
+        # 关键断言 2：集合相等于 pack ∩ allowlist（动态语义）
+        assert set(envelope.shared_file_ids) == pack_ids & worker_allowlist
 
     def test_envelope_layers_contain_role_layer_with_identity(self) -> None:
         """AC-1 + AC-2a: envelope.layers 含 ROLE layer，其内容含 IDENTITY 文件 marker。"""
@@ -153,6 +169,129 @@ class TestBuildBehaviorSliceEnvelope:
         assert role_layers, "Phase A 后 envelope 必含 ROLE layer（IDENTITY + AGENTS）"
         role_content = role_layers[0].content
         assert "[IDENTITY.md" in role_content, "ROLE layer 内容必含 IDENTITY.md marker"
+
+
+class TestPhaseCWorkerAllowlistExpansion:
+    """F095 Phase C: WORKER 白名单扩到 8 文件（USER + SOUL + HEARTBEAT 进，BOOTSTRAP 不进）。"""
+
+    def test_envelope_includes_user_soul_heartbeat_post_phase_c(self) -> None:
+        """Phase C 后：USER/SOUL/HEARTBEAT 必出现在 Worker envelope。"""
+        pack = _full_pack_baseline()
+        envelope = build_behavior_slice_envelope(pack)
+        for fid in ("USER.md", "SOUL.md", "HEARTBEAT.md"):
+            assert fid in envelope.shared_file_ids, (
+                f"{fid} 应在 Phase C Worker envelope（v0.2 修订决策）"
+            )
+
+    def test_envelope_total_file_count_post_phase_c(self) -> None:
+        """Phase C 后：Worker envelope shared_file_ids 应有 8 项（与 _PROFILE_ALLOWLIST[WORKER] 等大）。"""
+        pack = _full_pack_baseline()
+        envelope = build_behavior_slice_envelope(pack)
+        assert len(envelope.shared_file_ids) == 8, (
+            f"Phase C 后 Worker envelope 应含 8 项，实际 {len(envelope.shared_file_ids)}"
+        )
+
+    def test_envelope_layers_cover_4_h2_core_plus_bootstrap(self) -> None:
+        """Phase C: envelope 覆盖 ROLE/COMMUNICATION/SOLVING/TOOL_BOUNDARY 4 层 H2 核心 + BOOTSTRAP lifecycle layer。"""
+        pack = _full_pack_baseline()
+        envelope = build_behavior_slice_envelope(pack)
+        layer_kinds = {layer.layer for layer in envelope.layers}
+
+        for required in (
+            BehaviorLayerKind.ROLE,
+            BehaviorLayerKind.COMMUNICATION,
+            BehaviorLayerKind.SOLVING,
+            BehaviorLayerKind.TOOL_BOUNDARY,
+            BehaviorLayerKind.BOOTSTRAP,
+        ):
+            assert required in layer_kinds, (
+                f"Phase C envelope 必含 {required.value} layer"
+            )
+        # COMMUNICATION layer 应含 USER + SOUL（PROJECT 和 KNOWLEDGE 走 SOLVING）
+        comm_layers = [layer for layer in envelope.layers if layer.layer == BehaviorLayerKind.COMMUNICATION]
+        assert comm_layers, "Phase C envelope 必含 COMMUNICATION layer"
+        comm_source_ids = set(comm_layers[0].source_file_ids)
+        assert comm_source_ids == {"USER.md", "SOUL.md"}, (
+            f"Phase C COMMUNICATION layer source_file_ids 应等于 {{USER, SOUL}}，"
+            f"实际 {sorted(comm_source_ids)}"
+        )
+        # BOOTSTRAP layer 应只含 HEARTBEAT（BOOTSTRAP.md 不在白名单）
+        bootstrap_layers = [
+            layer for layer in envelope.layers if layer.layer == BehaviorLayerKind.BOOTSTRAP
+        ]
+        assert bootstrap_layers, "Phase C envelope 必含 BOOTSTRAP layer（仅 HEARTBEAT）"
+        bs_source_ids = set(bootstrap_layers[0].source_file_ids)
+        assert bs_source_ids == {"HEARTBEAT.md"}, (
+            f"Phase C BOOTSTRAP layer 仅含 HEARTBEAT（BOOTSTRAP.md 不在白名单），"
+            f"实际 {sorted(bs_source_ids)}"
+        )
+
+    def test_end_to_end_worker_pack_to_envelope_with_worker_variants(self) -> None:
+        """端到端集成（覆盖 plan §0.6 Worker 创建入口）：
+
+        kind="worker" AgentProfile → build_default_behavior_workspace_files(include_advanced=True)
+        → 转 BehaviorPack → build_behavior_slice_envelope → 验证 SOUL.worker.md / HEARTBEAT.worker.md
+        内容真进入 Worker LLM context（envelope.layers 内容含 worker variant 标志短语）。
+        """
+        worker_profile = AgentProfile(
+            profile_id="prod-worker-e2e",
+            name="Prod Worker E2E",
+            kind="worker",
+        )
+        workspace_files = build_default_behavior_workspace_files(
+            agent_profile=worker_profile,
+            project_name="atom",
+            project_slug="atom",
+            include_advanced=True,
+        )
+
+        # 转换 BehaviorWorkspaceFile → BehaviorPackFile
+        pack_files = [
+            BehaviorPackFile(
+                file_id=wf.file_id,
+                title=wf.title,
+                layer=wf.layer,
+                content=wf.content,
+                visibility=wf.visibility,
+                share_with_workers=wf.share_with_workers,
+                source_kind=wf.source_kind,
+                budget_chars=wf.budget_chars,
+                original_char_count=wf.original_char_count,
+                effective_char_count=wf.effective_char_count,
+                truncated=wf.truncated,
+                truncation_reason=wf.truncation_reason,
+            )
+            for wf in workspace_files
+        ]
+        pack = BehaviorPack(
+            pack_id="behavior-pack:prod-worker-e2e",
+            profile_id=worker_profile.profile_id,
+            scope="agent",
+            source_chain=["test:default_templates"],
+            files=pack_files,
+            layers=build_behavior_layers(pack_files),
+            clarification_policy={},
+            metadata={},
+        )
+
+        envelope = build_behavior_slice_envelope(pack)
+
+        # 端到端断言：worker variant 内容真进入 envelope.layers
+        comm_layers = [layer for layer in envelope.layers if layer.layer == BehaviorLayerKind.COMMUNICATION]
+        assert comm_layers, "端到端 envelope 必含 COMMUNICATION layer"
+        comm_content = comm_layers[0].content
+        # SOUL.worker.md 特征短语必出现
+        assert "服务对象 = 主 Agent" in comm_content, (
+            "端到端 envelope COMMUNICATION layer 必含 SOUL.worker.md 特征短语"
+        )
+
+        bootstrap_layers = [layer for layer in envelope.layers if layer.layer == BehaviorLayerKind.BOOTSTRAP]
+        assert bootstrap_layers, "端到端 envelope 必含 BOOTSTRAP layer"
+        bs_content = bootstrap_layers[0].content
+        # HEARTBEAT.worker.md 特征短语
+        assert "通过当前 Worker 回报通道" in bs_content, (
+            "端到端 envelope BOOTSTRAP layer 必含 HEARTBEAT.worker.md 特征短语"
+        )
 
 
 class TestBehaviorPromptOrdering:
