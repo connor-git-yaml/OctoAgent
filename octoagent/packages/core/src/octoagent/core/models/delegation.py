@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -324,3 +324,51 @@ class DelegationResult(BaseModel):
     worker_type: str = "general"
     route_reason: str = Field(default="")
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class SubagentDelegation(BaseModel):
+    """F097：H3-A 临时 Subagent 委托的结构化载体。
+
+    生命周期从 spawn（created_at 填充）到 close（closed_at 填充）。
+    持久化路径：child_task.metadata["subagent_delegation"]（JSON 序列化，无独立 SQL 表）。
+    F098 扩展点：WorkerDelegation 为独立 model（target_kind=WORKER），两者共有字段命名
+    遵循可派生惯例（delegation_id / parent_task_id / created_at 等），未来可提取 BaseDelegation。
+    """
+
+    delegation_id: str = Field(..., min_length=1)
+    """ULID 生成的唯一委托 ID（min_length=1，与 Work/DelegationEnvelope 一致 - Codex P2-2）。"""
+
+    parent_task_id: str = Field(..., min_length=1)
+    """发起委托的父任务 ID。"""
+
+    parent_work_id: str = Field(..., min_length=1)
+    """父任务对应的 work ID。"""
+
+    child_task_id: str = Field(..., min_length=1)
+    """被委托的子任务 ID。"""
+
+    child_agent_session_id: str | None = None
+    """Subagent 的 SUBAGENT_INTERNAL AgentSession ID（GATE_DESIGN C-1）。
+    spawn 失败或 session 尚未创建时为 None；cleanup hook 通过此字段直接定位。"""
+
+    caller_agent_runtime_id: str = Field(..., min_length=1)
+    """调用方 Agent 的 runtime ID，用于 Memory / Context 共享。"""
+
+    caller_project_id: str = Field(..., min_length=1)
+    """调用方 Project ID，用于 audit 和过滤。"""
+
+    caller_memory_namespace_ids: list[str] = Field(default_factory=list)
+    """共享的 Memory namespace ID 集合（OD-1 α 语义：直接复用 caller 的 AGENT_PRIVATE namespace）。"""
+
+    spawned_by: str = Field(..., min_length=1)
+    """spawn 来源工具名称，如 delegate_task / subagents.spawn。"""
+
+    target_kind: Literal[DelegationTargetKind.SUBAGENT] = DelegationTargetKind.SUBAGENT
+    """委托目标类型，固定为 SUBAGENT（Codex P2-1：Literal 防止反序列化时接受非 SUBAGENT 值）。
+    F098 WorkerDelegation 将作为独立 model（Literal[WORKER]），与本 model 边界互斥。"""
+
+    created_at: datetime
+    """委托创建时间（UTC）。"""
+
+    closed_at: datetime | None = None
+    """委托关闭时间（UTC）。None 表示委托仍活跃。"""
