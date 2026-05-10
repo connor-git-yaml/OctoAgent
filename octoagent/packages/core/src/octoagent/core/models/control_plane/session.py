@@ -147,7 +147,39 @@ class RecallFrameItem(BaseModel):
     # F094 C7: 双字段维度（spec §2.2 Gap-4 / Codex MED-5 闭环）
     queried_namespace_kinds: list[str] = Field(default_factory=list)
     hit_namespace_kinds: list[str] = Field(default_factory=list)
+    # F096 M7 闭环：补全 RecallFrame 完整字段（metadata / source_refs / budget）
+    # 让 audit endpoint 与底层 RecallFrame model 对齐 16 字段
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    source_refs: list[dict[str, Any]] = Field(default_factory=list)
+    budget: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime | None = None
+
+
+class AgentRecallTimeline(BaseModel):
+    """F096 块 E：agent 视角分组聚合（按 agent_runtime_id 分组的 recall frames 时间线）。"""
+
+    agent_runtime_id: str = Field(min_length=1)
+    agent_profile_id: str = Field(default="")
+    agent_name: str = Field(default="")
+    recall_frames: list[RecallFrameItem] = Field(default_factory=list)
+    total_hit_count: int = Field(default=0, ge=0)
+
+
+class RecallFrameListDocument(ControlPlaneDocument):
+    """F096 块 B：list_recall_frames endpoint 返回 schema。
+
+    含分页 (frames + total) + scope_hit_distribution 聚合 + 可选的
+    agent_recall_timelines（仅 group_by=agent_runtime_id 时填充）。
+    """
+
+    resource_type: str = "recall_frame_list"
+    resource_id: str = "recall_frames:list"
+    frames: list[RecallFrameItem] = Field(default_factory=list)
+    total: int = Field(default=0, ge=0)
+    limit: int = Field(default=50, ge=1)
+    offset: int = Field(default=0, ge=0)
+    scope_hit_distribution: dict[str, int] = Field(default_factory=dict)
+    agent_recall_timelines: list[AgentRecallTimeline] | None = None
 
 
 class A2AConversationItem(BaseModel):

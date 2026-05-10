@@ -19,11 +19,15 @@ import structlog
 from octoagent.core.models import (
     ActionRequestEnvelope,
     ActionResultEnvelope,
+    AgentRecallTimeline,
     ControlPlaneTargetRef,
     CorpusKind,
     MemoryConsoleDocument,
+    MemoryNamespaceKind,
     MemoryProposalAuditDocument,
     MemorySubjectHistoryDocument,
+    RecallFrameItem,
+    RecallFrameListDocument,
     RetrievalPlatformDocument,
     VaultAuthorizationDocument,
 )
@@ -263,6 +267,147 @@ class MemoryDomainService(DomainServiceBase):
             project_id=resolved_project_id,
             scope_id=scope_id,
             subject_key=subject_key,
+        )
+
+    async def list_recall_frames(
+        self,
+        *,
+        agent_runtime_id: str | None = None,
+        agent_session_id: str | None = None,
+        context_frame_id: str | None = None,
+        task_id: str | None = None,
+        project_id: str | None = None,
+        queried_namespace_kind: str | None = None,
+        hit_namespace_kind: str | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        limit: int = 50,
+        offset: int = 0,
+        group_by: str | None = None,
+    ) -> RecallFrameListDocument:
+        """F096 块 B + H3 闭环：list_recall_frames audit endpoint。
+
+        - 7 维过滤（agent_session_id / agent_runtime_id / context_frame_id /
+          task_id / project_id / queried_namespace_kind / hit_namespace_kind）
+        - 时间窗（created_after / created_before）
+        - 分页（limit + offset，total 通过 count_recall_frames 取）
+        - scope_hit_distribution 聚合（基于 hit_namespace_kinds 统计）
+        - group_by="agent_runtime_id" 时填 agent_recall_timelines（按
+          agent_runtime_id 分组）
+
+        kind 字段（queried_namespace_kind / hit_namespace_kind）参数为 str；
+        非合法 enum 值返回 400 等价的 ValueError（caller 层处理为 HTTPException）。
+        """
+        valid_kinds = {kind.value for kind in MemoryNamespaceKind}
+        queried_kind: MemoryNamespaceKind | None = None
+        hit_kind: MemoryNamespaceKind | None = None
+        if queried_namespace_kind:
+            if queried_namespace_kind not in valid_kinds:
+                raise ValueError(
+                    f"invalid queried_namespace_kind={queried_namespace_kind!r}; "
+                    f"must be one of {sorted(valid_kinds)}"
+                )
+            queried_kind = MemoryNamespaceKind(queried_namespace_kind)
+        if hit_namespace_kind:
+            if hit_namespace_kind not in valid_kinds:
+                raise ValueError(
+                    f"invalid hit_namespace_kind={hit_namespace_kind!r}; "
+                    f"must be one of {sorted(valid_kinds)}"
+                )
+            hit_kind = MemoryNamespaceKind(hit_namespace_kind)
+
+        store = self._stores.agent_context_store
+        rows = await store.list_recall_frames(
+            agent_session_id=agent_session_id,
+            agent_runtime_id=agent_runtime_id,
+            context_frame_id=context_frame_id,
+            task_id=task_id,
+            project_id=project_id,
+            queried_namespace_kind=queried_kind,
+            hit_namespace_kind=hit_kind,
+            created_after=created_after,
+            created_before=created_before,
+            limit=limit,
+            offset=offset,
+        )
+        total = await store.count_recall_frames(
+            agent_session_id=agent_session_id,
+            agent_runtime_id=agent_runtime_id,
+            context_frame_id=context_frame_id,
+            task_id=task_id,
+            project_id=project_id,
+            queried_namespace_kind=queried_kind,
+            hit_namespace_kind=hit_kind,
+            created_after=created_after,
+            created_before=created_before,
+        )
+
+        items: list[RecallFrameItem] = [
+            RecallFrameItem(
+                recall_frame_id=row.recall_frame_id,
+                agent_runtime_id=row.agent_runtime_id,
+                agent_session_id=row.agent_session_id,
+                context_frame_id=row.context_frame_id,
+                task_id=row.task_id,
+                project_id=row.project_id,
+                query=row.query,
+                recent_summary=row.recent_summary,
+                memory_namespace_ids=list(row.memory_namespace_ids),
+                memory_hit_count=len(row.memory_hits),
+                degraded_reason=row.degraded_reason,
+                queried_namespace_kinds=[k.value for k in row.queried_namespace_kinds],
+                hit_namespace_kinds=[k.value for k in row.hit_namespace_kinds],
+                metadata=dict(row.metadata),
+                source_refs=list(row.source_refs),
+                budget=dict(row.budget),
+                created_at=row.created_at,
+            )
+            for row in rows
+        ]
+
+        # scope_hit_distribution 聚合（基于已分页的 frames）
+        distribution: dict[str, int] = {}
+        for item in items:
+            for kind in item.hit_namespace_kinds:
+                distribution[kind] = distribution.get(kind, 0) + 1
+
+        timelines: list[AgentRecallTimeline] | None = None
+        if group_by == "agent_runtime_id":
+            grouped: dict[str, list[RecallFrameItem]] = {}
+            for item in items:
+                grouped.setdefault(item.agent_runtime_id, []).append(item)
+            timelines = []
+            for runtime_id, runtime_items in grouped.items():
+                # agent_profile_id / agent_name 派生：从 AgentRuntime + AgentProfile 表
+                # 反查；失败则 fallback 空字符串（不阻塞 timeline 渲染）
+                agent_profile_id = ""
+                agent_name = ""
+                try:
+                    runtime = await store.get_agent_runtime(runtime_id)
+                    if runtime is not None:
+                        agent_profile_id = runtime.profile_id
+                        profile = await store.get_agent_profile(agent_profile_id)
+                        if profile is not None:
+                            agent_name = profile.name
+                except Exception:
+                    pass
+                timelines.append(
+                    AgentRecallTimeline(
+                        agent_runtime_id=runtime_id,
+                        agent_profile_id=agent_profile_id,
+                        agent_name=agent_name,
+                        recall_frames=runtime_items,
+                        total_hit_count=sum(it.memory_hit_count for it in runtime_items),
+                    )
+                )
+
+        return RecallFrameListDocument(
+            frames=items,
+            total=total,
+            limit=limit,
+            offset=offset,
+            scope_hit_distribution=distribution,
+            agent_recall_timelines=timelines,
         )
 
     # ------------------------------------------------------------------

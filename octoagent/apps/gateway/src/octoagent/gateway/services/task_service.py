@@ -1711,7 +1711,12 @@ class TaskService:
                         else "F096_delayed_path"
                     )
                     delayed_recall_frame = RecallFrame(
-                        recall_frame_id=str(ULID()),
+                        # Phase A review #1 finding #4 闭环（Phase B 推迟项）：
+                        # 用 idempotency_key 派生 recall_frame_id 让 store 层
+                        # ON CONFLICT(recall_frame_id) DO UPDATE 退化为幂等更新；
+                        # race window（同 idempotency_key 两并发进入）现在多写一次但
+                        # 不会创建多条不同 row，frontend 拿到 1 条 frame 不重复。
+                        recall_frame_id=f"recall-{delayed_recall_idempotency_key}",
                         agent_runtime_id=ctx_frame.agent_runtime_id or "",
                         agent_session_id=ctx_frame.agent_session_id or "",
                         context_frame_id=context_frame_id,

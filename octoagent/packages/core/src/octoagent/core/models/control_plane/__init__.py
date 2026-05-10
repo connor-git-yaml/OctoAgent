@@ -74,6 +74,7 @@ from .retrieval import (
 from .session import (
     A2AConversationItem,
     A2AMessageItem,
+    AgentRecallTimeline,
     AgentRuntimeItem,
     AgentSessionContinuityItem,
     ContextContinuityDocument,
@@ -82,6 +83,7 @@ from .session import (
     MemoryNamespaceItem,
     OwnerProfileDocument,
     RecallFrameItem,
+    RecallFrameListDocument,
     SessionProjectionDocument,
     SessionProjectionItem,
     SessionProjectionSummary,
@@ -128,6 +130,7 @@ __all__ = [
     # session
     "A2AConversationItem",
     "A2AMessageItem",
+    "AgentRecallTimeline",
     "AgentRuntimeItem",
     "AgentSessionContinuityItem",
     "ContextContinuityDocument",
@@ -136,6 +139,7 @@ __all__ = [
     "MemoryNamespaceItem",
     "OwnerProfileDocument",
     "RecallFrameItem",
+    "RecallFrameListDocument",
     "SessionProjectionDocument",
     "SessionProjectionItem",
     "SessionProjectionSummary",

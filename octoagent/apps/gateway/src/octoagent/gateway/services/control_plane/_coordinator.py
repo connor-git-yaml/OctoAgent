@@ -958,6 +958,10 @@ class ControlPlaneService:
     async def get_retrieval_platform_document(self, **kwargs):
         return await self._memory_service.get_retrieval_platform_document(**kwargs)
 
+    async def list_recall_frames(self, **kwargs):
+        # F096 块 B + H3 闭环：audit endpoint 转发到 MemoryDomainService
+        return await self._memory_service.list_recall_frames(**kwargs)
+
     # ------------------------------------------------------------------
     # list_events
     # ------------------------------------------------------------------

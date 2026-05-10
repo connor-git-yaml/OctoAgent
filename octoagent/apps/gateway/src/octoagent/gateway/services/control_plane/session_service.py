@@ -334,6 +334,10 @@ class SessionDomainService(DomainServiceBase):
                 # F094 C7: 投影双字段（向 Web UI / F096 audit 提供数据基础）
                 queried_namespace_kinds=[k.value for k in item.queried_namespace_kinds],
                 hit_namespace_kinds=[k.value for k in item.hit_namespace_kinds],
+                # F096 M7 闭环：投影完整 RecallFrame 字段（含 metadata / source_refs / budget）
+                metadata=dict(item.metadata),
+                source_refs=list(item.source_refs),
+                budget=dict(item.budget),
                 created_at=item.created_at,
             )
             for item in recall_frames

@@ -5739,3 +5739,52 @@ class TestControlPlaneApi:
         assert target["dynamic_context"]["running_work_count"] == 1
         assert target["dynamic_context"]["latest_work_id"] == "work-owner-self-dashboard"
         assert target["dynamic_context"]["latest_work_status"] == "running"
+
+
+class TestF096RecallFramesEndpoint:
+    """F096 块 B + H3 闭环：list_recall_frames audit endpoint 集成测。"""
+
+    async def test_recall_frames_endpoint_returns_200_empty(
+        self,
+        control_plane_client: AsyncClient,
+        control_plane_app,
+    ) -> None:
+        """无数据时 endpoint 返回 200 + 空 frames + total=0。"""
+        resp = await control_plane_client.get("/api/control/resources/recall-frames")
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["frames"] == []
+        assert payload["total"] == 0
+        assert payload["limit"] == 50
+        assert payload["offset"] == 0
+        assert payload["scope_hit_distribution"] == {}
+        # group_by 未指定时 agent_recall_timelines is None
+        assert payload.get("agent_recall_timelines") is None
+
+    async def test_recall_frames_endpoint_returns_400_invalid_kind(
+        self,
+        control_plane_client: AsyncClient,
+        control_plane_app,
+    ) -> None:
+        """invalid namespace_kind 返回 400 BadRequest。"""
+        resp = await control_plane_client.get(
+            "/api/control/resources/recall-frames",
+            params={"queried_namespace_kind": "INVALID_KIND"},
+        )
+        assert resp.status_code == 400
+        assert "INVALID_KIND" in resp.text
+
+    async def test_recall_frames_endpoint_pagination_query(
+        self,
+        control_plane_client: AsyncClient,
+        control_plane_app,
+    ) -> None:
+        """endpoint 接受 limit + offset query params，不破坏 schema。"""
+        resp = await control_plane_client.get(
+            "/api/control/resources/recall-frames",
+            params={"limit": 10, "offset": 5},
+        )
+        assert resp.status_code == 200
+        payload = resp.json()
+        assert payload["limit"] == 10
+        assert payload["offset"] == 5

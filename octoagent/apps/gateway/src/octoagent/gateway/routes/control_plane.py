@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from octoagent.core.models import ActionRequestEnvelope, ControlPlaneActionStatus
 
@@ -159,6 +159,47 @@ async def get_control_memory(
             updated_before=updated_before,
         )
     ).model_dump(mode="json", by_alias=True)
+
+
+@router.get("/api/control/resources/recall-frames")
+async def get_control_recall_frames(
+    agent_runtime_id: str | None = Query(default=None),
+    agent_session_id: str | None = Query(default=None),
+    context_frame_id: str | None = Query(default=None),
+    task_id: str | None = Query(default=None),
+    project_id: str | None = Query(default=None),
+    queried_namespace_kind: str | None = Query(default=None),
+    hit_namespace_kind: str | None = Query(default=None),
+    created_after: str | None = Query(default=None),
+    created_before: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    group_by: str | None = Query(default=None),
+    control_plane=Depends(get_control_plane_service),
+):
+    """F096 块 B + H3 闭环：list_recall_frames audit endpoint。
+
+    7 维过滤 + 时间窗 + 分页 + group_by="agent_runtime_id" 聚合。
+    invalid namespace_kind 值返回 400 BadRequest。
+    """
+    try:
+        document = await control_plane.list_recall_frames(
+            agent_runtime_id=agent_runtime_id,
+            agent_session_id=agent_session_id,
+            context_frame_id=context_frame_id,
+            task_id=task_id,
+            project_id=project_id,
+            queried_namespace_kind=queried_namespace_kind,
+            hit_namespace_kind=hit_namespace_kind,
+            created_after=created_after,
+            created_before=created_before,
+            limit=limit,
+            offset=offset,
+            group_by=group_by,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return document.model_dump(mode="json", by_alias=True)
 
 
 @router.get("/api/control/actions")

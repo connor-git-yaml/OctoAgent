@@ -1149,21 +1149,25 @@ class SqliteAgentContextStore:
         )
         return [self._row_to_context_frame(row) for row in rows]
 
-    async def list_recall_frames(
-        self,
+    @staticmethod
+    def _build_recall_frames_filter(
         *,
-        agent_session_id: str | None = None,
-        agent_runtime_id: str | None = None,
-        context_frame_id: str | None = None,
-        task_id: str | None = None,
-        project_id: str | None = None,
-        queried_namespace_kind: MemoryNamespaceKind | None = None,
-        hit_namespace_kind: MemoryNamespaceKind | None = None,
-        limit: int = 20,
-    ) -> list[RecallFrame]:
-        # F094 C7: 加 agent_runtime_id / queried_namespace_kind /
-        # hit_namespace_kind 过滤维度。namespace_kind 字段是 JSON list，
-        # SQLite EXISTS + json_each 拆开后按 kind value 等值匹配。
+        agent_session_id: str | None,
+        agent_runtime_id: str | None,
+        context_frame_id: str | None,
+        task_id: str | None,
+        project_id: str | None,
+        queried_namespace_kind: MemoryNamespaceKind | None,
+        hit_namespace_kind: MemoryNamespaceKind | None,
+        created_after: str | None,
+        created_before: str | None,
+    ) -> tuple[list[str], list[object]]:
+        """F096 H3 闭环：list_recall_frames 与 count_recall_frames 共享过滤构造逻辑。
+
+        F094 C7：agent_runtime_id / queried_namespace_kind / hit_namespace_kind 过滤维度。
+        F096 H3：补 created_after / created_before 字段过滤（ISO8601 字符串比较，
+        SQLite TEXT 字典序与时间序一致）。
+        """
         clauses: list[str] = []
         args: list[object] = []
         if agent_session_id:
@@ -1193,17 +1197,92 @@ class SqliteAgentContextStore:
                 "WHERE json_each.value = ?)"
             )
             args.append(hit_namespace_kind.value)
+        if created_after:
+            clauses.append("created_at >= ?")
+            args.append(created_after)
+        if created_before:
+            clauses.append("created_at <= ?")
+            args.append(created_before)
+        return clauses, args
+
+    async def list_recall_frames(
+        self,
+        *,
+        agent_session_id: str | None = None,
+        agent_runtime_id: str | None = None,
+        context_frame_id: str | None = None,
+        task_id: str | None = None,
+        project_id: str | None = None,
+        queried_namespace_kind: MemoryNamespaceKind | None = None,
+        hit_namespace_kind: MemoryNamespaceKind | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[RecallFrame]:
+        # F094 C7: agent_runtime_id / queried_namespace_kind / hit_namespace_kind 过滤维度。
+        # F096 H3 闭环: 补 offset 参数 + created_after / created_before 时间窗过滤。
+        # namespace_kind 字段是 JSON list，SQLite EXISTS + json_each 按 kind value 等值匹配。
+        clauses, args = self._build_recall_frames_filter(
+            agent_session_id=agent_session_id,
+            agent_runtime_id=agent_runtime_id,
+            context_frame_id=context_frame_id,
+            task_id=task_id,
+            project_id=project_id,
+            queried_namespace_kind=queried_namespace_kind,
+            hit_namespace_kind=hit_namespace_kind,
+            created_after=created_after,
+            created_before=created_before,
+        )
         where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
         rows = await self._fetchall(
             f"""
             SELECT * FROM recall_frames
             {where}
             ORDER BY created_at DESC
-            LIMIT ?
+            LIMIT ? OFFSET ?
             """,
-            tuple([*args, limit]),
+            tuple([*args, limit, offset]),
         )
         return [self._row_to_recall_frame(row) for row in rows]
+
+    async def count_recall_frames(
+        self,
+        *,
+        agent_session_id: str | None = None,
+        agent_runtime_id: str | None = None,
+        context_frame_id: str | None = None,
+        task_id: str | None = None,
+        project_id: str | None = None,
+        queried_namespace_kind: MemoryNamespaceKind | None = None,
+        hit_namespace_kind: MemoryNamespaceKind | None = None,
+        created_after: str | None = None,
+        created_before: str | None = None,
+    ) -> int:
+        """F096 H3 闭环：聚合 query 返回过滤后总数（用于 endpoint 分页 total）。
+
+        Single SQL aggregate query（非 N+1）；与 list_recall_frames 共享 filter 构造。
+        SQLite 单 user 量级 < 100k 行 + indexed query < 10ms 可接受。
+        """
+        clauses, args = self._build_recall_frames_filter(
+            agent_session_id=agent_session_id,
+            agent_runtime_id=agent_runtime_id,
+            context_frame_id=context_frame_id,
+            task_id=task_id,
+            project_id=project_id,
+            queried_namespace_kind=queried_namespace_kind,
+            hit_namespace_kind=hit_namespace_kind,
+            created_after=created_after,
+            created_before=created_before,
+        )
+        where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        row = await self._fetchone(
+            f"SELECT COUNT(*) AS cnt FROM recall_frames {where}",
+            tuple(args),
+        )
+        if row is None:
+            return 0
+        return int(row["cnt"])
 
     async def _fetchone(self, query: str, params: tuple[object, ...]) -> aiosqlite.Row | None:
         cursor = await self._conn.execute(query, params)

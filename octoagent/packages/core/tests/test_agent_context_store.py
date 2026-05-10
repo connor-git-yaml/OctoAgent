@@ -690,6 +690,157 @@ async def test_f094_c7_list_recall_frames_namespace_filter(tmp_path: Path) -> No
         await store_group.conn.close()
 
 
+async def test_f096_b5_list_recall_frames_offset_pagination(tmp_path: Path) -> None:
+    """F096 H3 闭环：list_recall_frames offset 参数 + count_recall_frames 配合分页。"""
+    store_group = await create_store_group(
+        str(tmp_path / "f096-b5-pagination.db"),
+        str(tmp_path / "artifacts"),
+    )
+    try:
+        runtime = AgentRuntime(
+            agent_runtime_id="runtime-b5p",
+            project_id="proj-b5",
+            agent_profile_id="agent-profile-b5",
+            role=AgentRuntimeRole.MAIN,
+            name="B5 Agent",
+            persona_summary="B5 pagination 测试。",
+        )
+        await store_group.agent_context_store.save_agent_runtime(runtime)
+        # 保存 5 个 frame（按 created_at 顺序）
+        for i in range(5):
+            ts = datetime(2026, 5, 10, 10, i, 0, tzinfo=UTC)
+            await store_group.agent_context_store.save_recall_frame(
+                RecallFrame(
+                    recall_frame_id=f"recall-b5-{i}",
+                    agent_runtime_id=runtime.agent_runtime_id,
+                    project_id="proj-b5",
+                    query=f"q{i}",
+                    created_at=ts,
+                )
+            )
+        await store_group.conn.commit()
+
+        # 全表 count
+        total = await store_group.agent_context_store.count_recall_frames(
+            agent_runtime_id=runtime.agent_runtime_id,
+        )
+        assert total == 5
+
+        # 第一页（limit=2, offset=0）
+        page_1 = await store_group.agent_context_store.list_recall_frames(
+            agent_runtime_id=runtime.agent_runtime_id,
+            limit=2,
+            offset=0,
+        )
+        assert len(page_1) == 2
+        # ORDER BY created_at DESC：最新 (i=4) 在前
+        assert page_1[0].recall_frame_id == "recall-b5-4"
+        assert page_1[1].recall_frame_id == "recall-b5-3"
+
+        # 第二页（limit=2, offset=2）
+        page_2 = await store_group.agent_context_store.list_recall_frames(
+            agent_runtime_id=runtime.agent_runtime_id,
+            limit=2,
+            offset=2,
+        )
+        assert len(page_2) == 2
+        assert page_2[0].recall_frame_id == "recall-b5-2"
+        assert page_2[1].recall_frame_id == "recall-b5-1"
+
+        # 第三页（limit=2, offset=4）—— 仅 1 条
+        page_3 = await store_group.agent_context_store.list_recall_frames(
+            agent_runtime_id=runtime.agent_runtime_id,
+            limit=2,
+            offset=4,
+        )
+        assert len(page_3) == 1
+        assert page_3[0].recall_frame_id == "recall-b5-0"
+
+        # offset 超限返回空
+        page_empty = await store_group.agent_context_store.list_recall_frames(
+            agent_runtime_id=runtime.agent_runtime_id,
+            limit=2,
+            offset=10,
+        )
+        assert page_empty == []
+    finally:
+        await store_group.conn.close()
+
+
+async def test_f096_b5_list_recall_frames_time_window(tmp_path: Path) -> None:
+    """F096 H3 闭环：created_after / created_before 字段过滤。"""
+    store_group = await create_store_group(
+        str(tmp_path / "f096-b5-window.db"),
+        str(tmp_path / "artifacts"),
+    )
+    try:
+        runtime = AgentRuntime(
+            agent_runtime_id="runtime-b5w",
+            project_id="proj-b5w",
+            agent_profile_id="agent-profile-b5w",
+            role=AgentRuntimeRole.MAIN,
+            name="B5W",
+            persona_summary="window 测试。",
+        )
+        await store_group.agent_context_store.save_agent_runtime(runtime)
+        await store_group.agent_context_store.save_recall_frame(
+            RecallFrame(
+                recall_frame_id="early",
+                agent_runtime_id=runtime.agent_runtime_id,
+                project_id="proj-b5w",
+                query="early",
+                created_at=datetime(2026, 5, 10, 8, 0, 0, tzinfo=UTC),
+            )
+        )
+        await store_group.agent_context_store.save_recall_frame(
+            RecallFrame(
+                recall_frame_id="middle",
+                agent_runtime_id=runtime.agent_runtime_id,
+                project_id="proj-b5w",
+                query="middle",
+                created_at=datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC),
+            )
+        )
+        await store_group.agent_context_store.save_recall_frame(
+            RecallFrame(
+                recall_frame_id="late",
+                agent_runtime_id=runtime.agent_runtime_id,
+                project_id="proj-b5w",
+                query="late",
+                created_at=datetime(2026, 5, 10, 16, 0, 0, tzinfo=UTC),
+            )
+        )
+        await store_group.conn.commit()
+
+        # created_after 过滤
+        after_10 = await store_group.agent_context_store.list_recall_frames(
+            created_after="2026-05-10T10:00:00+00:00",
+        )
+        assert {f.recall_frame_id for f in after_10} == {"middle", "late"}
+
+        # created_before 过滤
+        before_14 = await store_group.agent_context_store.list_recall_frames(
+            created_before="2026-05-10T14:00:00+00:00",
+        )
+        assert {f.recall_frame_id for f in before_14} == {"early", "middle"}
+
+        # 时间窗组合
+        window = await store_group.agent_context_store.list_recall_frames(
+            created_after="2026-05-10T10:00:00+00:00",
+            created_before="2026-05-10T14:00:00+00:00",
+        )
+        assert {f.recall_frame_id for f in window} == {"middle"}
+
+        # count_recall_frames 时间窗
+        cnt = await store_group.agent_context_store.count_recall_frames(
+            created_after="2026-05-10T10:00:00+00:00",
+            created_before="2026-05-10T14:00:00+00:00",
+        )
+        assert cnt == 1
+    finally:
+        await store_group.conn.close()
+
+
 async def test_f094_c7b_list_memory_namespaces_archived_filter(tmp_path: Path) -> None:
     """F094 C7b: list_memory_namespaces / get_memory_namespace 默认过滤 archived；
     显式 include_archived=True 可读取。"""
