@@ -14,6 +14,7 @@ import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import aiosqlite
@@ -126,12 +127,89 @@ class TaskService:
     _max_task_seq_retries = 3
     _pipeline_nodes = PIPELINE_NODES
 
+    # F098 Phase H (Codex review P2 闭环): class-level terminal state callbacks。
+    # 设计选择：class-level（不是 instance-level）—— TaskService 在 TaskRunner 中频繁
+    # 临时实例化（每次 create_task / process_task 等都新建一个 TaskService），instance-level
+    # callback 跨实例无效。class-level 跨实例共享，配合幂等注册 + 显式 unregister 防泄漏。
+    #
+    # 防泄漏机制：
+    # 1. register 幂等（按 callback identity 检测重复）→ TaskRunner 多次注册同一 cleanup 仅生效一次
+    # 2. TaskRunner.shutdown 必须 unregister → 避免旧 runner callback 残留
+    # 3. test fixture try/finally 保证 unregister 即使测试失败也执行
+    _terminal_state_callbacks: list[Callable[[str], Awaitable[None]]] = []
+    _terminal_state_callbacks_lock = asyncio.Lock()
+
     def __init__(self, store_group: StoreGroup, sse_hub=None, *, project_root: Path | None = None) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
         self._context_compaction = ContextCompactionService(store_group)
         self._agent_context = AgentContextService(store_group, project_root=project_root)
         self._budget_planner = ContextBudgetPlanner(config=self._context_compaction._config)
+
+    @classmethod
+    async def register_terminal_state_callback(
+        cls,
+        callback: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """F098 Phase H: 注册 task 终态回调（task_runner 等通过此机制注册 cleanup）。
+
+        Codex review P2 闭环：幂等（按 callback identity 检测重复）。
+        重复 register 同一 callback 仅生效一次（`callback in list` 检测，按对象 identity）。
+        """
+        async with cls._terminal_state_callbacks_lock:
+            if callback in cls._terminal_state_callbacks:
+                log.debug(
+                    "terminal_state_callback_already_registered",
+                    callback=getattr(callback, "__qualname__", str(callback)),
+                )
+                return
+            cls._terminal_state_callbacks.append(callback)
+            log.debug(
+                "terminal_state_callback_registered",
+                callback=getattr(callback, "__qualname__", str(callback)),
+                total_count=len(cls._terminal_state_callbacks),
+            )
+
+    @classmethod
+    async def unregister_terminal_state_callback(
+        cls,
+        callback: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """F098 Phase H: 注销 callback（TaskRunner.shutdown 必须调用，避免泄漏）。
+
+        Codex review P2 闭环：避免旧 TaskRunner callback 残留。
+        重复 unregister 不报错（list.remove ValueError 静默 swallow）。
+        """
+        async with cls._terminal_state_callbacks_lock:
+            try:
+                cls._terminal_state_callbacks.remove(callback)
+                log.debug(
+                    "terminal_state_callback_unregistered",
+                    callback=getattr(callback, "__qualname__", str(callback)),
+                    total_count=len(cls._terminal_state_callbacks),
+                )
+            except ValueError:
+                pass
+
+    @classmethod
+    async def _invoke_terminal_state_callbacks(cls, task_id: str) -> None:
+        """F098 Phase H: 调用所有注册的 terminal state callbacks（异常隔离）。
+
+        在 lock 内 snapshot 列表，避免并发 register/unregister 导致 RuntimeError。
+        每个 callback 异常单独 try/except 隔离，不影响其他 callback + state transition。
+        """
+        async with cls._terminal_state_callbacks_lock:
+            callbacks_snapshot = list(cls._terminal_state_callbacks)
+        for callback in callbacks_snapshot:
+            try:
+                await callback(task_id)
+            except Exception as exc:
+                log.warning(
+                    "terminal_state_callback_failed",
+                    task_id=task_id,
+                    callback=getattr(callback, "__qualname__", str(callback)),
+                    error=str(exc),
+                )
 
     async def create_task(self, message: NormalizedMessage) -> tuple[str, bool]:
         """创建任务（消息接收入口）
@@ -2760,6 +2838,10 @@ class TaskService:
                 raise RuntimeError("failed to append state transition after retries")
         if cleanup_lock:
             await self._cleanup_task_lock(task_id)
+            # F098 Phase H: 终态触发所有注册的 callback（subagent session cleanup 等）。
+            # callback 在 task lock 释放后调用（避免 deadlock：cleanup 内可能再调 task_service）。
+            # 异常隔离：cleanup callback 失败不影响 state transition（已 commit）。
+            await self._invoke_terminal_state_callbacks(task_id)
 
         if result_event is None:
             raise RuntimeError("failed to append state transition after retries")
