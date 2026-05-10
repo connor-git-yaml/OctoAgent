@@ -1252,36 +1252,25 @@ class CapabilityPackService:
         self.enforce_child_target_kind_policy(target_kind)
         child_id = str(ULID())
         child_thread_id = f"{parent_task.thread_id}:child:{child_id[:8]}"
-        child_message = NormalizedMessage(
-            channel=parent_task.requester.channel,
-            thread_id=child_thread_id,
-            scope_id=parent_task.scope_id,
-            sender_id=parent_task.requester.sender_id,
-            sender_name=parent_task.requester.sender_id or "owner",
-            text=objective,
-            control_metadata={
-                "parent_task_id": parent_task.task_id,
-                "parent_work_id": parent_work.work_id,
-                "requested_worker_type": worker_type,
-                "target_kind": target_kind,
-                "tool_profile": tool_profile,
-                "spawned_by": spawned_by,
-                "child_title": title,
-                "worker_plan_id": plan_id,
-            },
-            idempotency_key=f"{spawned_by}:{parent_task.task_id}:{child_id}",
-        )
-        task_id, created = await self._task_runner.launch_child_task(child_message)
 
-        # F097 Phase B-1（Codex P1-2 + P2-6 闭环重构）：
-        # 之前：在 launch_child_task 返回后追加 USER_MESSAGE event 写 SubagentDelegation。
-        # 问题：launch_child_task 内部立即 enqueue + 启动后台 _run_job，存在 race —
-        #   child runtime 可能在 USER_MESSAGE 写入之前已进入 context 构建。
-        # 修复：通过 child_message.control_metadata 传递 raw delegation fields，由
-        #   task_runner.launch_child_task 在 create_task 后、enqueue 前 emit USER_MESSAGE
-        #   event（消除 race 窗口）。task_id 由 launch_child_task 拿到真实值后填入。
-        # P2-6 闭环：caller_agent_runtime_id 无值时保持空字符串（不 fallback 到 task_id），
-        #   由 launch_child_task 在 emit 时为空标记为 "<unknown>"（避免 min_length 校验失败）。
+        # F097 Phase B-1 + Phase D 联合修复（Codex Phase B P1-2 + Phase D P1-1 闭环）：
+        # 之前两版实施都把 __subagent_delegation_init__ / __caller_runtime_hints__ 写在
+        # await launch_child_task() 之后，是 race（production runner 已 normalize + enqueue
+        # 完成，post-hoc 修改 control_metadata 不可见）。修复：在 child_message 构造**之前**
+        # 计算所有 raw fields，一次性放入 control_metadata，确保 launch_child_task 看到完整数据。
+        base_control_metadata: dict[str, Any] = {
+            "parent_task_id": parent_task.task_id,
+            "parent_work_id": parent_work.work_id,
+            "requested_worker_type": worker_type,
+            "target_kind": target_kind,
+            "tool_profile": tool_profile,
+            "spawned_by": spawned_by,
+            "child_title": title,
+            "worker_plan_id": plan_id,
+        }
+
+        # F097 Phase B-1: SubagentDelegation raw fields（仅 target_kind=subagent）
+        # P2-6 闭环：caller_agent_runtime_id 无值时保持空字符串（不 fallback 到 task_id）
         if str(target_kind).strip().lower() == DelegationTargetKind.SUBAGENT.value:
             caller_agent_runtime_id = ""
             try:
@@ -1289,7 +1278,7 @@ class CapabilityPackService:
                 caller_agent_runtime_id = exec_ctx.agent_runtime_id or ""
             except RuntimeError:
                 pass
-            child_message.control_metadata["__subagent_delegation_init__"] = {
+            base_control_metadata["__subagent_delegation_init__"] = {
                 "delegation_id": str(ULID()),
                 "parent_task_id": parent_task.task_id,
                 "parent_work_id": parent_work.work_id,
@@ -1297,6 +1286,56 @@ class CapabilityPackService:
                 "caller_project_id": parent_work.project_id or "",
                 "spawned_by": spawned_by,
             }
+
+            # F097 Phase D: caller RuntimeHintBundle 拷贝（Codex P1-2 接受现状归档）
+            # AC-D1 完整解读：caller-side RuntimeHintBundle 由 orchestrator
+            # _build_request_runtime_hints 每 turn 重建，spawn 时不持有完整 caller 实例。
+            # F097 Phase D 范围：surface 字段从 exec_ctx.runtime_context 真拷贝
+            # （唯一可获取的 caller 字段）；其他字段为默认占位，child runtime 通过自己的
+            # _build_request_runtime_hints 重新构造（与 main / worker 路径一致）。
+            try:
+                caller_surface = ""
+                try:
+                    _exec_ctx = get_current_execution_context()
+                    if _exec_ctx.runtime_context is not None:
+                        caller_surface = _exec_ctx.runtime_context.surface or ""
+                except RuntimeError:
+                    pass
+                if not caller_surface:
+                    caller_surface = str(
+                        getattr(getattr(parent_task, "requester", None), "channel", "")
+                        or ""
+                    )
+                base_control_metadata["__caller_runtime_hints__"] = {
+                    "surface": caller_surface,
+                    "can_delegate_research": False,
+                    "recent_clarification_category": "",
+                    "recent_clarification_source_text": "",
+                    "recent_worker_lane_worker_type": "",
+                    "recent_worker_lane_profile_id": "",
+                    "recent_worker_lane_topic": "",
+                    "recent_worker_lane_summary": "",
+                    "tool_universe": None,
+                }
+            except Exception as _hint_exc:
+                _log.warning(
+                    "phase_d_hint_copy_failed",
+                    error=str(_hint_exc),
+                    target_kind=target_kind,
+                    reason="spawn 主流程不受影响",
+                )
+
+        child_message = NormalizedMessage(
+            channel=parent_task.requester.channel,
+            thread_id=child_thread_id,
+            scope_id=parent_task.scope_id,
+            sender_id=parent_task.requester.sender_id,
+            sender_name=parent_task.requester.sender_id or "owner",
+            text=objective,
+            control_metadata=base_control_metadata,
+            idempotency_key=f"{spawned_by}:{parent_task.task_id}:{child_id}",
+        )
+        task_id, created = await self._task_runner.launch_child_task(child_message)
 
         return {
             "task_id": task_id,

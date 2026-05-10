@@ -233,6 +233,16 @@ class TaskRunner:
             next_seq = await self._stores.event_store.get_next_task_seq(task_id)
             # 引入 UserMessagePayload 的 import（task_runner.py 顶部已 import 必需类）
             from octoagent.core.models.payloads import UserMessagePayload as _UserMessagePayload
+            from .connection_metadata import normalize_control_metadata as _normalize
+
+            # F097 Phase D Round 2 修复：merge_control_metadata 只取最新 USER_MESSAGE
+            # 的 TURN_SCOPED 字段（如 requested_worker_type / tool_profile）。本 emit 是
+            # 任务最新 USER_MESSAGE，必须包含原 message 的 normalize 后的所有 control_metadata
+            # 字段（除 raw key 外），否则下游 dispatch 会丢失 worker_type/tool_profile 等
+            # （F092 work_split / subagents.spawn / apply_worker_plan 路径都依赖这些字段）。
+            preserved_control = _normalize(message.control_metadata)
+            preserved_control["subagent_delegation"] = delegation.model_dump(mode="json")
+            # P1-1 闭环：target_kind / spawned_by 在 normalize 后已保留，无需重复写
 
             delegation_event = Event(
                 event_id=str(ULID()),
@@ -245,13 +255,7 @@ class TaskRunner:
                     text_preview="[subagent delegation metadata]",
                     text_length=0,
                     text="",
-                    control_metadata={
-                        "subagent_delegation": delegation.model_dump(mode="json"),
-                        # P1-1 闭环：保留 target_kind 让 merge_control_metadata 取最新
-                        # USER_MESSAGE 时仍能读到 turn-scoped 信号
-                        "target_kind": "subagent",
-                        "spawned_by": delegation.spawned_by,
-                    },
+                    control_metadata=preserved_control,
                 ).model_dump(),
                 trace_id=f"trace-{task_id}",
                 causality=EventCausality(

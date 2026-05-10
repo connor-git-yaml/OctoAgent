@@ -456,7 +456,7 @@
 
 ---
 
-### TD.1 `[code]` `_launch_child_task` 增 SUBAGENT 路径 RuntimeHintBundle 拷贝
+### TD.1 `[x]` `[code]` `_launch_child_task` 增 SUBAGENT 路径 RuntimeHintBundle 拷贝
 
 **描述**：在 `capability_pack.py` 的 `_launch_child_task`（plan 记录 line 1229 附近）中，当 `target_kind == DelegationTargetKind.SUBAGENT` 时，从 caller 的 RuntimeHintBundle（通过 control_metadata 或 agent_runtime 参数获取）提取字段，添加到 `child_message.control_metadata`。具体拷贝字段以 T0.3 侦察结果为准（至少包含 `surface` / `tool_universe` / `recent_failure_budget`）。Worker spawn 路径（target_kind=WORKER）的 `control_metadata` 不改变（AC-D2）。
 
@@ -472,7 +472,7 @@
 
 ---
 
-### TD.2 `[test]` RuntimeHintBundle 拷贝单测
+### TD.2 `[x]` `[test]` RuntimeHintBundle 拷贝单测
 
 **描述**：新建或扩展测试文件，覆盖：mock caller RuntimeHintBundle 含 `surface="web"`，spawn SUBAGENT，检查 `child_message.control_metadata["surface"] == "web"`；spawn WORKER（`target_kind=WORKER`），检查 `child_message.control_metadata` 不含 `surface` 字段（AC-D2）；caller `surface` 为 None 时的降级处理（不报错）。
 
