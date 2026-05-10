@@ -869,58 +869,75 @@ class TaskRunner:
                 )
                 # 不 return：继续走到 step 8 尝试 close session（P2-4 缓解）
 
-            # F097 Phase B-4 P2-3 闭环：颠倒 session.save 与 event.append 顺序。
-            # 原顺序：session.save → commit → event.append（两次 commit，第二次失败留下
-            # closed session 但无审计事件，不可恢复的不一致）。
-            # 新顺序：先 emit 事件（EventStore.idempotency_key 守护，失败则事件不写入）→
-            # 再 save session（session 失败则下次 cleanup 重试时事件已存在，幂等检查 P1-2
-            # 短路 → session 重新尝试 close）。最坏情况是 session 未标 CLOSED 但审计事件存在，
-            # 优于原顺序的"session closed 但无事件"（audit chain 缺失更危险）。
+            # F098 Phase G (P2-3 修复，OD-3 选 A atomic): event + session 同一事务。
+            # 原 F097 Phase B-4 用 append_event_committed (commit 1) + save_agent_session +
+            # conn.commit() (commit 2) 仍是 2 次 commit。F098 改用 append_event (pending) +
+            # save_agent_session (pending) + 单一 conn.commit() = atomic。
+            # 失败时 conn.rollback 全部回滚 → idempotency_key 守护重试不重复。
+            # 实现细节：
+            # - EventStore.append_event 已是 pending 路径（不自动 commit，参考其 docstring）
+            # - AgentContextStore.save_agent_session 也是 pending 路径
+            # - 任一步失败 → conn.rollback → 重试时 idempotency_key 检查短路重复 emit
 
-            # 7（新）: 先 emit SUBAGENT_COMPLETED 事件（AC-EVENT-1：Constitution C2）
-            # P2-4 缓解：仅在 should_emit_event=True 时 emit；重试时 should_emit_event=False
-            # 跳过 emit 但走到 step 8 仍尝试 close session（避免 session 永久 ACTIVE）
             parent_task_id = delegation.parent_task_id
-            if should_emit_event:
-                payload = SubagentCompletedPayload(
-                    delegation_id=delegation.delegation_id,
-                    child_task_id=delegation.child_task_id,
-                    terminal_status=terminal_status_str,
-                    closed_at=terminal_at,
-                    parent_task_id=parent_task_id,
-                    child_agent_session_id=delegation.child_agent_session_id,
-                )
-                event_seq = await self._stores.event_store.get_next_task_seq(parent_task_id)
-                completed_event = Event(
-                    event_id=str(ULID()),
-                    task_id=parent_task_id,
-                    task_seq=event_seq,
-                    ts=terminal_at,
-                    type=EventType.SUBAGENT_COMPLETED,
-                    actor=ActorType.SYSTEM,
-                    payload=payload.model_dump(mode="json"),
-                    trace_id=f"trace-{parent_task_id}",
-                    causality=EventCausality(idempotency_key=idempotency_key),
-                )
-                await self._stores.event_store.append_event_committed(
-                    completed_event, update_task_pointer=False
-                )
-
-            # 8（新）: 再 save AgentSession CLOSED（事件已写入或之前已有；P2-4 缓解：
-            # 即使事件已存在仍尝试关 session，避免事件 OK + session 因 first cleanup
-            # 失败留在 ACTIVE 永久状态）
             session = await self._stores.agent_context_store.get_agent_session(
                 delegation.child_agent_session_id
             )
-            if session is not None and session.status != AgentSessionStatus.CLOSED:
-                updated_session = session.model_copy(
-                    update={
-                        "status": AgentSessionStatus.CLOSED,
-                        "closed_at": terminal_at,
-                    }
-                )
-                await self._stores.agent_context_store.save_agent_session(updated_session)
-                await self._stores.conn.commit()
+            session_needs_close = (
+                session is not None and session.status != AgentSessionStatus.CLOSED
+            )
+
+            if should_emit_event or session_needs_close:
+                try:
+                    # 1. emit SUBAGENT_COMPLETED 事件（pending，未 commit）
+                    if should_emit_event:
+                        payload = SubagentCompletedPayload(
+                            delegation_id=delegation.delegation_id,
+                            child_task_id=delegation.child_task_id,
+                            terminal_status=terminal_status_str,
+                            closed_at=terminal_at,
+                            parent_task_id=parent_task_id,
+                            child_agent_session_id=delegation.child_agent_session_id,
+                        )
+                        event_seq = await self._stores.event_store.get_next_task_seq(parent_task_id)
+                        completed_event = Event(
+                            event_id=str(ULID()),
+                            task_id=parent_task_id,
+                            task_seq=event_seq,
+                            ts=terminal_at,
+                            type=EventType.SUBAGENT_COMPLETED,
+                            actor=ActorType.SYSTEM,
+                            payload=payload.model_dump(mode="json"),
+                            trace_id=f"trace-{parent_task_id}",
+                            causality=EventCausality(idempotency_key=idempotency_key),
+                        )
+                        # F098 Phase G: 用 append_event (pending) 替代 append_event_committed
+                        # 避免 2 次 commit，整个 cleanup 流程单一 atomic 事务
+                        await self._stores.event_store.append_event(completed_event)
+
+                    # 2. save AgentSession CLOSED（pending，未 commit）
+                    if session_needs_close:
+                        updated_session = session.model_copy(
+                            update={
+                                "status": AgentSessionStatus.CLOSED,
+                                "closed_at": terminal_at,
+                            }
+                        )
+                        await self._stores.agent_context_store.save_agent_session(updated_session)
+
+                    # 3. atomic commit（event + session 同一事务）
+                    await self._stores.conn.commit()
+                except Exception:
+                    # F098 Phase G: 失败 rollback 全部回滚（idempotency_key 守护重试不重复）
+                    try:
+                        await self._stores.conn.rollback()
+                    except Exception as rollback_exc:
+                        log.error(
+                            "subagent_cleanup_rollback_failed",
+                            task_id=task_id,
+                            error=str(rollback_exc),
+                        )
+                    raise
 
             log.info(
                 "subagent_session_cleanup_completed",
