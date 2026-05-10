@@ -34,6 +34,7 @@ from octoagent.core.models import (
     EventType,
     MemoryNamespaceKind,
     PartType,
+    RecallFrame,
     RecallPlan,
     RecallPlanMode,
     RequesterInfo,
@@ -1684,6 +1685,83 @@ class TaskService:
                 log.warning(
                     "memory_recall_completed_audit_hit_kinds_failed",
                     error=str(audit_exc),
+                )
+            # F096 Phase A: 延迟 recall 物化路径补 RecallFrame 持久化
+            # review #1 H2 闭环：直接用 ctx_frame.agent_session_id / agent_runtime_id /
+            # project_id 强一致派生（删除 task_metadata 派生 + session_state 反查 +
+            # fallback 空字符串链路）
+            # Phase A review #1 闭环：
+            # - finding #1：memory_hits schema 用 AgentContextService._memory_hit_payload
+            #   与 sync 路径（agent_context.py:858/3889）保持一致
+            # - finding #2：degraded_reason 含 F096_delayed_path marker（区分 sync vs delayed 路径）
+            # - finding #3：metadata 含 surface 字段；source 值用 plan §2.2 项 14 约定的
+            #   `delayed_recall`（不带 _materialize 后缀）
+            # try-except 隔离：persist 失败不阻塞 emit MEMORY_RECALL_COMPLETED 路径
+            try:
+                if ctx_frame is not None:
+                    valid_kind_values = {kind.value for kind in MemoryNamespaceKind}
+                    base_degraded = (
+                        "; ".join(recall.degraded_reasons)
+                        if recall.degraded_reasons
+                        else ""
+                    )
+                    delayed_degraded_reason = (
+                        f"{base_degraded}; F096_delayed_path"
+                        if base_degraded
+                        else "F096_delayed_path"
+                    )
+                    delayed_recall_frame = RecallFrame(
+                        recall_frame_id=str(ULID()),
+                        agent_runtime_id=ctx_frame.agent_runtime_id or "",
+                        agent_session_id=ctx_frame.agent_session_id or "",
+                        context_frame_id=context_frame_id,
+                        task_id=task_id,
+                        project_id=ctx_frame.project_id or "",
+                        query=str(plan["query"]) or recall.query,
+                        recent_summary="",
+                        memory_namespace_ids=list(recall.scope_ids),
+                        memory_hits=[
+                            AgentContextService._memory_hit_payload(hit)
+                            for hit in recall.hits
+                        ],
+                        source_refs=[
+                            {"kind": "request", "ref": request_artifact_id},
+                            {"kind": "result", "ref": result_artifact_id},
+                        ],
+                        budget={
+                            "memory_recall": {
+                                "scope_ids": list(recall.scope_ids),
+                                "hit_count": len(recall.hits),
+                            },
+                            "max_prompt_tokens": 0,
+                        },
+                        degraded_reason=delayed_degraded_reason,
+                        metadata={
+                            "request_kind": "delayed",
+                            "surface": task.requester.channel,
+                            "source": "delayed_recall",
+                            "schedule_reason": str(plan["schedule_reason"]),
+                        },
+                        queried_namespace_kinds=[
+                            MemoryNamespaceKind(k)
+                            for k in audit_queried_kinds
+                            if k in valid_kind_values
+                        ],
+                        hit_namespace_kinds=[
+                            MemoryNamespaceKind(k)
+                            for k in audit_hit_kinds
+                            if k in valid_kind_values
+                        ],
+                        created_at=datetime.now(UTC),
+                    )
+                    await self._stores.agent_context_store.save_recall_frame(
+                        delayed_recall_frame
+                    )
+            except Exception as persist_exc:
+                log.warning(
+                    "memory_recall_completed_save_recall_frame_failed_delayed_path",
+                    error=str(persist_exc),
+                    context_frame_id=context_frame_id,
                 )
             event = await self._append_event_only_with_retry(
                 task_id=task_id,

@@ -2339,6 +2339,234 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
     assert delayed_recall["hit_count"] == 2
     assert delayed_recall["backend_state"] == "healthy"
 
+    # F096 Phase A: 验证延迟 recall 物化路径已 persist RecallFrame
+    # T-A-2 test_delayed_recall_persists_recall_frame +
+    #       test_delayed_recall_recall_frame_field_completion
+    # Phase A review #1 finding #2/#3 闭环：source = "delayed_recall"（plan §2.2 项 14
+    # 约定值，非 _materialize 后缀）；degraded_reason 含 F096_delayed_path marker；
+    # memory_hits 与 sync 路径 schema 一致（_memory_hit_payload 扁平 17 字段）
+    recall_frames = await store_group.agent_context_store.list_recall_frames(
+        task_id=task_id,
+        limit=10,
+    )
+    # 应至少 2 条 RecallFrame：sync 路径（已 baseline）+ delayed 路径（F096 新增）
+    assert len(recall_frames) >= 2
+    delayed_frames = [
+        f for f in recall_frames if f.metadata.get("source") == "delayed_recall"
+    ]
+    assert len(delayed_frames) == 1
+    delayed_frame = delayed_frames[0]
+    # H2 闭环：agent_session_id / agent_runtime_id 强一致派生（非 fallback 空）
+    assert delayed_frame.agent_runtime_id != ""
+    assert delayed_frame.agent_session_id != ""
+    # context_frame_id 与 delayed_recall.budget 对齐
+    assert delayed_frame.context_frame_id == frames[0].context_frame_id
+    # source_refs 含 request + result artifact ref
+    ref_kinds = {ref["kind"] for ref in delayed_frame.source_refs}
+    assert {"request", "result"}.issubset(ref_kinds)
+    # metadata 含 delayed 标识 + surface（finding #3 闭环）
+    assert delayed_frame.metadata["request_kind"] == "delayed"
+    assert delayed_frame.metadata["surface"] == "web"
+    # degraded_reason 含 F096_delayed_path marker（finding #2 闭环）
+    assert "F096_delayed_path" in delayed_frame.degraded_reason
+    # memory_hits schema 与 sync 路径一致：含扁平字段 record_id / namespace_kind 等
+    # （finding #1 闭环，验证 _memory_hit_payload 调用）
+    assert len(delayed_frame.memory_hits) == 2
+    first_hit = delayed_frame.memory_hits[0]
+    assert "record_id" in first_hit
+    assert "namespace_kind" in first_hit
+    assert "namespace_id" in first_hit
+    assert "scope_kind" in first_hit
+    assert "partition" in first_hit
+    assert "summary" in first_hit
+    assert "layer" in first_hit
+
+    await store_group.conn.close()
+
+
+async def test_task_service_delayed_recall_save_recall_frame_failure_does_not_block_emit(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """F096 Phase A T-A-2 用例 (3) failure isolation（review #1 finding #5 闭环）：
+
+    monkeypatch save_recall_frame raise → 验证 MEMORY_RECALL_COMPLETED 仍 emit +
+    log warn 不阻塞 dispatch。
+    """
+    store_group = await create_store_group(
+        str(tmp_path / "f096-delayed-recall-fail.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+    await store_group.agent_context_store.save_agent_profile(
+        AgentProfile(
+            profile_id="agent-profile-alpha",
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name="Alpha Agent",
+            persona_summary="你负责 Alpha 项目的需求连续性与交付推进。",
+            instruction_overlays=["回答前必须对齐当前 project 的长期约束。"],
+            context_budget_policy={
+                "memory_recall": {"prefetch_mode": "detailed_prefetch"}
+            },
+        )
+    )
+    await store_group.conn.commit()
+
+    # mock recall: 复用 baseline test 双轮模式触发 delayed recall
+    # 第一轮：1 hit + DEGRADED backend → 触发 delayed recall 调度
+    # 第二轮：2 hits + HEALTHY → delayed 物化（即将 raise save_recall_frame）
+    fail_recall_calls: list[int] = []
+
+    async def fake_recall_memory(
+        self,
+        *,
+        scope_ids,
+        query,
+        policy=None,
+        per_scope_limit=3,
+        max_hits=4,
+        hook_options=None,
+    ):
+        fail_recall_calls.append(1)
+        if len(fail_recall_calls) == 1:
+            return MemoryRecallResult(
+                query=query,
+                expanded_queries=[query],
+                scope_ids=list(scope_ids),
+                hits=[
+                    MemoryRecallHit(
+                        record_id="memory-fail-initial",
+                        layer=MemoryLayer.SOR,
+                        scope_id="memory/project-alpha",
+                        partition=MemoryPartition.WORK,
+                        summary="initial recall (DEGRADED) for fail isolation test",
+                        subject_key="alpha-fail-initial",
+                        search_query=query,
+                        citation="memory://memory/project-alpha/sor/alpha-fail-initial",
+                        content_preview="initial content",
+                        metadata={"source": "fail-initial"},
+                        created_at=datetime.now(tz=UTC),
+                    )
+                ],
+                backend_status=MemoryBackendStatus(
+                    backend_id="sqlite",
+                    active_backend="sqlite",
+                    state=MemoryBackendState.DEGRADED,
+                    pending_replay_count=2,
+                ),
+                degraded_reasons=["memory_sync_backlog"],
+                hook_trace=MemoryRecallHookTrace(
+                    post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                    rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+                    focus_terms=["alpha"],
+                    candidate_count=1,
+                    filtered_count=0,
+                    delivered_count=1,
+                ),
+            )
+        return MemoryRecallResult(
+            query=query,
+            expanded_queries=[query],
+            scope_ids=list(scope_ids),
+            hits=[
+                MemoryRecallHit(
+                    record_id="memory-fail-delayed-1",
+                    layer=MemoryLayer.SOR,
+                    scope_id="memory/project-alpha",
+                    partition=MemoryPartition.WORK,
+                    summary="delayed hit 1 for fail isolation test",
+                    subject_key="alpha-fail-1",
+                    search_query=query,
+                    citation="memory://memory/project-alpha/sor/alpha-fail-1",
+                    content_preview="delayed content 1",
+                    metadata={"source": "fail-delayed"},
+                    created_at=datetime.now(tz=UTC),
+                ),
+                MemoryRecallHit(
+                    record_id="memory-fail-delayed-2",
+                    layer=MemoryLayer.SOR,
+                    scope_id="memory/project-alpha",
+                    partition=MemoryPartition.WORK,
+                    summary="delayed hit 2 for fail isolation test",
+                    subject_key="alpha-fail-2",
+                    search_query=query,
+                    citation="memory://memory/project-alpha/sor/alpha-fail-2",
+                    content_preview="delayed content 2",
+                    metadata={"source": "fail-delayed"},
+                    created_at=datetime.now(tz=UTC),
+                ),
+            ],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+                pending_replay_count=0,
+            ),
+            degraded_reasons=[],
+            hook_trace=MemoryRecallHookTrace(
+                post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+                focus_terms=["alpha"],
+                candidate_count=2,
+                filtered_count=0,
+                delivered_count=2,
+            ),
+        )
+
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
+
+    # 关键 monkeypatch：让 delayed 路径 save_recall_frame raise；但 sync 路径
+    # save_recall_frame 应正常通过——通过检查 metadata.source 区分两条路径
+    original_save = store_group.agent_context_store.save_recall_frame
+    save_call_count = {"total": 0, "delayed_failed": 0}
+
+    async def fail_save_for_delayed(frame):
+        save_call_count["total"] += 1
+        if frame.metadata.get("source") == "delayed_recall":
+            save_call_count["delayed_failed"] += 1
+            raise RuntimeError("simulated save_recall_frame failure for delayed path")
+        return await original_save(frame)
+
+    monkeypatch.setattr(
+        store_group.agent_context_store,
+        "save_recall_frame",
+        fail_save_for_delayed,
+    )
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = RecordingLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-alpha",
+        scope_id="chat:web:thread-alpha",
+        text="测试 Phase A failure isolation",
+        idempotency_key="f096-phase-a-fail-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+    )
+
+    # 关键断言：尽管 delayed 路径 save_recall_frame raise，
+    # MEMORY_RECALL_COMPLETED 仍 emit（emit 路径不被阻塞）
+    events = await store_group.event_store.get_events_for_task(task_id)
+    assert any(event.type is EventType.MEMORY_RECALL_COMPLETED for event in events), (
+        "MEMORY_RECALL_COMPLETED 应在 save_recall_frame 失败后仍 emit"
+    )
+    # 至少调用了一次 delayed 路径的 save（后续 raise）
+    assert save_call_count["delayed_failed"] >= 1
+    # store 内不存在 delayed_recall RecallFrame（被 raise 拦截了）
+    recall_frames = await store_group.agent_context_store.list_recall_frames(
+        task_id=task_id, limit=10
+    )
+    delayed = [f for f in recall_frames if f.metadata.get("source") == "delayed_recall"]
+    assert len(delayed) == 0, "raise 后不应有 delayed RecallFrame 持久化"
+
     await store_group.conn.close()
 
 
