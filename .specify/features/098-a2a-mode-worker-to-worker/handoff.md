@@ -13,7 +13,7 @@
 - ✅ H2 完整对等性（Phase C Worker→Worker 解禁 + enforce 删除）
 - ✅ F097 5 项推迟项全部接管（P1-1 块 E / P1-2 块 F / P2-3 块 G / P2-4 块 H / AC-F1 块 I）
 - ✅ BaseDelegation 公共抽象（块 J）
-- ⏳ Phase D（orchestrator.py 拆 dispatch_service.py）显式归档推迟到 F107
+- ✅ **Phase D D7 架构债清理**（orchestrator.py 3623 → 2733 行，A2ADispatchMixin 抽到 dispatch_service.py）— 用户选 B 后实施
 
 ### F098 留给 F099 的接入点
 
@@ -133,19 +133,29 @@ F099 实施时 **不得偏离** F098 已锁的 9 项 OD：
    - 影响：grep 结果不"干净"，但功能等价
    - F099 / F107 顺手清
 
-3. **Phase B-1 source 派生信号源**：
-   - 当前优先 RuntimeControlContext.turn_executor_kind
-   - fallback 到 envelope_metadata.source_runtime_kind / source_turn_executor_kind
-   - F099 source 泛化时可能需要扩展 RuntimeControlContext 加 source_type 字段
+3. **Phase B-1 source 派生信号源**（Phase D Codex P1 修复后）：
+   - **修订**：不再用 RuntimeControlContext.turn_executor_kind（这是 target 侧字段）
+   - 仅信任显式 envelope.metadata.source_runtime_kind / runtime_metadata.source_runtime_kind
+   - 缺信号时默认 main（baseline 行为）
+   - **worker→worker 解禁后扩展点**：spawn 路径需在 envelope.metadata 注入 source_runtime_kind=worker
+   - 当前 baseline 不注入 → worker→worker dispatch 仍记录为 main→worker（行为兼容）
+   - **F099 ask-back / source 泛化时一并补齐 spawn 路径注入逻辑**
 
-### Final Codex review 闭环情况
+4. **Phase D mixin 模式拆分**（dispatch_service.py 已建）：
+   - A2ADispatchMixin 含 15 个 A2A helper 方法
+   - 通过 OrchestratorService(A2ADispatchMixin) 继承
+   - F107 capability_pack/tooling/harness 三层职责整理时可进一步演化（例如把 A2ADispatchMixin 演化为独立 service 类，OrchestratorService 持引用而非继承）
 
-| 严重 | 处理 |
-|------|------|
-| 1 high (P1-1 source 派生不生效) | ✅ 已修复（用 turn_executor_kind） |
-| 3 medium (P2-1/2/3) | ✅ 全闭环（capability_pack 真实接入 / task_seq 重试保留 / shutdown 注销时机） |
+### Final + Phase D Post Codex Review 闭环情况
 
-无 high known issue 归档到 F099。F098 实施达成度高于 F097（F097 归档 2 high known issue）。
+| Review 阶段 | 严重 | 处理 |
+|-------------|------|------|
+| Pre-Impl Codex | 1 high + 2 medium | ✅ 全闭环（spec/plan v0.1 → v0.2）|
+| Final Cross-Phase Codex | 1 high + 3 medium | ✅ 全闭环（commit 6825ef1）|
+| Phase D Post-Review Codex | 1 high + 1 medium | ✅ 全闭环（commit 881ed1f）|
+| **总计** | **3 high + 6 medium** | **全闭环** |
+
+无 high known issue 归档到 F099。F098 实施达成度显著高于 F097（F097 归档 2 high known issue）。
 
 ---
 
