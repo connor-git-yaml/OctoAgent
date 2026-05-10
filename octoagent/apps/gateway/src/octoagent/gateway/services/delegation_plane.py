@@ -78,10 +78,12 @@ class SpawnChildResult:
     - "written"   — gate 通过 + launch 成功；业务字段填充
     - "rejected"  — DelegationManager.delegate gate 拒绝（depth/concurrent/blacklist）；error_code/reason 填充
 
-    注：launch_child_task raise（含 enforce_child_target_kind_policy / task_runner
-    未就绪 / 数据校验失败）由 spawn_child 不捕获，直接 propagate 给调用方处理。
-    这样 subagents.spawn 路径保持原 propagate 给 broker 的行为（F085 worker→worker
-    拒绝 invariant）；delegate_task 路径自行 try/except 包成 rejected。
+    注：launch_child_task raise（task_runner 未就绪 / 数据校验失败）由 spawn_child
+    不捕获，直接 propagate 给调用方处理。subagents.spawn 路径保持原 propagate 给 broker
+    的行为；delegate_task 路径自行 try/except 包成 rejected。
+
+    F098 Phase C: enforce_child_target_kind_policy（Worker→Worker 硬禁止）已删除——
+    Worker→Worker A2A 解禁完成（H2 完整对等性）。死循环防护由 DelegationManager max_depth=2 兜底。
     """
 
     status: Literal["written", "rejected"]
@@ -973,8 +975,8 @@ class DelegationPlaneService:
         装配顺序（必须与原 builtin_tools 旁路一致——零行为变更）：
         1. 推断 depth + active_children（容错：list_descendant_works 失败时降级为 []）
         2. DelegationManager.delegate gate（depth/concurrent/blacklist，失败时返回 rejected）
-        3. capability_pack._launch_child_task（内部仍调 enforce_child_target_kind_policy
-           + 调 task_runner.launch_child_task）
+        3. capability_pack._launch_child_task（F098 Phase C: enforce_child_target_kind_policy
+           已删除，Worker→Worker A2A 解禁；调 task_runner.launch_child_task）
            - **不捕获 raise**——直接 propagate 给调用方（保持原 builtin_tools 旁路语义：
              subagents.spawn propagate 给 broker；delegate_task 自己 try/except 包成 rejected）
         4. 仅 emit_audit_event=True 时调 mgr._emit_spawned_event
@@ -1079,10 +1081,11 @@ class DelegationPlaneService:
                 reason=gate_result.reason or "",
             )
 
-        # 3. capability_pack._launch_child_task（内部调 enforce_child_target_kind_policy）
+        # 3. capability_pack._launch_child_task（F098 Phase C: enforce_child_target_kind_policy
+        # 已删除，Worker→Worker A2A 解禁完成）
         # 关键：不捕获 raise——由调用方决定如何处理。原因：
-        # - subagents.spawn 路径原行为是 enforce raise / launch raise propagate 给 broker
-        #   → result.is_error=True（保持 F085 worker→worker 拒绝 invariant）
+        # - subagents.spawn 路径原行为是 launch raise propagate 给 broker
+        #   → result.is_error=True（F084/F085 worker→worker 拒绝 invariant 已被 F098 H2 对等性替代）
         # - delegate_task 路径原行为是自己 try/except → 包成 DelegateTaskResult(rejected)
         # 由 spawn_child 不区分，按 propagate 处理；调用方各自 try/except
         payload = await self._capability_pack._launch_child_task(

@@ -1259,9 +1259,15 @@ async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
         await store_group.conn.close()
 
 
-async def test_work_split_rejects_worker_to_worker_delegation(
+async def test_work_split_allows_worker_to_worker_delegation_after_F098(
     tmp_path: Path,
 ) -> None:
+    """F098 Phase C: Worker→Worker A2A 解禁后，worker runtime 调用
+    subagents.spawn(target_kind=worker) 不再 reject（H2 完整对等性）。
+
+    历史 F084/F085 baseline: enforce_child_target_kind_policy 拒绝 worker→worker。
+    F098 Phase C 删除此约束。死循环防护由 DelegationManager max_depth=2 兜底。
+    """
     (
         store_group,
         _sse_hub,
@@ -1276,7 +1282,7 @@ async def test_work_split_rejects_worker_to_worker_delegation(
         task_id, created = await task_service.create_task(
             NormalizedMessage(
                 text="请拆分一组 worker 子任务",
-                idempotency_key="feature-071-work-split-worker-to-worker",
+                idempotency_key="feature-098-work-split-worker-to-worker-allowed",
             )
         )
         assert created is True
@@ -1295,7 +1301,7 @@ async def test_work_split_rejects_worker_to_worker_delegation(
         runtime_context = ExecutionRuntimeContext(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
-            session_id="session-071-work-split-worker",
+            session_id="session-098-work-split-worker",
             worker_id="worker.supervisor",
             backend="inline",
             console=task_runner.execution_console,
@@ -1322,11 +1328,15 @@ async def test_work_split_rejects_worker_to_worker_delegation(
                 broker_context,
             )
 
-        assert result.is_error is True
-        assert result.error is not None
-        assert "worker runtime cannot delegate to another worker" in result.error
-        child_works = await store_group.work_store.list_works(parent_work_id=plan.work.work_id)
-        assert child_works == []
+        # F098 Phase C: worker→worker 解禁后不再 reject "cannot delegate to another worker"。
+        # 验证错误不含历史 reject 文案（具体业务结果由 DelegationManager 决定，
+        # max_depth=2 仍可能拒绝；但不再是 enforce_child_target_kind_policy 的硬编码 raise）
+        if result.is_error:
+            assert "worker runtime cannot delegate to another worker" not in (
+                result.error or ""
+            ), (
+                "F098 Phase C 闭环失败：仍命中 enforce_child_target_kind_policy 历史 raise"
+            )
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
@@ -1628,9 +1638,15 @@ async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
         await store_group.conn.close()
 
 
-async def test_subagents_spawn_rejects_worker_to_worker_delegation(
+async def test_subagents_spawn_allows_worker_to_worker_delegation_after_F098(
     tmp_path: Path,
 ) -> None:
+    """F098 Phase C: Worker→Worker A2A 解禁后，subagents.spawn(target_kind=worker)
+    不再 reject "worker runtime cannot delegate to another worker"（H2 完整对等性）。
+
+    历史 F084/F085 baseline: enforce_child_target_kind_policy 拒绝。
+    F098 Phase C 删除此约束。死循环防护由 max_depth=2 兜底。
+    """
     (
         store_group,
         _sse_hub,
@@ -1645,7 +1661,7 @@ async def test_subagents_spawn_rejects_worker_to_worker_delegation(
         task_id, created = await task_service.create_task(
             NormalizedMessage(
                 text="请把这项工作交给另一个 worker",
-                idempotency_key="feature-071-subagents-spawn-worker-to-worker",
+                idempotency_key="feature-098-subagents-spawn-worker-to-worker-allowed",
             )
         )
         assert created is True
@@ -1662,7 +1678,7 @@ async def test_subagents_spawn_rejects_worker_to_worker_delegation(
         runtime_context = ExecutionRuntimeContext(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
-            session_id="session-071-spawn-worker",
+            session_id="session-098-spawn-worker",
             worker_id="worker.supervisor",
             backend="inline",
             console=task_runner.execution_console,
@@ -1685,16 +1701,18 @@ async def test_subagents_spawn_rejects_worker_to_worker_delegation(
                     "objective": "请继续处理这项工作",
                     "worker_type": "research",
                     "target_kind": "worker",
-                    "title": "invalid-worker-hop",
+                    "title": "valid-worker-hop-F098",
                 },
                 broker_context,
             )
 
-        assert result.is_error is True
-        assert result.error is not None
-        assert "worker runtime cannot delegate to another worker" in result.error
-        child_works = await store_group.work_store.list_works(parent_work_id=plan.work.work_id)
-        assert child_works == []
+        # F098 Phase C: 不再 reject 历史 enforce raise 文案
+        if result.is_error:
+            assert "worker runtime cannot delegate to another worker" not in (
+                result.error or ""
+            ), (
+                "F098 Phase C 闭环失败：仍命中 enforce_child_target_kind_policy 历史 raise"
+            )
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()

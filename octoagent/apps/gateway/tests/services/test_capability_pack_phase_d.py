@@ -62,13 +62,15 @@ def _make_task_runner_mock() -> MagicMock:
 
 
 def _make_cap_pack(task_runner) -> Any:
-    """构造最小 CapabilityPackService mock，注入 task_runner。"""
+    """构造最小 CapabilityPackService mock，注入 task_runner。
+
+    F098 Phase C: enforce_child_target_kind_policy mock 已删除（函数本身已删除）。
+    """
     from octoagent.gateway.services.capability_pack import CapabilityPackService
 
     # CapabilityPackService 需要多个依赖，用 MagicMock(spec=...) 替代
     cap = MagicMock(spec=CapabilityPackService)
     cap._task_runner = task_runner
-    cap.enforce_child_target_kind_policy = MagicMock()  # 不抛异常
     # 直接绑定真实方法到 mock 实例（使实际代码路径被执行）
     cap._launch_child_task = CapabilityPackService._launch_child_task.__get__(cap, CapabilityPackService)
     return cap
@@ -258,8 +260,8 @@ async def test_worker_spawn_no_caller_runtime_hints() -> None:
 
     runner.launch_child_task = _fake_launch
 
-    # 对于 worker target_kind，enforce_child_target_kind_policy 会阻止 WORKER→WORKER
-    # 但这里用 MagicMock，不抛异常——只验证 control_metadata 无 __caller_runtime_hints__
+    # F098 Phase C: enforce_child_target_kind_policy 已删除，Worker→Worker A2A 解禁
+    # 此测试验证 worker target_kind 路径不写 __caller_runtime_hints__（仅 subagent 路径写）
     cap = _make_cap_pack(runner)
 
     with patch(
