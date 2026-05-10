@@ -347,7 +347,9 @@ def make_behavior_pack_loaded_payload(
     return BehaviorPackLoadedPayload(
         pack_id=pack.pack_id,
         agent_id=agent_profile.profile_id,
-        agent_kind=str(getattr(agent_profile, "kind", "main") or "main"),
+        # F096 Final review H1 闭环：review #1 M4 决议严格实施——
+        # AgentProfile.kind 是 StrEnum 默认 "main"，不需要 hasattr fallback
+        agent_kind=str(agent_profile.kind),
         load_profile=load_profile.value,
         pack_source=str(pack.metadata.get("pack_source", "unknown")),
         file_count=len(pack.files),
@@ -383,7 +385,8 @@ def make_behavior_pack_used_payload(
     return BehaviorPackUsedPayload(
         pack_id=pack.pack_id,
         agent_id=agent_profile.profile_id,
-        agent_kind=str(getattr(agent_profile, "kind", "main") or "main"),
+        # F096 Final review H1 闭环：review #1 M4 决议严格实施
+        agent_kind=str(agent_profile.kind),
         agent_runtime_id=agent_runtime_id,
         task_id=task_id,
         session_id=session_id,
