@@ -2258,11 +2258,42 @@ class AgentContextService(AgentContextTurnWriterMixin):
             or str(request.delegation_metadata.get("selected_worker_type", "")).strip()
             or str(request.delegation_metadata.get("worker_capability", "")).strip()
         )
+        # F098 Phase F (P1-2 修复)：subagent 路径检测——避免 ephemeral subagent profile
+        # 复用 caller worker active runtime 导致 audit chain 混叠。
+        # 信号 1: delegation_metadata["target_kind"] == "subagent"
+        # 信号 2: agent_profile.kind == "subagent"（fallback；F097 ephemeral profile 已置 kind=subagent）
+        is_subagent_path = (
+            str(request.delegation_metadata.get("target_kind", "")).strip().lower()
+            == DelegationTargetKind.SUBAGENT.value
+            or str(getattr(agent_profile, "kind", "")).strip().lower() == "subagent"
+        )
+        # F098 Phase F: 提取 subagent_delegation_id 用于 audit metadata（关联 SubagentDelegation.delegation_id）
+        subagent_delegation_id = ""
+        if is_subagent_path:
+            raw_init = request.delegation_metadata.get("__subagent_delegation_init__", {})
+            if isinstance(raw_init, dict):
+                subagent_delegation_id = str(raw_init.get("delegation_id", "")).strip()
+            if not subagent_delegation_id:
+                # 历史 control_metadata 已写入 SubagentDelegation
+                raw_delegation = request.delegation_metadata.get("subagent_delegation", {})
+                if isinstance(raw_delegation, dict):
+                    subagent_delegation_id = str(raw_delegation.get("delegation_id", "")).strip()
+                elif isinstance(raw_delegation, str):
+                    # 兼容 model_dump_json 字符串
+                    try:
+                        import json as _json
+                        parsed = _json.loads(raw_delegation)
+                        subagent_delegation_id = str(parsed.get("delegation_id", "")).strip()
+                    except (ValueError, TypeError):
+                        pass
+
         runtime_id = (request.agent_runtime_id or "").strip()
         existing: AgentRuntime | None = None
         if runtime_id:
             existing = await self._stores.agent_context_store.get_agent_runtime(runtime_id)
-        if existing is None:
+        # F098 Phase F: subagent 路径跳过 find_active_runtime 复用——
+        # 每次 spawn 创建新 runtime，避免 ephemeral profile 复用 caller worker active runtime。
+        if existing is None and not is_subagent_path:
             # 无显式 runtime_id 或该 id 不存在：按 (project, role, profile) 反查已有 active
             # runtime，避免对同一逻辑 runtime 产生 composite-key 第二条 row。
             existing = await self._stores.agent_context_store.find_active_runtime(
@@ -2295,6 +2326,18 @@ class AgentContextService(AgentContextTurnWriterMixin):
                 if worker_profile is not None
                 else f"{worker_label} internal worker runtime"
             )
+        # F098 Phase F: subagent 路径在 metadata 加 subagent_delegation_id（audit 关联）
+        base_metadata = {
+            "surface": request.surface,
+            "request_kind": request.request_kind.value,
+            "worker_capability": worker_capability,
+            "selected_worker_type": request.delegation_metadata.get(
+                "selected_worker_type", ""
+            ),
+        }
+        if is_subagent_path and subagent_delegation_id:
+            base_metadata["subagent_delegation_id"] = subagent_delegation_id
+
         runtime = (
             existing.model_copy(
                 update={
@@ -2306,12 +2349,7 @@ class AgentContextService(AgentContextTurnWriterMixin):
                     "persona_summary": persona_summary,
                     "metadata": {
                         **existing.metadata,
-                        "surface": request.surface,
-                        "request_kind": request.request_kind.value,
-                        "worker_capability": worker_capability,
-                        "selected_worker_type": request.delegation_metadata.get(
-                            "selected_worker_type", ""
-                        ),
+                        **base_metadata,
                     },
                     "updated_at": datetime.now(tz=UTC),
                 }
@@ -2326,14 +2364,7 @@ class AgentContextService(AgentContextTurnWriterMixin):
                 name=runtime_name,
                 persona_summary=persona_summary,
                 permission_preset=resolve_permission_preset(agent_profile),
-                metadata={
-                    "surface": request.surface,
-                    "request_kind": request.request_kind.value,
-                    "worker_capability": worker_capability,
-                    "selected_worker_type": request.delegation_metadata.get(
-                        "selected_worker_type", ""
-                    ),
-                },
+                metadata=base_metadata,
             )
         )
         try:
@@ -2342,6 +2373,8 @@ class AgentContextService(AgentContextTurnWriterMixin):
             # 并发 race：另一个协程在我们 lookup 之后、save 之前抢先写入。
             # partial unique index (project, role, profile) WHERE status='active' 拒绝
             # 第二条插入。回头按逻辑身份重读对方写入的 row 并复用。
+            # F098 Phase F: subagent 路径理论上不会触发 race（独立 ULID 不复用），
+            # 但保留 fallback 兜底（确保鲁棒性）。
             refreshed = await self._stores.agent_context_store.find_active_runtime(
                 project_id=project_id,
                 role=role,
