@@ -212,6 +212,14 @@ class EventType(StrEnum):
     SUBAGENT_RETURNED = "SUBAGENT_RETURNED"                  # 子任务返回结果
     SUBAGENT_COMPLETED = "SUBAGENT_COMPLETED"                # F097 Phase E: subagent 终态关闭（含 session CLOSED 状态迁移）
 
+    # F098 Phase E: 控制元数据更新事件（替代 USER_MESSAGE 复用承载 control_metadata 的反模式）
+    # F097 P1-1 known issue 修复：USER_MESSAGE 事件被多 consumer（context_compaction /
+    # chat / telegram 等）当作用户输入；F098 引入独立 event type，仅承载 control_metadata
+    # 不含 text，避免污染对话历史。merge_control_metadata 同时合并 USER_MESSAGE 和
+    # CONTROL_METADATA_UPDATED 两类事件，保持向后兼容（历史 USER_MESSAGE 含 control_metadata
+    # 的 task 仍可读）。
+    CONTROL_METADATA_UPDATED = "CONTROL_METADATA_UPDATED"
+
     # Feature 093 Phase A: AgentSessionTurn 持久化事件（main / worker session 统一）
     AGENT_SESSION_TURN_PERSISTED = "AGENT_SESSION_TURN_PERSISTED"  # mixin 写 turn 入库后 emit
 

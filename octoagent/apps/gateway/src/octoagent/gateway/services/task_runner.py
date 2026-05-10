@@ -266,15 +266,22 @@ class TaskRunner:
                 created_at=datetime.now(tz=UTC),
             )
             next_seq = await self._stores.event_store.get_next_task_seq(task_id)
-            # 引入 UserMessagePayload 的 import（task_runner.py 顶部已 import 必需类）
-            from octoagent.core.models.payloads import UserMessagePayload as _UserMessagePayload
+            # F098 Phase E: 改用 ControlMetadataUpdatedPayload + EventType.CONTROL_METADATA_UPDATED
+            # 替代 USER_MESSAGE 复用承载（F097 P1-1 known issue 修复）。
+            # 历史 baseline：用 USER_MESSAGE marker text "[subagent delegation metadata]"
+            # 污染 ContextCompactionService._load_conversation_turns 的对话历史读取。
+            # F098 修复：CONTROL_METADATA_UPDATED 仅含 control_metadata + source 字段，
+            # 不含 text，consumer（context_compaction / chat / telegram 等）天然不受影响。
+            from octoagent.core.models.payloads import (
+                ControlMetadataUpdatedPayload as _ControlMetadataUpdatedPayload,
+            )
             from .connection_metadata import normalize_control_metadata as _normalize
 
-            # F097 Phase D Round 2 修复：merge_control_metadata 只取最新 USER_MESSAGE
-            # 的 TURN_SCOPED 字段（如 requested_worker_type / tool_profile）。本 emit 是
-            # 任务最新 USER_MESSAGE，必须包含原 message 的 normalize 后的所有 control_metadata
-            # 字段（除 raw key 外），否则下游 dispatch 会丢失 worker_type/tool_profile 等
-            # （F092 work_split / subagents.spawn / apply_worker_plan 路径都依赖这些字段）。
+            # F097 Phase D Round 2 修复保留：merge_control_metadata 取最新 USER_MESSAGE +
+            # CONTROL_METADATA_UPDATED 的 TURN_SCOPED 字段（如 requested_worker_type /
+            # tool_profile）。本 emit 是任务最新 control 事件，必须包含原 message 的
+            # normalize 后的所有 control_metadata 字段（除 raw key 外），否则下游 dispatch
+            # 会丢失 worker_type/tool_profile 等。
             preserved_control = _normalize(message.control_metadata)
             preserved_control["subagent_delegation"] = delegation.model_dump(mode="json")
             # P1-1 闭环：target_kind / spawned_by 在 normalize 后已保留，无需重复写
@@ -284,13 +291,11 @@ class TaskRunner:
                 task_id=task_id,
                 task_seq=next_seq,
                 ts=datetime.now(tz=UTC),
-                type=EventType.USER_MESSAGE,
+                type=EventType.CONTROL_METADATA_UPDATED,
                 actor=ActorType.SYSTEM,
-                payload=_UserMessagePayload(
-                    text_preview="[subagent delegation metadata]",
-                    text_length=0,
-                    text="",
+                payload=_ControlMetadataUpdatedPayload(
                     control_metadata=preserved_control,
+                    source="subagent_delegation_init",
                 ).model_dump(),
                 trace_id=f"trace-{task_id}",
                 causality=EventCausality(

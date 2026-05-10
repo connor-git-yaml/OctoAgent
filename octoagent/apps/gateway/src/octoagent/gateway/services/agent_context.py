@@ -64,7 +64,10 @@ from octoagent.core.models import (
     WorkerProfile,
     WorkerProfileStatus,
 )
-from octoagent.core.models.payloads import UserMessagePayload
+from octoagent.core.models.payloads import (
+    ControlMetadataUpdatedPayload,
+    UserMessagePayload,
+)
 from octoagent.memory import (
     EvidenceRef,
     MemoryAccessPolicy,
@@ -2587,8 +2590,8 @@ class AgentContextService(AgentContextTurnWriterMixin):
             raise
 
         # F097 Phase B-3 (Codex P1-3 闭环): 回填 child_agent_session_id 到子任务
-        # control_metadata 的 SubagentDelegation 中。使用 USER_MESSAGE 事件追加
-        # control_metadata 更新，normalize 白名单已含 subagent_delegation（Phase E P1-1 闭环）。
+        # control_metadata 的 SubagentDelegation 中。F098 Phase E 改用
+        # CONTROL_METADATA_UPDATED 事件替代 USER_MESSAGE 复用承载（F097 P1-1 修复）。
         # P1-3 修复：移除 `existing is None` 条件 —— 真实生产路径走 orchestrator
         # `_prepare_a2a_dispatch` 预创建 agent_session_id 后才进入 _ensure_agent_session，
         # 此时 existing != None 但 SubagentDelegation.child_agent_session_id 仍是 None。
@@ -2605,12 +2608,13 @@ class AgentContextService(AgentContextTurnWriterMixin):
                     updated_delegation = _subagent_delegation.model_copy(
                         update={"child_agent_session_id": session.agent_session_id}
                     )
-                    # F097 Final cross-Phase Codex P2-1 闭环：B-3 backfill USER_MESSAGE
-                    # 必须 preserve 历史 USER_MESSAGE 的 TURN_SCOPED 字段（target_kind /
-                    # requested_worker_type / tool_profile 等），否则 merge_control_metadata
-                    # 取最新 USER_MESSAGE 时这些字段会丢失，subagent resume/retry 不再走
-                    # subagent context/session 分支。从历史 events 取 normalize 后的 control_metadata
-                    # 并扩展 subagent_delegation。
+                    # F097 Final cross-Phase Codex P2-1 闭环：B-3 backfill 必须 preserve
+                    # 历史 USER_MESSAGE / CONTROL_METADATA_UPDATED 的 TURN_SCOPED 字段
+                    # （target_kind / requested_worker_type / tool_profile 等），
+                    # 否则 merge_control_metadata 取最新事件时这些字段会丢失，
+                    # subagent resume/retry 不再走 subagent context/session 分支。
+                    # F098 Phase E：merge_control_metadata 已合并 USER_MESSAGE +
+                    # CONTROL_METADATA_UPDATED 两类事件，无需修改读取路径。
                     _historical_events = await self._stores.event_store.get_events_for_task(
                         task.task_id
                     )
@@ -2620,18 +2624,18 @@ class AgentContextService(AgentContextTurnWriterMixin):
                         mode="json"
                     )
                     next_seq = await self._stores.event_store.get_next_task_seq(task.task_id)
+                    # F098 Phase E：改用 CONTROL_METADATA_UPDATED + ControlMetadataUpdatedPayload
+                    # 避免 USER_MESSAGE marker text 污染 conversation history（P1-1 修复）。
                     b3_event = Event(
                         event_id=str(ULID()),
                         task_id=task.task_id,
                         task_seq=next_seq,
                         ts=datetime.now(tz=UTC),
-                        type=EventType.USER_MESSAGE,
+                        type=EventType.CONTROL_METADATA_UPDATED,
                         actor=ActorType.SYSTEM,
-                        payload=UserMessagePayload(
-                            text_preview="[subagent delegation session backfill]",
-                            text_length=0,
-                            text="",
+                        payload=ControlMetadataUpdatedPayload(
                             control_metadata=_backfill_control,
+                            source="subagent_delegation_session_backfill",
                         ).model_dump(),
                         trace_id=f"trace-{task.task_id}",
                         causality=EventCausality(idempotency_key=b3_idempotency_key),
