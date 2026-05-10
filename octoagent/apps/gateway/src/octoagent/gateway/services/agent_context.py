@@ -2605,6 +2605,20 @@ class AgentContextService(AgentContextTurnWriterMixin):
                     updated_delegation = _subagent_delegation.model_copy(
                         update={"child_agent_session_id": session.agent_session_id}
                     )
+                    # F097 Final cross-Phase Codex P2-1 闭环：B-3 backfill USER_MESSAGE
+                    # 必须 preserve 历史 USER_MESSAGE 的 TURN_SCOPED 字段（target_kind /
+                    # requested_worker_type / tool_profile 等），否则 merge_control_metadata
+                    # 取最新 USER_MESSAGE 时这些字段会丢失，subagent resume/retry 不再走
+                    # subagent context/session 分支。从历史 events 取 normalize 后的 control_metadata
+                    # 并扩展 subagent_delegation。
+                    _historical_events = await self._stores.event_store.get_events_for_task(
+                        task.task_id
+                    )
+                    _historical_control = merge_control_metadata(_historical_events)
+                    _backfill_control = dict(_historical_control)
+                    _backfill_control["subagent_delegation"] = updated_delegation.model_dump(
+                        mode="json"
+                    )
                     next_seq = await self._stores.event_store.get_next_task_seq(task.task_id)
                     b3_event = Event(
                         event_id=str(ULID()),
@@ -2617,9 +2631,7 @@ class AgentContextService(AgentContextTurnWriterMixin):
                             text_preview="[subagent delegation session backfill]",
                             text_length=0,
                             text="",
-                            control_metadata={
-                                "subagent_delegation": updated_delegation.model_dump(mode="json")
-                            },
+                            control_metadata=_backfill_control,
                         ).model_dump(),
                         trace_id=f"trace-{task.task_id}",
                         causality=EventCausality(idempotency_key=b3_idempotency_key),
