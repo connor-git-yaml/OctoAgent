@@ -153,9 +153,12 @@ async def test_phase_i_worker_runtime_metadata_includes_capability(tmp_path: Pat
 async def test_phase_i_worker_to_worker_source_audit_independence(tmp_path: Path):
     """AC-I3: worker→worker A2A 场景下 source 真实是 worker（B-1 派生），
     target Worker 独立加载（B-2 解析）→ source/target audit chain 完全独立。
+
+    F098 Final Codex P1 闭环：用真实 RuntimeControlContext.turn_executor_kind 字段。
     """
     from unittest.mock import MagicMock
 
+    from octoagent.core.models import TurnExecutorKind
     from octoagent.core.models.agent_context import AgentSessionKind
     from octoagent.gateway.services.orchestrator import OrchestratorService
 
@@ -163,16 +166,17 @@ async def test_phase_i_worker_to_worker_source_audit_independence(tmp_path: Path
     svc._stores = MagicMock()
     svc._delegation_plane = None
 
-    # 模拟 worker A 调用 A2A 给 worker B
+    # 模拟 worker A 调用 A2A 给 worker B（用真实 RuntimeControlContext 字段）
     runtime_context = MagicMock()
-    runtime_context.runtime_kind = "worker"
-    runtime_context.metadata = {"source_worker_capability": "research"}
+    runtime_context.turn_executor_kind = TurnExecutorKind.WORKER
+    runtime_context.worker_capability = "research"
+    runtime_context.metadata = {}
     runtime_context.surface = "chat"
     runtime_context.session_id = ""
 
     source_role, source_session_kind, source_uri = svc._resolve_a2a_source_role(
         runtime_context=runtime_context,
-        runtime_metadata={"source_worker_capability": "research"},
+        runtime_metadata={},
         envelope_metadata={},
     )
 

@@ -198,15 +198,24 @@ async def test_cleanup_idempotent_via_idempotency_key(tmp_path: Path):
 
 
 @pytest.mark.asyncio
-async def test_cleanup_rollback_on_session_save_failure(tmp_path: Path):
-    """AC-G3: session.save 失败 → conn.rollback 全部撤销（event + session 一致性）。"""
+async def test_cleanup_session_save_failure_audit_chain_preserved(tmp_path: Path):
+    """AC-G3: session.save 失败 → SUBAGENT_COMPLETED 已独立 commit（audit chain 优先）+ session 保持 ACTIVE。
+
+    F098 Phase G + Final Codex P2 修复后的设计：
+    - event 通过 append_event_committed 独立 commit（保留 task_seq 重试 + per-task lock）
+    - session 通过单独的 save_agent_session + commit
+    - session.save 失败 → 仅 session 部分 rollback（event 已独立 commit）
+    - 这是颠倒顺序设计：失败模式从"session closed 但无 audit"→"audit 存在但 session 未 close"
+      （audit chain 优先，与 F097 Phase B-4 设计一致）
+
+    后果：下次 cleanup 重试时 idempotency_key 守护 event 短路，重新尝试关 session。
+    最终一致性达成：audit 永远存在 + session 最终 close。
+    """
     store_group, runner, parent_task_id, child_task_id, delegation = (
         await _setup_completed_subagent_task(tmp_path)
     )
     try:
         # mock save_agent_session 抛异常
-        original_save = store_group.agent_context_store.save_agent_session
-
         async def failing_save(*args, **kwargs):
             raise RuntimeError("simulated save failure for atomic test")
 
@@ -215,27 +224,43 @@ async def test_cleanup_rollback_on_session_save_failure(tmp_path: Path):
             "save_agent_session",
             side_effect=failing_save,
         ):
-            # cleanup 应触发异常并被 task_runner outer try/except 捕获 + log warn 不 raise
-            # （F097/F098 Phase G 异常隔离要求）
+            # cleanup 应触发异常被 task_runner outer try/except 捕获（log warn 不 raise）
             await runner._close_subagent_session_if_needed(child_task_id)
 
-        # rollback 后：SUBAGENT_COMPLETED 事件应不存在（atomic 全部回滚）
+        # AC-G3: SUBAGENT_COMPLETED 事件已独立 commit（audit chain 优先设计）
         events = await store_group.event_store.get_events_for_task(parent_task_id)
         completed_events = [e for e in events if e.type is EventType.SUBAGENT_COMPLETED]
-        # 注意：cleanup 内 outer try/except log warn 但 atomic rollback 应已撤销 event
-        assert len(completed_events) == 0, (
-            f"AC-G3 失败：rollback 后 SUBAGENT_COMPLETED 事件仍存在 "
-            f"（atomic 事务未生效；count={len(completed_events)}）"
+        assert len(completed_events) >= 1, (
+            "AC-G3 失败：SUBAGENT_COMPLETED 事件应已独立 commit（audit chain 优先）"
         )
 
-        # session 状态保持 ACTIVE（save 失败 + rollback）
+        # AC-G3: session 状态保持 ACTIVE（save 失败 → rollback session 部分）
         session = await store_group.agent_context_store.get_agent_session(
             delegation.child_agent_session_id
         )
         assert session is not None
         assert session.status == AgentSessionStatus.ACTIVE, (
-            f"AC-G3 失败：rollback 后 session 状态变化（atomic 事务未生效；"
-            f"实际 {session.status}）"
+            f"AC-G3 失败：rollback 后 session 状态应保持 ACTIVE，实际 {session.status}"
+        )
+
+        # AC-G3 重试守护：下次 cleanup 应短路重复 emit event 但仍尝试 close session
+        # （因 mock 已退出，第二次 save_agent_session 应成功）
+        await runner._close_subagent_session_if_needed(child_task_id)
+        events_after_retry = await store_group.event_store.get_events_for_task(parent_task_id)
+        completed_count_retry = sum(
+            1 for e in events_after_retry if e.type is EventType.SUBAGENT_COMPLETED
+        )
+        assert completed_count_retry == len(completed_events), (
+            f"AC-G3 重试守护失败：idempotency_key 未短路重复 emit，event count "
+            f"{len(completed_events)} → {completed_count_retry}"
+        )
+
+        # 重试后 session 最终 CLOSED
+        session_final = await store_group.agent_context_store.get_agent_session(
+            delegation.child_agent_session_id
+        )
+        assert session_final.status == AgentSessionStatus.CLOSED, (
+            f"AC-G3 最终一致性失败：重试后 session 仍未 close，实际 {session_final.status}"
         )
     finally:
         await store_group.conn.close()
