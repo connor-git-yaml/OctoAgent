@@ -830,61 +830,41 @@ class A2ADispatchMixin:
         runtime_metadata: dict[str, Any],
         envelope_metadata: dict[str, Any],
     ) -> tuple[AgentRuntimeRole, AgentSessionKind, str]:
-        """F098 Phase B-1 (Codex review P1 闭环): 从 RuntimeControlContext 派生 A2A source。
+        """F098 Phase B-1: 从显式 source 信号派生 A2A source role / session_kind / agent_uri。
 
         baseline 硬编码 source = MAIN/MAIN_BOOTSTRAP/main.agent，导致 worker→worker A2A
         被错误记录为 main→worker，audit chain 错误（AC-C3 / AC-I3 失败）。
 
-        Final Codex review P1 修复：用 RuntimeControlContext.turn_executor_kind
-        （真实存在的字段，TurnExecutorKind enum：SELF / WORKER / SUBAGENT）+
-        worker_capability 派生 source role / session_kind / agent_uri。
+        Phase D Codex post-review P1 修复：**不能用 RuntimeControlContext.turn_executor_kind**
+        派生 source —— DelegationPlane.prepare_dispatch 会按 target 的 target_kind=worker
+        把 turn_executor_kind 设为 WORKER（target 侧），主 Agent dispatch 也会被误判为
+        source=worker。
 
-        派生规则：
-        - turn_executor_kind == WORKER → WORKER / WORKER_INTERNAL / "worker.<capability>"
-        - turn_executor_kind == SUBAGENT → 同上（按 worker 处理保持 audit 一致性）
-        - turn_executor_kind == SELF（默认主 Agent dispatch）→ MAIN / MAIN_BOOTSTRAP / "main.agent"
-        - runtime_context 缺失 → 默认 main 路径（不 raise）
+        正确派生规则（仅信任显式 source 信号）：
+        - envelope.metadata.source_runtime_kind == "worker"/"subagent" → WORKER 路径
+          （worker→worker dispatch 时 task_runner / capability_pack 在 spawn 阶段显式注入）
+        - runtime_metadata.source_runtime_kind 同上（fallback）
+        - 否则 → MAIN / MAIN_BOOTSTRAP / "main.agent"（默认主 Agent dispatch，baseline 行为）
+
+        worker→worker 解禁后扩展点：spawn 路径需在 envelope.metadata 注入
+        source_runtime_kind=worker 信号才能正确派生 source。当前 baseline 不注入 →
+        worker→worker dispatch 仍记录为 main→worker（行为兼容 baseline）。
+        F099+ ask-back / source 泛化时一并补齐 spawn 路径注入逻辑。
 
         返回 (role, session_kind, agent_uri) 三元组。
         """
-        from octoagent.core.models import TurnExecutorKind
-
-        # 优先从 RuntimeControlContext.turn_executor_kind 派生（真实存在的字段）
-        turn_executor_kind = ""
-        capability_hint = ""
-        if runtime_context is not None:
-            te_kind_raw = getattr(runtime_context, "turn_executor_kind", None)
-            if te_kind_raw is not None:
-                turn_executor_kind = str(
-                    te_kind_raw.value if hasattr(te_kind_raw, "value") else te_kind_raw
-                ).strip().lower()
-            capability_hint = str(
-                getattr(runtime_context, "worker_capability", "") or ""
-            ).strip()
-
-        # fallback 信号：envelope metadata 显式注入（用于覆盖测试或非标准入口）
-        if not turn_executor_kind:
-            turn_executor_kind = str(
-                envelope_metadata.get("source_turn_executor_kind", "")
-                or envelope_metadata.get("source_runtime_kind", "")
-            ).strip().lower()
-        if not turn_executor_kind:
-            turn_executor_kind = str(
-                runtime_metadata.get("source_turn_executor_kind", "")
-                or runtime_metadata.get("source_runtime_kind", "")
-            ).strip().lower()
+        # 仅信任显式 source 信号（envelope.metadata 或 runtime_metadata）
+        # 不使用 turn_executor_kind（这是 target 侧字段，被 prepare_dispatch 写入 target_kind）
+        source_runtime_kind = str(
+            envelope_metadata.get("source_runtime_kind", "")
+            or runtime_metadata.get("source_runtime_kind", "")
+        ).strip().lower()
 
         # 派生 source role
-        if turn_executor_kind in (
-            TurnExecutorKind.WORKER.value,
-            TurnExecutorKind.SUBAGENT.value,
-        ):
+        if source_runtime_kind in ("worker", "subagent"):
             source_capability = self._first_non_empty(
-                capability_hint,
-                str(runtime_metadata.get("source_worker_capability", "")),
-                str(runtime_metadata.get("worker_capability", "")),
                 str(envelope_metadata.get("source_worker_capability", "")),
-                str(envelope_metadata.get("worker_capability", "")),
+                str(runtime_metadata.get("source_worker_capability", "")),
             )
             return (
                 AgentRuntimeRole.WORKER,
@@ -893,7 +873,7 @@ class A2ADispatchMixin:
                     f"worker.{source_capability}" if source_capability else "worker.unknown"
                 ),
             )
-        # default: main path（turn_executor_kind == SELF 或缺失，regression 防护）
+        # default: main path（regression 防护，无显式 source 信号时保持 baseline）
         return (
             AgentRuntimeRole.MAIN,
             AgentSessionKind.MAIN_BOOTSTRAP,

@@ -426,17 +426,23 @@ async def register(broker, deps: ToolDeps) -> None:
                 # 优先复用 caller AGENT_PRIVATE namespace 的 scope_id（与 _ensure_memory_namespaces
                 # α 路径一致）。subagent runtime 自身没有 AGENT_PRIVATE namespace（Phase F TF.2
                 # α 语义不为 subagent 创建），因此原 worker default 路径会 SCOPE_UNRESOLVED 拒绝。
+                # F098 Phase E + Phase D Codex P2 闭环：subagent_delegation 现在写入
+                # CONTROL_METADATA_UPDATED 事件（不再用 USER_MESSAGE 复用承载）。
+                # consumer 同时读取 USER_MESSAGE（向后兼容历史 task）和 CONTROL_METADATA_UPDATED。
                 subagent_caller_scope_resolved = False
                 if task is not None:
                     try:
-                        # 从 task 最新 USER_MESSAGE event 反序列化 SubagentDelegation
+                        # 从 task 最新 USER_MESSAGE 或 CONTROL_METADATA_UPDATED event 反序列化 SubagentDelegation
                         events = await deps.stores.event_store.get_events_for_task(
                             task.task_id
                         )
                         from octoagent.core.models import EventType as _EventType, SubagentDelegation as _SD
 
                         for event in reversed(events):
-                            if event.type is not _EventType.USER_MESSAGE:
+                            if event.type not in (
+                                _EventType.USER_MESSAGE,
+                                _EventType.CONTROL_METADATA_UPDATED,
+                            ):
                                 continue
                             cm = (event.payload or {}).get("control_metadata", {}) or {}
                             raw_d = cm.get("subagent_delegation")

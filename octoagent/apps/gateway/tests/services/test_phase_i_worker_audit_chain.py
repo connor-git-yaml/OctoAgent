@@ -166,18 +166,15 @@ async def test_phase_i_worker_to_worker_source_audit_independence(tmp_path: Path
     svc._stores = MagicMock()
     svc._delegation_plane = None
 
-    # 模拟 worker A 调用 A2A 给 worker B（用真实 RuntimeControlContext 字段）
-    runtime_context = MagicMock()
-    runtime_context.turn_executor_kind = TurnExecutorKind.WORKER
-    runtime_context.worker_capability = "research"
-    runtime_context.metadata = {}
-    runtime_context.surface = "chat"
-    runtime_context.session_id = ""
-
+    # 模拟 worker A 调用 A2A 给 worker B（用 envelope.metadata.source_runtime_kind 显式信号）
+    # Phase D Codex P1 闭环：不再用 turn_executor_kind（避免与 target_kind 混淆）
     source_role, source_session_kind, source_uri = svc._resolve_a2a_source_role(
-        runtime_context=runtime_context,
+        runtime_context=None,
         runtime_metadata={},
-        envelope_metadata={},
+        envelope_metadata={
+            "source_runtime_kind": "worker",
+            "source_worker_capability": "research",
+        },
     )
 
     # AC-I3 Layer A: source 真实反映 worker（不是 main）

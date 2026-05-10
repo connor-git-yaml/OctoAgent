@@ -45,15 +45,18 @@ def _make_orchestrator(store_group, **kwargs) -> OrchestratorService:
 
 def _make_runtime_context(
     *,
-    turn_executor_kind: str = "self",
+    turn_executor_kind: str = "self",  # 保留兼容旧测试签名（实际不再被 source 派生使用）
     worker_capability: str = "",
     metadata: dict | None = None,
 ):
-    """构造 RuntimeControlContext mock（F098 Final Codex P1 闭环：用真实字段名）。"""
+    """构造 RuntimeControlContext mock。
+
+    F098 Phase D Codex P1 闭环：source 派生不再用 turn_executor_kind（避免与 target_kind 混淆）。
+    现在改用 envelope.metadata.source_runtime_kind 显式信号派生（baseline 默认 main）。
+    """
     from octoagent.core.models import TurnExecutorKind
 
     rc = MagicMock()
-    # 关键：turn_executor_kind 是 enum，需要 .value 属性
     rc.turn_executor_kind = TurnExecutorKind(turn_executor_kind)
     rc.worker_capability = worker_capability
     rc.metadata = metadata or {}
@@ -84,18 +87,20 @@ def test_resolve_a2a_source_role_main_default(tmp_path: Path):
     assert uri == "agent://main.agent"
 
 
-def test_resolve_a2a_source_role_worker_from_runtime_context(tmp_path: Path):
-    """AC-B1-S1: runtime_context.turn_executor_kind=worker → WORKER / WORKER_INTERNAL / "worker.<cap>"。"""
+def test_resolve_a2a_source_role_worker_from_envelope_metadata(tmp_path: Path):
+    """AC-B1-S1: envelope.metadata.source_runtime_kind=worker → WORKER / WORKER_INTERNAL / "worker.<cap>"。
+
+    Phase D Codex P1 修复后：source 派生仅信任 envelope.metadata.source_runtime_kind 显式信号。
+    """
     svc = _make_orchestrator(store_group=MagicMock())
 
-    runtime_context = _make_runtime_context(
-        turn_executor_kind="worker",
-        worker_capability="research",
-    )
     role, kind, uri = svc._resolve_a2a_source_role(
-        runtime_context=runtime_context,
+        runtime_context=None,
         runtime_metadata={},
-        envelope_metadata={},
+        envelope_metadata={
+            "source_runtime_kind": "worker",
+            "source_worker_capability": "research",
+        },
     )
 
     assert role == AgentRuntimeRole.WORKER
@@ -103,17 +108,17 @@ def test_resolve_a2a_source_role_worker_from_runtime_context(tmp_path: Path):
     assert uri == "agent://worker.research"
 
 
-def test_resolve_a2a_source_role_worker_from_envelope_metadata(tmp_path: Path):
-    """AC-B1-S1 alt: envelope.metadata.source_turn_executor_kind=worker（runtime_context 缺失）→ WORKER。"""
+def test_resolve_a2a_source_role_worker_from_runtime_metadata_fallback(tmp_path: Path):
+    """AC-B1-S1 alt: runtime_metadata.source_runtime_kind=worker（envelope 无）→ WORKER（fallback 信号）。"""
     svc = _make_orchestrator(store_group=MagicMock())
 
     role, kind, uri = svc._resolve_a2a_source_role(
-        runtime_context=None,  # 模拟 runtime_context 缺失
-        runtime_metadata={},
-        envelope_metadata={
-            "source_turn_executor_kind": "worker",
+        runtime_context=None,
+        runtime_metadata={
+            "source_runtime_kind": "worker",
             "source_worker_capability": "code",
         },
+        envelope_metadata={},
     )
 
     assert role == AgentRuntimeRole.WORKER
@@ -125,11 +130,10 @@ def test_resolve_a2a_source_role_worker_no_capability_fallback(tmp_path: Path):
     """AC-B1-S4: source 是 worker 但 capability 缺失 → "worker.unknown" agent_uri。"""
     svc = _make_orchestrator(store_group=MagicMock())
 
-    runtime_context = _make_runtime_context(turn_executor_kind="worker", worker_capability="")
     role, kind, uri = svc._resolve_a2a_source_role(
-        runtime_context=runtime_context,
+        runtime_context=None,
         runtime_metadata={},
-        envelope_metadata={},
+        envelope_metadata={"source_runtime_kind": "worker"},
     )
 
     assert role == AgentRuntimeRole.WORKER
@@ -138,7 +142,7 @@ def test_resolve_a2a_source_role_worker_no_capability_fallback(tmp_path: Path):
 
 
 def test_resolve_a2a_source_role_runtime_context_none_fallback(tmp_path: Path):
-    """AC-B1-S4: runtime_context 完全缺失（None）→ 默认 main 路径（不 raise）。"""
+    """AC-B1-S4: runtime_context 完全缺失（None）+ 无显式 source 信号 → 默认 main 路径。"""
     svc = _make_orchestrator(store_group=MagicMock())
 
     role, kind, uri = svc._resolve_a2a_source_role(
@@ -156,19 +160,47 @@ def test_resolve_a2a_source_role_subagent_handled_as_worker(tmp_path: Path):
     """AC-B1-S1 兼容性：subagent runtime 走 A2A 时按 worker 处理（保持 audit 一致性）。"""
     svc = _make_orchestrator(store_group=MagicMock())
 
-    runtime_context = _make_runtime_context(
-        turn_executor_kind="subagent",
-        worker_capability="search",
-    )
     role, kind, uri = svc._resolve_a2a_source_role(
-        runtime_context=runtime_context,
+        runtime_context=None,
         runtime_metadata={},
-        envelope_metadata={},
+        envelope_metadata={
+            "source_runtime_kind": "subagent",
+            "source_worker_capability": "search",
+        },
     )
 
     assert role == AgentRuntimeRole.WORKER
     assert kind == AgentSessionKind.WORKER_INTERNAL
     assert uri == "agent://worker.search"
+
+
+def test_resolve_a2a_source_role_target_turn_executor_kind_does_not_pollute_source(tmp_path: Path):
+    """AC-B1-S2 / Phase D Codex P1 闭环: 即使 RuntimeControlContext.turn_executor_kind 是 WORKER
+    （prepare_dispatch 按 target_kind 写入），source 仍是 main（无显式 source 信号时 baseline 行为）。
+
+    防回归：避免误用 target 侧 turn_executor_kind 字段污染 source 身份。
+    """
+    from octoagent.core.models import TurnExecutorKind
+
+    svc = _make_orchestrator(store_group=MagicMock())
+
+    runtime_context = MagicMock()
+    runtime_context.turn_executor_kind = TurnExecutorKind.WORKER  # target 侧字段
+    runtime_context.worker_capability = "research"  # target capability
+    runtime_context.metadata = {}
+
+    role, kind, uri = svc._resolve_a2a_source_role(
+        runtime_context=runtime_context,
+        runtime_metadata={},
+        envelope_metadata={},  # 无显式 source 信号
+    )
+
+    # 期望：默认 main（不被 target turn_executor_kind 误导）
+    assert role == AgentRuntimeRole.MAIN, (
+        "Phase D Codex P1 闭环失败：误用 target turn_executor_kind 派生 source"
+    )
+    assert kind == AgentSessionKind.MAIN_BOOTSTRAP
+    assert uri == "agent://main.agent"
 
 
 # ---- B-2 target profile 解析 ----
