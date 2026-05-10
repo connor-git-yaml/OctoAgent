@@ -218,6 +218,41 @@ class TaskRunner:
             # （SubagentDelegation 字段 min_length=1 不允许空字符串）
             caller_runtime = raw.get("caller_agent_runtime_id", "") or "<unknown>"
             caller_proj = raw.get("caller_project_id", "") or "<unknown>"
+            # TF.1: 查询 caller 的 AGENT_PRIVATE namespace IDs，填入 caller_memory_namespace_ids。
+            # α 语义（OD-1 锁定）：subagent 直接复用 caller 的 AGENT_PRIVATE namespace ID，
+            # 不创建新的 namespace row。仅 caller_agent_runtime_id 有效时查询，
+            # 失败时 caller_memory_namespace_ids = []，log warn 不阻断。
+            caller_memory_namespace_ids: list[str] = []
+            if caller_runtime != "<unknown>":
+                try:
+                    from octoagent.core.models import MemoryNamespaceKind
+
+                    caller_namespaces = (
+                        await self._stores.agent_context_store.list_memory_namespaces(
+                            agent_runtime_id=caller_runtime,
+                            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+                        )
+                    )
+                    caller_memory_namespace_ids = [
+                        ns.namespace_id for ns in caller_namespaces
+                    ]
+                    if caller_memory_namespace_ids:
+                        log.debug(
+                            "subagent_delegation_caller_namespaces_found",
+                            caller_agent_runtime_id=caller_runtime,
+                            namespace_ids=caller_memory_namespace_ids,
+                        )
+                    else:
+                        log.warning(
+                            "subagent_delegation_caller_namespaces_empty",
+                            caller_agent_runtime_id=caller_runtime,
+                        )
+                except Exception as ns_exc:
+                    log.warning(
+                        "subagent_delegation_caller_namespaces_lookup_failed",
+                        caller_agent_runtime_id=caller_runtime,
+                        error=str(ns_exc),
+                    )
             delegation = SubagentDelegation(
                 delegation_id=raw["delegation_id"],
                 parent_task_id=raw["parent_task_id"],
@@ -226,7 +261,7 @@ class TaskRunner:
                 child_agent_session_id=None,
                 caller_agent_runtime_id=caller_runtime,
                 caller_project_id=caller_proj,
-                caller_memory_namespace_ids=[],
+                caller_memory_namespace_ids=caller_memory_namespace_ids,
                 spawned_by=raw["spawned_by"],
                 created_at=datetime.now(tz=UTC),
             )

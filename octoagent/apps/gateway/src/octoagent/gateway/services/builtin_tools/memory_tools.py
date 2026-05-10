@@ -422,45 +422,91 @@ async def register(broker, deps: ToolDeps) -> None:
                 agent_runtime_id_val = ""
 
             if not explicit_scope_provided and agent_runtime_id_val:
-                # F094 B4 HIGH-1 fail-closed 路径：必须解析到 AGENT_PRIVATE
-                try:
-                    worker_scope = await resolve_worker_default_scope_id(
-                        deps,
-                        project_id=(project.project_id if project is not None else ""),
-                        agent_runtime_id=agent_runtime_id_val,
-                    )
-                    resolved_scope_id = worker_scope
-                    scope_ids = [worker_scope]
-                    # captured namespace 信息 给 emit 复用（避免 commit 后反查 race）
-                    matched_namespaces = (
-                        await deps.stores.agent_context_store.list_memory_namespaces(
-                            project_id=(
-                                project.project_id if project is not None else None
-                            ),
-                            agent_runtime_id=agent_runtime_id_val,
-                            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+                # F097 Phase F P1 闭环（α 语义）：subagent 默认 memory.write 路径
+                # 优先复用 caller AGENT_PRIVATE namespace 的 scope_id（与 _ensure_memory_namespaces
+                # α 路径一致）。subagent runtime 自身没有 AGENT_PRIVATE namespace（Phase F TF.2
+                # α 语义不为 subagent 创建），因此原 worker default 路径会 SCOPE_UNRESOLVED 拒绝。
+                subagent_caller_scope_resolved = False
+                if task is not None:
+                    try:
+                        # 从 task 最新 USER_MESSAGE event 反序列化 SubagentDelegation
+                        events = await deps.stores.event_store.get_events_for_task(
+                            task.task_id
                         )
-                    )
-                    if matched_namespaces:
-                        captured_namespace_id = matched_namespaces[0].namespace_id
-                        captured_namespace_kind = matched_namespaces[0].kind.value
-                except WorkerMemoryNamespaceNotResolved as exc:
-                    return MemoryWriteResult(
-                        status="rejected",
-                        target="memory_store",
-                        preview=f"无法解析 worker private namespace: {exc}",
-                        reason=(
-                            f"SCOPE_UNRESOLVED: F094 NFR-3 fail-closed: "
-                            f"agent_runtime_id={agent_runtime_id_val} 但未找到"
-                            f" active AGENT_PRIVATE namespace；上游 dispatch 路径"
-                            f" 应该已经创建过——请检查 agent_context.resolve 与"
-                            f" memory_namespaces 表数据一致性。原始异常: {exc}"
-                        ),
-                        memory_id="",
-                        version=0,
-                        action="create",
-                        scope_id="",
-                    )
+                        from octoagent.core.models import EventType as _EventType, SubagentDelegation as _SD
+
+                        for event in reversed(events):
+                            if event.type is not _EventType.USER_MESSAGE:
+                                continue
+                            cm = (event.payload or {}).get("control_metadata", {}) or {}
+                            raw_d = cm.get("subagent_delegation")
+                            if not raw_d:
+                                continue
+                            delegation = (
+                                _SD.model_validate_json(raw_d)
+                                if isinstance(raw_d, str)
+                                else _SD.model_validate(raw_d)
+                            )
+                            caller_ns_ids = list(delegation.caller_memory_namespace_ids or [])
+                            if not caller_ns_ids:
+                                break  # 无 caller namespace，走 degrade
+                            caller_ns = (
+                                await deps.stores.agent_context_store.get_memory_namespace(
+                                    caller_ns_ids[0]
+                                )
+                            )
+                            if caller_ns is not None and caller_ns.memory_scope_ids:
+                                resolved_scope_id = caller_ns.memory_scope_ids[0]
+                                scope_ids = [resolved_scope_id]
+                                captured_namespace_id = caller_ns.namespace_id
+                                captured_namespace_kind = caller_ns.kind.value
+                                subagent_caller_scope_resolved = True
+                            break
+                    except Exception:
+                        # 失败降级到原 worker default 路径
+                        pass
+                if subagent_caller_scope_resolved:
+                    pass  # subagent 走 caller scope，跳过 worker default 解析
+                else:
+                    # F094 B4 HIGH-1 fail-closed 路径：必须解析到 AGENT_PRIVATE
+                    try:
+                        worker_scope = await resolve_worker_default_scope_id(
+                            deps,
+                            project_id=(project.project_id if project is not None else ""),
+                            agent_runtime_id=agent_runtime_id_val,
+                        )
+                        resolved_scope_id = worker_scope
+                        scope_ids = [worker_scope]
+                        # captured namespace 信息 给 emit 复用（避免 commit 后反查 race）
+                        matched_namespaces = (
+                            await deps.stores.agent_context_store.list_memory_namespaces(
+                                project_id=(
+                                    project.project_id if project is not None else None
+                                ),
+                                agent_runtime_id=agent_runtime_id_val,
+                                kind=MemoryNamespaceKind.AGENT_PRIVATE,
+                            )
+                        )
+                        if matched_namespaces:
+                            captured_namespace_id = matched_namespaces[0].namespace_id
+                            captured_namespace_kind = matched_namespaces[0].kind.value
+                    except WorkerMemoryNamespaceNotResolved as exc:
+                        return MemoryWriteResult(
+                            status="rejected",
+                            target="memory_store",
+                            preview=f"无法解析 worker private namespace: {exc}",
+                            reason=(
+                                f"SCOPE_UNRESOLVED: F094 NFR-3 fail-closed: "
+                                f"agent_runtime_id={agent_runtime_id_val} 但未找到"
+                                f" active AGENT_PRIVATE namespace；上游 dispatch 路径"
+                                f" 应该已经创建过——请检查 agent_context.resolve 与"
+                                f" memory_namespaces 表数据一致性。原始异常: {exc}"
+                            ),
+                            memory_id="",
+                            version=0,
+                            action="create",
+                            scope_id="",
+                        )
             else:
                 # 显式 scope_id 或 legacy 无 agent_runtime_id 路径走 baseline
                 scope_ids = await resolve_memory_scope_ids(

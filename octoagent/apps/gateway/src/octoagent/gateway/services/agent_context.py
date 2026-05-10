@@ -1399,11 +1399,36 @@ class AgentContextService(AgentContextTurnWriterMixin):
             task=task,
             project=project,
         )
+        # F097 TF.2: 若当前是 SUBAGENT_INTERNAL，读取 SubagentDelegation 以传入
+        # _ensure_memory_namespaces α 共享路径。仅 target_kind=subagent 时尝试读取，
+        # 失败时 _subagent_delegation_for_memory = None（fallback 走正常创建路径）。
+        _subagent_delegation_for_memory: SubagentDelegation | None = None
+        if _target_kind_for_profile == "subagent":
+            try:
+                _task_events = await self._stores.event_store.get_events_for_task(task.task_id)
+                _control = merge_control_metadata(_task_events)
+                _raw_del_mem = _control.get("subagent_delegation")
+                if _raw_del_mem:
+                    if isinstance(_raw_del_mem, str):
+                        _subagent_delegation_for_memory = SubagentDelegation.model_validate_json(
+                            _raw_del_mem
+                        )
+                    else:
+                        _subagent_delegation_for_memory = SubagentDelegation.model_validate(
+                            _raw_del_mem
+                        )
+            except Exception as _mem_del_exc:
+                log.warning(
+                    "subagent_delegation_memory_lookup_failed",
+                    task_id=task.task_id,
+                    error=str(_mem_del_exc),
+                )
         memory_namespaces = await self._ensure_memory_namespaces(
             project=project,
             agent_runtime=agent_runtime,
             agent_session=agent_session,
             project_memory_scope_ids=project_memory_scope_ids,
+            _subagent_delegation=_subagent_delegation_for_memory,
         )
         (
             memory_hits,
@@ -2624,7 +2649,113 @@ class AgentContextService(AgentContextTurnWriterMixin):
         agent_runtime: AgentRuntime,
         agent_session: AgentSession,
         project_memory_scope_ids: list[str],
+        _subagent_delegation: SubagentDelegation | None = None,
     ) -> list[MemoryNamespace]:
+        # F097 TF.2: subagent α 共享引用路径（OD-1 α 语义锁定）。
+        # 当传入 _subagent_delegation 时，表示当前 agent 是 SUBAGENT_INTERNAL，
+        # 直接复用 caller 的 AGENT_PRIVATE namespace ID，不创建新的 namespace row。
+        # fallback：若 caller_memory_namespace_ids 为空，subagent 不获得 AGENT_PRIVATE
+        # namespace（只读 PROJECT_SHARED 等公共 namespace），log warn 不报错。
+        # Worker / main 路径：_subagent_delegation=None，行为完全不变（AC-F2 regression 防护）。
+        # F097 Phase F P2-1 闭环（Codex Phase F medium）：SUBAGENT_INTERNAL session 但
+        # SubagentDelegation lookup 失败时（event 缺失/反序列化错/DB 错误等 degraded 场景），
+        # 必须 fail-closed 不创建独立 AGENT_PRIVATE namespace（违反 AC-F1 α 语义）。
+        # session.kind 比 _subagent_delegation 更可靠（不依赖 metadata 反序列化）。
+        if (
+            agent_session.kind is AgentSessionKind.SUBAGENT_INTERNAL
+            and _subagent_delegation is None
+        ):
+            log.warning(
+                "subagent_memory_namespaces_degraded_no_delegation",
+                agent_runtime_id=agent_runtime.agent_runtime_id,
+                agent_session_id=agent_session.agent_session_id,
+                reason="SUBAGENT_INTERNAL session 但 SubagentDelegation 不可读 — fail-closed 仅返回 PROJECT_SHARED",
+            )
+            project_id = project.project_id if project is not None else ""
+            project_scope_ids = list(
+                dict.fromkeys(scope for scope in project_memory_scope_ids if scope)
+            )
+            namespaces: list[MemoryNamespace] = []
+            if project_id or project_scope_ids:
+                project_namespace_id = self._build_memory_namespace_id(
+                    kind=MemoryNamespaceKind.PROJECT_SHARED,
+                    project_id=project_id,
+                    agent_runtime_id=agent_runtime.agent_runtime_id,
+                )
+                project_existing = await self._stores.agent_context_store.get_memory_namespace(
+                    project_namespace_id
+                )
+                if project_existing is not None:
+                    namespaces.append(project_existing)
+            return namespaces
+
+        if _subagent_delegation is not None:
+            project_id = project.project_id if project is not None else ""
+            project_scope_ids = list(
+                dict.fromkeys(scope for scope in project_memory_scope_ids if scope)
+            )
+            namespaces: list[MemoryNamespace] = []
+            # 先处理 PROJECT_SHARED（与 main/worker 路径相同逻辑）
+            if project_id or project_scope_ids:
+                project_namespace_id = self._build_memory_namespace_id(
+                    kind=MemoryNamespaceKind.PROJECT_SHARED,
+                    project_id=project_id,
+                    agent_runtime_id=agent_runtime.agent_runtime_id,
+                )
+                project_existing = await self._stores.agent_context_store.get_memory_namespace(
+                    project_namespace_id
+                )
+                project_namespace = (
+                    project_existing.model_copy(
+                        update={
+                            "project_id": project_id,
+                            "agent_runtime_id": agent_runtime.agent_runtime_id,
+                            "kind": MemoryNamespaceKind.PROJECT_SHARED,
+                            "name": "Project Shared",
+                            "description": "Project 共享记忆命名空间。",
+                            "memory_scope_ids": project_scope_ids,
+                            "metadata": {
+                                **project_existing.metadata,
+                                "source": "agent_context.resolve",
+                            },
+                            "updated_at": datetime.now(tz=UTC),
+                        }
+                    )
+                    if project_existing is not None
+                    else MemoryNamespace(
+                        namespace_id=project_namespace_id,
+                        project_id=project_id,
+                        agent_runtime_id=agent_runtime.agent_runtime_id,
+                        kind=MemoryNamespaceKind.PROJECT_SHARED,
+                        name="Project Shared",
+                        description="Project 共享记忆命名空间。",
+                        memory_scope_ids=project_scope_ids,
+                        metadata={"source": "agent_context.resolve"},
+                    )
+                )
+                await self._stores.agent_context_store.save_memory_namespace(project_namespace)
+                namespaces.append(project_namespace)
+            # α 语义：用 caller 的 AGENT_PRIVATE namespace ID，不创建新 namespace row
+            caller_ns_ids = _subagent_delegation.caller_memory_namespace_ids
+            if caller_ns_ids:
+                # 从 store 加载 caller 的已有 AGENT_PRIVATE namespace 对象（只读引用）
+                for ns_id in caller_ns_ids:
+                    caller_ns = await self._stores.agent_context_store.get_memory_namespace(ns_id)
+                    if caller_ns is not None:
+                        namespaces.append(caller_ns)
+                log.debug(
+                    "subagent_memory_namespaces_alpha_shared",
+                    agent_runtime_id=agent_runtime.agent_runtime_id,
+                    caller_namespace_ids=caller_ns_ids,
+                    delegation_id=_subagent_delegation.delegation_id,
+                )
+            else:
+                log.warning(
+                    "subagent_memory_namespaces_alpha_empty_caller_ids",
+                    agent_runtime_id=agent_runtime.agent_runtime_id,
+                    delegation_id=_subagent_delegation.delegation_id,
+                )
+            return namespaces
         project_id = project.project_id if project is not None else ""
         project_scope_ids = list(
             dict.fromkeys(scope for scope in project_memory_scope_ids if scope)

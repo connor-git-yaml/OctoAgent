@@ -524,7 +524,7 @@
 
 ---
 
-### TF.1 `[code]` spawn 时填充 `caller_memory_namespace_ids`（Phase A/B 补全）
+### TF.1 `[x]` `[code]` spawn 时填充 `caller_memory_namespace_ids`（Phase A/B 补全）
 
 **描述**：在 spawn 路径（`delegation_plane.py` 或 `capability_pack.py` 的 SubagentDelegation 创建点）中，读取 caller AgentRuntime 的当前 AGENT_PRIVATE namespace IDs，填充到 `SubagentDelegation.caller_memory_namespace_ids`，随 child_task.metadata 持久化。具体注入点以 TB.1 实施后的实际代码结构为准。
 
@@ -540,7 +540,7 @@
 
 ---
 
-### TF.2 `[code]` `_ensure_memory_namespaces` 增 subagent α 共享路径
+### TF.2 `[x]` `[code]` `_ensure_memory_namespaces` 增 subagent α 共享路径
 
 **描述**：在 `agent_context.py` 的 `_ensure_memory_namespaces`（plan 记录 line 2463/2517 附近，以 T0.2 侦察结果为准）中新增 subagent 路径：当 `agent_runtime.delegation_mode == "subagent"` 时，从 task metadata 读取 `SubagentDelegation.caller_memory_namespace_ids`，直接返回 caller 的 namespace ID 集合，**不为 Subagent 创建新的 AGENT_PRIVATE namespace row**（AC-F1 α 语义）。fallback：若无法读取 caller namespace IDs，走正常创建路径（异常恢复）。
 
@@ -556,7 +556,7 @@
 
 ---
 
-### TF.3 `[test]` Memory α 共享单测
+### TF.3 `[x]` `[test]` Memory α 共享单测
 
 **描述**：单测覆盖：subagent 路径下 `_ensure_memory_namespaces` 不创建新 namespace row（mock store，断言 save_namespace 未调用）；返回的 namespace IDs 等于 mock 的 caller_memory_namespace_ids；fallback 场景（caller_memory_namespace_ids 为空）不报错，走创建路径；Worker spawn 路径（target_kind=WORKER）的 `_ensure_memory_namespaces` 行为不受影响（F094 AGENT_PRIVATE 独立路径）。
 
@@ -572,7 +572,7 @@
 
 ---
 
-### TF.4 `[test]` Memory α 共享集成测（AC-F3 核心）
+### TF.4 `[x]` `[test]` Memory α 共享集成测（AC-F3 核心）
 
 **描述**：集成测验证 α 语义端到端：1）Worker（caller）在 AGENT_PRIVATE namespace 写入 fact X；2）spawn Subagent（触发 TF.1/TF.2 路径）；3）Subagent 触发 Memory recall；4）断言 caller 在 spawn 之后能读到 Subagent 的写入（namespace ID 一致性，α 语义）；Worker 路径（target_kind=WORKER）独立 AGENT_PRIVATE 不受影响（F094 路径隔离验证）。
 
