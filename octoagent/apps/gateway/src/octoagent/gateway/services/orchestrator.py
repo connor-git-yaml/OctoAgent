@@ -2303,13 +2303,36 @@ class OrchestratorService:
             str(envelope.metadata.get("worker_capability", "")),
             envelope.worker_capability,
         )
+        # F098 Phase B-1 (Codex review P1 闭环): source role / session_kind / agent_uri
+        # 不再硬编码 MAIN/MAIN_BOOTSTRAP/main.agent。从 runtime_context/envelope 派生：
+        # - 主 Agent dispatch → MAIN / MAIN_BOOTSTRAP / "main.agent"
+        # - Worker A2A dispatch → WORKER / WORKER_INTERNAL / "worker.<source_capability>"
+        source_role, source_session_kind, source_agent_uri = self._resolve_a2a_source_role(
+            runtime_context=runtime_context,
+            runtime_metadata=runtime_metadata,
+            envelope_metadata=dict(envelope.metadata),
+        )
+        # F098 Phase B-1: source worker_profile_id / worker_capability 也从 source 派生
+        source_worker_profile_id = ""
+        source_worker_capability = ""
+        if source_role is AgentRuntimeRole.WORKER:
+            source_worker_profile_id = self._first_non_empty(
+                str(runtime_metadata.get("source_worker_profile_id", "")),
+                str(runtime_metadata.get("worker_profile_id", "")),
+                str(envelope.metadata.get("source_worker_profile_id", "")),
+            )
+            source_worker_capability = self._first_non_empty(
+                str(runtime_metadata.get("source_worker_capability", "")),
+                str(runtime_metadata.get("worker_capability", "")),
+                str(envelope.metadata.get("source_worker_capability", "")),
+            )
         source_runtime = await self._ensure_a2a_agent_runtime(
             agent_runtime_id=source_agent_runtime_id,
-            role=AgentRuntimeRole.MAIN,
+            role=source_role,
             project_id=project_id,
             agent_profile_id=source_agent_profile_id,
-            worker_profile_id="",
-            worker_capability="",
+            worker_profile_id=source_worker_profile_id,
+            worker_capability=source_worker_capability,
         )
         legacy_session_id = self._first_non_empty(
             runtime_context.session_id if runtime_context is not None else "",
@@ -2324,7 +2347,7 @@ class OrchestratorService:
         source_session = await self._ensure_a2a_agent_session(
             agent_session_id=source_agent_session_id,
             agent_runtime=source_runtime,
-            kind=AgentSessionKind.MAIN_BOOTSTRAP,
+            kind=source_session_kind,
             project_id=project_id,
             surface=(
                 runtime_context.surface
@@ -2338,11 +2361,19 @@ class OrchestratorService:
             a2a_conversation_id="",
             parent_agent_session_id="",
         )
+        # F098 Phase B-2 (Codex review P2 闭环): target Worker 加载自己的 AgentProfile，
+        # 不再复用 source profile（baseline bug）。通过 _delegation_plane.capability_pack
+        # 解析（orchestrator 不直接持 capability_pack 引用）；fallback fail-loud。
+        target_agent_profile_id = await self._resolve_target_agent_profile(
+            requested_worker_profile_id=requested_worker_profile_id,
+            worker_capability=worker_capability_hint,
+            fallback_source_profile_id=source_agent_profile_id,
+        )
         target_runtime = await self._ensure_a2a_agent_runtime(
             agent_runtime_id=str(envelope.metadata.get("target_agent_runtime_id", "")),
             role=AgentRuntimeRole.WORKER,
             project_id=project_id,
-            agent_profile_id=source_agent_profile_id,
+            agent_profile_id=target_agent_profile_id,
             worker_profile_id=requested_worker_profile_id,
             worker_capability=worker_capability_hint,
         )
@@ -2368,7 +2399,7 @@ class OrchestratorService:
             a2a_conversation_id=conversation_id,
             parent_agent_session_id=source_session.agent_session_id,
         )
-        source_agent_uri = self._agent_uri("main.agent")
+        # F098 Phase B-1: source_agent_uri 已在 _resolve_a2a_source_role 中派生
         target_agent_uri = self._agent_uri(worker_id or f"worker.{envelope.worker_capability}")
         existing_conversation = await self._stores.a2a_store.get_conversation(conversation_id)
         conversation = (
@@ -3173,6 +3204,122 @@ class OrchestratorService:
             for ch in label.strip().lower()
         ).strip("-")
         return f"agent://{normalized or 'unknown'}"
+
+    def _resolve_a2a_source_role(
+        self,
+        *,
+        runtime_context: Any,  # RuntimeContext | None
+        runtime_metadata: dict[str, Any],
+        envelope_metadata: dict[str, Any],
+    ) -> tuple[AgentRuntimeRole, AgentSessionKind, str]:
+        """F098 Phase B-1 (Codex review P1 闭环): 从 runtime_context/envelope 派生 A2A source。
+
+        baseline 硬编码 source = MAIN/MAIN_BOOTSTRAP/main.agent，导致 worker→worker A2A
+        被错误记录为 main→worker，audit chain 错误（AC-C3 / AC-I3 失败）。
+
+        派生规则：
+        - 若 runtime_context.runtime_kind == WORKER 或 envelope.metadata.source_runtime_kind == worker
+          → WORKER / WORKER_INTERNAL / "worker.<source_capability>"
+        - 否则 → MAIN / MAIN_BOOTSTRAP / "main.agent"（默认主 Agent，保持 baseline 行为）
+
+        返回 (role, session_kind, agent_uri) 三元组。
+        """
+        runtime_kind = ""
+        if runtime_context is not None:
+            runtime_kind = str(getattr(runtime_context, "runtime_kind", "") or "").strip().lower()
+
+        # fallback 信号：envelope metadata（如 task_runner 在 spawn 时显式注入）
+        if not runtime_kind:
+            runtime_kind = str(envelope_metadata.get("source_runtime_kind", "")).strip().lower()
+        if not runtime_kind:
+            runtime_kind = str(runtime_metadata.get("source_runtime_kind", "")).strip().lower()
+
+        # 派生 source role
+        if runtime_kind in ("worker", "subagent"):
+            # subagent 走 A2A 时也作为 source（虽然 F097 subagent 在自己 SUBAGENT_INTERNAL session
+            # 工作，理论上不应该再走 A2A；保留兼容性，按 worker 处理）
+            source_capability = self._first_non_empty(
+                str(runtime_metadata.get("source_worker_capability", "")),
+                str(runtime_metadata.get("worker_capability", "")),
+                str(envelope_metadata.get("source_worker_capability", "")),
+                str(envelope_metadata.get("worker_capability", "")),
+            )
+            return (
+                AgentRuntimeRole.WORKER,
+                AgentSessionKind.WORKER_INTERNAL,
+                self._agent_uri(
+                    f"worker.{source_capability}" if source_capability else "worker.unknown"
+                ),
+            )
+        # default: main path（regression 防护）
+        return (
+            AgentRuntimeRole.MAIN,
+            AgentSessionKind.MAIN_BOOTSTRAP,
+            self._agent_uri("main.agent"),
+        )
+
+    async def _resolve_target_agent_profile(
+        self,
+        *,
+        requested_worker_profile_id: str,
+        worker_capability: str,
+        fallback_source_profile_id: str,
+    ) -> str:
+        """F098 Phase B-2 (Codex review P2 闭环): A2A target Worker 加载自己的 AgentProfile。
+
+        baseline bug：target_agent_profile_id = source_agent_profile_id（receiver 复用 caller profile）
+        → 违反 H3-B "receiver 在自己 context 工作"。
+
+        解析路径（fail-loud，避免 except 静默吞 error 让 fallback 静默用 source profile）：
+        - 路径 1: requested_worker_profile_id 直接 lookup AgentProfile
+        - 路径 2: 通过 self._delegation_plane.capability_pack 按 worker_capability 派生 default profile
+          （orchestrator 不直接持 capability_pack 引用，使用 delegation_plane 路径）
+        - 路径 3: fallback 到 source profile（warning log + 测试 fail-loud）
+
+        返回 target Worker 的 profile_id。
+        """
+        # 路径 1: requested_worker_profile_id 直接 lookup
+        if requested_worker_profile_id:
+            profile = await self._stores.agent_context_store.get_agent_profile(
+                requested_worker_profile_id,
+            )
+            if profile is not None:
+                return profile.profile_id
+            # fail-loud: 明确 lookup 失败但不吞 except → 走 capability fallback
+            log.warning(
+                "a2a_target_profile_explicit_id_not_found",
+                requested_worker_profile_id=requested_worker_profile_id,
+            )
+
+        # 路径 2: 通过 _delegation_plane.capability_pack 按 worker_capability 派生 default profile
+        # 注意：orchestrator 通过 delegation_plane 访问 capability_pack（不直接持引用）。
+        if worker_capability:
+            delegation_plane = getattr(self, "_delegation_plane", None)
+            capability_pack = (
+                getattr(delegation_plane, "capability_pack", None)
+                if delegation_plane is not None
+                else None
+            )
+            if capability_pack is not None:
+                # capability_pack 提供 resolve_worker_agent_profile 入口（若不存在则 fallback）
+                resolver = getattr(capability_pack, "resolve_worker_agent_profile", None)
+                if resolver is not None:
+                    default_profile = await resolver(worker_capability=worker_capability)
+                    if default_profile is not None:
+                        return default_profile.profile_id
+                    log.warning(
+                        "a2a_target_profile_capability_no_default",
+                        worker_capability=worker_capability,
+                    )
+
+        # 路径 3: fallback (warning log)
+        log.warning(
+            "a2a_target_profile_fallback_to_source",
+            requested_worker_profile_id=requested_worker_profile_id,
+            worker_capability=worker_capability,
+            fallback_source_profile_id=fallback_source_profile_id,
+        )
+        return fallback_source_profile_id
 
     async def _write_orch_decision_event(
         self,
