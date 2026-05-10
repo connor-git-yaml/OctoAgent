@@ -122,14 +122,33 @@ class TaskRunner:
         return self._execution_console
 
     async def startup(self) -> None:
-        """启动恢复：清理 orphan running + 拉起 queued"""
+        """启动恢复：清理 orphan running + 拉起 queued。
+
+        F098 Phase H: 注册 subagent session cleanup 为 task 终态 callback。
+        所有终态路径（mark_failed / mark_cancelled / dispatch exception / shutdown 等）
+        通过 task_service._write_state_transition 自动触发，不再依赖 task_runner 手动调用。
+        """
+        # F098 Phase H: 注册 cleanup callback 到 TaskService class-level callback list
+        # 幂等：重复 startup 多次注册仅生效一次（按 callback identity 检测）。
+        await TaskService.register_terminal_state_callback(
+            self._close_subagent_session_if_needed,
+        )
+
         await self._recover_orphan_running_jobs()
         await self._dispatch_queued_jobs()
         if self._monitor_task is None or self._monitor_task.done():
             self._monitor_task = asyncio.create_task(self._monitor_loop())
 
     async def shutdown(self) -> None:
-        """停止监控并取消在途任务"""
+        """停止监控并取消在途任务。
+
+        F098 Phase H: 注销 cleanup callback 防泄漏。
+        """
+        # F098 Phase H: 注销 callback（必须在 monitor_task 取消前/后均可，避免泄漏）
+        await TaskService.unregister_terminal_state_callback(
+            self._close_subagent_session_if_needed,
+        )
+
         if self._monitor_task is not None:
             self._monitor_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
