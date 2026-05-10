@@ -16,6 +16,9 @@ from octoagent.core.models.agent_context import (
     DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
     resolve_permission_preset,
 )
+from octoagent.core.models.payloads import (
+    MemoryRecallCompletedPayload,
+)
 from octoagent.core.behavior_workspace import (
     build_behavior_bootstrap_template_ids,
     load_onboarding_state,
@@ -30,10 +33,13 @@ from octoagent.core.models import (
     AgentSessionKind,
     AgentSessionTurn,
     AgentSessionTurnKind,
+    ActorType,
     ContextFrame,
     ContextRequestKind,
     ContextResolveRequest,
     ContextResolveResult,
+    Event,
+    EventCausality,
     EventType,
     MemoryNamespace,
     MemoryNamespaceKind,
@@ -934,6 +940,50 @@ class AgentContextService(AgentContextTurnWriterMixin):
             )
         )
         await self._stores.conn.commit()
+
+        # F096 Phase C: 同步 recall 路径补 emit MEMORY_RECALL_COMPLETED
+        # - review #1 L12 闭环：emit 在 commit 之后（事务边界已 commit，event 写入更稳）
+        # - review #1 M8 闭环：idempotency_key = f"{recall_frame_id}:event"
+        #   防 retry/resume 同 dispatch 重复 emit
+        # - try-except 隔离：emit 失败 log warn 不阻塞 build_task_context 返回
+        # - Worker dispatch 路径自动覆盖（也走此 build_task_context 主路径）
+        try:
+            sync_event_seq = await self._stores.event_store.get_next_task_seq(task.task_id)
+            sync_event = Event(
+                event_id=str(ULID()),
+                task_id=task.task_id,
+                task_seq=sync_event_seq,
+                ts=datetime.now(tz=UTC),
+                type=EventType.MEMORY_RECALL_COMPLETED,
+                actor=ActorType.SYSTEM,
+                payload=MemoryRecallCompletedPayload(
+                    context_frame_id=context_frame_id,
+                    query=recall_frame.query,
+                    scope_ids=memory_scope_ids,
+                    request_artifact_ref=None,
+                    result_artifact_ref=None,
+                    hit_count=len(memory_hits),
+                    backend="",  # 同步路径不展开 backend_status
+                    backend_state="",
+                    degraded_reasons=degraded_reasons,
+                    agent_runtime_id=agent_runtime.agent_runtime_id,
+                    queried_namespace_kinds=[k.value for k in queried_namespace_kinds],
+                    hit_namespace_kinds=[k.value for k in hit_namespace_kinds],
+                ).model_dump(),
+                trace_id=f"trace-{task.task_id}",
+                causality=EventCausality(
+                    idempotency_key=f"{recall_frame.recall_frame_id}:event"
+                ),
+            )
+            await self._stores.event_store.append_event_committed(
+                sync_event, update_task_pointer=False
+            )
+        except Exception as exc:
+            log.warning(
+                "memory_recall_completed_emit_failed_sync_path",
+                error=str(exc),
+                context_frame_id=context_frame_id,
+            )
 
         messages = [*system_blocks, *compiled.messages]
         return CompiledTaskContext(

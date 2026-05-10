@@ -2316,6 +2316,38 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
     assert any(event.type is EventType.MEMORY_RECALL_SCHEDULED for event in events)
     assert any(event.type is EventType.MEMORY_RECALL_COMPLETED for event in events)
 
+    # F096 Phase C: 验证同步路径 + 延迟路径双 emit MEMORY_RECALL_COMPLETED
+    # T-C-3 test_sync_path_emits_memory_recall_completed +
+    #       test_dual_path_consistency
+    completed_events = [
+        ev for ev in events if ev.type is EventType.MEMORY_RECALL_COMPLETED
+    ]
+    # 应有 2 条事件：sync 路径（Phase C 新增）+ delayed 路径（baseline F094 + Phase A）
+    assert len(completed_events) >= 2, (
+        f"sync + delayed 路径应各 emit 一次，实际 {len(completed_events)} 条"
+    )
+    # idempotency_key 互不相同（sync = recall_frame_id；delayed = delayed_recall_idempotency_key）
+    idempotency_keys = {
+        ev.causality.idempotency_key
+        for ev in completed_events
+        if ev.causality is not None
+    }
+    assert len(idempotency_keys) >= 2, (
+        f"sync vs delayed 路径 idempotency_key 应不同，实际 {idempotency_keys}"
+    )
+    # sync 路径 event payload 含 agent_runtime_id 强一致（非审计派生）
+    sync_completed = [
+        ev
+        for ev in completed_events
+        if ev.causality is not None
+        and ev.causality.idempotency_key
+        and ev.causality.idempotency_key.endswith(":event")
+        and not ev.causality.idempotency_key.startswith("f038-")  # delayed 路径前缀
+    ]
+    assert len(sync_completed) >= 1, "sync 路径 emit MEMORY_RECALL_COMPLETED 应至少 1 条"
+    sync_payload = sync_completed[0].payload
+    assert sync_payload.get("agent_runtime_id"), "sync 路径 payload 必含 agent_runtime_id"
+
     artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
     delayed_request = next(item for item in artifacts if item.name == "delayed-recall-request")
     delayed_result = next(item for item in artifacts if item.name == "delayed-recall-result")
