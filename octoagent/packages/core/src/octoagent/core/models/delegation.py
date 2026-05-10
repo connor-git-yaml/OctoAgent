@@ -326,17 +326,25 @@ class DelegationResult(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class SubagentDelegation(BaseModel):
-    """F097：H3-A 临时 Subagent 委托的结构化载体。
+class BaseDelegation(BaseModel):
+    """F098 Phase J: Delegation 公共抽象基类（OD-5 选 A）。
 
-    生命周期从 spawn（created_at 填充）到 close（closed_at 填充）。
-    持久化路径：child_task.metadata["subagent_delegation"]（JSON 序列化，无独立 SQL 表）。
-    F098 扩展点：WorkerDelegation 为独立 model（target_kind=WORKER），两者共有字段命名
-    遵循可派生惯例（delegation_id / parent_task_id / created_at 等），未来可提取 BaseDelegation。
+    SubagentDelegation（F097，spawn-and-die / shared context）和未来扩展的
+    A2A 长生命周期 delegation 共享的 7+ 字段。
+
+    子类区分语义：
+    - SubagentDelegation: spawn-and-die / α 共享 caller AGENT_PRIVATE namespace
+    - 未来 A2A 长生命周期 delegation（F099+）: 持久化路径走 A2AConversation + A2AMessageRecord
+      （已存在），因此 F098 不引入额外 WorkerA2ADelegation 持久化模型。
+
+    继承约束：
+    - 子类必须保持本基类字段的 min_length 约束（不放松）
+    - 子类专属字段在子类定义（如 child_agent_session_id 仅 SubagentDelegation 有）
+    - target_kind 由子类用 Literal[...] 收紧到具体值
     """
 
     delegation_id: str = Field(..., min_length=1)
-    """ULID 生成的唯一委托 ID（min_length=1，与 Work/DelegationEnvelope 一致 - Codex P2-2）。"""
+    """ULID 生成的唯一委托 ID（min_length=1，与 Work/DelegationEnvelope 一致）。"""
 
     parent_task_id: str = Field(..., min_length=1)
     """发起委托的父任务 ID。"""
@@ -347,28 +355,40 @@ class SubagentDelegation(BaseModel):
     child_task_id: str = Field(..., min_length=1)
     """被委托的子任务 ID。"""
 
-    child_agent_session_id: str | None = None
-    """Subagent 的 SUBAGENT_INTERNAL AgentSession ID（GATE_DESIGN C-1）。
-    spawn 失败或 session 尚未创建时为 None；cleanup hook 通过此字段直接定位。"""
-
     caller_agent_runtime_id: str = Field(..., min_length=1)
-    """调用方 Agent 的 runtime ID，用于 Memory / Context 共享。"""
-
-    caller_project_id: str = Field(..., min_length=1)
-    """调用方 Project ID，用于 audit 和过滤。"""
-
-    caller_memory_namespace_ids: list[str] = Field(default_factory=list)
-    """共享的 Memory namespace ID 集合（OD-1 α 语义：直接复用 caller 的 AGENT_PRIVATE namespace）。"""
+    """调用方 Agent 的 runtime ID，用于 audit 关联。"""
 
     spawned_by: str = Field(..., min_length=1)
-    """spawn 来源工具名称，如 delegate_task / subagents.spawn。"""
-
-    target_kind: Literal[DelegationTargetKind.SUBAGENT] = DelegationTargetKind.SUBAGENT
-    """委托目标类型，固定为 SUBAGENT（Codex P2-1：Literal 防止反序列化时接受非 SUBAGENT 值）。
-    F098 WorkerDelegation 将作为独立 model（Literal[WORKER]），与本 model 边界互斥。"""
+    """spawn 来源工具名称，如 delegate_task / subagents.spawn / worker.send_message。"""
 
     created_at: datetime
     """委托创建时间（UTC）。"""
 
     closed_at: datetime | None = None
     """委托关闭时间（UTC）。None 表示委托仍活跃。"""
+
+
+class SubagentDelegation(BaseDelegation):
+    """F097：H3-A 临时 Subagent 委托的结构化载体（F098 Phase J 继承 BaseDelegation）。
+
+    生命周期从 spawn（created_at 填充）到 close（closed_at 填充）。
+    持久化路径：child_task.metadata["subagent_delegation"]（JSON 序列化，无独立 SQL 表）。
+    F098 Phase J: 共享字段提取到 BaseDelegation 父类，本类保留 SubagentDelegation 专属字段。
+    """
+
+    child_agent_session_id: str | None = None
+    """Subagent 的 SUBAGENT_INTERNAL AgentSession ID（GATE_DESIGN C-1）。
+    spawn 失败或 session 尚未创建时为 None；cleanup hook 通过此字段直接定位。"""
+
+    caller_project_id: str = Field(..., min_length=1)
+    """调用方 Project ID，用于 audit 和过滤。SubagentDelegation 专属：α 共享语义要求
+    receiver 共享 caller project（不创建独立 project）。"""
+
+    caller_memory_namespace_ids: list[str] = Field(default_factory=list)
+    """共享的 Memory namespace ID 集合（OD-1 α 语义：直接复用 caller 的 AGENT_PRIVATE namespace）。
+    SubagentDelegation 专属：F098 A2A 长生命周期 delegation 不需要此字段
+    （receiver 在自己 namespace 工作）。"""
+
+    target_kind: Literal[DelegationTargetKind.SUBAGENT] = DelegationTargetKind.SUBAGENT
+    """委托目标类型，固定为 SUBAGENT（Literal 防止反序列化时接受非 SUBAGENT 值）。
+    子类 Literal 收紧 BaseDelegation 中无此字段。"""
