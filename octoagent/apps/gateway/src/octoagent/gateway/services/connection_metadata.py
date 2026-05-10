@@ -139,13 +139,25 @@ def control_metadata_from_payload(payload: Mapping[str, Any] | None) -> dict[str
 
 
 def merge_control_metadata(events: Iterable[Event]) -> dict[str, Any]:
-    """按 turn/task 生命周期合并 USER_MESSAGE control metadata。"""
+    """按 turn/task 生命周期合并 USER_MESSAGE + CONTROL_METADATA_UPDATED control metadata。
 
-    user_events = [event for event in events if event.type == EventType.USER_MESSAGE]
-    if not user_events:
+    F098 Phase E: 同时处理两类事件。
+    - USER_MESSAGE: 历史 baseline + 真实用户输入（含 control_metadata 字段）
+    - CONTROL_METADATA_UPDATED: F098 引入的纯 control metadata 事件（不含 text，避免污染 conversation history）
+
+    时序保证：events 已按 task_seq 升序排列（EventStore.get_events_for_task 默认行为）。
+    最新事件（events[-1]）决定 TURN_SCOPED 字段，task_seq 倒序回溯填充 TASK_SCOPED。
+    """
+
+    relevant_events = [
+        event
+        for event in events
+        if event.type in (EventType.USER_MESSAGE, EventType.CONTROL_METADATA_UPDATED)
+    ]
+    if not relevant_events:
         return {}
 
-    latest_payload = user_events[-1].payload
+    latest_payload = relevant_events[-1].payload
     latest_control = control_metadata_from_payload(latest_payload)
 
     merged: dict[str, Any] = {}
@@ -161,7 +173,7 @@ def merge_control_metadata(events: Iterable[Event]) -> dict[str, Any]:
             continue
         merged[key] = value
 
-    for event in reversed(user_events):
+    for event in reversed(relevant_events):
         control = control_metadata_from_payload(event.payload)
         if not control:
             continue

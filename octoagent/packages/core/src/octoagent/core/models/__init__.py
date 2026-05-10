@@ -285,6 +285,7 @@ from .payloads import (
     BackupLifecyclePayload,
     ChatImportLifecyclePayload,
     CheckpointSavedPayload,
+    ControlMetadataUpdatedPayload,
     ControlPlaneAuditPayload,
     ErrorPayload,
     ExecutionCancelRequestedPayload,
@@ -584,6 +585,7 @@ __all__ = [
     # Payloads
     "TaskCreatedPayload",
     "UserMessagePayload",
+    "ControlMetadataUpdatedPayload",
     "ModelCallStartedPayload",
     "ModelCallCompletedPayload",
     "ModelCallFailedPayload",

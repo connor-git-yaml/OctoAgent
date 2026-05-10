@@ -710,15 +710,16 @@ async def test_p1_2_emit_before_enqueue_no_race(tmp_path: Path) -> None:
 
     assert created, "launch_child_task 应成功创建 task"
 
-    # 验证：USER_MESSAGE event 含完整 SubagentDelegation 在 task 事件流中
+    # F098 Phase E: 改用 CONTROL_METADATA_UPDATED 事件（P1-1 修复）。
+    # 历史 baseline 用 USER_MESSAGE marker text，F098 改用独立 event type 避免污染对话历史。
     events = await store_group.event_store.get_events_for_task(task_id)
-    user_msg_events = [e for e in events if e.type is EventType.USER_MESSAGE]
     delegation_events = [
-        e for e in user_msg_events
-        if e.payload.get("control_metadata", {}).get("subagent_delegation")
+        e for e in events
+        if e.type is EventType.CONTROL_METADATA_UPDATED
+        and e.payload.get("control_metadata", {}).get("subagent_delegation")
     ]
     assert len(delegation_events) >= 1, (
-        "P1-2 闭环失败：launch_child_task 后未在事件流中找到 SubagentDelegation USER_MESSAGE"
+        "P1-2 闭环失败：launch_child_task 后未在事件流中找到 SubagentDelegation CONTROL_METADATA_UPDATED"
     )
 
     # 验证：delegation event 在 enqueue 之前 emit（enqueue 被 mock 不会真触发，
@@ -773,20 +774,20 @@ async def test_p1_1_emit_preserves_target_kind(tmp_path: Path) -> None:
     with patch.object(runner, "enqueue", new_callable=AsyncMock):
         task_id, _ = await runner.launch_child_task(message)
 
-    # 验证：emit 的 USER_MESSAGE event 的 control_metadata 同时含 target_kind 和 subagent_delegation
+    # F098 Phase E: 改用 CONTROL_METADATA_UPDATED 事件（P1-1 修复）。
     events = await store_group.event_store.get_events_for_task(task_id)
     delegation_events = [
         e for e in events
-        if e.type is EventType.USER_MESSAGE
+        if e.type is EventType.CONTROL_METADATA_UPDATED
         and e.payload.get("control_metadata", {}).get("subagent_delegation")
     ]
     assert len(delegation_events) >= 1
     cm = delegation_events[0].payload["control_metadata"]
     assert cm.get("target_kind") == "subagent", (
-        f"P1-1 闭环失败：USER_MESSAGE event 缺 target_kind，实际 {cm}"
+        f"P1-1 闭环失败：CONTROL_METADATA_UPDATED event 缺 target_kind，实际 {cm}"
     )
 
-    # 验证：merge_control_metadata 取最新 USER_MESSAGE 后能读到 target_kind
+    # 验证：merge_control_metadata 同时合并 USER_MESSAGE + CONTROL_METADATA_UPDATED 后能读到 target_kind
     merged = merge_control_metadata(events)
     assert merged.get("target_kind") == "subagent", (
         f"P1-1 闭环失败：merge_control_metadata 后 target_kind 丢失，实际 {merged}"
@@ -895,10 +896,11 @@ async def test_p2_6_caller_unknown_when_no_execution_context(tmp_path: Path) -> 
         task_id, _ = await runner.launch_child_task(message)
 
     # 验证：emit 的 SubagentDelegation 中 caller_agent_runtime_id 是 "<unknown>" 而非 task_id
+    # F098 Phase E: 改用 CONTROL_METADATA_UPDATED 事件（P1-1 修复）。
     events = await store_group.event_store.get_events_for_task(task_id)
     delegation_events = [
         e for e in events
-        if e.type is EventType.USER_MESSAGE
+        if e.type is EventType.CONTROL_METADATA_UPDATED
         and e.payload.get("control_metadata", {}).get("subagent_delegation")
     ]
     assert len(delegation_events) >= 1

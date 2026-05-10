@@ -37,6 +37,36 @@ class UserMessagePayload(BaseModel):
     )
 
 
+class ControlMetadataUpdatedPayload(BaseModel):
+    """F098 Phase E: CONTROL_METADATA_UPDATED 事件 payload。
+
+    F097 P1-1 known issue 修复：USER_MESSAGE 事件被多 consumer（context_compaction /
+    chat / telegram 等）当作用户输入；F098 引入独立 event type，仅承载 control_metadata
+    不含 text，避免污染对话历史。
+
+    与 UserMessagePayload 区别：
+    - UserMessagePayload 含 text / text_preview / text_length / attachment_count
+    - ControlMetadataUpdatedPayload 仅承载 control_metadata + source 字段（emit 来源）
+
+    `merge_control_metadata` 合并 USER_MESSAGE + CONTROL_METADATA_UPDATED 两类事件，
+    历史 USER_MESSAGE 含 control_metadata 的 task 仍可读（向后兼容）。
+    """
+
+    control_metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="受控运行元数据，仅 trusted control envelope 可写入",
+    )
+    source: str = Field(
+        default="",
+        description=(
+            "Emit 来源标识，便于审计与诊断。候选值（未强制 enum）："
+            " 'subagent_delegation_init'（task_runner._emit_subagent_delegation_init_if_needed）"
+            " / 'subagent_delegation_session_backfill'（agent_context._ensure_agent_session B-3）"
+            " / 后续 Feature 可扩展"
+        ),
+    )
+
+
 class ModelCallStartedPayload(BaseModel):
     """MODEL_CALL_STARTED 事件 payload"""
 
