@@ -1,4 +1,4 @@
-# F098 Plan — A2A Mode + Worker↔Worker 实施计划
+# F098 Plan — A2A Mode + Worker↔Worker 实施计划（v0.2 Pre-Impl Codex Review 闭环）
 
 **关联**: spec.md v0.1（GATE_DESIGN 已锁定）+ clarification.md + phase-0-recon.md
 **Phase 数**: 9（B / C / D / E / F / G / H / I / J）+ Phase 0 已完成
@@ -265,24 +265,96 @@ async def _ensure_agent_runtime(
 
 ---
 
-## 3. Phase B — A2A Target Profile 独立加载（H3-B 核心）
+## 3. Phase B — A2A Source/Target 双向独立加载（H3-B 核心，Codex review P1 闭环）
 
-**目标**：A2A receiver 加载自己的 AgentProfile（spec.md §3 块 B）。
+**目标**：A2A source + target 双向从 runtime_context/envelope 派生（spec.md §3 块 B + Codex review P1 闭环）。
 
 ### 3.1 改动文件清单
 
 | 文件 | 改动 | 估计行数 |
 |------|------|---------|
-| `apps/gateway/src/octoagent/gateway/services/orchestrator.py` | `_prepare_a2a_dispatch` target_agent_profile_id 独立解析 | +60 / -10 |
-| `apps/gateway/tests/services/test_phase_b_a2a_target_profile.py` | 新增单测 | +300 |
+| `apps/gateway/src/octoagent/gateway/services/orchestrator.py` | `_prepare_a2a_dispatch` source/target 双向独立解析（**B-1 新增 source 派生 + B-2 target 解析**）| +120 / -25 |
+| `apps/gateway/tests/services/test_phase_b_a2a_source_target.py` | 新增单测（覆盖 B-1 + B-2）| +500 |
 
-**净增减估计**：+~360 / -~10
+**净增减估计**：+~620 / -~25（**Codex review P1 闭环：双向修复一起 commit**）
 
 ### 3.2 关键代码点
+
+#### B-1: Source 派生（**Codex review P1 闭环新增**）
 
 ```python
 # apps/gateway/src/octoagent/gateway/services/orchestrator.py
 
+def _resolve_a2a_source_role(
+    self,
+    *,
+    runtime_context: RuntimeContext | None,
+    runtime_metadata: dict[str, Any],
+    envelope_metadata: dict[str, Any],
+) -> tuple[AgentRuntimeRole, AgentSessionKind, str]:
+    """F098 Phase B-1: 从 runtime_context/envelope 派生 A2A source role / session_kind / agent_uri。
+    
+    Codex review P1 闭环：worker→worker A2A 不能再硬编码 source = MAIN/MAIN_BOOTSTRAP/main.agent。
+    """
+    # 优先从 runtime_context.runtime_kind 派生
+    runtime_kind = ""
+    if runtime_context is not None:
+        runtime_kind = str(getattr(runtime_context, "runtime_kind", "") or "").strip().lower()
+    
+    # fallback: envelope metadata (e.g., source_runtime_kind)
+    if not runtime_kind:
+        runtime_kind = str(envelope_metadata.get("source_runtime_kind", "")).strip().lower()
+    
+    # 派生 source role
+    if runtime_kind == RuntimeKind.WORKER.value:
+        source_capability = str(
+            runtime_metadata.get("source_worker_capability", "")
+            or envelope_metadata.get("source_worker_capability", "")
+        ).strip()
+        return (
+            AgentRuntimeRole.WORKER,
+            AgentSessionKind.WORKER_INTERNAL,
+            self._agent_uri(f"worker.{source_capability or 'unknown'}"),
+        )
+    # default: main path（regression 防护）
+    return (
+        AgentRuntimeRole.MAIN,
+        AgentSessionKind.MAIN_BOOTSTRAP,
+        self._agent_uri("main.agent"),
+    )
+
+# _prepare_a2a_dispatch 改动:
+# 当前 line 2280:
+# source_runtime = await self._ensure_a2a_agent_runtime(
+#     role=AgentRuntimeRole.MAIN,  # 硬编码
+#     ...
+# )
+
+# F098 Phase B-1:
+source_role, source_session_kind, source_agent_uri = self._resolve_a2a_source_role(
+    runtime_context=runtime_context,
+    runtime_metadata=runtime_metadata,
+    envelope_metadata=envelope.metadata,
+)
+source_runtime = await self._ensure_a2a_agent_runtime(
+    agent_runtime_id=source_agent_runtime_id,
+    role=source_role,  # 派生
+    project_id=project_id,
+    agent_profile_id=source_agent_profile_id,
+    worker_profile_id=str(runtime_metadata.get("source_worker_profile_id", "")).strip(),
+    worker_capability=str(runtime_metadata.get("source_worker_capability", "")).strip(),
+)
+source_session = await self._ensure_a2a_agent_session(
+    ...
+    kind=source_session_kind,  # 派生
+    ...
+)
+# source_agent_uri 用派生值代替硬编码 "main.agent"
+```
+
+#### B-2: Target 解析（**修订：用 `_delegation_plane.capability_pack` 路径**）
+
+```python
 async def _resolve_target_agent_profile(
     self,
     *,
@@ -290,38 +362,39 @@ async def _resolve_target_agent_profile(
     worker_capability: str,
     fallback_source_profile_id: str,
 ) -> str:
-    """F098 Phase B: A2A target Worker 加载自己的 AgentProfile。"""
+    """F098 Phase B-2: A2A target Worker 加载自己的 AgentProfile。
+    
+    Codex review P2 闭环：通过 _delegation_plane.capability_pack 访问 capability_pack（orchestrator 不直接持引用），
+    且 fallback fail-loud（不静默吞 except 用 source profile）。
+    """
     # 路径 1: 按 requested_worker_profile_id 直接 lookup
     if requested_worker_profile_id:
-        try:
-            profile = await self._stores.agent_context_store.get_agent_profile(
-                requested_worker_profile_id,
-            )
-            if profile is not None:
-                return profile.profile_id
-        except Exception as exc:
-            log.warning(
-                "a2a_target_profile_lookup_failed",
-                requested_worker_profile_id=requested_worker_profile_id,
-                error=str(exc),
-            )
+        profile = await self._stores.agent_context_store.get_agent_profile(
+            requested_worker_profile_id,
+        )
+        if profile is not None:
+            return profile.profile_id
+        # fail-loud：明确 lookup 失败但不吞 except → 走 capability fallback
+        log.warning(
+            "a2a_target_profile_explicit_id_not_found",
+            requested_worker_profile_id=requested_worker_profile_id,
+        )
     
-    # 路径 2: 按 worker_capability 派生 default profile（F095 worker variant）
-    if worker_capability:
-        try:
-            default_profile = await self._capability_pack.resolve_worker_agent_profile(
+    # 路径 2: 按 worker_capability 派生 default profile via _delegation_plane.capability_pack
+    if worker_capability and self._delegation_plane is not None:
+        capability_pack = self._delegation_plane.capability_pack  # 现有访问路径
+        if capability_pack is not None:
+            default_profile = await capability_pack.resolve_worker_agent_profile(
                 worker_capability=worker_capability,
             )
             if default_profile is not None:
                 return default_profile.profile_id
-        except Exception as exc:
             log.warning(
-                "a2a_target_profile_capability_resolution_failed",
+                "a2a_target_profile_capability_no_default",
                 worker_capability=worker_capability,
-                error=str(exc),
             )
     
-    # 路径 3: fallback (warning log)
+    # 路径 3: fallback (warning log + 测试 fail-loud)
     log.warning(
         "a2a_target_profile_fallback_to_source",
         requested_worker_profile_id=requested_worker_profile_id,
@@ -330,11 +403,8 @@ async def _resolve_target_agent_profile(
     )
     return fallback_source_profile_id
 
-# _prepare_a2a_dispatch 中改动:
-# 当前 line 2299:
-# target_agent_profile_id = source_agent_profile_id  # bug
-
-# F098 Phase B:
+# _prepare_a2a_dispatch 改动 (line 2299):
+# F098 Phase B-2:
 target_agent_profile_id = await self._resolve_target_agent_profile(
     requested_worker_profile_id=requested_worker_profile_id,
     worker_capability=worker_capability_hint,
@@ -344,7 +414,7 @@ target_runtime = await self._ensure_a2a_agent_runtime(
     agent_runtime_id=str(envelope.metadata.get("target_agent_runtime_id", "")),
     role=AgentRuntimeRole.WORKER,
     project_id=project_id,
-    agent_profile_id=target_agent_profile_id,  # 改用独立 profile
+    agent_profile_id=target_agent_profile_id,  # 独立 profile
     worker_profile_id=requested_worker_profile_id,
     worker_capability=worker_capability_hint,
 )
@@ -354,11 +424,15 @@ target_runtime = await self._ensure_a2a_agent_runtime(
 
 | 测试场景 | 验收 AC |
 |---------|---------|
-| 路径 1: requested_worker_profile_id 直接 lookup | AC-B1 |
-| 路径 2: worker_capability 派生 default profile | AC-B2 |
-| 路径 3: fallback (warning log) | AC-B2 |
-| target_profile_id != source_profile_id（独立加载验证）| AC-B1 |
-| A2A receiver context 4 层身份独立（profile / runtime / session / Memory namespace）| AC-B3 |
+| **B-1 source role 派生**：worker→worker 场景 source 是 worker / WORKER_INTERNAL / `worker.<cap>` | AC-B1-S1 |
+| **B-1 source main 防回归**：main→worker 场景 source 仍是 main | AC-B1-S2 |
+| **B-1 A2AConversation source 字段**反映真实 source | AC-B1-S3 |
+| **B-1 source 派生 fallback**：metadata 缺失优雅降级 | AC-B1-S4 |
+| **B-2 路径 1**: requested_worker_profile_id 直接 lookup | AC-B2-T1 |
+| **B-2 路径 2**: worker_capability 派生（**通过 _delegation_plane.capability_pack**） | AC-B2-T2 |
+| **B-2 路径 3 fail-loud**：lookup/capability resolve 失败时**不**静默吞 except 用 source profile | AC-B2-T2 |
+| **B-2 target_profile_id != source_profile_id** | AC-B2-T1 |
+| A2A receiver context 4 层身份独立（profile / runtime / session / Memory namespace）| AC-B2-T3 |
 
 ### 3.4 Codex review 节点
 
@@ -472,24 +546,49 @@ async def test_f098_audit_chain_worker_to_worker_dispatch():
 
 ### 6.2 关键代码点
 
-**6.2.1 TaskService 加 callback 注册机制**：
+**6.2.1 TaskService 加 实例级 callback 注册机制**（**Codex review P2 闭环**：避免 class-level 泄漏）：
 
 ```python
 # apps/gateway/src/octoagent/gateway/services/task_service.py
 
 class TaskService:
-    # 类级 callback 注册（多实例共享）
-    _terminal_state_callbacks: list[Callable[[str], Awaitable[None]]] = []
-    _terminal_state_callbacks_lock: asyncio.Lock = asyncio.Lock()
+    def __init__(self, ...):
+        # ...原有初始化保持...
+        # F098 Phase H: 实例级 callback list（不是 class-level，避免泄漏）
+        self._terminal_state_callbacks: list[Callable[[str], Awaitable[None]]] = []
+        self._terminal_state_callbacks_lock = asyncio.Lock()
     
-    @classmethod
     async def register_terminal_state_callback(
-        cls,
+        self,
         callback: Callable[[str], Awaitable[None]],
     ) -> None:
-        """F098 Phase H: 注册 task 终态回调（task_runner 等通过此机制注册 cleanup）。"""
-        async with cls._terminal_state_callbacks_lock:
-            cls._terminal_state_callbacks.append(callback)
+        """F098 Phase H: 注册 task 终态回调（task_runner 等通过此机制注册 cleanup）。
+        
+        Codex review P2 闭环：实例级 + 幂等（按 callback identity 检测重复）。
+        """
+        async with self._terminal_state_callbacks_lock:
+            # 幂等：同一 callback 重复 register 仅生效一次
+            if callback in self._terminal_state_callbacks:
+                log.debug(
+                    "terminal_state_callback_already_registered",
+                    callback=getattr(callback, "__qualname__", str(callback)),
+                )
+                return
+            self._terminal_state_callbacks.append(callback)
+    
+    async def unregister_terminal_state_callback(
+        self,
+        callback: Callable[[str], Awaitable[None]],
+    ) -> None:
+        """F098 Phase H: 注销 callback（TaskRunner.shutdown 必须调用，避免泄漏）。
+        
+        Codex review P2 闭环：避免旧 TaskRunner callback 残留。
+        """
+        async with self._terminal_state_callbacks_lock:
+            try:
+                self._terminal_state_callbacks.remove(callback)
+            except ValueError:
+                pass  # 已不在 list（重复 unregister 或 register 未成功）
     
     async def _write_state_transition(...):
         # ...原有 _append_event_and_update_task_with_retry 逻辑保持...
@@ -501,37 +600,77 @@ class TaskService:
     
     async def _invoke_terminal_state_callbacks(self, task_id: str) -> None:
         """F098 Phase H: 调用所有注册的 terminal state callbacks（异常隔离）。"""
-        for callback in list(self._terminal_state_callbacks):
+        # 在 lock 内拷贝 snapshot，避免并发 register/unregister 导致 RuntimeError
+        async with self._terminal_state_callbacks_lock:
+            callbacks_snapshot = list(self._terminal_state_callbacks)
+        for callback in callbacks_snapshot:
             try:
                 await callback(task_id)
             except Exception as exc:
                 log.warning(
                     "terminal_state_callback_failed",
                     task_id=task_id,
-                    callback=callback.__name__,
+                    callback=getattr(callback, "__qualname__", str(callback)),
                     error=str(exc),
                 )
 ```
 
-**6.2.2 TaskRunner 注册 cleanup callback**：
+**6.2.2 TaskRunner 注册 cleanup callback + shutdown 注销**（**Codex review P2 闭环**）：
 
 ```python
 # apps/gateway/src/octoagent/gateway/services/task_runner.py
 
 class TaskRunner:
-    def __init__(self, ...):
+    def __init__(self, *, task_service: TaskService, ...):
         # ...原有初始化保持...
-        # F098 Phase H: 注册 subagent session cleanup 为 task 终态 callback
-        asyncio.create_task(
-            TaskService.register_terminal_state_callback(
-                self._close_subagent_session_if_needed,
-            )
+        # F098 Phase H: 持有 task_service 引用，不再 fly-by-night 创建 TaskService
+        self._task_service = task_service
+        # 注册时机推迟到 start() / __aenter__ 而非 __init__（确保 event loop 可用）
+    
+    async def start(self) -> None:
+        """启动 TaskRunner：注册 callback 到 task_service。"""
+        # F098 Phase H: 实例级注册（task_service 是注入的实例）
+        await self._task_service.register_terminal_state_callback(
+            self._close_subagent_session_if_needed,
         )
+    
+    async def shutdown(self) -> None:
+        """关闭 TaskRunner：注销 callback，避免泄漏。
+        
+        Codex review P2 闭环：旧 TaskRunner 不应被 callback 持有引用。
+        """
+        await self._task_service.unregister_terminal_state_callback(
+            self._close_subagent_session_if_needed,
+        )
+        # ...其他 shutdown 逻辑（取消 jobs / close stores 等）...
+    
+    async def __aenter__(self):
+        await self.start()
+        return self
+    
+    async def __aexit__(self, *exc_info):
+        await self.shutdown()
     
     # 移除以下手动调用：
     # task_runner.py:679 - dispatch exception 路径
     # task_runner.py:711 - mark_failed 非终态分支
     # task_runner.py:764 - _notify_completion
+```
+
+**6.2.3 测试 fixture 设计**（**Codex review P2 闭环**）：
+
+```python
+# apps/gateway/tests/conftest.py 或 test fixture
+
+@pytest.fixture
+async def task_runner(task_service):
+    """F098 Phase H: TaskRunner fixture 必须 start/shutdown 配对，避免 callback 泄漏。"""
+    runner = TaskRunner(task_service=task_service, ...)
+    await runner.start()  # 注册 callback
+    try:
+        yield runner
+    finally:
+        await runner.shutdown()  # 注销 callback（必须在 yield 之外，避免测试失败时泄漏）
 ```
 
 ### 6.3 测试设计
@@ -543,11 +682,14 @@ class TaskRunner:
 | task_runner.py grep `_close_subagent_session_if_needed` 仅在定义和注册处 | AC-H3 |
 | mark_failed / mark_cancelled / dispatch exception / shutdown 4 路径自动 cleanup | AC-H4 |
 | callback 异常 → state transition 仍成功 | AC-H5 |
+| **callback 幂等注册**：重复 register 同一 callback 触发次数仍为 1（Codex review P2 闭环）| AC-H6 |
+| **callback 生命周期**：TaskRunner.shutdown 后 callback list 不包含 self；GC 后旧 TaskRunner 可回收（Codex review P2 闭环）| AC-H7 |
+| **多 TaskService 实例**：不同 TaskService 的 callback list 不串扰（实例级验证）| AC-H1 |
 
 ### 6.4 Codex review 节点
 
-- **Phase H pre-review**（强制）：检查 task state machine 改造的影响面 + callback 设计模式
-- **Phase H post-review**（强制）：检查所有终态路径覆盖 + 异常隔离
+- **Phase H pre-review**（强制）：检查 task state machine 改造的影响面 + callback 设计模式 + **生命周期管理**（Codex P2 闭环）
+- **Phase H post-review**（强制）：检查所有终态路径覆盖 + 异常隔离 + **callback 注销正确性**
 
 ---
 
@@ -809,7 +951,7 @@ class SubagentDelegation(BaseDelegation):
 | 测试代码净增减 | +2000 |
 | 文档制品净增减 | +700 |
 | Codex review 次数 | 11+（per-Phase 9 + Final 1 + ad-hoc 1）|
-| 估计实施时间 | 60-80h |
+| 估计实施时间 | 65-85h（Codex P1 闭环：Phase B 由 5h → 8h，整体 +3h）|
 
 ---
 
@@ -819,7 +961,7 @@ class SubagentDelegation(BaseDelegation):
 Phase 0 实测 ✓ (已完成)
 Phase E (~5h)  → CONTROL_METADATA_UPDATED + 向后兼容 test
 Phase F (~3h)  → ephemeral runtime 独立
-Phase B (~5h)  → A2A target profile 独立加载
+Phase B (~8h)  → A2A source + target 双向独立加载（Codex P1 闭环：source 端改造扩大）
 Phase C (~3h)  → enforce 删除 + 正面 test
 Phase I (~5h)  → worker audit chain 集成测
 Phase H (~10h) → task state machine 改造（Codex 强制）
