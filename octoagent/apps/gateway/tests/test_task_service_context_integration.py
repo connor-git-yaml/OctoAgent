@@ -2459,6 +2459,158 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
     await store_group.conn.close()
 
 
+async def test_f096_audit_chain_profile_runtime_recallframe_consistency(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """F096 Phase F (AC-F1 + AC-F2 闭环)：完整 audit chain 一致性。
+
+    验证 AgentProfile.profile_id ↔ AgentRuntime.profile_id ↔
+    BEHAVIOR_PACK_LOADED.agent_id ↔ RecallFrame.agent_runtime_id 的端到端对齐。
+
+    路径：
+      1. dispatch（含 RecallFrame persist + LOADED + USED + MEMORY_RECALL_COMPLETED emit）
+      2. list_recall_frames(agent_runtime_id=runtime_id) 返回该 frame
+      3. EventStore 查 LOADED 事件，agent_id == AgentProfile.profile_id
+      4. AgentRuntime 表 (runtime_id, profile_id) 双绑
+    """
+    store_group = await create_store_group(
+        str(tmp_path / "f096-audit-chain.db"),
+        str(tmp_path / "artifacts"),
+    )
+    profile_id = "agent-profile-audit-chain"
+    await _seed_project_context(store_group)
+    await store_group.agent_context_store.save_agent_profile(
+        AgentProfile(
+            profile_id=profile_id,
+            scope=AgentProfileScope.PROJECT,
+            project_id="project-alpha",
+            name="Audit Chain Agent",
+            persona_summary="F096 audit chain 端到端验证。",
+            instruction_overlays=[],
+            context_budget_policy={"memory_recall": {"prefetch_mode": "detailed_prefetch"}},
+        )
+    )
+    await store_group.conn.commit()
+
+    async def fake_recall_memory(
+        self, *, scope_ids, query, policy=None, per_scope_limit=3, max_hits=4, hook_options=None,
+    ):
+        return MemoryRecallResult(
+            query=query,
+            expanded_queries=[query],
+            scope_ids=list(scope_ids),
+            hits=[
+                MemoryRecallHit(
+                    record_id="memory-audit-1",
+                    layer=MemoryLayer.SOR,
+                    scope_id="memory/project-alpha",
+                    partition=MemoryPartition.WORK,
+                    summary="audit chain hit",
+                    subject_key="alpha-audit",
+                    search_query=query,
+                    citation="memory://memory/project-alpha/sor/alpha-audit",
+                    content_preview="audit content",
+                    metadata={"source": "audit-chain"},
+                    created_at=datetime.now(tz=UTC),
+                )
+            ],
+            backend_status=MemoryBackendStatus(
+                backend_id="sqlite",
+                active_backend="sqlite",
+                state=MemoryBackendState.HEALTHY,
+                pending_replay_count=0,
+            ),
+            degraded_reasons=[],
+            hook_trace=MemoryRecallHookTrace(
+                post_filter_mode=MemoryRecallPostFilterMode.KEYWORD_OVERLAP,
+                rerank_mode=MemoryRecallRerankMode.HEURISTIC,
+                focus_terms=["alpha"],
+                candidate_count=1,
+                filtered_count=0,
+                delivered_count=1,
+            ),
+        )
+
+    monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
+
+    service = TaskService(store_group, SSEHub())
+    llm_service = RecordingLLMService()
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-audit",
+        scope_id="chat:web:thread-audit",
+        text="audit chain test",
+        idempotency_key="f096-audit-chain-001",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+
+    await service.process_task_with_llm(
+        task_id=task_id,
+        user_text=message.text,
+        llm_service=llm_service,
+    )
+
+    # === AC-F2 audit chain：四层身份对齐 ===
+    # Layer 1：RecallFrame.agent_runtime_id 取自 sync 路径 build_task_context
+    recall_frames = await store_group.agent_context_store.list_recall_frames(task_id=task_id)
+    assert len(recall_frames) >= 1, "audit chain test 必有 RecallFrame"
+    recall = recall_frames[0]
+    runtime_id_from_recall = recall.agent_runtime_id
+    assert runtime_id_from_recall, "RecallFrame.agent_runtime_id 必非空"
+
+    # Layer 2：AgentRuntime 表 (runtime_id, profile_id) 双绑
+    runtime = await store_group.agent_context_store.get_agent_runtime(runtime_id_from_recall)
+    assert runtime is not None, f"AgentRuntime {runtime_id_from_recall!r} 必存在"
+    profile_id_from_runtime = runtime.agent_profile_id
+    assert profile_id_from_runtime, "AgentRuntime.agent_profile_id 必非空"
+
+    # Layer 3：EventStore 查 BEHAVIOR_PACK_LOADED.agent_id
+    events = await store_group.event_store.get_events_for_task(task_id)
+    loaded_events = [ev for ev in events if ev.type is EventType.BEHAVIOR_PACK_LOADED]
+    assert len(loaded_events) >= 1, "audit chain test 必有 BEHAVIOR_PACK_LOADED"
+    loaded_agent_id = loaded_events[0].payload.get("agent_id")
+    assert loaded_agent_id, "LOADED.agent_id 必非空"
+
+    # 关键 assertion：跨四层身份对齐
+    # F095 handoff §AC-7b：payload.agent_id == AgentProfile.profile_id →
+    #   AgentRuntime.profile_id → RecallFrame.agent_runtime_id
+    assert loaded_agent_id == profile_id_from_runtime, (
+        f"audit chain layer 2/3 不对齐：LOADED.agent_id={loaded_agent_id!r} != "
+        f"AgentRuntime.agent_profile_id={profile_id_from_runtime!r}"
+    )
+
+    # AC-F1: BEHAVIOR_PACK_LOADED + USED 同 pack_id 关联
+    used_events = [ev for ev in events if ev.type is EventType.BEHAVIOR_PACK_USED]
+    assert len(used_events) >= 1, "audit chain test 必有 BEHAVIOR_PACK_USED"
+    loaded_pack_id = loaded_events[0].payload.get("pack_id")
+    used_pack_id = used_events[0].payload.get("pack_id")
+    assert loaded_pack_id == used_pack_id, (
+        f"LOADED.pack_id 与 USED.pack_id 必相等：{loaded_pack_id!r} vs {used_pack_id!r}"
+    )
+
+    # Layer 4：list_recall_frames(agent_runtime_id) endpoint 链路（block B 集成）
+    filtered = await store_group.agent_context_store.list_recall_frames(
+        agent_runtime_id=runtime_id_from_recall
+    )
+    assert any(f.recall_frame_id == recall.recall_frame_id for f in filtered), (
+        "list_recall_frames(agent_runtime_id) 必返回该 frame"
+    )
+
+    # MEMORY_RECALL_COMPLETED emit（sync 路径，Phase C）
+    completed_events = [
+        ev for ev in events if ev.type is EventType.MEMORY_RECALL_COMPLETED
+    ]
+    assert len(completed_events) >= 1, "audit chain test 必有 MEMORY_RECALL_COMPLETED"
+    completed_payload = completed_events[0].payload
+    assert completed_payload.get("agent_runtime_id") == runtime_id_from_recall, (
+        "MEMORY_RECALL_COMPLETED.agent_runtime_id 必与 RecallFrame.agent_runtime_id 一致"
+    )
+
+    await store_group.conn.close()
+
+
 async def test_task_service_delayed_recall_save_recall_frame_failure_does_not_block_emit(
     tmp_path: Path,
     monkeypatch,
