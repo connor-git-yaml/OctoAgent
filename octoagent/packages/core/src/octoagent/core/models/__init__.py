@@ -63,6 +63,7 @@ from .behavior import (
     BehaviorPack,
     BehaviorPackFile,
     BehaviorPackLoadedPayload,
+    BehaviorPackUsedPayload,
     BehaviorPatchProposal,
     BehaviorReviewMode,
     BehaviorSliceEnvelope,
@@ -469,6 +470,7 @@ __all__ = [
     "BehaviorFileChange",
     "BehaviorPatchProposal",
     "BehaviorPackLoadedPayload",
+    "BehaviorPackUsedPayload",
     # Backup / Restore / Export
     "BackupScope",
     "SensitivityLevel",

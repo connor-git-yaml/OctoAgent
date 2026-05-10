@@ -64,6 +64,24 @@ from octoagent.memory import (
 )
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _f096_reset_behavior_pack_cache():
+    """F096 Phase D：清理 module-level behavior pack cache。
+
+    `_behavior_pack_cache` 在 agent_decision.py 是 module global dict，
+    cross-test 共享会让第二个 test build_task_context resolve_behavior_pack
+    返回 cache hit（metadata.cache_state stripped），导致 BEHAVIOR_PACK_LOADED
+    不 emit。每个 test 前清空让"首次 dispatch 必 cache miss"语义成立。
+    """
+    from octoagent.gateway.services import agent_decision
+
+    agent_decision._behavior_pack_cache.clear()
+    yield
+    agent_decision._behavior_pack_cache.clear()
+
 
 class RecordingLLMService:
     """记录真实 LLM 输入。"""
@@ -2347,6 +2365,31 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
     assert len(sync_completed) >= 1, "sync 路径 emit MEMORY_RECALL_COMPLETED 应至少 1 条"
     sync_payload = sync_completed[0].payload
     assert sync_payload.get("agent_runtime_id"), "sync 路径 payload 必含 agent_runtime_id"
+
+    # F096 Phase D: 验证 BEHAVIOR_PACK_LOADED + BEHAVIOR_PACK_USED emit
+    # T-D-5 test_loaded_emits_on_cache_miss + test_used_emits_every_dispatch +
+    #       test_loaded_used_pack_id_matches
+    loaded_events = [
+        ev for ev in events if ev.type is EventType.BEHAVIOR_PACK_LOADED
+    ]
+    used_events = [ev for ev in events if ev.type is EventType.BEHAVIOR_PACK_USED]
+    # 至少 1 个 LOADED（首次 dispatch 必 cache miss）
+    assert len(loaded_events) >= 1, "首次 dispatch 必 emit LOADED（cache miss）"
+    # USED 频次 ≥ LOADED（每次 dispatch emit）；本 test 含 sync + delayed 两次 dispatch
+    assert len(used_events) >= len(loaded_events), (
+        f"USED 应 ≥ LOADED 频次（USED={len(used_events)} LOADED={len(loaded_events)}）"
+    )
+    # pack_id 关联：LOADED 与 USED 的 pack_id 必相同（同一 pack）
+    loaded_pack_ids = {ev.payload.get("pack_id") for ev in loaded_events}
+    used_pack_ids = {ev.payload.get("pack_id") for ev in used_events}
+    assert loaded_pack_ids.issubset(used_pack_ids), (
+        f"LOADED.pack_id 必出现在 USED.pack_id 集合内（LOADED={loaded_pack_ids} "
+        f"USED={used_pack_ids}）"
+    )
+    # USED payload 含 agent_runtime_id / agent_id（与 audit chain 对齐）
+    first_used = used_events[0]
+    assert first_used.payload.get("agent_runtime_id"), "USED 必含 agent_runtime_id"
+    assert first_used.payload.get("agent_id"), "USED 必含 agent_id (= AgentProfile.profile_id)"
 
     artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
     delayed_request = next(item for item in artifacts if item.name == "delayed-recall-request")

@@ -313,6 +313,30 @@ class BehaviorPackLoadedPayload(BaseModel):
     is_advanced_included: bool = Field(default=False, description="是否含 ADVANCED 层文件（IDENTITY/SOUL/HEARTBEAT）")
 
 
+class BehaviorPackUsedPayload(BaseModel):
+    """F096 Phase D: BEHAVIOR_PACK_USED 事件 payload schema。
+
+    每次 LLM 决策环（build_task_context）emit 一次；与 LOADED 通过 pack_id 关联：
+    - LOADED：cache miss 时 emit（一次 cache miss 一次）
+    - USED：每次 build_task_context emit（频次 ≥ LOADED）
+
+    M5 阶段 1 范围内 schema 一次稳定（不预占 schema_version 字段）；F096 仅 emit
+    `main` / `worker` 两个 agent_kind 值（不预占 `subagent`，由 F097 引入）。
+    """
+
+    pack_id: str = Field(min_length=1, description="关联到 BehaviorPackLoadedPayload.pack_id")
+    agent_id: str = Field(min_length=1, description="= AgentProfile.profile_id")
+    agent_kind: str = Field(description="main / worker；F096 仅这两个值，subagent 由 F097 引入")
+    agent_runtime_id: str = Field(default="", description="与 F094 RecallFrame 同维度的运行时实例")
+    task_id: str = Field(default="")
+    session_id: str | None = Field(default=None, description="A2A / Worker 对话时填充")
+    use_phase: str = Field(default="context_preparation", description="使用阶段")
+    cache_state: str = Field(default="hit", description="hit / miss；与 LOADED 严格对齐")
+    file_count: int = Field(default=0, ge=0)
+    is_advanced_included: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=_utc_now)
+
+
 class BehaviorFileChange(BaseModel):
     file_id: str = Field(min_length=1)
     summary: str = Field(default="")

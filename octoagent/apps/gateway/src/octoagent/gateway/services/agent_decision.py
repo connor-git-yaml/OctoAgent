@@ -25,6 +25,7 @@ from octoagent.core.models import (
     BehaviorPack,
     BehaviorPackFile,
     BehaviorPackLoadedPayload,
+    BehaviorPackUsedPayload,
     BehaviorSliceEnvelope,
     BehaviorWorkspace,
     AgentDecision,
@@ -353,6 +354,42 @@ def make_behavior_pack_loaded_payload(
         file_ids=[f.file_id for f in pack.files],
         source_chain=list(pack.source_chain),
         cache_state=str(pack.metadata.get("cache_state", "miss")),
+        is_advanced_included=is_advanced,
+    )
+
+
+def make_behavior_pack_used_payload(
+    pack: BehaviorPack,
+    *,
+    agent_profile: AgentProfile,
+    load_profile: BehaviorLoadProfile,
+    agent_runtime_id: str,
+    task_id: str,
+    session_id: str | None = None,
+    use_phase: str = "context_preparation",
+) -> BehaviorPackUsedPayload:
+    """F096 Phase D: 从 BehaviorPack 构造 BEHAVIOR_PACK_USED 事件 payload。
+
+    每次 build_task_context emit 一次（频次 ≥ LOADED）；与 LOADED 通过 pack_id 关联。
+
+    review #1 M4 闭环：agent_kind 直接 str(agent_profile.kind)（删 hasattr fallback）；
+    F096 仅 emit `main` / `worker` 两个值（不预占 `subagent`，由 F097 引入）。
+    cache_state 从 pack.metadata 取（cache hit 路径已 strip cache_state metadata
+    时取不到 → "hit"；cache miss 保留 "miss"）。
+    """
+    advanced_file_ids = {"SOUL.md", "HEARTBEAT.md", "IDENTITY.md"}
+    is_advanced = bool(advanced_file_ids & {f.file_id for f in pack.files})
+    cache_state = str(pack.metadata.get("cache_state", "hit"))
+    return BehaviorPackUsedPayload(
+        pack_id=pack.pack_id,
+        agent_id=agent_profile.profile_id,
+        agent_kind=str(getattr(agent_profile, "kind", "main") or "main"),
+        agent_runtime_id=agent_runtime_id,
+        task_id=task_id,
+        session_id=session_id,
+        use_phase=use_phase,
+        cache_state=cache_state,
+        file_count=len(pack.files),
         is_advanced_included=is_advanced,
     )
 

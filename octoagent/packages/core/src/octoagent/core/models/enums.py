@@ -218,6 +218,10 @@ class EventType(StrEnum):
     # F095 提供 infrastructure（payload schema + helper）；实际 EventStore 接入由 F096 实现。
     # F096 BEHAVIOR_PACK_USED 通过 pack_id 引用此 LOADED 事件做行为可审计。
     BEHAVIOR_PACK_LOADED = "BEHAVIOR_PACK_LOADED"
+    # F096 Phase D: 每次 LLM 决策环 emit；与 LOADED 通过 pack_id 关联。
+    # LOADED 频次 = cache miss 频次（一次 worktree boot / 一次 pack mtime 变更）；
+    # USED 频次 = build_task_context 调用频次（一次 dispatch 一次）。
+    BEHAVIOR_PACK_USED = "BEHAVIOR_PACK_USED"
 
 
 class ActorType(StrEnum):

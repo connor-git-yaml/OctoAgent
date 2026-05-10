@@ -26,6 +26,7 @@ from octoagent.core.behavior_workspace import (
 )
 from octoagent.core.models import (
     AgentProfile,
+    BehaviorPack,
     AgentProfileScope,
     AgentRuntime,
     AgentRuntimeRole,
@@ -87,6 +88,8 @@ from .agent_decision import (
     build_behavior_tool_guide_block,
     build_runtime_hint_bundle,
     is_worker_behavior_profile,
+    make_behavior_pack_loaded_payload,
+    make_behavior_pack_used_payload,
     render_behavior_system_block,
     render_runtime_hint_block,
     resolve_behavior_pack,
@@ -641,6 +644,35 @@ class AgentContextService(AgentContextTurnWriterMixin):
         )
 
         recent_summary = session_state.rolling_summary.strip() or compiled.summary_text.strip()
+
+        # F096 Phase D 方案 B（review #1 H1 闭环）：
+        # 在 _fit_prompt_budget 之前先 prime 调用 resolve_behavior_pack 一次——
+        # 首次调用获得 metadata 完整 pack（含 cache_state="miss" 标记）；
+        # 后续 _fit_prompt_budget 内部 render_behavior_system_block 调用是 cache hit
+        # （metadata 已 strip）。Caller 持有 prime 调用返回的 pack 引用，line 936
+        # commit 后 emit LOADED（仅 cache miss）+ USED（每次）。
+        # 性能：cache hit 后开销 < 1µs（dict lookup）；cache miss 仅一次 IO。
+        loaded_pack: BehaviorPack | None = None
+        try:
+            load_profile_for_emit = (
+                BehaviorLoadProfile.WORKER
+                if worker_capability
+                else BehaviorLoadProfile.FULL
+            )
+            loaded_pack = resolve_behavior_pack(
+                agent_profile=agent_profile,
+                project_name=project.name if project is not None else "",
+                project_slug=project.slug if project is not None else "",
+                project_root=self._project_root,
+                load_profile=load_profile_for_emit,
+            )
+        except Exception as exc:
+            log.warning(
+                "behavior_pack_resolve_failed_for_emit",
+                error=str(exc),
+                agent_profile_id=agent_profile.profile_id,
+            )
+
         (
             system_blocks,
             recent_summary,
@@ -940,6 +972,68 @@ class AgentContextService(AgentContextTurnWriterMixin):
             )
         )
         await self._stores.conn.commit()
+
+        # F096 Phase D: emit BEHAVIOR_PACK_LOADED（仅 cache miss）+ BEHAVIOR_PACK_USED（每次）
+        # - 方案 B（review #1 H1 闭环）：上方 prime 调用持有 loaded_pack 引用
+        # - L12 闭环：emit 在 commit 之后（事务边界已 commit）
+        # - try-except 隔离：emit 失败 log warn 不阻塞 build_task_context
+        if loaded_pack is not None:
+            try:
+                load_profile_emit = (
+                    BehaviorLoadProfile.WORKER
+                    if worker_capability
+                    else BehaviorLoadProfile.FULL
+                )
+                # cache miss 才 emit LOADED
+                if loaded_pack.metadata.get("cache_state") == "miss":
+                    loaded_payload = make_behavior_pack_loaded_payload(
+                        loaded_pack,
+                        agent_profile=agent_profile,
+                        load_profile=load_profile_emit,
+                    )
+                    loaded_seq = await self._stores.event_store.get_next_task_seq(task.task_id)
+                    loaded_event = Event(
+                        event_id=str(ULID()),
+                        task_id=task.task_id,
+                        task_seq=loaded_seq,
+                        ts=datetime.now(tz=UTC),
+                        type=EventType.BEHAVIOR_PACK_LOADED,
+                        actor=ActorType.SYSTEM,
+                        payload=loaded_payload.model_dump(mode="json"),
+                        trace_id=f"trace-{task.task_id}",
+                    )
+                    await self._stores.event_store.append_event_committed(
+                        loaded_event, update_task_pointer=False
+                    )
+                # USED 总 emit
+                used_payload = make_behavior_pack_used_payload(
+                    loaded_pack,
+                    agent_profile=agent_profile,
+                    load_profile=load_profile_emit,
+                    agent_runtime_id=agent_runtime.agent_runtime_id,
+                    task_id=task.task_id,
+                    session_id=agent_session.agent_session_id,
+                )
+                used_seq = await self._stores.event_store.get_next_task_seq(task.task_id)
+                used_event = Event(
+                    event_id=str(ULID()),
+                    task_id=task.task_id,
+                    task_seq=used_seq,
+                    ts=datetime.now(tz=UTC),
+                    type=EventType.BEHAVIOR_PACK_USED,
+                    actor=ActorType.SYSTEM,
+                    payload=used_payload.model_dump(mode="json"),
+                    trace_id=f"trace-{task.task_id}",
+                )
+                await self._stores.event_store.append_event_committed(
+                    used_event, update_task_pointer=False
+                )
+            except Exception as exc:
+                log.warning(
+                    "behavior_pack_event_emit_failed",
+                    error=str(exc),
+                    pack_id=loaded_pack.pack_id if loaded_pack else "",
+                )
 
         # F096 Phase C: 同步 recall 路径补 emit MEMORY_RECALL_COMPLETED
         # - review #1 L12 闭环：emit 在 commit 之后（事务边界已 commit，event 写入更稳）
