@@ -26,6 +26,7 @@ from octoagent.core.behavior_workspace import (
 )
 from octoagent.core.models import (
     AgentProfile,
+    AgentSessionStatus,
     BehaviorPack,
     AgentProfileScope,
     AgentRuntime,
@@ -39,6 +40,7 @@ from octoagent.core.models import (
     ContextRequestKind,
     ContextResolveRequest,
     ContextResolveResult,
+    DelegationTargetKind,
     Event,
     EventCausality,
     EventType,
@@ -56,11 +58,13 @@ from octoagent.core.models import (
     RecallPlanMode,
     RuntimeControlContext,
     SessionContextState,
+    SubagentDelegation,
     Task,
     TurnExecutorKind,
     WorkerProfile,
     WorkerProfileStatus,
 )
+from octoagent.core.models.payloads import UserMessagePayload
 from octoagent.memory import (
     EvidenceRef,
     MemoryAccessPolicy,
@@ -96,6 +100,7 @@ from .agent_decision import (
 )
 from octoagent.core.behavior_workspace import BehaviorLoadProfile
 from .connection_metadata import (
+    merge_control_metadata,
     resolve_delegation_target_profile_id,
     resolve_session_owner_profile_id,
     resolve_turn_executor_kind,
@@ -2388,15 +2393,45 @@ class AgentContextService(AgentContextTurnWriterMixin):
             and not parent_agent_session_id
             and not (request.work_id or "").strip()
         )
-        kind = (
-            AgentSessionKind.DIRECT_WORKER
-            if is_direct_worker_session
-            else (
-                AgentSessionKind.WORKER_INTERNAL
-                if agent_runtime.role is AgentRuntimeRole.WORKER
-                else AgentSessionKind.MAIN_BOOTSTRAP
-            )
+        # F097 Phase B-2: SUBAGENT_INTERNAL 第 4 路检测。
+        # 信号来源：request.delegation_metadata["target_kind"] == "subagent"
+        # 由 _launch_child_task.control_metadata["target_kind"] = "subagent" 写入，
+        # 经 NormalizedMessage → task.metadata → dispatch_metadata →
+        # ContextResolveRequest.delegation_metadata 链路传递（Phase 0 侦察 §4 确认已通）。
+        # 优先于现有 3 路判断：确保 subagent 不被误判为 WORKER_INTERNAL。
+        _is_subagent_session = (
+            str(request.delegation_metadata.get("target_kind", "")).strip()
+            == DelegationTargetKind.SUBAGENT.value
         )
+        if _is_subagent_session:
+            kind = AgentSessionKind.SUBAGENT_INTERNAL
+        else:
+            kind = (
+                AgentSessionKind.DIRECT_WORKER
+                if is_direct_worker_session
+                else (
+                    AgentSessionKind.WORKER_INTERNAL
+                    if agent_runtime.role is AgentRuntimeRole.WORKER
+                    else AgentSessionKind.MAIN_BOOTSTRAP
+                )
+            )
+
+        # F097 B-2: 若是 SUBAGENT_INTERNAL，读取子任务的 SubagentDelegation 以获取 caller 信息。
+        # 用于填充 parent_worker_runtime_id 字段（仅 SUBAGENT_INTERNAL 使用）。
+        _subagent_delegation: SubagentDelegation | None = None
+        if _is_subagent_session:
+            try:
+                _task_events = await self._stores.event_store.get_events_for_task(task.task_id)
+                _control = merge_control_metadata(_task_events)
+                _raw_del = _control.get("subagent_delegation")
+                if _raw_del:
+                    if isinstance(_raw_del, str):
+                        _subagent_delegation = SubagentDelegation.model_validate_json(_raw_del)
+                    else:
+                        _subagent_delegation = SubagentDelegation.model_validate(_raw_del)
+            except Exception:
+                pass  # delegation 读取失败不阻断 session 创建
+
         agent_session_id = (request.agent_session_id or "").strip()
         existing: AgentSession | None = None
         if agent_session_id:
@@ -2419,6 +2454,15 @@ class AgentContextService(AgentContextTurnWriterMixin):
                 agent_session_id = existing.agent_session_id
         if not agent_session_id:
             agent_session_id = f"session-{ULID()}"
+
+        # F097 B-2: SUBAGENT_INTERNAL 的 parent_worker_runtime_id 从 delegation 取，
+        # 普通路径保留原有 ""（AgentSession 默认值）。
+        _parent_worker_runtime_id = (
+            (_subagent_delegation.caller_agent_runtime_id if _subagent_delegation else "")
+            if _is_subagent_session
+            else ""
+        )
+
         session = (
             existing.model_copy(
                 update={
@@ -2439,6 +2483,9 @@ class AgentContextService(AgentContextTurnWriterMixin):
                                 else ""
                             )
                         )
+                    ),
+                    "parent_worker_runtime_id": (
+                        existing.parent_worker_runtime_id or _parent_worker_runtime_id
                     ),
                     "metadata": {
                         **existing.metadata,
@@ -2470,6 +2517,7 @@ class AgentContextService(AgentContextTurnWriterMixin):
                         else ""
                     )
                 ),
+                parent_worker_runtime_id=_parent_worker_runtime_id,
                 work_id=request.work_id or "",
                 metadata={
                     "request_kind": request.request_kind.value,
@@ -2512,6 +2560,61 @@ class AgentContextService(AgentContextTurnWriterMixin):
             if refreshed is not None:
                 return refreshed
             raise
+
+        # F097 Phase B-3 (Codex P1-3 闭环): 回填 child_agent_session_id 到子任务
+        # control_metadata 的 SubagentDelegation 中。使用 USER_MESSAGE 事件追加
+        # control_metadata 更新，normalize 白名单已含 subagent_delegation（Phase E P1-1 闭环）。
+        # P1-3 修复：移除 `existing is None` 条件 —— 真实生产路径走 orchestrator
+        # `_prepare_a2a_dispatch` 预创建 agent_session_id 后才进入 _ensure_agent_session，
+        # 此时 existing != None 但 SubagentDelegation.child_agent_session_id 仍是 None。
+        # 移除条件后无论是否新建 session 都尝试回填；EventStore.check_idempotency_key
+        # 守护重复回填短路（同一 delegation_id 只回填一次）。
+        if _is_subagent_session and _subagent_delegation is not None:
+            try:
+                delegation_id = _subagent_delegation.delegation_id
+                b3_idempotency_key = f"subagent_delegation_session_backfill:{delegation_id}"
+                _existing_b3 = await self._stores.event_store.check_idempotency_key(
+                    b3_idempotency_key
+                )
+                if _existing_b3 is None:
+                    updated_delegation = _subagent_delegation.model_copy(
+                        update={"child_agent_session_id": session.agent_session_id}
+                    )
+                    next_seq = await self._stores.event_store.get_next_task_seq(task.task_id)
+                    b3_event = Event(
+                        event_id=str(ULID()),
+                        task_id=task.task_id,
+                        task_seq=next_seq,
+                        ts=datetime.now(tz=UTC),
+                        type=EventType.USER_MESSAGE,
+                        actor=ActorType.SYSTEM,
+                        payload=UserMessagePayload(
+                            text_preview="[subagent delegation session backfill]",
+                            text_length=0,
+                            text="",
+                            control_metadata={
+                                "subagent_delegation": updated_delegation.model_dump(mode="json")
+                            },
+                        ).model_dump(),
+                        trace_id=f"trace-{task.task_id}",
+                        causality=EventCausality(idempotency_key=b3_idempotency_key),
+                    )
+                    await self._stores.event_store.append_event_committed(
+                        b3_event, update_task_pointer=False
+                    )
+                    log.info(
+                        "subagent_delegation_session_backfilled",
+                        task_id=task.task_id,
+                        delegation_id=delegation_id,
+                        child_agent_session_id=session.agent_session_id,
+                    )
+            except Exception as b3_exc:
+                log.warning(
+                    "subagent_delegation_session_backfill_failed",
+                    task_id=task.task_id,
+                    error=str(b3_exc),
+                )
+
         return session
 
     async def _ensure_memory_namespaces(

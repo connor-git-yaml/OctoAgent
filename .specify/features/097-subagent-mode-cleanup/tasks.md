@@ -362,7 +362,7 @@
 
 ---
 
-### TB.1 `[code]` `_ensure_agent_session` 增第 4 路（SUBAGENT_INTERNAL）
+### TB.1 `[code]` `[x]` `_ensure_agent_session` 增第 4 路（SUBAGENT_INTERNAL）
 
 **描述**：在 `agent_context.py` 的 `_ensure_agent_session`（line 2318 附近，以 T0.2 侦察结果为准）新增第 4 路判断：`if agent_runtime.delegation_mode == "subagent"` → 创建 `kind=SUBAGENT_INTERNAL` 的 AgentSession，`parent_worker_runtime_id` 从 `agent_runtime` 的 control metadata 中读取 caller runtime ID。同时，session 创建成功后，更新 task metadata 中 `SubagentDelegation.child_agent_session_id` 字段（C-1 决策）。新路径放在现有 3 路判断**之前**（优先匹配，避免 fallback 到 WORKER_INTERNAL）。
 
@@ -378,7 +378,7 @@
 
 ---
 
-### TB.2 `[code]` `_update_subagent_delegation_session_id` helper（或内联逻辑）
+### TB.2 `[code]` `[x]` `_update_subagent_delegation_session_id` helper（或内联逻辑）
 
 **描述**：实现将新建 session 的 `agent_session_id` 写回 task metadata 中 `SubagentDelegation.child_agent_session_id` 的逻辑（可内联在 TB.1 的 if 块内，也可提取为独立 private helper）。写入路径：从 agent_runtime 取 task_id → 读 task metadata → 反序列化 SubagentDelegation → mark child_agent_session_id → 重新序列化 → update_task_metadata。
 
@@ -394,7 +394,7 @@
 
 ---
 
-### TB.3 `[test]` `_ensure_agent_session` 路径单测
+### TB.3 `[test]` `[x]` `_ensure_agent_session` 路径单测
 
 **描述**：新建或扩展测试文件，覆盖：`delegation_mode == "subagent"` 触发 SUBAGENT_INTERNAL 路径，session kind 正确；`parent_worker_runtime_id` 正确填充；`child_agent_session_id` 写回 task metadata；现有 3 路（DIRECT_WORKER / WORKER_INTERNAL / MAIN_BOOTSTRAP）的所有现有单测**全部继续通过**（0 regression，AC-B2 核心验证）。
 
@@ -410,7 +410,7 @@
 
 ---
 
-### TB.4 `[test]` 全量回归（Phase B 后，关键门禁）
+### TB.4 `[test]` `[x]` 全量回归（Phase B 后，关键门禁）
 
 **描述**：`pytest -q --timeout=60` 必通（≥ Phase 0 baseline passed 数，0 regression）；`pytest -m e2e_smoke` 必通（8/8 PASS）。本 Phase 是高风险 Phase，回归通过才能进入 Codex review。
 

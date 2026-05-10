@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import httpx
 from octoagent.core.models import (
     WORK_TERMINAL_STATUSES,
+    ActorType,
     BuiltinToolAvailabilityStatus,
     BundledCapabilityPack,
     BundledSkillDefinition,
@@ -24,10 +25,14 @@ from octoagent.core.models import (
     DelegationTargetKind,
     DynamicToolSelection,
     EffectiveToolUniverse,
+    Event,
+    EventCausality,
+    EventType,
     NormalizedMessage,
     OwnerProfile,
     ProjectBindingType,
     RuntimeKind,
+    SubagentDelegation,
     TurnExecutorKind,
     ToolAvailabilityExplanation,
     ToolIndexQuery,
@@ -36,6 +41,7 @@ from octoagent.core.models import (
     WorkerProfileStatus,
     WorkStatus,
 )
+from octoagent.core.models.payloads import UserMessagePayload
 from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
 from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 from octoagent.skills import SkillDiscovery
@@ -1239,6 +1245,8 @@ class CapabilityPackService:
         spawned_by: str,
         plan_id: str = "",
     ) -> dict[str, Any]:
+        from datetime import UTC, datetime
+
         if self._task_runner is None:
             raise RuntimeError("task runner is not bound for child task launch")
         self.enforce_child_target_kind_policy(target_kind)
@@ -1264,6 +1272,32 @@ class CapabilityPackService:
             idempotency_key=f"{spawned_by}:{parent_task.task_id}:{child_id}",
         )
         task_id, created = await self._task_runner.launch_child_task(child_message)
+
+        # F097 Phase B-1（Codex P1-2 + P2-6 闭环重构）：
+        # 之前：在 launch_child_task 返回后追加 USER_MESSAGE event 写 SubagentDelegation。
+        # 问题：launch_child_task 内部立即 enqueue + 启动后台 _run_job，存在 race —
+        #   child runtime 可能在 USER_MESSAGE 写入之前已进入 context 构建。
+        # 修复：通过 child_message.control_metadata 传递 raw delegation fields，由
+        #   task_runner.launch_child_task 在 create_task 后、enqueue 前 emit USER_MESSAGE
+        #   event（消除 race 窗口）。task_id 由 launch_child_task 拿到真实值后填入。
+        # P2-6 闭环：caller_agent_runtime_id 无值时保持空字符串（不 fallback 到 task_id），
+        #   由 launch_child_task 在 emit 时为空标记为 "<unknown>"（避免 min_length 校验失败）。
+        if str(target_kind).strip().lower() == DelegationTargetKind.SUBAGENT.value:
+            caller_agent_runtime_id = ""
+            try:
+                exec_ctx = get_current_execution_context()
+                caller_agent_runtime_id = exec_ctx.agent_runtime_id or ""
+            except RuntimeError:
+                pass
+            child_message.control_metadata["__subagent_delegation_init__"] = {
+                "delegation_id": str(ULID()),
+                "parent_task_id": parent_task.task_id,
+                "parent_work_id": parent_work.work_id,
+                "caller_agent_runtime_id": caller_agent_runtime_id,
+                "caller_project_id": parent_work.project_id or "",
+                "spawned_by": spawned_by,
+            }
+
         return {
             "task_id": task_id,
             "created": created,

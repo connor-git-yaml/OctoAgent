@@ -188,9 +188,85 @@ class TaskRunner:
         """创建并启动 child task。"""
         service = TaskService(self._stores, self._sse_hub)
         task_id, created = await service.create_task(message)
+        # F097 Phase B-1（Codex P1-2 闭环）：在 create_task 后、enqueue 前
+        # emit SubagentDelegation USER_MESSAGE event。消除 race —— child runtime
+        # 启动前已有完整 delegation 可读，_ensure_agent_session 能拿到 SubagentDelegation。
+        # P1-1 闭环：USER_MESSAGE event 同时保留 target_kind="subagent" 让
+        # merge_control_metadata 取最新 USER_MESSAGE 时仍能读到 turn-scoped 信号，
+        # _ensure_agent_session 走第 4 路 SUBAGENT_INTERNAL。
+        if created:
+            await self._emit_subagent_delegation_init_if_needed(task_id, message)
         if created:
             await self.enqueue(task_id, message.text, model_alias=model_alias)
         return task_id, created
+
+    async def _emit_subagent_delegation_init_if_needed(
+        self, task_id: str, message: NormalizedMessage
+    ) -> None:
+        """F097 Phase B-1: 若 message 含 __subagent_delegation_init__ raw fields，
+        emit SubagentDelegation USER_MESSAGE event（保留 target_kind 等 turn-scoped 信号）。
+        异常隔离：失败 log warn 不阻断 spawn 主流程。
+        """
+        raw = message.control_metadata.get("__subagent_delegation_init__")
+        if not raw or not isinstance(raw, dict):
+            return
+        target_kind = str(message.control_metadata.get("target_kind", "")).strip().lower()
+        if target_kind != "subagent":
+            return
+        try:
+            # P2-6 闭环：caller_agent_runtime_id 无值时用 "<unknown>" 而不是 task_id 伪造
+            # （SubagentDelegation 字段 min_length=1 不允许空字符串）
+            caller_runtime = raw.get("caller_agent_runtime_id", "") or "<unknown>"
+            caller_proj = raw.get("caller_project_id", "") or "<unknown>"
+            delegation = SubagentDelegation(
+                delegation_id=raw["delegation_id"],
+                parent_task_id=raw["parent_task_id"],
+                parent_work_id=raw["parent_work_id"],
+                child_task_id=task_id,
+                child_agent_session_id=None,
+                caller_agent_runtime_id=caller_runtime,
+                caller_project_id=caller_proj,
+                caller_memory_namespace_ids=[],
+                spawned_by=raw["spawned_by"],
+                created_at=datetime.now(tz=UTC),
+            )
+            next_seq = await self._stores.event_store.get_next_task_seq(task_id)
+            # 引入 UserMessagePayload 的 import（task_runner.py 顶部已 import 必需类）
+            from octoagent.core.models.payloads import UserMessagePayload as _UserMessagePayload
+
+            delegation_event = Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=next_seq,
+                ts=datetime.now(tz=UTC),
+                type=EventType.USER_MESSAGE,
+                actor=ActorType.SYSTEM,
+                payload=_UserMessagePayload(
+                    text_preview="[subagent delegation metadata]",
+                    text_length=0,
+                    text="",
+                    control_metadata={
+                        "subagent_delegation": delegation.model_dump(mode="json"),
+                        # P1-1 闭环：保留 target_kind 让 merge_control_metadata 取最新
+                        # USER_MESSAGE 时仍能读到 turn-scoped 信号
+                        "target_kind": "subagent",
+                        "spawned_by": delegation.spawned_by,
+                    },
+                ).model_dump(),
+                trace_id=f"trace-{task_id}",
+                causality=EventCausality(
+                    idempotency_key=f"subagent_delegation_init:{delegation.delegation_id}"
+                ),
+            )
+            await self._stores.event_store.append_event_committed(
+                delegation_event, update_task_pointer=False
+            )
+        except Exception as exc:
+            log.warning(
+                "subagent_delegation_init_failed",
+                task_id=task_id,
+                error=str(exc),
+            )
 
     async def resume_task(self, task_id: str, trigger: str = "manual") -> ResumeResult:
         """手动触发恢复并在成功时启动执行。"""
@@ -559,6 +635,9 @@ class TaskRunner:
                 )
             except Exception:
                 log.warning("run_job_mark_task_failed_fallback", task_id=task_id, exc_info=True)
+            # F097 Phase B-4 P2-4 闭环：dispatch exception 路径原本无 _notify_completion。
+            # 这里显式调用 subagent cleanup（cleanup 内部有幂等 + try-except 隔离）。
+            await self._close_subagent_session_if_needed(task_id)
             return
 
         task = await service.get_task(task_id)
@@ -588,6 +667,9 @@ class TaskRunner:
             task_id,
             f"task_left_non_terminal_status_{task.status}",
         )
+        # F097 Phase B-4 P2-4: task 处于非终态时也触发 cleanup（幂等保护，cleanup 内部
+        # 会检查 task 是否确实终态，不会对非终态 task 的 delegation session 做错误关闭）
+        await self._close_subagent_session_if_needed(task_id)
 
     async def _monitor_loop(self) -> None:
         while True:
@@ -682,37 +764,88 @@ class TaskRunner:
             if delegation.closed_at is not None:
                 return
 
-            # 5. 查 Task 获取终态时间戳（_notify_completion 调用时 task 已是终态）
+            # 5. 查 Task 获取终态时间戳
             task = await service.get_task(task_id)
-            terminal_at = datetime.now(tz=UTC)
-            terminal_status_str = "failed"  # 默认 failed
-            if task is not None:
-                terminal_at = task.updated_at if task.updated_at else terminal_at
-                terminal_status_str = (
-                    task.status.value
-                    if hasattr(task.status, "value")
-                    else str(task.status)
+            # F097 Phase B-4 (Codex P2-5 闭环): 验证 task 真终态——非终态调用直接 return。
+            # _notify_completion 正常路径触发时 task 已是终态；但 dispatch exception /
+            # shutdown 兜底等路径若在 task 非终态时调用 cleanup，会用错误的"current 状态"
+            # 写 SUBAGENT_COMPLETED 并提前关闭未真正终结的 subagent session。
+            if task is None:
+                return
+            if task.status not in TERMINAL_STATES:
+                # task 还非终态（RUNNING / CREATED / PAUSED 等），不应触发 cleanup
+                log.debug(
+                    "subagent_session_cleanup_skipped_non_terminal",
+                    task_id=task_id,
+                    task_status=str(task.status),
                 )
+                return
+            terminal_at = task.updated_at if task.updated_at else datetime.now(tz=UTC)
+            terminal_status_str = (
+                task.status.value
+                if hasattr(task.status, "value")
+                else str(task.status)
+            )
 
-            # 6. F097 Phase E (Codex P1-2 闭环): 用 EventStore.check_idempotency_key
-            # 防止重复 emit。重复触发 cleanup（如 _notify_completion 多次调用 / 进程重启
-            # 后再次进入终态分支）时，若 SUBAGENT_COMPLETED 事件已写入则整个 cleanup
-            # 短路（不再 close session 也不再 emit）——保证 AC-E2 真幂等。
+            # 6. F097 Phase E (Codex P1-2 闭环) + Phase B-4 (Codex P2-4 缓解):
+            # 用 EventStore.check_idempotency_key 防止重复 emit。重复触发 cleanup
+            # （_notify_completion 多次 / 进程重启）时，若 SUBAGENT_COMPLETED 事件已写入
+            # 则跳过 emit 但**仍尝试 close session**（P2-4 缓解：避免事件 OK + session
+            # 因 first cleanup 失败留在 ACTIVE 永久状态）。
             idempotency_key = f"subagent_completed:{delegation.delegation_id}"
             existing_task = await self._stores.event_store.check_idempotency_key(
                 idempotency_key
             )
-            if existing_task is not None:
-                # 已 emit 过，确认 session 状态后短路
+            should_emit_event = existing_task is None
+            if not should_emit_event:
                 log.info(
-                    "subagent_session_cleanup_already_done",
+                    "subagent_session_cleanup_event_already_emitted",
                     task_id=task_id,
                     delegation_id=delegation.delegation_id,
                     existing_event_task=existing_task,
                 )
-                return
+                # 不 return：继续走到 step 8 尝试 close session（P2-4 缓解）
 
-            # 7. 查 AgentSession，若 status != CLOSED 则 save 新实例
+            # F097 Phase B-4 P2-3 闭环：颠倒 session.save 与 event.append 顺序。
+            # 原顺序：session.save → commit → event.append（两次 commit，第二次失败留下
+            # closed session 但无审计事件，不可恢复的不一致）。
+            # 新顺序：先 emit 事件（EventStore.idempotency_key 守护，失败则事件不写入）→
+            # 再 save session（session 失败则下次 cleanup 重试时事件已存在，幂等检查 P1-2
+            # 短路 → session 重新尝试 close）。最坏情况是 session 未标 CLOSED 但审计事件存在，
+            # 优于原顺序的"session closed 但无事件"（audit chain 缺失更危险）。
+
+            # 7（新）: 先 emit SUBAGENT_COMPLETED 事件（AC-EVENT-1：Constitution C2）
+            # P2-4 缓解：仅在 should_emit_event=True 时 emit；重试时 should_emit_event=False
+            # 跳过 emit 但走到 step 8 仍尝试 close session（避免 session 永久 ACTIVE）
+            parent_task_id = delegation.parent_task_id
+            if should_emit_event:
+                payload = SubagentCompletedPayload(
+                    delegation_id=delegation.delegation_id,
+                    child_task_id=delegation.child_task_id,
+                    terminal_status=terminal_status_str,
+                    closed_at=terminal_at,
+                    parent_task_id=parent_task_id,
+                    child_agent_session_id=delegation.child_agent_session_id,
+                )
+                event_seq = await self._stores.event_store.get_next_task_seq(parent_task_id)
+                completed_event = Event(
+                    event_id=str(ULID()),
+                    task_id=parent_task_id,
+                    task_seq=event_seq,
+                    ts=terminal_at,
+                    type=EventType.SUBAGENT_COMPLETED,
+                    actor=ActorType.SYSTEM,
+                    payload=payload.model_dump(mode="json"),
+                    trace_id=f"trace-{parent_task_id}",
+                    causality=EventCausality(idempotency_key=idempotency_key),
+                )
+                await self._stores.event_store.append_event_committed(
+                    completed_event, update_task_pointer=False
+                )
+
+            # 8（新）: 再 save AgentSession CLOSED（事件已写入或之前已有；P2-4 缓解：
+            # 即使事件已存在仍尝试关 session，避免事件 OK + session 因 first cleanup
+            # 失败留在 ACTIVE 永久状态）
             session = await self._stores.agent_context_store.get_agent_session(
                 delegation.child_agent_session_id
             )
@@ -724,36 +857,7 @@ class TaskRunner:
                     }
                 )
                 await self._stores.agent_context_store.save_agent_session(updated_session)
-                # save_agent_session 不自动 commit，需手动提交（与 agent_context.py 模式一致）
                 await self._stores.conn.commit()
-
-            # 8. emit SUBAGENT_COMPLETED 事件（AC-EVENT-1：Constitution C2 Everything is an Event）
-            # 写入 parent_task_id 的事件流，用于关联审计；idempotency_key 保证重复 emit
-            # 被 EventStore 短路（P1-2 闭环）。
-            parent_task_id = delegation.parent_task_id
-            payload = SubagentCompletedPayload(
-                delegation_id=delegation.delegation_id,
-                child_task_id=delegation.child_task_id,
-                terminal_status=terminal_status_str,
-                closed_at=terminal_at,
-                parent_task_id=parent_task_id,
-                child_agent_session_id=delegation.child_agent_session_id,
-            )
-            event_seq = await self._stores.event_store.get_next_task_seq(parent_task_id)
-            completed_event = Event(
-                event_id=str(ULID()),
-                task_id=parent_task_id,
-                task_seq=event_seq,
-                ts=terminal_at,
-                type=EventType.SUBAGENT_COMPLETED,
-                actor=ActorType.SYSTEM,
-                payload=payload.model_dump(mode="json"),
-                trace_id=f"trace-{parent_task_id}",
-                causality=EventCausality(idempotency_key=idempotency_key),
-            )
-            await self._stores.event_store.append_event_committed(
-                completed_event, update_task_pointer=False
-            )
 
             log.info(
                 "subagent_session_cleanup_completed",
