@@ -654,10 +654,16 @@ class AgentContextService(AgentContextTurnWriterMixin):
         # 性能：cache hit 后开销 < 1µs（dict lookup）；cache miss 仅一次 IO。
         loaded_pack: BehaviorPack | None = None
         try:
+            # F097 Phase C (Codex P2-1 闭环): subagent 走 MINIMAL profile（4 文件
+            # AGENTS+TOOLS+IDENTITY+USER），否则走 worker_capability 决定的 WORKER/FULL
             load_profile_for_emit = (
-                BehaviorLoadProfile.WORKER
-                if worker_capability
-                else BehaviorLoadProfile.FULL
+                BehaviorLoadProfile.MINIMAL
+                if agent_profile.kind == "subagent"
+                else (
+                    BehaviorLoadProfile.WORKER
+                    if worker_capability
+                    else BehaviorLoadProfile.FULL
+                )
             )
             loaded_pack = resolve_behavior_pack(
                 agent_profile=agent_profile,
@@ -979,10 +985,17 @@ class AgentContextService(AgentContextTurnWriterMixin):
         # - try-except 隔离：emit 失败 log warn 不阻塞 build_task_context
         if loaded_pack is not None:
             try:
+                # F097 Phase C (Codex P2-1 闭环): subagent → MINIMAL（与上方 prime
+                # 调用 load_profile_for_emit 严格一致，避免 LOADED 事件 emit 时
+                # load_profile 字段错误）
                 load_profile_emit = (
-                    BehaviorLoadProfile.WORKER
-                    if worker_capability
-                    else BehaviorLoadProfile.FULL
+                    BehaviorLoadProfile.MINIMAL
+                    if agent_profile.kind == "subagent"
+                    else (
+                        BehaviorLoadProfile.WORKER
+                        if worker_capability
+                        else BehaviorLoadProfile.FULL
+                    )
                 )
                 # cache miss 才 emit LOADED
                 if loaded_pack.metadata.get("cache_state") == "miss":
@@ -1272,6 +1285,33 @@ class AgentContextService(AgentContextTurnWriterMixin):
             runtime_metadata=runtime_metadata,
         )
 
+    @staticmethod
+    def _build_ephemeral_subagent_profile(project: "Project | None") -> "AgentProfile":
+        """F097 Phase C (P2-2 闭环): 构造临时 Subagent 的 ephemeral AgentProfile。
+
+        - kind="subagent"（GATE_DESIGN OD-1 锁定）
+        - scope=PROJECT 跟随 caller 同 project（AC-C2）
+        - profile_id 命名前缀 `agent-prf-subagent-` + ULID
+        - **不持久化**（不调 save_agent_profile）；生命周期绑定 _resolve_context_bundle 调用
+        - 不复用 caller 的 worker AgentProfile（Phase 0 §2 侦察确认）
+        - F097 Phase G：BEHAVIOR_PACK_LOADED.agent_kind 自动派生为 "subagent"
+        """
+        return AgentProfile(
+            profile_id=f"agent-prf-subagent-{ULID()}",
+            kind="subagent",
+            scope=AgentProfileScope.PROJECT,
+            project_id=project.project_id if project is not None else "",
+            name="Ephemeral Subagent",
+            persona_summary="",
+            instruction_overlays=[
+                "本实例是临时 Subagent，共享调用方 Project 和 Memory 上下文。",
+                "完成指定任务后立即结束，不保留独立状态。",
+            ],
+            model_alias="main",
+            tool_profile="standard",
+            metadata={"source_kind": "ephemeral_subagent", "ephemeral": True},
+        )
+
     async def _resolve_context_bundle(
         self,
         *,
@@ -1285,10 +1325,24 @@ class AgentContextService(AgentContextTurnWriterMixin):
             surface=request.surface,
             project_id=request.project_id,
         )
-        agent_profile, degraded_reasons = await self._resolve_agent_profile(
-            project=project,
-            requested_profile_id=request.agent_profile_id or "",
-        )
+        # F097 Phase C: ephemeral AgentProfile for subagent
+        # 当 target_kind=subagent 时，构造 ephemeral profile 并短路，不进入持久化 profile 加载路径。
+        # 信号来源：request.delegation_metadata["target_kind"]，由 _launch_child_task 写入
+        # control_metadata["target_kind"]，经 NormalizedMessage → task.metadata → dispatch_metadata
+        # → ContextResolveRequest.delegation_metadata 链路传递（Phase 0 侦察 §3 确认路径已通）。
+        # ephemeral profile 生命周期绑定本次 _resolve_context_bundle 调用，不写 agent_profile 表。
+        # P2-2 闭环：ephemeral 构造提为 _build_ephemeral_subagent_profile，测试可直接调用真实 helper。
+        _target_kind_for_profile = str(
+            request.delegation_metadata.get("target_kind", "")
+        ).strip()
+        if _target_kind_for_profile == "subagent":
+            agent_profile = self._build_ephemeral_subagent_profile(project)
+            degraded_reasons: list[str] = []
+        else:
+            agent_profile, degraded_reasons = await self._resolve_agent_profile(
+                project=project,
+                requested_profile_id=request.agent_profile_id or "",
+            )
         owner_profile = await self._ensure_owner_profile()
         owner_overlay = await self._ensure_owner_overlay(
             owner_profile=owner_profile,
@@ -3456,10 +3510,16 @@ class AgentContextService(AgentContextTurnWriterMixin):
         )
         is_worker_profile = is_worker_behavior_profile(agent_profile)
         # Feature 063: 根据 Agent 角色确定行为文件加载级别
+        # F097 Phase C (Codex P2-1 闭环): subagent kind 优先映射到 MINIMAL
+        # （AGENTS+TOOLS+IDENTITY+USER 4 文件），避免加载主 Agent 完整行为包
         effective_load_profile = (
-            BehaviorLoadProfile.WORKER
-            if is_worker_profile
-            else BehaviorLoadProfile.FULL
+            BehaviorLoadProfile.MINIMAL
+            if agent_profile.kind == "subagent"
+            else (
+                BehaviorLoadProfile.WORKER
+                if is_worker_profile
+                else BehaviorLoadProfile.FULL
+            )
         )
         include_detailed_recall = ctx.memory_prefetch_mode == "detailed_prefetch"
         runtime_hints = build_runtime_hint_bundle(
