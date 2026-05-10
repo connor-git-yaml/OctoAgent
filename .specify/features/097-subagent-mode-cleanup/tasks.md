@@ -626,7 +626,7 @@
 
 ---
 
-### TG.1 `[test]` 补充 BEHAVIOR_PACK_LOADED agent_kind=subagent 集成测
+### TG.1 `[x]` `[test]` 补充 BEHAVIOR_PACK_LOADED agent_kind=subagent 集成测
 
 **描述**：在 `test_task_service_context_integration.py`（已有文件，tech-research 记录 line 2373 有相关结构）补充 subagent 路径的 BEHAVIOR_PACK_LOADED 断言：spawn subagent task → dispatch → query EventStore → 断言 `BEHAVIOR_PACK_LOADED.agent_kind == "subagent"` + `BEHAVIOR_PACK_LOADED.agent_id` 与 AgentRuntime.profile_id 一致（AC-AUDIT-1 四层链路前两层）。
 
@@ -642,7 +642,7 @@
 
 ---
 
-### TG.2 `[test]` 验证现有 Worker 路径 agent_kind 不受影响（AC-COMPAT-1）
+### TG.2 `[x]` `[test]` 验证现有 Worker 路径 agent_kind 不受影响（AC-COMPAT-1）
 
 **描述**：确认 `test_agent_decision_envelope.py:640` 的 `assert payload.agent_kind == "worker"` 测试（Worker 路径）在 F097 实施后**继续通过**（0 regression）。如该测试在 Phase 0-F 期间已被回归验证，此 Task 可简化为文档确认；若需要额外补充，在 TG.1 同文件增加 Worker agent_kind 不变的显式断言。
 
@@ -658,7 +658,7 @@
 
 ---
 
-### TG.3 `[test]` 全量回归（Phase G 后）
+### TG.3 `[x]` `[test]` 全量回归（Phase G 后）
 
 **描述**：`pytest -q --timeout=60` 必通（≥ Phase 0 baseline passed 数 + 所有新增测试，0 regression）；`pytest -m e2e_smoke` 必通（8/8 PASS）。
 
