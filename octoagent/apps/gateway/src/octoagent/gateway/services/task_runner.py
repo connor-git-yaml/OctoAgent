@@ -143,11 +143,11 @@ class TaskRunner:
         """停止监控并取消在途任务。
 
         F098 Phase H: 注销 cleanup callback 防泄漏。
+        Final Codex review P2 修复：注销 callback 挪到 shutdown 末尾——
+        否则 mark_running_task_failed_for_recovery 触发的终态 transition 不会
+        触发 cleanup callback（callback 已被注销），运行中的 subagent session
+        在进程停止时会保持 ACTIVE。
         """
-        # F098 Phase H: 注销 callback（必须在 monitor_task 取消前/后均可，避免泄漏）
-        await TaskService.unregister_terminal_state_callback(
-            self._close_subagent_session_if_needed,
-        )
 
         if self._monitor_task is not None:
             self._monitor_task.cancel()
@@ -186,6 +186,13 @@ class TaskRunner:
                     message="runner shutdown cancelled execution",
                 )
             self._cancellation_registry.clear(task_id)
+
+        # F098 Phase H + Final Codex P2 修复：所有终态迁移完成后才注销 callback
+        # 确保 shutdown 路径下的 mark_running_task_failed_for_recovery 仍能触发
+        # cleanup callback，subagent session 不会保持 ACTIVE。
+        await TaskService.unregister_terminal_state_callback(
+            self._close_subagent_session_if_needed,
+        )
 
     async def enqueue(self, task_id: str, user_text: str, model_alias: str | None = None) -> None:
         """入队并尝试启动执行"""
@@ -869,15 +876,28 @@ class TaskRunner:
                 )
                 # 不 return：继续走到 step 8 尝试 close session（P2-4 缓解）
 
-            # F098 Phase G (P2-3 修复，OD-3 选 A atomic): event + session 同一事务。
+            # F098 Phase G (P2-3 修复，OD-3 选 A) + Final Codex review P2 修复：
+            # event + session 同一事务，且保留 append_event_committed 的 task_seq 冲突重试机制。
+            #
             # 原 F097 Phase B-4 用 append_event_committed (commit 1) + save_agent_session +
-            # conn.commit() (commit 2) 仍是 2 次 commit。F098 改用 append_event (pending) +
-            # save_agent_session (pending) + 单一 conn.commit() = atomic。
-            # 失败时 conn.rollback 全部回滚 → idempotency_key 守护重试不重复。
-            # 实现细节：
-            # - EventStore.append_event 已是 pending 路径（不自动 commit，参考其 docstring）
-            # - AgentContextStore.save_agent_session 也是 pending 路径
-            # - 任一步失败 → conn.rollback → 重试时 idempotency_key 检查短路重复 emit
+            # conn.commit() (commit 2) 是 2 次 commit。F098 Phase G 初版改用 append_event
+            # (pending) 失去了 task_seq 重试 + per-task lock（Codex review P2 抓到）。
+            #
+            # Final 修复方案：
+            # - 用 append_event_committed(update_task_pointer=False)：保留 task_seq 重试 +
+            #   per-task lock（防并发）；event 在 append_event_committed 内已 commit。
+            # - session.save 走自己的 save_agent_session + 单独 commit。
+            # - 仍是 2 次 commit，但与 F097 baseline 相比已颠倒顺序（event 先 commit，
+            #   session 后 commit）：失败模式优化为"event 存在但 session 未 close"
+            #   （audit chain 优先，与 F097 Phase B-4 设计一致）。
+            # - rollback 路径仅对 session.save 失败有效（event 已独立 commit 不可回滚）；
+            #   session.save 失败时下次 cleanup 重试，idempotency_key 守护 event 短路 emit，
+            #   重新尝试关 session。
+            #
+            # 真正的 single-transaction atomic 需要 EventStore API 演化（append_event_pending
+            # API + 显式 task lock 暴露）—— 推迟到 F107 Capability Layer Refactor。
+            # F098 Phase G 当前实施：保留 F097 Phase B-4 的"颠倒顺序 + idempotency 守护"
+            # 设计 + 加 try/except 包裹（异常路径更明确）。
 
             parent_task_id = delegation.parent_task_id
             session = await self._stores.agent_context_store.get_agent_session(
@@ -887,53 +907,49 @@ class TaskRunner:
                 session is not None and session.status != AgentSessionStatus.CLOSED
             )
 
-            if should_emit_event or session_needs_close:
+            if should_emit_event:
+                payload = SubagentCompletedPayload(
+                    delegation_id=delegation.delegation_id,
+                    child_task_id=delegation.child_task_id,
+                    terminal_status=terminal_status_str,
+                    closed_at=terminal_at,
+                    parent_task_id=parent_task_id,
+                    child_agent_session_id=delegation.child_agent_session_id,
+                )
+                event_seq = await self._stores.event_store.get_next_task_seq(parent_task_id)
+                completed_event = Event(
+                    event_id=str(ULID()),
+                    task_id=parent_task_id,
+                    task_seq=event_seq,
+                    ts=terminal_at,
+                    type=EventType.SUBAGENT_COMPLETED,
+                    actor=ActorType.SYSTEM,
+                    payload=payload.model_dump(mode="json"),
+                    trace_id=f"trace-{parent_task_id}",
+                    causality=EventCausality(idempotency_key=idempotency_key),
+                )
+                # Final Codex review P2 修复：保留 append_event_committed 的
+                # task_seq 冲突重试 + per-task lock（防并发同 parent task 竞态）
+                await self._stores.event_store.append_event_committed(
+                    completed_event, update_task_pointer=False
+                )
+
+            if session_needs_close:
                 try:
-                    # 1. emit SUBAGENT_COMPLETED 事件（pending，未 commit）
-                    if should_emit_event:
-                        payload = SubagentCompletedPayload(
-                            delegation_id=delegation.delegation_id,
-                            child_task_id=delegation.child_task_id,
-                            terminal_status=terminal_status_str,
-                            closed_at=terminal_at,
-                            parent_task_id=parent_task_id,
-                            child_agent_session_id=delegation.child_agent_session_id,
-                        )
-                        event_seq = await self._stores.event_store.get_next_task_seq(parent_task_id)
-                        completed_event = Event(
-                            event_id=str(ULID()),
-                            task_id=parent_task_id,
-                            task_seq=event_seq,
-                            ts=terminal_at,
-                            type=EventType.SUBAGENT_COMPLETED,
-                            actor=ActorType.SYSTEM,
-                            payload=payload.model_dump(mode="json"),
-                            trace_id=f"trace-{parent_task_id}",
-                            causality=EventCausality(idempotency_key=idempotency_key),
-                        )
-                        # F098 Phase G: 用 append_event (pending) 替代 append_event_committed
-                        # 避免 2 次 commit，整个 cleanup 流程单一 atomic 事务
-                        await self._stores.event_store.append_event(completed_event)
-
-                    # 2. save AgentSession CLOSED（pending，未 commit）
-                    if session_needs_close:
-                        updated_session = session.model_copy(
-                            update={
-                                "status": AgentSessionStatus.CLOSED,
-                                "closed_at": terminal_at,
-                            }
-                        )
-                        await self._stores.agent_context_store.save_agent_session(updated_session)
-
-                    # 3. atomic commit（event + session 同一事务）
+                    updated_session = session.model_copy(
+                        update={
+                            "status": AgentSessionStatus.CLOSED,
+                            "closed_at": terminal_at,
+                        }
+                    )
+                    await self._stores.agent_context_store.save_agent_session(updated_session)
                     await self._stores.conn.commit()
                 except Exception:
-                    # F098 Phase G: 失败 rollback 全部回滚（idempotency_key 守护重试不重复）
                     try:
                         await self._stores.conn.rollback()
                     except Exception as rollback_exc:
                         log.error(
-                            "subagent_cleanup_rollback_failed",
+                            "subagent_cleanup_session_rollback_failed",
                             task_id=task_id,
                             error=str(rollback_exc),
                         )

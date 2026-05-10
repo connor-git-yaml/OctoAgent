@@ -3208,37 +3208,61 @@ class OrchestratorService:
     def _resolve_a2a_source_role(
         self,
         *,
-        runtime_context: Any,  # RuntimeContext | None
+        runtime_context: Any,  # RuntimeControlContext | None
         runtime_metadata: dict[str, Any],
         envelope_metadata: dict[str, Any],
     ) -> tuple[AgentRuntimeRole, AgentSessionKind, str]:
-        """F098 Phase B-1 (Codex review P1 闭环): 从 runtime_context/envelope 派生 A2A source。
+        """F098 Phase B-1 (Codex review P1 闭环): 从 RuntimeControlContext 派生 A2A source。
 
         baseline 硬编码 source = MAIN/MAIN_BOOTSTRAP/main.agent，导致 worker→worker A2A
         被错误记录为 main→worker，audit chain 错误（AC-C3 / AC-I3 失败）。
 
+        Final Codex review P1 修复：用 RuntimeControlContext.turn_executor_kind
+        （真实存在的字段，TurnExecutorKind enum：SELF / WORKER / SUBAGENT）+
+        worker_capability 派生 source role / session_kind / agent_uri。
+
         派生规则：
-        - 若 runtime_context.runtime_kind == WORKER 或 envelope.metadata.source_runtime_kind == worker
-          → WORKER / WORKER_INTERNAL / "worker.<source_capability>"
-        - 否则 → MAIN / MAIN_BOOTSTRAP / "main.agent"（默认主 Agent，保持 baseline 行为）
+        - turn_executor_kind == WORKER → WORKER / WORKER_INTERNAL / "worker.<capability>"
+        - turn_executor_kind == SUBAGENT → 同上（按 worker 处理保持 audit 一致性）
+        - turn_executor_kind == SELF（默认主 Agent dispatch）→ MAIN / MAIN_BOOTSTRAP / "main.agent"
+        - runtime_context 缺失 → 默认 main 路径（不 raise）
 
         返回 (role, session_kind, agent_uri) 三元组。
         """
-        runtime_kind = ""
-        if runtime_context is not None:
-            runtime_kind = str(getattr(runtime_context, "runtime_kind", "") or "").strip().lower()
+        from octoagent.core.models import TurnExecutorKind
 
-        # fallback 信号：envelope metadata（如 task_runner 在 spawn 时显式注入）
-        if not runtime_kind:
-            runtime_kind = str(envelope_metadata.get("source_runtime_kind", "")).strip().lower()
-        if not runtime_kind:
-            runtime_kind = str(runtime_metadata.get("source_runtime_kind", "")).strip().lower()
+        # 优先从 RuntimeControlContext.turn_executor_kind 派生（真实存在的字段）
+        turn_executor_kind = ""
+        capability_hint = ""
+        if runtime_context is not None:
+            te_kind_raw = getattr(runtime_context, "turn_executor_kind", None)
+            if te_kind_raw is not None:
+                turn_executor_kind = str(
+                    te_kind_raw.value if hasattr(te_kind_raw, "value") else te_kind_raw
+                ).strip().lower()
+            capability_hint = str(
+                getattr(runtime_context, "worker_capability", "") or ""
+            ).strip()
+
+        # fallback 信号：envelope metadata 显式注入（用于覆盖测试或非标准入口）
+        if not turn_executor_kind:
+            turn_executor_kind = str(
+                envelope_metadata.get("source_turn_executor_kind", "")
+                or envelope_metadata.get("source_runtime_kind", "")
+            ).strip().lower()
+        if not turn_executor_kind:
+            turn_executor_kind = str(
+                runtime_metadata.get("source_turn_executor_kind", "")
+                or runtime_metadata.get("source_runtime_kind", "")
+            ).strip().lower()
 
         # 派生 source role
-        if runtime_kind in ("worker", "subagent"):
-            # subagent 走 A2A 时也作为 source（虽然 F097 subagent 在自己 SUBAGENT_INTERNAL session
-            # 工作，理论上不应该再走 A2A；保留兼容性，按 worker 处理）
+        if turn_executor_kind in (
+            TurnExecutorKind.WORKER.value,
+            TurnExecutorKind.SUBAGENT.value,
+        ):
             source_capability = self._first_non_empty(
+                capability_hint,
                 str(runtime_metadata.get("source_worker_capability", "")),
                 str(runtime_metadata.get("worker_capability", "")),
                 str(envelope_metadata.get("source_worker_capability", "")),
@@ -3251,7 +3275,7 @@ class OrchestratorService:
                     f"worker.{source_capability}" if source_capability else "worker.unknown"
                 ),
             )
-        # default: main path（regression 防护）
+        # default: main path（turn_executor_kind == SELF 或缺失，regression 防护）
         return (
             AgentRuntimeRole.MAIN,
             AgentSessionKind.MAIN_BOOTSTRAP,
@@ -3270,47 +3294,60 @@ class OrchestratorService:
         baseline bug：target_agent_profile_id = source_agent_profile_id（receiver 复用 caller profile）
         → 违反 H3-B "receiver 在自己 context 工作"。
 
-        解析路径（fail-loud，避免 except 静默吞 error 让 fallback 静默用 source profile）：
-        - 路径 1: requested_worker_profile_id 直接 lookup AgentProfile
-        - 路径 2: 通过 self._delegation_plane.capability_pack 按 worker_capability 派生 default profile
-          （orchestrator 不直接持 capability_pack 引用，使用 delegation_plane 路径）
+        Final Codex review P2 修复：
+        - 接入真实 capability_pack.resolve_worker_binding 入口（非 mock）
+        - resolve_worker_binding 是已存在的方法（line 449），返回 _ResolvedWorkerBinding
+          其 profile_id 即 target Worker 的 AgentProfile.profile_id（通过
+          _sync_worker_profile_agent_profile 已同步存储）
+
+        解析路径（fail-loud）：
+        - 路径 1: 通过 capability_pack.resolve_worker_binding(requested_profile_id=...,
+          fallback_worker_type=worker_capability) 解析 target Worker profile
+        - 路径 2: requested_worker_profile_id 直接 store lookup（fallback 兜底）
         - 路径 3: fallback 到 source profile（warning log + 测试 fail-loud）
 
         返回 target Worker 的 profile_id。
         """
-        # 路径 1: requested_worker_profile_id 直接 lookup
+        # 路径 1: 通过 capability_pack.resolve_worker_binding 真实接入（生产路径）
+        delegation_plane = getattr(self, "_delegation_plane", None)
+        capability_pack = (
+            getattr(delegation_plane, "capability_pack", None)
+            if delegation_plane is not None
+            else None
+        )
+        if capability_pack is not None:
+            resolve_worker_binding = getattr(capability_pack, "resolve_worker_binding", None)
+            if resolve_worker_binding is not None:
+                try:
+                    binding = await resolve_worker_binding(
+                        requested_profile_id=requested_worker_profile_id or "",
+                        fallback_worker_type=worker_capability or "general",
+                    )
+                    # binding.source_kind 区分：'builtin_singleton' / 'worker_profile' /
+                    # 'agent_profile' / 'builtin_fallback'。前 3 种是真实 target profile，
+                    # 'builtin_fallback' 是 worker_capability 派生的内置默认 profile（
+                    # singleton:<worker_type> 形式），仍是独立 profile_id（不复用 source）。
+                    if binding is not None and binding.profile_id:
+                        return binding.profile_id
+                except Exception as exc:
+                    log.warning(
+                        "a2a_target_profile_resolve_worker_binding_failed",
+                        requested_worker_profile_id=requested_worker_profile_id,
+                        worker_capability=worker_capability,
+                        error=str(exc),
+                    )
+
+        # 路径 2: 直接 store lookup（fallback 兜底，用于 capability_pack 不可用场景）
         if requested_worker_profile_id:
             profile = await self._stores.agent_context_store.get_agent_profile(
                 requested_worker_profile_id,
             )
             if profile is not None:
                 return profile.profile_id
-            # fail-loud: 明确 lookup 失败但不吞 except → 走 capability fallback
             log.warning(
                 "a2a_target_profile_explicit_id_not_found",
                 requested_worker_profile_id=requested_worker_profile_id,
             )
-
-        # 路径 2: 通过 _delegation_plane.capability_pack 按 worker_capability 派生 default profile
-        # 注意：orchestrator 通过 delegation_plane 访问 capability_pack（不直接持引用）。
-        if worker_capability:
-            delegation_plane = getattr(self, "_delegation_plane", None)
-            capability_pack = (
-                getattr(delegation_plane, "capability_pack", None)
-                if delegation_plane is not None
-                else None
-            )
-            if capability_pack is not None:
-                # capability_pack 提供 resolve_worker_agent_profile 入口（若不存在则 fallback）
-                resolver = getattr(capability_pack, "resolve_worker_agent_profile", None)
-                if resolver is not None:
-                    default_profile = await resolver(worker_capability=worker_capability)
-                    if default_profile is not None:
-                        return default_profile.profile_id
-                    log.warning(
-                        "a2a_target_profile_capability_no_default",
-                        worker_capability=worker_capability,
-                    )
 
         # 路径 3: fallback (warning log)
         log.warning(

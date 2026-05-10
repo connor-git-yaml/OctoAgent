@@ -45,12 +45,17 @@ def _make_orchestrator(store_group, **kwargs) -> OrchestratorService:
 
 def _make_runtime_context(
     *,
-    runtime_kind: str = "main",
+    turn_executor_kind: str = "self",
+    worker_capability: str = "",
     metadata: dict | None = None,
 ):
-    """构造 RuntimeContext mock。"""
+    """构造 RuntimeControlContext mock（F098 Final Codex P1 闭环：用真实字段名）。"""
+    from octoagent.core.models import TurnExecutorKind
+
     rc = MagicMock()
-    rc.runtime_kind = runtime_kind
+    # 关键：turn_executor_kind 是 enum，需要 .value 属性
+    rc.turn_executor_kind = TurnExecutorKind(turn_executor_kind)
+    rc.worker_capability = worker_capability
     rc.metadata = metadata or {}
     rc.surface = "chat"
     rc.session_id = ""
@@ -64,10 +69,10 @@ def _make_runtime_context(
 
 
 def test_resolve_a2a_source_role_main_default(tmp_path: Path):
-    """AC-B1-S2: 默认 main 路径（无 worker 信号）→ MAIN / MAIN_BOOTSTRAP / "main.agent"。"""
+    """AC-B1-S2: 默认 main 路径（turn_executor_kind=self）→ MAIN / MAIN_BOOTSTRAP / "main.agent"。"""
     svc = _make_orchestrator(store_group=MagicMock())
 
-    runtime_context = _make_runtime_context(runtime_kind="main")
+    runtime_context = _make_runtime_context(turn_executor_kind="self")
     role, kind, uri = svc._resolve_a2a_source_role(
         runtime_context=runtime_context,
         runtime_metadata={},
@@ -80,16 +85,16 @@ def test_resolve_a2a_source_role_main_default(tmp_path: Path):
 
 
 def test_resolve_a2a_source_role_worker_from_runtime_context(tmp_path: Path):
-    """AC-B1-S1: runtime_context.runtime_kind=worker → WORKER / WORKER_INTERNAL / "worker.<cap>"。"""
+    """AC-B1-S1: runtime_context.turn_executor_kind=worker → WORKER / WORKER_INTERNAL / "worker.<cap>"。"""
     svc = _make_orchestrator(store_group=MagicMock())
 
     runtime_context = _make_runtime_context(
-        runtime_kind="worker",
-        metadata={"source_worker_capability": "research"},
+        turn_executor_kind="worker",
+        worker_capability="research",
     )
     role, kind, uri = svc._resolve_a2a_source_role(
         runtime_context=runtime_context,
-        runtime_metadata={"source_worker_capability": "research"},
+        runtime_metadata={},
         envelope_metadata={},
     )
 
@@ -99,14 +104,14 @@ def test_resolve_a2a_source_role_worker_from_runtime_context(tmp_path: Path):
 
 
 def test_resolve_a2a_source_role_worker_from_envelope_metadata(tmp_path: Path):
-    """AC-B1-S1 alt: envelope.metadata.source_runtime_kind=worker（runtime_context 缺失）→ WORKER。"""
+    """AC-B1-S1 alt: envelope.metadata.source_turn_executor_kind=worker（runtime_context 缺失）→ WORKER。"""
     svc = _make_orchestrator(store_group=MagicMock())
 
     role, kind, uri = svc._resolve_a2a_source_role(
         runtime_context=None,  # 模拟 runtime_context 缺失
         runtime_metadata={},
         envelope_metadata={
-            "source_runtime_kind": "worker",
+            "source_turn_executor_kind": "worker",
             "source_worker_capability": "code",
         },
     )
@@ -120,7 +125,7 @@ def test_resolve_a2a_source_role_worker_no_capability_fallback(tmp_path: Path):
     """AC-B1-S4: source 是 worker 但 capability 缺失 → "worker.unknown" agent_uri。"""
     svc = _make_orchestrator(store_group=MagicMock())
 
-    runtime_context = _make_runtime_context(runtime_kind="worker", metadata={})
+    runtime_context = _make_runtime_context(turn_executor_kind="worker", worker_capability="")
     role, kind, uri = svc._resolve_a2a_source_role(
         runtime_context=runtime_context,
         runtime_metadata={},
@@ -152,12 +157,12 @@ def test_resolve_a2a_source_role_subagent_handled_as_worker(tmp_path: Path):
     svc = _make_orchestrator(store_group=MagicMock())
 
     runtime_context = _make_runtime_context(
-        runtime_kind="subagent",
-        metadata={"source_worker_capability": "search"},
+        turn_executor_kind="subagent",
+        worker_capability="search",
     )
     role, kind, uri = svc._resolve_a2a_source_role(
         runtime_context=runtime_context,
-        runtime_metadata={"source_worker_capability": "search"},
+        runtime_metadata={},
         envelope_metadata={},
     )
 
@@ -206,30 +211,25 @@ async def test_resolve_target_agent_profile_explicit_id_lookup_success(tmp_path:
 
 @pytest.mark.asyncio
 async def test_resolve_target_agent_profile_capability_via_capability_pack(tmp_path: Path):
-    """AC-B2-T2: 通过 _delegation_plane.capability_pack 按 worker_capability 派生 default profile。"""
+    """AC-B2-T2: 通过 _delegation_plane.capability_pack.resolve_worker_binding 派生 target profile。
+
+    F098 Final Codex P2 闭环：用真实 resolve_worker_binding（返回 _ResolvedWorkerBinding）。
+    """
+    from dataclasses import dataclass
+
     store_group = await create_store_group(
         str(tmp_path / "b-2.db"), str(tmp_path / "art")
     )
 
-    capability_default_profile = AgentProfile(
-        profile_id="profile-capability-default",
-        scope=AgentProfileScope.PROJECT,
-        project_id="proj",
-        name="default_code_worker",
-        kind="worker",
-        persona_summary="default code worker",
-        model_alias="default",
-        tool_profile="code",
-        metadata={},
-        created_at=_NOW,
-        updated_at=_NOW,
-    )
+    @dataclass
+    class _MockBinding:
+        profile_id: str
 
-    # mock _delegation_plane.capability_pack.resolve_worker_agent_profile
+    binding = _MockBinding(profile_id="profile-capability-default")
+
+    # mock _delegation_plane.capability_pack.resolve_worker_binding（真实方法）
     capability_pack = MagicMock()
-    capability_pack.resolve_worker_agent_profile = AsyncMock(
-        return_value=capability_default_profile
-    )
+    capability_pack.resolve_worker_binding = AsyncMock(return_value=binding)
     delegation_plane = MagicMock()
     delegation_plane.capability_pack = capability_pack
 
@@ -242,52 +242,50 @@ async def test_resolve_target_agent_profile_capability_via_capability_pack(tmp_p
     )
 
     assert result_profile_id == "profile-capability-default"
-    # 验证 capability_pack.resolve_worker_agent_profile 被正确调用
-    capability_pack.resolve_worker_agent_profile.assert_called_once_with(worker_capability="code")
+    # 验证 resolve_worker_binding 被正确调用（带 fallback_worker_type=worker_capability）
+    capability_pack.resolve_worker_binding.assert_called_once_with(
+        requested_profile_id="",
+        fallback_worker_type="code",
+    )
 
     await store_group.conn.close()
 
 
 @pytest.mark.asyncio
-async def test_resolve_target_agent_profile_explicit_id_not_found_falls_back_to_capability(
+async def test_resolve_target_agent_profile_explicit_id_via_resolve_worker_binding(
     tmp_path: Path,
 ):
-    """AC-B2-T2 chain: explicit id lookup 失败 → 走 capability fallback（fail-loud + warning）。"""
+    """AC-B2-T1: explicit requested_worker_profile_id 通过 resolve_worker_binding 解析。"""
+    from dataclasses import dataclass
+
     store_group = await create_store_group(
         str(tmp_path / "b-3.db"), str(tmp_path / "art")
     )
 
-    capability_default_profile = AgentProfile(
-        profile_id="profile-capability-fallback",
-        scope=AgentProfileScope.PROJECT,
-        project_id="proj",
-        name="default_research_worker",
-        kind="worker",
-        persona_summary="default research worker",
-        model_alias="default",
-        tool_profile="research",
-        metadata={},
-        created_at=_NOW,
-        updated_at=_NOW,
-    )
+    @dataclass
+    class _MockBinding:
+        profile_id: str
+
+    # resolve_worker_binding 返回 explicit profile_id（路径 1）
+    binding = _MockBinding(profile_id="profile-target-explicit")
     capability_pack = MagicMock()
-    capability_pack.resolve_worker_agent_profile = AsyncMock(
-        return_value=capability_default_profile
-    )
+    capability_pack.resolve_worker_binding = AsyncMock(return_value=binding)
     delegation_plane = MagicMock()
     delegation_plane.capability_pack = capability_pack
 
     svc = _make_orchestrator(store_group=store_group, delegation_plane=delegation_plane)
 
-    # explicit id 不存在 store 中 → lookup 返回 None → 走 capability fallback
     result_profile_id = await svc._resolve_target_agent_profile(
-        requested_worker_profile_id="profile-not-exist",
+        requested_worker_profile_id="profile-target-explicit",
         worker_capability="research",
         fallback_source_profile_id="profile-source-fallback",
     )
 
-    assert result_profile_id == "profile-capability-fallback"
-    capability_pack.resolve_worker_agent_profile.assert_called_once()
+    assert result_profile_id == "profile-target-explicit"
+    capability_pack.resolve_worker_binding.assert_called_once_with(
+        requested_profile_id="profile-target-explicit",
+        fallback_worker_type="research",
+    )
 
     await store_group.conn.close()
 
@@ -296,14 +294,16 @@ async def test_resolve_target_agent_profile_explicit_id_not_found_falls_back_to_
 async def test_resolve_target_agent_profile_fallback_to_source_when_all_fail(
     tmp_path: Path,
 ):
-    """AC-B2-T3 fail-loud: 所有路径失败 → fallback 到 source profile（warning log + 不静默）。"""
+    """AC-B2-T3 fail-loud: resolve_worker_binding 返回 None / 抛异常 → fallback 到 source profile。"""
     store_group = await create_store_group(
         str(tmp_path / "b-4.db"), str(tmp_path / "art")
     )
 
-    # capability_pack.resolve_worker_agent_profile 返回 None（无 default）
+    # resolve_worker_binding 抛异常
     capability_pack = MagicMock()
-    capability_pack.resolve_worker_agent_profile = AsyncMock(return_value=None)
+    capability_pack.resolve_worker_binding = AsyncMock(
+        side_effect=RuntimeError("simulated capability failure")
+    )
     delegation_plane = MagicMock()
     delegation_plane.capability_pack = capability_pack
 
