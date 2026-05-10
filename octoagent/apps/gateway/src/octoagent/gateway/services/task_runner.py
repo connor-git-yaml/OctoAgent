@@ -19,15 +19,23 @@ from typing import Any
 import structlog
 from octoagent.core.models import (
     TERMINAL_STATES,
+    ActorType,
+    AgentSessionStatus,
     DispatchEnvelope,
+    Event,
+    EventCausality,
+    EventType,
     ExecutionConsoleSession,
     ExecutionSessionState,
     NormalizedMessage,
     ResumeFailureType,
     ResumeResult,
+    SubagentCompletedPayload,
+    SubagentDelegation,
     TaskStatus,
 )
 from octoagent.core.store import StoreGroup
+from ulid import ULID
 
 from .execution_console import (
     AttachInputResult,
@@ -630,6 +638,9 @@ class TaskRunner:
                 log.warning("task_runner_job_timeout", task_id=task_id)
 
     async def _notify_completion(self, task_id: str) -> None:
+        # F097 Phase E: 在通知前先执行 subagent session cleanup
+        # cleanup 内部已有 try-except 隔离，异常不影响主流程
+        await self._close_subagent_session_if_needed(task_id)
         if self._completion_notifier is None:
             return
         try:
@@ -639,6 +650,123 @@ class TaskRunner:
                 "task_runner_completion_notifier_failed",
                 task_id=task_id,
                 error_type=type(exc).__name__,
+            )
+
+    async def _close_subagent_session_if_needed(self, task_id: str) -> None:
+        """F097 Phase E: subagent 完成后真清理 SUBAGENT_INTERNAL session + emit SUBAGENT_COMPLETED。
+
+        幂等：对已 CLOSED session 或 delegation.closed_at 已设置时重复调用不报错。
+        保留 RecallFrame：不清理 RecallFrame 历史（H1 audit 优先）。
+        异常隔离：cleanup 失败 log warn 不影响主流程（AC-E1 异常隔离要求）。
+        非 subagent task：无 subagent_delegation metadata 时立即 return（对 main / worker 零影响）。
+        """
+        try:
+            # 1. 通过 TaskService 读取 control_metadata，取出 subagent_delegation
+            service = TaskService(self._stores, self._sse_hub)
+            control_metadata = await service.get_latest_user_metadata(task_id)
+            raw_delegation = control_metadata.get("subagent_delegation")
+            if not raw_delegation:
+                return  # 非 subagent task，直接 return
+
+            # 2. 反序列化为 SubagentDelegation
+            if isinstance(raw_delegation, str):
+                delegation = SubagentDelegation.model_validate_json(raw_delegation)
+            else:
+                delegation = SubagentDelegation.model_validate(raw_delegation)
+
+            # 3. spawn 失败场景：child_agent_session_id 为 None 则 return
+            if delegation.child_agent_session_id is None:
+                return
+
+            # 4. 幂等：若 delegation.closed_at 已设置，return
+            if delegation.closed_at is not None:
+                return
+
+            # 5. 查 Task 获取终态时间戳（_notify_completion 调用时 task 已是终态）
+            task = await service.get_task(task_id)
+            terminal_at = datetime.now(tz=UTC)
+            terminal_status_str = "failed"  # 默认 failed
+            if task is not None:
+                terminal_at = task.updated_at if task.updated_at else terminal_at
+                terminal_status_str = (
+                    task.status.value
+                    if hasattr(task.status, "value")
+                    else str(task.status)
+                )
+
+            # 6. F097 Phase E (Codex P1-2 闭环): 用 EventStore.check_idempotency_key
+            # 防止重复 emit。重复触发 cleanup（如 _notify_completion 多次调用 / 进程重启
+            # 后再次进入终态分支）时，若 SUBAGENT_COMPLETED 事件已写入则整个 cleanup
+            # 短路（不再 close session 也不再 emit）——保证 AC-E2 真幂等。
+            idempotency_key = f"subagent_completed:{delegation.delegation_id}"
+            existing_task = await self._stores.event_store.check_idempotency_key(
+                idempotency_key
+            )
+            if existing_task is not None:
+                # 已 emit 过，确认 session 状态后短路
+                log.info(
+                    "subagent_session_cleanup_already_done",
+                    task_id=task_id,
+                    delegation_id=delegation.delegation_id,
+                    existing_event_task=existing_task,
+                )
+                return
+
+            # 7. 查 AgentSession，若 status != CLOSED 则 save 新实例
+            session = await self._stores.agent_context_store.get_agent_session(
+                delegation.child_agent_session_id
+            )
+            if session is not None and session.status != AgentSessionStatus.CLOSED:
+                updated_session = session.model_copy(
+                    update={
+                        "status": AgentSessionStatus.CLOSED,
+                        "closed_at": terminal_at,
+                    }
+                )
+                await self._stores.agent_context_store.save_agent_session(updated_session)
+                # save_agent_session 不自动 commit，需手动提交（与 agent_context.py 模式一致）
+                await self._stores.conn.commit()
+
+            # 8. emit SUBAGENT_COMPLETED 事件（AC-EVENT-1：Constitution C2 Everything is an Event）
+            # 写入 parent_task_id 的事件流，用于关联审计；idempotency_key 保证重复 emit
+            # 被 EventStore 短路（P1-2 闭环）。
+            parent_task_id = delegation.parent_task_id
+            payload = SubagentCompletedPayload(
+                delegation_id=delegation.delegation_id,
+                child_task_id=delegation.child_task_id,
+                terminal_status=terminal_status_str,
+                closed_at=terminal_at,
+                parent_task_id=parent_task_id,
+                child_agent_session_id=delegation.child_agent_session_id,
+            )
+            event_seq = await self._stores.event_store.get_next_task_seq(parent_task_id)
+            completed_event = Event(
+                event_id=str(ULID()),
+                task_id=parent_task_id,
+                task_seq=event_seq,
+                ts=terminal_at,
+                type=EventType.SUBAGENT_COMPLETED,
+                actor=ActorType.SYSTEM,
+                payload=payload.model_dump(mode="json"),
+                trace_id=f"trace-{parent_task_id}",
+                causality=EventCausality(idempotency_key=idempotency_key),
+            )
+            await self._stores.event_store.append_event_committed(
+                completed_event, update_task_pointer=False
+            )
+
+            log.info(
+                "subagent_session_cleanup_completed",
+                task_id=task_id,
+                delegation_id=delegation.delegation_id,
+                child_agent_session_id=delegation.child_agent_session_id,
+                terminal_status=terminal_status_str,
+            )
+        except Exception as cleanup_exc:
+            log.warning(
+                "subagent_session_cleanup_failed",
+                task_id=task_id,
+                error=str(cleanup_exc),
             )
 
     async def _mark_execution_terminal(

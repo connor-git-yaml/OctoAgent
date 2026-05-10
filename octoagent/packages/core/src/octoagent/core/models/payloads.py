@@ -634,3 +634,22 @@ class ExecutionCancelRequestedPayload(BaseModel):
     session_id: str = Field(description="execution session ID")
     actor: str = Field(description="cancel actor")
     reason: str = Field(default="", description="cancel reason")
+
+
+# Feature 097 Phase E: Subagent 完成事件 payload
+
+
+class SubagentCompletedPayload(BaseModel):
+    """SUBAGENT_COMPLETED 事件 payload。
+
+    Subagent 子任务进入终态时由 cleanup hook 写入。
+    覆盖 AC-EVENT-1（Constitution C2 Everything is an Event）：
+    SUBAGENT_INTERNAL session CLOSED 状态迁移通过此事件记录。
+    """
+
+    delegation_id: str = Field(..., min_length=1, description="委托 ID（SubagentDelegation.delegation_id）")
+    child_task_id: str = Field(..., min_length=1, description="被委托子任务 ID")
+    terminal_status: str = Field(description="终态：succeeded / failed / cancelled")
+    closed_at: datetime = Field(description="终态时间戳（UTC）")
+    parent_task_id: str = Field(default="", description="父任务 ID，用于 audit 关联")
+    child_agent_session_id: str | None = Field(default=None, description="Subagent SUBAGENT_INTERNAL session ID（None 表示 spawn 失败场景）")

@@ -210,6 +210,7 @@ class EventType(StrEnum):
     OBSERVATION_DISCARDED = "OBSERVATION_DISCARDED"          # 候选被用户拒绝
     SUBAGENT_SPAWNED = "SUBAGENT_SPAWNED"                    # DelegationManager 派发子任务
     SUBAGENT_RETURNED = "SUBAGENT_RETURNED"                  # 子任务返回结果
+    SUBAGENT_COMPLETED = "SUBAGENT_COMPLETED"                # F097 Phase E: subagent 终态关闭（含 session CLOSED 状态迁移）
 
     # Feature 093 Phase A: AgentSessionTurn 持久化事件（main / worker session 统一）
     AGENT_SESSION_TURN_PERSISTED = "AGENT_SESSION_TURN_PERSISTED"  # mixin 写 turn 入库后 emit

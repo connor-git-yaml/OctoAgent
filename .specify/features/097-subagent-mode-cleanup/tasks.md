@@ -276,7 +276,7 @@
 
 ---
 
-### TE.1 `[code]` `_close_subagent_session_if_needed` 新增函数（含 SUBAGENT_COMPLETED emit 条件路径 — analysis F-01 修订）
+### TE.1 `[code]` `[x]` `_close_subagent_session_if_needed` 新增函数（含 SUBAGENT_COMPLETED emit 条件路径 — analysis F-01 修订）
 
 **描述**：在 `task_runner.py` 中新增 `_close_subagent_session_if_needed(self, task_id: str, terminal_at: datetime, terminal_status: TaskStatus)` 异步函数。逻辑：1）从 task metadata 读取 `subagent_delegation` 字段，不存在则 return；2）反序列化为 `SubagentDelegation`；3）若 `child_agent_session_id` 为 None 则 return（spawn 失败场景）；4）若 `delegation.closed_at is not None` 则 return（幂等）；5）查 AgentSession，若 status != CLOSED 则 save 新实例（status=CLOSED, closed_at=terminal_at）；6）更新 task metadata 中的 `subagent_delegation.closed_at`（顺序写，非事务）；**7）emit SUBAGENT_COMPLETED 事件**——条件路径：(a) 若 T0.1 侦察发现 baseline 已有 `EventType.SUBAGENT_COMPLETED` 枚举且有 emit 调用 → 验证仍正确；(b) 若 T0.1 发现枚举/emit 不存在 → TE.1 同步补充：在 `events/enums.py` 新增 `SUBAGENT_COMPLETED` 枚举值 + 在 cleanup 函数末尾 emit（payload 含 `delegation_id` / `child_task_id` / `terminal_status` / `closed_at`）。Session CLOSED 状态迁移由此事件覆盖（满足 Constitution C2，参见 spec AC-EVENT-1 / analysis F-07）。try-except 隔离：cleanup 失败时 log warn，不影响主流程。
 
@@ -292,7 +292,7 @@
 
 ---
 
-### TE.2 `[code]` 在 `_notify_completion` 中调用 cleanup hook
+### TE.2 `[code]` `[x]` 在 `_notify_completion` 中调用 cleanup hook
 
 **描述**：在 `task_runner.py` 的 `_notify_completion`（plan 记录 line 632）中，task 进入终态后调用 `await self._close_subagent_session_if_needed(task_id, terminal_at)`。确保调用在 completion notifier 之后，异常不传播到主流程。
 
@@ -308,7 +308,7 @@
 
 ---
 
-### TE.3 `[test]` session cleanup 单测
+### TE.3 `[test]` `[x]` session cleanup 单测
 
 **描述**：新建单测文件，覆盖：mock stores，测试 cleanup 被调用两次时幂等（closed_at 保持首次值，不被第二次调用覆盖）；非 subagent task（无 `subagent_delegation` 字段）时 cleanup 直接 return 不报错；`child_agent_session_id` 为 None 时跳过；cleanup 内部异常不传播到主流程（try-except 隔离验证）。
 

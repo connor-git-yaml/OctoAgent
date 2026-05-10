@@ -311,6 +311,7 @@ from .payloads import (
     ToolCallCompletedPayload,
     ToolCallFailedPayload,
     ToolCallStartedPayload,
+    SubagentCompletedPayload,
     ToolIndexSelectedPayload,
     UserMessagePayload,
     WorkerDispatchedPayload,
@@ -618,6 +619,7 @@ __all__ = [
     "ControlPlaneAuditPayload",
     "ToolIndexSelectedPayload",
     "WorkLifecyclePayload",
+    "SubagentCompletedPayload",
     "PipelineRunUpdatedPayload",
     "PipelineCheckpointSavedPayload",
     # Feature 008: Orchestrator Models

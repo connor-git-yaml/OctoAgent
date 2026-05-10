@@ -46,6 +46,11 @@ TASK_SCOPED_CONTROL_KEYS = frozenset(
         "retry_source_task_id",
         "retry_action_source",
         "retry_actor_id",
+        # F097 Phase E (Codex P1-1 闭环): SubagentDelegation 持久化字段（CL#16
+        # 锁定走 child_task 控制 metadata）。Phase B 实施 spawn 路径时由
+        # _launch_child_task 写入；Phase E cleanup 通过 task_service.get_latest_user_metadata
+        # 读取。结构化 dict value 由 normalize_control_metadata 原样保留（line 114）。
+        "subagent_delegation",
     }
 )
 
