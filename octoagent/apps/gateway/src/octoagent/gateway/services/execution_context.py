@@ -39,6 +39,12 @@ class ExecutionRuntimeContext:
     agent_runtime_id: str = ""
     runtime_context: RuntimeControlContext | None = None
     resume_state_snapshot: dict[str, Any] | None = None
+    # F099 Codex Final F1 修复：区分"真实 worker dispatch"与"owner-self 主 Agent 自执行"。
+    # worker_runtime.py 构造 ExecutionRuntimeContext 时设 True；
+    # orchestrator _register_owner_self_execution_session 构造时保持 False（默认值）。
+    # _spawn_inject.py 通过此字段决定是否注入 source_runtime_kind=worker，
+    # 而非依赖 runtime_kind（target 侧字段，owner-self 路径也为 "worker"）。
+    is_caller_worker: bool = False
     _resume_input_consumed: bool = field(default=False, init=False, repr=False)
 
     async def emit_log(self, stream: str, chunk: str) -> None:

@@ -206,6 +206,9 @@ class CapabilityPackService:
         # Feature 061: ApprovalOverride 内存缓存（给 Hook 使用）
         # 外部传入时与 ApprovalManager 共享同一实例
         self._approval_override_cache = approval_override_cache or _ApprovalOverrideMemoryCache()
+        # F099 Codex Final F2 修复：ApprovalGate 实例（worker.escalate_permission 使用）
+        # 通过 bind_approval_gate 在 startup() 之前注入（octo_harness.py 负责创建和绑定）
+        self._approval_gate: Any = None
         # Feature 080 Phase 4：embedding 路由通过 ProviderRouter 直连，
         # 不再依赖 LiteLLM Proxy（router 为 None 时 BuiltinMemUBridge 走 fallback）
         self._provider_router = provider_router
@@ -259,6 +262,16 @@ class CapabilityPackService:
         self._mcp_installer = mcp_installer
         if self._tool_deps is not None:
             self._tool_deps._mcp_installer = mcp_installer
+
+    def bind_approval_gate(self, approval_gate: Any) -> None:
+        """F099 Codex Final F2 修复：绑定 ApprovalGate 实例到生产 ToolDeps。
+
+        必须在 startup() 之前调用（或在 startup 之后直接设置 _tool_deps._approval_gate）。
+        octo_harness.py 负责在 lifespan 中创建 ApprovalGate 并调用此方法。
+        """
+        self._approval_gate = approval_gate
+        if self._tool_deps is not None:
+            self._tool_deps._approval_gate = approval_gate
 
     @property
     def mcp_registry(self) -> McpRegistryService | None:
@@ -1047,6 +1060,9 @@ class CapabilityPackService:
             _mcp_registry=self._mcp_registry,
             _mcp_installer=self._mcp_installer,
             _pack_service=self,
+            # F099 Codex Final F2 修复：注入 ApprovalGate 到 ToolDeps
+            # 通过 bind_approval_gate() 在 startup() 之前设置 self._approval_gate
+            _approval_gate=self._approval_gate,
         )
         self._tool_deps = deps
         await register_all(self._tool_broker, deps)

@@ -500,6 +500,9 @@ class WorkerRuntime:
                     agent_runtime_id=str(envelope.metadata.get("agent_runtime_id", "")),
                     runtime_context=envelope.runtime_context,
                     resume_state_snapshot=envelope.resume_state_snapshot,
+                    # F099 Codex Final F1 修复：真实 worker dispatch 路径设 True，
+                    # 与 owner-self 主 Agent 自执行路径（orchestrator 创建的 context）区分。
+                    is_caller_worker=True,
                 )
                 if self._execution_console is not None
                 else None

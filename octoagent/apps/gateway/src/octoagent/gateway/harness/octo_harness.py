@@ -691,6 +691,23 @@ class OctoHarness:
         app.state.mcp_installer = mcp_installer
         app.state.capability_pack_service.bind_mcp_installer(mcp_installer)
 
+        # F099 Codex Final F2 修复：创建生产 ApprovalGate 并绑定到 CapabilityPackService
+        # 必须在 startup() 之前 bind，startup() 内部的 _register_builtin_tools 会把它注入 ToolDeps
+        _store_group = self._store_group
+        try:
+            from octoagent.gateway.harness.approval_gate import ApprovalGate
+
+            _approval_gate = ApprovalGate(
+                event_store=_store_group.event_store if _store_group is not None and hasattr(_store_group, "event_store") else None,
+                task_store=_store_group.task_store if _store_group is not None and hasattr(_store_group, "task_store") else None,
+                sse_push_fn=None,  # SSE 推送通过 app.state.sse_hub 在后续阶段绑定
+            )
+            app.state.approval_gate = _approval_gate
+            app.state.capability_pack_service.bind_approval_gate(_approval_gate)
+        except Exception as exc:
+            _main_module.log.warning("approval_gate_capability_pack_bind_skipped", error=str(exc))
+            app.state.approval_gate = None
+
         await app.state.capability_pack_service.startup()
 
         # F084 Phase 2 T033：startup 后把 SnapshotStore 注入 ToolDeps

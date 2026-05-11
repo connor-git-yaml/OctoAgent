@@ -220,14 +220,15 @@ def test_resolve_source_role_main_backward_compat():
 
 
 def test_delegate_task_injects_worker_source_kind():
-    """AC-C1 / FR-C2: inject_worker_source_metadata 在 worker 环境下返回正确注入值。"""
+    """AC-C1 / FR-C2: inject_worker_source_metadata 在真实 worker dispatch 环境下返回正确注入值。"""
     from octoagent.gateway.services.builtin_tools._spawn_inject import inject_worker_source_metadata
     from octoagent.gateway.services.execution_context import ExecutionRuntimeContext
 
-    # 构造 mock ExecutionRuntimeContext（worker 环境）
+    # 构造 mock ExecutionRuntimeContext（真实 worker dispatch 环境：is_caller_worker=True）
     mock_ctx = MagicMock(spec=ExecutionRuntimeContext)
     mock_ctx.runtime_kind = "worker"
     mock_ctx.worker_id = "worker:research_worker"
+    mock_ctx.is_caller_worker = True  # F099 Codex Final F1 修复：真实 worker dispatch 标记
 
     with patch(
         "octoagent.gateway.services.builtin_tools._spawn_inject.get_current_execution_context",
@@ -246,10 +247,11 @@ def test_delegate_task_no_inject_when_not_worker():
     from octoagent.gateway.services.builtin_tools._spawn_inject import inject_worker_source_metadata
     from octoagent.gateway.services.execution_context import ExecutionRuntimeContext
 
-    # 构造 mock ExecutionRuntimeContext（主 Agent 环境）
+    # 构造 mock ExecutionRuntimeContext（主 Agent 环境：is_caller_worker=False 默认值）
     mock_ctx = MagicMock(spec=ExecutionRuntimeContext)
     mock_ctx.runtime_kind = "main"  # 非 worker
     mock_ctx.worker_id = ""
+    mock_ctx.is_caller_worker = False
 
     with patch(
         "octoagent.gateway.services.builtin_tools._spawn_inject.get_current_execution_context",
@@ -272,6 +274,33 @@ def test_delegate_task_no_inject_when_no_execution_context():
         result = inject_worker_source_metadata()
 
     assert result == {}
+
+
+def test_owner_self_no_inject_even_with_worker_runtime_kind():
+    """F099 Codex Final F1 修复：owner-self 路径（runtime_kind="worker" 但 is_caller_worker=False）→ 不注入。
+
+    F1 修复的核心测试：owner-self 主 Agent 自执行路径有 runtime_kind="worker"，
+    但 is_caller_worker=False，不应注入 source_runtime_kind=worker（否则 audit 链会误判）。
+    """
+    from octoagent.gateway.services.builtin_tools._spawn_inject import inject_worker_source_metadata
+    from octoagent.gateway.services.execution_context import ExecutionRuntimeContext
+
+    # 模拟 owner-self 路径：runtime_kind="worker"，但 is_caller_worker=False
+    mock_ctx = MagicMock(spec=ExecutionRuntimeContext)
+    mock_ctx.runtime_kind = "worker"  # orchestrator owner-self 路径也是 "worker"
+    mock_ctx.worker_id = "worker:general"
+    mock_ctx.is_caller_worker = False  # 关键：owner-self 不是真实 worker dispatch
+
+    with patch(
+        "octoagent.gateway.services.builtin_tools._spawn_inject.get_current_execution_context",
+        return_value=mock_ctx,
+    ):
+        result = inject_worker_source_metadata()
+
+    # owner-self 路径不应注入（F1 修复目标）
+    assert result == {}, (
+        f"owner-self 路径（is_caller_worker=False）不应注入 source_runtime_kind，实际返回 {result!r}"
+    )
 
 
 # ---------------------------------------------------------------------------

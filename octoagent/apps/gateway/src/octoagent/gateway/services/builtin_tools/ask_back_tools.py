@@ -32,7 +32,7 @@ from typing import Any
 import structlog
 from pydantic import BaseModel
 
-from octoagent.core.models.enums import ActorType, EventType
+from octoagent.core.models.enums import ActorType, EventType, TaskStatus
 from octoagent.core.models.event import Event, EventCausality
 from octoagent.core.models.payloads import ControlMetadataUpdatedPayload
 from octoagent.core.models.source_kinds import (
@@ -63,10 +63,14 @@ async def _emit_ask_back_audit(
     deps: ToolDeps,
     source: str,
     control_metadata: dict[str, Any],
+    tool_name: str = "",
 ) -> None:
     """emit CONTROL_METADATA_UPDATED 事件（FR-B4 / Constitution C2）。
 
     OD-F099-1 B 落实：复用已有 CONTROL_METADATA_UPDATED + ControlMetadataUpdatedPayload。
+
+    F099 Codex Final F4 修复：失败路径加结构化 trace（task_id + tool_name + error），
+    确保 AC-G4 audit trace 失败可观测（不 silent fail）。
 
     失败时 log warning 不 raise——audit emit 失败不阻断工具主流程
     （Constitution C6 Degrade Gracefully：外部系统不可用时工具仍可运行）。
@@ -75,17 +79,20 @@ async def _emit_ask_back_audit(
         deps: ToolDeps 共享依赖容器（获取 task_id + event_store）。
         source: 事件来源操作字符串（CONTROL_METADATA_SOURCE_* 常量）。
         control_metadata: 要承载的元数据（ask_back_question 等）。
+        tool_name: 调用方工具名称（用于失败 trace，AC-G4 可观测性）。
     """
+    task_id: str = "unknown"
     try:
         # 从当前 execution context 获取 task_id（工具在 worker 调用链中运行时有效）
         exec_ctx = get_current_execution_context()
         task_id = exec_ctx.task_id
     except RuntimeError:
-        # 测试环境或非 worker context → log warning 不 raise
+        # 测试环境或非 worker context → log warning 不 raise（AC-G4：可观测失败）
         log.warning(
             "ask_back_audit_no_execution_context",
             source=source,
-            hint="execution_context 不可用，跳过 CONTROL_METADATA_UPDATED emit",
+            tool_name=tool_name,
+            hint="execution_context 不可用，跳过 CONTROL_METADATA_UPDATED emit（AC-G4 降级）",
         )
         return
 
@@ -117,16 +124,20 @@ async def _emit_ask_back_audit(
             "ask_back_audit_emitted",
             source=source,
             task_id=task_id,
+            tool_name=tool_name,
             event_id=audit_event.event_id,
         )
 
     except Exception as exc:
         # emit 失败不阻断工具主流程（Constitution C6）
+        # F099 Codex Final F4 修复：加结构化 task_id + tool_name + error（AC-G4 可观测）
         log.warning(
             "ask_back_audit_emit_failed",
             source=source,
-            task_id=task_id if "task_id" in dir() else "unknown",
+            task_id=task_id,
+            tool_name=tool_name,
             error=str(exc),
+            hint="CONTROL_METADATA_UPDATED emit 失败，AC-G4 audit trace 缺失",
         )
 
 
@@ -166,6 +177,23 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             来源提供的回答文本（字符串）。若发生异常则返回空字符串（FR-B1 不 raise）。
         """
         try:
+            # F099 Codex Final F5 修复：在入口 guard 检查 task.status == RUNNING
+            # 防止非 RUNNING task 创建无法兑现的 waiter（F5 / Codex Domain 2）
+            try:
+                _guard_ctx = get_current_execution_context()
+                if getattr(_guard_ctx, "is_caller_worker", False):
+                    _guard_task = await deps.stores.task_store.get_task(_guard_ctx.task_id)
+                    if _guard_task is not None and _guard_task.status != TaskStatus.RUNNING:
+                        log.warning(
+                            "ask_back_called_in_non_running_state",
+                            task_id=_guard_ctx.task_id,
+                            status=str(_guard_task.status),
+                            tool_name="worker.ask_back",
+                        )
+                        return ""
+            except Exception:
+                pass  # 无 execution_context 或 task_store 不可用 → guard 跳过，继续原有流程
+
             # FR-B4: emit CONTROL_METADATA_UPDATED（source=worker_ask_back）
             await _emit_ask_back_audit(
                 deps,
@@ -175,6 +203,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                     "ask_back_context": context,
                     "created_at": datetime.now(tz=UTC).isoformat(),
                 },
+                tool_name="worker.ask_back",
             )
 
             # OD-F099-7 A: tool_result 路径——调用 execution_context.request_input()
@@ -237,6 +266,22 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             来源提供的输入文本（FR-B2）。若发生异常则返回空字符串。
         """
         try:
+            # F099 Codex Final F5 修复：在入口 guard 检查 task.status == RUNNING
+            try:
+                _guard_ctx = get_current_execution_context()
+                if getattr(_guard_ctx, "is_caller_worker", False):
+                    _guard_task = await deps.stores.task_store.get_task(_guard_ctx.task_id)
+                    if _guard_task is not None and _guard_task.status != TaskStatus.RUNNING:
+                        log.warning(
+                            "request_input_called_in_non_running_state",
+                            task_id=_guard_ctx.task_id,
+                            status=str(_guard_task.status),
+                            tool_name="worker.request_input",
+                        )
+                        return ""
+            except Exception:
+                pass  # 无 execution_context 或 task_store 不可用 → guard 跳过
+
             # FR-B4: emit CONTROL_METADATA_UPDATED（source=worker_request_input）
             await _emit_ask_back_audit(
                 deps,
@@ -246,6 +291,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                     "expected_format": expected_format,
                     "created_at": datetime.now(tz=UTC).isoformat(),
                 },
+                tool_name="worker.request_input",
             )
 
             # OD-F099-7 A: tool_result 路径——组合 prompt + expected_format
@@ -314,6 +360,22 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             不会 raise（FR-B3）。
         """
         try:
+            # F099 Codex Final F5 修复：在入口 guard 检查 task.status == RUNNING
+            try:
+                _guard_ctx = get_current_execution_context()
+                if getattr(_guard_ctx, "is_caller_worker", False):
+                    _guard_task = await deps.stores.task_store.get_task(_guard_ctx.task_id)
+                    if _guard_task is not None and _guard_task.status != TaskStatus.RUNNING:
+                        log.warning(
+                            "escalate_permission_called_in_non_running_state",
+                            task_id=_guard_ctx.task_id,
+                            status=str(_guard_task.status),
+                            tool_name="worker.escalate_permission",
+                        )
+                        return "rejected"
+            except Exception:
+                pass  # 无 execution_context 或 task_store 不可用 → guard 跳过
+
             # FR-D3: emit CONTROL_METADATA_UPDATED（source=worker_escalate_permission）
             await _emit_ask_back_audit(
                 deps,
@@ -324,6 +386,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                     "escalate_reason": reason,
                     "created_at": datetime.now(tz=UTC).isoformat(),
                 },
+                tool_name="worker.escalate_permission",
             )
 
             # OD-F099-5 A: 复用 ApprovalGate SSE 路径

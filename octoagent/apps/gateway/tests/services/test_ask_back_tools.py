@@ -46,7 +46,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_deps(*, approval_gate=None, event_store=None):
+def _make_mock_deps(*, approval_gate=None, event_store=None, task_store=None):
     """构建最小化 mock ToolDeps（只填测试所需字段）。"""
     from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
@@ -58,6 +58,15 @@ def _make_mock_deps(*, approval_gate=None, event_store=None):
         mock_event_store.get_next_task_seq = AsyncMock(return_value=1)
         mock_event_store.append_event_committed = AsyncMock(return_value=None)
         mock_stores.event_store = mock_event_store
+
+    # F099 Codex Final F5 修复：task_store.get_task 需要是 AsyncMock
+    # 默认返回 None（安全 fallback：无法查到 task 时 guard 跳过）
+    if task_store is not None:
+        mock_stores.task_store = task_store
+    else:
+        mock_task_store = AsyncMock()
+        mock_task_store.get_task = AsyncMock(return_value=None)  # None → guard 跳过
+        mock_stores.task_store = mock_task_store
 
     deps = ToolDeps(
         project_root=MagicMock(),
@@ -72,14 +81,19 @@ def _make_mock_deps(*, approval_gate=None, event_store=None):
     return deps
 
 
-def _make_mock_execution_context(*, task_id="task-test-001", session_id="session-001", worker_id="worker:test_worker"):
-    """构建 mock ExecutionRuntimeContext。"""
+def _make_mock_execution_context(*, task_id="task-test-001", session_id="session-001", worker_id="worker:test_worker", is_caller_worker=False):
+    """构建 mock ExecutionRuntimeContext。
+
+    is_caller_worker 默认 False（大多数测试不走 F5 RUNNING guard）；
+    需要触发 RUNNING guard 的 F5 测试显式设 True。
+    """
     from octoagent.gateway.services.execution_context import ExecutionRuntimeContext
 
     mock_ctx = MagicMock(spec=ExecutionRuntimeContext)
     mock_ctx.task_id = task_id
     mock_ctx.session_id = session_id
     mock_ctx.worker_id = worker_id
+    mock_ctx.is_caller_worker = is_caller_worker  # F099 Codex Final F1/F5 修复字段
     mock_ctx.request_input = AsyncMock(return_value="mock user answer")
     return mock_ctx
 
@@ -468,3 +482,131 @@ async def test_escalate_permission_emits_audit():
     assert captured_events[0].payload.get("source") == "worker_escalate_permission", (
         f"source 应为 'worker_escalate_permission'，实际 {captured_events[0].payload.get('source')!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# F099 Codex Final F4: audit emit 失败路径可观测性（AC-G4）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ask_back_audit_emit_failure_is_observable():
+    """F099 Codex Final F4: EventStore append 失败时 → handler 仍返回正常结果（不 raise）
+    + audit 失败信息结构化 log（task_id + tool_name + error 均在 log 中）。
+
+    AC-G4 可观测性：emit 失败不 silent fail，log warning 携带 task_id + tool_name + error。
+    """
+    import structlog
+
+    mock_event_store = AsyncMock()
+    mock_event_store.get_next_task_seq = AsyncMock(return_value=1)
+    # 模拟 EventStore append 失败
+    mock_event_store.append_event_committed = AsyncMock(
+        side_effect=RuntimeError("EventStore 连接断开")
+    )
+
+    deps = _make_mock_deps(event_store=mock_event_store)
+    mock_ctx = _make_mock_execution_context()
+    mock_ctx.is_caller_worker = True
+
+    log_records = []
+
+    with patch(
+        "octoagent.gateway.services.builtin_tools.ask_back_tools.get_current_execution_context",
+        return_value=mock_ctx,
+    ):
+        with patch(
+            "octoagent.gateway.services.builtin_tools.ask_back_tools.log"
+        ) as mock_log:
+            handlers = await _register_and_get_handlers(deps)
+            result = await handlers["worker.ask_back"](question="测试问题")
+
+    # 工具不 raise（FR-B1）——即使 audit emit 失败
+    assert isinstance(result, str), f"ask_back 不应 raise，应返回字符串，实际 {type(result)}"
+    # audit emit 失败时应调用 log.warning（不 silent fail）
+    assert mock_log.warning.called, "audit emit 失败时应调用 log.warning（AC-G4 可观测性）"
+
+
+@pytest.mark.asyncio
+async def test_ask_back_audit_no_context_is_observable():
+    """F099 Codex Final F4: 无 execution_context 时 → log warning 携带 tool_name（AC-G4）。"""
+    deps = _make_mock_deps()
+
+    with patch(
+        "octoagent.gateway.services.builtin_tools.ask_back_tools.get_current_execution_context",
+        side_effect=RuntimeError("no execution context"),
+    ):
+        with patch(
+            "octoagent.gateway.services.builtin_tools.ask_back_tools.log"
+        ) as mock_log:
+            handlers = await _register_and_get_handlers(deps)
+            result = await handlers["worker.ask_back"](question="测试")
+
+    # 无 context → 返回空字符串（FR-B1）
+    assert result == ""
+    # audit 路径 warning 应被调用（no_execution_context 路径）
+    assert mock_log.warning.called
+
+
+# ---------------------------------------------------------------------------
+# F099 Codex Final F5: 非 RUNNING task guard（F5 / Codex Domain 2）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ask_back_returns_empty_when_task_not_running():
+    """F099 Codex Final F5: task.status != RUNNING 时 → handler 返回 "" 不创建悬挂 waiter。"""
+    from octoagent.core.models.enums import TaskStatus
+
+    mock_task = MagicMock()
+    mock_task.status = TaskStatus.FAILED  # 非 RUNNING 状态
+
+    mock_task_store = AsyncMock()
+    mock_task_store.get_task = AsyncMock(return_value=mock_task)
+
+    # 构建 deps 注入 mock task_store
+    deps = _make_mock_deps()
+    deps.stores.task_store = mock_task_store
+
+    mock_ctx = _make_mock_execution_context()
+    mock_ctx.is_caller_worker = True  # 真实 worker dispatch 路径
+
+    with patch(
+        "octoagent.gateway.services.builtin_tools.ask_back_tools.get_current_execution_context",
+        return_value=mock_ctx,
+    ):
+        handlers = await _register_and_get_handlers(deps)
+        result = await handlers["worker.ask_back"](question="测试问题")
+
+    # 非 RUNNING 状态 → 应返回 ""（不创建 waiter）
+    assert result == "", f"非 RUNNING 状态下 ask_back 应返回 ''，实际 {result!r}"
+    # request_input 不应被调用（避免创建悬挂 waiter）
+    mock_ctx.request_input.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_request_input_returns_empty_when_task_not_running():
+    """F099 Codex Final F5: task.status != RUNNING 时 → request_input 返回 ""。"""
+    from octoagent.core.models.enums import TaskStatus
+
+    mock_task = MagicMock()
+    mock_task.status = TaskStatus.SUCCEEDED  # 非 RUNNING 状态（完成后仍被调用的情形）
+
+    mock_task_store = AsyncMock()
+    mock_task_store.get_task = AsyncMock(return_value=mock_task)
+
+    deps = _make_mock_deps()
+    deps.stores.task_store = mock_task_store
+
+    mock_ctx = _make_mock_execution_context()
+    mock_ctx.is_caller_worker = True
+
+    with patch(
+        "octoagent.gateway.services.builtin_tools.ask_back_tools.get_current_execution_context",
+        return_value=mock_ctx,
+    ):
+        handlers = await _register_and_get_handlers(deps)
+        result = await handlers["worker.request_input"](prompt="请提供数据")
+
+    assert result == "", f"非 RUNNING 状态下 request_input 应返回 ''，实际 {result!r}"
+    mock_ctx.request_input.assert_not_called()

@@ -26,18 +26,18 @@ log = structlog.get_logger(__name__)
 def inject_worker_source_metadata() -> dict[str, Any]:
     """F099 Phase C: 在 spawn 路径中注入 source_runtime_kind=worker（FR-C2 / FR-C3）。
 
-    仅在 worker 执行环境中注入：
-    - 通过 get_current_execution_context() 检测当前是否在 worker context 下运行
-    - runtime_kind == "worker" 时注入 source_runtime_kind=worker
-    - 主 Agent dispatch（无 execution_context 或 runtime_kind != "worker"）时返回空 dict
+    F099 Codex Final F1 修复：仅信任显式 is_caller_worker 信号（同 F098 Phase D Post-Review 修法）。
+    不使用 runtime_kind 派生注入条件——runtime_kind 是 target 侧字段（owner-self 路径也为 "worker"），
+    用它做 caller 身份判断会误将主 Agent owner-self 路径注入为 source=worker。
 
     注入条件（AC-C2 后向兼容）：
-    - 主 Agent 调用 delegate_task：无 execution_context 或 runtime_kind 非 worker → 不注入 → MAIN 路径不变
-    - Worker 调用 delegate_task：runtime_kind == "worker" → 注入 → WORKER 路径正确派生
+    - 真实 worker dispatch 路径（worker_runtime.py 构造 context）：is_caller_worker=True → 注入
+    - owner-self 主 Agent 自执行路径（orchestrator 构造 context）：is_caller_worker=False → 不注入
+    - 主 Agent 调用 delegate_task（无 execution_context）：无 context → 不注入 → MAIN 路径不变
 
     Returns:
         dict：包含 source_runtime_kind=worker + 可选的 source_worker_capability 字段，
-              或空 dict（非 worker 环境）。
+              或空 dict（非 worker dispatch 环境）。
     """
     try:
         exec_ctx = get_current_execution_context()
@@ -45,8 +45,9 @@ def inject_worker_source_metadata() -> dict[str, Any]:
         # 没有 execution_context（通常是主 Agent 路径或测试环境）→ 不注入
         return {}
 
-    # 仅在 worker 环境注入（AC-C2：主 Agent 不误注入）
-    if exec_ctx.runtime_kind != "worker":
+    # 仅在真实 worker dispatch 路径注入（is_caller_worker=True）
+    # AC-C2：owner-self 路径（is_caller_worker=False）不注入，保持 MAIN baseline
+    if not exec_ctx.is_caller_worker:
         return {}
 
     extra: dict[str, Any] = {
