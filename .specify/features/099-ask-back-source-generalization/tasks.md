@@ -196,9 +196,9 @@
   5. commit：`feat(F099-Phase-C): source_runtime_kind 扩展 + spawn 路径注入（FR-C1~FR-C4，F098 LOW §3 修复）`
   6. 运行全量回归确认 0 regression：`pytest --tb=short -q | tail -5`
 - **验收**:
-  - [ ] 全量回归 ≥ F098 baseline c2e97d5 passed 数
-  - [ ] Codex review 0 high finding 残留
-  - [ ] commit message 含 Codex review 闭环说明
+  - [x] 全量回归 ≥ F098 baseline c2e97d5 passed 数
+  - [x] Codex review 0 high finding 残留
+  - [x] commit message 含 Codex review 闭环说明
 - **预估**: 60min（含 review 等待）
 - **可合并 commit**: 独立（review 后 commit）
 
@@ -224,7 +224,7 @@
   2. 若缺失，补充 `CONTROL_METADATA_SOURCE_ASK_BACK = "worker_ask_back"`、`CONTROL_METADATA_SOURCE_REQUEST_INPUT = "worker_request_input"`、`CONTROL_METADATA_SOURCE_ESCALATE_PERMISSION = "worker_escalate_permission"` 三个常量
   3. 若 T-C-1 已包含，记录为 "验证通过，无需额外改动"
 - **验收**:
-  - [ ] `grep -c 'CONTROL_METADATA_SOURCE_' packages/core/src/octoagent/core/models/source_kinds.py` 输出 ≥ 5
+  - [x] `grep -c 'CONTROL_METADATA_SOURCE_' packages/core/src/octoagent/core/models/source_kinds.py` 输出 ≥ 5
 - **预估**: +0~10 LOC，10min
 - **可合并 commit**: T-D-1 + T-D-2（若 T-C-1 已含则无源码改动，合到 T-D-2 commit）
 
@@ -242,8 +242,8 @@
   2. 在 `source` 字段的 `Field(description=...)` 或注释中追加候选值：`worker_ask_back / worker_request_input / worker_escalate_permission`（F099 新增）
   3. 确认无 schema 破坏（字段类型仍为 `str`，无 Literal 约束变更）
 - **验收**:
-  - [ ] `grep 'worker_ask_back' packages/core/src/octoagent/core/models/payloads.py` 有输出
-  - [ ] `python3 -c "from octoagent.core.models.payloads import ControlMetadataUpdatedPayload"` 无报错
+  - [x] `grep 'worker_ask_back' packages/core/src/octoagent/core/models/payloads.py` 有输出
+  - [x] `python3 -c "from octoagent.core.models.payloads import ControlMetadataUpdatedPayload"` 无报错
 - **预估**: +5 LOC，15min
 - **可合并 commit**: T-D-1 + T-D-2
 
@@ -264,8 +264,8 @@
      - `test_ask_back_audit_event_not_in_conversation_turns`：mock event store 返回一个 CONTROL_METADATA_UPDATED 事件，验证 `_load_conversation_turns` 不包含该事件（AC-D2）
   2. 在文件末尾加注释标记"# Phase E 补全：emit 实测断言（test_ask_back_control_metadata_source_field 等）"
 - **验收**:
-  - [ ] `pytest tests/services/test_phase_d_ask_back_audit.py -v` 全部 PASS（4/4）
-  - [ ] AC-D2 测试函数明确验证 CONTROL_METADATA_UPDATED 不出现在 conversation_turns 中
+  - [x] `pytest tests/services/test_phase_d_ask_back_audit.py -v` 全部 PASS（4/4）
+  - [x] AC-D2 测试函数明确验证 CONTROL_METADATA_UPDATED 不出现在 conversation_turns 中
 - **预估**: +150 LOC，45min
 - **可合并 commit**: 独立
 
@@ -283,8 +283,8 @@
   3. 处理 finding，commit：`feat(F099-Phase-D): CONTROL_METADATA_UPDATED 常量化 + payloads 文档更新（FR-D4）`
   4. 确认全量回归 0 regression
 - **验收**:
-  - [ ] 全量回归 ≥ Phase C baseline passed 数
-  - [ ] Codex finding 闭环说明写入 commit message 或合并到 Phase C commit 中
+  - [x] 全量回归 ≥ Phase C baseline passed 数
+  - [x] Codex finding 闭环说明写入 commit message 或合并到 Phase C commit 中
 - **预估**: 30min
 - **可合并 commit**: 可合并至 Phase C commit
 

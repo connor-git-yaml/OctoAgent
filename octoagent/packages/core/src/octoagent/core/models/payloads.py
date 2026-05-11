@@ -59,10 +59,12 @@ class ControlMetadataUpdatedPayload(BaseModel):
     source: str = Field(
         default="",
         description=(
-            "Emit 来源标识，便于审计与诊断。候选值（未强制 enum）："
-            " 'subagent_delegation_init'（task_runner._emit_subagent_delegation_init_if_needed）"
-            " / 'subagent_delegation_session_backfill'（agent_context._ensure_agent_session B-3）"
-            " / 后续 Feature 可扩展"
+            "Emit 来源标识，便于审计与诊断。候选值（未强制 enum，见 source_kinds.CONTROL_METADATA_SOURCE_*）："
+            " 'subagent_delegation_init'（F098: task_runner._emit_subagent_delegation_init_if_needed）"
+            " / 'subagent_delegation_session_backfill'（F098: agent_context._ensure_agent_session B-3）"
+            " / 'worker_ask_back'（F099: worker.ask_back 工具触发）"
+            " / 'worker_request_input'（F099: worker.request_input 工具触发）"
+            " / 'worker_escalate_permission'（F099: worker.escalate_permission 工具触发）"
         ),
     )
 
