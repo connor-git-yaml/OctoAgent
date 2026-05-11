@@ -1243,3 +1243,98 @@ class TestTaskRunner:
 
         await runner.shutdown()
         await store_group.conn.close()
+
+    async def test_task_runner_ask_back_state_transition(
+        self, tmp_path: Path
+    ) -> None:
+        """T-E-3 / AC-E1: task_runner 层 ask_back 状态迁移（F099 Phase E）。
+
+        验证：InteractiveLLMService（模拟 worker.ask_back 路径）触发：
+        - RUNNING → WAITING_INPUT 状态迁移（request_input 调用）
+        - attach_input 提交用户回答
+        - WAITING_INPUT → RUNNING → SUCCEEDED 状态迁移
+        - 最终任务 SUCCEEDED 且 output 包含用户回答
+
+        注：此测试验证 execution_context.request_input() 的状态机路径，
+        与 ask_back_handler 内部调用的路径完全相同（OD-F099-7 A）。
+        """
+        store_group = await create_store_group(
+            str(tmp_path / "runner-ask-back.db"),
+            str(tmp_path / "artifacts"),
+        )
+        sse_hub = SSEHub()
+        task_service = TaskService(store_group, sse_hub)
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=InteractiveLLMService(),  # 模拟 worker.ask_back 内部调用 request_input
+            timeout_seconds=60,
+            monitor_interval_seconds=0.05,
+            docker_available_checker=lambda: True,
+        )
+        await runner.startup()
+
+        msg = NormalizedMessage(
+            text="ask back state transition test",
+            idempotency_key="runner-f099-ask-back",
+        )
+        task_id, created = await task_service.create_task(msg)
+        assert created is True
+        await runner.enqueue(task_id, msg.text)
+
+        # AC-E1: 等待 RUNNING → WAITING_INPUT 状态迁移
+        for _ in range(100):  # 5s 窗口
+            task = await task_service.get_task(task_id)
+            session = await runner.get_execution_session(task_id)
+            if (
+                task is not None
+                and task.status == TaskStatus.WAITING_INPUT
+                and session is not None
+                and session.state == ExecutionSessionState.WAITING_INPUT
+                and session.can_attach_input is True
+            ):
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError(
+                "F099: task did not reach WAITING_INPUT within 5s（ask_back state transition 失败）"
+            )
+
+        # WAITING_INPUT 状态验证
+        assert task is not None
+        assert task.status == TaskStatus.WAITING_INPUT
+        assert session.can_attach_input is True
+
+        # AC-E1: attach_input → WAITING_INPUT → RUNNING → SUCCEEDED
+        user_answer = "ask-back-用户回答-F099"
+        result = await runner.attach_input(task_id, user_answer)
+        assert result.delivered_live is True
+
+        # 等待 SUCCEEDED
+        for _ in range(40):  # 2s 窗口
+            task = await task_service.get_task(task_id)
+            if task is not None and task.status == TaskStatus.SUCCEEDED:
+                break
+            await asyncio.sleep(0.05)
+        else:
+            raise AssertionError(
+                "F099: task did not SUCCEED after attach_input（ask_back resume 失败）"
+            )
+
+        assert task.status == TaskStatus.SUCCEEDED
+
+        # 验证 MODEL_CALL_COMPLETED 事件中包含用户回答（InteractiveLLMService 返回 "interactive:{human_input}"）
+        events = await store_group.event_store.get_events_for_task(task_id)
+        model_call_events = [e for e in events if e.type == EventType.MODEL_CALL_COMPLETED]
+        assert len(model_call_events) >= 1, (
+            f"应有 MODEL_CALL_COMPLETED 事件，实际事件类型: {[e.type for e in events]}"
+        )
+        # model call result 包含用户回答（通过 payload 检查）
+        model_payload = model_call_events[-1].payload
+        assert user_answer in str(model_payload), (
+            f"MODEL_CALL_COMPLETED payload 应包含用户回答 {user_answer!r}，"
+            f"实际 payload: {str(model_payload)[:200]}"
+        )
+
+        await runner.shutdown()
+        await store_group.conn.close()

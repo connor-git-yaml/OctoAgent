@@ -2055,3 +2055,40 @@ async def test_bootstrap_token_budget_within_limit(
     finally:
         await task_runner.shutdown()
         await store_group.conn.close()
+
+
+async def test_ask_back_tools_in_broker_registration(
+    tmp_path: Path,
+) -> None:
+    """T-E-3 / AC-B1: register_all 后 broker 可查到三个 ask_back 工具（F099 Phase B）。
+
+    验证 worker.ask_back / worker.request_input / worker.escalate_permission
+    在 capability_pack.startup() 完成后已注册到 tool_broker，可通过 get_pack() 查询到。
+    """
+    (
+        store_group,
+        _sse_hub,
+        _task_service,
+        capability_pack,
+        _delegation_plane,
+        task_runner,
+        _tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        pack = await capability_pack.get_pack()
+        tool_names = {item.tool_name for item in pack.tools}
+
+        # AC-B1: 三工具已注册到 broker（F099 Phase B）
+        assert "worker.ask_back" in tool_names, (
+            f"worker.ask_back 未注册到 broker，已注册工具数: {len(tool_names)}"
+        )
+        assert "worker.request_input" in tool_names, (
+            f"worker.request_input 未注册到 broker，已注册工具数: {len(tool_names)}"
+        )
+        assert "worker.escalate_permission" in tool_names, (
+            f"worker.escalate_permission 未注册到 broker，已注册工具数: {len(tool_names)}"
+        )
+    finally:
+        await task_runner.shutdown()
+        await store_group.conn.close()

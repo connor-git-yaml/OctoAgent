@@ -197,7 +197,236 @@ async def test_ask_back_audit_event_not_in_conversation_turns():
     assert len(turns) == 1, f"只有 1 个 USER_MESSAGE 事件应生成 1 个 turn，实际 {len(turns)} 个"
 
 
-# Phase E 补全：emit 实测断言
-# test_ask_back_control_metadata_source_field — 需要 ask_back_tools.py 就绪后补充
-# test_ask_back_control_metadata_updated_not_in_conversation_turns — Phase E emit 实测
-# test_escalate_permission_control_metadata_source_field — Phase E emit 实测
+# ---------------------------------------------------------------------------
+# Phase E 补全：emit 实测断言（T-E-1）
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_ask_back_control_metadata_source_field():
+    """AC-D1: ask_back_handler 触发 emit 的 CONTROL_METADATA_UPDATED.source == 'worker_ask_back'。
+
+    Phase E 补全：使用 ask_back_tools 真实 handler + mock execution_context，
+    验证 event_store 中捕获到的事件 source 值正确。
+    """
+    from unittest.mock import patch
+    from octoagent.core.models.enums import EventType
+    from octoagent.gateway.services.builtin_tools._deps import ToolDeps
+
+    # 构建 mock event_store 捕获 emit
+    mock_event_store = AsyncMock()
+    mock_event_store.get_next_task_seq = AsyncMock(return_value=3)
+    captured_events = []
+
+    async def capture_append(event, **kwargs):
+        captured_events.append(event)
+
+    mock_event_store.append_event_committed = AsyncMock(side_effect=capture_append)
+
+    mock_stores = MagicMock()
+    mock_stores.event_store = mock_event_store
+
+    deps = ToolDeps(
+        project_root=MagicMock(),
+        stores=mock_stores,
+        tool_broker=MagicMock(),
+        tool_index=MagicMock(),
+        skill_discovery=MagicMock(),
+        memory_console_service=MagicMock(),
+        memory_runtime_service=MagicMock(),
+    )
+    deps._approval_gate = None
+
+    from octoagent.gateway.services.execution_context import ExecutionRuntimeContext
+    from octoagent.gateway.services.builtin_tools import ask_back_tools
+
+    mock_ctx = MagicMock(spec=ExecutionRuntimeContext)
+    mock_ctx.task_id = "task-e1-ask-back"
+    mock_ctx.session_id = "session-e1"
+    mock_ctx.request_input = AsyncMock(return_value="用户回答")
+
+    handlers = {}
+
+    class CaptureBroker:
+        async def try_register(self, schema, handler):
+            tool_name = schema.get("name", "") if isinstance(schema, dict) else getattr(schema, "name", "")
+            handlers[tool_name] = handler
+
+    with patch(
+        "octoagent.gateway.services.builtin_tools.ask_back_tools.get_current_execution_context",
+        return_value=mock_ctx,
+    ):
+        await ask_back_tools.register(CaptureBroker(), deps)
+        await handlers["worker.ask_back"](question="测试问题 E1")
+
+    # 验证 event_store 中 CONTROL_METADATA_UPDATED 的 source
+    assert len(captured_events) >= 1, "应捕获到至少 1 个 emit 事件"
+    audit_event = captured_events[0]
+    assert audit_event.type == EventType.CONTROL_METADATA_UPDATED, (
+        f"事件类型应为 CONTROL_METADATA_UPDATED，实际 {audit_event.type}"
+    )
+    assert audit_event.payload.get("source") == "worker_ask_back", (
+        f"source 应为 'worker_ask_back'，实际 {audit_event.payload.get('source')!r}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_ask_back_control_metadata_updated_not_in_conversation_turns():
+    """AC-D2: ask_back_handler emit 的 CONTROL_METADATA_UPDATED 不进入 conversation_turns（真实调用）。
+
+    Phase E 补全：联合 ask_back_handler + ContextCompactionService._load_conversation_turns，
+    验证 audit emit 事件不污染 LLM compaction 上下文（FR-D2）。
+    """
+    from unittest.mock import patch
+    from octoagent.core.models.enums import EventType
+    from octoagent.core.models import Event
+    from octoagent.gateway.services.context_compaction import ContextCompactionService
+    from octoagent.gateway.services.builtin_tools._deps import ToolDeps
+    from octoagent.gateway.services.builtin_tools import ask_back_tools
+    from octoagent.gateway.services.execution_context import ExecutionRuntimeContext
+
+    # mock event_store：append_event_committed 把事件存起来，get_events_for_task 返回存储的事件
+    stored_events = []
+
+    async def capture_append(event, **kwargs):
+        stored_events.append(event)
+
+    mock_event_store = AsyncMock()
+    mock_event_store.get_next_task_seq = AsyncMock(return_value=1)
+    mock_event_store.append_event_committed = AsyncMock(side_effect=capture_append)
+
+    # get_events_for_task 返回已存的事件（模拟 ask_back emit 后的 event store 状态）
+    async def get_events(task_id, **kwargs):
+        return stored_events
+
+    mock_event_store.get_events_for_task = AsyncMock(side_effect=get_events)
+
+    mock_artifact_store = AsyncMock()
+    mock_artifact_store.get_artifact_content = AsyncMock(return_value=None)
+
+    mock_stores = MagicMock()
+    mock_stores.event_store = mock_event_store
+    mock_stores.artifact_store = mock_artifact_store
+
+    deps = ToolDeps(
+        project_root=MagicMock(),
+        stores=mock_stores,
+        tool_broker=MagicMock(),
+        tool_index=MagicMock(),
+        skill_discovery=MagicMock(),
+        memory_console_service=MagicMock(),
+        memory_runtime_service=MagicMock(),
+    )
+    deps._approval_gate = None
+
+    mock_ctx = MagicMock(spec=ExecutionRuntimeContext)
+    mock_ctx.task_id = "task-e1-conv"
+    mock_ctx.session_id = "session-e1"
+    mock_ctx.request_input = AsyncMock(return_value="回答")
+
+    handlers = {}
+
+    class CaptureBroker:
+        async def try_register(self, schema, handler):
+            tool_name = schema.get("name", "") if isinstance(schema, dict) else getattr(schema, "name", "")
+            handlers[tool_name] = handler
+
+    with patch(
+        "octoagent.gateway.services.builtin_tools.ask_back_tools.get_current_execution_context",
+        return_value=mock_ctx,
+    ):
+        await ask_back_tools.register(CaptureBroker(), deps)
+        # 调用 ask_back → emit CONTROL_METADATA_UPDATED 到 event store
+        await handlers["worker.ask_back"](question="Phase E 测试问题")
+
+    # 确认有事件被 emit
+    ctrl_events = [e for e in stored_events if e.type == EventType.CONTROL_METADATA_UPDATED]
+    assert len(ctrl_events) >= 1, "应有至少 1 个 CONTROL_METADATA_UPDATED emit"
+    ctrl_event_ids = {e.event_id for e in ctrl_events}
+
+    # 用 ContextCompactionService._load_conversation_turns 验证过滤行为
+    service = ContextCompactionService.__new__(ContextCompactionService)
+    service._stores = mock_stores
+
+    turns = await service._load_conversation_turns("task-e1-conv")
+    turn_event_ids = {t.source_event_id for t in turns}
+
+    # CONTROL_METADATA_UPDATED 事件不应出现在 conversation_turns 中（AC-D2 / FR-D2）
+    assert not ctrl_event_ids.intersection(turn_event_ids), (
+        f"CONTROL_METADATA_UPDATED 事件 {ctrl_event_ids} 不应出现在 conversation_turns 中，"
+        f"实际 turn event ids: {turn_event_ids}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_escalate_permission_control_metadata_source_field():
+    """FR-D3: escalate_permission_handler 触发 emit 的 CONTROL_METADATA_UPDATED.source == 'worker_escalate_permission'。
+
+    Phase E 补全：验证 escalate_permission emit 的 source 值正确（FR-D3 real call）。
+    """
+    from unittest.mock import patch
+    from octoagent.core.models.enums import EventType
+    from octoagent.gateway.services.builtin_tools._deps import ToolDeps
+    from octoagent.gateway.services.builtin_tools import ask_back_tools
+    from octoagent.gateway.services.execution_context import ExecutionRuntimeContext
+
+    mock_event_store = AsyncMock()
+    mock_event_store.get_next_task_seq = AsyncMock(return_value=2)
+    captured_events = []
+
+    async def capture_append(event, **kwargs):
+        captured_events.append(event)
+
+    mock_event_store.append_event_committed = AsyncMock(side_effect=capture_append)
+
+    mock_stores = MagicMock()
+    mock_stores.event_store = mock_event_store
+
+    # mock approval_gate
+    mock_gate = AsyncMock()
+    mock_handle = MagicMock()
+    mock_gate.request_approval = AsyncMock(return_value=mock_handle)
+    mock_gate.wait_for_decision = AsyncMock(return_value="rejected")
+
+    deps = ToolDeps(
+        project_root=MagicMock(),
+        stores=mock_stores,
+        tool_broker=MagicMock(),
+        tool_index=MagicMock(),
+        skill_discovery=MagicMock(),
+        memory_console_service=MagicMock(),
+        memory_runtime_service=MagicMock(),
+    )
+    deps._approval_gate = mock_gate
+
+    mock_ctx = MagicMock(spec=ExecutionRuntimeContext)
+    mock_ctx.task_id = "task-e1-escalate"
+    mock_ctx.session_id = "session-e1"
+
+    handlers = {}
+
+    class CaptureBroker:
+        async def try_register(self, schema, handler):
+            tool_name = schema.get("name", "") if isinstance(schema, dict) else getattr(schema, "name", "")
+            handlers[tool_name] = handler
+
+    with patch(
+        "octoagent.gateway.services.builtin_tools.ask_back_tools.get_current_execution_context",
+        return_value=mock_ctx,
+    ):
+        await ask_back_tools.register(CaptureBroker(), deps)
+        await handlers["worker.escalate_permission"](
+            action="Phase E 测试动作",
+            scope="测试范围",
+            reason="Phase E 测试原因",
+        )
+
+    # 验证 source == "worker_escalate_permission"（FR-D3）
+    assert len(captured_events) >= 1, "应捕获到至少 1 个 emit 事件"
+    audit_event = captured_events[0]
+    assert audit_event.type == EventType.CONTROL_METADATA_UPDATED, (
+        f"事件类型应为 CONTROL_METADATA_UPDATED，实际 {audit_event.type}"
+    )
+    assert audit_event.payload.get("source") == "worker_escalate_permission", (
+        f"source 应为 'worker_escalate_permission'，实际 {audit_event.payload.get('source')!r}"
+    )
