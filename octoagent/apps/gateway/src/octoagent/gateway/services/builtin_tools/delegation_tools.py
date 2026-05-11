@@ -38,6 +38,8 @@ from ._deps import (
     descendant_works_for_current_context,
     resolve_child_work,
 )
+# F099 Phase C: FR-C3 spawn 路径注入（与 delegate_task_tool 保持一致）
+from ._spawn_inject import inject_worker_source_metadata
 
 # 各工具 entrypoints 声明（Feature 084 D1 根治 + Codex F2 收紧）
 # 设计原则：终止/控制/合并/删除 sub-agent 是不可逆动作，web 暴露需要 ApprovalGate（Phase 3）。
@@ -136,6 +138,11 @@ async def register(broker, deps: ToolDeps) -> None:
         if parent_work is None:
             raise RuntimeError(f"current work not found: {context.work_id}")
 
+        # F099 Phase C: FR-C3 subagents.spawn 路径注入 source_runtime_kind=worker
+        # 在 batch loop 外计算一次（所有 objective 共享同一 execution context）
+        # inject_worker_source_metadata() 内部判断 runtime_kind，非 worker 环境返回 {}
+        spawn_extra_metadata = inject_worker_source_metadata()
+
         launched_raw: list[Any] = []
         skipped_objectives: list[tuple[str, str]] = []  # (objective, reject_reason)
         accumulated_task_ids: list[str] = []
@@ -159,6 +166,7 @@ async def register(broker, deps: ToolDeps) -> None:
                 emit_audit_event=False,  # 关键：保持原 subagents.spawn 历史不写审计行为
                 audit_task_fallback="_subagents_spawn_audit",
                 additional_active_children=list(accumulated_task_ids),
+                extra_control_metadata=spawn_extra_metadata or None,
             )
 
             if spawn_result.status == "rejected":

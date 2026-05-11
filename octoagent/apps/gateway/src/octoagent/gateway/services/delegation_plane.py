@@ -969,6 +969,7 @@ class DelegationPlaneService:
         audit_task_fallback: str = "_delegate_task_audit",
         additional_active_children: list[str] | None = None,
         delegation_manager: DelegationManager | None = None,
+        extra_control_metadata: dict[str, Any] | None = None,
     ) -> SpawnChildResult:
         """F092 Phase A：统一 spawn 编排入口。
 
@@ -1000,6 +1001,10 @@ class DelegationPlaneService:
                 task_id 累加进来，让后续 objective 的 gate 检查正确累计；delegate_task_tool
                 单次调用时无需传。**若不传则等价于空列表**。
             delegation_manager: 测试用 DI 钩子；None 时按 stores 默认构造
+            extra_control_metadata: F099 Phase C 新增——额外的 control_metadata 字段，在
+                _launch_child_task 构建 base_control_metadata 后追加合并（低优先级，不覆盖
+                基础字段）。工具层（delegate_task_tool / delegation_tools）在 worker 环境
+                下注入 source_runtime_kind=worker 使用此参数；主 Agent 调用时不传。
 
         Returns:
             SpawnChildResult：status ∈ {"written", "rejected"}。
@@ -1098,6 +1103,7 @@ class DelegationPlaneService:
             title=title,
             spawned_by=spawned_by,
             plan_id=plan_id,
+            extra_control_metadata=extra_control_metadata or {},
         )
 
         spawned_task_id = payload.get("task_id", "") if isinstance(payload, dict) else ""

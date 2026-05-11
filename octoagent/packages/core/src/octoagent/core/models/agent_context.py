@@ -107,6 +107,8 @@ class ContextRequestKind(StrEnum):
 class AgentRuntimeRole(StrEnum):
     MAIN = "main"
     WORKER = "worker"
+    AUTOMATION = "automation"      # F099 新增（GATE_DESIGN G-2 要求，F101 依赖此基础设施）
+    USER_CHANNEL = "user_channel"  # F099 新增（GATE_DESIGN G-2 要求，用户渠道直接触发）
 
 
 class AgentRuntimeStatus(StrEnum):
@@ -131,6 +133,8 @@ class AgentSessionKind(StrEnum):
     WORKER_INTERNAL = "worker_internal"
     DIRECT_WORKER = "direct_worker"
     SUBAGENT_INTERNAL = "subagent_internal"
+    AUTOMATION_INTERNAL = "automation_internal"  # F099 新增（automation dispatch 专用 session 类型）
+    USER_CHANNEL = "user_channel"               # F099 新增（用户渠道直接触发的 session 类型）
 
 
 def normalize_session_kind(value: str) -> AgentSessionKind:

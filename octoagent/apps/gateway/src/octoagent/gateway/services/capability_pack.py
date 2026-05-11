@@ -1244,6 +1244,7 @@ class CapabilityPackService:
         title: str = "",
         spawned_by: str,
         plan_id: str = "",
+        extra_control_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         from datetime import UTC, datetime
 
@@ -1327,6 +1328,18 @@ class CapabilityPackService:
                     target_kind=target_kind,
                     reason="spawn 主流程不受影响",
                 )
+
+        # F099 Phase C: 合并调用方注入的额外 control_metadata（低优先级：不覆盖基础字段）
+        # extra_control_metadata 由 delegate_task_tool / delegation_tools 在 worker 环境下注入
+        # source_runtime_kind=worker，保证 _resolve_a2a_source_role 能正确派生 source（FR-C2/C3）
+        # 合并策略：先设 base，再更新 extra；extra 不覆盖 base 的核心字段
+        # （由 delegate_task_tool 注入条件控制：非 worker 环境不注入 → 不影响主 Agent 路径）
+        if extra_control_metadata:
+            # extra 仅注入"注释性"字段（source_runtime_kind / source_worker_capability 等）
+            # 不允许覆盖核心路由字段（parent_task_id / target_kind / requested_worker_type 等）
+            for key, val in extra_control_metadata.items():
+                if key not in base_control_metadata:
+                    base_control_metadata[key] = val
 
         child_message = NormalizedMessage(
             channel=parent_task.requester.channel,

@@ -38,6 +38,12 @@ from octoagent.core.models import (
     TurnExecutorKind,
     WorkerResult,
 )
+# F099 Phase C: source_kinds 常量导入（_resolve_a2a_source_role 扩展）
+from octoagent.core.models.source_kinds import (
+    KNOWN_SOURCE_RUNTIME_KINDS,
+    SOURCE_RUNTIME_KIND_AUTOMATION,
+    SOURCE_RUNTIME_KIND_USER_CHANNEL,
+)
 from octoagent.protocol import (
     build_cancel_message,
     build_error_message,
@@ -873,7 +879,43 @@ class A2ADispatchMixin:
                     f"worker.{source_capability}" if source_capability else "worker.unknown"
                 ),
             )
-        # default: main path（regression 防护，无显式 source 信号时保持 baseline）
+
+        # F099 Phase C: automation 分支（GATE_DESIGN G-2 / FR-C1）
+        if source_runtime_kind == SOURCE_RUNTIME_KIND_AUTOMATION:
+            source_automation_id = self._first_non_empty(
+                str(envelope_metadata.get("source_automation_id", "")),
+                str(runtime_metadata.get("source_automation_id", "")),
+            ) or "unknown"
+            return (
+                AgentRuntimeRole.AUTOMATION,
+                AgentSessionKind.AUTOMATION_INTERNAL,
+                self._agent_uri(f"automation.{source_automation_id}"),
+            )
+
+        # F099 Phase C: user_channel 分支（GATE_DESIGN G-2 / FR-C1）
+        if source_runtime_kind == SOURCE_RUNTIME_KIND_USER_CHANNEL:
+            source_channel_id = self._first_non_empty(
+                str(envelope_metadata.get("source_channel_id", "")),
+                str(runtime_metadata.get("source_channel_id", "")),
+            ) or "unknown"
+            return (
+                AgentRuntimeRole.USER_CHANNEL,
+                AgentSessionKind.USER_CHANNEL,
+                self._agent_uri(f"user.{source_channel_id}"),
+            )
+
+        # F099 Phase C: FR-C4 无效值降级（SHOULD 级别）
+        # 非空且不在已知集合中的值 → 降级为 MAIN + warning log（不 raise）
+        if source_runtime_kind and source_runtime_kind not in KNOWN_SOURCE_RUNTIME_KINDS:
+            log.warning(
+                "source_runtime_kind_unknown",
+                source_runtime_kind=source_runtime_kind,
+                hint="未知 source_runtime_kind 值，降级为 main 路径（AC-C3）",
+                known_kinds=list(KNOWN_SOURCE_RUNTIME_KINDS),
+            )
+            # 降级为 MAIN（保护 audit chain 完整性，不静默丢失）
+
+        # default: main path（regression 防护，无显式 source 信号或降级时保持 baseline）
         return (
             AgentRuntimeRole.MAIN,
             AgentSessionKind.MAIN_BOOTSTRAP,

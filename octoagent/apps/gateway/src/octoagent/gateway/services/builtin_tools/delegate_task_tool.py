@@ -37,6 +37,8 @@ from octoagent.gateway.harness.tool_registry import register as _registry_regist
 from octoagent.tooling import reflect_tool_schema, tool_contract
 
 from ._deps import ToolDeps, current_work_context
+# F099 Phase C: FR-C2 spawn 路径注入（inject_worker_source_metadata 检测 runtime_kind 并注入）
+from ._spawn_inject import inject_worker_source_metadata
 
 log = structlog.get_logger(__name__)
 
@@ -142,6 +144,12 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             if deps._pack_service is not None
             else "default"
         )
+
+        # F099 Phase C: FR-C2 worker→worker dispatch source 注入
+        # 仅在 worker 环境下注入 source_runtime_kind=worker（AC-C2 后向兼容：主 Agent 不注入）
+        # inject_worker_source_metadata() 内部判断 runtime_kind，非 worker 环境返回 {}
+        extra_control_metadata = inject_worker_source_metadata()
+
         try:
             spawn_result = await deps.delegation_plane.spawn_child(
                 parent_task=parent_task,
@@ -155,6 +163,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                 emit_audit_event=True,  # F34: SUBAGENT_SPAWNED 审计事件必须写
                 callback_mode=callback_mode,
                 audit_task_fallback=_DELEGATE_AUDIT_TASK_ID,
+                extra_control_metadata=extra_control_metadata or None,
             )
         except Exception as exc:
             # launch raise（含 enforce / task_runner 错误）→ 包成 rejected
