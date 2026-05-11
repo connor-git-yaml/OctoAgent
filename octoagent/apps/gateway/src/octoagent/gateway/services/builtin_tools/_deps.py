@@ -62,6 +62,7 @@ class ToolDeps:
     _pack_service: Any = None  # 弱引用回 CapabilityPackService
     _snapshot_store: Any = None  # F084 Phase 2 T022-T025
     _graph_pipeline_tool: Any = None  # GraphPipelineTool 实例（lifespan 内 late-bind）
+    _approval_gate: Any = None  # F099 Phase B: ApprovalGate 实例（worker.escalate_permission 使用）
 
     @property
     def task_runner(self):

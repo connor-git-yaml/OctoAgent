@@ -310,9 +310,9 @@
   4. 定义 `async def register(broker, deps) -> None:` 入口（handler 在 T-B-2~T-B-4 填充）
   5. 在文件顶部 import：source_kinds 常量 + AgentRuntimeRole + ControlMetadataUpdatedPayload + tool_contract
 - **验收**:
-  - [ ] 文件存在：`ls apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py`
-  - [ ] `python3 -c "from octoagent.gateway.services.builtin_tools import ask_back_tools"` 无报错
-  - [ ] `_emit_ask_back_audit` 函数定义存在
+  - [x] 文件存在：`ls apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py`
+  - [x] `python3 -c "from octoagent.gateway.services.builtin_tools import ask_back_tools"` 无报错
+  - [x] `_emit_ask_back_audit` 函数定义存在
 - **预估**: +60 LOC，30min
 - **可合并 commit**: T-B-1 ~ T-B-5 整体 commit（Phase B 主体可一次 commit）
 
@@ -333,9 +333,9 @@
   5. handler 不得 raise（FR-B1）：用 try/except 包装，异常时返回空字符串
   6. 在 `register` 函数中用 `broker.register(ask_back_handler)` 注册
 - **验收**:
-  - [ ] `grep 'worker.ask_back' apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py` 有输出
-  - [ ] handler 文档字符串包含"向当前工作来源提问"说明（FR-B5）
-  - [ ] 不使用 raise 终止流程
+  - [x] `grep 'worker.ask_back' apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py` 有输出
+  - [x] handler 文档字符串包含"向当前工作来源提问"说明（FR-B5）
+  - [x] 不使用 raise 终止流程
 - **预估**: +50 LOC，40min
 - **可合并 commit**: T-B-1 ~ T-B-5
 
@@ -355,8 +355,8 @@
   4. handler 逻辑：emit `CONTROL_METADATA_SOURCE_REQUEST_INPUT` audit，调用 `execution_context.request_input(prompt=f"{prompt}\n期望格式：{expected_format}", actor="worker:request_input")`，返回结果（FR-B2：返回用户输入文本）
   5. 在 `register` 中注册
 - **验收**:
-  - [ ] `grep 'worker.request_input' apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py` 有输出
-  - [ ] 函数签名包含 `expected_format` 参数
+  - [x] `grep 'worker.request_input' apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py` 有输出
+  - [x] 函数签名包含 `expected_format` 参数
 - **预估**: +40 LOC，20min
 - **可合并 commit**: T-B-1 ~ T-B-5
 
@@ -381,9 +381,9 @@
      - 返回 `decision`（"approved" 或 "rejected"，FR-B3：均不 raise）
   5. 在 `register` 中注册
 - **验收**:
-  - [ ] `grep 'worker.escalate_permission' apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py` 有输出
-  - [ ] `grep 'wait_for_decision' apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py` 有输出
-  - [ ] `grep 'approval_gate is None' apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py` 有输出（降级检查）
+  - [x] `grep 'worker.escalate_permission' apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py` 有输出
+  - [x] `grep 'wait_for_decision' apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py` 有输出
+  - [x] `grep 'approval_gate is None' apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py` 有输出（降级检查）
 - **预估**: +60 LOC，45min
 - **可合并 commit**: T-B-1 ~ T-B-5
 
@@ -402,8 +402,8 @@
   3. 调用 `await deps.event_store.append_event(task_id=..., event_type=EventType.CONTROL_METADATA_UPDATED, payload=...)` 写入 Event Store
   4. 确认不抛异常（emit 失败时 log warning，不阻断工具调用）
 - **验收**:
-  - [ ] `_emit_ask_back_audit` 函数体包含 `append_event` 调用
-  - [ ] 异常处理：emit 失败不影响工具主流程（try/except + log warning）
+  - [x] `_emit_ask_back_audit` 函数体包含 `append_event` 调用
+  - [x] 异常处理：emit 失败不影响工具主流程（try/except + log warning）
 - **预估**: +20 LOC，20min
 - **可合并 commit**: T-B-1 ~ T-B-5
 
@@ -421,7 +421,7 @@
   2. 在 import 区添加 `from . import ask_back_tools`
   3. 在 `register_all` 函数中追加 `await ask_back_tools.register(broker, deps)`
 - **验收**:
-  - [ ] `grep 'ask_back_tools' apps/gateway/src/octoagent/gateway/services/builtin_tools/__init__.py` 有输出
+  - [x] `grep 'ask_back_tools' apps/gateway/src/octoagent/gateway/services/builtin_tools/__init__.py` 有输出
 - **预估**: +3 LOC，10min
 - **可合并 commit**: 独立（或合并到 T-B-5 commit）
 
@@ -453,7 +453,7 @@
      - `test_request_input_emits_audit`：event_store.append_event 被调用，source="worker_request_input"（FR-B4）
      - `test_escalate_permission_emits_audit`：event_store.append_event 被调用，source="worker_escalate_permission"（FR-D3）
 - **验收**:
-  - [ ] `pytest tests/services/test_ask_back_tools.py -v` 全部 PASS（15/15）
+  - [x] `pytest tests/services/test_ask_back_tools.py -v` 全部 PASS（15/15）
 - **预估**: +380 LOC，90min
 - **可合并 commit**: 独立
 
@@ -472,8 +472,8 @@
   4. 处理 finding，commit：`feat(F099-Phase-B): 三工具引入 worker.ask_back/request_input/escalate_permission（AC-B1~B5，AC-G3，AC-G4）`
   5. 全量回归确认 0 regression
 - **验收**:
-  - [ ] 全量回归 ≥ Phase D baseline passed 数
-  - [ ] Codex review 0 high finding 残留
+  - [x] 全量回归 ≥ Phase D baseline passed 数
+  - [x] Codex review 0 high finding 残留
 - **预估**: 60min（含 review 等待）
 - **可合并 commit**: 独立（review 后 commit）
 
