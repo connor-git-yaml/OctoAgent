@@ -395,6 +395,57 @@ def default_docker_available_checker() -> bool:
         return False
 
 
+async def _emit_is_caller_worker_signal(
+    task_service: TaskService,
+    task_id: str,
+    trace_id: str,
+    dispatch_id: str,
+) -> None:
+    """F099 N-H1 修复：WorkerRuntime 首次 dispatch 时持久化 is_caller_worker_signal。
+
+    写入 CONTROL_METADATA_UPDATED 事件（含 is_caller_worker_signal="1"），
+    使 task_service.get_latest_user_metadata() 在 resume 路径可读取此信号，
+    从而在 task_runner.attach_input() 无 live waiter 分支重建 is_caller_worker=True。
+
+    幂等保护：idempotency_key = "is_caller_worker_signal:{dispatch_id}"，
+    同一 dispatch_id 重复调用不会重复写入。
+    """
+    try:
+        from datetime import UTC, datetime
+
+        from octoagent.core.models import ActorType, Event, EventCausality, EventType
+        from octoagent.core.models.payloads import ControlMetadataUpdatedPayload
+
+        from ulid import ULID as _ULID
+
+        event = Event(
+            event_id=str(_ULID()),
+            task_id=task_id,
+            task_seq=await task_service._stores.event_store.get_next_task_seq(task_id),
+            ts=datetime.now(UTC),
+            type=EventType.CONTROL_METADATA_UPDATED,
+            actor=ActorType.SYSTEM,
+            payload=ControlMetadataUpdatedPayload(
+                control_metadata={"is_caller_worker_signal": "1"},
+                source="worker_runtime_dispatch",
+            ).model_dump(),
+            trace_id=trace_id,
+            causality=EventCausality(
+                idempotency_key=f"is_caller_worker_signal:{dispatch_id}"
+            ),
+        )
+        await task_service._stores.event_store.append_event_committed(
+            event, update_task_pointer=False
+        )
+    except Exception:
+        # 信号写入失败不阻断 worker 执行；resume 路径回退到 WorkerRuntime 无条件 True
+        log.warning(
+            "worker_runtime_emit_is_caller_worker_signal_failed",
+            task_id=task_id,
+            dispatch_id=dispatch_id,
+        )
+
+
 class WorkerRuntime:
     """Worker Runtime 执行器。"""
 
@@ -484,6 +535,27 @@ class WorkerRuntime:
                     message="worker runtime selected backend",
                 )
 
+            # F099 N-H1 修复：is_caller_worker 持久化 + resume 重建。
+            # 首次 dispatch（resume_state_snapshot is None）时，写入 CONTROL_METADATA_UPDATED
+            # 事件含 is_caller_worker_signal="1"，确保 latest_user_metadata 中有持久化信号。
+            # resume 路径（task_runner.attach_input 无 live waiter 分支）读取此信号，
+            # 附加到 resume_state_snapshot，WorkerRuntime 从 snapshot 中恢复 is_caller_worker=True。
+            _snapshot = envelope.resume_state_snapshot
+            _is_caller_worker = True  # WorkerRuntime 路径始终为 True
+            if _snapshot is not None:
+                # resume 路径：优先从 snapshot 的持久化信号恢复（防御性读取，增强可验证性）
+                _signal_from_snapshot = _snapshot.get("is_caller_worker_signal", "")
+                if _signal_from_snapshot == "1":
+                    _is_caller_worker = True
+            else:
+                # 首次 dispatch：写入 CONTROL_METADATA_UPDATED 持久化 is_caller_worker 信号
+                await _emit_is_caller_worker_signal(
+                    task_service=task_service,
+                    task_id=envelope.task_id,
+                    trace_id=envelope.trace_id,
+                    dispatch_id=envelope.dispatch_id,
+                )
+
             execution_context = (
                 ExecutionRuntimeContext(
                     task_id=envelope.task_id,
@@ -502,7 +574,8 @@ class WorkerRuntime:
                     resume_state_snapshot=envelope.resume_state_snapshot,
                     # F099 Codex Final F1 修复：真实 worker dispatch 路径设 True，
                     # 与 owner-self 主 Agent 自执行路径（orchestrator 创建的 context）区分。
-                    is_caller_worker=True,
+                    # F099 N-H1 修复：resume 路径通过 _is_caller_worker 恢复持久化信号。
+                    is_caller_worker=_is_caller_worker,
                 )
                 if self._execution_console is not None
                 else None

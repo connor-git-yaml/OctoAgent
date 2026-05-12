@@ -609,16 +609,33 @@ class TaskRunner:
 
         await self._stores.task_job_store.mark_running_from_waiting_input(task_id)
         self._cancellation_registry.ensure(task_id)
+
+        # F099 N-H1 修复：从持久化 latest_user_metadata 读取 is_caller_worker_signal，
+        # 附加到 resume_state_snapshot，WorkerRuntime 据此重建 is_caller_worker=True。
+        # WorkerRuntime 首次 dispatch 时写入该信号（CONTROL_METADATA_UPDATED 事件）；
+        # resume 路径如无信号，WorkerRuntime 仍回退到无条件 True（worker 子任务路径）。
+        _resume_snapshot: dict = {
+            "execution_session_id": result.session_id,
+            "human_input_artifact_id": result.artifact_id,
+            "input_request_id": result.request_id,
+        }
+        try:
+            _task_svc = TaskService(self._stores, self._sse_hub)
+            _latest_meta = await _task_svc.get_latest_user_metadata(task_id)
+            if _latest_meta.get("is_caller_worker_signal") == "1":
+                _resume_snapshot["is_caller_worker_signal"] = "1"
+        except Exception:
+            log.warning(
+                "attach_input_resume_is_caller_worker_signal_read_failed",
+                task_id=task_id,
+            )
+
         await self._spawn_job(
             task_id=task_id,
             user_text=job.user_text,
             model_alias=job.model_alias,
             resume_from_node="state_running",
-            resume_state_snapshot={
-                "execution_session_id": result.session_id,
-                "human_input_artifact_id": result.artifact_id,
-                "input_request_id": result.request_id,
-            },
+            resume_state_snapshot=_resume_snapshot,
         )
         return result
 

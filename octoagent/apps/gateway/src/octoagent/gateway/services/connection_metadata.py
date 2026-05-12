@@ -51,6 +51,10 @@ TASK_SCOPED_CONTROL_KEYS = frozenset(
         # _launch_child_task 写入；Phase E cleanup 通过 task_service.get_latest_user_metadata
         # 读取。结构化 dict value 由 normalize_control_metadata 原样保留（line 114）。
         "subagent_delegation",
+        # F099 N-H1 修复：WorkerRuntime 首次 dispatch 时写入，resume 路径从
+        # latest_user_metadata 读取，确保 is_caller_worker 信号跨 resume 持久化。
+        # 值 "1" 表示该 task 是真实 worker dispatch（WorkerRuntime 路径，不是 owner-self）。
+        "is_caller_worker_signal",
     }
 )
 
