@@ -47,3 +47,13 @@
   - test_runtime_control_f091.py：unspecified 路径断言全部迁移 fallback→False
   - test_task_service_context_integration.py 1 处 fixture 迁移到 runtime_context_json 路径
   - apps/gateway 非 e2e_live 全量回归 1458 passed in 53s（0 regression vs F099 baseline）
+[19:35:00] Phase G: STARTED — mock-based perf 基准 + 全量回归
+[19:45:00] Phase G 实施完成：
+  - test_runtime_control_f100_perf.py 新建（11 perf tests passed，0.18s）
+  - 实测 5000 样本：is_recall_planner_skip 各 path mean 0.04-0.08μs（远低于 100μs 容忍）
+  - is_single_loop_main_active 各 path mean 0.05-0.07μs
+  - AC-PERF-1 通过：simple query 0.050μs，零回归 vs F091 baseline
+  - AC-PERF-2 软门通过：force_full_recall override helper 层 0 增延
+  - 全量回归（Phase E2 累计）：1458 passed in 53s（0 regression）
+  - e2e_smoke 5x sanity（5 commit hook 累计跑过）：每次 8 passed in 1.93-1.99s
+  - phase-g-perf-report.md 产出
