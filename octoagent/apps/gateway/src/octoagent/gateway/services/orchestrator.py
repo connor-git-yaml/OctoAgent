@@ -867,8 +867,13 @@ class OrchestratorService(A2ADispatchMixin):
         metadata: dict[str, Any],
         delegation_mode: DelegationMode,
         recall_planner_mode: RecallPlannerMode = "full",
+        force_full_recall: bool | None = None,
     ) -> RuntimeControlContext:
         """Feature 090 D1: 在现有 runtime_context 上 patch delegation_mode + recall_planner_mode。
+
+        Feature 100 FR-H (HIGH-1 minimal trigger)：可选 ``force_full_recall`` 参数。
+        若未传（None），从 ``metadata["force_full_recall"]`` hint 读取（FR-H1）；
+        若传了显式值，直接使用。最终值写入 patched runtime_context.force_full_recall。
 
         Base context 解析顺序（与 task_service / delegation_plane 保持一致）：
         1. ``request.runtime_context``（OrchestratorRequest 显式字段）
@@ -893,10 +898,17 @@ class OrchestratorService(A2ADispatchMixin):
                 route_reason=request.route_reason,
                 metadata=dict(metadata),
             )
+        # F100 FR-H1：未显式传时从 metadata hint 读取（bool/str 兼容，复用 metadata_flag 语义）
+        resolved_force_full_recall = (
+            force_full_recall
+            if force_full_recall is not None
+            else OrchestratorService._metadata_flag(metadata, "force_full_recall")
+        )
         return base.model_copy(
             update={
                 "delegation_mode": delegation_mode,
                 "recall_planner_mode": recall_planner_mode,
+                "force_full_recall": resolved_force_full_recall,
             }
         )
 

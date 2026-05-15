@@ -99,31 +99,45 @@ def is_recall_planner_skip(
 ) -> bool:
     """当前轮次是否跳过 recall planner。
 
-    F091 Phase C/Final-review 修复（Codex M2 闭环）：
-    `recall_planner_mode` 仅在 `delegation_mode` 已显式时（非 "unspecified"）作为权威。
-    当 `delegation_mode == "unspecified"`（默认值）时，必须 fallback 到 metadata flag——
-    否则"默认 RuntimeControlContext + metadata['single_loop_executor']=True"在旧逻辑里
-    会 skip recall planner，新逻辑因 recall_planner_mode 默认 "full" 反而不 skip，行为变了。
+    F100 Phase D 启用 RecallPlannerMode "auto" + force_full_recall override：
 
     读取优先级：
-    1. runtime_context.delegation_mode != "unspecified"（已显式）→ 看 recall_planner_mode：
+    1. runtime_context.force_full_recall == True → 始终 False（H1 完整决策环 override）
+    2. runtime_context.delegation_mode != "unspecified"（已显式）→ 看 recall_planner_mode：
        - "skip" → True
        - "full" → False
-       - "auto" → raise NotImplementedError（防止 F091 隐式定义；F100 启用）
-    2. runtime_context.delegation_mode == "unspecified" 或 runtime_context = None
-       → fallback metadata flag（保持旧逻辑等价）
+       - "auto" → 依 delegation_mode 自动决议：
+         - main_inline / worker_inline → True (skip，兼容 F051 性能优势)
+         - main_delegate / subagent → False (full，走完整决策环)
+    3. runtime_context.delegation_mode == "unspecified" 或 runtime_context = None
+       → return False（F100 v0.3：移除 metadata fallback；与 baseline 默认行为等价——
+       baseline 在 metadata 缺 single_loop_executor 时 fallback 也返回 False）
 
-    F100 收口：实施 "auto" 实际语义（依 delegation_mode 自动决议）+ 删除 metadata fallback。
+    F100 v0.3 修订（phase-c-audit.md）：原 v0.2 "consumed 时 raise" 会破坏 chat 主链
+    （3/4 consumed 时点是 pre-decision），改为 unspecified/None → return False。
     """
+    # F100 FR-A2：force_full_recall override 优先级最高
+    if runtime_context is not None and runtime_context.force_full_recall:
+        return False
+
     if runtime_context is not None and runtime_context.delegation_mode != "unspecified":
         if runtime_context.recall_planner_mode == "skip":
             return True
         if runtime_context.recall_planner_mode == "full":
             return False
-        # "auto" 显式 fail-fast，防止 F091 时通过 fallback 偷偷固化语义
-        raise NotImplementedError(
-            'RecallPlannerMode "auto" not implemented in F091; F100 will enable.'
-            ' Use "skip" or "full" explicitly.'
+        # F100 FR-A1：AUTO 决议启用——依 delegation_mode 自动决议
+        if runtime_context.recall_planner_mode == "auto":
+            if runtime_context.delegation_mode in {"main_inline", "worker_inline"}:
+                return True  # AUTO + inline → skip（F051 性能兼容）
+            if runtime_context.delegation_mode in {"main_delegate", "subagent"}:
+                return False  # AUTO + delegate/subagent → full（H1 完整决策环）
+            # defense-in-depth：上面已枚举所有 DelegationMode 取值（不含 unspecified）
+            raise ValueError(
+                f"AUTO recall_planner_mode 遇到未预期的 delegation_mode: "
+                f"{runtime_context.delegation_mode}"
+            )
+        raise ValueError(
+            f"Unknown recall_planner_mode: {runtime_context.recall_planner_mode}"
         )
-    # delegation_mode = unspecified（默认）或 runtime_context = None → fallback metadata flag
+    # F100 Phase D：fallback metadata flag 保留（Phase E2 移除，统一改为 return False）
     return metadata_flag(metadata, "single_loop_executor")

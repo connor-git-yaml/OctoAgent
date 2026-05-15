@@ -24,3 +24,13 @@
 [18:02:00] Phase F: STARTED — ask_back resume 真实恢复机制实测
 [18:25:00] Phase F: COMPLETED — phase-f-resume-trace.md + test_ask_back_recall_planner_resume_f100.py（6 tests passed）
 [18:25:00] HIGH-3 自动闭环验证：v0.3 unspecified→False 与 baseline 行为完全等价
+[18:30:00] Phase D: STARTED — RuntimeControlContext 加 force_full_recall + AUTO 决议启用 + FR-H 接入
+[18:50:00] Phase D 实施完成：
+  - RuntimeControlContext.force_full_recall: bool = False（packages/core/orchestrator.py）
+  - is_recall_planner_skip 启用 AUTO 决议 + force_full_recall 优先（runtime_control.py）
+  - _with_delegation_mode 接受 metadata["force_full_recall"] hint（orchestrator.py）
+  - test_runtime_control_f100.py 新建，覆盖 AC-1/2/3/4/H1/H2/11/round-trip（20+ tests）
+  - test_runtime_control_f091.py 迁移 auto raise → AUTO 启用断言
+[18:55:00] Phase D 回归：1458 passed + 1 skipped + 1 xfailed + 1 xpassed in 53s（非 e2e_live）
+  e2e_live test_domain_8_real_llm_delegate_task 1 rerun + 1 fail（real LLM flaky，与 F100 无关，
+  F100 不动 delegate_task 流程；Phase G 再验证）

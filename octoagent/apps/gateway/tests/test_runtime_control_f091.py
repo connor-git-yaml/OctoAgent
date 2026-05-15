@@ -116,24 +116,27 @@ class TestIsRecallPlannerSkip:
         # 默认 ctx + 无 metadata → 默认 False
         assert is_recall_planner_skip(ctx, {}) is False
 
-    def test_auto_mode_raises_not_implemented_when_delegation_explicit(self) -> None:
-        """recall_planner_mode = auto + delegation_mode 显式 → raise NotImplementedError。
+    def test_auto_mode_enabled_in_f100(self) -> None:
+        """F091 占位 raise NotImplementedError 已在 F100 Phase D 启用。
 
-        Codex M1 闭环：F091 不可通过 fallback 隐式定义 "auto" 行为，避免锁死 F100 设计空间。
+        F100 启用语义：依 delegation_mode 自动决议
+        - main_inline / worker_inline → skip (True)
+        - main_delegate / subagent → full (False)
+
+        详细 AUTO 决议覆盖见 test_runtime_control_f100.py::TestAutoModeResolution。
+        本测试仅迁移历史 F091 占位 raise 断言到 F100 启用后行为。
         """
         ctx_main = _make_context(
             delegation_mode="main_inline",
             recall_planner_mode="auto",
         )
-        with pytest.raises(NotImplementedError, match='"auto" not implemented in F091'):
-            is_recall_planner_skip(ctx_main, {})
+        assert is_recall_planner_skip(ctx_main, {}) is True
 
         ctx_delegate = _make_context(
             delegation_mode="main_delegate",
             recall_planner_mode="auto",
         )
-        with pytest.raises(NotImplementedError, match='"auto" not implemented in F091'):
-            is_recall_planner_skip(ctx_delegate, {})
+        assert is_recall_planner_skip(ctx_delegate, {}) is False
 
     def test_runtime_context_none_falls_back_to_metadata(self) -> None:
         """runtime_context = None 时 fallback 到 metadata flag。"""

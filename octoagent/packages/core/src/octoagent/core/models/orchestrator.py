@@ -93,6 +93,20 @@ class RuntimeControlContext(BaseModel):
         default="full",
         description="Recall planner 行为模式（F090 D1 显式化）",
     )
+    # Feature 100 H1: override flag — 强制走完整 recall planner phase，
+    # 覆盖 recall_planner_mode 的默认决议结果。
+    # True → 始终 full（用于 H1 完整决策环——主 Agent 自跑长 context 复杂查询时设 True）
+    # False（默认）→ 按 recall_planner_mode 正常决议（行为兼容 F091 baseline）
+    # 上层 producer：orchestrator._prepare_single_loop_request 接受 metadata["force_full_recall"] hint
+    # 上层 producer（潜在）：chat 路由 / API 参数 / 调试工具（推 F101 / 独立 Feature）
+    force_full_recall: bool = Field(
+        default=False,
+        description=(
+            "F100：H1 完整决策环 override flag。"
+            "True 强制走完整 recall planner（覆盖 recall_planner_mode）；"
+            "False（默认）按 recall_planner_mode 正常决议，行为兼容 F091 baseline。"
+        ),
+    )
     agent_profile_id: str = Field(
         default="",
         description="legacy effective agent profile ID（兼容字段，默认镜像 session owner）",
