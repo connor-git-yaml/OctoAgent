@@ -866,21 +866,33 @@ async def test_task_service_single_loop_executor_skips_auxiliary_recall_planner_
     task_id, created = await service.create_task(message)
     assert created is True
 
+    # F100 Phase E2 迁移：baseline 用 metadata["single_loop_executor"]=True 触发 skip 已失效
+    # （fallback 已移除）。改用 runtime_context.delegation_mode="main_inline" 显式触发 skip。
+    from octoagent.core.models import RuntimeControlContext
+    from octoagent.gateway.services.runtime_control import encode_runtime_context
+
+    runtime_context = RuntimeControlContext(
+        task_id=task_id,
+        delegation_mode="main_inline",
+        recall_planner_mode="skip",
+    )
+
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
         llm_service=llm_service,
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
-            "single_loop_executor": True,
             "selected_worker_type": "general",
             "selected_tools_json": "[]",
+            "runtime_context_json": encode_runtime_context(runtime_context),
         },
     )
 
     assert len(llm_service.calls) == 1
     final_call = llm_service.calls[0]
-    assert final_call["metadata"]["single_loop_executor"] is True
+    # F100 Phase E1: metadata 不再含 single_loop_executor；改读 runtime_context_json
+    assert "single_loop_executor" not in final_call["metadata"]
     joined = "\n".join(
         str(item.get("content", ""))
         for item in final_call["prompt_or_messages"]

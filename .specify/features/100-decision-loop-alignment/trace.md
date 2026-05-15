@@ -40,3 +40,10 @@
   - test_orchestrator.py 2 处断言迁移（验证 metadata 不再含 flag + 改读 runtime_context）
   - grep 全仓库 production writer：0 hit
   - 测试：apps/gateway tests/test_orchestrator + test_runtime_control_f100/f091 + task_service: 101 passed in 3s
+[19:15:00] Phase E2: STARTED — 移除 helper fallback + fixture 迁移
+[19:30:00] Phase E2 实施完成：
+  - is_single_loop_main_active / is_recall_planner_skip 移除 metadata_flag fallback
+  - unspecified / None → return False（与 baseline metadata 缺失时的默认行为等价）
+  - test_runtime_control_f091.py：unspecified 路径断言全部迁移 fallback→False
+  - test_task_service_context_integration.py 1 处 fixture 迁移到 runtime_context_json 路径
+  - apps/gateway 非 e2e_live 全量回归 1458 passed in 53s（0 regression vs F099 baseline）

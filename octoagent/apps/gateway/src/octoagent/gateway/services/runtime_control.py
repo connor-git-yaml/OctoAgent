@@ -82,15 +82,19 @@ def is_single_loop_main_active(
     True → 跳过 recall planner / DelegationPlane / agent decision phase 等标准链路；
     False → 走标准 delegation。
 
-    F091 Phase C 读取优先级：
+    读取优先级：
     1. runtime_context.delegation_mode in {"main_inline", "worker_inline"} → True
     2. runtime_context.delegation_mode in {"main_delegate", "subagent"} → False
-    3. delegation_mode == "unspecified" 或 runtime_context = None → fallback metadata flag
-    F100 收口：删除 fallback；强制 runtime_context 必填 + delegation_mode 显式。
+    3. delegation_mode == "unspecified" 或 runtime_context = None → **return False**
+       （F100 v0.3 Phase E2：移除 metadata fallback；
+        与 baseline metadata flag 缺失时的默认行为等价；
+        consumed 时 pre-decision unspecified 视为"尚未决策"，默认走 standard routing）
     """
     if runtime_context is not None and runtime_context.delegation_mode != "unspecified":
         return runtime_context.delegation_mode in _SINGLE_LOOP_DELEGATION_MODES
-    return metadata_flag(metadata, "single_loop_executor")
+    # F100 Phase E2：unspecified / None → return False（移除 metadata fallback）
+    # _ = metadata  # 参数保留以兼容 caller signature
+    return False
 
 
 def is_recall_planner_skip(
@@ -139,5 +143,6 @@ def is_recall_planner_skip(
         raise ValueError(
             f"Unknown recall_planner_mode: {runtime_context.recall_planner_mode}"
         )
-    # F100 Phase D：fallback metadata flag 保留（Phase E2 移除，统一改为 return False）
-    return metadata_flag(metadata, "single_loop_executor")
+    # F100 Phase E2：unspecified / None → return False（移除 metadata fallback）
+    # 与 baseline metadata flag 缺失时的默认行为等价；不再 fallback metadata["single_loop_executor"]
+    return False

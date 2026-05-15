@@ -34,7 +34,14 @@ def _make_context(
 
 
 class TestIsSingleLoopMainActive:
-    """读取优先级：runtime_context.delegation_mode (非 unspecified) → metadata fallback。"""
+    """F100 Phase E2 迁移：fallback metadata flag 已移除。
+
+    读取优先级：
+    - runtime_context.delegation_mode in {"main_inline", "worker_inline"} → True
+    - runtime_context.delegation_mode in {"main_delegate", "subagent"} → False
+    - delegation_mode == "unspecified" 或 runtime_context = None → return False
+      （v0.3：与 baseline metadata flag 缺失时等价；不再 fallback 到 metadata flag）
+    """
 
     @pytest.mark.parametrize(
         "delegation_mode,expected",
@@ -48,17 +55,22 @@ class TestIsSingleLoopMainActive:
     def test_runtime_context_explicit_modes(
         self, delegation_mode: str, expected: bool
     ) -> None:
-        """显式 delegation_mode 优先于 metadata flag。"""
+        """显式 delegation_mode → 直接返回；不受 metadata flag 影响。"""
         ctx = _make_context(delegation_mode=delegation_mode)
-        # 即使 metadata flag 矛盾，runtime_context 优先
+        # 即使 metadata flag 矛盾，runtime_context 优先（F091 baseline 不变）
         assert is_single_loop_main_active(ctx, {"single_loop_executor": not expected}) is expected
 
-    def test_unspecified_falls_back_to_metadata_flag_true(self) -> None:
-        """delegation_mode = unspecified 时 fallback metadata flag。"""
-        ctx = _make_context(delegation_mode="unspecified")
-        assert is_single_loop_main_active(ctx, {"single_loop_executor": True}) is True
+    def test_unspecified_returns_false_regardless_of_metadata_flag_true(self) -> None:
+        """F100 Phase E2 迁移：unspecified + metadata flag True → False（不再 fallback）。
 
-    def test_unspecified_falls_back_to_metadata_flag_false(self) -> None:
+        baseline 行为：unspecified → fallback metadata_flag → True
+        F100 v0.3 行为：unspecified → return False（移除 fallback）
+        """
+        ctx = _make_context(delegation_mode="unspecified")
+        assert is_single_loop_main_active(ctx, {"single_loop_executor": True}) is False
+
+    def test_unspecified_returns_false_with_metadata_flag_false(self) -> None:
+        """unspecified + metadata flag False → False（行为等价）。"""
         ctx = _make_context(delegation_mode="unspecified")
         assert is_single_loop_main_active(ctx, {"single_loop_executor": False}) is False
 
@@ -66,14 +78,14 @@ class TestIsSingleLoopMainActive:
         ctx = _make_context(delegation_mode="unspecified")
         assert is_single_loop_main_active(ctx, {}) is False
 
-    def test_runtime_context_none_falls_back_to_metadata(self) -> None:
-        """runtime_context = None 时直接走 metadata fallback。"""
-        assert is_single_loop_main_active(None, {"single_loop_executor": True}) is True
+    def test_runtime_context_none_returns_false_regardless_of_metadata(self) -> None:
+        """F100 Phase E2：None runtime_context 不再 fallback 到 metadata flag。"""
+        assert is_single_loop_main_active(None, {"single_loop_executor": True}) is False
         assert is_single_loop_main_active(None, {"single_loop_executor": False}) is False
         assert is_single_loop_main_active(None, {}) is False
 
     def test_runtime_context_none_metadata_none(self) -> None:
-        """两者都 None 默认 False。"""
+        """两者都 None 默认 False（与 baseline 一致）。"""
         assert is_single_loop_main_active(None, None) is False
 
 
@@ -105,15 +117,16 @@ class TestIsRecallPlannerSkip:
         ctx = _make_context(delegation_mode="main_delegate", recall_planner_mode="full")
         assert is_recall_planner_skip(ctx, {"single_loop_executor": True}) is False
 
-    def test_default_context_falls_back_to_metadata(self) -> None:
-        """Final Codex M2 闭环：delegation_mode = unspecified（默认）时 recall_planner_mode 不权威，
-        fallback metadata flag——保持与旧逻辑等价。"""
-        ctx = _make_context()  # delegation_mode = unspecified, recall_planner_mode = full（默认）
-        # 默认 ctx + metadata flag True → 应 skip（旧逻辑）
-        assert is_recall_planner_skip(ctx, {"single_loop_executor": True}) is True
-        # 默认 ctx + metadata flag False → 应不 skip
+    def test_default_context_returns_false_no_metadata_fallback(self) -> None:
+        """F100 Phase E2 迁移：delegation_mode = unspecified → return False（不 fallback metadata）。
+
+        baseline 行为：unspecified + metadata flag True → fallback → True
+        F100 v0.3 行为：unspecified → return False（无 fallback；与 baseline metadata 缺失时等价）
+        """
+        ctx = _make_context()  # delegation_mode = unspecified
+        # F100 Phase E2：fallback 移除，所有 unspecified 路径都 return False
+        assert is_recall_planner_skip(ctx, {"single_loop_executor": True}) is False
         assert is_recall_planner_skip(ctx, {"single_loop_executor": False}) is False
-        # 默认 ctx + 无 metadata → 默认 False
         assert is_recall_planner_skip(ctx, {}) is False
 
     def test_auto_mode_enabled_in_f100(self) -> None:
@@ -138,10 +151,11 @@ class TestIsRecallPlannerSkip:
         )
         assert is_recall_planner_skip(ctx_delegate, {}) is False
 
-    def test_runtime_context_none_falls_back_to_metadata(self) -> None:
-        """runtime_context = None 时 fallback 到 metadata flag。"""
-        assert is_recall_planner_skip(None, {"single_loop_executor": True}) is True
+    def test_runtime_context_none_returns_false(self) -> None:
+        """F100 Phase E2：runtime_context = None → return False（无 fallback；与 baseline 等价）。"""
+        assert is_recall_planner_skip(None, {"single_loop_executor": True}) is False
         assert is_recall_planner_skip(None, {"single_loop_executor": False}) is False
+        assert is_recall_planner_skip(None, {}) is False
 
 
 # ============================================================
