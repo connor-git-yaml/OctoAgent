@@ -835,9 +835,14 @@ class TestOrchestrator:
             assert len(llm_service.calls) == 1
             metadata = llm_service.calls[0]["metadata"]
             assert isinstance(metadata, dict)
-            assert metadata["single_loop_executor"] is True
+            # F100 Phase E1: metadata["single_loop_executor"] / "single_loop_executor_mode" 已移除
+            # 改为验证 runtime_context.delegation_mode == "main_inline"（单一事实源）
+            assert "single_loop_executor" not in metadata
+            assert "single_loop_executor_mode" not in metadata
+            runtime_context = llm_service.calls[0].get("runtime_context")
+            if runtime_context is not None:
+                assert runtime_context.delegation_mode == "main_inline"
             assert metadata["selected_worker_type"] == "research"
-            assert metadata["single_loop_executor_mode"] == "main_research"
             assert "decision_phase" not in metadata
         finally:
             await store_group.conn.close()
@@ -871,11 +876,15 @@ class TestOrchestrator:
             assert len(llm_service.calls) == 1
             metadata = llm_service.calls[0]["metadata"]
             assert isinstance(metadata, dict)
-            assert metadata["single_loop_executor"] is True
+            # F100 Phase E1: metadata flag 已移除；改读 runtime_context
+            assert "single_loop_executor" not in metadata
+            assert "single_loop_executor_mode" not in metadata
+            runtime_context = llm_service.calls[0].get("runtime_context")
+            if runtime_context is not None:
+                assert runtime_context.delegation_mode == "main_inline"
             assert metadata["selected_worker_type"] == "research"
             assert metadata["requested_worker_type"] == "research"
             assert metadata["requested_worker_profile_id"] == "singleton:research"
-            assert metadata["single_loop_executor_mode"] == "main_research"
             assert metadata["requested_worker_type_source"] == "delegation_target_profile_id"
             assert "decision_phase" not in metadata
         finally:

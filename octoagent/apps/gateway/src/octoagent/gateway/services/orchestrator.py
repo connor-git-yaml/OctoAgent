@@ -824,10 +824,11 @@ class OrchestratorService(A2ADispatchMixin):
             if selection is not None and selection.recommended_tools
             else list(selected_tools)
         )
+        # Feature 100 Phase E1: 移除 metadata["single_loop_executor"] / "single_loop_executor_mode"
+        # 写入（F090 双轨收尾）。runtime_context.delegation_mode == "main_inline" 已是单一事实源。
+        # 保留 "agent_execution_mode" 与 "selected_*" 等其他字段（非 single_loop_executor 控制流字段）。
         updated_metadata = {
             **metadata,
-            "single_loop_executor": True,
-            "single_loop_executor_mode": f"main_{worker_type}",
             "selected_worker_type": worker_type,
             "selected_tools": selected_tools,
             "recommended_tools": recommended_tools,

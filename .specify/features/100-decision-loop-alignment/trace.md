@@ -34,3 +34,9 @@
 [18:55:00] Phase D 回归：1458 passed + 1 skipped + 1 xfailed + 1 xpassed in 53s（非 e2e_live）
   e2e_live test_domain_8_real_llm_delegate_task 1 rerun + 1 fail（real LLM flaky，与 F100 无关，
   F100 不动 delegate_task 流程；Phase G 再验证）
+[19:00:00] Phase E1: STARTED — 移除 orchestrator metadata["single_loop_executor"] / "single_loop_executor_mode" 写入
+[19:08:00] Phase E1 实施完成：
+  - orchestrator._prepare_single_loop_request 移除两行 metadata 写入（保留 runtime_context 写入）
+  - test_orchestrator.py 2 处断言迁移（验证 metadata 不再含 flag + 改读 runtime_context）
+  - grep 全仓库 production writer：0 hit
+  - 测试：apps/gateway tests/test_orchestrator + test_runtime_control_f100/f091 + task_service: 101 passed in 3s
