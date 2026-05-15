@@ -842,6 +842,14 @@ class TestOrchestrator:
             runtime_context = llm_service.calls[0].get("runtime_context")
             if runtime_context is not None:
                 assert runtime_context.delegation_mode == "main_inline"
+            # F100 Final review HIGH-1 验证：patched runtime_context 同步覆盖 metadata["runtime_context_json"]
+            # （避免 LLMService 通过 runtime_context_from_metadata 读到 stale unspecified）
+            assert "runtime_context_json" in metadata
+            from octoagent.gateway.services.runtime_control import decode_runtime_context
+
+            decoded = decode_runtime_context(metadata["runtime_context_json"])
+            assert decoded is not None
+            assert decoded.delegation_mode == "main_inline"
             assert metadata["selected_worker_type"] == "research"
             assert "decision_phase" not in metadata
         finally:

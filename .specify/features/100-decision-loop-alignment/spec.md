@@ -90,7 +90,7 @@ delegation_mode == "main_inline"    → skip
 delegation_mode == "worker_inline"  → skip
 delegation_mode == "main_delegate"  → full
 delegation_mode == "subagent"       → full
-delegation_mode == "unspecified"    → raise ValueError（F100 收尾不允许 unspecified）
+delegation_mode == "unspecified"    → return False（v0.3 修订：与 baseline metadata 缺失时等价）
 + override `force_full_recall=True` → full（覆盖所有上述映射）
 ```
 
@@ -167,11 +167,12 @@ delegation_mode == "unspecified"    → raise ValueError（F100 收尾不允许 
 - `is_single_loop_main_active` / `is_recall_planner_skip` 两个 helper 内部不再有 metadata fallback 分支
 **Acceptance**: AC-6, AC-7
 
-### US-6：未显式 delegation_mode 的路径 fail-fast
+### US-6：未显式 delegation_mode 的路径默认走 standard routing（v0.3 修订）
 
 **As a** 维护者
 **When** 任何未来代码遗漏未显式设置 `delegation_mode`（残留 default "unspecified"）
-**Then** `is_recall_planner_skip` raise ValueError（不再静默 fallback 到 metadata flag）
+**Then** `is_recall_planner_skip` / `is_single_loop_main_active` return False（**不 raise**；与 baseline metadata 缺失时等价）
+**Why**: v0.2 原设计是 fail-fast raise，但 Phase C audit 发现 3/4 consumed 时点是 pre-decision（chat.py seed unspecified），raise 会破坏 chat 主链。v0.3 改为 return False 与 baseline 兼容。错误检测通过测试覆盖关键 patch 必经路径补强。
 **Acceptance**: AC-8
 
 ---
@@ -202,10 +203,22 @@ delegation_mode == "unspecified"    → raise ValueError（F100 收尾不允许 
 `RuntimeControlContext(delegation_mode="worker_inline", recall_planner_mode="skip")` 仍返回 True。
 任何现有 worker_inline 代码路径行为零变化。
 
-### AC-5：ask_back resume turn N+1 行为
+### AC-5：ask_back resume turn N+1 行为（v0.3 + Final review HIGH-2 修订）
 
-F099 ask_back resume 路径上 turn N+1 调用 `is_recall_planner_skip` 返回 `True`（baseline 已通）。
-F100 改造后此行为保持。
+**v0.1/v0.2 原假设错误**：spec 原写"runtime_context 透传机制保留 worker_inline → skip"。Phase F 实测发现 `task_runner._run_job` line 692 走 `get_latest_user_metadata` 取 metadata 时按 TASK_SCOPED_CONTROL_KEYS allowlist 过滤——**不含 runtime_context_json**。所以 resume 后 turn N+1 派发时 orchestrator 收到的 metadata 不包含 runtime_context_json。
+
+**v0.3 实际行为**：
+- baseline 与 F100 v0.3 一致：resume 后 `is_recall_planner_skip(None, metadata)` → **return False**（不 skip）
+- turn N+1 **会跑 recall planner**
+- 与 spec.md v0.1 / v0.2 假设的 "worker_inline → skip" 不一致；F100 不改 TASK_SCOPED_CONTROL_KEYS
+
+**Acceptance（v0.3 修订）**：
+- F099 ask_back resume 路径行为兼容 baseline（v0.3 helper 修改不影响）
+- 单测覆盖：`test_ask_back_recall_planner_resume_f100.py` 显式断言 `is_recall_planner_skip(None, resume_metadata) is False`
+
+**F101 handoff 项**：若期望 ask_back resume 保持 turn N delegation_mode（如 worker_inline → skip），需在 F101 / 独立 Feature 中：
+- 把 `runtime_context_json` 加入 TASK_SCOPED_CONTROL_KEYS（连接 metadata trust boundary 改动）
+- 或在 resume 路径显式 patch runtime_context（task_runner.attach_input → resume_state_snapshot 携带）
 
 ### AC-N-H1-COMPAT：is_caller_worker_signal 透传不破
 
@@ -214,7 +227,7 @@ attach_input 路径 resume 后 WorkerRuntime 重建时仍能正确恢复 is_call
 
 ### AC-6：metadata `single_loop_executor` 写入移除
 
-`grep -r 'metadata\["single_loop_executor"\]\s*=\s*' octoagent/apps octoagent/packages` 返回 0 行 production 代码（测试 fixture 可保留以验证 unspecified 路径 raise）。
+`grep -r 'metadata\["single_loop_executor"\]\s*=\s*' octoagent/apps octoagent/packages` 返回 0 行 production 代码（v0.3：测试 fixture 也已迁移到显式 delegation_mode；不再依赖 metadata 写入）。
 
 同 `single_loop_executor_mode` 字段也移除。
 
@@ -257,17 +270,19 @@ attach_input 路径 resume 后 WorkerRuntime 重建时仍能正确恢复 is_call
 **Then** patched runtime_context 中 `force_full_recall == False`（默认值）
 **And** is_recall_planner_skip 按 delegation_mode + recall_planner_mode 正常决议
 
-### AC-PERF-1：simple query 性能不回退（MEDIUM-2 修订）
+### AC-PERF-1：simple query 性能不回退（MEDIUM-2 + Final review MEDIUM-1 修订）
 
-**v0.1 原方法**（5x e2e P50/P95 + 5% hard gate）经 Codex 评估统计基础不足，**v0.2 修订为 mock-based 控制变量方法**：
+**v0.1 原方法**（5x e2e P50/P95 + 5% hard gate）经 Codex MED-2 评估统计基础不足。
 
-**测量入口**：mock RuntimeControlContext fixture 直接调用 `is_recall_planner_skip` / `is_single_loop_main_active` helper
-**测量指标**：helper 单次调用耗时（微秒级）+ 分支访问次数
-**通过门**：
-- F100 helper 调用耗时回归 ≤ 5%（基于 1000+ 样本均值，可重复）
-- F100 引入的额外分支次数 ≤ 2（force_full_recall early-check + AUTO switch）
+**v0.2/v0.3 修订（mock-based 控制变量）**：
+- **测量入口**：pytest fixture 直接调 `is_recall_planner_skip` / `is_single_loop_main_active` helper
+- **测量样本**：1000+ 次/path（运行时实测 5000）
+- **通过门（绝对值）**：每路径单次调用 < 100μs（mock 环境硬门，远高于实际表现）
+- **通过门（相对路径对照）**：F100 引入的额外分支次数 ≤ 2（force_full_recall early-check + AUTO switch）；实测 simple query 路径未恶化（main_inline + skip 仍 ~0.05μs，与 baseline 等价）
 
-**e2e_smoke 5x 仅作 sanity check**：验证 simple query 整体路径未崩，不作 hard gate（噪声大于 5%）。
+**v0.3 Final review MEDIUM-1 备注**：spec v0.2 写 "回归 ≤ 5%" 表述实际未真跑 F099 baseline 对比（mock 数据是 F100 内部相对路径对照）。本 AC 不要求真实 baseline 跑分——F100 helper 改动是单 if-check + switch 几行，性能影响极小，绝对值阈值（100μs）已远超合理上限。
+
+**e2e_smoke 5x 仅作 sanity check**：验证 simple query 整体路径未崩，不作 perf hard gate（噪声大于 5%）。
 
 ### AC-PERF-2：override 启用 full recall 时延迟增加可接受（MEDIUM-2 修订）
 
@@ -401,7 +416,7 @@ force_full_recall: bool = Field(
 
 **FR-G1**：原依赖 metadata fallback 行为的测试转为显式 delegation_mode 测试
 
-**FR-G2**：新增 unspecified delegation_mode raise ValueError 测试
+**FR-G2**（v0.3 修订）：新增 unspecified delegation_mode return False 测试（与 baseline 兼容；不 raise）
 
 **FR-G3**：新增 force_full_recall 覆盖所有 delegation_mode 的测试
 

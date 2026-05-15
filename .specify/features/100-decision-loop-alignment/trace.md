@@ -57,3 +57,19 @@
   - 全量回归（Phase E2 累计）：1458 passed in 53s（0 regression）
   - e2e_smoke 5x sanity（5 commit hook 累计跑过）：每次 8 passed in 1.93-1.99s
   - phase-g-perf-report.md 产出
+[19:50:00] Phase H: STARTED — Final Codex review
+[20:05:00] Codex Final review COMPLETED — 2 HIGH + 2 MED + 1 LOW
+  - HIGH-1: patched runtime_context 未覆盖 stale runtime_context_json → orchestrator 修复
+  - HIGH-2: ask_back resume AC-5/FR-E 未闭环 → spec/AC 修订 + handoff
+  - MED-1: AC-PERF-1 5% gate 未真执行 → spec 措辞修订
+  - MED-2: _with_delegation_mode 清掉 base.force_full_recall → 优先级修复
+  - LOW-1: spec v0.3 残留 raise 描述 → US-6 + FR-G2 修订
+[20:20:00] Phase H 修复全部闭环：
+  - orchestrator HIGH-1 修复（model_copy 前同步 metadata[RUNTIME_CONTEXT_JSON_KEY]）
+  - orchestrator MED-2 修复（_with_delegation_mode 优先级 fallback：kwarg > metadata > base > False）
+  - spec.md v0.3 修订：AC-5 重写 / US-6 改 return False / AC-PERF-1 措辞修订
+  - test_orchestrator.py 加 HIGH-1 验证（runtime_context_json 解码 + delegation_mode 检查）
+  - 全量回归 1469 passed in 53s（vs F099 0 regression）
+[20:25:00] completion-report.md + handoff.md 产出
+[20:30:00] F100 commit chain：3c0d0c4 → 7c3c241 → 162a8d0 → 665f7cf → 5d617c5 → c5b157e → (Phase H)
+[20:30:00] F100 ✅ 完成，等待用户拍板 push origin/master。M5 阶段 2 全部关闭。

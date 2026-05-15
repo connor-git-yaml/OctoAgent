@@ -783,8 +783,18 @@ class OrchestratorService(A2ADispatchMixin):
                     delegation_mode="main_inline",
                     recall_planner_mode="skip",
                 )
+                # F100 Final review HIGH-1 修复：patched runtime_context 同步覆盖 metadata
+                # 中陈旧的 runtime_context_json（chat.py pre-decision seed unspecified），
+                # 否则下游 LLMService 通过 runtime_context_from_metadata(metadata) 仍读到旧的 unspecified。
+                patched_metadata = {
+                    **metadata,
+                    RUNTIME_CONTEXT_JSON_KEY: encode_runtime_context(patched_runtime_context),
+                }
                 return request.model_copy(
-                    update={"runtime_context": patched_runtime_context}
+                    update={
+                        "metadata": patched_metadata,
+                        "runtime_context": patched_runtime_context,
+                    }
                 )
             return request
         worker_type = self._resolve_single_loop_worker_type(request)
@@ -845,14 +855,17 @@ class OrchestratorService(A2ADispatchMixin):
                     "agent_profile_id",
                     selection.effective_tool_universe.profile_id,
                 )
-        # Feature 090 D1: 同步显式 runtime_context 字段（与 metadata flag 双轨）
-        # F090 范围下 metadata flag 保留为兼容期；F091/F100 完成后切换到单轨。
+        # Feature 100 Phase D: 显式 runtime_context patch（F090 D1 双轨在 Phase E1/E2 完成单轨化）
         updated_runtime_context = self._with_delegation_mode(
             request=request,
             metadata=updated_metadata,
             delegation_mode="main_inline",
             recall_planner_mode="skip",
         )
+        # F100 Final review HIGH-1 修复：patched runtime_context 同步覆盖 metadata
+        # 中的 runtime_context_json key（避免 LLMService 等下游通过
+        # runtime_context_from_metadata(metadata) 读到 chat.py 写入的 stale unspecified seed）
+        updated_metadata[RUNTIME_CONTEXT_JSON_KEY] = encode_runtime_context(updated_runtime_context)
         return request.model_copy(
             update={
                 "route_reason": route_reason,
@@ -899,12 +912,17 @@ class OrchestratorService(A2ADispatchMixin):
                 route_reason=request.route_reason,
                 metadata=dict(metadata),
             )
-        # F100 FR-H1：未显式传时从 metadata hint 读取（bool/str 兼容，复用 metadata_flag 语义）
-        resolved_force_full_recall = (
-            force_full_recall
-            if force_full_recall is not None
-            else OrchestratorService._metadata_flag(metadata, "force_full_recall")
-        )
+        # F100 FR-H1：force_full_recall 优先级（v0.3 + Final review MED-2 修复）：
+        # 1. 显式 kwarg（force_full_recall != None）
+        # 2. metadata["force_full_recall"] hint（FR-H 接入点）
+        # 3. base.force_full_recall（保留上游已通过 runtime_context 字段传入的 True）
+        # 4. False（默认）
+        if force_full_recall is not None:
+            resolved_force_full_recall = force_full_recall
+        elif OrchestratorService._metadata_flag(metadata, "force_full_recall"):
+            resolved_force_full_recall = True
+        else:
+            resolved_force_full_recall = bool(getattr(base, "force_full_recall", False))
         return base.model_copy(
             update={
                 "delegation_mode": delegation_mode,
