@@ -20,4 +20,7 @@
 [14:05:00] Phase C: STARTED — consumed 时点 audit + fixture 准备
 [14:35:00] Phase C: COMPLETED — 4 consumed 时点 audit；发现 3/4 是 pre-decision；v0.2 raise 方案破坏 chat 主链
 [14:35:00] v0.3 修订: unspecified → return False（与 baseline 100% 兼容）—— spec/plan v0.3 产出
-[14:40:00] Phase C commit: 准备中（含 spec/plan/recon/review/audit 全部 spec 阶段制品）
+[14:40:00] Phase C commit: 3c0d0c4（spec/plan v0.3 + recon + review + audit + venv 修复）
+[18:02:00] Phase F: STARTED — ask_back resume 真实恢复机制实测
+[18:25:00] Phase F: COMPLETED — phase-f-resume-trace.md + test_ask_back_recall_planner_resume_f100.py（6 tests passed）
+[18:25:00] HIGH-3 自动闭环验证：v0.3 unspecified→False 与 baseline 行为完全等价
