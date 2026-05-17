@@ -353,6 +353,104 @@ class ExecutionConsoleService:
             state.session.pending_approval_id = None
             state.session.can_attach_input = False
 
+    async def mark_waiting_approval(
+        self,
+        *,
+        task_id: str,
+        session_id: str = "",
+    ) -> None:
+        """F101 Phase B FR-C1：将任务从 RUNNING 标记为 WAITING_APPROVAL（审批等待期间）。
+
+        由 escalate_permission_handler 在调用 ApprovalGate.wait_for_decision 之前调用，
+        确保 task 状态正确反映"等待用户审批"的中间状态。
+
+        对应恢复方法：mark_running_from_waiting_approval（decision 返回后调用）。
+        H2 说明：终态（FAILED/SUCCEEDED）由 task_runner 负责，此方法仅处理 RUNNING→WAITING_APPROVAL 中间转移。
+        """
+        service = TaskService(self._stores, self._sse_hub)
+        task = await service.get_task(task_id)
+        if task is None or task.status != TaskStatus.RUNNING:
+            return  # 非 RUNNING 状态不做转移（幂等）
+
+        try:
+            await service._write_state_transition(
+                task_id=task_id,
+                from_status=TaskStatus.RUNNING,
+                to_status=TaskStatus.WAITING_APPROVAL,
+                trace_id=f"trace-{task_id}",
+                reason="escalate_permission_waiting_approval",
+            )
+        except Exception as exc:
+            log.warning(
+                "execution_console_mark_waiting_approval_failed",
+                task_id=task_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            return
+
+        try:
+            await self._stores.task_job_store.mark_waiting_approval(task_id)
+        except Exception as exc:
+            log.warning(
+                "execution_console_task_job_mark_waiting_approval_failed",
+                task_id=task_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+
+        log.info(
+            "execution_console_task_waiting_approval",
+            task_id=task_id,
+            session_id=session_id,
+        )
+
+    async def mark_running_from_waiting_approval(
+        self,
+        *,
+        task_id: str,
+    ) -> None:
+        """F101 Phase B FR-C1：将任务从 WAITING_APPROVAL 恢复为 RUNNING（decision 到达后）。
+
+        由 escalate_permission_handler 在 wait_for_decision 返回后调用，
+        恢复任务到 RUNNING 状态（worker 继续执行）。
+        超时场景（decision="rejected"）同样恢复为 RUNNING，由 worker 决定后续行为；
+        FAILED 终态由 task_runner 超时监控（FR-C3）负责，不在此处处理。
+        """
+        service = TaskService(self._stores, self._sse_hub)
+        task = await service.get_task(task_id)
+        if task is None or task.status != TaskStatus.WAITING_APPROVAL:
+            return  # 非 WAITING_APPROVAL 状态不做转移（幂等，防止 double recovery）
+
+        try:
+            await service._write_state_transition(
+                task_id=task_id,
+                from_status=TaskStatus.WAITING_APPROVAL,
+                to_status=TaskStatus.RUNNING,
+                trace_id=f"trace-{task_id}",
+                reason="escalate_permission_decision_received",
+            )
+        except Exception as exc:
+            log.warning(
+                "execution_console_mark_running_from_approval_failed",
+                task_id=task_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            return
+
+        try:
+            await self._stores.task_job_store.mark_running_from_deferred(task_id)
+        except Exception as exc:
+            log.warning(
+                "execution_console_task_job_mark_running_from_approval_failed",
+                task_id=task_id,
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+
+        log.info("execution_console_task_running_from_approval", task_id=task_id)
+
     async def attach_input(
         self,
         *,

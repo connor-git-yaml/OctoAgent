@@ -430,8 +430,103 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                 task_id=task_id_for_approval,
             )
 
-            # wait_for_decision: 最长 300s 等待用户决策（P-VAL-1 确认超时返回 "rejected" 不 raise）
-            decision = await approval_gate.wait_for_decision(handle, timeout_seconds=300.0)
+            # F101 Phase B HIGH-01 v3：同步注册到 ApprovalManager，让双 resolve 路径可见此 approval_id。
+            # 核心原因：Web（routes/approvals.py）和 Telegram（operator_actions.py）双 resolve
+            # 都先调 approval_manager.resolve()，ApprovalManager 不知道此 approval_id → 404 →
+            # approval_gate.resolve_approval 永不触发 → worker 等满 300s timeout。
+            # 解法（路径 A）：escalate_permission 在 request_approval 后，同步注册到 ApprovalManager，
+            # 使用 handle.handle_id 作为 approval_id（两层共享同一 ID）。
+            approval_manager = getattr(deps, "_approval_manager", None)
+            if approval_manager is not None:
+                try:
+                    from datetime import timedelta as _td
+                    from octoagent.policy.models import ApprovalRequest as _ApprovalRequest
+                    from octoagent.core.models.enums import SideEffectLevel as _SideEffectLevel
+                    _now = datetime.now(tz=UTC)
+                    _approval_request = _ApprovalRequest(
+                        approval_id=handle.handle_id,
+                        task_id=task_id_for_approval,
+                        tool_name="worker.escalate_permission",
+                        tool_args_summary=f"action={action!r}, scope={scope!r}",
+                        risk_explanation=reason,
+                        policy_label="worker.escalate_permission",
+                        side_effect_level=_SideEffectLevel.IRREVERSIBLE,
+                        expires_at=_now + _td(seconds=300),
+                        created_at=_now,
+                    )
+                    await approval_manager.register(_approval_request)
+                    log.debug(
+                        "escalate_permission_registered_to_approval_manager",
+                        approval_id=handle.handle_id,
+                        task_id=task_id_for_approval,
+                    )
+                except Exception as _reg_exc:
+                    # 注册失败不阻断流程（Constitution C6 降级）
+                    # 双 resolve 链路退化为仅 approval_gate 路径（Telegram 仍部分可用）
+                    log.warning(
+                        "escalate_permission_approval_manager_register_failed",
+                        approval_id=handle.handle_id,
+                        task_id=task_id_for_approval,
+                        error=str(_reg_exc),
+                        hint="ApprovalManager 注册失败，Web/Telegram 双 resolve 路径不可用",
+                    )
+            else:
+                log.debug(
+                    "escalate_permission_approval_manager_unavailable",
+                    approval_id=handle.handle_id,
+                    hint="approval_manager is None，跳过 ApprovalManager 注册（测试/CLI 路径）",
+                )
+
+            # F101 Phase B FR-C1：wait_for_decision 之前将 task 状态改为 WAITING_APPROVAL
+            # task_runner 是终态 owner（H2 决议），此处只做 RUNNING→WAITING_APPROVAL 中间转移
+            try:
+                await exec_ctx.mark_waiting_approval()
+            except Exception as _mark_exc:
+                log.warning(
+                    "escalate_permission_mark_waiting_approval_failed",
+                    task_id=task_id_for_approval,
+                    error=str(_mark_exc),
+                )
+
+            # F101 Phase B HIGH-02 v3：decision 变量在 finally 块中条件恢复
+            # 修复 v2 PARTIAL：v2 先查状态再决定，但 wait_for_decision timeout 返回后
+            # monitor 还未推 FAILED 时仍可竞争写回 RUNNING（race window 未消除）。
+            # v3 修复：由 wait_for_decision 实际返回值决定——仅 "approved" 才恢复 RUNNING，
+            # "rejected"/"timeout" 均不恢复（由 task_runner monitor 唯一负责终态转移）。
+            decision = "rejected"  # 默认值，wait_for_decision 失败时使用
+            try:
+                # wait_for_decision: 最长 300s 等待用户决策（P-VAL-1 确认超时返回 "rejected" 不 raise）
+                # FR-C3b：timeout_seconds 默认 300s；User.md 可覆盖（Phase C 解析）
+                decision = await approval_gate.wait_for_decision(handle, timeout_seconds=300.0)
+            finally:
+                # F101 Phase B HIGH-02 v3：按 decision 返回值条件恢复
+                # - "approved" → 恢复 RUNNING（worker 继续执行后续步骤）
+                # - "rejected" / "timeout"（wait_for_decision 超时返回 "rejected"）→ 不恢复
+                #   → 由 task_runner monitor 推 FAILED（single-owner 原则：task_runner 是终态 owner）
+                # 注意：finally 块在 decision 被赋值前（wait_for_decision raise 时）也会执行，
+                # 此时 decision 为初始值 "rejected"，正确不恢复 RUNNING。
+                if decision == "approved":
+                    try:
+                        await exec_ctx.mark_running_from_waiting_approval()
+                        log.debug(
+                            "escalate_permission_restored_running_after_approved",
+                            task_id=task_id_for_approval,
+                        )
+                    except Exception as _restore_exc:
+                        log.warning(
+                            "escalate_permission_mark_running_from_approval_failed",
+                            task_id=task_id_for_approval,
+                            error=str(_restore_exc),
+                        )
+                else:
+                    # decision 为 "rejected" 或超时默认值：不恢复 RUNNING
+                    # task_runner monitor 将在 approval_timeout 后推 FAILED（FR-C3）
+                    log.debug(
+                        "escalate_permission_skip_restore_decision_rejected_or_timeout",
+                        task_id=task_id_for_approval,
+                        decision=decision,
+                    )
+
             return decision  # "approved" 或 "rejected"
 
         except Exception as exc:

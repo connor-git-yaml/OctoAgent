@@ -397,7 +397,14 @@ class ApprovalManager:
         approval_id: str,
         request: ApprovalRequest,
     ) -> None:
-        """启动超时定时器"""
+        """启动超时定时器
+
+        F101 Phase B NEW-HIGH-01 v4 修复：必须按 request.expires_at 而非 _default_timeout_s 设定定时器。
+        原缺陷：timer 固定用 _default_timeout_s（600s），而 ask_back_tools 设置 expires_at = now+300s，
+        导致用户在 300-600s 窗口 approve 时 ApprovalManager 仍 PENDING（timer 未触发），
+        resolve() 返回 True（甚至写 allow-always），但 task 已 FAILED——形成假成功。
+        修复：按 expires_at - now 计算实际剩余时间，确保 timer 与 expires_at 严格对齐。
+        """
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -405,7 +412,15 @@ class ApprovalManager:
             logger.debug("无事件循环，跳过超时定时器: %s", approval_id)
             return
 
-        timeout_s = self._default_timeout_s
+        # NEW-HIGH-01 v4：按 expires_at 计算实际超时，不依赖 _default_timeout_s
+        now = datetime.now(UTC)
+        timeout_s = max(0.0, (request.expires_at - now).total_seconds())
+        if timeout_s <= 0:
+            # 已过期：直接触发（async safe via ensure_future）
+            loop.call_soon(lambda: asyncio.ensure_future(self._handle_timeout(approval_id)))
+            logger.debug("超时定时器立即触发（expires_at 已过期）: %s", approval_id)
+            return
+
         handle = loop.call_later(
             timeout_s,
             lambda: asyncio.ensure_future(self._handle_timeout(approval_id)),
@@ -612,6 +627,72 @@ class ApprovalManager:
         """获取指定审批记录（含宽限期内已解决的）"""
         pending = self._pending.get(approval_id)
         return pending.record if pending is not None else None
+
+    async def expire_dead_approval(self, approval_id: str) -> bool:
+        """F101 Phase B HIGH-04 v4：显式 expire 因重启而 dead 的审批。
+
+        gateway 重启后 ApprovalGate._pending_handles 全丢，用户 approve 时
+        approval_gate.resolve_approval 找不到 handle → wait_for_decision 永不被唤醒。
+        为避免用户操作返回 success 但 task 不能恢复执行的混乱体验，
+        startup_recovery 应显式将对应的 ApprovalManager entry 标记为 EXPIRED。
+        后续用户再点 approve → resolve() 检测 status != PENDING → 返回 False → 路由返回 409。
+        路由可进一步区分 EXPIRED (410) 和 ALREADY_RESOLVED (409)。
+
+        Args:
+            approval_id: 要 expire 的审批 ID
+
+        Returns:
+            True 表示成功 expire（从 PENDING → EXPIRED）
+            False 表示 approval_id 不存在或状态已非 PENDING（幂等）
+        """
+        pending = self._pending.get(approval_id)
+        if pending is None:
+            # 不在内存（可能已被 recover_from_store 恢复时设为 EXPIRED 或已清理）
+            logger.debug("expire_dead_approval: approval_id=%s 不在内存，忽略", approval_id)
+            return False
+
+        if pending.record.status != ApprovalStatus.PENDING:
+            logger.debug(
+                "expire_dead_approval: approval_id=%s 已非 PENDING（当前: %s），忽略",
+                approval_id,
+                pending.record.status,
+            )
+            return False
+
+        now = datetime.now(UTC)
+
+        # 取消超时定时器
+        if pending.timer_handle is not None:
+            pending.timer_handle.cancel()
+            pending.timer_handle = None
+
+        # 标记为 EXPIRED
+        pending.record.status = ApprovalStatus.EXPIRED
+        pending.record.resolved_at = now
+        pending.record.resolved_by = "system:gateway-restart"
+
+        # Event Store 双写（失败时仅 warn，不阻断 startup_recovery）
+        try:
+            await self._write_approval_expired_event(
+                approval_id=approval_id,
+                task_id=pending.record.request.task_id,
+                expired_at=now,
+            )
+        except Exception:
+            logger.warning(
+                "expire_dead_approval_event_write_failed",
+                exc_info=True,
+                approval_id=approval_id,
+            )
+
+        # 唤醒等待方（如果有残留的 wait_for_decision）
+        pending.event.set()
+
+        logger.info(
+            "expire_dead_approval: approval_id=%s 已标记 EXPIRED（gateway 重启 dead approval）",
+            approval_id,
+        )
+        return True
 
     # ============================================================
     # 内部辅助方法

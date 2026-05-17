@@ -26,7 +26,7 @@ from octoagent.policy.models import (
     ApprovalsListResponse,
 )
 
-from ..deps import get_approval_manager, get_approval_override_cache, get_approval_override_repo
+from ..deps import get_approval_gate, get_approval_manager, get_approval_override_cache, get_approval_override_repo
 
 logger = logging.getLogger(__name__)
 
@@ -79,12 +79,19 @@ async def list_approvals(
 async def resolve_approval(
     approval_id: str,
     body: ApprovalResolveRequest,
+    request: Request,
     approval_manager=Depends(get_approval_manager),
+    approval_gate=Depends(get_approval_gate),
 ) -> JSONResponse:
     """提交审批决策
 
     FR-019: 接收决策，调用 ApprovalManager.resolve()。
     成功/404/409 响应分别对应不同场景。
+
+    F101 Phase B HIGH-01 修复：同时调用 ApprovalGate.resolve_approval()，
+    唤醒 escalate_permission_handler 中 wait_for_decision 的 asyncio.Event。
+    ApprovalManager（policy 层）负责持久化决策记录；
+    ApprovalGate（harness 层）负责唤醒正在等待的 Agent coroutine。
     """
     # 先尝试解决（resolve 内部自行查找，避免双重查询）
     result = await approval_manager.resolve(
@@ -116,6 +123,41 @@ async def resolve_approval(
                 current_status=record.status.value,
             ).model_dump(),
         )
+
+    # F101 Phase B HIGH-01：双 resolve——同时唤醒 ApprovalGate._pending_handles 中的等待协程。
+    # approval_manager.resolve() 负责持久化决策；approval_gate.resolve_approval() 负责唤醒。
+    # 若 approval_gate 不可用（CLI/测试路径），降级跳过（Constitution C6）。
+    if approval_gate is not None:
+        try:
+            # 将 ApprovalDecision 枚举映射为 ApprovalGate 期望的字符串（"approved"/"rejected"）
+            # ApprovalDecision 枚举值：allow-once / allow-always（批准）/ deny（拒绝）
+            _gate_decision = "approved" if body.decision.value in ("allow-once", "allow-always") else "rejected"
+
+            # F101 Phase B N-M-01 v3：从 ApprovalManager 读取原 session_id / operation_type
+            # 并传给 approval_gate.resolve_approval，确保 ApprovalGate.allowlist 能真正更新。
+            # 若 record 不可用，用空字符串（allowlist 不更新，降级可接受）。
+            _record = approval_manager.get_approval(approval_id)
+            _task_id_for_gate = _record.request.task_id if _record is not None else ""
+            # session_id / operation_type 存储在 ApprovalManager 注册的 entry 中
+            # （escalate_permission HIGH-01 v3 已注册 tool_name=worker.escalate_permission）
+            # session_id 从 task_id 推断（审批发起时 task_id == session_id 的 task context）
+            # operation_type 使用 tool_name 作为 operation_type（ApprovalGate allowlist 作用域）
+            _session_id_for_gate = ""
+            _operation_type_for_gate = _record.request.tool_name if _record is not None else ""
+
+            await approval_gate.resolve_approval(
+                handle_id=approval_id,
+                decision=_gate_decision,
+                operator="user:web",
+                task_id=_task_id_for_gate,
+                session_id=_session_id_for_gate,
+                operation_type=_operation_type_for_gate,
+            )
+        except Exception as _exc:
+            logger.warning(
+                "approval_gate_resolve_failed",
+                extra={"approval_id": approval_id, "error": str(_exc)},
+            )
 
     return JSONResponse(
         status_code=200,

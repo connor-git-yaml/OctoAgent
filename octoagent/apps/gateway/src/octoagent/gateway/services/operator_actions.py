@@ -131,6 +131,7 @@ class OperatorActionService:
         store_group: StoreGroup,
         sse_hub=None,
         approval_manager=None,
+        approval_gate=None,
         task_runner=None,
         telegram_state_store=None,
         watchdog_config: WatchdogConfig | None = None,
@@ -139,6 +140,8 @@ class OperatorActionService:
         self._stores = store_group
         self._sse_hub = sse_hub
         self._approval_manager = approval_manager
+        # F101 Phase B HIGH-01：注入 ApprovalGate 供双 resolve 使用
+        self._approval_gate = approval_gate
         self._task_runner = task_runner
         self._telegram_state_store = telegram_state_store
         self._watchdog_config = watchdog_config or WatchdogConfig.from_env()
@@ -265,6 +268,33 @@ class OperatorActionService:
                 task_id=record.request.task_id,
                 handled_at=now,
             )
+
+        # F101 Phase B HIGH-01：双 resolve——同时唤醒 ApprovalGate._pending_handles 中的等待协程。
+        # approval_manager.resolve() 负责持久化；approval_gate.resolve_approval() 负责唤醒。
+        if self._approval_gate is not None:
+            try:
+                _gate_decision = "approved" if decision in (
+                    ApprovalDecision.ALLOW_ONCE, ApprovalDecision.ALLOW_ALWAYS
+                ) else "rejected"
+                # F101 Phase B N-M-01 v3：从 record 读取 tool_name 作为 operation_type，
+                # 确保 ApprovalGate.allowlist 在 "approved" + operation_type 条件下真正更新。
+                # session_id 对 Telegram/operator 路径暂时为空（无会话上下文），allowlist 降级可接受。
+                _operation_type_for_gate = record.request.tool_name if record is not None else ""
+                await self._approval_gate.resolve_approval(
+                    handle_id=approval_id,
+                    decision=_gate_decision,
+                    operator=request.actor_id or "operator",
+                    task_id=record.request.task_id or "",
+                    session_id="",  # Telegram/operator 路径无 session_id
+                    operation_type=_operation_type_for_gate,
+                )
+            except Exception as _gate_exc:
+                import structlog as _sl
+                _sl.get_logger(__name__).warning(
+                    "operator_action_approval_gate_resolve_failed",
+                    approval_id=approval_id,
+                    error=str(_gate_exc),
+                )
 
         decision_label = {
             OperatorActionKind.APPROVE_ONCE: "审批已批准一次",

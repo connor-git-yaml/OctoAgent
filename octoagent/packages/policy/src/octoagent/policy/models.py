@@ -245,6 +245,11 @@ class ApprovalRequest(BaseModel):
         default_factory=lambda: datetime.now(UTC),
         description="审批请求创建时间（UTC）",
     )
+    # F101 Phase B N-M-01 v4：session_id 持久化，双 resolve 时真传给 ApprovalGate.allowlist
+    session_id: str = Field(
+        default="",
+        description="发起审批的 Agent 会话 ID（用于 ApprovalGate.allowlist 更新）",
+    )
 
 
 class ApprovalRecord(BaseModel):

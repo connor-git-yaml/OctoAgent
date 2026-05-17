@@ -63,6 +63,7 @@ class ToolDeps:
     _snapshot_store: Any = None  # F084 Phase 2 T022-T025
     _graph_pipeline_tool: Any = None  # GraphPipelineTool 实例（lifespan 内 late-bind）
     _approval_gate: Any = None  # F099 Phase B: ApprovalGate 实例（worker.escalate_permission 使用）
+    _approval_manager: Any = None  # F101 Phase B HIGH-01 v3: ApprovalManager 实例（escalate_permission 注册用）
 
     @property
     def task_runner(self):

@@ -97,8 +97,9 @@ class ApprovalGate:
         Args:
             event_store: EventStore 实例（用于写审计事件）；None 时审计降级
             task_store: TaskStore 实例（用于 ensure audit task 防 F24）
-            sse_push_fn: 异步函数 (session_id, payload) -> None，
-                         用于向 Web UI 推送审批卡片；None 时仅写事件（CLI/测试路径）
+            sse_push_fn: 异步函数 (session_id: str, payload: dict, task_id: str = "") -> None，
+                         用于向 Web UI 推送审批卡片；None 时仅写事件（CLI/测试路径）。
+                         F101 Phase B：task_id 参数新增，供 SSEHub 以 task_id 路由广播。
         """
         self._event_store = event_store
         self._task_store = task_store
@@ -221,6 +222,7 @@ class ApprovalGate:
         )
 
         # 推送审批卡片到 Web UI（SSE 路径）
+        # F101 Phase B FR-C2：传入 task_id 供 sse_push_fn 闭包以 task_id 路由 SSEHub 广播
         if self._sse_push_fn is not None:
             try:
                 await self._sse_push_fn(
@@ -235,6 +237,7 @@ class ApprovalGate:
                         "pattern_id": pattern_id,
                         "diff_content": diff_content,
                     },
+                    task_id,  # F101 Phase B：新增 task_id 参数（SSEHub 按 task_id 路由）
                 )
             except Exception as exc:
                 log.warning(

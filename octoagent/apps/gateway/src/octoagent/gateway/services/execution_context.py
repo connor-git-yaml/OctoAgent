@@ -77,6 +77,23 @@ class ExecutionRuntimeContext:
             approval_required=approval_required,
         )
 
+    async def mark_waiting_approval(self) -> None:
+        """F101 Phase B FR-C1：通知 console 将 task 状态改为 WAITING_APPROVAL。
+
+        由 escalate_permission_handler 在调用 ApprovalGate.wait_for_decision 之前调用。
+        """
+        await self.console.mark_waiting_approval(
+            task_id=self.task_id,
+            session_id=self.session_id,
+        )
+
+    async def mark_running_from_waiting_approval(self) -> None:
+        """F101 Phase B FR-C1：通知 console 将 task 状态从 WAITING_APPROVAL 恢复为 RUNNING。
+
+        由 escalate_permission_handler 在 wait_for_decision 返回后调用。
+        """
+        await self.console.mark_running_from_waiting_approval(task_id=self.task_id)
+
     async def consume_resume_input(self) -> str | None:
         if self._resume_input_consumed:
             return None

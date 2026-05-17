@@ -32,6 +32,15 @@ def get_approval_manager(request: Request) -> ApprovalManager:
     return request.app.state.approval_manager
 
 
+def get_approval_gate(request: Request):
+    """从 app.state 获取 ApprovalGate 实例（F101 Phase B HIGH-01 修复）。
+
+    ApprovalGate 在 octo_harness._bootstrap_mcp 中初始化（F101 Phase B FR-C2）。
+    若未初始化（CLI 环境 / 测试路径）返回 None，调用方需做 None 检查。
+    """
+    return getattr(request.app.state, "approval_gate", None)
+
+
 def get_approval_override_repo(request: Request):
     """从 app.state 获取 ApprovalOverrideRepository 实例
 

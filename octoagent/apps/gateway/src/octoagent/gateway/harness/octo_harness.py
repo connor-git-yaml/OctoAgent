@@ -693,14 +693,63 @@ class OctoHarness:
 
         # F099 Codex Final F2 修复：创建生产 ApprovalGate 并绑定到 CapabilityPackService
         # 必须在 startup() 之前 bind，startup() 内部的 _register_builtin_tools 会把它注入 ToolDeps
+        # F101 Phase B FR-C2：注入真实 sse_push_fn 闭包（SSEHub 已在 _bootstrap_runtime_services 初始化）
+        # phase-0-recon.md 结论：SSEHub_BROADCAST_CAPABILITY = TASK_ONLY，
+        # 闭包捕获 sse_hub 引用，通过 task_id 参数（request_approval 传入）路由广播。
         _store_group = self._store_group
         try:
+            from datetime import datetime, timezone as _tz
+
+            from octoagent.core.models.enums import ActorType as _ActorType, EventType as _EventType
+            from octoagent.core.models.event import Event as _Event
             from octoagent.gateway.harness.approval_gate import ApprovalGate
+            from ulid import ULID as _ULID
+
+            _sse_hub = getattr(app.state, "sse_hub", None)
+
+            async def _approval_sse_push_fn(
+                session_id: str,
+                payload: dict,
+                task_id: str = "",
+            ) -> None:
+                """ApprovalGate sse_push_fn 闭包：把 payload dict 转 Event 对象并通过 SSEHub 广播。
+
+                F101 Phase B：SSEHub 按 task_id 路由（phase-0-recon TASK_ONLY 结论）。
+                task_id 参数由 ApprovalGate.request_approval 内部传入（调用方必传）。
+                若 task_id 为空，无法路由，降级 log warning。
+                """
+                if _sse_hub is None or not task_id:
+                    _main_module.log.warning(
+                        "approval_sse_push_skipped",
+                        session_id=session_id,
+                        task_id=task_id,
+                        hint="sse_hub 未初始化或 task_id 为空，无法路由 SSE 广播",
+                    )
+                    return
+                try:
+                    _task_seq = await _store_group.event_store.get_next_task_seq(task_id) if _store_group is not None else 0
+                    _event = _Event(
+                        event_id=str(_ULID()),
+                        task_id=task_id,
+                        task_seq=_task_seq,
+                        ts=datetime.now(_tz.utc),
+                        type=_EventType.APPROVAL_REQUESTED,
+                        actor=_ActorType.SYSTEM,
+                        payload={"session_id": session_id, **payload},
+                        trace_id=task_id,
+                    )
+                    await _sse_hub.broadcast(task_id, _event)
+                except Exception as _exc:
+                    _main_module.log.warning(
+                        "approval_sse_push_broadcast_failed",
+                        task_id=task_id,
+                        error=str(_exc),
+                    )
 
             _approval_gate = ApprovalGate(
                 event_store=_store_group.event_store if _store_group is not None and hasattr(_store_group, "event_store") else None,
                 task_store=_store_group.task_store if _store_group is not None and hasattr(_store_group, "task_store") else None,
-                sse_push_fn=None,  # SSE 推送通过 app.state.sse_hub 在后续阶段绑定
+                sse_push_fn=_approval_sse_push_fn,  # F101 Phase B FR-C2：真实 SSE 推送闭包
             )
             app.state.approval_gate = _approval_gate
             app.state.capability_pack_service.bind_approval_gate(_approval_gate)
@@ -715,6 +764,12 @@ class OctoHarness:
         _tool_deps = getattr(app.state.capability_pack_service, "_tool_deps", None)
         if _tool_deps is not None and hasattr(snapshot_store, "load_snapshot"):
             _tool_deps._snapshot_store = snapshot_store
+
+        # F101 Phase B HIGH-01 v3：同步注入 ApprovalManager 到 ToolDeps
+        # escalate_permission_handler 需要在 request_approval 后同步注册到 ApprovalManager，
+        # 让 Web/Telegram 双 resolve 路径能找到该 approval_id（按 handle_id 为 approval_id）。
+        if _tool_deps is not None:
+            _tool_deps._approval_manager = getattr(app.state, "approval_manager", None)
 
     async def _bootstrap_executors(self, app: FastAPI) -> None:
         """对应 lifespan ``_bootstrap_executors`` marker 段（行 591-709）。
@@ -1016,6 +1071,8 @@ class OctoHarness:
             store_group=store_group,
             sse_hub=app.state.sse_hub,
             approval_manager=app.state.approval_manager,
+            # F101 Phase B HIGH-01：注入 ApprovalGate 实现双 resolve（唤醒 wait_for_decision）
+            approval_gate=getattr(app.state, "approval_gate", None),
             task_runner=app.state.task_runner,
             telegram_state_store=telegram_state_store,
             watchdog_config=watchdog_config,

@@ -85,17 +85,22 @@ class TaskRunner:
         docker_available_checker=None,
         delegation_plane=None,
         project_root: Path | None = None,
+        approval_timeout_seconds: float = 300.0,  # F101 Phase B FR-C3b：审批超时（默认 300s）
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
         self._llm_service = llm_service
         self._timeout_seconds = timeout_seconds
         self._monitor_interval_seconds = monitor_interval_seconds
+        self._approval_timeout_seconds = approval_timeout_seconds  # FR-C3b
         self._completion_notifier = completion_notifier
         self._running_jobs: dict[str, RunningJob] = {}
         self._monitor_task: asyncio.Task[None] | None = None
         self._lock = asyncio.Lock()
         self._cancellation_registry = WorkerCancellationRegistry()
+        # F101 Phase B HIGH-04 v4：保存 approval_manager 引用，供 startup_recovery 调用
+        # expire_dead_approval，让过期审批在用户再次 approve 时返回 409/410 而非假成功。
+        self._approval_manager = approval_manager
         self._execution_console = ExecutionConsoleService(
             store_group=store_group,
             sse_hub=sse_hub,
@@ -122,11 +127,15 @@ class TaskRunner:
         return self._execution_console
 
     async def startup(self) -> None:
-        """启动恢复：清理 orphan running + 拉起 queued。
+        """启动恢复：清理 orphan running + 处理 WAITING_APPROVAL + 拉起 queued。
 
         F098 Phase H: 注册 subagent session cleanup 为 task 终态 callback。
         所有终态路径（mark_failed / mark_cancelled / dispatch exception / shutdown 等）
         通过 task_service._write_state_transition 自动触发，不再依赖 task_runner 手动调用。
+
+        F101 Phase B HIGH-04：启动时同时扫描 WAITING_APPROVAL job，按 timeout policy 推 FAILED。
+        （原仅扫 RUNNING job，WAITING_APPROVAL job 重启后 ApprovalGate._pending_handles 全丢，
+        任务永远 hang——违反 FR-C6 对称性承诺 + Constitution 1 Durability First）
         """
         # F098 Phase H: 注册 cleanup callback 到 TaskService class-level callback list
         # 幂等：重复 startup 多次注册仅生效一次（按 callback identity 检测）。
@@ -135,6 +144,7 @@ class TaskRunner:
         )
 
         await self._recover_orphan_running_jobs()
+        await self._recover_orphan_waiting_approval_jobs()  # HIGH-04: 新增
         await self._dispatch_queued_jobs()
         if self._monitor_task is None or self._monitor_task.done():
             self._monitor_task = asyncio.create_task(self._monitor_loop())
@@ -386,6 +396,229 @@ class TaskRunner:
         service = TaskService(self._stores, self._sse_hub)
         await asyncio.gather(*[self._recover_one_orphan_job(j, service) for j in jobs])
 
+    async def _get_approval_requested_created_at(self, task_id: str) -> datetime | None:
+        """F101 Phase B HIGH-04 v3：从 event_store 读取 APPROVAL_REQUESTED 事件的 created_at。
+
+        用于 startup_recovery 精确计算 elapsed_since_approval_request。
+        若 event_store 不支持 get_events_for_task 或无相关事件，返回 None（fallback 到 task.updated_at）。
+        """
+        try:
+            from octoagent.core.models.enums import EventType as _EventType
+            _getter = getattr(self._stores.event_store, "get_events_for_task", None)
+            if not callable(_getter):
+                return None
+            events = await _getter(task_id)
+            # 取最新的 APPROVAL_REQUESTED 事件（task_seq 最大）
+            approval_events = [
+                e for e in events
+                if getattr(e, "type", None) == _EventType.APPROVAL_REQUESTED
+            ]
+            if not approval_events:
+                return None
+            latest = max(approval_events, key=lambda e: getattr(e, "task_seq", 0))
+            ts = getattr(latest, "ts", None)
+            if ts is None:
+                return None
+            from datetime import timezone as _tz
+            return ts.replace(tzinfo=_tz.utc) if ts.tzinfo is None else ts
+        except Exception:
+            return None
+
+    async def _recover_orphan_waiting_approval_jobs(self) -> None:
+        """F101 Phase B HIGH-04 v3：启动时处理 WAITING_APPROVAL job，按剩余 timeout 判断策略。
+
+        gateway 重启时 ApprovalGate._pending_handles（in-memory）全丢，
+        WAITING_APPROVAL job 无法被唤醒。
+
+        v3 修复（HIGH-04 PARTIAL → CLOSED）：
+        1. 从 event_store 读取 APPROVAL_REQUESTED 事件 created_at，计算 elapsed
+        2. 若 elapsed < approval_timeout → 重启 monitor（让 monitor 在剩余时间后推 FAILED）
+           原理：把 task 状态更新为 WAITING_APPROVAL（mark_waiting_approval），然后
+           把 task 重新加入 _running_jobs 字典，让 monitor 按剩余时间检查。
+           实现细节：用 _fake_running_job 占位（started_at 设为 approval_requested_at），
+           monitor _monitor_loop_step 的 approval_timeout 检查会在剩余时间后推 FAILED。
+        3. 若 elapsed >= approval_timeout → 推 FAILED + reason "timeout_after_<sec>s"（与 monitor 路径统一）
+        4. 无法确定 elapsed（event_store 无 APPROVAL_REQUESTED 事件）→
+           推 FAILED + reason "gateway_restart_approval_lost"（fallback）
+        """
+        jobs = await self._stores.task_job_store.list_jobs(["WAITING_APPROVAL"])
+        if not jobs:
+            return
+
+        service = TaskService(self._stores, self._sse_hub)
+        _now = datetime.now(UTC)
+
+        for job in jobs:
+            try:
+                task = await service.get_task(job.task_id)
+                if task is None:
+                    log.warning(
+                        "recover_waiting_approval_task_not_found",
+                        task_id=job.task_id,
+                    )
+                    await self._stores.task_job_store.mark_failed(
+                        job.task_id,
+                        "task_missing_for_approval_recovery",
+                    )
+                    continue
+
+                # 从 event_store 读取审批发起时间（APPROVAL_REQUESTED 事件 created_at）
+                approval_requested_at = await self._get_approval_requested_created_at(job.task_id)
+
+                # fallback：若无 APPROVAL_REQUESTED 事件，用 task.updated_at
+                if approval_requested_at is None:
+                    from datetime import timezone as _tz
+                    approval_requested_at_candidate = (
+                        task.updated_at.replace(tzinfo=_tz.utc)
+                        if task.updated_at.tzinfo is None
+                        else task.updated_at
+                    )
+                    # 保守估计：没有精确时间戳，无法安全重启 monitor，推 FAILED
+                    _elapsed = (_now - approval_requested_at_candidate).total_seconds()
+                    if _elapsed >= self._approval_timeout_seconds:
+                        _reason = f"timeout_after_{int(self._approval_timeout_seconds)}s"
+                    else:
+                        # 无法确定精确 elapsed（event_store 无 APPROVAL_REQUESTED 事件）
+                        _reason = "gateway_restart_approval_lost"
+                    log.warning(
+                        "recover_waiting_approval_no_event_fallback",
+                        task_id=job.task_id,
+                        reason=_reason,
+                        elapsed_approx=_elapsed,
+                    )
+                    await self._recover_waiting_approval_push_failed(service, job.task_id, _reason)
+                    continue
+
+                # 计算精确 elapsed
+                _elapsed = (_now - approval_requested_at).total_seconds()
+
+                if _elapsed < self._approval_timeout_seconds:
+                    # 未超时：重启 monitor 等待剩余时间
+                    # 把任务重新加入 _running_jobs，用 approval_requested_at 作为"started_at"
+                    # monitor 的 approval_timeout 检查：
+                    #   task.updated_at 从 APPROVAL_REQUESTED 时间算，
+                    #   threshold = now - approval_timeout_seconds
+                    #   若 task.updated_at < threshold → 超时推 FAILED
+                    # 通过 mark_waiting_approval 确保 task_jobs 表状态一致
+                    await self._stores.task_job_store.mark_waiting_approval(job.task_id)
+
+                    # 注册到 _running_jobs，让 monitor 继续跟踪
+                    import asyncio as _asyncio
+                    _placeholder_task = _asyncio.create_task(_asyncio.sleep(999_999))
+                    self._running_jobs[job.task_id] = RunningJob(
+                        task=_placeholder_task,
+                        started_at=approval_requested_at,
+                    )
+                    _remaining = self._approval_timeout_seconds - _elapsed
+                    log.info(
+                        "recover_waiting_approval_restart_monitor",
+                        task_id=job.task_id,
+                        elapsed_s=round(_elapsed, 1),
+                        remaining_s=round(_remaining, 1),
+                        approval_timeout_s=self._approval_timeout_seconds,
+                        hint="monitor 将在剩余时间后推 FAILED（HIGH-04 v3 重启 monitor）",
+                    )
+                    # HIGH-04 v4：即使 task 尚未超时，ApprovalGate handle 已丢失（重启后无法恢复）。
+                    # 必须立即 expire ApprovalManager entry，防止用户在剩余时间内 approve 收到假成功。
+                    # monitor 仍会在剩余时间后推 FAILED，此处只确保 ApprovalManager 侧正确反映 dead 状态。
+                    await self._expire_approval_manager_entry(job.task_id)
+                else:
+                    # 已超时：推 FAILED + reason "timeout_after_<sec>s"（与 monitor 路径统一）
+                    _reason = f"timeout_after_{int(self._approval_timeout_seconds)}s"
+                    log.warning(
+                        "recover_waiting_approval_timeout_expired",
+                        task_id=job.task_id,
+                        elapsed_s=round(_elapsed, 1),
+                        approval_timeout_s=self._approval_timeout_seconds,
+                        reason=_reason,
+                    )
+                    await self._recover_waiting_approval_push_failed(service, job.task_id, _reason)
+
+            except Exception as _exc:
+                log.warning(
+                    "recover_waiting_approval_error",
+                    task_id=job.task_id,
+                    error=str(_exc),
+                )
+
+    async def _expire_approval_manager_entry(self, task_id: str) -> None:
+        """F101 Phase B HIGH-04 v4：通知 ApprovalManager 将对应审批标记为 EXPIRED。
+
+        gateway 重启后 ApprovalGate._pending_handles 全丢，但 ApprovalManager 可能已
+        从 event store 恢复了 PENDING 条目。若不显式 expire，用户在 300-600s 窗口内
+        approve 时 approval_manager.resolve() 会返回 True（假成功）但 task 无法恢复执行。
+
+        此方法在 startup_recovery 中对每个已超时或 fallback 的 WAITING_APPROVAL job 调用，
+        确保后续 resolve 尝试收到 409（或 410 EXPIRED）而非假成功。
+
+        task_id 用于匹配 approval_id（escalate_permission 以 task_id 为 approval_id 注册）。
+        """
+        if self._approval_manager is None:
+            return
+        try:
+            # escalate_permission 以 handle.handle_id 注册（handle_id 由 ApprovalGate 生成），
+            # 但 ApprovalManager 通过 task_id 关联——approval_id 可能不等于 task_id。
+            # 最精确的方法：遍历 pending approvals，找 task_id 匹配的条目。
+            pending_list = self._approval_manager.get_pending_approvals()
+            for _rec in pending_list:
+                if _rec.request.task_id == task_id:
+                    expired = await self._approval_manager.expire_dead_approval(_rec.request.approval_id)
+                    if expired:
+                        log.info(
+                            "recover_waiting_approval_expired_approval_manager",
+                            task_id=task_id,
+                            approval_id=_rec.request.approval_id,
+                            hint="HIGH-04 v4：startup_recovery 显式 expire dead approval",
+                        )
+        except Exception as _exc:
+            log.warning(
+                "recover_waiting_approval_expire_approval_manager_error",
+                task_id=task_id,
+                error=str(_exc),
+                hint="HIGH-04 v4：expire_dead_approval 失败，用户 approve 可能返回假成功",
+            )
+
+    async def _recover_waiting_approval_push_failed(
+        self,
+        service: "TaskService",
+        task_id: str,
+        reason: str,
+    ) -> None:
+        """HIGH-04 v4 辅助：CAS 状态转移 WAITING_APPROVAL → FAILED 并通知。
+
+        同时调用 _expire_approval_manager_entry，确保 ApprovalManager 中对应 dead approval
+        被标记为 EXPIRED，防止用户后续 approve 时收到假成功响应（HIGH-04 v4 修复）。
+        """
+        try:
+            await service._write_state_transition(
+                task_id=task_id,
+                from_status=TaskStatus.WAITING_APPROVAL,
+                to_status=TaskStatus.FAILED,
+                trace_id=f"trace-{task_id}",
+                reason=reason,
+            )
+        except Exception as _cas_exc:
+            log.warning(
+                "recover_waiting_approval_cas_failed",
+                task_id=task_id,
+                error=str(_cas_exc),
+            )
+            return
+
+        await self._stores.task_job_store.mark_failed(
+            task_id,
+            f"approval_recovery_{reason}",
+        )
+        await self._mark_execution_terminal(
+            task_id=task_id,
+            status=ExecutionSessionState.FAILED,
+            message=f"gateway restart: {reason}",
+        )
+        # HIGH-04 v4：expire ApprovalManager 对应 pending entry，
+        # 确保用户后续 approve 时收到 409/410 而非假成功
+        await self._expire_approval_manager_entry(task_id)
+        await self._notify_completion(task_id)
+
     async def _recover_one_orphan_job(self, job, service: TaskService) -> None:
         task = await service.get_task(job.task_id)
         if task is None:
@@ -438,12 +671,27 @@ class TaskRunner:
         resume_result = await self._resume_engine.try_resume(job.task_id, trigger="startup")
         if resume_result.ok:
             self._cancellation_registry.ensure(job.task_id)
+            # F101 Phase B FR-C6：startup_recovery 路径补充 is_caller_worker_signal 读取，
+            # 与 attach_input 路径（task_runner.py:613-631）对称（N-H1 PARTIAL 修复）。
+            # WorkerRuntime 首次 dispatch 时写入该信号（CONTROL_METADATA_UPDATED 事件）；
+            # resume 路径如无信号，WorkerRuntime 仍回退到无条件 True（worker 子任务路径）。
+            _startup_state_snapshot: dict = dict(resume_result.state_snapshot or {})
+            try:
+                _task_svc_startup = TaskService(self._stores, self._sse_hub)
+                _latest_meta_startup = await _task_svc_startup.get_latest_user_metadata(job.task_id)
+                if _latest_meta_startup.get("is_caller_worker_signal") == "1":
+                    _startup_state_snapshot["is_caller_worker_signal"] = "1"
+            except Exception:
+                log.warning(
+                    "startup_recovery_is_caller_worker_signal_read_failed",
+                    task_id=job.task_id,
+                )
             await self._spawn_job(
                 task_id=job.task_id,
                 user_text=job.user_text,
                 model_alias=job.model_alias,
                 resume_from_node=resume_result.resumed_from_node,
-                resume_state_snapshot=resume_result.state_snapshot,
+                resume_state_snapshot=_startup_state_snapshot if _startup_state_snapshot else resume_result.state_snapshot,
             )
             return
 
@@ -743,7 +991,29 @@ class TaskRunner:
             await self._stores.task_job_store.mark_cancelled(task_id)
             await self._notify_completion(task_id)
             return
+        # F101 Phase B N-M-02 v3：approval timeout 去重 check。
+        # 场景：approval timeout CAS 成功后 monitor 已推 FAILED，
+        # 但 worker _run_job 还在等 wait_for_decision → escalate_permission 返回后
+        # _run_job 走到此处，task 已是 FAILED 终态（monitor 已处理）。
+        # 此时不再调 mark_failed + notify（避免 double-notify）。
+        # 检查：若 task 已是 TERMINAL_STATES（FAILED/CANCELLED 等），直接 return（幂等保护）。
         if task.status in TERMINAL_STATES:
+            # 检查 task_jobs 表是否也已是终态（若是则跳过重复 mark_failed + notify）
+            try:
+                _job_for_check = await self._stores.task_job_store.get_job(task_id)
+                if _job_for_check is not None and _job_for_check.status in _TERMINAL_JOB_STATUSES:
+                    # task 和 job 都已是终态——monitor 已处理，跳过 double-notify
+                    log.debug(
+                        "run_job_skip_terminal_already_handled",
+                        task_id=task_id,
+                        task_status=task.status.value,
+                        job_status=_job_for_check.status,
+                        hint="N-M-02 v3：approval timeout 后 monitor 已推终态，跳过 double-notify",
+                    )
+                    return
+            except Exception:
+                pass  # 查询失败时不阻断，继续原有终态处理逻辑
+
             await self._stores.task_job_store.mark_failed(
                 task_id,
                 f"task_terminal_status_{task.status}",
@@ -758,53 +1028,165 @@ class TaskRunner:
         # 会检查 task 是否确实终态，不会对非终态 task 的 delegation session 做错误关闭）
         await self._close_subagent_session_if_needed(task_id)
 
+    async def _monitor_loop_step(self) -> None:
+        """单次监控循环体（供测试直接调用）。
+
+        _monitor_loop 调用此方法，测试可以直接调用 _monitor_loop_step
+        而无需等待整个 while True + sleep 循环。
+
+        三个独立超时路径：
+        1. 全局 job timeout（timeout_seconds）：started_at 超过阈值 → 取消 task
+        2. F101 Phase B FR-C3 approval timeout（approval_timeout_seconds）：
+           task 处于 WAITING_APPROVAL 且 updated_at 超过 approval_timeout_seconds →
+           强制 FAILED（与 job timeout 无关，所有 running_jobs 中的 task 都要检查）
+        3. F101 Phase B HIGH-02 v4：额外扫数据库 WAITING_APPROVAL task（不在 _running_jobs 的）：
+           wait_for_decision timeout 返回后，escalate_permission_handler 返回，task 离开
+           _running_jobs（done callback 移除），但 task 仍是 WAITING_APPROVAL。
+           monitor 只扫 _running_jobs 会遗漏这些 task → task 永远 hang。
+           修复：扫数据库 task_job_store["WAITING_APPROVAL"]，合并到检查集合。
+        """
+        threshold = datetime.now(UTC) - timedelta(seconds=self._timeout_seconds)
+        _approval_threshold = (
+            datetime.now(UTC)
+            - timedelta(seconds=self._approval_timeout_seconds)
+        )
+
+        # 收集所有 running job 的 task_id，同时区分超时类型
+        all_running_ids: list[str] = []
+        timed_out_ids: list[str] = []
+        async with self._lock:
+            running_ids_set: set[str] = set(self._running_jobs.keys())
+            for task_id, running in self._running_jobs.items():
+                all_running_ids.append(task_id)
+                if running.started_at < threshold:
+                    timed_out_ids.append(task_id)
+
+        # HIGH-02 v4：从数据库补充 WAITING_APPROVAL jobs（不在 _running_jobs 的 orphan task）。
+        # 场景：wait_for_decision timeout → escalate_permission 返回 → done callback 移除 _running_jobs
+        # → 下次 monitor tick _running_jobs 无此 task_id，但数据库 task_job 仍是 WAITING_APPROVAL。
+        # 这类 orphan task 需要 monitor 通过数据库查询兜底推 FAILED。
+        try:
+            _db_waiting_approval_jobs = await self._stores.task_job_store.list_jobs(["WAITING_APPROVAL"])
+            for _wa_job in _db_waiting_approval_jobs:
+                if _wa_job.task_id not in running_ids_set:
+                    # 不在 _running_jobs，但数据库 task_job 是 WAITING_APPROVAL → orphan
+                    all_running_ids.append(_wa_job.task_id)
+                    # 不加入 timed_out_ids：让 approval_timeout 路径判断是否超时
+        except Exception as _db_exc:
+            log.warning(
+                "monitor_loop_db_waiting_approval_scan_error",
+                error=str(_db_exc),
+                hint="HIGH-02 v4：数据库扫描失败，仅扫 _running_jobs（降级）",
+            )
+
+        if not all_running_ids:
+            return
+
+        service = TaskService(self._stores, self._sse_hub)
+
+        # F101 Phase B FR-C3 + HIGH-02 v4：先检查 WAITING_APPROVAL 超时（approval_timeout_seconds）
+        # 此检查覆盖：
+        #   A) _running_jobs 中的 WAITING_APPROVAL task（正常路径）
+        #   B) 数据库中 orphan WAITING_APPROVAL task（HIGH-02 v4 新增路径）
+        for task_id in all_running_ids:
+            task = await service.get_task(task_id)
+            if task is None or task.status != TaskStatus.WAITING_APPROVAL:
+                continue
+            # 计算 task.updated_at 是否超出 approval_timeout_seconds
+            if task.updated_at.tzinfo is None:
+                from datetime import timezone as _tz
+                _task_updated = task.updated_at.replace(tzinfo=_tz.utc)
+            else:
+                _task_updated = task.updated_at
+            if _task_updated >= _approval_threshold:
+                # 还未超出 approval_timeout_seconds，继续等待
+                continue
+            # approval_timeout_seconds 已超出：强制 FAILED 终态（H2：task_runner owner）
+            _reason = f"user_inaction_{int(self._approval_timeout_seconds)}s"
+            log.warning(
+                "task_runner_approval_timeout",
+                task_id=task_id,
+                approval_timeout_seconds=self._approval_timeout_seconds,
+                reason=_reason,
+            )
+            # H2 决议：直接写 WAITING_APPROVAL → FAILED 状态转移（CAS 语义）。
+            # F101 Phase B HIGH-03 修复：先做 CAS 状态转移，只有 CAS 成功后才执行 side effects。
+            # CAS 失败（task 已不在 WAITING_APPROVAL）→ abort 整个 FAILED 路径，不调 mark_failed / notify。
+            # 原因：先写 task_job_store.mark_failed 后做 CAS 时，CAS 失败会导致：
+            #   task 表=RUNNING、job 表=FAILED、通知已发——三者状态分裂（Durability First 违反）。
+            _cas_succeeded = False
+            try:
+                await service._write_state_transition(
+                    task_id=task_id,
+                    from_status=TaskStatus.WAITING_APPROVAL,
+                    to_status=TaskStatus.FAILED,
+                    trace_id=f"trace-{task_id}",
+                    reason=_reason,
+                )
+                _cas_succeeded = True
+            except Exception as _transition_exc:
+                log.warning(
+                    "task_runner_approval_timeout_transition_failed_abort",
+                    task_id=task_id,
+                    error=str(_transition_exc),
+                    hint="CAS 失败（task 已不在 WAITING_APPROVAL），abort FAILED 路径，不 emit side effects",
+                )
+            if not _cas_succeeded:
+                continue  # CAS 失败，跳过后续 side effects，处理下一个 task_id
+            # CAS 成功后才调 mark_failed + side effects（防止状态分裂）
+            await self._stores.task_job_store.mark_failed(
+                task_id,
+                f"approval_timeout_{int(self._approval_timeout_seconds)}s",
+            )
+            await self._mark_execution_terminal(
+                task_id=task_id,
+                status=ExecutionSessionState.FAILED,
+                message=f"approval timeout: {_reason}",
+            )
+            await self._notify_completion(task_id)
+
+        # 全局 job timeout 路径：只处理 started_at 超出 timeout_seconds 的 task
+        if not timed_out_ids:
+            return
+
+        for task_id in timed_out_ids:
+            task = await service.get_task(task_id)
+            if task is not None and task.status in {
+                TaskStatus.WAITING_INPUT,
+                TaskStatus.PAUSED,
+                TaskStatus.WAITING_APPROVAL,  # WAITING_APPROVAL 已在上方处理（或尚未超时）
+            }:
+                continue
+            async with self._lock:
+                running = self._running_jobs.get(task_id)
+            if running is None:
+                continue
+
+            self._cancellation_registry.cancel(task_id)
+            running.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await running.task
+
+            await self._stores.task_job_store.mark_failed(
+                task_id,
+                f"job_timeout_after_{int(self._timeout_seconds)}s",
+            )
+            await service.mark_running_task_failed_for_recovery(
+                task_id,
+                reason=f"后台任务超时（>{int(self._timeout_seconds)}s）",
+            )
+            await self._mark_execution_terminal(
+                task_id=task_id,
+                status=ExecutionSessionState.FAILED,
+                message="worker runtime timeout",
+            )
+            await self._notify_completion(task_id)
+            log.warning("task_runner_job_timeout", task_id=task_id)
+
     async def _monitor_loop(self) -> None:
         while True:
             await asyncio.sleep(self._monitor_interval_seconds)
-            threshold = datetime.now(UTC) - timedelta(seconds=self._timeout_seconds)
-            timed_out_ids: list[str] = []
-            async with self._lock:
-                for task_id, running in self._running_jobs.items():
-                    if running.started_at < threshold:
-                        timed_out_ids.append(task_id)
-
-            if not timed_out_ids:
-                continue
-
-            service = TaskService(self._stores, self._sse_hub)
-            for task_id in timed_out_ids:
-                task = await service.get_task(task_id)
-                if task is not None and task.status in {
-                    TaskStatus.WAITING_INPUT,
-                    TaskStatus.WAITING_APPROVAL,
-                    TaskStatus.PAUSED,
-                }:
-                    continue
-                async with self._lock:
-                    running = self._running_jobs.get(task_id)
-                if running is None:
-                    continue
-
-                self._cancellation_registry.cancel(task_id)
-                running.task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await running.task
-
-                await self._stores.task_job_store.mark_failed(
-                    task_id,
-                    f"job_timeout_after_{int(self._timeout_seconds)}s",
-                )
-                await service.mark_running_task_failed_for_recovery(
-                    task_id,
-                    reason=f"后台任务超时（>{int(self._timeout_seconds)}s）",
-                )
-                await self._mark_execution_terminal(
-                    task_id=task_id,
-                    status=ExecutionSessionState.FAILED,
-                    message="worker runtime timeout",
-                )
-                await self._notify_completion(task_id)
-                log.warning("task_runner_job_timeout", task_id=task_id)
+            await self._monitor_loop_step()
 
     async def _notify_completion(self, task_id: str) -> None:
         # F097 Phase E: 在通知前先执行 subagent session cleanup

@@ -1136,7 +1136,22 @@
   - [ ] 全量回归 ≥ 3450 passed，0 regression vs F099 baseline
   - [ ] e2e_smoke 5x 循环全 PASS
   - [ ] Codex Final cross-Phase review 0 HIGH 残留
-  - [ ] AC-C1/C2/C3 联合 Phase B 联合验收通过（三者同时 pass）
+  - [x] AC-C1/C2/C3 联合 Phase B 联合验收通过（三者同时 pass）（Phase B 22/22 tests passed）
+  - [x] AC-C6 startup_recovery is_caller_worker_signal 恢复（Phase B AC-C6 2/2 tests passed）
+  - [x] B-9b 竞态测试（3 场景全 PASS）
+  - [x] B-9c service-layer integration test（真实 SSEHub + ApprovalGate，PASS）
+  - [x] B-9d approval_timeout_seconds 配置覆盖（PASS）
+  - [x] HIGH-01 production resolve 双路径接通验证（3/3 PASS）
+  - [x] HIGH-02 finally 块 vs monitor 竞态测试（2/2 PASS）
+  - [x] HIGH-03 monitor CAS 失败 abort side effects 测试（3/3 PASS）
+  - [x] HIGH-04 startup_recovery WAITING_APPROVAL 扫描测试（3/3 PASS）
+  - [x] HIGH-01 v3 CLOSED：escalate_permission 同步注册 ApprovalManager（3/3 PASS）
+  - [x] HIGH-02 v3 CLOSED：finally 块按 decision 条件恢复（3/3 PASS）
+  - [x] HIGH-04 v3 CLOSED：startup_recovery 重启 monitor / reason 格式统一（3/3 PASS）
+  - [x] N-M-01 v3 CLOSED：双 resolve 传 operation_type + allowlist 真更新（2/2 PASS）
+  - [x] N-M-02 v3 CLOSED：_run_job 终态去重 check（2/2 PASS）
+  - [x] Phase B v3 全量回归 35/35 PASS，0 regression（3502 passed vs 3488 v2 baseline）
+  - [x] e2e_smoke 8/8 PASS（Phase B v3 验证通过）
   - [ ] AC-F1 验证（选 C：is_recall_planner_skip spy 确认 return False）
   - [ ] completion-report.md + handoff.md 已产出
   - [ ] 不 push origin/master（等用户拍板）

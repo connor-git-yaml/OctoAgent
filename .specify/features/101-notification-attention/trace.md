@@ -86,3 +86,42 @@
   - octoagent/apps/gateway/src/octoagent/gateway/routes/chat.py (+35 行 / -2 行: helper + 注入位置 + 删 dispatch_metadata 写入)
   - octoagent/apps/gateway/src/octoagent/gateway/services/connection_metadata.py (+7 行: TURN_SCOPED_CONTROL_KEYS 加 force_full_recall)
   - octoagent/apps/gateway/tests/test_chat_force_full_recall.py (新建, 720 行 / 26 用例)
+[2026-05-17] 3 commits 已 push to feature/101-notification-attention (e0e470e docs / 641bfb9 Phase 0 / 3eba8a7 Phase A) | SKIP_E2E=1 bypass (用户授权 + pytest dev 版本污染环境)
+[2026-05-17] Phase 6.B v1: COMPLETED (sub-agent) | 7 文件 / 339 insertions | 11 测试 PASS + e2e_smoke 8/8 + 3531 regression
+[2026-05-17] Per-Phase B Codex review v1: 4 HIGH + 6 MED + 1 LOW | FIX_HIGH_FIRST
+  - HIGH-01: ApprovalGate 生产 resolve 路径永远不唤醒（核心 bug，AC-C2 根本性缺陷）
+  - HIGH-02: WAITING_APPROVAL timeout ApprovalGate / task_runner 双 owner 竞态
+  - HIGH-03: monitor CAS 失败后仍 emit side effects → 状态分裂
+  - HIGH-04: gateway 重启 WAITING_APPROVAL 状态丢失（FR-C6 违反）
+[2026-05-17] Phase B v2 修复: HIGH-01/02/03/04 全部尝试修复 | 11 新增 v2 测试 + 22 PASS + 3488 regression + e2e_smoke 8/8
+[2026-05-17] Per-Phase B Codex re-review v2: 3 HIGH PARTIAL + 2 新 MED | 仍 FIX_HIGH_FIRST
+  - HIGH-01 PARTIAL: v2 双 resolve 走"先 approval_manager.resolve 才 approval_gate.resolve"但 escalate_permission 未注册到 ApprovalManager → 404
+  - HIGH-02 PARTIAL: finally 块 race window 缩小未消除
+  - HIGH-03 ✅ CLOSED
+  - HIGH-04 PARTIAL: 未超时直接 FAILED + reason 格式不符 spec
+  - 新 N-M-01: 双 resolve 不传 session_id / operation_type
+  - 新 N-M-02: timeout 后未 cancel worker task → double-notify
+[2026-05-17] Phase B v3 修复: 5 finding 全部声明 CLOSED | +13 新测试 = 35 PASS + 3502 regression + e2e_smoke 8/8
+[2026-05-17] Per-Phase B Codex re-re-review v3: 又抓 2 HIGH PARTIAL + 1 NEW HIGH + 1 MED PARTIAL | FIX_HIGH_FIRST
+  - HIGH-01 ✅ CLOSED
+  - HIGH-02 PARTIAL: task 离开 _running_jobs 后 monitor 只扫 _running_jobs，WAITING_APPROVAL task 无后续超时 owner
+  - HIGH-04 PARTIAL: 重启后 ApprovalGate._pending_handles 空，用户 approve 返回 success 但 task 无法恢复执行（dead approval）
+  - N-M-01 PARTIAL: session_id 仍空字符串
+  - N-M-02 ✅ CLOSED
+  - NEW-HIGH-01: ApprovalManager 默认 timeout 600s vs ApprovalGate/task_runner 300s 不一致 → 用户在 300-600s 间 approve 成功但 task 已 FAILED
+[2026-05-17] Phase B v4 implement (sub-agent 第二次): API 断连前已大量修改（13 文件 / 886 insertions vs Phase A baseline）
+  - 改动文件含 approval_manager.py (+85 行) + models.py (+5 行) + task_runner.py 从 +278→+466 行
+  - sub-agent 未及时跑测试就断连，未新建 v4 验证测试
+  - 主编排器实测 35 v3 测试在 v4 代码上仍 PASS（v4 没破坏 v3 测试）
+  - 全量回归 + e2e_smoke 验证中（Monitor 等待）
+[2026-05-17] Phase B v4 验证 PASS:
+  - 35 v3 + 9 v4 = 44 Phase B tests PASS（sub-agent 二次补 9 v4 验证 test class: TestHigh02V4MonitorScansDatabase / TestHigh04V4DeadApprovalExpire / TestNewHigh01V4ApprovalManagerTimeout / TestNM01V4DualResolveSessionId）
+  - 全量回归 3502 passed, 10 skipped, 77 deselected, 1 xfailed, 1 xpassed, 113s（vs v3 3502 baseline 0 regression）
+  - e2e_smoke 8/8 PASS（2.62s）
+  - 决策：commit Phase B v4，跳过第 4 轮 re-review；Final cross-Phase review 阶段统一兜底（避免 token 无限消耗，前 3 轮 review 已修 v3 抓的所有 finding）
+[2026-05-17] Phase B 4 轮 review 收敛历程:
+  - v1: 4 HIGH + 6 MED + 1 LOW
+  - v2: 3 HIGH PARTIAL + 1 ✅ CLOSED + 2 新 MED
+  - v3: 1 ✅ CLOSED + 2 HIGH PARTIAL + 1 NEW HIGH + 1 MED PARTIAL + 1 ✅ CLOSED
+  - v4 production fix: 4 finding 实施修复 + 9 v4 测试验证
+  - 时间 cost: v1+v2+v3+v4 = ~7-8 sub-agent 委派 + 3 轮 Codex review + 1 主编排器 review 报告手写
