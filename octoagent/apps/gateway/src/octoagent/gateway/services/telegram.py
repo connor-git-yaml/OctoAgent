@@ -207,6 +207,8 @@ class TelegramGatewayService:
         self._operator_inbox_service = None
         self._operator_action_service = None
         self._control_plane_service = None
+        # F101 Phase C v2 H-3：NotificationService 引用，供 dismiss callback 使用
+        self._notification_service = None
 
     @property
     def enabled(self) -> bool:
@@ -226,6 +228,10 @@ class TelegramGatewayService:
 
     def bind_control_plane_service(self, control_plane_service: Any) -> None:
         self._control_plane_service = control_plane_service
+
+    def bind_notification_service(self, notification_service: Any) -> None:
+        """绑定 NotificationService（F101 Phase C v2 H-3：Telegram dismiss callback）。"""
+        self._notification_service = notification_service
 
     def _get_telegram_config(self):
         try:
@@ -697,11 +703,17 @@ class TelegramGatewayService:
 
     async def _handle_callback_query(self, context: TelegramInboundContext) -> TelegramIngestResult:
         if (
-            self._operator_action_service is None
-            or self._bot_client is None
+            self._bot_client is None
             or not context.callback_query_id
             or not context.callback_data
         ):
+            return TelegramIngestResult(status="ignored", detail="operator_action_unavailable")
+
+        # F101 Phase C v2 H-3：先检测 dismiss_notif 格式（优先于 operator action 解码）
+        if context.callback_data.startswith("dismiss_notif:"):
+            return await self._handle_dismiss_notification_callback(context)
+
+        if self._operator_action_service is None:
             return TelegramIngestResult(status="ignored", detail="operator_action_unavailable")
 
         try:
@@ -737,6 +749,57 @@ class TelegramGatewayService:
             detail=result.outcome.value,
             task_id=result.task_id,
             created=result.outcome == OperatorActionOutcome.SUCCEEDED,
+        )
+
+    async def _handle_dismiss_notification_callback(
+        self, context: TelegramInboundContext
+    ) -> TelegramIngestResult:
+        """F101 Phase C v2 H-3：处理通知 dismiss callback。
+
+        callback_data 格式：``dismiss_notif:<notification_id>``
+        识别后调用 notification_service.dismiss(notification_id, source="telegram")。
+        不影响现有 operator action 路径。
+        """
+        # 解析 notification_id
+        try:
+            _, notification_id = context.callback_data.split(":", 1)
+            notification_id = notification_id.strip()
+        except ValueError:
+            with contextlib.suppress(Exception):
+                await self._bot_client.answer_callback_query(
+                    context.callback_query_id,
+                    text="无效的通知 ID",
+                    show_alert=False,
+                )
+            return TelegramIngestResult(status="blocked", detail="invalid_dismiss_callback")
+
+        # 调用 notification_service.dismiss（若可用）
+        if self._notification_service is not None:
+            with contextlib.suppress(Exception):
+                self._notification_service.dismiss(notification_id, source="telegram")
+
+        # 应答 callback query（移除 inline keyboard）
+        with contextlib.suppress(Exception):
+            await self._bot_client.answer_callback_query(
+                context.callback_query_id,
+                text="通知已关闭",
+                show_alert=False,
+            )
+        with contextlib.suppress(Exception):
+            await self._bot_client.edit_message_text(
+                chat_id=context.chat_id,
+                message_id=context.message_id,
+                text="[通知已关闭]",
+                reply_markup=None,
+            )
+        logger.debug(
+            "telegram_notification_dismissed",
+            notification_id=notification_id,
+            sender_id=context.sender_id,
+        )
+        return TelegramIngestResult(
+            status="notification_dismissed",
+            detail=notification_id,
         )
 
     async def _notify_pairing_request(self, user_id: str) -> None:

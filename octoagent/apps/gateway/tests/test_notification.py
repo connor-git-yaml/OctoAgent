@@ -103,8 +103,18 @@ class TestNotificationService:
 
         assert len(ch1.notify_calls) == 1
         assert len(ch2.notify_calls) == 1
-        assert ch1.notify_calls[0] == ("task-001", "STATE_TRANSITION:SUCCEEDED", payload)
-        assert ch2.notify_calls[0] == ("task-001", "STATE_TRANSITION:SUCCEEDED", payload)
+        # F101 Phase C v2 H-3：channel 收到的 payload 会包含 notification_id（供 Telegram dismiss 按钮使用）
+        # 验证关键字段存在，不用精确 payload 比较
+        ch1_task_id, ch1_event_type, ch1_payload = ch1.notify_calls[0]
+        assert ch1_task_id == "task-001"
+        assert ch1_event_type == "STATE_TRANSITION:SUCCEEDED"
+        assert ch1_payload["task_title"] == payload["task_title"]
+        assert ch1_payload["to_status"] == payload["to_status"]
+        assert "notification_id" in ch1_payload  # H-3：notification_id 注入
+        ch2_task_id, ch2_event_type, ch2_payload = ch2.notify_calls[0]
+        assert ch2_task_id == "task-001"
+        assert ch2_event_type == "STATE_TRANSITION:SUCCEEDED"
+        assert ch2_payload["task_title"] == payload["task_title"]
 
     @pytest.mark.asyncio
     async def test_notify_deduplication(self) -> None:

@@ -86,6 +86,7 @@ class TaskRunner:
         delegation_plane=None,
         project_root: Path | None = None,
         approval_timeout_seconds: float = 300.0,  # F101 Phase B FR-C3b：审批超时（默认 300s）
+        notification_service=None,  # F101 Phase C T-C-00：NotificationService，供 WAITING_APPROVAL 通知使用
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
@@ -101,6 +102,8 @@ class TaskRunner:
         # F101 Phase B HIGH-04 v4：保存 approval_manager 引用，供 startup_recovery 调用
         # expire_dead_approval，让过期审批在用户再次 approve 时返回 409/410 而非假成功。
         self._approval_manager = approval_manager
+        # F101 Phase C T-C-00：保存 notification_service 引用，供 WAITING_APPROVAL 通知调用
+        self._notification_service = notification_service
         self._execution_console = ExecutionConsoleService(
             store_group=store_group,
             sse_hub=sse_hub,
@@ -1192,6 +1195,65 @@ class TaskRunner:
         # F097 Phase E: 在通知前先执行 subagent session cleanup
         # cleanup 内部已有 try-except 隔离，异常不影响主流程
         await self._close_subagent_session_if_needed(task_id)
+
+        # F101 Phase C T-C-09：FR-B6 精确一次推送
+        # NotificationService 内置 (task_id, event_type) 去重（_notified_set），
+        # 多次调用 _notify_completion 时只有第一次真正推送，满足 AC-B1 精确一次要求。
+        if self._notification_service is not None:
+            try:
+                from .notification import NotificationPriority as _NotificationPriority
+                # 读取 task 获取状态和标题
+                task_svc = TaskService(self._stores, self._sse_hub)
+                _task = await task_svc.get_task(task_id)
+                _status_str = (
+                    _task.status.value
+                    if _task is not None and hasattr(_task.status, "value")
+                    else ("UNKNOWN" if _task is None else str(_task.status))
+                )
+                _title = (
+                    (_task.title or "") if _task is not None else ""
+                )
+                # 按终态决定优先级：FAILED → HIGH；SUCCEEDED → LOW；其他 → LOW
+                if _status_str == "FAILED":
+                    _priority = _NotificationPriority.HIGH
+                else:
+                    _priority = _NotificationPriority.LOW
+                # F101 Phase C v3 Issue 1：从 task.pointers.latest_event_id 读取真实
+                # state_transition_event_id，确保同一 task 不同 transition 产生不同
+                # notification_id（M4-1 约束）。
+                _event_id = (
+                    (_task.pointers.latest_event_id or "")
+                    if _task is not None
+                    else ""
+                )
+                # F101 Phase C v3 Issue 2：从 execution_console 读取 session_id，
+                # 供 list_active(session_id) Web 刷新使用（FR-B5 H3）。
+                _session_id: str | None = None
+                try:
+                    _exec_session = await self._execution_console.get_session(task_id)
+                    if _exec_session is not None:
+                        _session_id = _exec_session.session_id
+                except Exception:
+                    pass  # session 不可用时降级为 None（Constitution #6）
+                await self._notification_service.notify_task_state_change(
+                    task_id=task_id,
+                    event_type="TASK_COMPLETED",
+                    payload={
+                        "task_title": _title,
+                        "to_status": _status_str,
+                    },
+                    priority=_priority,
+                    state_transition_event_id=_event_id,
+                    session_id=_session_id,
+                )
+            except Exception as _notif_exc:
+                # 通知失败不影响主流程（Constitution #6 降级）
+                log.warning(
+                    "task_runner_notification_service_failed",
+                    task_id=task_id,
+                    error_type=type(_notif_exc).__name__,
+                )
+
         if self._completion_notifier is None:
             return
         try:

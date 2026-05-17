@@ -771,6 +771,13 @@ class OctoHarness:
         if _tool_deps is not None:
             _tool_deps._approval_manager = getattr(app.state, "approval_manager", None)
 
+        # F101 Phase C v2 H-2：NotificationService 在 _bootstrap_executors 后创建，
+        # 此处不注入（值为 None）；_bootstrap_executors 完成后会调用
+        # capability_pack_service.bind_notification_service 补绑（正确顺序）。
+        # 旧的直接注入会冻结 None → Telegram 路径静默失效（H-2 修复）。
+        if _tool_deps is not None:
+            _tool_deps._notification_service = None  # 占位，_bootstrap_executors 后重新绑定
+
     async def _bootstrap_executors(self, app: FastAPI) -> None:
         """对应 lifespan ``_bootstrap_executors`` marker 段（行 591-709）。
 
@@ -846,6 +853,73 @@ class OctoHarness:
         )
         app.state.capability_pack_service.bind_delegation_plane(app.state.delegation_plane_service)
         llm_service = app.state.llm_service
+
+        # F101 Phase C T-C-00：创建 NotificationService 实例并注册 SSE + Telegram 渠道。
+        # NotificationService 由 TaskRunner 在 WAITING_APPROVAL 进入时调用（FR-B1）。
+        # 采用 lazy import 避免循环依赖；创建失败时降级为 None（Constitution #6）。
+        try:
+            from ..services.notification import (
+                NotificationService as _NotificationService,
+                SSENotificationChannel as _SSENotificationChannel,
+                TelegramNotificationChannel as _TelegramNotificationChannel,
+            )
+            # H-7：注入 snapshot_store 供 NotificationService 读取 USER.md active_hours
+            # H-6：注入 event_store 供 NotificationService 写审计事件
+            _notif_event_store = getattr(store_group, "event_store", None)
+            _notification_service = _NotificationService(
+                snapshot_store=snapshot_store,
+                event_store=_notif_event_store,
+            )
+            # 注册 SSE 渠道（Web UI 订阅者接收通知）
+            _sse_ch = _SSENotificationChannel(getattr(app.state, "sse_hub", None))
+            _notification_service.register_channel(_sse_ch)
+            # H-1 修复：TelegramNotificationChannel 构造签名为 send_message_fn + chat_id，
+            # 不是整个 telegram_service 对象。从 telegram_service 提取正确参数。
+            if telegram_service is not None:
+                _tg_bot_client = getattr(telegram_service, "_bot_client", None)
+                _tg_state_store = getattr(telegram_service, "_state_store", None)
+                # 提取第一个已授权用户的 chat_id 作为通知目标
+                _tg_chat_id: str | None = None
+                if _tg_state_store is not None:
+                    try:
+                        _approved = _tg_state_store.first_approved_user()
+                        if _approved is not None:
+                            _tg_chat_id = str(getattr(_approved, "chat_id", "") or "")
+                            if not _tg_chat_id:
+                                _tg_chat_id = None
+                    except Exception:
+                        _tg_chat_id = None
+                # 构造适配闭包：TelegramNotificationChannel.notify 以位置参数调用
+                # send_message_fn(chat_id, text, reply_markup)，但 bot_client.send_message
+                # 的 reply_markup 是关键字参数——用闭包适配
+                if _tg_bot_client is not None:
+                    async def _tg_send_fn(chat_id: str, text: str, reply_markup=None):
+                        await _tg_bot_client.send_message(
+                            chat_id,
+                            text,
+                            reply_markup=reply_markup or None,
+                        )
+                    _tg_ch = _TelegramNotificationChannel(
+                        send_message_fn=_tg_send_fn,
+                        chat_id=_tg_chat_id,
+                    )
+                    _notification_service.register_channel(_tg_ch)
+            app.state.notification_service = _notification_service
+        except Exception as _exc:
+            _log.warning("notification_service_init_skipped", error=str(_exc))
+            app.state.notification_service = None
+
+        # H-2 修复：_bootstrap_capability_pack 早于本函数（_bootstrap_executors）运行，
+        # 导致 ToolDeps._notification_service 被冻结为 None。
+        # notification_service 在本函数内创建后，立即重新绑定到 ToolDeps（补绑）。
+        _tool_deps_rebind = getattr(
+            getattr(app.state, "capability_pack_service", None),
+            "_tool_deps",
+            None,
+        )
+        if _tool_deps_rebind is not None:
+            _tool_deps_rebind._notification_service = app.state.notification_service
+
         app.state.task_runner = TaskRunner(
             store_group=store_group,
             sse_hub=app.state.sse_hub,
@@ -854,6 +928,7 @@ class OctoHarness:
             completion_notifier=telegram_service.notify_task_result,
             delegation_plane=app.state.delegation_plane_service,
             project_root=project_root,
+            notification_service=app.state.notification_service,  # F101 Phase C T-C-00
         )
         app.state.capability_pack_service.bind_task_runner(app.state.task_runner)
 
@@ -898,6 +973,10 @@ class OctoHarness:
         await app.state.capability_pack_service.refresh()
         app.state.execution_console = app.state.task_runner.execution_console
         telegram_service.bind_task_runner(app.state.task_runner)
+        # F101 Phase C v2 H-3：绑定 NotificationService 到 TelegramGatewayService，
+        # 使 Telegram dismiss callback 能调用 notification_service.dismiss
+        if hasattr(telegram_service, "bind_notification_service"):
+            telegram_service.bind_notification_service(app.state.notification_service)
         await app.state.task_runner.startup()
 
         # Feature 079 Phase 4：启动时对账 auth-profiles ↔ octoagent.yaml

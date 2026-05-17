@@ -488,6 +488,37 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                     error=str(_mark_exc),
                 )
 
+            # F101 Phase C T-C-07：FR-B1 WAITING_APPROVAL 进入时推送审批通知（CRITICAL 级别，豁免 quiet hours）
+            _notification_service = getattr(deps, "_notification_service", None)
+            if _notification_service is not None:
+                try:
+                    from ...services.notification import NotificationPriority as _NotificationPriority
+                    # F101 Phase C v3 Issue 1：用 handle.handle_id 作为 state_transition_event_id，
+                    # 确保同一 task 不同审批请求产生不同 notification_id（M4-1 约束）。
+                    # F101 Phase C v3 Issue 2：传入 session_id_for_approval，
+                    # 供 list_active(session_id) Web 刷新使用（FR-B5 H3）。
+                    await _notification_service.notify_approval_request(
+                        task_id=task_id_for_approval,
+                        tool_name="worker.escalate_permission",
+                        ask_reason=operation_summary,
+                        payload={
+                            "action": action,
+                            "scope": scope,
+                            "reason": reason,
+                            "timeout_seconds": 300,
+                        },
+                        priority=_NotificationPriority.CRITICAL,
+                        state_transition_event_id=handle.handle_id,
+                        session_id=session_id_for_approval,
+                    )
+                except Exception as _notif_exc:
+                    # 通知失败不阻断审批流程（Constitution #6 降级）
+                    log.debug(
+                        "escalate_permission_notification_failed",
+                        task_id=task_id_for_approval,
+                        error=str(_notif_exc),
+                    )
+
             # F101 Phase B HIGH-02 v3：decision 变量在 finally 块中条件恢复
             # 修复 v2 PARTIAL：v2 先查状态再决定，但 wait_for_decision timeout 返回后
             # monitor 还未推 FAILED 时仍可竞争写回 RUNNING（race window 未消除）。

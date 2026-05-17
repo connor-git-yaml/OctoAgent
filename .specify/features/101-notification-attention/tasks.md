@@ -1152,6 +1152,14 @@
   - [x] N-M-02 v3 CLOSED：_run_job 终态去重 check（2/2 PASS）
   - [x] Phase B v3 全量回归 35/35 PASS，0 regression（3502 passed vs 3488 v2 baseline）
   - [x] e2e_smoke 8/8 PASS（Phase B v3 验证通过）
+  - [x] AC-B1 Worker 完成精确一次推送（test_f101_notification.py 1/1 PASS）
+  - [x] AC-B2 approval_pending + quiet hours → CRITICAL 豁免推送（2/2 PASS）
+  - [x] AC-B3 worker_completed + quiet hours → 过滤（3/3 PASS）
+  - [x] AC-B4 active_hours 为空/None → 全时段推送（2/2 PASS）
+  - [x] AC-B5 WAITING_APPROVAL → notify_approval_request 调用（1/1 PASS）
+  - [x] AC-B6 dismiss 幂等跨通道（2/2 PASS）
+  - [x] Phase C 全量回归 3527 passed vs 3502 baseline，0 regression（+16 新测试 + Phase B 不变）
+  - [x] e2e_smoke 8/8 PASS（Phase C 验证通过）
   - [ ] AC-F1 验证（选 C：is_recall_planner_skip spy 确认 return False）
   - [ ] completion-report.md + handoff.md 已产出
   - [ ] 不 push origin/master（等用户拍板）

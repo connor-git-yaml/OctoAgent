@@ -232,6 +232,11 @@ class EventType(StrEnum):
     # USED 频次 = build_task_context 调用频次（一次 dispatch 一次）。
     BEHAVIOR_PACK_USED = "BEHAVIOR_PACK_USED"
 
+    # F101 Phase C v2：通知审计事件（H4 discard 审计链，FR-B3/B6/B8）
+    # NOTIFICATION_DISPATCHED 覆盖"正常推送"和"quiet hours 过滤"两种情况，
+    # payload.filtered=True 表示被 quiet hours 过滤（channel push 跳过，event 写入保留审计）。
+    NOTIFICATION_DISPATCHED = "NOTIFICATION_DISPATCHED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""
