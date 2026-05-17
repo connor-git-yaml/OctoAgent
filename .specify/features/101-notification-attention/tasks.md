@@ -974,6 +974,7 @@
 - **预估改动**: 0 行（只读）
 - **风险**: LOW
 - **Codex review 节点**: 否
+- **状态**: ✅ 完成（2026-05-17）——实测确认 unspecified+False → return False；None → return False
 
 ---
 
@@ -992,6 +993,17 @@
 - **预估改动**: 新增 ~30-40 行
 - **风险**: LOW
 - **Codex review 节点**: 否
+- **状态**: ✅ 完成（2026-05-17）——新建 `tests/services/test_f101_phase_f_acceptance.py`；2 集成测试 PASS（AC-F1 集成路径 + RUNNING 状态验证）
+
+---
+
+### T-F-02b: 多轮 ask_back loop 测试（Codex M2 修订）
+
+- **Phase**: F
+- **对应 FR/AC**: AC-F1 补充（Codex M2 finding 修订）
+- **改动文件**: `apps/gateway/tests/services/test_f101_phase_f_acceptance.py`（追加）
+- **完成判据**: 2 轮并发 ask_back loop + 独立性验证 + 性能基准（3 测试 PASS）
+- **状态**: ✅ 完成（2026-05-17）——TestMultiRoundAskBackLoop 3 测试全 PASS
 
 ---
 
@@ -1006,6 +1018,7 @@
 - **预估改动**: 0 行
 - **风险**: LOW
 - **Codex review 节点**: 否
+- **状态**: ✅ 完成（2026-05-17）——3571 passed（vs 3563 baseline，+8，0 regression）
 
 ---
 
@@ -1020,6 +1033,7 @@
 - **预估改动**: 0 行
 - **风险**: LOW
 - **Codex review 节点**: 否
+- **状态**: ✅ 完成（2026-05-17）——5 轮 × 8 passed = 40 次全 PASS（~2.5s/轮）
 
 ---
 
@@ -1037,6 +1051,7 @@
 - **预估改动**: 新建或追加文档 ~30-50 行
 - **风险**: LOW
 - **Codex review 节点**: 否
+- **状态**: ✅ 完成（2026-05-17）——新建 `phase-f-final-input.md`，含 6 Phase commit 汇总 + 各轮 Codex review 摘要 + 验证通过状态 + Final review 重点检查项
 
 ---
 
