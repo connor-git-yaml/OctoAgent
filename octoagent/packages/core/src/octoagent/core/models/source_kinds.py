@@ -20,6 +20,28 @@ OD-F099-3 落实（扩展 source_runtime_kind 枚举，不新增 A2AConversation
 """
 
 # ---------------------------------------------------------------------------
+# FR-C7（F101 Phase D）：显式 __all__ 导出列表，防止 `from source_kinds import *` 导入非预期符号
+# 11 个符号：5 个 SOURCE_RUNTIME_KIND_* + KNOWN_SOURCE_RUNTIME_KINDS + 5 个 CONTROL_METADATA_SOURCE_*
+# ---------------------------------------------------------------------------
+
+__all__ = [
+    # Caller 身份枚举（source_runtime_kind）
+    "SOURCE_RUNTIME_KIND_MAIN",
+    "SOURCE_RUNTIME_KIND_WORKER",
+    "SOURCE_RUNTIME_KIND_SUBAGENT",
+    "SOURCE_RUNTIME_KIND_AUTOMATION",
+    "SOURCE_RUNTIME_KIND_USER_CHANNEL",
+    # 已知值集合
+    "KNOWN_SOURCE_RUNTIME_KINDS",
+    # 事件来源操作字符串（control_metadata_source）
+    "CONTROL_METADATA_SOURCE_SUBAGENT_DELEGATION_INIT",
+    "CONTROL_METADATA_SOURCE_SUBAGENT_DELEGATION_BACKFILL",
+    "CONTROL_METADATA_SOURCE_ASK_BACK",
+    "CONTROL_METADATA_SOURCE_REQUEST_INPUT",
+    "CONTROL_METADATA_SOURCE_ESCALATE_PERMISSION",
+]
+
+# ---------------------------------------------------------------------------
 # Caller 身份枚举（source_runtime_kind）
 # 注：这些是字符串常量，不是 StrEnum，保持与现有 metadata.get() 读取模式一致
 # ---------------------------------------------------------------------------

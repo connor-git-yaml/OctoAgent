@@ -1160,6 +1160,15 @@
   - [x] AC-B6 dismiss 幂等跨通道（2/2 PASS）
   - [x] Phase C 全量回归 3527 passed vs 3502 baseline，0 regression（+16 新测试 + Phase B 不变）
   - [x] e2e_smoke 8/8 PASS（Phase C 验证通过）
+  - [x] M-1 broad-catch 3 处加 log.debug（ask_back/request_input/escalate_permission guard，Phase D T-D-01 PASS）
+  - [x] FR-C5 非 worker 路径 guard 补全（ask_back/request_input/escalate_permission 三工具，Phase D T-D-02 PASS）
+  - [x] FR-C7 source_kinds.__all__ 11 个符号（Phase D T-D-03 PASS）
+  - [x] AC-C4 ask_back integration test（8/8 PASS，真实 service layer 调用链验证，Phase D T-D-04 PASS）
+  - [x] AC-C5 非 worker guard 单测（2/2 PASS，Phase D T-D-05 PASS）
+  - [x] AC-C7 __all__ style 验证（2/2 PASS，Phase D T-D-05 PASS）
+  - [x] N-H1 startup_recovery verify（3/3 HIGH-04 PASS，Phase D T-D-06 verify）
+  - [x] Phase D 全量回归 3557 passed vs 3549 baseline，0 regression（+8 新测试）
+  - [x] e2e_smoke 8/8 PASS（Phase D 验证通过）
   - [ ] AC-F1 验证（选 C：is_recall_planner_skip spy 确认 return False）
   - [ ] completion-report.md + handoff.md 已产出
   - [ ] 不 push origin/master（等用户拍板）

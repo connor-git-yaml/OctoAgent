@@ -182,6 +182,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             try:
                 _guard_ctx = get_current_execution_context()
                 if getattr(_guard_ctx, "is_caller_worker", False):
+                    # worker 路径：检查 task 是否处于 RUNNING 状态
                     _guard_task = await deps.stores.task_store.get_task(_guard_ctx.task_id)
                     if _guard_task is not None and _guard_task.status != TaskStatus.RUNNING:
                         log.warning(
@@ -191,8 +192,30 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                             tool_name="worker.ask_back",
                         )
                         return ""
-            except Exception:
-                pass  # 无 execution_context 或 task_store 不可用 → guard 跳过，继续原有流程
+                else:
+                    # FR-C5（F101 Phase D）：非 worker 路径 guard 补全（SHOULD 级别）
+                    # 非 worker 调用时记录 debug 日志，但不阻断——非 worker 上下文仍可调用
+                    _guard_task = await deps.stores.task_store.get_task(
+                        getattr(_guard_ctx, "task_id", "")
+                    ) if getattr(_guard_ctx, "task_id", "") else None
+                    if _guard_task is not None and _guard_task.status != TaskStatus.RUNNING:
+                        log.debug(
+                            "ask_back_non_worker_task_not_running",
+                            task_id=getattr(_guard_ctx, "task_id", "unknown"),
+                            status=str(_guard_task.status),
+                            tool_name="worker.ask_back",
+                        )
+                        return ""
+                    else:
+                        log.debug(
+                            "ask_back_guard_skipped_non_worker_path",
+                            task_id=getattr(_guard_ctx, "task_id", "unknown"),
+                            tool_name="worker.ask_back",
+                        )
+            except Exception as exc:
+                # M-1 修复（F101 Phase D）：broad-catch 加 log.debug，guard 失败可观测
+                # 降级行为保持不变——guard 失败时工具仍按原有降级路径执行（Constitution C6）
+                log.debug("ask_back guard failed: %s", exc, exc_info=True)
 
             # FR-B4: emit CONTROL_METADATA_UPDATED（source=worker_ask_back）
             await _emit_ask_back_audit(
@@ -270,6 +293,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             try:
                 _guard_ctx = get_current_execution_context()
                 if getattr(_guard_ctx, "is_caller_worker", False):
+                    # worker 路径：检查 task 是否处于 RUNNING 状态
                     _guard_task = await deps.stores.task_store.get_task(_guard_ctx.task_id)
                     if _guard_task is not None and _guard_task.status != TaskStatus.RUNNING:
                         log.warning(
@@ -279,8 +303,28 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                             tool_name="worker.request_input",
                         )
                         return ""
-            except Exception:
-                pass  # 无 execution_context 或 task_store 不可用 → guard 跳过
+                else:
+                    # FR-C5（F101 Phase D）：非 worker 路径 guard 补全（SHOULD 级别）
+                    _guard_task = await deps.stores.task_store.get_task(
+                        getattr(_guard_ctx, "task_id", "")
+                    ) if getattr(_guard_ctx, "task_id", "") else None
+                    if _guard_task is not None and _guard_task.status != TaskStatus.RUNNING:
+                        log.debug(
+                            "request_input_non_worker_task_not_running",
+                            task_id=getattr(_guard_ctx, "task_id", "unknown"),
+                            status=str(_guard_task.status),
+                            tool_name="worker.request_input",
+                        )
+                        return ""
+                    else:
+                        log.debug(
+                            "request_input_guard_skipped_non_worker_path",
+                            task_id=getattr(_guard_ctx, "task_id", "unknown"),
+                            tool_name="worker.request_input",
+                        )
+            except Exception as exc:
+                # M-1 修复（F101 Phase D）：broad-catch 加 log.debug，guard 失败可观测
+                log.debug("request_input guard failed: %s", exc, exc_info=True)
 
             # FR-B4: emit CONTROL_METADATA_UPDATED（source=worker_request_input）
             await _emit_ask_back_audit(
@@ -364,6 +408,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             try:
                 _guard_ctx = get_current_execution_context()
                 if getattr(_guard_ctx, "is_caller_worker", False):
+                    # worker 路径：检查 task 是否处于 RUNNING 状态
                     _guard_task = await deps.stores.task_store.get_task(_guard_ctx.task_id)
                     if _guard_task is not None and _guard_task.status != TaskStatus.RUNNING:
                         log.warning(
@@ -373,8 +418,28 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                             tool_name="worker.escalate_permission",
                         )
                         return "rejected"
-            except Exception:
-                pass  # 无 execution_context 或 task_store 不可用 → guard 跳过
+                else:
+                    # FR-C5（F101 Phase D）：非 worker 路径 guard 补全（SHOULD 级别）
+                    _guard_task = await deps.stores.task_store.get_task(
+                        getattr(_guard_ctx, "task_id", "")
+                    ) if getattr(_guard_ctx, "task_id", "") else None
+                    if _guard_task is not None and _guard_task.status != TaskStatus.RUNNING:
+                        log.debug(
+                            "escalate_permission_non_worker_task_not_running",
+                            task_id=getattr(_guard_ctx, "task_id", "unknown"),
+                            status=str(_guard_task.status),
+                            tool_name="worker.escalate_permission",
+                        )
+                        return "rejected"
+                    else:
+                        log.debug(
+                            "escalate_permission_guard_skipped_non_worker_path",
+                            task_id=getattr(_guard_ctx, "task_id", "unknown"),
+                            tool_name="worker.escalate_permission",
+                        )
+            except Exception as exc:
+                # M-1 修复（F101 Phase D）：broad-catch 加 log.debug，guard 失败可观测
+                log.debug("escalate_permission guard failed: %s", exc, exc_info=True)
 
             # FR-D3: emit CONTROL_METADATA_UPDATED（source=worker_escalate_permission）
             await _emit_ask_back_audit(
