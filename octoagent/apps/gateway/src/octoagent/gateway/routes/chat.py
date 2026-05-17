@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,30 @@ from ..services.runtime_control import RUNTIME_CONTEXT_JSON_KEY, encode_runtime_
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# F101 Phase A：长 prompt 自动触发完整决策环（FR-D1/D2/D3）
+# 单位：Unicode 字符数（len(message)），使用 Python str 的 Unicode 码点计数。
+# M1 已知局限：中英文密度差异——2000 中文字符信息量约等于 6000 英文字符；
+#   纯中文 prompt 实际触发门槛偏低，纯代码/英文 prompt 触发门槛偏高。
+# 设计决策（GATE_DESIGN）：接受此局限，后续 F102 attention model 可按 token 估算调参。
+LONG_PROMPT_THRESHOLD: int = 2000
+
+
+def _resolve_long_prompt_threshold() -> int:
+    """解析 LONG_PROMPT_THRESHOLD：优先 ENV `OCTOAGENT_LONG_PROMPT_THRESHOLD`，缺省 2000（FR-D3 可配置要求）。
+
+    非法值（非整数 / 非正数）fallback 到默认值。
+    """
+    raw = os.environ.get("OCTOAGENT_LONG_PROMPT_THRESHOLD")
+    if raw is None or raw.strip() == "":
+        return LONG_PROMPT_THRESHOLD
+    try:
+        value = int(raw)
+    except (ValueError, TypeError):
+        return LONG_PROMPT_THRESHOLD
+    if value <= 0:
+        return LONG_PROMPT_THRESHOLD
+    return value
 
 # 保存后台任务引用，防止 GC 回收
 _background_tasks: set[asyncio.Task[None]] = set()
@@ -374,6 +399,14 @@ async def send_chat_message(
     if project_id:
         chat_control_metadata["project_id"] = project_id
 
+    # F101 Phase A FR-D1/D2/D3：长 prompt 自动触发完整决策环
+    # H-A1 修复：写入 chat_control_metadata（持久化到 USER_MESSAGE event 的 control_metadata），
+    # 而非 dispatch_metadata 临时副本——后者在 _enqueue_or_run → task_runner.enqueue 路径中被丢弃。
+    # task_runner 通过 TaskService.get_latest_user_metadata(task_id) 读取 USER_MESSAGE control_metadata，
+    # orchestrator._with_delegation_mode 据此触发 FR-H force_full_recall hint。
+    if len(body.message) > _resolve_long_prompt_threshold():
+        chat_control_metadata["force_full_recall"] = True
+
     # 确定 task_id（复用已有或创建新的）
     task_id = body.task_id or f"task-{uuid.uuid4().hex[:12]}"
     after_event_id = ""
@@ -430,6 +463,8 @@ async def send_chat_message(
                 runtime_metadata["agent_runtime_id"] = new_conversation_agent_runtime_id
             if new_conversation_agent_session_id:
                 runtime_metadata["agent_session_id"] = new_conversation_agent_session_id
+            # F101 Phase A FR-D1：force_full_recall 已通过 chat_control_metadata 写入 USER_MESSAGE event
+            # （见 chat_control_metadata 初始化段；dict(chat_control_metadata) 已自动继承该字段）。
             dispatch_metadata[RUNTIME_CONTEXT_JSON_KEY] = encode_runtime_context(
                 RuntimeControlContext(
                     task_id=task_id,
@@ -478,6 +513,8 @@ async def send_chat_message(
                 control_metadata=chat_control_metadata,
             )
             dispatch_metadata = dict(chat_control_metadata)
+            # F101 Phase A FR-D2：force_full_recall 已通过 chat_control_metadata 写入 USER_MESSAGE event
+            # （append_user_message 已传 control_metadata=chat_control_metadata；dict 副本自动继承）。
             if project_id:
                 dispatch_metadata[RUNTIME_CONTEXT_JSON_KEY] = encode_runtime_context(
                     RuntimeControlContext(

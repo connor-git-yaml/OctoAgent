@@ -27,6 +27,12 @@ TURN_SCOPED_CONTROL_KEYS = frozenset(
         # decode 后透传给 ProviderClient。生产路径默认不传 → 沿用 LLM 自主决策
         # 行为，无副作用。挂在 turn-scoped：每轮独立，不在 task 内残留。
         "force_tool_choice",
+        # F101 Phase A FR-D1/D2/D3：长 prompt 自动触发完整决策环。
+        # 值为 bool（True/False）；挂在 turn-scoped：每条消息独立计算，不在 task 生命周期残留。
+        # 由 chat.py chat_control_metadata 写入，经 USER_MESSAGE event.control_metadata 持久化，
+        # 再由 task_runner._run_job → get_latest_user_metadata 读取，
+        # 传入 orchestrator._prepare_single_loop_request metadata["force_full_recall"] hint。
+        "force_full_recall",
     }
 )
 
