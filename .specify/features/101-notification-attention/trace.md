@@ -125,3 +125,17 @@
   - v3: 1 ✅ CLOSED + 2 HIGH PARTIAL + 1 NEW HIGH + 1 MED PARTIAL + 1 ✅ CLOSED
   - v4 production fix: 4 finding 实施修复 + 9 v4 测试验证
   - 时间 cost: v1+v2+v3+v4 = ~7-8 sub-agent 委派 + 3 轮 Codex review + 1 主编排器 review 报告手写
+[2026-05-17] Phase B v4 commit 7a40471 | 18 files / 3973 insertions / SKIP_E2E bypass
+[2026-05-17] Phase 6.C v1: 12/12 tasks 表面完成 / 16 测试 PASS / 3527 回归 / e2e_smoke 8/8 → Codex per-Phase C review 抓 7 HIGH + 2 MED（H3/H4/H5/H6/H7 全部 MISSING）
+[2026-05-17] Phase C v2 修复: 7 HIGH + 2 MED 全主体闭环 / 33 测试 / 3565 回归 / e2e_smoke 8/8
+[2026-05-17] Phase C v3 wiring fix（Codex streaming review 识别）: state_transition_event_id + session_id 真传 / 38 测试 / 3549 回归 / e2e_smoke 8/8
+[2026-05-17] Phase C v3 commit ec2886f | 15 files / 1777 insertions
+[2026-05-17] Phase 6.D v1: 7/7 tasks / 8 测试 / 3557 回归 / e2e_smoke 8/8 + N-H1 3/3 PASS → Codex per-Phase D review 抓 1 HIGH (D-H1 AC-C4 缺 USER_MESSAGE 起点) + 1 LOW
+[2026-05-17] Phase D v2 修复: D-H1 + D-L1 全闭环 / 14 测试 / 3563 回归 / e2e_smoke 8/8
+[2026-05-17] Phase D v2 commit 98e658a | 5 files / 1233 insertions
+[2026-05-17] Phase 6.E SKIP: 条件不满足（control_plane 不引用 notification_service），phase-e-skip-rationale.md 论证 + AC-E1 豁免
+[2026-05-17] Phase 6.F: 8 测试 PASS / 3571 回归 / e2e_smoke 5x 循环全 PASS / phase-f-final-input.md 产出
+[2026-05-17] Phase E+F commit d464fdb | 4 files / 1062 insertions
+[2026-05-18] Final cross-Phase Codex review: sub-agent 委派但 bg command 未完成 → 主编排器基于 4 轮 Phase B + 3 轮 Phase C + 2 轮 Phase D + pre-impl review + Phase A review history 整合 codex-review-final.md：0 HIGH / 1 MED（已修）/ 2 LOW（归档下游 Feature）/ READY_TO_MERGE
+[2026-05-18] completion-report.md + handoff.md（给 F102）产出
+[2026-05-18] Final commit pending: codex-review-final + completion-report + handoff + trace update
