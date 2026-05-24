@@ -138,3 +138,19 @@
     * channels=frozenset() 全跳过 / unknown channel 全跳过
     * audit payload channels 字段存在（显式）/ 不存在（None）/ quiet hours filtered 仍写 channels
   - F101 + F102 综合回归 76 passed in 3.25s 0 regression
+[02:50] Phase D Codex review 后台中 (任务 ID bz6kv36c2)
+[03:00] Phase C: DailyRoutineService 主体完整闭环
+  - daily_routine.py 完整实现 (~480 行)：cron 注册 + 9 步执行 + LLM/fallback + audit task 占位
+  - octo_harness bootstrap + shutdown 集成（_bootstrap_optional_routines 末尾 + cleanup 段）
+  - SD-7 attention_statuses 校正：去掉 escalated，保留 {WAITING_INPUT, WAITING_APPROVAL, PAUSED, FAILED}
+  - test_f102_daily_routine_service.py 12 tests PASS：
+    * AC-B6 startup cron+audit task / shutdown remove_job / startup idempotent
+    * AC-B2 routine_active=false → SKIPPED 不推送
+    * AC-B5 + SD-8 空数据 → COMPLETED(worker_count=0) 不推送
+    * AC-E4 attention_count 算法（5 task 4 status fixture → 3）+ ATTENTION_TASK_STATUSES 校正
+    * AC-B7 attention > 0 → priority MEDIUM
+    * AC-E1 + AC-F1 完整事件链 TRIGGERED → COMPLETED → DISPATCHED + channels payload
+    * AC-B3 + AC-E2 LLM 失败 fallback / LLM 空响应 fallback
+    * AC-E3 CancelledError 显式 re-raise（用真实 async 函数手动 raise，AsyncMock 对 BaseException 处理特殊）
+  - F101 + F102 联合回归 139 passed in 0.81s 0 regression
+  - 注：Phase C 实现含 LLM 简版 prompt，Phase E 接 SD-9 token budget 截断

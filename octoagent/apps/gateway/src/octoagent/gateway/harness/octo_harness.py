@@ -175,6 +175,11 @@ class OctoHarness:
         if hasattr(app.state, "watchdog_scheduler") and app.state.watchdog_scheduler:
             app.state.watchdog_scheduler.shutdown(wait=False)
             _log.info("watchdog_scheduler_stopped")
+        if hasattr(app.state, "daily_routine_service") and app.state.daily_routine_service:
+            try:
+                await app.state.daily_routine_service.shutdown()
+            except Exception:
+                _log.exception("daily_routine_shutdown_failed")
         if hasattr(app.state, "automation_scheduler") and app.state.automation_scheduler:
             await app.state.automation_scheduler.shutdown()
 
@@ -1195,6 +1200,26 @@ class OctoHarness:
         await app.state.mcp_installer.startup()
         telegram_service.bind_control_plane_service(app.state.control_plane_service)
         await app.state.automation_scheduler.startup()
+
+        # F102 Proactive Followup：DailyRoutineService 在 automation_scheduler.startup()
+        # 之后构造（plan A-3 CQ-5 决议），此时 NotificationService 已完全 bind 完成
+        try:
+            from ..services.daily_routine import DailyRoutineService as _DailyRoutineService
+
+            _daily_routine = _DailyRoutineService(
+                scheduler=app.state.automation_scheduler,
+                task_store=store_group.task_store,
+                event_store=store_group.event_store,
+                notification_service=app.state.notification_service,
+                snapshot_store=app.state.snapshot_store,
+                provider_router=app.state.provider_router,
+            )
+            app.state.daily_routine_service = _daily_routine
+            await _daily_routine.startup()
+        except Exception:
+            # Constitution C6：daily routine 不可用不阻塞 gateway 启动
+            _log.exception("daily_routine_bootstrap_failed")
+            app.state.daily_routine_service = None
 
         _log.info(
             "watchdog_scheduler_started",
