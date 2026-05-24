@@ -74,6 +74,13 @@ ATTENTION_TASK_STATUSES: Final[frozenset[TaskStatus]] = frozenset({
     TaskStatus.FAILED,
 })
 
+#: spec SD-9 LLM input token budget（粗估值，中文 1 字符 ≈ 1.5 token，简化按字符数算）
+#: 3000 token ≈ 2000 中文字符；超限时优先保留 failed + attention task 详情
+LLM_INPUT_CHAR_BUDGET: Final[int] = 2000
+
+#: LLM output token budget（spec SD-9）
+LLM_OUTPUT_TOKEN_BUDGET: Final[int] = 512
+
 
 # ============================================================
 # DailyRoutineService
@@ -338,19 +345,18 @@ class DailyRoutineService:
         failed_count: int,
         attention_count: int,
     ) -> str:
-        """LLM 路径（Phase C 骨架，Phase E 完整实施 prompt 模板 + token budget）。
+        """LLM 路径（spec FR-B3 + SD-9 token budget 截断）。
 
-        Phase C: 直接调 cheap alias 简易 prompt；Phase E：实施 SD-9 input ≤ 3000 tokens
-        截断策略（优先保留 failed + attention task 的 events）。
+        SD-9 input budget：≤ 2000 中文字符（粗估 3000 token）；超限时**优先保留**
+        attention/failed task 的 status + title，其余 task 仅 title。max_tokens=512。
         """
-        prompt = self._build_simple_summary_prompt(
+        prompt = self._build_summary_prompt(
             tasks, date_str, worker_count, failed_count, attention_count
         )
-        # provider_router.complete 接口签名待 Phase E 确认；当前简单调用
         result = await self._provider_router.complete(
             model_alias="cheap",
             messages=[{"role": "user", "content": prompt}],
-            max_tokens=512,
+            max_tokens=LLM_OUTPUT_TOKEN_BUDGET,
         )
         if isinstance(result, str):
             return result.strip()
@@ -364,7 +370,7 @@ class DailyRoutineService:
                 return content.strip()
         return ""
 
-    def _build_simple_summary_prompt(
+    def _build_summary_prompt(
         self,
         tasks: list[Task],
         date_str: str,
@@ -372,21 +378,74 @@ class DailyRoutineService:
         failed_count: int,
         attention_count: int,
     ) -> str:
-        """Phase C 简版 prompt；Phase E 替换为 SD-9 token budget 截断版本。"""
-        lines = [
-            f"请用中文为以下 OctoAgent 用户的昨日 Worker 任务（{date_str}）生成简短摘要：",
+        """SD-9 LLM prompt 模板（含 token budget 截断策略）。
+
+        优先级：
+        1. attention task 详情（failed / waiting_input / waiting_approval / paused）
+           — 这些是用户最需要看到的，先 enumerate
+        2. 其余 task title（如 budget 不够则只列前 N 个）
+        3. 任意剩余 task 用"以及 N 个其他完成任务"概括
+
+        budget 检查：拼装时实时计算字符数，超限时停止详情、回退到 title-only。
+        """
+        # 1) 头部 + 总览（固定开销 ~150 char）
+        header_lines = [
+            "你是 OctoAgent 的 daily summary 助手。请用中文为用户生成简短摘要：",
             "",
+            f"日期：{date_str}（昨日）",
             f"任务总数：{worker_count}",
             f"失败任务数：{failed_count}",
-            f"待关注任务数：{attention_count}（waiting_input / waiting_approval / paused / failed）",
+            f"待关注任务数：{attention_count}（含 failed / waiting_input / waiting_approval / paused）",
             "",
-            "任务列表（最多展示前 20 个）：",
         ]
-        for task in tasks[:20]:
-            lines.append(f"- [{task.status.value}] {task.title}")
-        lines.append("")
-        lines.append("摘要要求：3-5 句话，开门见山，先说重点（失败 / 待关注），再说总体进展。")
-        return "\n".join(lines)
+
+        attention_tasks = [t for t in tasks if t.status in ATTENTION_TASK_STATUSES]
+        succeeded_tasks = [
+            t for t in tasks if t.status not in ATTENTION_TASK_STATUSES
+        ]
+
+        # 2) 优先展示 attention task 详情
+        body_lines: list[str] = []
+        used_chars = sum(len(line) for line in header_lines)
+
+        if attention_tasks:
+            body_lines.append("[待关注 / 失败任务]")
+            for task in attention_tasks:
+                entry = f"- [{task.status.value}] {task.title}"
+                if used_chars + len(entry) > LLM_INPUT_CHAR_BUDGET:
+                    body_lines.append(
+                        f"... 还有 {len(attention_tasks) - (len(body_lines) - 1)} 个待关注任务未列出"
+                    )
+                    break
+                body_lines.append(entry)
+                used_chars += len(entry)
+
+        # 3) 完成任务（title-only，留空间）
+        if succeeded_tasks and used_chars < LLM_INPUT_CHAR_BUDGET - 200:
+            body_lines.append("")
+            body_lines.append("[完成任务（仅 title）]")
+            shown = 0
+            for task in succeeded_tasks:
+                entry = f"- {task.title}"
+                if used_chars + len(entry) > LLM_INPUT_CHAR_BUDGET:
+                    remaining = len(succeeded_tasks) - shown
+                    if remaining > 0:
+                        body_lines.append(f"... 以及 {remaining} 个其他完成任务")
+                    break
+                body_lines.append(entry)
+                used_chars += len(entry)
+                shown += 1
+
+        # 4) 摘要要求（约 100 char 固定）
+        tail_lines = [
+            "",
+            "摘要要求：",
+            "- 3-5 句话",
+            "- 开门见山，先说重点（失败 / 待关注），再说总体进展",
+            "- 不要列举具体 task title，重点说趋势和需用户关注的事项",
+        ]
+
+        return "\n".join(header_lines + body_lines + tail_lines)
 
     def _generate_summary_fallback(
         self,

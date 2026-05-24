@@ -154,3 +154,20 @@
     * AC-E3 CancelledError 显式 re-raise（用真实 async 函数手动 raise，AsyncMock 对 BaseException 处理特殊）
   - F101 + F102 联合回归 139 passed in 0.81s 0 regression
   - 注：Phase C 实现含 LLM 简版 prompt，Phase E 接 SD-9 token budget 截断
+[03:30] Phase E: LLM prompt 模板 + SD-9 token budget 截断完成
+  - 新增 LLM_INPUT_CHAR_BUDGET=2000（粗估 3000 token）+ LLM_OUTPUT_TOKEN_BUDGET=512 常量
+  - _build_summary_prompt 完整 SD-9 实施：
+    * 优先级 1: attention task 详情（status + title），实时 char budget 检查
+    * 优先级 2: succeeded task title-only，留 200 char buffer 给 tail
+    * 优先级 3: "... 以及 N 个其他完成任务" 截断标记
+    * 头/尾固定开销 + body 动态截断
+  - max_tokens=LLM_OUTPUT_TOKEN_BUDGET（cheap alias 输出侧）
+  - 测试覆盖（3 tests）：
+    * prompt 含 attention/succeeded section + 正常调用
+    * 200 task 大量 succeeded 时截断（"... 以及 N 个其他"标记）
+    * 50 attention task budget 紧张时 attention 优先列出（"个待关注任务未列出"标记）
+  - F101 + F102 综合回归 148 passed in 5.62s 0 regression
+  - Phase E Codex review 推迟到 Phase F（与 Phase C 一起 final cross-Phase review）
+[03:35] Phase D Codex review 输出不完整（task ID bz6kv36c2 只到 trace，未生成 finding）
+  - 风险评估：Phase D 改动小（25 行 + 8 tests）+ F101 综合 76 PASS 验证，无 BLOCKER 信号
+  - Phase D review 推迟到 Final cross-Phase review 一并完整 review（避免单 Phase review 流产）

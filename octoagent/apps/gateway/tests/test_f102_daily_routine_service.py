@@ -496,6 +496,140 @@ class TestLLMFallback:
 # ============================================================
 
 
+class TestLLMPromptTokenBudget:
+    """Phase E：SD-9 LLM prompt 截断策略测试。"""
+
+    @pytest.mark.asyncio
+    async def test_prompt_includes_attention_section_when_tasks_exist(
+        self,
+        store_group: StoreGroup,
+        notification_service: NotificationService,
+    ) -> None:
+        """prompt 含 [待关注 / 失败任务] section 当有 attention task 时。"""
+        from datetime import timedelta
+
+        now_utc = datetime.now(UTC)
+        yesterday_noon = (now_utc - timedelta(days=1)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
+        await _create_task(
+            store_group, "t-fail", yesterday_noon, TaskStatus.FAILED, title="重要任务失败"
+        )
+        await _create_task(
+            store_group, "t-succ", yesterday_noon, TaskStatus.SUCCEEDED, title="日常任务"
+        )
+        await store_group.conn.commit()
+
+        # 捕获 LLM 调用 prompt
+        captured: dict[str, Any] = {}
+
+        async def _capture(model_alias: str, messages: list, max_tokens: int) -> str:
+            captured["prompt"] = messages[0]["content"]
+            captured["max_tokens"] = max_tokens
+            captured["model"] = model_alias
+            return "测试摘要"
+
+        svc = _build_service(store_group, notification_service)
+        svc._provider_router.complete = _capture
+        await svc.startup()
+        await svc._run_daily_summary()
+
+        prompt = captured["prompt"]
+        assert "[待关注 / 失败任务]" in prompt
+        assert "重要任务失败" in prompt
+        assert "FAILED" in prompt
+        assert "[完成任务（仅 title）]" in prompt
+        assert "日常任务" in prompt
+        assert captured["max_tokens"] == 512  # LLM_OUTPUT_TOKEN_BUDGET
+        assert captured["model"] == "cheap"
+
+    @pytest.mark.asyncio
+    async def test_prompt_truncates_when_too_many_succeeded_tasks(
+        self,
+        store_group: StoreGroup,
+        notification_service: NotificationService,
+    ) -> None:
+        """SD-9：大量 task 时 prompt 截断，回退到 "... 以及 N 个其他完成任务" 概括。"""
+        from datetime import timedelta
+
+        now_utc = datetime.now(UTC)
+        yesterday_noon = (now_utc - timedelta(days=1)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
+        # 创建 200 个 succeeded task，title 50 chars each → 总 char ~ 200 * 50 = 10000，
+        # 远超 LLM_INPUT_CHAR_BUDGET=2000
+        long_title = "这是一个相当长的任务标题用来测试 token budget 截断策略是否正确生效啊"
+        for i in range(200):
+            await _create_task(
+                store_group,
+                f"t-{i:03d}",
+                yesterday_noon,
+                TaskStatus.SUCCEEDED,
+                title=f"{long_title}-{i}",
+            )
+        await store_group.conn.commit()
+
+        captured_prompt: dict[str, str] = {}
+
+        async def _capture(model_alias: str, messages: list, max_tokens: int) -> str:
+            captured_prompt["text"] = messages[0]["content"]
+            return "截断测试摘要"
+
+        svc = _build_service(store_group, notification_service)
+        svc._provider_router.complete = _capture
+        await svc.startup()
+        await svc._run_daily_summary()
+
+        prompt = captured_prompt["text"]
+        # 截断标记应出现
+        assert "以及" in prompt and "其他完成任务" in prompt
+        # 总 prompt 长度应小于 budget + 头尾固定开销（~400 char）
+        # 即使头尾 + body 截断后 prompt 仍 < 3000 char（充裕余量）
+        assert len(prompt) < 3000
+
+    @pytest.mark.asyncio
+    async def test_prompt_attention_priority_when_budget_tight(
+        self,
+        store_group: StoreGroup,
+        notification_service: NotificationService,
+    ) -> None:
+        """SD-9：当 attention task 多 + budget 紧张时，attention 详情优先于 succeeded。"""
+        from datetime import timedelta
+
+        now_utc = datetime.now(UTC)
+        yesterday_noon = (now_utc - timedelta(days=1)).replace(
+            hour=12, minute=0, second=0, microsecond=0
+        )
+        # 50 个 attention task（FAILED）每个 title 100 char ≈ 5000 char ≫ budget
+        long_title = "一个相当长的失败任务标题用来测试 attention task 优先级是否生效啊不行还得再长一点"
+        for i in range(50):
+            await _create_task(
+                store_group,
+                f"t-fail-{i:02d}",
+                yesterday_noon,
+                TaskStatus.FAILED,
+                title=f"{long_title}-{i}",
+            )
+        await store_group.conn.commit()
+
+        captured_prompt: dict[str, str] = {}
+
+        async def _capture(model_alias: str, messages: list, max_tokens: int) -> str:
+            captured_prompt["text"] = messages[0]["content"]
+            return "测试"
+
+        svc = _build_service(store_group, notification_service)
+        svc._provider_router.complete = _capture
+        await svc.startup()
+        await svc._run_daily_summary()
+
+        prompt = captured_prompt["text"]
+        # attention section 应至少含部分 task，截断标记出现
+        assert "[待关注 / 失败任务]" in prompt
+        assert "FAILED" in prompt
+        assert "个待关注任务未列出" in prompt
+
+
 class TestCancelledErrorRespected:
     @pytest.mark.asyncio
     async def test_cancelled_error_during_llm_call_propagates(
