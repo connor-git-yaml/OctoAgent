@@ -128,3 +128,13 @@
   - routine_type 改 Literal["daily"]
   - +5 测试覆盖 fix 场景：web_sse 直写 / key 字符串误捕获 / 裸格式 / llm_path 设值 / 非 UTC 归一化
   - 总测 51 passed (38 + 13) in 0.33s
+[02:40] Phase D: notification.py channels 参数完整闭环
+  - notify_task_state_change 新增 channels: frozenset[str] | None = None（向后兼容）
+  - 内部 channel 推送循环加 if channels is not None and channel.channel_name not in channels: continue
+  - _write_notification_audit_event 透传 channels；NOTIFICATION_DISPATCHED payload
+    显式传入时按字典序写 channels: list[str]；None 时不写字段（旧 schema 向后兼容）
+  - test_f102_notification_channels.py 8 tests PASS：
+    * channels=None 全推（F101 caller 兼容）/ channels={telegram} 跳过 web_sse / 对称测试
+    * channels=frozenset() 全跳过 / unknown channel 全跳过
+    * audit payload channels 字段存在（显式）/ 不存在（None）/ quiet hours filtered 仍写 channels
+  - F101 + F102 综合回归 76 passed in 3.25s 0 regression

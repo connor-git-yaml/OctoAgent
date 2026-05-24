@@ -343,6 +343,7 @@ class NotificationService:
         priority: "NotificationPriority",
         filtered: bool,
         payload: dict[str, Any],
+        channels: frozenset[str] | None = None,
     ) -> None:
         """写 event_store 通知审计事件（H-6 H4 discard 审计链）。
 
@@ -356,6 +357,9 @@ class NotificationService:
             priority: 通知优先级
             filtered: True = 被 quiet hours 过滤（channel push 跳过），False = 正常推送
             payload: 通知内容
+            channels: F102 SD-6 / FR-B8 per-call channel 过滤集合；None 表示对所有
+                已注册 channel push（向后兼容，F101 现有 caller 不传）；
+                传入集合时仅推 channel_name ∈ channels 的 channel
         """
         if self._event_store is None:
             return
@@ -372,6 +376,12 @@ class NotificationService:
                     "notification_type": notification_type,
                     "priority": priority.value,
                     "filtered": filtered,
+                    # F102 FR-B8：channels=None 时不写字段（保持向后兼容，避免 F101
+                    # 旧 NOTIFICATION_DISPATCHED 事件 schema 出现 channels: null）；
+                    # channels 显式传入时按字典序写 list[str]
+                    **(
+                        {"channels": sorted(channels)} if channels is not None else {}
+                    ),
                     **{k: v for k, v in payload.items() if k != "notification_id"},
                 },
                 trace_id="",
@@ -475,6 +485,7 @@ class NotificationService:
         active_hours: str | None = None,
         state_transition_event_id: str = "",
         session_id: str | None = None,
+        channels: frozenset[str] | None = None,
     ) -> None:
         """Task 状态变更通知（FR-064-32）。
 
@@ -487,6 +498,11 @@ class NotificationService:
         - 被过滤的通知不推送 channel，但仍写 event_store（H4 discard 审计链）
         - session_id：用于 list_active 查询（H-4 Web list API）
 
+        F102 SD-6 / FR-B8 扩展：
+        - channels：per-call channel 过滤集合（None=全推，向后兼容 F101 所有现有 caller）；
+          传入 frozenset 时仅对 channel.channel_name ∈ channels 的 channel 调用 notify。
+          F102 daily routine 唯一传 channels 的 caller（基于 USER.md summary_channels 配置）。
+
         Args:
             task_id: 任务 ID
             event_type: 事件类型（如 STATE_TRANSITION）
@@ -495,6 +511,7 @@ class NotificationService:
             active_hours: 调用方传入的 active_hours（fallback，优先 USER.md SoT）
             state_transition_event_id: 触发通知的事件 ID，用于 sha256 生成
             session_id: 会话 ID，用于 list_active 查询
+            channels: F102 per-call channel 过滤，默认 None=对所有已注册 channel 推送
         """
         # H-5：sha256 notification_id（FR-B8）
         notification_id = generate_notification_id(
@@ -530,6 +547,7 @@ class NotificationService:
             priority=priority,
             filtered=filtered,
             payload=payload,
+            channels=channels,
         )
 
         if filtered:
@@ -559,6 +577,9 @@ class NotificationService:
         channel_payload = {**payload, "notification_id": notification_id}
 
         for channel in self._channels:
+            # F102 FR-B8：channels=None 时不过滤（向后兼容）；非 None 时仅推匹配
+            if channels is not None and channel.channel_name not in channels:
+                continue
             try:
                 await channel.notify(task_id, event_type, channel_payload)
             except Exception:
