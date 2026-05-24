@@ -106,3 +106,14 @@
   - T-B1 enums.py +4 EventType（ROUTINE_TRIGGERED/COMPLETED/FAILED/SKIPPED）；uv run python import 验证通过（104 total EventType）
   - T-B4 USER.md 模板新增 3 字段（daily_summary_time/routine_active/summary_channels），含注释说明
   - baseline full pytest 重跑后台中
+[02:00] Phase 6 Step 2: Phase A COMPLETED + commit 5433ed8
+  - phase-a-recon.md 归档 + T-B1 enums +4 EventType + T-B4 USER.md +3 字段
+  - e2e_smoke 8 passed / 3652 deselected
+[02:10] Phase 6 Step 3: Phase B COMPLETED
+  - T-B2 daily_routine_config.py + 3 解析函数 + DailyRoutineConfig + 4 payload schema + 34 测试 PASS
+  - T-B3 task_store.list_tasks_in_time_range + 12 测试 PASS（含 NFR-1 性能验证 50 task < 500ms）
+  - T-B6 daily_routine.py 骨架（DailyRoutineService + 常量 + DI 注入）
+  - 局部回归 52 passed in 0.37s 0 regression（含邻接 test_task_store_parent）
+  - 已知后续校正项（Phase C 实施时）：
+    * spec SD-7 attention_statuses 集合 escalated 不在 TaskStatus 中（worker_service WorkItem.status 才有）
+      → Phase C 实施时校正为 {WAITING_INPUT, WAITING_APPROVAL, FAILED, PAUSED}（4 个 TaskStatus 实际值）

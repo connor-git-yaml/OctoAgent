@@ -109,6 +109,60 @@ class SqliteTaskStore:
         rows = await cursor.fetchall()
         return [self._row_to_task(row) for row in rows]
 
+    async def list_tasks_in_time_range(
+        self,
+        start: datetime,
+        end: datetime,
+        statuses: list[TaskStatus] | None = None,
+    ) -> list[Task]:
+        """查询 created_at 在 [start, end) 范围内的 task 列表（F102 FR-T1）。
+
+        D3 决策：F102 范围内新增此 API 解决 daily routine 跨任务时间窗 N+1 问题；
+        复用现有 idx_tasks_created_at 索引（store/sqlite_init.py:32）。
+
+        时区语义（spec SD-10）：start / end MUST 是 UTC-aware datetime；
+        tasks.created_at 列以 UTC ISO 8601 形式持久化（``Task.created_at.isoformat()``）；
+        调用方负责本地时区 → UTC 转换。NaiveDatetime 输入会 raise ValueError。
+
+        Args:
+            start: 查询窗起点（UTC-aware datetime, 含）
+            end: 查询窗终点（UTC-aware datetime, 不含）
+            statuses: 可选状态过滤；None 时返回时间窗内全部 task
+
+        Returns:
+            按 created_at 倒序排列的 Task 列表（与 list_tasks 保持一致）
+
+        Raises:
+            ValueError: start 或 end 为 NaiveDatetime（无 tzinfo）时
+        """
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError(
+                "list_tasks_in_time_range requires UTC-aware datetimes; "
+                "naive datetimes are ambiguous and rejected (spec SD-10)."
+            )
+
+        start_iso = start.isoformat()
+        end_iso = end.isoformat()
+
+        if statuses is None:
+            cursor = await self._conn.execute(
+                "SELECT * FROM tasks WHERE created_at >= ? AND created_at < ? "
+                "ORDER BY created_at DESC",
+                (start_iso, end_iso),
+            )
+        else:
+            if not statuses:
+                return []
+            placeholders = ",".join("?" * len(statuses))
+            status_values = [s.value for s in statuses]
+            cursor = await self._conn.execute(
+                f"SELECT * FROM tasks WHERE created_at >= ? AND created_at < ? "
+                f"AND status IN ({placeholders}) ORDER BY created_at DESC",
+                (start_iso, end_iso, *status_values),
+            )
+        rows = await cursor.fetchall()
+        return [self._row_to_task(row) for row in rows]
+
     async def update_task_status(
         self,
         task_id: str,
