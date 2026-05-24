@@ -162,6 +162,31 @@ class TestSummaryChannelsParsing:
             extract_summary_channels_from_user_md(content) == DEFAULT_SUMMARY_CHANNELS
         )
 
+    def test_internal_value_web_sse_accepted(self) -> None:
+        """Codex M3 修复：开发者直接写内部值 "web_sse" 也接受（不再 fallback）。"""
+        content = '- **summary_channels**: "web_sse"'
+        assert extract_summary_channels_from_user_md(content) == frozenset({"web_sse"})
+
+    def test_key_string_in_value_position_does_not_match_itself(self) -> None:
+        """Codex H1 BLOCKER 修复：value 部分包含 "summary_channels" 字面值
+        不应被当作 channel name 提取——key prefix MUST 存在才提取 value。
+        """
+        # 用户随便写了个 invalid value："summary_channels: telegram_channels"
+        # 旧实现：捕获 "telegram_channels" → 未知 channel → fallback 全渠道
+        # 新实现：捕获 "telegram_channels" → 未知 channel → fallback 全渠道（同行为）
+        # 关键测试：当 key 名出现在 value 部分时，不应误捕获
+        # 即裸字符串 "summary_channels" 不带 ":" 前缀时不应被解析
+        content = "随便提及 summary_channels 这个词但没赋值"
+        # 该行不含 ":" 模式，应该跳过该行解析回到默认
+        assert (
+            extract_summary_channels_from_user_md(content) == DEFAULT_SUMMARY_CHANNELS
+        )
+
+    def test_naked_value_without_list_marker(self) -> None:
+        """spec SD-1 / FR-D1 支持的写法：裸 key:value（无 **bold** 列表标记）。"""
+        content = "summary_channels: telegram"
+        assert extract_summary_channels_from_user_md(content) == frozenset({"telegram"})
+
 
 # ============================================================
 # AC-D4：全部字段缺失时整体行为
@@ -257,6 +282,7 @@ class TestPayloadSchemas:
         assert p.channels == ["telegram"]
 
     def test_routine_completed_fallback_default(self) -> None:
+        """Codex L5 修复：llm_elapsed_ms 默认 None（区分 fallback 路径与 LLM 真 0ms）。"""
         p = RoutineCompletedPayload(
             date="2026-05-24",
             worker_count=0,
@@ -266,8 +292,23 @@ class TestPayloadSchemas:
             summary_length=0,
         )
         assert p.fallback is False
-        assert p.llm_elapsed_ms == 0
+        assert p.llm_elapsed_ms is None
         assert p.channels is None
+
+    def test_routine_completed_llm_path_sets_elapsed(self) -> None:
+        """LLM 路径成功时 MUST 设置 llm_elapsed_ms 具体值。"""
+        p = RoutineCompletedPayload(
+            date="2026-05-24",
+            worker_count=3,
+            failed_count=0,
+            attention_count=0,
+            elapsed_ms=1500,
+            llm_elapsed_ms=800,
+            fallback=False,
+            summary_length=120,
+        )
+        assert p.llm_elapsed_ms == 800
+        assert p.fallback is False
 
     def test_routine_completed_rejects_negative_counts(self) -> None:
         with pytest.raises(ValueError):

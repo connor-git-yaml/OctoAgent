@@ -97,13 +97,18 @@ class DailyRoutineService:
         """注册 cron job + ensure audit task 占位（spec FR-B1 / FR-B5）。
 
         Phase B 骨架仅记录入口，实现细节在 Phase C 完成。
+
+        Codex Phase B review M4 修复：骨架阶段 startup 不实际注册 cron
+        （Phase C 实施），但要让 caller 在 bootstrap 时清楚此事——升级到
+        ``logger.warning`` 提示"骨架未实现 cron 注册"；Phase C 替换为真实现后改回 info。
         """
         if self._started:
             logger.debug("DailyRoutineService.startup called again; skipping")
             return
         self._started = True
-        logger.info(
-            "DailyRoutineService.startup skeleton invoked (Phase C will fill in)"
+        logger.warning(
+            "DailyRoutineService.startup skeleton invoked; "
+            "no cron job registered (F102 Phase C will implement)"
         )
 
     async def shutdown(self) -> None:
@@ -115,8 +120,9 @@ class DailyRoutineService:
             return
         self._started = False
         self._cron_registered = False
-        logger.info(
-            "DailyRoutineService.shutdown skeleton invoked (Phase C will fill in)"
+        logger.warning(
+            "DailyRoutineService.shutdown skeleton invoked; "
+            "no cron job removal (F102 Phase C will implement)"
         )
 
     async def _run_daily_summary(self) -> None:

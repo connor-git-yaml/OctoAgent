@@ -182,7 +182,7 @@ class TestListTasksInTimeRange:
         """spec SD-10 / FR-T1：NaiveDatetime 必须 raise ValueError。"""
         start = datetime(2026, 5, 24, 0, 0)  # no tzinfo
         end = datetime(2026, 5, 25, 0, 0, tzinfo=UTC)
-        with pytest.raises(ValueError, match="UTC-aware"):
+        with pytest.raises(ValueError, match="tz-aware"):
             await store_group.task_store.list_tasks_in_time_range(start, end)
 
     @pytest.mark.asyncio
@@ -191,8 +191,35 @@ class TestListTasksInTimeRange:
     ) -> None:
         start = datetime(2026, 5, 24, 0, 0, tzinfo=UTC)
         end = datetime(2026, 5, 25, 0, 0)  # no tzinfo
-        with pytest.raises(ValueError, match="UTC-aware"):
+        with pytest.raises(ValueError, match="tz-aware"):
             await store_group.task_store.list_tasks_in_time_range(start, end)
+
+    @pytest.mark.asyncio
+    async def test_non_utc_aware_datetime_normalized_to_utc(
+        self, store_group: StoreGroup
+    ) -> None:
+        """Codex H2 修复：带 +08:00 等非 UTC tz 的 aware datetime 内部 normalize 到 UTC。
+
+        构造场景：task created_at 是 UTC 12:00；查询用 +08:00 的 20:00（等价 UTC 12:00）；
+        应该匹配（旧实现因字符串字典序错位会漏）。
+        """
+        from datetime import timedelta, timezone
+
+        # task 写入时使用 UTC
+        utc_created = datetime(2026, 5, 24, 12, 0, tzinfo=UTC)
+        await _create_task(store_group, "t-utc", utc_created)
+        await store_group.conn.commit()
+
+        # 查询使用 +08:00（北京）；start_local 20:00 → UTC 12:00（包含 t-utc）
+        tz_beijing = timezone(timedelta(hours=8))
+        start_local = datetime(2026, 5, 24, 20, 0, tzinfo=tz_beijing)
+        end_local = datetime(2026, 5, 25, 7, 59, tzinfo=tz_beijing)  # 等价 UTC 23:59
+
+        result = await store_group.task_store.list_tasks_in_time_range(
+            start_local, end_local
+        )
+        assert len(result) == 1
+        assert result[0].task_id == "t-utc"
 
     @pytest.mark.asyncio
     async def test_performance_50_tasks_under_500ms(

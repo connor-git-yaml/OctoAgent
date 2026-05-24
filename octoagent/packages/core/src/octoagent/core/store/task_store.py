@@ -134,15 +134,24 @@ class SqliteTaskStore:
 
         Raises:
             ValueError: start 或 end 为 NaiveDatetime（无 tzinfo）时
+
+        Codex Phase B review H2 修复：
+            带非 UTC tzinfo（如 +08:00）的 aware datetime 不能直接 isoformat() 与 UTC
+            字符串字典序比较——会跨时区错位。修复：内部统一 astimezone(UTC) 后再
+            isoformat()。spec SD-10 要求"UTC-aware"，本实现接受任何 tz-aware 但
+            归一化到 UTC 比较。
         """
         if start.tzinfo is None or end.tzinfo is None:
             raise ValueError(
-                "list_tasks_in_time_range requires UTC-aware datetimes; "
+                "list_tasks_in_time_range requires tz-aware datetimes; "
                 "naive datetimes are ambiguous and rejected (spec SD-10)."
             )
 
-        start_iso = start.isoformat()
-        end_iso = end.isoformat()
+        # Codex H2 修复：归一化到 UTC（避免 +08:00 vs +00:00 字符串字典序错位）
+        from datetime import UTC as _UTC
+
+        start_iso = start.astimezone(_UTC).isoformat()
+        end_iso = end.astimezone(_UTC).isoformat()
 
         if statuses is None:
             cursor = await self._conn.execute(

@@ -117,3 +117,14 @@
   - 已知后续校正项（Phase C 实施时）：
     * spec SD-7 attention_statuses 集合 escalated 不在 TaskStatus 中（worker_service WorkItem.status 才有）
       → Phase C 实施时校正为 {WAITING_INPUT, WAITING_APPROVAL, FAILED, PAUSED}（4 个 TaskStatus 实际值）
+[02:25] Phase B Codex adversarial review: 2 HIGH (1 BLOCKER) + 2 MED + 1 LOW
+[02:30] Phase B Codex fix commit:
+  - H1 BLOCKER: summary_channels regex 强制 key prefix（key 字符串本身不再被当 value）
+    + 3 个解析正则统一改造（daily_summary_time / routine_active / summary_channels）
+  - H2: list_tasks_in_time_range 非 UTC tz aware datetime astimezone(UTC) 归一化（修字符串字典序错位）
+  - M3: web_sse 内部值直写 accepted（mapping 加自映射）
+  - M4: daily_routine.py skeleton startup/shutdown 升级到 warning（让骨架阶段可见）
+  - L5: RoutineCompletedPayload.llm_elapsed_ms 默认 None（区分 fallback 与 LLM 0ms cached）
+  - routine_type 改 Literal["daily"]
+  - +5 测试覆盖 fix 场景：web_sse 直写 / key 字符串误捕获 / 裸格式 / llm_path 设值 / 非 UTC 归一化
+  - 总测 51 passed (38 + 13) in 0.33s

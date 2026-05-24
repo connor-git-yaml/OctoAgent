@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Final
+from typing import Final, Literal
 
 import structlog
 from pydantic import BaseModel, Field
@@ -35,12 +35,16 @@ DEFAULT_DAILY_SUMMARY_TIME: Final[str] = "08:30"
 DEFAULT_ROUTINE_ACTIVE: Final[bool] = True
 DEFAULT_SUMMARY_CHANNELS: Final[frozenset[str]] = frozenset({"telegram", "web_sse"})
 
-# USER.md 用户友好值 → 内部 channel.channel_name 映射（plan A-4/A-8）
-# "telegram" → "telegram"（TelegramNotificationChannel.channel_name）
-# "web"      → "web_sse" （SSENotificationChannel.channel_name）
+# USER.md 用户友好值 + 内部值 → channel.channel_name 映射（plan A-4/A-8 + Codex M3）
+# 用户写法：
+#   "telegram" → "telegram"（TelegramNotificationChannel.channel_name）
+#   "web"      → "web_sse" （SSENotificationChannel.channel_name 友好别名）
+# 开发者写法（直接用内部值，与 channel_name 实测一致）：
+#   "web_sse"  → "web_sse"
 _USER_VISIBLE_TO_INTERNAL_CHANNEL: Final[dict[str, str]] = {
     "telegram": "telegram",
     "web": "web_sse",
+    "web_sse": "web_sse",  # Codex review M3：接受内部值直写，避免误 fallback
 }
 _VALID_INTERNAL_CHANNELS: Final[frozenset[str]] = frozenset(
     _USER_VISIBLE_TO_INTERNAL_CHANNEL.values()
@@ -48,16 +52,26 @@ _VALID_INTERNAL_CHANNELS: Final[frozenset[str]] = frozenset(
 
 
 # ============================================================
-# 解析正则
+# 解析正则（Codex review H1 BLOCKER 修复）
 # ============================================================
+#
+# 设计：key prefix MUST 出现在每行内才提取 value（强制 "key: value" 形式），
+# 否则 key 字符串本身可能被当作 value 匹配（如 "summary_channels" 被当作 channel
+# 名 fallback 到全渠道）。原 (?:...)? 可选 prefix 会被绕过裸值，已知 bug。
+#
+# 支持的合法 USER.md 写法（每个字段独立分支）：
+#   - **daily_summary_time**: "08:30"      # 标准 USER.md 列表
+#   - daily_summary_time: 08:30            # 裸 key:value
+#   - daily_summary_time: "8:30"           # 单数字小时 + 引号
+#
 
-# daily_summary_time: 匹配 "- **daily_summary_time**: "08:30"" 或裸值，宽松格式 (允许 "8:30")
+# daily_summary_time 强制 key prefix
 _DAILY_SUMMARY_TIME_PATTERN = re.compile(
     r"""
-    (?:                             # 可选 USER.md 列表格式前缀
-        \*\*daily_summary_time\*\*
-        \s*:\s*
-    )?
+    (?:\*\*)?                       # 可选 **
+    daily_summary_time              # MUST 出现
+    (?:\*\*)?                       # 可选 **
+    \s*:\s*                         # MUST :
     "?                              # 可选引号
     (\d{1,2}:\d{2})                 # HH:MM（捕获组）
     "?
@@ -65,27 +79,27 @@ _DAILY_SUMMARY_TIME_PATTERN = re.compile(
     re.VERBOSE,
 )
 
-# routine_active: 匹配 "- **routine_active**: "true"" 或裸值
+# routine_active 强制 key prefix
 _ROUTINE_ACTIVE_PATTERN = re.compile(
     r"""
-    (?:
-        \*\*routine_active\*\*
-        \s*:\s*
-    )?
+    (?:\*\*)?
+    routine_active                  # MUST 出现
+    (?:\*\*)?
+    \s*:\s*
     "?
-    (true|false|True|False)         # 布尔字符串
+    (true|false|True|False)
     "?
     """,
     re.VERBOSE,
 )
 
-# summary_channels: 匹配 "- **summary_channels**: "telegram,web"" 或裸值
+# summary_channels 强制 key prefix
 _SUMMARY_CHANNELS_PATTERN = re.compile(
     r"""
-    (?:
-        \*\*summary_channels\*\*
-        \s*:\s*
-    )?
+    (?:\*\*)?
+    summary_channels                # MUST 出现
+    (?:\*\*)?
+    \s*:\s*
     "?
     ([a-z][a-z_,\s]+)               # 逗号分隔 channel 名（小写 + _ + 逗号 + 空格）
     "?
@@ -304,7 +318,7 @@ class RoutineTriggeredPayload(BaseModel):
     在每次 cron 触发的最开始写入，用于审计 cron 调度本身的发生。
     """
 
-    routine_type: str = Field(default="daily", description="Routine 类型；v0.1 固定 daily")
+    routine_type: Literal["daily"] = Field(default="daily", description="Routine 类型；v0.1 固定 daily")
     trigger_ts: str = Field(description="触发时间戳 ISO 8601 UTC")
 
 
@@ -314,7 +328,7 @@ class RoutineCompletedPayload(BaseModel):
     覆盖 LLM 路径与 fallback 路径，通过 ``fallback`` 字段区分。
     """
 
-    routine_type: str = Field(default="daily", description="Routine 类型；v0.1 固定 daily")
+    routine_type: Literal["daily"] = Field(default="daily", description="Routine 类型；v0.1 固定 daily")
     date: str = Field(description="昨日日期 YYYY-MM-DD（用户本地时区）")
     worker_count: int = Field(ge=0, description="昨日 Worker 任务总数")
     failed_count: int = Field(ge=0, description="昨日失败任务数（status=failed）")
@@ -323,10 +337,12 @@ class RoutineCompletedPayload(BaseModel):
         description="昨日开始且当前仍处于 attention 状态的任务数（SD-7 算法）",
     )
     elapsed_ms: int = Field(ge=0, description="routine 执行总耗时（毫秒）")
-    llm_elapsed_ms: int = Field(
-        default=0,
+    # Codex Phase B review L5：默认 None 让 fallback 路径与 LLM 真 0ms 完成的边界
+    # 可区分（LLM 路径成功时 MUST 设置具体毫秒数；fallback 路径必为 None）
+    llm_elapsed_ms: int | None = Field(
+        default=None,
         ge=0,
-        description="LLM 调用耗时（毫秒）；fallback 路径为 0",
+        description="LLM 调用耗时（毫秒）；None 表示走 fallback 路径未调用 LLM",
     )
     fallback: bool = Field(
         default=False,
@@ -347,7 +363,7 @@ class RoutineFailedPayload(BaseModel):
     不可恢复异常时写入。错误信息不含 traceback 原始文本，避免 PII 泄露。
     """
 
-    routine_type: str = Field(default="daily", description="Routine 类型；v0.1 固定 daily")
+    routine_type: Literal["daily"] = Field(default="daily", description="Routine 类型；v0.1 固定 daily")
     error_type: str = Field(
         description="异常类名（短字符串，如 'cron_register_failed' / 'TimeoutError'）"
     )
@@ -360,7 +376,7 @@ class RoutineSkippedPayload(BaseModel):
     routine_active=False 或运行时跳过条件触发时写入。
     """
 
-    routine_type: str = Field(default="daily", description="Routine 类型；v0.1 固定 daily")
+    routine_type: Literal["daily"] = Field(default="daily", description="Routine 类型；v0.1 固定 daily")
     reason: str = Field(
         description="跳过原因（如 'routine_disabled' / 'no_user_timezone'）"
     )
