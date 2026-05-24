@@ -237,6 +237,17 @@ class EventType(StrEnum):
     # payload.filtered=True 表示被 quiet hours 过滤（channel push 跳过，event 写入保留审计）。
     NOTIFICATION_DISPATCHED = "NOTIFICATION_DISPATCHED"
 
+    # F102 Proactive Followup (DailyRoutine v0.1) — Routine 审计事件链。
+    # ROUTINE_TRIGGERED：cron 触发时刻（含 trigger_ts）。
+    # ROUTINE_COMPLETED：含 elapsed_ms / worker_count / failed_count / attention_count /
+    #   fallback / llm_elapsed_ms / summary_length，区分 LLM 路径与 fallback 路径。
+    # ROUTINE_FAILED：含 error_type + error_msg（不含 traceback 原始文本，防 PII）。
+    # ROUTINE_SKIPPED：routine_active=False 或运行时跳过条件，含 reason 字段。
+    ROUTINE_TRIGGERED = "ROUTINE_TRIGGERED"
+    ROUTINE_COMPLETED = "ROUTINE_COMPLETED"
+    ROUTINE_FAILED = "ROUTINE_FAILED"
+    ROUTINE_SKIPPED = "ROUTINE_SKIPPED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

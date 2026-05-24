@@ -97,3 +97,12 @@
   - GATE_TASKS 推荐 PASS：spec ↔ plan ↔ tasks 三向一致，17 AC + 16 FR 100% task 覆盖
   - 3 WARNING（plan §0.6 措辞 / Payload schema 放置 / T-C3 依赖过度保守）可实施时就地修正
 [01:46] GATE_TASKS: PAUSE | critical=always | 等待用户对 tasks.md + Phase A 启动拍板
+[01:50] Phase 6 Step 1: docs commit COMPLETED | commit=a9a5afe
+  - spec.md (691) + plan.md (592) + tasks.md + analyze.md + clarify.md + checklists/requirements.md + research/tech-research.md + trace.md
+  - venv 修复（pytest shebang 死链 F101 worktree → uv sync --reinstall）
+  - e2e_smoke 8 passed / 3652 deselected（pre-commit hook 通过）
+[01:55] Phase 6 Step 2: Phase A IN_PROGRESS
+  - phase-a-recon.md 产出（8 项侦察独立 grep 验证 + spec 校正归档）
+  - T-B1 enums.py +4 EventType（ROUTINE_TRIGGERED/COMPLETED/FAILED/SKIPPED）；uv run python import 验证通过（104 total EventType）
+  - T-B4 USER.md 模板新增 3 字段（daily_summary_time/routine_active/summary_channels），含注释说明
+  - baseline full pytest 重跑后台中

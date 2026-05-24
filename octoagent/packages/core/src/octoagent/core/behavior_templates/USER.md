@@ -32,6 +32,17 @@
 <!-- CRITICAL 级别通知（如等待审批）始终推送，不受 quiet hours 影响 -->
 - **active_hours**: （格式："HH:MM-HH:MM"，如 "09:00-23:00"——设置后 quiet hours 内只推送紧急通知）
 
+### Daily Routine 偏好
+
+<!-- F102 Proactive Followup FR-D1：机器可读字段，供 DailyRoutineService 解析 -->
+<!-- daily_summary_time: "HH:MM"，每日 active hours 内自动推送昨日 Worker 摘要的时间，默认 08:30 -->
+<!-- routine_active: "true" / "false"，是否启用 daily routine，默认 true -->
+<!-- summary_channels: 逗号分隔 "telegram" / "web" / "telegram,web"，默认全渠道 -->
+<!-- 注意：daily_summary_time 落在 quiet hours 内时通知会被 discard 不补发，建议落在 active hours 内 -->
+- **daily_summary_time**: "08:30"
+- **routine_active**: "true"
+- **summary_channels**: "telegram,web"
+
 ---
 
 *更新原则*: 当对话中获得新的用户偏好信息时，先判断信息稳定性——稳定事实（如姓名、时区）应优先写入 Memory 服务持久化；高频参考的简要偏好（如回复风格）可同步更新本文件。用户偏好应来自真实交互中的了解，而不是临时猜测。
