@@ -171,3 +171,13 @@
 [03:35] Phase D Codex review 输出不完整（task ID bz6kv36c2 只到 trace，未生成 finding）
   - 风险评估：Phase D 改动小（25 行 + 8 tests）+ F101 综合 76 PASS 验证，无 BLOCKER 信号
   - Phase D review 推迟到 Final cross-Phase review 一并完整 review（避免单 Phase review 流产）
+[04:00] Phase F-1: completion-report.md 完整产出
+[04:05] Phase F-2: handoff.md 给 F103 完整产出
+[04:10] Self-discovered HIGH bug fix (Codex Final review 前): _user_timezone 字段未更新
+  - 现象：line 119 init "UTC"，但 startup() 中无 USER.md timezone 解析代码
+  - 影响：所有非 UTC 用户的 cron 触发时刻 + 昨日窗口都按 UTC 计算（偏移）
+  - 修复：环境变量优先 OCTOAGENT_USER_TIMEZONE + zoneinfo 合法性校验 + fallback UTC
+  - 新增 _resolve_user_timezone @staticmethod + 4 测试覆盖
+  - 注：USER.md 当前无机器可读 timezone 字段（"时区/地点"是人类可读）
+  - 后续 Feature 可加 user_timezone 字段从 USER.md 解析覆盖
+  - 测试 19 passed in 2.33s

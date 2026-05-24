@@ -18,6 +18,7 @@ Phase E 范围：LLM prompt 模板细化 + token budget 截断 + priority 决策
 from __future__ import annotations
 
 import asyncio
+import os
 import time as _time
 import zoneinfo
 from datetime import UTC, datetime, time, timedelta
@@ -116,7 +117,28 @@ class DailyRoutineService:
         self._provider_router = provider_router
         self._started: bool = False
         self._cron_registered: bool = False
-        self._user_timezone: str = "UTC"  # 由 startup() 从 USER.md 解析后更新
+        # spec NFR-3 SD-10：用户时区解析顺序：
+        #   1. 环境变量 OCTOAGENT_USER_TIMEZONE（部署侧配置，最高优先级）
+        #   2. fallback "UTC"
+        # 注：USER.md 当前没有机器可读 timezone 字段（"时区/地点"是人类可读），
+        # 后续 Feature 可加 user_timezone 字段从 USER.md 解析覆盖此值
+        self._user_timezone: str = self._resolve_user_timezone()
+
+    @staticmethod
+    def _resolve_user_timezone() -> str:
+        """解析 user timezone（环境变量优先 + zoneinfo 合法性校验，fallback UTC）。"""
+        candidate = os.environ.get("OCTOAGENT_USER_TIMEZONE", "").strip()
+        if not candidate:
+            return "UTC"
+        try:
+            zoneinfo.ZoneInfo(candidate)
+            return candidate
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+            logger.warning(
+                "daily_routine_invalid_user_timezone_fallback_utc",
+                requested=candidate,
+            )
+            return "UTC"
 
     async def startup(self) -> None:
         """注册 cron job + ensure audit task 占位（spec FR-B1 / FR-B5）。"""

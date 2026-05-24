@@ -630,6 +630,29 @@ class TestLLMPromptTokenBudget:
         assert "个待关注任务未列出" in prompt
 
 
+class TestUserTimezoneResolver:
+    """Codex Final review HIGH bug fix：_user_timezone 字段必须从环境变量初始化。
+
+    spec NFR-3 / SD-10：用户本地时区影响 cron 触发时刻和"昨日"窗口边界。
+    """
+
+    def test_default_fallback_to_utc(self, monkeypatch: Any) -> None:
+        monkeypatch.delenv("OCTOAGENT_USER_TIMEZONE", raising=False)
+        assert DailyRoutineService._resolve_user_timezone() == "UTC"
+
+    def test_environment_variable_overrides(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("OCTOAGENT_USER_TIMEZONE", "Asia/Shanghai")
+        assert DailyRoutineService._resolve_user_timezone() == "Asia/Shanghai"
+
+    def test_invalid_timezone_falls_back_to_utc(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("OCTOAGENT_USER_TIMEZONE", "Mars/Olympus_Mons")
+        assert DailyRoutineService._resolve_user_timezone() == "UTC"
+
+    def test_empty_string_falls_back_to_utc(self, monkeypatch: Any) -> None:
+        monkeypatch.setenv("OCTOAGENT_USER_TIMEZONE", "   ")
+        assert DailyRoutineService._resolve_user_timezone() == "UTC"
+
+
 class TestCancelledErrorRespected:
     @pytest.mark.asyncio
     async def test_cancelled_error_during_llm_call_propagates(
