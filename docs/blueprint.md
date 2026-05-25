@@ -12,8 +12,9 @@
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
 - 版本：v0.1（实现准备版）
-- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-Delivered / M3-Delivered / M4-Delivered（2026-04-06 同步）
+- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-Delivered / M3-Delivered / M4-Delivered / **M5-Delivered**（2026-05-25 F103 同步），M6 待启动
 - M0 完成日期：2026-02-28（commit `52959a7`）
+- M5 完成日期：2026-05-25（F102 commit `9185862` + F103 同步）
 - 目标读者：
   - 你（Owner / PM / 架构师 / 最终用户）
   - 未来可能加入的 1-3 名协作者（工程实现、前端、运维）
@@ -372,19 +373,29 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 | 里程碑 | 状态 | 核心交付 |
 |--------|------|---------|
 | M0 基础底座 | ✅ | Task/Event/Artifact + SSE + 最小 Web UI |
-| M1 最小智能闭环 | ✅ | LiteLLM + Auth + Skill + Tool Contract |
+| M1 最小智能闭环 | ✅ | ProviderRouter（F081 退役 LiteLLM） + Auth + Skill + Tool Contract |
 | M1.5 Agent 闭环 | ✅ | Orchestrator + Worker + Policy |
 | M2 多渠道多 Worker | ✅ | Telegram + A2A + JobRunner + Memory |
 | M3 增强 | ✅ | Chat Import + Vault + ToolIndex + Pipeline |
-| M4 引导式工作台 | ✅ | 30 Feature 全部完成（071b-D 高层工具 + 063-P3 Compactor 推迟到 M5） |
-| M5 文件工作台 | ⏳ | 语音/多模态/Companion/通知中心 |
+| M4 引导式工作台 | ✅ | 30 Feature 全部完成 |
+| **M5 架构债清理 + Worker 完整对等 + 委托模式分离 + 用户感知 ROI** | ✅ | F090-F103（13 Feature）+ F084-F088（基础设施）；H1/H2/H3 哲学全部代码层落地；架构债 D1-D14 闭环 12 推迟 2（F107） |
+| **M6 Surface 扩张** | ⏳ | F104 文件工作台 v0.1 / F105 Companion PWA / F106 文件工作台 v0.2 / F107 Capability Layer Refactor / F108-F109 语音 / F110 Behavior Compactor |
 
 ### 待办汇总
 
 > 已完成项详见 [blueprint/architecture-audit.md](blueprint/architecture-audit.md)
-> 短板 1-5 ✅ | 架构 A1-A7 ✅ | Worker W1-W5 ✅
+> 短板 1-5 ✅ | 架构 A1-A7 ✅（A7 F091 关闭） | Worker W1-W5 ✅
+> **M5 增补审计** §14.9-14.13：F084-F088 ✅ / F090-F092 ✅ / F093-F096 ✅ / F097-F100 ✅ / F101-F102 ✅
 
-**全部已完成。** 无剩余架构待办项。
+**M5 全部已完成（2026-05-25）。** 推迟到 F107 / M6 的项见 [blueprint/milestones.md](blueprint/milestones.md) §M6。
+
+### 三条设计哲学（M5 引入）
+
+详见 [blueprint/agent-collaboration-philosophy.md](blueprint/agent-collaboration-philosophy.md)：
+
+- **H1 管家 mediated 模式** — 主 Agent 唯一 user-facing speaker；F100 `force_full_recall` override
+- **H2 完整 Agent 对等性** — Worker 拥有 Session/Memory/Behavior/Recall 4 维完整上下文栈；F093-F096 代码落地
+- **H3 两种委托模式并存** — H3-A 临时 Subagent（F097 SubagentDelegation）+ H3-B A2A 真 P2P（F098 解禁 D14 Worker↔Worker）+ ask_back 三工具（F099）
 
 ---
 
