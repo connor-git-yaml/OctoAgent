@@ -13,6 +13,12 @@
    - [Tooling / Policy / Skill Runtime](./modules/04-tooling-policy-skill-runtime.md)
    - [Memory / Protocol](./modules/05-memory-and-protocol.md)
    - [Frontend Workbench](./modules/06-frontend-workbench.md)
+4. 跨模块专题（M5 引入）：
+   - [Harness + Context Layer](./harness-and-context.md)（F084 Hermes Agent 模式落地）
+   - [三层消息模型 Work × DispatchEnvelope × A2AMessage](./message-model.md)（F103 关闭 D13 架构债）
+   - [Provider Direct Routing](./provider-direct-routing.md)（F080/F081 LiteLLM 退役）
+   - [e2e Testing](./e2e-testing.md)（F087 13 能力域 e2e_live 套件）
+   - [Testing Concurrency](./testing-concurrency.md)（F083 thread shutdown hang 修复）
 
 ## 1. 这份文档集解决什么问题
 
