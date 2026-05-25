@@ -334,21 +334,22 @@ $PROJECT_ROOT (~/.octoagent)/
 - ToolIndex 向量检索精度满足 top-5 命中率 > 80%，Skill Pipeline 可 checkpoint + 可回放 + 可中断（HITL），多 Worker 派发策略可解释且失败可降级回单 Worker 路径
 - Feature 031 已补齐 M3 acceptance matrix、deployment boundary、OpenClaw migration rehearsal 与最终 release report；结合 Feature 033 关闭 `GATE-M3-CONTEXT-CONTINUITY` 后，M3 现已按 user-ready 版本签收
 
-### M3 Carry-Forward（Feature 033）：Agent Profile + Bootstrap + Context Continuity
+### M3 Carry-Forward（Feature 033）：Agent Profile + Bootstrap + Context Continuity ✅ 已完成（M5 阶段 1 关闭）
 
 - 目标：把 `AgentProfile`、owner basics、bootstrap、recent session summary 和 long-term memory retrieval 真正接进 Butler 与 Worker 的运行链
 - 这不是 M4 体验增强，而是当前多 Agent 系统"是否像长期助手组织而不是 stateless router + tools shell" 的基础门槛
-- 当前状态：Butler 主链已大体补齐；Worker 侧的 session continuity / private memory / recall parity 仍未完成，因此 033 的"全 Agent 完成态"仍需后续补位
-- `GATE-M3-CONTEXT-CONTINUITY` 仅对主 Agent 路径关闭；从 2026-03-13 起，新增 `GATE-M4-AGENT-RUNTIME-CONTINUITY`
+- **2026-05-25 关闭状态**：F093-F096 Worker 完整对等 4 维（Session / Memory / Behavior / Recall Audit）全部交付，Worker 侧的 session continuity / private memory / recall parity 已与主 Agent 对等
+- `GATE-M3-CONTEXT-CONTINUITY` ✅ 全 Agent 路径关闭（M5 阶段 1）
+- `GATE-M4-AGENT-RUNTIME-CONTINUITY` ✅ 关闭（F093-F096）
 
-### M3 Carry-Forward（Feature 038）：Agent Memory Recall Optimization
+### M3 Carry-Forward（Feature 038）：Agent Memory Recall Optimization ✅ 已完成（M5 阶段 1 关闭）
 
 - 目标：把 Agent Memory 从 `chat import / fragment & SoR 写入 / backend resolve / runtime recall / built-in tool` 收敛为同一条 `project shared + agent private + work evidence` 主链
 - 已完成项：`MemoryService.recall_memory()`、`MemoryRecallHit/Result`、`ContextFrame.memory_recall provenance`、`memory.recall` built-in tool、`ChatImportService` runtime resolver 接线
 - 已完成项：delayed recall durable carrier、`MEMORY_RECALL_*` events/artifacts、Control Plane recall provenance 可视化、内建 `keyword_overlap post-filter + heuristic rerank` hooks
-- 2026-04-05 架构整治新增：多 scope 并行 recall（asyncio.gather）、`memory_recall_completed` 可观测日志、recall hooks 拆为 MemoryRecallService 独立模块
-- 吸收了 Agent Zero 的 project-scoped memory 隔离经验，也吸收 OpenClaw 的 session-key / compaction / recall ordering 思路，但当前实现仍缺 `agent private namespace + worker recall runtime`
-- 038 的完成态定义被上调：backend resolver 必须进入 Butler 与 Worker 的真实运行链，并能按 namespace / agent / session 维度审计 recall 质量与 provenance
+- 2026-04-05 架构整治：多 scope 并行 recall（asyncio.gather）、`memory_recall_completed` 可观测日志、recall hooks 拆为 MemoryRecallService 独立模块
+- **2026-05-09 M5 阶段 1 关闭**：F094 引入 `AGENT_PRIVATE` namespace（仅 Worker 路径生效，main direct 保留 PROJECT_SHARED）；F096 引入 `list_recall_frames` audit endpoint + `MEMORY_RECALL_COMPLETED` 同步路径 emit；AC-7b 四层 audit chain（profile_id↔runtime_id↔LOADED.agent_id↔RecallFrame）实测通过
+- 038 的完成态：backend resolver 已进入主 Agent 与 Worker 的真实运行链，可按 namespace / agent / session 维度审计 recall 质量与 provenance（F096 endpoint 暴露）
 
 ### M3 Carry-Forward（Feature 067）：Session-Driven Memory Pipeline
 
@@ -408,19 +409,107 @@ M4 约束：
 - UX 收尾（074-076）以用户可感知的体验改进为目标，不引入新的后端架构变更
 - 本轮执行顺序与升级波次事实源，见 `docs/milestone/m4-feature-split.md`
 
-### M5（文件工作台 / 语音多模态 / Companion / Attention）
+### M5（架构债清理 + Worker 完整对等性 + 委托模式分离 + 用户感知 ROI）✅ 已完成（2026-05-25）
 
-- [ ] 文件/工作区工作台（file browser / editor / diff / git-aware workspace inspector）
-- [ ] 语音与多模态交互表面（STT / TTS / voice session / richer multimodal chat surfaces）
-- [ ] Progressive Web App / companion surfaces / remote tunnel polish
-- [ ] 更完整的通知中心与 attention model（提醒、升级提示、后台任务完成通知、多端同步提示）
-- [ ] Behavior Compactor LLM 智能合并（从 M4 Feature 063 Phase 3 推迟）
-- [ ] 071b Slice C 文案统一（已合并到 M4 Feature 075 的核心部分，剩余深度 i18n 留到 M5）
+> **决策来源**（2026-05-05 拍板）：架构战略评估 + Worker vs 主 Agent 实测 + 架构债 review（对照 Hermes Agent / OpenClaw / Agent Zero）。
+> **哲学**：**先治本再扩张**——M5 是大重构，把 H2 完整对等性 + H3 委托模式两路分离 + 架构债一并清；M6 才开始 surface 扩张。
+> **实施详情索引**：CLAUDE.local.md §"M5 / M6 战略规划"（13 Feature 完整实施记录 + 架构债 D1-D14 映射）。
+> **三条核心设计哲学**：详见 [agent-collaboration-philosophy.md](agent-collaboration-philosophy.md)（H1 管家 mediated / H2 完整对等性 / H3 两种委托模式）。
 
-M5 说明：
+#### M5 整体完成状态
 
-- 这些内容原先放在 M4，但在当前升级波次里不是阻塞用户可用、也不是阻塞三层结构成立的核心项
-- M5 建立在 M4 收口完成之后推进，避免继续把"入口闭环"和"未来表面增强"混在同一阶段
-- Behavior Compactor 从 063 推迟：Phase 1/2 的截断+缓存已足够支撑当前 behavior 文件规模，LLM 合并属于高级优化
+13 个 Feature 全部交付，分 4 阶段串行/并行推进。F084-F088 是 M5 启动前的基础设施修复（与 M5 同期落地，详见 §"M5 后续修复"段）。
+
+| 阶段 | 主题 | 范围 | 状态 |
+|------|------|------|------|
+| 阶段 0 | 架构债前置清理（必须严格串行） | F090-F092 | ✅ |
+| 阶段 1 | Agent 完整上下文栈对等 | F093-F096 | ✅ |
+| 阶段 2 | 委托模式两路分离 | F097-F100 | ✅ |
+| 阶段 3 | 用户感知 ROI + 文档 | F101-F103 | ✅ |
+
+#### 阶段 0：架构债前置清理（F090-F092，严格串行）
+
+| Feature | Commit | 一句话目的 |
+|---------|--------|-----------|
+| **F090 Type System & Naming Cleanup** | 2026-05-06 | metadata flag → `RuntimeControlContext` 显式字段（双轨）；`AgentProfile + kind` 字段（WorkerProfile 类保留，完全合并推迟 F107）；`WorkerSession` → `WorkerDispatchState` 重命名（dispatch 瞬时状态） |
+| **F091 State Machine Unification + F090 残留** | 2026-05-06 | 3 个状态枚举（TaskStatus / WorkerRuntimeState / WorkStatus，WorkerExecutionStatus 实测不存在）建跨枚举映射函数；MERGED/ESCALATED/DELETED 显式 raise ValueError；F090 D1 读取端 4 处真实 reader 切换 |
+| **F092 DelegationPlane Unification** | 2026-05-08 | 主路径 `plane.spawn_child` 统一 spawn 编排入口；DelegationManager production 构造从 5+ 处 → 1 处；3 条豁免路径显式归档（`apply_worker_plan` / `work.split` / `spawn_from_profile`）；`SpawnChildResult` 三态 + `emit_audit_event` 参数 |
+
+#### 阶段 1：Agent 完整上下文栈对等（F093-F096）
+
+| Feature | Commit | 一句话目的 |
+|---------|--------|-----------|
+| **F093 Worker Full Session Parity** | 2026-05-09 | Worker turn 写入 + rolling_summary / memory_cursor 字段 + `AGENT_SESSION_TURN_PERSISTED` 事件；agent_context.py 4112→4008 行（D6 拆分） |
+| **F094 Worker Memory Parity** | 2026-05-09 | `AGENT_PRIVATE` namespace 仅 Worker 路径生效（main direct 保留 PROJECT_SHARED，完整对等留 F107）；RecallFrame 用 `agent_runtime_id`（不是 `agent_id`）；废弃 WORKER_PRIVATE 路径 |
+| **F095 Worker Behavior Workspace Parity** | 2026-05-09 | `_PROFILE_ALLOWLIST[WORKER]` 5 → 8 文件：`{AGENTS, TOOLS, IDENTITY, PROJECT, KNOWLEDGE, USER, SOUL, HEARTBEAT}`（去 BOOTSTRAP 加 USER，**用户 GATE_DESIGN v0.2 翻转**）；修复 envelope 双过滤剥离 IDENTITY 的 baseline 隐性 bug；SOUL.worker.md / HEARTBEAT.worker.md 模板 |
+| **F096 Worker Recall Audit & Provenance** | cc64f0c | 阶段 1 收尾整合：list_recall_frames audit endpoint + MEMORY_RECALL_COMPLETED 同步路径 emit + BEHAVIOR_PACK_LOADED EventStore 接入 + BEHAVIOR_PACK_USED 新增；AC-7b 四层 audit chain（profile_id↔runtime_id↔LOADED.agent_id↔RecallFrame） |
+
+#### 阶段 2：委托模式两路分离（F097-F100，依赖阶段 0 + 1）
+
+| Feature | Commit | 一句话目的 |
+|---------|--------|-----------|
+| **F097 Subagent Mode Cleanup**（H3-A） | 4441a5a | 显式建模 `SubagentDelegation` Pydantic model + ephemeral AgentProfile (kind=subagent) + `SUBAGENT_INTERNAL` session 路径 + cleanup hook + `SUBAGENT_COMPLETED` event；Memory α 共享引用（caller AGENT_PRIVATE） |
+| **F098 A2A Mode + Worker↔Worker**（H3-B） | c2e97d5 | A2A source+target 双向独立加载；**删除 `_enforce_child_target_kind_policy`（关闭 D14 Worker↔Worker 硬禁止）**；新增 `CONTROL_METADATA_UPDATED` event 解决 USER_MESSAGE 复用污染；ephemeral runtime 独立路径；BaseDelegation 公共抽象提取；orchestrator.py 3623→2733 行（D7 拆分 A2ADispatchMixin） |
+| **F099 Ask-Back Channel + Source Generalization** | 049f5aa | 三工具引入：`worker.ask_back` / `worker.request_input` / `worker.escalate_permission`；`source_runtime_kind` 5 值枚举（MAIN / WORKER / SUBAGENT / AUTOMATION / USER_CHANNEL）；is_caller_worker resume 通过 CONTROL_METADATA_UPDATED 持久化 |
+| **F100 Decision Loop Alignment**（H1） | 182e9ed | `RuntimeControlContext.force_full_recall: bool = False`（H1 override 字段）；`RecallPlannerMode="auto"` 实际语义启用（按 delegation_mode 自动决议）；F090 D1 双轨彻底收尾（移除 orchestrator metadata 写入 + helper fallback） |
+
+#### 阶段 3：用户感知 ROI + 文档（F101-F103）
+
+| Feature | Commit | 一句话目的 |
+|---------|--------|-----------|
+| **F101 Notification + Attention Model** | 74c9ab3 | NotificationService 四级优先级（CRITICAL/HIGH/MEDIUM/LOW）+ quiet hours discard + USER.md SoT + dismiss 跨通道统一 + Telegram callback + Web API + sha256 notification_id；`NOTIFICATION_DISPATCHED` 新 EventType；`WAITING_APPROVAL` 状态机改造（task_runner 单 owner + CAS + 双注册）；ApprovalGate SSE production 接入；force_full_recall producer |
+| **F102 Proactive Followup（Hermes Routine）** | 9185862 | `DailyRoutineService` cron 触发 + 9 步执行 + LLM/fallback 双路径 + LLM token budget 截断（max_input ≤ 2000 字符 + max_output ≤ 512 token）；4 新 EventType（ROUTINE_TRIGGERED/COMPLETED/FAILED/SKIPPED）挂在 `_daily_routine_audit` task；USER.md +3 机器可读字段（daily_summary_time / routine_active / summary_channels）；F101 NotificationService.notify_task_state_change 加 channels 可选参数 |
+| **F103 Blueprint v0.1 Incremental 修订** | （本 Feature） | 同步 F084-F102 到 Blueprint 5 子文档 + 新增 §"Agent 协作三条设计哲学"独立章节 + 关闭架构债 D13（三层消息模型文档） |
+
+#### M5 后续修复（与 M5 同期落地的 F081-F088 基础设施）
+
+- **Feature 081（LiteLLM 完全退役）** ✅: ProviderRouter 直连替代 LiteLLM Proxy；migrate-080 双对象迁移。详见 [codebase-architecture/provider-direct-routing.md](../codebase-architecture/provider-direct-routing.md)
+- **Feature 082（Bootstrap & Profile Integrity）** ⚠️→F084 退役：F082 因发现 bootstrap 状态机本身的设计缺陷被 F084 整体替代（净删 ~2400 行 dead code）
+- **Feature 083（测试并发加速）** ✅（务实版本）：修 thread shutdown hang（aiosqlite + asyncio executor）+ 修 fixture `os.environ` 污染 + `attach_input` 测试 race 加严等待。进程退出从 30+ 分钟 hang → ~20s。详见 [codebase-architecture/testing-concurrency.md](../codebase-architecture/testing-concurrency.md)
+- **Feature 084（Context + Harness 全栈重构）** ✅（仿 Hermes Agent 模式）：
+  - **Harness 层**：中央 ToolRegistry（数据驱动 entrypoints）+ ToolsetResolver + ThreatScanner（17+ pattern + invisible Unicode）+ SnapshotStore（冻结快照 + Live State 二分，保护 prefix cache）+ ApprovalGate（session allowlist + SSE）+ DelegationManager（max_depth=2 / max_concurrent=3）
+  - **Context 层**：USER.md 是 SoT，OwnerProfile 退化为派生只读视图；`user_profile.update/read/observe` 三工具 + Memory Candidates API（promote/discard/bulk_discard with atomic claim + skipped_ids）
+  - **WriteResult 通用回显契约**：18+ 写工具 return type 强制 WriteResult 子类，注册期 fail-fast；保留 task_id / memory_id / run_id 等关联键不压扁
+  - **退役**：BootstrapSession / BootstrapOrchestrator / UserMdRenderer / bootstrap_integrity / bootstrap_commands CLI（净删 ~2400 行 dead code）
+  - 详见 [codebase-architecture/harness-and-context.md](../codebase-architecture/harness-and-context.md)
+- **Feature 085（capability_pack 拆分）** ✅: 47 个工具 handler 迁移到 `builtin_tools/` 子包，CapabilityPackService 从 5112 → 2138 行（-58%），退化为编排层（详见 architecture-audit.md §14.8 A1）
+- **Feature 086（APScheduler 框架增强）** ✅: 为 F102 Routine 提供 cron 注册基础
+- **Feature 087（Agent e2e Live Test Suite）** ✅: 替换旧 `test_acceptance_scenarios.py` 5 域循环为 13 能力域 e2e_live 套件；OctoHarness 抽离 4 个 DI 钩子；smoke 5 + full 8；hermetic 隔离（5 类凭证 env + 4 路径 env + 5 module 单例）；pre-commit hook + `octo e2e` CLI 4 模式。详见 [codebase-architecture/e2e-testing.md](../codebase-architecture/e2e-testing.md)
+- **Feature 088（Module Singletons）** ✅: 测试 hermetic 隔离单例清单维护（`MODULE_SINGLETONS.md`）
+
+#### M5 → M6 切换 acceptance
+
+M5 acceptance gate 全部关闭：
+
+- F090-F103 acceptance criteria 全部通过（详见各 Feature `.specify/features/<NNN>-*/completion-report.md`）
+- F102 baseline (9185862) e2e_smoke 5x 循环 PASS
+- 全量回归 ≥ 3571 passed（F102 baseline）+ 0 regression
+- 三条设计哲学（H1/H2/H3）已显式建模到代码（H1 force_full_recall / H2 Worker 完整对等性 4 维 / H3 SubagentDelegation + A2A WorkerDelegation 两路）
+- 14 条架构债（D1-D14）：12 条已闭环、2 条显式推迟 F107（D2 WorkerProfile 完全合并、D8 control_plane 隐性耦合）
+
+**M6 启动条件已满足。** M6 范围见下文 §"M6（Surface 扩张）"。
+
+#### M5 carry-forward gate 关闭
+
+- `GATE-M3-CONTEXT-CONTINUITY` ✅：Butler 主链 + Worker session continuity（F093）+ Worker memory parity（F094）+ Worker recall audit（F096）全部闭环
+- `GATE-M4-AGENT-RUNTIME-CONTINUITY` ✅：F093-F096 Worker 完整对等 4 维全部实现，主 Agent 与 Worker 上下文栈对等
+
+---
+
+### M6（Surface 扩张：F104-F110）⏳ 待启动
+
+M5 全部关闭后启动。M6 不再做架构债清理（已在 M5 完成），聚焦用户感知 surface 扩张。
+
+| Feature | 一句话目的 | 依赖 |
+|---------|-----------|------|
+| **F104 文件工作台 v0.1**（diff 视图）| git-aware artifact diff UI；复用 F084 SnapshotStore | F084 |
+| **F105 Companion 基础**（PWA shell）| 最小 PWA shell + multi-device session sync | M5 全闭环 |
+| **F106 文件工作台 v0.2**（git-aware）| branch/commit/blame 浏览 | F104 |
+| **F107 Capability Layer Refactor** | 清理 D9/D11/D12（tooling/harness/capability_pack 三层职责 + LLMWorkerAdapter 命名 + BehaviorFileRegistry）；+ F090 D2 完全合并：WorkerProfile 与 AgentProfile 真正合并（独立 SQL 表数据迁移 + revision 机制收口 + FE 类型同步）；+ F101 推迟 4 项：D8 control_plane domain service 隐性耦合、dismiss 跨重启持久化、FR-D4 API 显式参数、FR-E1 control_plane 参数评估 | F101 / F102 |
+| **F108 语音 PoC**（STT only）| 单向语音输入 → text | — |
+| **F109 语音 v0.1**（STT+TTS+voice session）| 完整 voice session | F093（Worker Full Session Parity）|
+| **F110 Behavior Compactor LLM 智能合并** | F063 Phase 3 推迟项；token 成本下降后做 | — |
+
+**不进 M5/M6 的项**：071b Slice D 高层工具暴露（命中"不需要 Codex review 的微改"，空闲间隙顺手做）；Agent Zero Extensions / Instruments 系统（规模 ≥ 1 个月，放 M7 评估）；front-door 公网暴露 / 多用户 / 团队 / 家庭模式（Blueprint §0 已锁单用户深度）
 
 ---
