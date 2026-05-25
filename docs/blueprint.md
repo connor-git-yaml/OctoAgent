@@ -34,9 +34,21 @@
 | [architecture-tradeoffs.md](blueprint/architecture-tradeoffs.md) | §11 | 14 个架构权衡点与收敛方案 |
 | [deployment-and-ops.md](blueprint/deployment-and-ops.md) | §12 | 部署拓扑 / Docker / 备份 / 故障策略 / DX |
 | [testing-strategy.md](blueprint/testing-strategy.md) | §13 | 10 个测试类别 + 覆盖矩阵 |
-| [milestones.md](blueprint/milestones.md) | §14 | M0-M5 里程碑 Feature 列表 |
-| [architecture-audit.md](blueprint/architecture-audit.md) | §14.5-14.8 | 短板 / 架构问题 / Worker 审计 / 代码审计 |
+| [milestones.md](blueprint/milestones.md) | §14 | M0-M6 里程碑 Feature 列表 |
+| [architecture-audit.md](blueprint/architecture-audit.md) | §14.5-14.13 | 短板 / 架构问题 / Worker 审计 / 代码审计 / F084-F102 完成审计 |
+| [agent-collaboration-philosophy.md](blueprint/agent-collaboration-philosophy.md) | §2.3 | **Agent 协作三条设计哲学**（H1 管家 / H2 完整对等 / H3 两种委托）|
 | [appendix.md](blueprint/appendix.md) | 附录 | 术语表 + 示例配置 |
+
+### 实现级文档（docs/codebase-architecture/）
+
+| 文件 | 说明 |
+|------|------|
+| [codebase-architecture/README.md](codebase-architecture/README.md) | 当前代码架构总览 |
+| [codebase-architecture/harness-and-context.md](codebase-architecture/harness-and-context.md) | F084 Harness + Context 层（ToolRegistry / ThreatScanner / SnapshotStore / ApprovalGate / DelegationManager / USER.md SoT）|
+| [codebase-architecture/e2e-testing.md](codebase-architecture/e2e-testing.md) | F087 13 能力域 e2e_live 套件（OctoHarness 4 DI 钩子 + smoke 5 + full 8）|
+| [codebase-architecture/provider-direct-routing.md](codebase-architecture/provider-direct-routing.md) | F080/F081 ProviderRouter（替代 LiteLLM Proxy） |
+| [codebase-architecture/testing-concurrency.md](codebase-architecture/testing-concurrency.md) | F083 测试并发加速（aiosqlite + asyncio executor） |
+| [codebase-architecture/message-model.md](codebase-architecture/message-model.md) | **三层消息模型**（Work × DispatchEnvelope × A2AMessage，F103 关闭 D13 架构债）|
 
 ---
 
