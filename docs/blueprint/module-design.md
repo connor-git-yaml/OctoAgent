@@ -270,12 +270,12 @@ config_schema:
 - **USER.md 是 SoT**：用户长期偏好的唯一事实源；OwnerProfile 退化为派生只读视图
 - **三工具**：`user_profile.update / user_profile.read / user_profile.observe`
 - **Memory Candidates API**：`promote` / `discard` / `bulk_discard` with atomic claim + skipped_ids；Web UI 红点 badge
-- **USER.md 机器可读字段**（M5 内逐步引入）：
+- **USER.md 机器可读字段**（M5 内逐步引入，详见 `packages/core/src/octoagent/core/behavior_templates/USER.md`）：
   - `active_hours: "HH:MM-HH:MM"`（F101，影响 NotificationService quiet hours discard）
-  - `approval_timeout_seconds: int`（F101，影响 ApprovalGate timeout）
   - `daily_summary_time: "HH:MM"` 默认 `"08:30"`（F102）
   - `routine_active: "true"/"false"` 默认 `true`（F102）
   - `summary_channels: "telegram,web"` 默认 `"telegram,web"`（F102，含 `"web"→"web_sse"` 映射）
+  - 注：`approval_timeout_seconds` 不在 USER.md，而在 `packages/policy/src/octoagent/policy/models.py:159`（默认 600.0s 浮点数，per-policy_profile 可配置）
 - `RuntimeControlContext` 显式字段（F090 引入 + F100 收尾）：替代 metadata flag 控制流；含 `force_full_recall: bool = False`（H1 override）+ `delegation_mode` + `turn_executor_kind` + `recall_planner_mode` 等
 - `RecallPlannerMode="auto"`（F100 启用）：按 delegation_mode 自动决议（main_inline / worker_inline → skip / main_delegate / subagent → full）
 

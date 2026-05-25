@@ -339,7 +339,8 @@ KNOWN_SOURCE_RUNTIME_KINDS = frozenset({MAIN, WORKER, SUBAGENT, AUTOMATION, USER
 - `A2AMessage`：`packages/protocol/src/octoagent/protocol/models.py:238`
 - `A2AMessageRecord`：`packages/core/src/octoagent/core/models/a2a_runtime.py:56`
 - `A2AConversation`：`packages/core/src/octoagent/core/models/a2a_runtime.py:29`
-- `RuntimeControlContext`：`packages/core/src/octoagent/core/models/runtime.py`（F090 引入，F100 force_full_recall 字段）
+- `RuntimeControlContext`：`packages/core/src/octoagent/core/models/orchestrator.py:55`（F090 引入，F100 force_full_recall 字段）
+- `RecallPlannerMode` Literal：`packages/core/src/octoagent/core/models/orchestrator.py:52`（值：`"full" | "skip" | "auto"`）
 - `source_runtime_kind` 5 值：`packages/core/src/octoagent/core/models/source_kinds.py`（F099）
 - 三层哲学映射：[blueprint/agent-collaboration-philosophy.md](../blueprint/agent-collaboration-philosophy.md)
 - A2A envelope wire spec：[blueprint/api-and-protocol.md §10.2](../blueprint/api-and-protocol.md)

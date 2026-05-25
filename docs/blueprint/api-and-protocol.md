@@ -39,9 +39,12 @@ A2AMessage:
   payload: { ... }
   trace: { trace_id, parent_span_id }
   metadata:
+    # 注：A2AMessageMetadata typed model 含 hop_count/max_hops/route_reason/worker_capability/
+    #     tool_profile/model_alias/internal_status/retryable 8 个 typed 字段。其余通过 dict
+    #     access（向后兼容），如下：
     source_session_id: "session://main-user/..."
     target_session_id: "session://worker-a2a/..."
-    source_runtime_kind: MAIN|WORKER|SUBAGENT|AUTOMATION|USER_CHANNEL  # F099 引入，5 值枚举
+    source_runtime_kind: "main"|"worker"|"subagent"|"automation"|"user_channel"  # F099 引入，dict key
     origin_user_thread_id: "stable_thread_key"
     work_id: "work_id"
     context_capsule_ref: "artifact://..."
@@ -204,12 +207,11 @@ ROUTINE_SKIPPED = "ROUTINE_SKIPPED"        # reason (routine_disabled / no_user_
 | `AGENT_SESSION_TURN_PERSISTED` | F093 | Worker turn 写入持久化审计 |
 | `BEHAVIOR_PACK_LOADED` | F095 schema / F096 EventStore 接入 | BehaviorPack 加载（含 `agent_id` + `agent_kind` 字段）|
 | `BEHAVIOR_PACK_USED` | F096 | BehaviorPack 实际被消费（dispatch e2e 验证）|
-| `MEMORY_RECALL_COMPLETED` | F096 同步路径 emit（F094 仅 delayed recall） | 同步 recall 路径 emit 覆盖完整 |
-| `RECALL_FRAME_CREATED` | F096 list_recall_frames endpoint 暴露 | RecallFrame 物化（agent_runtime_id 维度审计） |
+| `MEMORY_RECALL_SCHEDULED` / `MEMORY_RECALL_COMPLETED` / `MEMORY_RECALL_FAILED` | F094 引入 + F096 覆盖范围扩大到同步路径 | Recall 三态事件（scheduled / completed / failed）；F096 引入 `list_recall_frames` audit endpoint 暴露 agent_runtime_id 维度审计 |
 
 ### 10.7 ask_back 三工具（F099 引入）
 
-`apps/gateway/src/octoagent/gateway/services/ask_back_tools.py`：
+`apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py`：
 
 - **`worker.ask_back(question: str, target: AskBackTarget)`**：向上游（user / butler / caller worker）提问，task 进入 `WAITING_INPUT`
 - **`worker.request_input(prompt: str, expected_fields: list[str])`**：结构化输入请求

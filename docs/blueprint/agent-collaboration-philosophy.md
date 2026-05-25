@@ -46,28 +46,46 @@ OctoAgent 不只是"一个聊天机器人"，而是"个人智能操作系统"。
 #### F100 `RuntimeControlContext.force_full_recall`（H1 override）
 
 ```python
-# packages/core/src/octoagent/core/models/runtime.py
+# packages/core/src/octoagent/core/models/orchestrator.py:55（简化）
+DelegationMode = Literal["unspecified", "main_inline", "worker_inline", "main_delegate", "subagent"]
+RecallPlannerMode = Literal["full", "skip", "auto"]
+
 class RuntimeControlContext(BaseModel):
-    delegation_mode: DelegationMode = DelegationMode.UNSPECIFIED
-    turn_executor_kind: TurnExecutorKind = TurnExecutorKind.UNSPECIFIED
-    recall_planner_mode: RecallPlannerMode = RecallPlannerMode.UNSPECIFIED
-    force_full_recall: bool = False   # F100 引入，H1 主 Agent override
-    ...
+    # ... task_id / trace_id / project_id 等 20+ 字段省略
+    delegation_mode: DelegationMode = Field(default="unspecified")
+    turn_executor_kind: TurnExecutorKind = Field(default=TurnExecutorKind.SELF)
+    recall_planner_mode: RecallPlannerMode = Field(default="full")
+    force_full_recall: bool = False   # F100 引入，H1 主 Agent override（最高优先级）
 ```
 
 `force_full_recall=True` 时，主 Agent 强制跑 full memory recall（不走 `RecallPlannerMode="auto"` 自动决议）。F101 `chat_control_metadata` 持久化 + `TURN_SCOPED_CONTROL_KEYS` 白名单 + ENV-aware threshold 让该 override 可在 chat turn 维度精确生效。
 
 #### F100 `RecallPlannerMode="auto"` 自动决议
 
+实际实施：`apps/gateway/src/octoagent/gateway/services/runtime_control.py:106` `is_recall_planner_skip()` 函数
+
 ```python
-# apps/gateway/src/octoagent/gateway/services/recall_planner.py
-def resolve_recall_mode(delegation_mode: DelegationMode) -> bool:
-    """按 delegation_mode 自动决议是否跳过 recall planner"""
-    if delegation_mode in (DelegationMode.MAIN_INLINE, DelegationMode.WORKER_INLINE):
-        return SKIP  # 主 Agent inline 或 Worker inline 不需要重新 recall
-    if delegation_mode in (DelegationMode.MAIN_DELEGATE, DelegationMode.SUBAGENT):
-        return FULL  # 派活或 subagent 需要完整 recall
-    return baseline_default
+# 简化语义（实际逻辑见 runtime_control.py:106）
+def is_recall_planner_skip(runtime_context, metadata) -> bool:
+    # 优先级 1: force_full_recall override 最高（H1 完整决策环 override）
+    if runtime_context.force_full_recall:
+        return False  # 强制完整 recall
+
+    # 优先级 2: 显式 delegation_mode + recall_planner_mode
+    if runtime_context.delegation_mode != "unspecified":
+        if runtime_context.recall_planner_mode == "skip":
+            return True
+        if runtime_context.recall_planner_mode == "full":
+            return False
+        # AUTO 决议：依 delegation_mode 自动决议
+        if runtime_context.recall_planner_mode == "auto":
+            if runtime_context.delegation_mode in {"main_inline", "worker_inline"}:
+                return True   # SKIP（F051 inline 性能兼容）
+            if runtime_context.delegation_mode in {"main_delegate", "subagent"}:
+                return False  # FULL（走完整决策环）
+
+    # 优先级 3: unspecified → return False（baseline 默认行为等价）
+    return False
 ```
 
 #### `NotificationService`（F101）也是 H1 实现
@@ -192,19 +210,24 @@ OctoAgent 同时支持两种委托模式：
 #### F097 H3-A：`SubagentDelegation`
 
 ```python
-# packages/core/src/octoagent/core/models/delegation.py
+# packages/core/src/octoagent/core/models/delegation.py:371
 class SubagentDelegation(BaseDelegation):
-    """临时 Subagent 委托（共享 caller project）"""
-    parent_runtime_id: str
-    parent_session_id: str
-    ephemeral_profile_id: str   # ephemeral AgentProfile (kind=subagent)
-    # 共享 caller 的 Memory α (AGENT_PRIVATE)
+    """F097：H3-A 临时 Subagent 委托的结构化载体。
+    F098 Phase J 继承 BaseDelegation（共享字段下沉到父类）。
+    持久化路径：child_task.metadata["subagent_delegation"]（JSON 序列化，无独立 SQL 表）"""
+
+    # SubagentDelegation 专属字段：
+    child_agent_session_id: str | None = None     # SUBAGENT_INTERNAL session ID
+    caller_project_id: str                         # α 共享：receiver 复用 caller project
+    caller_memory_namespace_ids: list[str]         # α 共享 AGENT_PRIVATE namespace IDs
+    target_kind: Literal[DelegationTargetKind.SUBAGENT] = DelegationTargetKind.SUBAGENT
+    # 父类 BaseDelegation 提供 delegation_id / parent_runtime_id 等公共字段
 ```
 
 - ephemeral `AgentProfile (kind=subagent)`
 - `SUBAGENT_INTERNAL` session 路径（与 A2A receiver session 区分）
 - cleanup hook + `SUBAGENT_COMPLETED` event emit
-- Memory α 共享引用（caller `AGENT_PRIVATE`）
+- Memory α 共享引用（caller `AGENT_PRIVATE`），通过 `caller_memory_namespace_ids` 字段直接传递
 - ephemeral runtime 独立路径（F098 P1-2 修复）：audit chain 严格隔离
 
 #### F098 H3-B：A2A `WorkerDelegation`
@@ -228,12 +251,18 @@ KNOWN_SOURCE_RUNTIME_KINDS = frozenset({MAIN, WORKER, SUBAGENT, AUTOMATION, USER
 
 A2A source 派生**仅信任**显式 `envelope.metadata.source_runtime_kind` 信号（缺信号默认 `main`）。F098 Phase D post-review 抓到的 bug：baseline 用 `turn_executor_kind` 派生 source role（target 侧字段）→ 主 Agent 派 worker 时 source 误判 worker。修复后必须显式 signal。
 
-三工具（`ask_back_tools.py`）：
+三工具（`apps/gateway/src/octoagent/gateway/services/builtin_tools/ask_back_tools.py`）：
 
 ```python
-worker.ask_back(question: str, target: AskBackTarget)
-worker.request_input(prompt: str, expected_fields: list[str])
-worker.escalate_permission(action: str, reason: str)  # 走 ApprovalGate SSE（F101 production 接入）
+# 简化签名（实际 handler 见源文件）
+async def ask_back_handler(question: str, context: str = "") -> str
+    """Worker 向用户/主 Agent 提问，任务进入 WAITING_INPUT"""
+
+async def request_input_handler(prompt: str, expected_format: str = "") -> str
+    """请求结构化输入（JSON/配置/代码片段）"""
+
+async def escalate_permission_handler(action: str, scope: str, reason: str) -> str
+    """向用户申请敏感操作的执行权限，走 ApprovalGate SSE（F101 production 接入）"""
 ```
 
 统一 emit `CONTROL_METADATA_UPDATED` 审计事件。**N-H1 修复**：is_caller_worker resume 持久化通过 CONTROL_METADATA_UPDATED 事件机制。

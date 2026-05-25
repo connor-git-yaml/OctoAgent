@@ -215,7 +215,7 @@
 
 - FR-NOTIFY-2（应该，[M5]）：USER.md 是 SoT
   - `active_hours: "HH:MM-HH:MM"` 字段决定 quiet hours 边界
-  - `approval_timeout_seconds: int` 字段决定 ApprovalGate timeout
+  - 注：`approval_timeout_seconds` 不在 USER.md，而在 `packages/policy/models.py`（默认 600.0s，per-policy_profile 可配）
 
 #### 5.1.10 Proactive Followup / Routine（M5 阶段 3 引入，F102）
 
