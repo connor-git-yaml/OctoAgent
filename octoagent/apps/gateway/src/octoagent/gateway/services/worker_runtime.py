@@ -37,6 +37,7 @@ from ulid import ULID
 
 from .execution_context import ExecutionRuntimeContext
 from .task_service import TaskService
+from .worker_audit_logger import audit_worker_log, derive_agent_runtime_id
 
 log = structlog.get_logger()
 
@@ -400,6 +401,8 @@ async def _emit_is_caller_worker_signal(
     task_id: str,
     trace_id: str,
     dispatch_id: str,
+    *,
+    envelope_metadata: dict[str, Any] | None = None,
 ) -> None:
     """F099 N-H1 修复：WorkerRuntime 首次 dispatch 时持久化 is_caller_worker_signal。
 
@@ -439,10 +442,15 @@ async def _emit_is_caller_worker_signal(
         )
     except Exception:
         # 信号写入失败不阻断 worker 执行；resume 路径回退到 WorkerRuntime 无条件 True
-        log.warning(
-            "worker_runtime_emit_is_caller_worker_signal_failed",
+        agent_runtime_id, degraded_reason = derive_agent_runtime_id(envelope_metadata)
+        await audit_worker_log(
+            task_service,
             task_id=task_id,
-            dispatch_id=dispatch_id,
+            agent_runtime_id=agent_runtime_id,
+            degraded_reason=degraded_reason,
+            level="warning",
+            key="worker_runtime_emit_is_caller_worker_signal_failed",
+            payload={"dispatch_id": dispatch_id, "trace_id": trace_id},
         )
 
 
@@ -554,6 +562,7 @@ class WorkerRuntime:
                     task_id=envelope.task_id,
                     trace_id=envelope.trace_id,
                     dispatch_id=envelope.dispatch_id,
+                    envelope_metadata=envelope.metadata,
                 )
 
             execution_context = (
@@ -599,12 +608,21 @@ class WorkerRuntime:
                             state=TaskStatus.RUNNING,
                         )
                     except Exception as exc:  # pragma: no cover - 心跳失败不阻塞执行
-                        log.warning(
-                            "worker_runtime_a2a_heartbeat_failed",
+                        agent_runtime_id, degraded_reason = derive_agent_runtime_id(
+                            envelope.metadata
+                        )
+                        await audit_worker_log(
+                            task_service,
                             task_id=envelope.task_id,
-                            worker_id=worker_id,
-                            loop_step=step,
-                            error_type=type(exc).__name__,
+                            agent_runtime_id=agent_runtime_id,
+                            degraded_reason=degraded_reason,
+                            level="warning",
+                            key="worker_runtime_a2a_heartbeat_failed",
+                            payload={
+                                "worker_id": worker_id,
+                                "loop_step": step,
+                                "error_type": type(exc).__name__,
+                            },
                         )
 
                 if cancel_signal is not None and cancel_signal.is_set():
@@ -627,11 +645,20 @@ class WorkerRuntime:
                         self._config.first_output_timeout_seconds > 0
                         and elapsed > self._config.first_output_timeout_seconds
                     ):
-                        log.info(
-                            "worker_runtime_first_output_timeout_budget_exceeded",
+                        agent_runtime_id, degraded_reason = derive_agent_runtime_id(
+                            envelope.metadata
+                        )
+                        await audit_worker_log(
+                            task_service,
                             task_id=envelope.task_id,
-                            elapsed_s=round(elapsed, 3),
-                            threshold_s=self._config.first_output_timeout_seconds,
+                            agent_runtime_id=agent_runtime_id,
+                            degraded_reason=degraded_reason,
+                            level="info",
+                            key="worker_runtime_first_output_timeout_budget_exceeded",
+                            payload={
+                                "elapsed_s": round(elapsed, 3),
+                                "threshold_s": self._config.first_output_timeout_seconds,
+                            },
                         )
 
                 task = await task_service.get_task(envelope.task_id)

@@ -64,6 +64,8 @@ from .runtime_control import (
     encode_runtime_context,
     runtime_context_from_metadata,
 )
+from .task_service import TaskService
+from .worker_audit_logger import audit_worker_log, derive_agent_runtime_id
 
 log = structlog.get_logger()
 
@@ -210,6 +212,8 @@ class A2ADispatchMixin:
             requested_worker_profile_id=requested_worker_profile_id,
             worker_capability=worker_capability_hint,
             fallback_source_profile_id=source_agent_profile_id,
+            task_id=envelope.task_id,
+            envelope_metadata=dict(envelope.metadata),
         )
         target_runtime = await self._ensure_a2a_agent_runtime(
             agent_runtime_id=str(envelope.metadata.get("target_agent_runtime_id", "")),
@@ -928,6 +932,8 @@ class A2ADispatchMixin:
         requested_worker_profile_id: str,
         worker_capability: str,
         fallback_source_profile_id: str,
+        task_id: str = "",
+        envelope_metadata: dict[str, Any] | None = None,
     ) -> str:
         """F098 Phase B-2 (Codex review P2 闭环): A2A target Worker 加载自己的 AgentProfile。
 
@@ -970,12 +976,41 @@ class A2ADispatchMixin:
                     if binding is not None and binding.profile_id:
                         return binding.profile_id
                 except Exception as exc:
-                    log.warning(
-                        "a2a_target_profile_resolve_worker_binding_failed",
-                        requested_worker_profile_id=requested_worker_profile_id,
-                        worker_capability=worker_capability,
-                        error=str(exc),
-                    )
+                    # F103c C-3: 升级到 EventStore audit chain（保留原 structlog 双轨）
+                    if task_id:
+                        try:
+                            _audit_svc = TaskService(self._stores, self._sse_hub)
+                            agent_runtime_id, degraded_reason = derive_agent_runtime_id(
+                                envelope_metadata
+                            )
+                            await audit_worker_log(
+                                _audit_svc,
+                                task_id=task_id,
+                                agent_runtime_id=agent_runtime_id,
+                                degraded_reason=degraded_reason,
+                                level="warning",
+                                key="a2a_target_profile_resolve_worker_binding_failed",
+                                payload={
+                                    "requested_worker_profile_id": requested_worker_profile_id,
+                                    "worker_capability": worker_capability,
+                                    "error": str(exc),
+                                },
+                            )
+                        except Exception:
+                            log.warning(
+                                "a2a_target_profile_resolve_worker_binding_failed",
+                                requested_worker_profile_id=requested_worker_profile_id,
+                                worker_capability=worker_capability,
+                                error=str(exc),
+                            )
+                    else:
+                        # 无 task_id 上下文 → fallback 仅 structlog（向后兼容旧 caller）
+                        log.warning(
+                            "a2a_target_profile_resolve_worker_binding_failed",
+                            requested_worker_profile_id=requested_worker_profile_id,
+                            worker_capability=worker_capability,
+                            error=str(exc),
+                        )
 
         # 路径 2: 直接 store lookup（fallback 兜底，用于 capability_pack 不可用场景）
         if requested_worker_profile_id:

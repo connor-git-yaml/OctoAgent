@@ -45,6 +45,11 @@ from .execution_console import (
 from .orchestrator import OrchestratorService
 from .resume_engine import ResumeEngine
 from .task_service import TaskService
+from .worker_audit_logger import (
+    audit_worker_error,
+    audit_worker_log,
+    derive_agent_runtime_id,
+)
 from .worker_runtime import WorkerCancellationRegistry, WorkerRuntimeConfig
 
 log = structlog.get_logger()
@@ -345,10 +350,23 @@ class TaskRunner:
                 delegation_event, update_task_pointer=False
             )
         except Exception as exc:
-            log.warning(
-                "subagent_delegation_init_failed",
+            _task_svc_init = TaskService(self._stores, self._sse_hub)
+            try:
+                _task_meta = await _task_svc_init.get_latest_user_metadata(task_id)
+            except Exception:
+                _task_meta = {}
+            agent_runtime_id, degraded_reason = derive_agent_runtime_id(_task_meta)
+            await audit_worker_log(
+                _task_svc_init,
                 task_id=task_id,
-                error=str(exc),
+                agent_runtime_id=agent_runtime_id,
+                degraded_reason=degraded_reason,
+                level="warning",
+                key="subagent_delegation_init_failed",
+                payload={
+                    "error": str(exc),
+                    "delegation_id": delegation.delegation_id,
+                },
             )
 
     async def resume_task(self, task_id: str, trigger: str = "manual") -> ResumeResult:
@@ -876,9 +894,20 @@ class TaskRunner:
             if _latest_meta.get("is_caller_worker_signal") == "1":
                 _resume_snapshot["is_caller_worker_signal"] = "1"
         except Exception:
-            log.warning(
-                "attach_input_resume_is_caller_worker_signal_read_failed",
+            _task_svc_for_audit = TaskService(self._stores, self._sse_hub)
+            try:
+                _resume_meta = await _task_svc_for_audit.get_latest_user_metadata(task_id)
+            except Exception:
+                _resume_meta = {}
+            agent_runtime_id, degraded_reason = derive_agent_runtime_id(_resume_meta)
+            await audit_worker_log(
+                _task_svc_for_audit,
                 task_id=task_id,
+                agent_runtime_id=agent_runtime_id,
+                degraded_reason=degraded_reason,
+                level="warning",
+                key="attach_input_resume_is_caller_worker_signal_read_failed",
+                payload={"session_id": result.session_id},
             )
 
         await self._spawn_job(
@@ -963,6 +992,29 @@ class TaskRunner:
                 exc_info=True,
             )
             error_summary = f"dispatch_exception:{type(exc).__name__}:{str(exc)[:200]}"
+            # F103c: emit WORKER_ERROR + NotificationService priority=HIGH 主 Agent feedback。
+            # 必须在 mark_failed / _ensure_task_failed 之前 emit，确保审计链记录原因；
+            # state_transition_event_id=event.event_id 做 sha256 幂等（Codex PM1 闭环）。
+            try:
+                try:
+                    _exc_meta = await service.get_latest_user_metadata(task_id)
+                except Exception:
+                    _exc_meta = {}
+                agent_runtime_id, degraded_reason = derive_agent_runtime_id(_exc_meta)
+                _task_obj = await service.get_task(task_id)
+                _task_title = (_task_obj.title if _task_obj is not None else "") or task_id
+                await audit_worker_error(
+                    service,
+                    task_id=task_id,
+                    agent_runtime_id=agent_runtime_id,
+                    degraded_reason=degraded_reason,
+                    error_class=type(exc).__name__,
+                    error_summary=error_summary[:200],
+                    notification_service=self._notification_service,
+                    task_title=_task_title,
+                )
+            except Exception:
+                log.warning("worker_error_audit_failed", task_id=task_id, exc_info=True)
             try:
                 await self._stores.task_job_store.mark_failed(task_id, error_summary)
             except Exception:
@@ -1184,7 +1236,21 @@ class TaskRunner:
                 message="worker runtime timeout",
             )
             await self._notify_completion(task_id)
-            log.warning("task_runner_job_timeout", task_id=task_id)
+            _task_svc_to = TaskService(self._stores, self._sse_hub)
+            try:
+                _to_meta = await _task_svc_to.get_latest_user_metadata(task_id)
+            except Exception:
+                _to_meta = {}
+            agent_runtime_id, degraded_reason = derive_agent_runtime_id(_to_meta)
+            await audit_worker_log(
+                _task_svc_to,
+                task_id=task_id,
+                agent_runtime_id=agent_runtime_id,
+                degraded_reason=degraded_reason,
+                level="warning",
+                key="task_runner_job_timeout",
+                payload={},
+            )
 
     async def _monitor_loop(self) -> None:
         while True:
