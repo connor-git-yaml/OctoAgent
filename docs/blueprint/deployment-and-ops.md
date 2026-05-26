@@ -90,6 +90,48 @@ volumes:
 - 约束：JobRunner 创建的沙箱容器**必须**挂载到独立的 Docker network（`octo-sandbox-net`），与系统内部网络隔离
 - 沙箱容器默认：`--network=octo-sandbox-net --read-only --cap-drop=ALL --memory=512m --cpus=1`
 
+#### 12.1.4 ProviderRouter 直连（Feature 081 退役 LiteLLM Proxy）
+
+> Feature 080 引入 ProviderRouter 替代 LiteLLM Proxy；Feature 081 完全退役 LiteLLM Proxy 子进程、容器、衍生 yaml。本节列出对部署运维的具体影响（与 §8.9 软件架构层互补）。
+
+**部署拓扑简化**：
+
+- **不再启动 `litellm-proxy` 服务**（移除内部 `:4000` 端口）：`octoagent/docker-compose.litellm.yml` 已删除；生产 `docker-compose.yml` 应同步移除 `litellm-proxy` 服务条目（见 §12.2 参考配置注释）
+- **不再依赖 Docker daemon**（LiteLLM Proxy 时代的 `octoagent/provider/dx/docker_daemon.py` 已删除）：开发拓扑（§12.1.1）单进程启动无需 Docker；生产拓扑（§12.1.2）仅 JobRunner 沙箱仍用 Docker Socket
+- **Gateway 启动时间**：~10s → **~5s**（无 LiteLLM Proxy 子进程等待 + 无 docker-compose 启动）
+
+**3 种 transport 直连**（详见 §8.9.2）：
+
+| Transport | HTTP 端点 | 代表 Provider |
+|-----------|----------|--------------|
+| `openai_chat` | `POST /v1/chat/completions` | OpenAI / OpenRouter / SiliconFlow / 本地 Ollama |
+| `openai_responses` | `POST /v1/responses` | OpenAI Codex（JWT OAuth 直连）|
+| `anthropic_messages` | `POST /v1/messages` | Anthropic Claude |
+
+**凭证管理**：
+
+- 用户主入口：`~/.octoagent/octoagent.yaml`（`providers[]` 配置）+ `~/.octoagent/auth-profiles.json`（API key / OAuth credential）
+- LiteLLM 时代的 `.env.litellm` 已退役 → `octo config migrate-080` 一键合并到 `.env`（不覆盖已存在键，自动备份原文件）
+- `auth-profiles.json` 受 `.gitignore` 保护，对齐 Constitution 原则 5 Least Privilege
+
+**alias 解析路径**（运行时）：
+
+```
+业务代码语义 alias (router/planner/...)
+  → AliasRegistry 解析（显式配置优先 + legacy 语义 alias fallback）
+  → 运行时 ProviderEntry（含 transport + api_base + auth）
+  → ProviderClient 按 transport 派发到对应 HTTP endpoint
+```
+
+**docker-compose.yml 应做的同步改动**（§12.2 参考配置目前仍含 `litellm-proxy` 服务条目，待用户部署时手动同步删除）：
+
+- 删除 `services.litellm-proxy` 整块
+- 删除 §12.1.2 服务清单中的 `litellm-proxy` 行
+- 删除依赖 `litellm-proxy` 的 `depends_on` 引用
+- 部署生产环境时确认 `~/.octoagent/auth-profiles.json` 已通过 `octo config migrate-080` 迁移到位
+
+> **运维 follow-up**：当前 `docs/blueprint/deployment-and-ops.md` §12.2 + §12.1.2 仍保留 LiteLLM Proxy 段落作为历史参考，建议在 M6 F104（文件工作台 v0.1）期间或运维侧首次重部署时同步清理。
+
 ### 12.2 Docker Compose 参考配置
 
 ```yaml
@@ -479,6 +521,11 @@ F094 引入 `octo memory migrate-094` CLI 命令组（dry-run / apply / rollback
    - `octo init` 保留为历史引导入口；新流程以 `octo config` 为准
 
 产出文件：`octoagent.yaml`（用户主配置）+ `litellm-config.yaml`（衍生文件）+ `.env`（运行时环境变量）
+
+> **Feature 081 后置更新**：`litellm-config.yaml` 衍生文件已退役（LiteLLM Proxy 完全退役）。
+> 当前 ProviderRouter 直连体系下，**主路径配置仅 2 份**：`octoagent.yaml`（含 `providers[]` ProviderEntry v2 schema）+ `auth-profiles.json`（凭证）。
+> 老 v1 yaml（含 `runtime.llm_mode` / `litellm_proxy_url` / `master_key_env`）启动时会触发 deprecation warning，引导跑 `octo config migrate-080` 升级；`octo init` 历史路径保留兼容但不再活跃。
+> 详见 §8.9 + `docs/codebase-architecture/provider-direct-routing.md`。
 
 #### 12.9.2 `octo doctor` — 配置诊断（M1，M2 扩展 guided remediation）
 
