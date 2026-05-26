@@ -30,6 +30,32 @@
     conftest.py     # 全局 fixture + 安全锁
   ```
 
+#### 13.1.1 测试并发优化（Feature 083）
+
+> 详见 `docs/codebase-architecture/testing-concurrency.md`。
+
+Feature 083 之前测试套件有两个开发体验痛点：
+
+| # | 症状 | 实测 |
+|---|------|------|
+| 1 | **thread shutdown hang**：pytest 跑完后进程不退出 | macOS sample 显示 100% 时间在 `Py_FinalizeEx → wait_for_thread_shutdown`；实测 30+ 分钟才被 kill |
+| 2 | **xdist 并发未启用**：装了 `pytest-xdist 3.8.0` 但配置缺失 → 默认串行 ~93s 全量回归 |
+
+Feature 083 采用实用主义策略：
+
+| 方面 | 决策 |
+|------|------|
+| thread shutdown hang | ✅ 修复（`pytest_sessionfinish` hook 显式 `loop.shutdown_default_executor()`）—— 进程退出 30+ min → ~20s |
+| `os.environ` fixture 污染 | ✅ 改 `monkeypatch.setenv` |
+| Race #1（`ExecutionConsoleService.attach_input` 读窗口）| ✅ P5 治本（`_read_task_with_waiting_input_retry`） |
+| Race #2（runner restart + recovery 路径）| ⏭️ 移交 Feature 084（治本超 F083 scope） |
+| 单 sleep + assert 长尾（~72 处 `await asyncio.sleep(N) + assert` 模式）| ⏭️ 移交 Feature 084 |
+| `test_attach_input_after_restart` 测试 polling 加严 | ✅ P6 双状态联合等待 + 1s → 5s 窗口 |
+| **xdist 默认启用** | ❌ 撤销——风险大于收益（task_runner 状态机测试 ~20% 失败率） |
+| **xdist opt-in** | ✅ 文档化：本地开发子包并发 `pytest -n auto packages/core/tests/`；CI 全量回归仍用默认串行 |
+
+修复后默认行为：pytest 报告 ~103s / 进程实际退出 ~104s / 5 次连续 100% 稳定。`-n auto` 加速 5.5x（~17s 报告 / ~20s 退出），代价是高 CPU 负载下 task_runner 状态机测试偶发 race ~20%（治本超 scope）。
+
 ### 13.2 单元测试（Unit）
 
 - **domain models**：
@@ -160,3 +186,106 @@
 | S6 成本可见 | §13.2 成本计算、§13.7 成本追踪 |
 
 ---
+
+### 13.11 E2E Live Test Suite（Feature 087）
+
+> 详见 `docs/codebase-architecture/e2e-testing.md`。
+
+F087 把旧 `test_acceptance_scenarios.py` 5 域循环替换为 **13 能力域 e2e_live 套件**——基于真实 LLM 路径或直调主路径，hermetic 隔离 + pre-commit hook 默认跑 smoke 子集。
+
+**OctoHarness 抽离**（`octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py`）：
+
+| DI 钩子 | 用途 |
+|---------|------|
+| `credential_store` | 替换 ProviderRouter 凭据来源（fake_store / real_codex_credential_store）|
+| `secret_store` | 注入测试 secret |
+| `transport_factory` | 注入 stub / 真实 transport 工厂 |
+| `clock` | 注入可控时钟（routine cron 等时间相关测试）|
+
+内置约束：**120s ProviderRouter timeout** + **30s SIGALRM 单测 watchdog**。
+
+**13 能力域清单**（注册表权威源：`tests/e2e_live/helpers/domain_runner.py::DOMAIN_REGISTRY` + `gateway/cli/e2e_command.py::_DOMAIN_REGISTRY` 双源同步）：
+
+| 域 # | 名称 | marker |
+|------|------|--------|
+| 1 | 工具调用基础 | e2e_smoke |
+| 2 | USER.md 全链路（threat scanner 通过）| e2e_smoke |
+| 3 | 冻结快照 + Live State 二分（prefix cache 不爆）| e2e_smoke |
+| 4 | Memory observation → promote → audit | e2e_full |
+| 5 | 真实 Perplexity MCP install + invoke（**manual gate**：`OCTOAGENT_E2E_PERPLEXITY_API_KEY`）| e2e_full |
+| 6 | Skill 调用（强类型 contract）| e2e_full |
+| 7 | Graph Pipeline（DAG checkpoint）| e2e_full |
+| 8 | `delegate_task`（worker 派发）| e2e_full |
+| 9 | Sub-agent `max_depth=2` 边界 | e2e_full |
+| 10 | A2A-Lite 双向通信（schema 集成）| e2e_full |
+| 11 | ThreatScanner block（恶意 prompt + USER.md 不变）| e2e_smoke |
+| 12 | ApprovalGate session allowlist + SSE 审批 | e2e_smoke |
+| 13 | Routine cron + webhook 触发 | e2e_full |
+
+**关键设计权衡**（GATE_P3_DEVIATION）：
+
+- **smoke 5 域**（#1 #2 #3 #11 #12）：保留集成层（OctoHarness DI + stub transport），断言调用骨架（USER.md 写入 / 事件 emit / threat scanner block 路径）
+- **full 8 域中 4 个**（#4 #5 #8 #9 #10）：P4 fixup 下沉为**直调主路径**（绕开 LLM agent loop），直接构造 `MemoryService` / `MCPInstaller` / `DelegationManager`
+- **真实 LLM e2e**：保留在 `test_e2e_smoke_real_llm.py` 基线对照，需 `.env.e2e` 凭证才跑，不在 pre-commit 默认路径
+
+理由：LLM 决策不稳定性（同样 prompt 不同步 token sampling）让 5x 循环 0 regression DoD 不可达；Codex P4 review 接受 GATE_P3_DEVIATION 决策。代价是 13 域不全是端到端"真实跑"；收益是 5x 循环 0 regression（P5 实测 4s/iter），pre-commit hook 可用、可信、不阻断开发节奏。
+
+**Hermetic 隔离**：双 autouse fixture 重置 5 类凭证 env（OpenAI / Anthropic / OpenRouter / SiliconFlow / Codex OAuth）+ 4 个 OCTOAGENT_* 路径 env + 5 项 module 单例（清单见 `tests/e2e_live/helpers/MODULE_SINGLETONS.md`）。
+
+**`octo e2e` CLI**（`octoagent/apps/gateway/src/octoagent/gateway/cli/e2e_command.py`）：
+
+```bash
+octo e2e smoke              # 跑 smoke 5 域
+octo e2e full               # 跑 full 8 域
+octo e2e 7                  # 跑域 #7 单测
+octo e2e --list             # 列 13 域
+octo e2e smoke --loop=5     # smoke 5x 循环
+```
+
+退出码：0 = 全 PASS（SKIP 不算 FAIL，但写入 `~/.octoagent/logs/e2e/quota-skip-*.log`）；1 = 至少 1 FAIL；2 = 参数错误。
+
+**pre-commit hook**：
+
+```bash
+make install-hooks           # 一次性安装（worktree-aware）
+git commit                   # 自动跑 pytest -m e2e_smoke
+SKIP_E2E=1 git commit ...    # 紧急 bypass
+```
+
+180s **portable watchdog**：python3 SIGTERM→SIGKILL 升级（不依赖 macOS 上需 `brew install coreutils` 的 `timeout`）。
+
+**SC-7 运行时不变量**：跑前后比对 sha256，全部一致：
+- `~/.octoagent/behavior/system/USER.md`
+- `~/.octoagent/auth-profiles.json`
+- `~/.octoagent/mcp-servers/`（递归）
+
+P5 实测 F087 e2e_full 跑前后 sha256 完全一致（hermetic 隔离生效）。
+
+**已知工程债**：
+- `memory_candidates audit task` 字段缺失（F084 P5 spawn task 待修；当前 e2e_full 域 #4 直调路径已绕开）
+- F083 race `test_sc3_projection`（aiosqlite event loop 关闭顺序导致全量回归偶发 1 例 FAIL，重跑必过；超 F087 scope）
+- OAuth profile 失效自然 SKIP（无真实 token 时 e2e_full 真实 LLM 测自然 SKIP，不阻断 commit）
+
+### 13.12 MCP E2E Testing（Feature 089）
+
+> 详见 `.specify/features/089-mcp-e2e-testing/spec.md`（v2 版本）。
+
+Feature 089 补 F087 留下的 **MCP 集成路径 CI 盲区**——F087 把 13 域纳入 e2e_live 后，真实 MCP register/spawn/execute 链路依然依赖手动 gate（`OCTOAGENT_E2E_PERPLEXITY_API_KEY`，CI 永远 SKIP）。
+
+**v2 关键决策**（v1 spec 被 Codex adversarial review 拒绝后重做）：
+- 走 **mcp_registry config-driven** 路径，**不测 npm/pip install 链路**（避免 npm 网络抖动 / install 副作用）
+- 0 生产代码改动（纯测试新增）
+
+**baseline def6638 实施状态**（**部分落地**，与 spec 5-case 完整套件有偏差）：
+
+| 文件 | 状态 | 用途 |
+|------|------|------|
+| `apps/gateway/tests/e2e_live/_mcp_stub_server.py` | ✅ 落地（stub helper）| 本地 stdio MCP server（纯 stdlib）|
+| `apps/gateway/tests/e2e_live/test_e2e_mcp_local_stub.py` | ✅ 落地（1 test：`test_mcp_unregister_kills_subprocess`）| stub subprocess 启停 + leak detection |
+| `apps/gateway/tests/e2e_live/test_subprocess_leak_detection.py` | ✅ 落地 | 进程残留检测（autouse 验证 leak） |
+| `apps/gateway/tests/e2e_live/test_e2e_mcp_broker.py` | ✅ 落地 | MCP broker 集成 |
+| `apps/gateway/tests/e2e_live/test_e2e_mcp_skill_pipeline.py` 域 #5 SKIP gate fallback | 🚧 部分（v2 spec 列入"应做"，baseline 实施程度待 F089 后续推进确认）|
+
+剩余 4 个 e2e_smoke case（config-register / execute / error / delete）+ hermetic env 扩展（`OCTOAGENT_MCP_SERVERS_PATH` / `OCTOAGENT_E2E_USE_HOST_KEY`）+ docs/e2e-testing.md MCP 章节追加为 F089 v2 spec **未完结的剩余范围**（建议 M6 期间完成）。
+
+**为什么不测 npm install**：测试要 hermetic + < 10s + CI 跑得起，但 npm install 网络抖动 / vendor 包变化 / install 副作用都让 CI 不稳定。stub-based 测试已能覆盖 OctoAgent client 实现层（register / spawn / discover / execute / unregister 主链路），是否兼容真实 vendor server 留给 vendor manual gate（域 #5）+ 用户报障驱动。
