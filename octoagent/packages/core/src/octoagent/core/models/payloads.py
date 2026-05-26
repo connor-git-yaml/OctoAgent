@@ -685,3 +685,71 @@ class SubagentCompletedPayload(BaseModel):
     closed_at: datetime = Field(description="终态时间戳（UTC）")
     parent_task_id: str = Field(default="", description="父任务 ID，用于 audit 关联")
     child_agent_session_id: str | None = Field(default=None, description="Subagent SUBAGENT_INTERNAL session ID（None 表示 spawn 失败场景）")
+
+
+# F103c: Worker Log/Error 表面规范化（H1 强化）
+
+
+class WorkerLogEmittedPayload(BaseModel):
+    """WORKER_LOG_EMITTED 事件 payload。
+
+    Worker 内部关键 logger（A2A heartbeat 失败、首次输出超时、resume 信号失败等）
+    升级到 EventStore audit chain 时使用。
+
+    Constitution 原则 2 / 8 / 11：
+    - Everything is an Event：Worker 内部 log 进入审计链
+    - Observability：主 Agent / control_plane 可观察 worker 健康
+    - Context Hygiene：payload 不含 secrets / api_key / 完整 prompt
+    """
+
+    task_id: str = Field(..., min_length=1, description="audit chain key")
+    agent_runtime_id: str = Field(
+        default="",
+        description=(
+            "Worker AgentRuntime 标识。空串仅当 degraded_reason 同时填写 "
+            "（不允许静默空值；详见 F103c Codex review PH1 闭环）"
+        ),
+    )
+    level: Literal["info", "warning", "error"] = Field(description="原 structlog 级别")
+    key: str = Field(..., min_length=1, description="logger 标识符（原 structlog key 名）")
+    payload: dict[str, Any] = Field(
+        default_factory=dict,
+        description="脱敏后的字段，原 structlog kwargs（禁止 token / api_key / 完整 prompt）",
+    )
+    agent_session_id: str | None = Field(default=None, description="可选会话关联")
+    degraded_reason: str | None = Field(
+        default=None,
+        description="audit chain 降级原因；当 agent_runtime_id 为空时必填",
+    )
+
+
+class WorkerErrorPayload(BaseModel):
+    """WORKER_ERROR 事件 payload。
+
+    Worker fatal exception（task_runner dispatch_exception 路径）独立 EventType，
+    便于主 Agent / control_plane 订阅 worker 失败信号；payload 含脱敏 error_summary。
+
+    H1 强化：Worker 不直接 raise 给用户；通过 NotificationService.priority=HIGH
+    + state_transition_event_id=event.event_id 做幂等推送。
+    """
+
+    task_id: str = Field(..., min_length=1, description="audit chain key")
+    agent_runtime_id: str = Field(
+        default="",
+        description="Worker AgentRuntime 标识；同 WorkerLogEmittedPayload 语义",
+    )
+    error_class: str = Field(..., min_length=1, description="exception __class__.__name__")
+    error_summary: str = Field(
+        ...,
+        max_length=200,
+        description="脱敏摘要（≤200 字符）；完整 traceback 通过 artifact 引用（本期固定 None）",
+    )
+    traceback_artifact_id: str | None = Field(
+        default=None,
+        description="完整 traceback 存 artifact 引用（F103c 本期固定 None，留 F108）",
+    )
+    agent_session_id: str | None = Field(default=None, description="可选会话关联")
+    degraded_reason: str | None = Field(
+        default=None,
+        description="audit chain 降级原因；当 agent_runtime_id 为空时必填",
+    )

@@ -133,6 +133,11 @@ class EventType(StrEnum):
     A2A_MESSAGE_SENT = "A2A_MESSAGE_SENT"
     A2A_MESSAGE_RECEIVED = "A2A_MESSAGE_RECEIVED"
 
+    # F103c: Worker Log/Error 表面规范化（H1 强化）
+    # 关键 Worker 内部 logger 升级 EventStore audit + Worker fatal error 走主 Agent feedback
+    WORKER_LOG_EMITTED = "WORKER_LOG_EMITTED"
+    WORKER_ERROR = "WORKER_ERROR"
+
     # Feature 010: Checkpoint / Resume 生命周期事件
     CHECKPOINT_SAVED = "CHECKPOINT_SAVED"
     RESUME_STARTED = "RESUME_STARTED"

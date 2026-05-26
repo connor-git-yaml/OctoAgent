@@ -46,6 +46,8 @@ from octoagent.core.models.payloads import (
     StateTransitionPayload,
     TaskCreatedPayload,
     UserMessagePayload,
+    WorkerErrorPayload,
+    WorkerLogEmittedPayload,
 )
 
 
@@ -81,6 +83,8 @@ class TestEnums:
         assert EventType.ORCH_DECISION == "ORCH_DECISION"
         assert EventType.WORKER_DISPATCHED == "WORKER_DISPATCHED"
         assert EventType.WORKER_RETURNED == "WORKER_RETURNED"
+        assert EventType.WORKER_LOG_EMITTED == "WORKER_LOG_EMITTED"
+        assert EventType.WORKER_ERROR == "WORKER_ERROR"
         assert EventType.CHECKPOINT_SAVED == "CHECKPOINT_SAVED"
         assert EventType.RESUME_STARTED == "RESUME_STARTED"
         assert EventType.RESUME_SUCCEEDED == "RESUME_SUCCEEDED"
@@ -444,3 +448,71 @@ class TestPayloads:
         )
         assert not payload.recoverable
         assert payload.recovery_hint == ""
+
+    def test_worker_log_emitted_payload_roundtrip(self):
+        """F103c: WORKER_LOG_EMITTED payload 序列化往返"""
+        payload = WorkerLogEmittedPayload(
+            task_id="task-123",
+            agent_runtime_id="runtime-abc",
+            level="warning",
+            key="worker_runtime_a2a_heartbeat_failed",
+            payload={"worker_id": "w-1", "loop_step": 3, "error_type": "TimeoutError"},
+        )
+        dumped = payload.model_dump(mode="json")
+        restored = WorkerLogEmittedPayload.model_validate(dumped)
+        assert restored.task_id == "task-123"
+        assert restored.agent_runtime_id == "runtime-abc"
+        assert restored.level == "warning"
+        assert restored.key == "worker_runtime_a2a_heartbeat_failed"
+        assert restored.payload["loop_step"] == 3
+        assert restored.degraded_reason is None
+
+    def test_worker_log_emitted_payload_with_degraded_reason(self):
+        """F103c PH1: agent_runtime_id 为空时 degraded_reason 必填语义"""
+        payload = WorkerLogEmittedPayload(
+            task_id="task-456",
+            agent_runtime_id="",
+            level="info",
+            key="worker_runtime_first_output_timeout_budget_exceeded",
+            payload={"elapsed_s": 12.5, "threshold_s": 10.0},
+            degraded_reason="agent_runtime_id_unavailable",
+        )
+        assert payload.agent_runtime_id == ""
+        assert payload.degraded_reason == "agent_runtime_id_unavailable"
+
+    def test_worker_error_payload_roundtrip(self):
+        """F103c: WORKER_ERROR payload 序列化往返"""
+        payload = WorkerErrorPayload(
+            task_id="task-789",
+            agent_runtime_id="runtime-xyz",
+            error_class="RuntimeError",
+            error_summary="dispatch_exception:RuntimeError:LLM call timed out after 60s",
+        )
+        dumped = payload.model_dump(mode="json")
+        restored = WorkerErrorPayload.model_validate(dumped)
+        assert restored.task_id == "task-789"
+        assert restored.error_class == "RuntimeError"
+        assert restored.traceback_artifact_id is None
+
+    def test_worker_error_payload_summary_max_length(self):
+        """F103c FR-E2: error_summary 严格 ≤200 字符"""
+        from pydantic import ValidationError
+
+        long_summary = "x" * 201
+        with pytest.raises(ValidationError):
+            WorkerErrorPayload(
+                task_id="task-overflow",
+                agent_runtime_id="runtime-1",
+                error_class="ValueError",
+                error_summary=long_summary,
+            )
+
+        # 边界值 200 字符 OK
+        ok_summary = "x" * 200
+        payload = WorkerErrorPayload(
+            task_id="task-edge",
+            agent_runtime_id="runtime-1",
+            error_class="ValueError",
+            error_summary=ok_summary,
+        )
+        assert len(payload.error_summary) == 200
