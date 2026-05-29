@@ -466,3 +466,173 @@ async def fetch_events_from_store(
         if d is not None:
             result.append(d)
     return result
+
+
+# ============================================================
+# Tier 2 评分（spec FR-B01 / FR-E01~E04, T-B-4 实施）
+# ============================================================
+
+
+def _build_score(
+    task_id: str,
+    verdict: TaskVerdict,
+    pass_fail_score: float,
+    pass_fail_weight: float,
+    token_usage: int | None = None,
+    error_message: str | None = None,
+) -> BenchmarkRunScore:
+    """Tier 2 用的简化加权计算（partial / efficiency 暂未启用）.
+
+    Tier 2 当前 rubric (tier2-tau-v1 + tier2-gaia-v1) 都是 100/0/0 二值评分，
+    weighted_score 严格 = pass_fail_score（活跃归一化退化到 pass_fail）.
+    """
+    weighted_score = pass_fail_score  # 100/0/0 二值，归一化后等价
+    return BenchmarkRunScore(
+        task_id=task_id,
+        verdict=verdict,
+        pass_fail_score=pass_fail_score,
+        weighted_score=weighted_score,
+        match_ratio=pass_fail_score,
+        token_usage=token_usage,
+        error_message=error_message,
+    )
+
+
+def score_tier2_tau(
+    task: Any,
+    actual_tool_calls: list[dict[str, Any]],
+    rubric: dict[str, Any] | None = None,
+    token_usage: int | None = None,
+) -> BenchmarkRunScore:
+    """Tier 2 τ-bench Pass@1 评分（spec FR-B01 + FR-B05）.
+
+    Pass@1 简化版（Phase B）:
+    - 期望 action names：task.actions 中每条 `name`（W5 实测 list[dict] of {name, arguments}）
+    - 实际 action names：actual_tool_calls 中每条 `name`（runner 收集）
+    - 自动去 TAU_BENCH_TOOL_PREFIX（"tau_bench__"）前缀对齐
+    - 完整覆盖（expected ⊆ actual unprefixed names）= PASS；任一 expected 缺失 = FAIL
+    - 严格版（Phase D）: order-aware + arguments 比对，含 user_simulator multi-turn 检查
+
+    Args:
+        task: TauBenchTaskMeta（含 task_id / actions / user_id ...）
+        actual_tool_calls: agent 实际调用记录，每条 dict 含 `name` (str) + 可选 `arguments`
+        rubric: scoring_rubrics.yaml tier2-tau-v1（None 时用默认 100/0/0）
+        token_usage: input+output token 总数
+
+    Returns:
+        BenchmarkRunScore: verdict + pass_fail_score + weighted_score 等
+    """
+    from collections import Counter
+
+    task_id = getattr(task, "task_id", "T2-TAU-UNKNOWN")
+    pass_fail_weight = (rubric or {}).get("pass_fail_weight", 1.0)
+
+    try:
+        expected_actions = getattr(task, "actions", None) or []
+        # Codex Phase B review MED 修复 2026-05-29:
+        # 用 Counter 保留同名 action 重复次数（spec FR-B01 + plan §4.1 W5 "actions 序列匹配率"）。
+        # 旧 set 版本会让 "需要 5 次 update_reservation_flights" 的 task 被 agent 只调一次
+        # 也判 PASS，系统性高估 Pass@1。
+        expected_counter = Counter(
+            a.get("name", "") for a in expected_actions if a.get("name")
+        )
+        if not expected_counter:
+            # 无 expected actions = 无法判分，避免 silent PASS（Codex MED-6 no silent cap）
+            return _build_score(
+                task_id=task_id,
+                verdict=TaskVerdict.ERROR,
+                pass_fail_score=0.0,
+                pass_fail_weight=pass_fail_weight,
+                token_usage=token_usage,
+                error_message="task.actions 为空，无法 Pass@1 评分",
+            )
+
+        # 实际 tool_calls 用 Counter；
+        # Codex Phase B review MED-5 修复 2026-05-29:
+        # 强制要求 startswith "tau_bench__" 前缀，否则忽略（避免 production 同名工具调用
+        # 混入 actual_counter 导致 false PASS）。Phase D runner 必须保证 actual_tool_calls
+        # 只含 benchmark_scope=tau_bench_benchmark 的 call.
+        actual_counter: Counter[str] = Counter()
+        for call in actual_tool_calls:
+            name = call.get("name", "")
+            if not name.startswith("tau_bench__"):
+                continue  # 严格忽略非 tau_bench 调用
+            unprefixed = name[len("tau_bench__"):]
+            # 若 scope_id 形式（tau_bench__<scope_id>__<tool_name>），剥离 scope_id
+            if "__" in unprefixed:
+                # 形式："<scope_id>__<tool_name>" → 取 tool_name 部分
+                _, tool_name_only = unprefixed.split("__", 1)
+                actual_counter[tool_name_only] += 1
+            else:
+                actual_counter[unprefixed] += 1
+
+        # Pass@1: 对每个 expected action name，actual 调用次数 >= expected 次数
+        missing_calls: list[str] = []
+        for name, expected_count in expected_counter.items():
+            actual_count = actual_counter.get(name, 0)
+            if actual_count < expected_count:
+                missing_calls.append(f"{name}({actual_count}/{expected_count})")
+        pass_at_1 = len(missing_calls) == 0
+
+        return _build_score(
+            task_id=task_id,
+            verdict=TaskVerdict.PASS if pass_at_1 else TaskVerdict.FAIL,
+            pass_fail_score=1.0 if pass_at_1 else 0.0,
+            pass_fail_weight=pass_fail_weight,
+            token_usage=token_usage,
+            error_message=(
+                f"Pass@1 缺调用: {', '.join(missing_calls)}" if missing_calls else None
+            ),
+        )
+    except Exception as exc:
+        return _build_score(
+            task_id=task_id,
+            verdict=TaskVerdict.ERROR,
+            pass_fail_score=0.0,
+            pass_fail_weight=pass_fail_weight,
+            token_usage=token_usage,
+            error_message=f"scorer 内部异常: {type(exc).__name__}: {exc}",
+        )
+
+
+def score_tier2_gaia(
+    task: Any,
+    actual_answer: str,
+    rubric: dict[str, Any] | None = None,
+    token_usage: int | None = None,
+) -> BenchmarkRunScore:
+    """Tier 2 GAIA fallback normalized 字符串匹配评分（spec FR-B01 + FR-E03）.
+
+    Phase B 主路径: 走 gaia_fallback_adapter.match_answer（normalized + tolerance + alternates）.
+    Phase D T-D-6 升级: 主路径不命中时触发 LLM-judge fallback（spec FR-B03）.
+
+    Args:
+        task: GaiaFallbackTaskMeta（含 task_id / expected_answer / tolerance / alternates）
+        actual_answer: agent 实际回答（一般是 LLM 最终回复 plain text）
+        rubric: scoring_rubrics.yaml tier2-gaia-v1（None 时用默认 100/0/0）
+        token_usage: input+output token 总数
+    """
+    task_id = getattr(task, "task_id", "T2-GAIA-UNKNOWN")
+    pass_fail_weight = (rubric or {}).get("pass_fail_weight", 1.0)
+
+    try:
+        # Lazy import 避免循环依赖（gaia_fallback_adapter 在 tier2/ 下）
+        from benchmarks.tiers.tier2.gaia_fallback_adapter import match_answer
+
+        matched = match_answer(actual_answer, task)
+        return _build_score(
+            task_id=task_id,
+            verdict=TaskVerdict.PASS if matched else TaskVerdict.FAIL,
+            pass_fail_score=1.0 if matched else 0.0,
+            pass_fail_weight=pass_fail_weight,
+            token_usage=token_usage,
+        )
+    except Exception as exc:
+        return _build_score(
+            task_id=task_id,
+            verdict=TaskVerdict.ERROR,
+            pass_fail_score=0.0,
+            pass_fail_weight=pass_fail_weight,
+            token_usage=token_usage,
+            error_message=f"scorer 内部异常: {type(exc).__name__}: {exc}",
+        )

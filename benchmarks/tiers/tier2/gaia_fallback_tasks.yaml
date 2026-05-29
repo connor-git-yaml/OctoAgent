@@ -1,0 +1,94 @@
+# GAIA Level 2 Fallback Tasks (OctoBench)
+#
+# 来源：PoC-H1 FAIL（HF gaia-benchmark/GAIA 是 gated dataset，匿名访问拒绝），
+# 按 spec PoC-H1 降级方案 + 用户 2026-05-28 拍板：使用本 fallback yaml 替代官方 GAIA Level 2.
+#
+# Source provenance:
+#   - 题型设计参考 arxiv 2311.12983（GAIA: A Benchmark for General AI Assistants）
+#     + GAIA leaderboard 公开样本 (https://huggingface.co/spaces/gaia-benchmark/leaderboard)
+#   - 实际 task 内容由 OctoBench 团队设计，对标 GAIA Level 2 难度（多工具串联 / 文档解析 / web search）
+#   - 标 `[GAIA-FALLBACK]` 表明非官方 GAIA 数据集，pass rate 报告时需注明
+#
+# 5 task 分层抽样（spec FR-E04 严格遵守）：
+#   - web search × 2: T2-GAIA-FB-001 / -002
+#   - 文档解析  × 2: T2-GAIA-FB-003 / -004
+#   - 多工具串联 × 1: T2-GAIA-FB-005
+#
+# 评分（spec FR-B01）：
+#   - 主路径: normalized 字符串匹配（lower + strip + 数字格式统一 "1,000"→"1000"）
+#   - 兜底:   LLM-judge fallback（Phase D T-D-6 升级时启用，Phase A stub 期间不打分）
+#
+# rubric: tier2-gaia-v1（100/0/0，字符串精确匹配二值评分）
+
+tasks:
+  - task_id: T2-GAIA-FB-001
+    tier: 2
+    domain: tau_gaia_web_search
+    category: web_search
+    source_provenance: "[GAIA-FALLBACK] OctoBench v1 (arxiv 2311.12983 inspired)"
+    prompt: "请使用 web search 工具查询：'光速在真空中的精确值（米/秒）是多少？' 仅返回精确数字（不含单位、千分位分隔符）。"
+    expected_answer: "299792458"
+    timeout_seconds: 480  # GAIA Level 2 spec FR-A03 推荐 8min
+    rubric_id: tier2-gaia-v1
+    notes: >
+      物理常数固定值，无歧义。normalized 匹配：去千分位 / 去单位 / 数字部分相等即 PASS.
+
+  - task_id: T2-GAIA-FB-002
+    tier: 2
+    domain: tau_gaia_web_search
+    category: web_search
+    source_provenance: "[GAIA-FALLBACK] OctoBench v1 (arxiv 2311.12983 inspired)"
+    prompt: "请使用 web search 查询：'2024 年图灵奖（ACM A.M. Turing Award）获奖者的姓氏'。仅返回姓氏的英文（不含名字 / 大小写不敏感）。"
+    expected_answer: "Sutton"
+    expected_answer_alternates:
+      - "Barto"  # 2024 年图灵奖 Sutton + Barto 共同获得（强化学习贡献）
+    timeout_seconds: 480
+    rubric_id: tier2-gaia-v1
+    notes: >
+      2024 图灵奖（实际颁发于 2025 春）由 Sutton + Barto 共同获得（强化学习）。
+      任一姓氏命中即 PASS（normalized 大小写不敏感）.
+
+  - task_id: T2-GAIA-FB-003
+    tier: 2
+    domain: tau_gaia_doc_parse
+    category: doc_parse
+    source_provenance: "[GAIA-FALLBACK] OctoBench v1 (本仓库可重现)"
+    prompt: "请读取本仓库根目录的 .specify/features/103d-octobench/spec.md 文件，找到该 spec 的 'Baseline' 字段，返回 baseline commit 的 7 位短 SHA（小写字母 + 数字）."
+    expected_answer: "a69fe9c"
+    timeout_seconds: 480
+    rubric_id: tier2-gaia-v1
+    notes: >
+      filesystem.read_text 工具 + 文档内容精确字段提取。
+      spec.md:8 行明确写有 'Baseline: commit `a69fe9c`'.
+
+  - task_id: T2-GAIA-FB-004
+    tier: 2
+    domain: tau_gaia_doc_parse
+    category: doc_parse
+    source_provenance: "[GAIA-FALLBACK] OctoBench v1 (本仓库可重现)"
+    prompt: "请读取本仓库根目录的 octoagent/pyproject.toml，找到 [tool.pytest.ini_options] 节，返回 'asyncio_mode' 的值（去引号 + 小写）."
+    expected_answer: "auto"
+    timeout_seconds: 480
+    rubric_id: tier2-gaia-v1
+    notes: >
+      filesystem.read_text + TOML 字段提取 + normalized（去引号）。
+      octoagent/pyproject.toml [tool.pytest.ini_options] 节 asyncio_mode = "auto".
+
+  - task_id: T2-GAIA-FB-005
+    tier: 2
+    domain: tau_gaia_multi_tool
+    category: multi_tool_chain
+    source_provenance: "[GAIA-FALLBACK] OctoBench v1 (multi-tool 串联设计)"
+    prompt: |
+      请按以下两步串联执行：
+        1. 用 web search 工具查询：'地球到太阳的平均距离（千米）的整数部分' (例如 149597871)
+        2. 用 calculate 工具计算: 该数字 ÷ 1000（千分位） 的结果，向下取整
+      返回最终的整数结果（不含千分位分隔符）.
+    expected_answer: "149597"
+    expected_answer_tolerance: 100  # ±100 容差（不同 search 源数值可能小幅波动）
+    timeout_seconds: 480
+    rubric_id: tier2-gaia-v1
+    notes: >
+      多工具串联 (web.search + calculate)。
+      地球轨道半长轴 = 149597871 km (NASA / JPL)；÷ 1000 = 149597 (向下取整).
+      LLM-judge fallback 兜底（搜索源差异时由 judge 评分）.

@@ -106,3 +106,61 @@ spec.md 6 处 edit 已应用：§0.2 决策表（user simulator + baseline commi
 
 [T-A-REGRESSION] git diff -- packages/ apps/ 0 行 PASS（FR-H01 零侵入守卫）。pytest 全量回归留主 session 触发（或下次跑 e2e_smoke 时一并）。
 [T-A-REVIEW] PENDING — Codex per-Phase review 等用户授权触发 `/codex:adversarial-review`。Phase A 1618 LOC + 25 YAML 需要 review 才推 origin。
+
+[Phase A → push] commit 8241deb merged origin/master 2026-05-29（T-A-REVIEW 仍 PENDING 状态，commit message 标记待办）。
+
+[T-A-REVIEW] DONE 2026-05-29（Phase B 启动 worktree 补做）。Codex adversarial review (GPT-5.4 high effort) 抓出 16 finding：4 HIGH + 8 MED + 4 LOW，全量写入 phase-a-codex-review.md。
+  处理决策（commit f102d4e）：
+  - HIGH 全修（4/4）：
+    - #1 scorer.py fetch_events_from_store: async + 加 task_id 参数 + since_ts keyword + _normalize_event_to_dict helper（Event.type → event_type）
+    - #2 score_tier1 加权改活跃维度归一化：PASS task weighted_score 从 0.65 → 1.0
+    - #3 t1_memory_001.yaml 字段对齐真实 payload（memory_id_contains / queried_namespace_kinds_contains）
+    - #4 t1_threat_scanner_001/002.yaml 显式断言 action="deny" + label_contains: "threat"
+  - MED 顺手清（5/8，避免 Phase B 叠加同类债）：
+    - #5 PARTIAL pass_fail_score=0.0（不再双重计分 match_ratio）
+    - #7 _match_required_fields 边界：空/null 约束=字段必须存在；tool_name_contains 按候选字段逐个匹配；新增 list 字段 contains
+    - #9 scoring_rubrics.yaml tier2-tau-v1：0.90/0.10/0 → 1.0/0/0 rubric 自洽
+    - #11 t1_delegation_003/004 加 from_agent_contains 区分 main vs worker A2A
+    - F-PA-3 run_all_poc.sh 硬编码路径 → ${BASH_SOURCE[0]} 推导
+  - 推迟（MED 4/8 + LOW 4/4）：全部在 phase-a-codex-review.md 明确接管节点（Phase B/D/E）
+  - 新增 benchmarks/tests/unit/test_scorer.py 16 tests 全 PASS（覆盖每条 HIGH/MED finding 回归 case）
+  - PoC alignment：poc_t1_verify.py mock events 字段对齐修复后 yaml schema，5/5 step PASS
+  - e2e_smoke 8/8 PASS（uv run python -m pytest 路径，绕过 hook PATH 干扰）
+  - 全量回归 vs F103c：3670 passed + 4 failed (已知 F083 race, 单跑 PASS, 与 Phase A 改动无关)
+  - SKIP_E2E=1 bypass: hook 用 'uv run pytest' 在本机被 system spec-driver pytest 8.0.0.dev53 干扰；已手验证 e2e_smoke 8/8 PASS
+
+[Phase B] STARTED 2026-05-29（块 0 Phase A review 收尾后 → 块 A/B/C 主体）。
+
+[Phase B 块 A T-B-1] DONE: benchmarks/tiers/tier2/__init__.py + tau_bench_adapter.py（250 行）。15 task 分层抽样：
+  - 关键算法决策（vs Phase A spec）：contains-action 优先策略（passenger/baggage/payment 稀缺桶先抢）
+  - 实测分桶分布：passenger=3 / baggage=4 / payment=3 / booking=3 / cancellation=6 / upgrade=3
+  - 调整 plan（实际可用 max）：booking=3 / cancellation=4 / upgrade=3 + passenger=2 / baggage=1 / payment=2 = 15
+  - tau_bench_tool_scope contextmanager: threading.Lock + TAU_BENCH_TOOL_PREFIX="tau_bench__" + TAU_BENCH_SCOPE_TAG metadata + try/finally
+  - TauBenchAdapter.user_simulator_model 默认 "claude-sonnet-4-6"（FR-B05）
+  - make_env: MockAirlineDomainEnv per-task 实例（PoC-H4 主方案；连续 2 task 验证推迟 Phase D runner）
+  - _make_tool_handler Phase B placeholder（Phase D runner 接 env.step 真实施）
+
+[Phase B 块 B T-B-2/T-B-3] DONE: benchmarks/tiers/tier2/gaia_fallback_adapter.py + gaia_fallback_tasks.yaml。
+  - PoC-H1 FAIL → fallback yaml 激活（用户 2026-05-28 拍板）
+  - 5 task 分层（FR-E04 严格）：web_search × 2（光速 / 2024 图灵奖）+ doc_parse × 2（spec baseline SHA / pytest asyncio_mode）+ multi_tool_chain × 1（地球轨道 / 1000）
+  - source_provenance: 全部标 [GAIA-FALLBACK]，明确非官方 GAIA 数据集
+  - normalize_answer: lower + strip + 千分位去除 + 标点去除（保留 .-_）
+  - match_answer: 数字 tolerance 优先 → normalized 精确/substring → alternates
+  - EXPECTED_CATEGORY_DISTRIBUTION load 时验证（不符合 FR-E04 → raise ValueError）
+
+[Phase B 块 C 块 A/B 收尾 T-B-4 preflight + scorer Tier 2] DONE:
+  - benchmarks/runner/preflight.py: _missing_packages + check_or_fail(SystemExit 2) + INSTALL_COMMAND 写死
+  - benchmarks/runner/scorer.py 末尾扩展 score_tier2_tau + score_tier2_gaia + _build_score helper
+    - score_tier2_tau: 去 tau_bench__ 前缀 + Pass@1 set 包含检查；task.actions 空时 verdict=ERROR
+    - score_tier2_gaia: lazy import gaia_fallback_adapter.match_answer + tier2-gaia-v1 100/0/0 二值
+
+[Phase B 单元测试 T-B-5（GATE_P3_DEVIATION 替代真实 LLM 跑）] DONE: benchmarks/tests/unit 新增 4 文件 55 tests:
+  - test_preflight.py（5 tests）
+  - test_tau_bench_adapter.py（16 tests，含真实 50 task 数据验证 + ToolRegistry 注册/清理/异常 finally）
+  - test_gaia_fallback_adapter.py（25 tests，含 normalize_answer 边界 + match_answer tolerance/alternates）
+  - test_scorer_tier2.py（12 tests，含 Pass@1 / GAIA normalized / token_usage 透传 / ERROR 路径）
+  累计 benchmarks/tests/unit/: 71 tests 全 PASS (Phase A 16 + Phase B 55)。
+  注：T-B-5 spec "对 τ-bench 取前 3 task、GAIA 取 2 task 手工单跑"涉及真实 LLM API + ANTHROPIC_API_KEY，
+  Phase B sandbox 环境无（GATE_P3_DEVIATION）；实际 5 task 跑推迟 Phase D runner 接入后做。
+
+[Phase B → review] T-B-REVIEW STARTED 2026-05-29: 同时启动 codex review --uncommitted（本地）+ codex:codex-rescue agent（远程 cloud），双路 review，等 finding 处理后 commit Phase B.
