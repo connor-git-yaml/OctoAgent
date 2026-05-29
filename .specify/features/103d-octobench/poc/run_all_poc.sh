@@ -11,9 +11,13 @@
 set -uo pipefail
 # 不 set -e — 允许单 task 失败继续跑剩下的
 
-WORKTREE_ROOT="/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F103d-octobench"
+# Codex Phase A review P2 修复（2026-05-29）：从脚本自身位置推导 WORKTREE_ROOT，
+# 避免硬编码绝对路径（不同 worktree / 不同开发者机器都能直接跑）。
+# 本脚本位于 <WORKTREE_ROOT>/.specify/features/103d-octobench/poc/run_all_poc.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WORKTREE_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 OCTO_DIR="$WORKTREE_ROOT/octoagent"
-POC_DIR="$WORKTREE_ROOT/.specify/features/103d-octobench/poc"
+POC_DIR="$SCRIPT_DIR"
 OUTPUT_DIR="/tmp/octobench-poc-$(date +%Y%m%d-%H%M%S)"
 POC_TIMEOUT="${POC_TIMEOUT:-600}"  # 单 task 超时秒（默认 10 min）
 

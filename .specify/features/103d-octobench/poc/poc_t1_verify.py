@@ -126,9 +126,12 @@ print("Step 4: score_tier1 端到端验证（mock 事件列表）")
 print("=" * 60)
 
 # 模拟 task 执行后的实际事件（全部命中 → 期望 PASS）
+# Codex Phase A review HIGH-3 修复 2026-05-29：mock events 字段对齐真实 payload
+# MEMORY_ENTRY_ADDED: memory_id / tool / scope_id ...（memory_tools.py:774-786）
+# MEMORY_RECALL_COMPLETED: queried_namespace_kinds list（payloads.py:165-189）
 mock_events_full_pass = [
-    {"event_type": "MEMORY_ENTRY_ADDED", "payload": {"content": "OctoAgent project details"}},
-    {"event_type": "MEMORY_RECALL_COMPLETED", "payload": {"namespace": "AGENT_PRIVATE"}},
+    {"event_type": "MEMORY_ENTRY_ADDED", "payload": {"memory_id": "mem_test_001", "tool": "memory.write"}},
+    {"event_type": "MEMORY_RECALL_COMPLETED", "payload": {"queried_namespace_kinds": ["AGENT_PRIVATE"]}},
 ]
 
 result_pass = score_tier1(task=task, actual_events=mock_events_full_pass)
@@ -137,7 +140,7 @@ assert result_pass.verdict == TaskVerdict.PASS, f"期望 PASS，实际 {result_p
 
 # 模拟部分命中（match_ratio=0.5，期望触发 LLM judge → PARTIAL）
 mock_events_partial = [
-    {"event_type": "MEMORY_ENTRY_ADDED", "payload": {"content": "OctoAgent project details"}},
+    {"event_type": "MEMORY_ENTRY_ADDED", "payload": {"memory_id": "mem_test_001"}},
     # MEMORY_RECALL_COMPLETED 缺失
 ]
 result_partial = score_tier1(task=task, actual_events=mock_events_partial)

@@ -21,10 +21,13 @@ rubrics:
       efficiency：efficiency_baseline_tokens 填入后，token_usage 与 baseline p50 比较。
 
   # Tier 2 τ-bench airline：Pass@1 评分（用户模拟器 action 全部成功执行）
+  # Codex Phase A review MED-9 修复 2026-05-29: pass_fail_weight 0.90 / partial_weight 0.10
+  # 但 partial_logic=null 会让 τ-bench 完美 Pass@1 最高只能得 0.90（rubric 不自洽）。
+  # 改为 1.00/0.00/0.00 二值评分；未来如需 partial 必须同时定义 partial_logic。
   - rubric_id: tier2-tau-v1
     tier: 2
-    pass_fail_weight: 0.90
-    partial_weight: 0.10
+    pass_fail_weight: 1.00
+    partial_weight: 0.00
     efficiency_weight: 0.00
     pass_logic: pass_at_1
     partial_logic: null
@@ -32,8 +35,8 @@ rubrics:
     llm_judge_trigger: null
     llm_judge_max_calls: null
     notes: >
-      pass_fail：τ-bench user simulator actions 全部成功执行（Pass@1）。
-      partial：预留 0.10 权重供未来扩展（Phase B 实施时确认是否使用）。
+      pass_fail：τ-bench user simulator actions 全部成功执行（Pass@1）二值评分。
+      partial / efficiency：禁用；M6 启用前必须同时定义对应 logic 才能加权。
 
   # Tier 2 GAIA Level 2：字符串精确匹配（normalized）
   - rubric_id: tier2-gaia-v1

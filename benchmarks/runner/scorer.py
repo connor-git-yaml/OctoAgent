@@ -93,6 +93,12 @@ class BenchmarkRunScore:
 # EventStore 断言逻辑
 # ============================================================
 
+# tool_name_contains 在多个候选字段中搜索（防止把多个字段无分隔拼接导致跨字段误匹配，
+# Codex Phase A review MED-7 修复 2026-05-29）。按 OctoAgent 真实事件 payload 习惯
+# 排序：TOOL_CALL_* / MEMORY_ENTRY_ADDED 用 `tool_name` / `tool` / `function_name` / `name`。
+_TOOL_NAME_CANDIDATE_FIELDS: tuple[str, ...] = ("tool_name", "tool", "function_name", "name")
+
+
 def _match_required_fields(
     event_payload: dict[str, Any],
     required_fields: dict[str, Any],
@@ -101,35 +107,54 @@ def _match_required_fields(
     检查实际事件的 payload 是否满足 required_fields 约束。
 
     支持的约束类型：
-    - 精确匹配：required_fields = {"namespace": "AGENT_PRIVATE"}
-    - 字符串包含匹配：required_fields = {"content_contains": "OctoAgent"}
+    - 精确匹配：required_fields = {"namespace_kind": "AGENT_PRIVATE"}
+    - 字符串包含匹配：required_fields = {"preview_contains": "OctoAgent"}
       （以 _contains 结尾的 key 会用 in 操作符匹配目标字段）
-    - tool_name_contains：特殊处理（匹配 payload 中任何 tool_name 相关字段）
+    - list 字段 contains：当 payload[base_field] 是 list 时，做 element-in-list 检查
+      （Codex Phase A review MED-7：list-aware contains，支持 queried_namespace_kinds 等）
+    - tool_name_contains：在多个候选字段中任一命中即 OK
+      （Codex Phase A review MED-7：从无分隔拼接改为按字段单独匹配）
+    - 空 / null 约束：要求字段存在（Codex Phase A review MED-7）
 
     返回：(是否全部命中, 缺失/不匹配的字段列表)
     """
     missing: list[str] = []
 
     for key, expected_value in required_fields.items():
-        if not expected_value and expected_value != 0:
-            # 空字符串 / null 约束：只需字段存在即可
+        # 空 / null 约束（Codex MED-7：从"无条件跳过"改为"必须字段存在"）
+        if expected_value is None or expected_value == "":
+            base_field = key[: -len("_contains")] if key.endswith("_contains") else key
+            if base_field not in event_payload:
+                missing.append(key)
             continue
 
         if key.endswith("_contains"):
-            # 字符串包含匹配：key = "content_contains" → 在 payload["content"] 中搜索
             base_field = key[: -len("_contains")]
-            actual_value = event_payload.get(base_field, "")
 
-            # tool_name_contains：搜索所有可能包含工具名的字段
+            # tool_name_contains：在候选字段中任一命中即 OK（不再拼接，避免跨字段误匹配）
             if base_field == "tool_name":
-                actual_value = (
-                    str(event_payload.get("tool_name", ""))
-                    + str(event_payload.get("function_name", ""))
-                    + str(event_payload.get("name", ""))
-                )
+                hit = False
+                for field in _TOOL_NAME_CANDIDATE_FIELDS:
+                    field_val = event_payload.get(field)
+                    if field_val is not None and str(expected_value) in str(field_val):
+                        hit = True
+                        break
+                if not hit:
+                    missing.append(key)
+                continue
 
-            if expected_value not in str(actual_value):
+            actual_value = event_payload.get(base_field)
+            if actual_value is None:
                 missing.append(key)
+                continue
+
+            # list 字段 contains：element-in-list
+            if isinstance(actual_value, list):
+                if expected_value not in actual_value:
+                    missing.append(key)
+            else:
+                if str(expected_value) not in str(actual_value):
+                    missing.append(key)
         else:
             # 精确匹配
             actual_value = event_payload.get(key)
@@ -263,8 +288,10 @@ def score_tier1(
                 match_ratio=match_ratio,
             )
             partial_score = judge_result.score
-            # pass_fail 维度：按 match_ratio 线性插值（部分命中）
-            pass_fail_score = match_ratio
+            # Codex Phase A review MED-5 修复 2026-05-29:
+            # PARTIAL 不再用 match_ratio 作 pass_fail_score（避免 LLM judge 与 EventStore
+            # 匹配双重计分），pass_fail 二值化：PARTIAL → 0.0（partial 维度独立体现）
+            pass_fail_score = 0.0
             verdict = TaskVerdict.PARTIAL
 
         else:
@@ -280,14 +307,27 @@ def score_tier1(
                 # 效率分：token_usage / baseline（越低越好，上限 1.0）
                 efficiency_score = min(1.0, baseline / token_usage)
 
-        # Step 4: 加权总分
-        partial_contribution = (partial_score or 0.0) * partial_weight
-        efficiency_contribution = (efficiency_score or 0.0) * efficiency_weight
-        weighted_score = (
-            pass_fail_score * pass_fail_weight
-            + partial_contribution
-            + efficiency_contribution
+        # Step 4: 加权总分（活跃维度归一化）
+        # Codex Phase A review HIGH-2 修复 2026-05-29:
+        # 未触发的维度（partial / efficiency = None）不计入权重分母，
+        # 否则 Phase A-D PASS task 上限只能到 pass_fail_weight (0.65)，
+        # M5 baseline weighted_score 系统性偏低。
+        active_pass_fail_weight = pass_fail_weight
+        active_partial_weight = partial_weight if partial_score is not None else 0.0
+        active_efficiency_weight = efficiency_weight if efficiency_score is not None else 0.0
+        total_active_weight = (
+            active_pass_fail_weight + active_partial_weight + active_efficiency_weight
         )
+
+        if total_active_weight > 0:
+            weighted_score = (
+                pass_fail_score * active_pass_fail_weight
+                + (partial_score or 0.0) * active_partial_weight
+                + (efficiency_score or 0.0) * active_efficiency_weight
+            ) / total_active_weight
+        else:
+            # 极端情况：所有 weight 都 0（rubric 配置异常），退化为 pass_fail_score
+            weighted_score = pass_fail_score
 
         return BenchmarkRunScore(
             task_id=task_id,
@@ -331,75 +371,98 @@ def load_scoring_rubrics(rubrics_yaml_path: Path) -> dict[str, dict[str, Any]]:
     return {r["rubric_id"]: r for r in rubrics_list}
 
 
-def fetch_events_from_store(
-    event_store: EventStore,
-    task_start_time: datetime.datetime,
-    event_types: list[str] | None = None,
-) -> list[dict[str, Any]]:
+DEFAULT_TIER1_EVENT_TYPES: list[EventType] = [
+    EventType.MEMORY_ENTRY_ADDED,
+    EventType.MEMORY_RECALL_COMPLETED,
+    EventType.MEMORY_RECALL_SCHEDULED,
+    EventType.TOOL_CALL_STARTED,
+    EventType.TOOL_CALL_COMPLETED,
+    EventType.TOOL_CALL_FAILED,
+    EventType.SKILL_STARTED,
+    EventType.SKILL_COMPLETED,
+    EventType.SUBAGENT_SPAWNED,
+    EventType.SUBAGENT_COMPLETED,
+    EventType.WORKER_DISPATCHED,
+    EventType.WORKER_RETURNED,
+    EventType.WORKER_LOG_EMITTED,
+    EventType.A2A_MESSAGE_SENT,
+    EventType.A2A_MESSAGE_RECEIVED,
+    EventType.ROUTINE_TRIGGERED,
+    EventType.ROUTINE_COMPLETED,
+    EventType.ROUTINE_SKIPPED,
+    EventType.POLICY_DECISION,
+    EventType.BEHAVIOR_PACK_LOADED,
+    EventType.MODEL_CALL_COMPLETED,
+    EventType.PIPELINE_RUN_UPDATED,
+    EventType.RESOURCE_LIMIT_HIT,
+    EventType.OBSERVATION_OBSERVED,
+]
+
+
+def _normalize_event_to_dict(evt: Any) -> dict[str, Any] | None:
+    """将单个 Event 对象规范化为 scorer 可消费的 dict 格式。
+
+    Event 模型字段名是 `type`（不是 `event_type`），scorer.event_store_assert 用
+    `e.get("event_type")` 过滤——这里统一把 `type` 映射为 `event_type` 字符串。
+
+    返回 None 表示无法处理的事件对象，调用方应跳过。
     """
-    从 EventStore 查询 task 执行期间的事件。
+    if isinstance(evt, dict):
+        d = dict(evt)
+    elif hasattr(evt, "model_dump"):
+        # pydantic BaseModel（生产路径 SqliteEventStore 返回 Event）
+        d = evt.model_dump()
+    elif hasattr(evt, "__dict__"):
+        d = dict(evt.__dict__)
+    else:
+        return None
+
+    # 字段名标准化：Event.type → event_type（枚举值展平为字符串）
+    raw_type = d.pop("type", None)
+    if raw_type is None:
+        raw_type = d.get("event_type")
+    if raw_type is not None:
+        d["event_type"] = raw_type.value if hasattr(raw_type, "value") else raw_type
+    return d
+
+
+async def fetch_events_from_store(
+    event_store: EventStore,
+    task_id: str,
+    task_start_time: datetime.datetime,
+    event_types: list[EventType] | None = None,
+) -> list[dict[str, Any]]:
+    """异步从 EventStore 查询 task 执行期间的事件。
+
+    Codex Phase A review P1 修复（2026-05-29）：
+    - `SqliteEventStore.get_events_by_types_since` 是 async 方法，
+      真实签名 `(task_id: str, event_types: list[EventType], since_ts: datetime)`
+    - `Event` 模型字段名是 `type` 不是 `event_type`（pydantic 字段）
 
     参数：
-    - event_store：OctoAgent EventStore 实例
-    - task_start_time：task 开始执行的时间（仅查询此时间之后的事件）
-    - event_types：需要查询的 EventType 列表（None = 查询所有类型）
+    - event_store：OctoAgent SqliteEventStore 实例
+    - task_id：task ID（按 task 过滤；从调用方 BenchmarkRun 传入）
+    - task_start_time：task 开始执行的时间（仅返回 ts >= task_start_time 的事件）
+    - event_types：要查询的 EventType 列表（None = 使用 DEFAULT_TIER1_EVENT_TYPES）
 
-    返回：事件 dict 列表（扁平化，含 event_type / payload / created_at）
+    返回：事件 dict 列表，每条含 `event_type`（标准化为字符串）+ payload + 其他字段。
 
     注意（PoC-H0 实测）：
     - harness._store_group（private）需用 getattr(harness, "_store_group", None) 访问
     - 从 _store_group 获取 event_store 实例后再调用此函数
     """
     if event_types is None:
-        # 默认查询 Tier 1 常用事件类型
-        event_types = [
-            EventType.MEMORY_ENTRY_ADDED,
-            EventType.MEMORY_RECALL_COMPLETED,
-            EventType.MEMORY_RECALL_SCHEDULED,
-            EventType.TOOL_CALL_STARTED,
-            EventType.TOOL_CALL_COMPLETED,
-            EventType.TOOL_CALL_FAILED,
-            EventType.SKILL_STARTED,
-            EventType.SKILL_COMPLETED,
-            EventType.SUBAGENT_SPAWNED,
-            EventType.SUBAGENT_COMPLETED,
-            EventType.WORKER_DISPATCHED,
-            EventType.WORKER_RETURNED,
-            EventType.WORKER_LOG_EMITTED,
-            EventType.A2A_MESSAGE_SENT,
-            EventType.A2A_MESSAGE_RECEIVED,
-            EventType.ROUTINE_TRIGGERED,
-            EventType.ROUTINE_COMPLETED,
-            EventType.ROUTINE_SKIPPED,
-            EventType.POLICY_DECISION,
-            EventType.BEHAVIOR_PACK_LOADED,
-            EventType.MODEL_CALL_COMPLETED,
-            EventType.PIPELINE_RUN_UPDATED,
-            EventType.RESOURCE_LIMIT_HIT,
-            EventType.OBSERVATION_OBSERVED,
-        ]
+        event_types = DEFAULT_TIER1_EVENT_TYPES
 
-    raw_events = event_store.get_events_by_types_since(
-        since=task_start_time,
+    raw_events = await event_store.get_events_by_types_since(
+        task_id=task_id,
         event_types=event_types,
+        since_ts=task_start_time,
     )
 
-    # 将 OctoAgent Event 对象序列化为 scorer 可消费的 dict 格式
     result: list[dict[str, Any]] = []
     for evt in raw_events:
-        # 兼容不同的 event 对象格式（dataclass / pydantic model / dict）
-        if isinstance(evt, dict):
-            result.append(evt)
-        elif hasattr(evt, "__dict__"):
-            d = evt.__dict__.copy()
-            # event_type 统一为字符串
-            if "event_type" in d and hasattr(d["event_type"], "value"):
-                d["event_type"] = d["event_type"].value
+        d = _normalize_event_to_dict(evt)
+        if d is not None:
             result.append(d)
-        elif hasattr(evt, "model_dump"):
-            d = evt.model_dump()
-            if "event_type" in d and hasattr(d["event_type"], "value"):
-                d["event_type"] = d["event_type"].value
-            result.append(d)
-
     return result

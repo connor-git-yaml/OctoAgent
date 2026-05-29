@@ -7,11 +7,16 @@ tier: 1
 domain: delegation
 delegation_mode: a2a_worker_to_worker
 prompt: "请安排一个 Worker 委托另一个 Worker 帮助完成子任务：由 Research Worker 向 Writing Worker 发送请求，让 Writing Worker 基于研究结果写一段 2 句话总结。"
+# Codex Phase A review MED-11 修复 2026-05-29: A2A_MESSAGE_SENT 必须断言 from_agent
+# 包含 "worker"，否则 worker→worker 路径无法与 main→worker (T1-DELEGATION-003) 区分。
+# A2AMessageAuditPayload from_agent 字段是发送方 agent URI（payloads.py:280）。
 expected_events:
   - event_type: A2A_MESSAGE_SENT
-    required_fields: {}  # Worker→Worker A2A 消息发送（F098 D14 解禁后路径）
+    required_fields:
+      from_agent_contains: "worker"  # 发送方必须是 Worker（D14 解禁后 Worker→Worker 路径）
   - event_type: A2A_MESSAGE_RECEIVED
-    required_fields: {}  # 接收方 Worker 收到消息
+    required_fields:
+      to_agent_contains: "worker"  # 接收方也是 Worker
   - event_type: WORKER_RETURNED
     required_fields: {}  # 最终结果回报到主 Agent
 timeout_seconds: 300
@@ -19,6 +24,8 @@ partial_signals:
   - event_type: A2A_MESSAGE_SENT
 notes: >
   此 task 验证 F098 D14（Worker→Worker 解禁）后的 A2A 路径 audit chain 完整性。
+  from_agent_contains: "worker" 是 worker→worker 路径的关键证据，与 T1-DELEGATION-003
+  (from_agent=main) 显式区分。
   Tier 1 只看事件存在性（流程跑通即可）。
   Tier 3 t3_delegation_h3b.yaml 验证 H3-B 哲学语义（每方在自己的 Project/Memory 工作）。
 rubric_id: tier1-v1
