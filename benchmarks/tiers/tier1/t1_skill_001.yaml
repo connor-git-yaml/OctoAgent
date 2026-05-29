@@ -1,0 +1,16 @@
+# Tier 1 — Skill Pipeline 域：触发单步 Skill（DAG 单节点执行）
+# 验证 Agent 能触发 Skill Pipeline 并产生 SKILL_STARTED / SKILL_COMPLETED 事件链
+
+task_id: T1-SKILL-001
+tier: 1
+domain: skill_pipeline
+prompt: "请运行一个 Skill 来帮我生成一份简短的项目状态摘要，内容包括：当前任务状态 / 最近活动。"
+expected_events:
+  - event_type: SKILL_STARTED
+    required_fields: {}  # Skill 执行开始
+  - event_type: SKILL_COMPLETED
+    required_fields: {}  # Skill 执行完成
+timeout_seconds: 300
+partial_signals:
+  - event_type: SKILL_STARTED  # 至少触发 Skill 启动
+rubric_id: tier1-v1

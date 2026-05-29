@@ -1,0 +1,76 @@
+{
+  "_comment": "虚构健康数据，用于 OctoBench T1-CONNOR-4 睡眠/运动分析测试。不含真实个人 PII。",
+  "_generated": "2026-05-29",
+  "health_data": {
+    "owner": "benchmark_test_user",
+    "period": "7_days",
+    "start_date": "2026-05-22",
+    "end_date": "2026-05-28",
+    "daily_records": [
+      {
+        "date": "2026-05-22",
+        "sleep_hours": 7.2,
+        "hrv": 48,
+        "steps": 8540,
+        "exercise_minutes": 35,
+        "resting_hr": 62
+      },
+      {
+        "date": "2026-05-23",
+        "sleep_hours": 6.1,
+        "hrv": 42,
+        "steps": 5200,
+        "exercise_minutes": 0,
+        "resting_hr": 66
+      },
+      {
+        "date": "2026-05-24",
+        "sleep_hours": 8.0,
+        "hrv": 55,
+        "steps": 11200,
+        "exercise_minutes": 60,
+        "resting_hr": 59
+      },
+      {
+        "date": "2026-05-25",
+        "sleep_hours": 5.8,
+        "hrv": 38,
+        "steps": 4800,
+        "exercise_minutes": 0,
+        "resting_hr": 70
+      },
+      {
+        "date": "2026-05-26",
+        "sleep_hours": 7.5,
+        "hrv": 51,
+        "steps": 9100,
+        "exercise_minutes": 45,
+        "resting_hr": 61
+      },
+      {
+        "date": "2026-05-27",
+        "sleep_hours": 6.8,
+        "hrv": 47,
+        "steps": 7300,
+        "exercise_minutes": 20,
+        "resting_hr": 63
+      },
+      {
+        "date": "2026-05-28",
+        "sleep_hours": 7.9,
+        "hrv": 53,
+        "steps": 10500,
+        "exercise_minutes": 55,
+        "resting_hr": 60
+      }
+    ],
+    "weekly_summary": {
+      "avg_sleep_hours": 7.04,
+      "avg_hrv": 47.7,
+      "total_steps": 56640,
+      "avg_daily_steps": 8091,
+      "exercise_days": 5,
+      "avg_resting_hr": 63.0
+    }
+  }
+}

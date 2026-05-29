@@ -1,0 +1,24 @@
+# Tier 1 — 委托域：delegate_task 单 spawn（coding/analysis capability）
+# F-10 patch：第 2 个 delegate_task 场景（不同 capability）
+# 验证不同 capability 的 Worker 委托路径
+
+task_id: T1-DELEGATION-002
+tier: 1
+domain: delegation
+delegation_mode: delegate_task
+prompt: "请委托一个 Coding Worker 分析以下代码片段的复杂度：`def fib(n): return n if n <= 1 else fib(n-1) + fib(n-2)`。Worker 完成后向我汇报时间复杂度分析。"
+expected_events:
+  - event_type: WORKER_DISPATCHED
+    required_fields: {}
+  - event_type: SUBAGENT_SPAWNED
+    required_fields: {}
+  - event_type: WORKER_RETURNED
+    required_fields: {}
+timeout_seconds: 300
+partial_signals:
+  - event_type: WORKER_DISPATCHED
+  - event_type: SUBAGENT_SPAWNED
+notes: >
+  与 T1-DELEGATION-001 的区别：capability 不同（coding vs research）。
+  验证 delegate_task 路径对不同 capability Worker 的通用性。
+rubric_id: tier1-v1

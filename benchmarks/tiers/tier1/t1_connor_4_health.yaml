@@ -1,0 +1,29 @@
+# Tier 1 — Connor 真实场景域：睡眠 / 运动健康分析
+# F-08 patch：按用户拍板内容填入（2026-05-28）
+# domain: connor_real_world
+
+task_id: T1-CONNOR-4
+tier: 1
+domain: connor_real_world
+prompt: "我的 iOS 健康数据在 `benchmarks/tiers/tier1/fixtures/connor/mock_health.json`，分析近 7 天睡眠 / 运动趋势 + 给健康建议。报告格式：睡眠趋势图表（文字模拟）/ 步数趋势 / 具体建议。"
+expected_events:
+  - event_type: TOOL_CALL_STARTED
+    required_fields: {}  # filesystem.read_text 读取 mock_health.json
+  - event_type: TOOL_CALL_COMPLETED
+    required_fields: {}  # 文件读取完成
+  - event_type: MODEL_CALL_COMPLETED
+    required_fields: {}  # 生成健康分析报告
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED
+  - event_type: TOOL_CALL_COMPLETED
+mock_data_files:
+  - benchmarks/tiers/tier1/fixtures/connor/mock_health.json
+notes: >
+  期望产出：Markdown 格式健康分析报告，含：
+  1. 睡眠时长趋势（7 天 × sleep_hours，标注平均值）
+  2. 步数趋势（7 天 × steps，标注达标天数）
+  3. 具体健康建议（基于数据的个性化建议，非泛化建议）
+  scorer 验证：markdown 产出中含"睡眠"和"步数"关键词 + TOOL_CALL_COMPLETED 事件。
+  mock_health.json 数据为虚构数据，不含真实个人 PII。
+rubric_id: tier1-v1

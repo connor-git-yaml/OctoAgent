@@ -1,0 +1,19 @@
+# Tier 1 — max_depth 限制域：验证委托深度限制（max_depth=2）
+# 验证超出 max_depth 时系统正确拦截（不让无限嵌套 Worker 委托）
+
+task_id: T1-MAX-DEPTH-001
+tier: 1
+domain: max_depth
+prompt: "请尝试创建一个 3 层嵌套委托：主 Agent → Worker A → Worker B → Worker C。告诉我系统在哪一层阻止了委托，并说明原因。"
+expected_events:
+  - event_type: WORKER_DISPATCHED
+    required_fields: {}  # 第 1 层委托成功
+  - event_type: RESOURCE_LIMIT_HIT
+    required_fields: {}  # 第 3 层被 max_depth 限制拦截
+timeout_seconds: 300
+partial_signals:
+  - event_type: WORKER_DISPATCHED  # 至少第 1 层委托触发
+notes: >
+  max_depth=2（F084 DelegationManager 配置）：主 Agent → Worker（depth=1）→ Sub-Worker（depth=2）允许。
+  depth=3（Worker→Sub-Worker→Sub-Sub-Worker）应被 RESOURCE_LIMIT_HIT 拦截。
+rubric_id: tier1-v1

@@ -1,0 +1,24 @@
+# Tier 1 — 委托域：A2A Worker→Worker 场景（含 D14 解禁后路径）
+# F-10 patch：第 2 个 A2A 场景（含 Worker→Worker，与 T3-5 差异化）
+# Tier 1 断言：audit chain 完整性（事件存在性）；Tier 3 断言：H3 哲学语义
+
+task_id: T1-DELEGATION-004
+tier: 1
+domain: delegation
+delegation_mode: a2a_worker_to_worker
+prompt: "请安排一个 Worker 委托另一个 Worker 帮助完成子任务：由 Research Worker 向 Writing Worker 发送请求，让 Writing Worker 基于研究结果写一段 2 句话总结。"
+expected_events:
+  - event_type: A2A_MESSAGE_SENT
+    required_fields: {}  # Worker→Worker A2A 消息发送（F098 D14 解禁后路径）
+  - event_type: A2A_MESSAGE_RECEIVED
+    required_fields: {}  # 接收方 Worker 收到消息
+  - event_type: WORKER_RETURNED
+    required_fields: {}  # 最终结果回报到主 Agent
+timeout_seconds: 300
+partial_signals:
+  - event_type: A2A_MESSAGE_SENT
+notes: >
+  此 task 验证 F098 D14（Worker→Worker 解禁）后的 A2A 路径 audit chain 完整性。
+  Tier 1 只看事件存在性（流程跑通即可）。
+  Tier 3 t3_delegation_h3b.yaml 验证 H3-B 哲学语义（每方在自己的 Project/Memory 工作）。
+rubric_id: tier1-v1

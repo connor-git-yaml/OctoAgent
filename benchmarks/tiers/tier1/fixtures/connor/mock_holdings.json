@@ -1,0 +1,66 @@
+{
+  "_comment": "虚构持仓数据，用于 OctoBench T1-CONNOR-1 持仓健康度报告测试。不含真实股票 ticker，不作为投资建议。",
+  "_generated": "2026-05-29",
+  "portfolio": {
+    "owner": "benchmark_test_user",
+    "currency": "USD",
+    "holdings": [
+      {
+        "name": "NexaCore Technologies",
+        "sector": "Technology",
+        "quantity": 120,
+        "cost_price": 45.20,
+        "current_price": 62.80,
+        "industry": "Cloud Infrastructure"
+      },
+      {
+        "name": "QuantumLeap Biotech",
+        "sector": "Healthcare",
+        "quantity": 80,
+        "cost_price": 88.50,
+        "current_price": 74.30,
+        "industry": "Gene Therapy"
+      },
+      {
+        "name": "Solaris Energy Corp",
+        "sector": "Energy",
+        "quantity": 200,
+        "cost_price": 22.10,
+        "current_price": 28.90,
+        "industry": "Solar Power"
+      },
+      {
+        "name": "ArcadeFinancial Group",
+        "sector": "Financials",
+        "quantity": 150,
+        "cost_price": 55.00,
+        "current_price": 58.40,
+        "industry": "Investment Banking"
+      },
+      {
+        "name": "TerraVerde Agriculture",
+        "sector": "Consumer Staples",
+        "quantity": 300,
+        "cost_price": 18.75,
+        "current_price": 15.20,
+        "industry": "Precision Farming"
+      },
+      {
+        "name": "PrismRobotics Inc",
+        "sector": "Technology",
+        "quantity": 50,
+        "cost_price": 125.00,
+        "current_price": 183.60,
+        "industry": "Industrial Robotics"
+      },
+      {
+        "name": "NovaCeramics Materials",
+        "sector": "Materials",
+        "quantity": 400,
+        "cost_price": 12.30,
+        "current_price": 11.80,
+        "industry": "Advanced Ceramics"
+      }
+    ]
+  }
+}

@@ -1,0 +1,16 @@
+# Tier 1 — Memory 域：memory recall（从已有 memory 检索）
+# 验证 Agent 能主动触发 recall 从 memory 中检索历史写入的事实
+
+task_id: T1-MEMORY-003
+tier: 1
+domain: memory
+prompt: "请从你的长期记忆中检索任何与 'OctoAgent' 或 '项目' 相关的事实，并列出找到的内容。如果没有相关记忆，请说明。"
+expected_events:
+  - event_type: MEMORY_RECALL_SCHEDULED
+    required_fields: {}  # recall 调度
+  - event_type: MEMORY_RECALL_COMPLETED
+    required_fields: {}  # recall 完成（可能 0 结果，但事件必须产生）
+timeout_seconds: 300
+partial_signals:
+  - event_type: MEMORY_RECALL_SCHEDULED  # 触发 recall 调度即得部分分
+rubric_id: tier1-v1

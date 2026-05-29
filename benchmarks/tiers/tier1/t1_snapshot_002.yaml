@@ -1,0 +1,18 @@
+# Tier 1 — 冻结快照域：SnapshotStore 读取（列出已有快照）
+# 验证 Agent 能读取已有冻结快照列表并报告状态
+
+task_id: T1-SNAPSHOT-002
+tier: 1
+domain: snapshot
+prompt: "请列出当前所有可用的行为快照（frozen snapshots），如果没有则告知，并说明快照的作用。"
+expected_events:
+  - event_type: TOOL_CALL_STARTED
+    required_fields: {}  # 调用列快照或读快照工具
+  - event_type: TOOL_CALL_COMPLETED
+    required_fields: {}
+  - event_type: MODEL_CALL_COMPLETED
+    required_fields: {}
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED
+rubric_id: tier1-v1

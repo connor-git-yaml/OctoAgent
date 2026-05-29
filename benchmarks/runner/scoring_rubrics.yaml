@@ -1,0 +1,68 @@
+# OctoBench ScoringRubric 定义
+# 版本历史：Phase A 初始版（efficiency_baseline_tokens = null，Phase E 末跑完 M5 baseline 后填入）
+# 权重设计：pass_fail=65% / partial=25% / efficiency=10%（Tier 1 主评维度是 EventStore 断言）
+# 修改注意：触发条件常量（llm_judge_trigger）须与 scorer.py 中 LLM_JUDGE_TRIGGER_* 常量严格对齐
+
+rubrics:
+  # Tier 1 私有 task：EventStore 断言主路径 + LLM judge partial 评分
+  - rubric_id: tier1-v1
+    tier: 1
+    pass_fail_weight: 0.65
+    partial_weight: 0.25
+    efficiency_weight: 0.10
+    pass_logic: event_store_assert
+    partial_logic: llm_judge
+    efficiency_baseline_tokens: null  # W3: Phase E 末跑 M5 baseline 后用 p50 填入
+    llm_judge_trigger: "0.5 <= match_ratio < 1.0"
+    llm_judge_max_calls: 2
+    notes: >
+      pass_fail：EventStore 查询断言（expected_events 全部命中 → PASS）。
+      partial：match_ratio 在 [0.5, 1.0) 时触发 LLM judge（最多 2 次/task）。
+      efficiency：efficiency_baseline_tokens 填入后，token_usage 与 baseline p50 比较。
+
+  # Tier 2 τ-bench airline：Pass@1 评分（用户模拟器 action 全部成功执行）
+  - rubric_id: tier2-tau-v1
+    tier: 2
+    pass_fail_weight: 0.90
+    partial_weight: 0.10
+    efficiency_weight: 0.00
+    pass_logic: pass_at_1
+    partial_logic: null
+    efficiency_baseline_tokens: null
+    llm_judge_trigger: null
+    llm_judge_max_calls: null
+    notes: >
+      pass_fail：τ-bench user simulator actions 全部成功执行（Pass@1）。
+      partial：预留 0.10 权重供未来扩展（Phase B 实施时确认是否使用）。
+
+  # Tier 2 GAIA Level 2：字符串精确匹配（normalized）
+  - rubric_id: tier2-gaia-v1
+    tier: 2
+    pass_fail_weight: 1.00
+    partial_weight: 0.00
+    efficiency_weight: 0.00
+    pass_logic: string_match
+    partial_logic: null
+    efficiency_baseline_tokens: null
+    llm_judge_trigger: null
+    llm_judge_max_calls: null
+    notes: >
+      GAIA L2 标准评分：模型回答与 gold_answer 做 normalized 字符串匹配。
+      Phase B PoC-H1 FAIL 激活 fallback（gaia_fallback_tasks.yaml 手工样本）。
+
+  # Tier 3 哲学验证 task：audit chain 完整性断言
+  - rubric_id: tier3-v1
+    tier: 3
+    pass_fail_weight: 1.00
+    partial_weight: 0.00
+    efficiency_weight: 0.00
+    pass_logic: audit_chain_assert
+    partial_logic: null
+    efficiency_baseline_tokens: null
+    llm_judge_trigger: null
+    llm_judge_max_calls: null
+    notes: >
+      Tier 3 断言维度：audit 信号语义（H1/H2/H3 哲学正确），不只看事件链存在性。
+      H1：主 Agent 唯一 user-facing speaker（WORKER_DISPATCHED 但无 Worker 直接 user reply）。
+      H2：Worker full session parity（AGENT_SESSION_TURN_PERSISTED / MEMORY_RECALL_COMPLETED）。
+      H3：委托模式审计链（SUBAGENT_SPAWNED / A2A_MESSAGE_SENT 信号语义）。

@@ -1,0 +1,25 @@
+# Tier 1 — Connor 真实场景域：无人机 / 机器人日报
+# F-08 patch：按用户拍板内容填入（2026-05-28）
+# domain: connor_real_world
+
+task_id: T1-CONNOR-3
+tier: 1
+domain: connor_real_world
+prompt: "出一份近 24h 的无人机 + 机器人（含具身智能 / humanoid）领域日报，5-10 条新闻，每条带 1 句话评论。格式：Markdown 列表，含标题 / 来源 / 1 句话点评。"
+expected_events:
+  - event_type: TOOL_CALL_STARTED
+    required_fields: {}  # web.search 或 mcp.perplexity 工具调用（至少 1 次）
+  - event_type: TOOL_CALL_COMPLETED
+    required_fields: {}
+  - event_type: MODEL_CALL_COMPLETED
+    required_fields: {}
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED
+  - event_type: TOOL_CALL_COMPLETED
+notes: >
+  与 T1-CONNOR-2 结构相同，领域不同（robotics / drone / embodied AI / humanoid）。
+  scorer 宽松策略：web.search 任意工具 ≥ 1 次即可。
+  PASS 条件：产出 Markdown 含 ≥ 5 条相关新闻 + 至少 1 次 web 工具调用。
+  无 mock 数据文件（依赖实时 web）。
+rubric_id: tier1-v1

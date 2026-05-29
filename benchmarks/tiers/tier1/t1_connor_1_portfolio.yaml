@@ -1,0 +1,36 @@
+# Tier 1 — Connor 真实场景域：持仓健康度报告
+# F-08 patch：按用户拍板内容填入（2026-05-28）
+# domain: connor_real_world（SC-005 第 10 域）
+
+task_id: T1-CONNOR-1
+tier: 1
+domain: connor_real_world
+prompt: "我的持仓在 `benchmarks/tiers/tier1/fixtures/connor/mock_holdings.json`，请生成一份持仓健康度报告，含估值变动 / 集中度 / 行业敞口 / 风险提示 / rebalance 建议。"
+expected_events:
+  - event_type: SKILL_STARTED
+    required_fields: {}  # Skill Pipeline 触发（分析类 Skill）
+  - event_type: TOOL_CALL_STARTED
+    required_fields: {}  # filesystem.read_text 或类似工具读取 mock_holdings.json
+  - event_type: TOOL_CALL_COMPLETED
+    required_fields: {}  # 文件读取完成
+  - event_type: MEMORY_RECALL_COMPLETED
+    required_fields: {}  # 从 memory 中检索相关历史信息
+  - event_type: WORKER_LOG_EMITTED
+    required_fields: {}  # Worker 中间分析日志（F103c 新增）
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED   # 至少读取文件
+  - event_type: TOOL_CALL_COMPLETED  # 文件读取成功
+  - event_type: WORKER_LOG_EMITTED   # 产生分析日志
+mock_data_files:
+  - benchmarks/tiers/tier1/fixtures/connor/mock_holdings.json
+notes: >
+  期望产出：Markdown 格式持仓报告，含以下 5 个子模块：
+  1. 估值变动（成本价 vs 当前价的盈亏）
+  2. 集中度分析（单一持仓占比 > 20% 需标注）
+  3. 行业敞口分布（按 sector 汇总）
+  4. 风险提示（集中度 / 行业偏斜 / 波动率）
+  5. Rebalance 建议（调仓方向）
+  scorer 验证：markdown 产出存在 + WORKER_LOG_EMITTED 事件存在。
+  mock_holdings.json 含虚构股票名，不使用真实 ticker（防止误用为真实投资建议）。
+rubric_id: tier1-v1

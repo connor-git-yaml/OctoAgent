@@ -1,0 +1,17 @@
+# Tier 1 — 工具调用域：基础工具调用（读取文件系统信息）
+# 验证 Agent 能正确调用工具 + EventStore 产生 TOOL_CALL_STARTED / TOOL_CALL_COMPLETED 事件链
+
+task_id: T1-TOOL-CALL-001
+tier: 1
+domain: tool_call
+prompt: "请用工具读取当前项目根目录下 README.md 的内容（如果不存在则告知），并简要总结文件存在性状态。"
+expected_events:
+  - event_type: TOOL_CALL_STARTED
+    required_fields:
+      tool_name_contains: "read"  # filesystem.read_text 或类似工具
+  - event_type: TOOL_CALL_COMPLETED
+    required_fields: {}  # 工具调用完成即可，不限制具体返回值
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED  # 至少发起工具调用即得部分分
+rubric_id: tier1-v1

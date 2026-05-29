@@ -1,0 +1,24 @@
+# Tier 1 — 委托域：delegate_task 单 spawn（research capability）
+# F-10 patch：2 delegate_task + 2 A2A 分布
+# 验证主 Agent 能通过 delegate_task 派发 Worker 并产生完整 audit chain
+
+task_id: T1-DELEGATION-001
+tier: 1
+domain: delegation
+delegation_mode: delegate_task
+prompt: "请委托一个 Research Worker 帮我查找关于 'Pydantic AI Agent framework' 的简要介绍（2-3 句话），Worker 完成后向我汇报结果。"
+expected_events:
+  - event_type: WORKER_DISPATCHED
+    required_fields: {}  # Worker 被派发
+  - event_type: SUBAGENT_SPAWNED
+    required_fields: {}  # Worker spawn 事件（delegate_task 路径）
+  - event_type: WORKER_RETURNED
+    required_fields: {}  # Worker 完成任务返回
+timeout_seconds: 300
+partial_signals:
+  - event_type: WORKER_DISPATCHED  # 至少触发委托
+  - event_type: SUBAGENT_SPAWNED   # spawn 事件产生
+notes: >
+  Tier 1 断言维度：event chain 存在性（流程跑通即可）。
+  Tier 3 审计断言（H3 哲学语义验证）在 t3_delegation_*.yaml 中处理。
+rubric_id: tier1-v1

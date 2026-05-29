@@ -1,0 +1,24 @@
+# Tier 1 — 委托域：A2A Worker 场景（main → worker P2P 消息）
+# F-10 patch：第 1 个 A2A 场景
+# 验证 A2A 消息发送路径（H3-B：Agent-to-Agent 真 P2P）
+
+task_id: T1-DELEGATION-003
+tier: 1
+domain: delegation
+delegation_mode: a2a
+prompt: "请通过 A2A 模式向一个已有的 Worker 发送消息：'请帮我确认系统状态并回报'，等待 Worker 回报后向我汇报结果。"
+expected_events:
+  - event_type: A2A_MESSAGE_SENT
+    required_fields: {}  # A2A 消息发送
+  - event_type: A2A_MESSAGE_RECEIVED
+    required_fields: {}  # Worker 接收消息
+  - event_type: WORKER_RETURNED
+    required_fields: {}  # Worker 完成回报
+timeout_seconds: 300
+partial_signals:
+  - event_type: A2A_MESSAGE_SENT   # 至少发出 A2A 消息
+  - event_type: A2A_MESSAGE_RECEIVED
+notes: >
+  Tier 1 A2A 场景：验证 audit chain 完整性（A2A_MESSAGE_SENT + A2A_MESSAGE_RECEIVED 必须配对）。
+  与 T1-DELEGATION-001/002（delegate_task 路径）的差异：A2A 是真 P2P，Worker 在自己的 Project 工作。
+rubric_id: tier1-v1

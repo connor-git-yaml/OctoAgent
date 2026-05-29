@@ -50,29 +50,29 @@
 **目标**：完成 25 个 Tier 1 task YAML 定义 + scorer 初始版 + ScoringRubric YAML。
 **关联 FR**：FR-D01, FR-D02, FR-D03, FR-B01, FR-B02, FR-B03 / **关联 AC**：AC1-1（前置）, AC4-1（前置）
 
-- [ ] **T-A-1** [新增文件，W9] 新建 `benchmarks/runner/scoring_rubrics.yaml`（初始版），含 4 个 rubric（tier1-v1 / tier2-tau-v1 / tier2-gaia-v1 / tier3-v1），`efficiency_baseline_tokens: null`（Phase E 末填入）。格式严格按 plan §3.1 草稿。**新增文件，不修改现有文件。** 估算：0.2h / 50 LOC。关联 FR-B02, W3, W9。
+- [x] **T-A-1** [新增文件，W9] 新建 `benchmarks/runner/scoring_rubrics.yaml`（初始版），含 4 个 rubric（tier1-v1 / tier2-tau-v1 / tier2-gaia-v1 / tier3-v1），`efficiency_baseline_tokens: null`（Phase E 末填入）。格式严格按 plan §3.1 草稿。**新增文件，不修改现有文件。** 估算：0.2h / 50 LOC。关联 FR-B02, W3, W9。
 
-- [ ] **T-A-2** [新增文件，P 可并行] 新建 `benchmarks/tiers/tier1/` 目录 + `t1_tool_call_*.yaml` × 3（基础工具调用域）。每文件含：`task_id` / `tier:1` / `domain:tool_call` / `prompt` / `expected_events`（MEMORY_ENTRY_ADDED 等）/ `timeout_seconds:300` / `partial_signals`。**新增文件。** 估算：0.3h / 60 LOC。关联 FR-D01, FR-D03。
+- [x] **T-A-2** [新增文件，P 可并行] 新建 `benchmarks/tiers/tier1/` 目录 + `t1_tool_call_*.yaml` × 3（基础工具调用域）。每文件含：`task_id` / `tier:1` / `domain:tool_call` / `prompt` / `expected_events`（MEMORY_ENTRY_ADDED 等）/ `timeout_seconds:300` / `partial_signals`。**新增文件。** 估算：0.3h / 60 LOC。关联 FR-D01, FR-D03。
 
-- [ ] **T-A-3** [新增文件，P 可并行] 新建 `t1_user_md_*.yaml` × 3（USER.md 全链路域：读写 + 观测）。**新增文件。** 估算：0.3h / 60 LOC。关联 FR-D01, FR-D03。
+- [x] **T-A-3** [新增文件，P 可并行] 新建 `t1_user_md_*.yaml` × 3（USER.md 全链路域：读写 + 观测）。**新增文件。** 估算：0.3h / 60 LOC。关联 FR-D01, FR-D03。
 
-- [ ] **T-A-4** [新增文件，P 可并行] 新建 `t1_snapshot_*.yaml` × 2（冻结快照域：SnapshotStore 读写）。**新增文件。** 估算：0.2h / 40 LOC。关联 FR-D01, FR-D03。
+- [x] **T-A-4** [新增文件，P 可并行] 新建 `t1_snapshot_*.yaml` × 2（冻结快照域：SnapshotStore 读写）。**新增文件。** 估算：0.2h / 40 LOC。关联 FR-D01, FR-D03。
 
-- [ ] **T-A-5** [新增文件，P 可并行] 新建 `t1_memory_*.yaml` × 3（Memory 域：promote / recall，含 MEMORY_ENTRY_ADDED + MEMORY_RECALL_COMPLETED 断言）。**新增文件。** 估算：0.3h / 60 LOC。关联 FR-D01, FR-D03。
+- [x] **T-A-5** [新增文件，P 可并行] 新建 `t1_memory_*.yaml` × 3（Memory 域：promote / recall，含 MEMORY_ENTRY_ADDED + MEMORY_RECALL_COMPLETED 断言）。**新增文件。** 估算：0.3h / 60 LOC。关联 FR-D01, FR-D03。
 
-- [ ] **T-A-6** [新增文件，P 可并行] 新建 `t1_skill_*.yaml` × 2（Skill Pipeline 域：DAG 触发）。**新增文件。** 估算：0.2h / 40 LOC。关联 FR-D01, FR-D03。
+- [x] **T-A-6** [新增文件，P 可并行] 新建 `t1_skill_*.yaml` × 2（Skill Pipeline 域：DAG 触发）。**新增文件。** 估算：0.2h / 40 LOC。关联 FR-D01, FR-D03。
 
-- [ ] **T-A-7** [新增文件，P 可并行] 新建 `t1_delegation_*.yaml` × 4（委托域：delegate_task + A2A，含 SUBAGENT_SPAWNED 断言）。**新增文件。** 估算：0.3h / 80 LOC。关联 FR-D01, FR-D03。
+- [x] **T-A-7** [新增文件，P 可并行] 新建 `t1_delegation_*.yaml` × 4（委托域：delegate_task + A2A，含 SUBAGENT_SPAWNED 断言）。**新增文件。** 估算：0.3h / 80 LOC。关联 FR-D01, FR-D03。F-10 patch 落地：2 delegate_task（001/002）+ 2 A2A（003 main→worker / 004 worker→worker）。
 
-- [ ] **T-A-8** [新增文件，P 可并行] 新建 `t1_max_depth_001.yaml` × 1（max_depth 限制域）+ `t1_routine_001.yaml` × 1（Routine cron 触发域）。**新增文件。** 估算：0.2h / 40 LOC。关联 FR-D01, FR-D03。
+- [x] **T-A-8** [新增文件，P 可并行] 新建 `t1_max_depth_001.yaml` × 1（max_depth 限制域）+ `t1_routine_001.yaml` × 1（Routine cron 触发域）。**新增文件。** 估算：0.2h / 40 LOC。关联 FR-D01, FR-D03。
 
-- [ ] **T-A-9** [新增文件，P 可并行] 新建 `t1_threat_scanner_*.yaml` × 2（ThreatScanner block 安全拦截域）。**新增文件。** 估算：0.2h / 40 LOC。关联 FR-D01, FR-D03。
+- [x] **T-A-9** [新增文件，P 可并行] 新建 `t1_threat_scanner_*.yaml` × 2（ThreatScanner block 安全拦截域）。**新增文件。** 估算：0.2h / 40 LOC。关联 FR-D01, FR-D03。
 
-- [ ] **T-A-10** [新增文件，W8] 新建 Connor 真实场景 PLACEHOLDER × 4（`t1_connor_{1-4}.yaml`），状态 `status: PLACEHOLDER`，prompt 填 `"[CONNOR-SCENE-{N}: 待 PoC 后用户确认场景内容]"`，`expected_events: []`。**新增文件。** 估算：0.2h / 80 LOC。关联 FR-D01, FR-D03, W8，SC-005。blockedBy：T-0-GATE（需用户拍板场景内容后填入，此处先建 PLACEHOLDER）。
+- [x] **T-A-10** [新增文件，W8] 新建 Connor 真实场景 × 4（`t1_connor_{1-4}.yaml`）。F-08 patch 落地：按用户 2026-05-28 拍板内容完整填入（非 PLACEHOLDER），含 prompt / expected_events / mock_data_files。`t1_connor_1_portfolio.yaml` / `t1_connor_2_ai_daily.yaml` / `t1_connor_3_robotics_daily.yaml` / `t1_connor_4_health.yaml`。mock 数据：`fixtures/connor/mock_holdings.json`（7 持仓）+ `mock_health.json`（7 天健康数据）。**新增文件。** 估算：0.2h / 80 LOC。关联 FR-D01, FR-D03, W8，SC-005。
 
-- [ ] **T-A-11** [新增文件] 新建 `benchmarks/runner/scorer.py` Tier 1 初始版：EventStore query 断言逻辑（`event_store_assert`）+ LLM judge stub（W4：触发条件 `0.5 <= match_ratio < 1.0`，`max_calls=2`，Phase A 为 stub 实现）。定义 `score_tier1(task, run_result, event_store) -> BenchmarkRunScore` 接口（类型签名）。**新增文件，不修改现有文件。** 估算：0.8h / 120 LOC。关联 FR-B01, FR-B02, FR-B03, W4。blockedBy：T-A-1。
+- [x] **T-A-11** [新增文件] 新建 `benchmarks/runner/scorer.py` Tier 1 初始版 + `benchmarks/runner/llm_judge.py`（F-01 patch：触发常量真实落地）。scorer：EventStore query 断言逻辑（`event_store_assert`）+ LLM judge 触发（W4：`0.5 <= match_ratio < 1.0`，`max_calls=2`）。llm_judge：`LLMJudgeTrigger.should_trigger_judge` 真实判断（非 stub），`invoke_judge` Phase A 为 stub（score=0.5）。**新增文件，不修改现有文件。** 关联 FR-B01, FR-B02, FR-B03, W4。
 
-- [ ] **T-A-12** 单 task 手工验证：用 T-A-11 scorer 对 T-A-5 中 `t1_memory_001.yaml` 手工跑一次，确认 EventStore 断言路径可工作。无新文件产出，仅在 poc/ 下写临时验证脚本（可复用 T-0-T1 框架）。估算：0.3h。blockedBy：T-A-11, T-A-5。
+- [x] **T-A-12** 单 task 手工验证：poc/poc_t1_verify.py 对 t1_memory_001.yaml 做 schema validate + score_tier1 3 场景端到端 + LLM judge 边界测试（5/5）+ scoring_rubrics 4 rubric 加载。全部 PASS（退出码 0）。
 
 - [ ] **T-A-REVIEW** Phase A 末 per-Phase Codex review（foreground，小范围）：范围 = `benchmarks/runner/scoring_rubrics.yaml` + `benchmarks/tiers/tier1/*.yaml`（25 文件）+ `benchmarks/runner/scorer.py`（初始版）。重点：YAML schema 是否足够表达断言意图 / LLM judge 触发逻辑边界（W4）/ scoring_rubrics.yaml 权重设计是否合理。blockedBy：T-A-12。
 

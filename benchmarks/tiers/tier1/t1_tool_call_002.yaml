@@ -1,0 +1,16 @@
+# Tier 1 — 工具调用域：多步工具调用（列目录 + 读文件）
+# 验证 Agent 能串行调用多个工具并完成复合任务
+
+task_id: T1-TOOL-CALL-002
+tier: 1
+domain: tool_call
+prompt: "请列出项目根目录下有哪些 Python 文件（.py 扩展名），返回文件名列表即可，不需要读取内容。"
+expected_events:
+  - event_type: TOOL_CALL_STARTED
+    required_fields: {}  # 调用搜索或列目录工具
+  - event_type: TOOL_CALL_COMPLETED
+    required_fields: {}
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED
+rubric_id: tier1-v1

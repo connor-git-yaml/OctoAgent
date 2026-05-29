@@ -1,0 +1,19 @@
+# Tier 1 — Skill Pipeline 域：多步 Skill 执行（Graph Pipeline DAG）
+# 验证 Agent 能触发含多个节点的 Skill Graph Pipeline
+
+task_id: T1-SKILL-002
+tier: 1
+domain: skill_pipeline
+prompt: "请触发一个多步骤的 Skill Pipeline：第一步收集数据，第二步分析，第三步生成摘要报告。请用 skill 工具执行并报告每步结果。"
+expected_events:
+  - event_type: SKILL_STARTED
+    required_fields: {}
+  - event_type: SKILL_COMPLETED
+    required_fields: {}
+  - event_type: PIPELINE_RUN_UPDATED
+    required_fields: {}  # Graph pipeline 产生 checkpoint / run 更新事件
+timeout_seconds: 300
+partial_signals:
+  - event_type: SKILL_STARTED
+  - event_type: PIPELINE_RUN_UPDATED  # 至少产生 pipeline 更新事件
+rubric_id: tier1-v1

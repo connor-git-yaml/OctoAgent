@@ -1,0 +1,18 @@
+# Tier 1 — Memory 域：memory promote（observation → memory entry）
+# 验证 Agent 能将 candidate observation 提升为长期 memory
+
+task_id: T1-MEMORY-002
+tier: 1
+domain: memory
+prompt: "请将以下信息提升为长期记忆：'用户偏好深色模式界面 (dark mode)'。使用 memory promote 工具完成，并确认提升成功。"
+expected_events:
+  - event_type: TOOL_CALL_STARTED
+    required_fields:
+      tool_name_contains: "promote"  # memory.promote 或 observation.promote 工具
+  - event_type: MEMORY_ENTRY_ADDED
+    required_fields: {}  # promote 后写入 memory
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED
+  - event_type: MEMORY_ENTRY_ADDED
+rubric_id: tier1-v1

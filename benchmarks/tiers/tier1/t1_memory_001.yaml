@@ -1,0 +1,18 @@
+# Tier 1 — Memory 域：写入事实 + 验证 MEMORY_ENTRY_ADDED
+# 标准 memory promote 路径：用户给出新事实 → Agent 写入 memory → MEMORY_ENTRY_ADDED
+
+task_id: T1-MEMORY-001
+tier: 1
+domain: memory
+prompt: "请记住这条事实：project codename = OctoAgent。然后告诉我项目代号是什么。"
+expected_events:
+  - event_type: MEMORY_ENTRY_ADDED
+    required_fields:
+      content_contains: "OctoAgent"  # 内容中含有写入的事实
+  - event_type: MEMORY_RECALL_COMPLETED
+    required_fields:
+      namespace: AGENT_PRIVATE  # F094：Worker 写入默认 AGENT_PRIVATE
+timeout_seconds: 300
+partial_signals:
+  - event_type: MEMORY_ENTRY_ADDED  # 至少写入成功，即使未 recall 也得部分分
+rubric_id: tier1-v1

@@ -1,0 +1,19 @@
+# Tier 1 — 工具调用域：工具调用 + 结构化输出
+# 验证 Agent 能调用工具后将结果组织成结构化格式（Markdown 表格 / JSON）
+
+task_id: T1-TOOL-CALL-003
+tier: 1
+domain: tool_call
+prompt: "请查看系统当前时间，并以 JSON 格式返回：{\"current_time\": \"<ISO 格式时间>\", \"timezone\": \"<时区>\"}"
+expected_events:
+  - event_type: TOOL_CALL_STARTED
+    required_fields: {}  # 调用时间相关工具
+  - event_type: TOOL_CALL_COMPLETED
+    required_fields: {}
+  - event_type: MODEL_CALL_COMPLETED
+    required_fields: {}
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED  # 工具调用发起
+  - event_type: TOOL_CALL_COMPLETED  # 工具调用完成
+rubric_id: tier1-v1

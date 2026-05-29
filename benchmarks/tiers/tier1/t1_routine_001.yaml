@@ -1,0 +1,20 @@
+# Tier 1 — Routine cron 触发域：DailyRoutineService 触发验证（F102）
+# 验证 Routine 能正确触发并产生 ROUTINE_TRIGGERED / ROUTINE_COMPLETED 事件链
+
+task_id: T1-ROUTINE-001
+tier: 1
+domain: routine
+prompt: "请手动触发一次日常例程（Daily Routine），生成今日项目摘要，并告诉我 Routine 执行了哪些步骤。"
+expected_events:
+  - event_type: ROUTINE_TRIGGERED
+    required_fields: {}  # Routine 触发事件
+  - event_type: ROUTINE_COMPLETED
+    required_fields: {}  # Routine 完成事件
+timeout_seconds: 300
+partial_signals:
+  - event_type: ROUTINE_TRIGGERED  # 至少 Routine 被触发
+notes: >
+  F102 DailyRoutineService：cron 触发路径在 Phase E 全量跑时验证。
+  Tier 1 bench 验证手动触发路径（octo routine trigger 或 Agent 自主调用）。
+  ROUTINE_SKIPPED 也是合法终态（quiet hours / routine_active=false），不算 FAIL。
+rubric_id: tier1-v1

@@ -1,0 +1,17 @@
+# Tier 1 — USER.md 全链路域：写入用户观测（observation promoted 到 USER.md）
+# 验证 Agent 能将新事实通过 user_profile.observe 工具写入 USER.md
+
+task_id: T1-USER-MD-002
+tier: 1
+domain: user_md
+prompt: "请记录一条关于我的新偏好：我喜欢用 Markdown 格式整理信息。请用 user_profile.observe 工具记录这条观测。"
+expected_events:
+  - event_type: TOOL_CALL_STARTED
+    required_fields:
+      tool_name_contains: "observe"  # user_profile.observe 工具调用
+  - event_type: OBSERVATION_OBSERVED
+    required_fields: {}  # 观测事件记录成功
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED
+rubric_id: tier1-v1

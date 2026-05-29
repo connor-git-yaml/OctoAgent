@@ -1,0 +1,20 @@
+# Tier 1 — USER.md 全链路域：更新用户信息后可读取验证
+# 验证写入 + 读取完整链路（update → read → 回复引用新信息）
+
+task_id: T1-USER-MD-003
+tier: 1
+domain: user_md
+prompt: "请用 user_profile.update 工具更新我的时区信息为 Asia/Shanghai，完成后确认更新是否成功。"
+expected_events:
+  - event_type: TOOL_CALL_STARTED
+    required_fields:
+      tool_name_contains: "update"  # user_profile.update 工具调用
+  - event_type: TOOL_CALL_COMPLETED
+    required_fields: {}
+  - event_type: MODEL_CALL_COMPLETED
+    required_fields: {}  # 模型确认更新成功
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED
+  - event_type: TOOL_CALL_COMPLETED
+rubric_id: tier1-v1

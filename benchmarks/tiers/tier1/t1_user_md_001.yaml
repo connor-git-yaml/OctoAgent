@@ -1,0 +1,16 @@
+# Tier 1 — USER.md 全链路域：读取 USER.md 并引用用户信息
+# 验证 Agent 能读取 USER.md（用户画像 SoT）并在回复中引用
+
+task_id: T1-USER-MD-001
+tier: 1
+domain: user_md
+prompt: "请告诉我你对我（用户 Connor）的了解，包括我的偏好、项目背景等。用 Markdown 列表格式整理。"
+expected_events:
+  - event_type: BEHAVIOR_PACK_LOADED
+    required_fields: {}  # USER.md 作为 behavior pack 被加载
+  - event_type: MODEL_CALL_COMPLETED
+    required_fields: {}  # 模型使用 USER.md 信息生成回复
+timeout_seconds: 300
+partial_signals:
+  - event_type: BEHAVIOR_PACK_LOADED  # USER.md 至少被加载
+rubric_id: tier1-v1

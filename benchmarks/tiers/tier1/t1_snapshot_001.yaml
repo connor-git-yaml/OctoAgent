@@ -1,0 +1,17 @@
+# Tier 1 — 冻结快照域：SnapshotStore 写入（冻结快照）
+# 验证 Agent 能将当前 behavior context 写入 SnapshotStore（prefix cache 保护）
+
+task_id: T1-SNAPSHOT-001
+tier: 1
+domain: snapshot
+prompt: "请为当前会话创建一个冻结快照，保存当前的行为上下文，并告诉我快照 ID。"
+expected_events:
+  - event_type: TOOL_CALL_STARTED
+    required_fields:
+      tool_name_contains: "snapshot"  # snapshot 相关工具调用
+  - event_type: TOOL_CALL_COMPLETED
+    required_fields: {}
+timeout_seconds: 300
+partial_signals:
+  - event_type: TOOL_CALL_STARTED
+rubric_id: tier1-v1
