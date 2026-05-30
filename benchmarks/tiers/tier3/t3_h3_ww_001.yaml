@@ -1,0 +1,72 @@
+# Tier 3 — H3 Worker→Worker A2A：F098 解禁 D14 硬禁止
+#
+# 哲学依据（docs/blueprint/agent-collaboration-philosophy.md §4.5）：
+# - F098 已关闭 D14：Worker→Worker 委托现在合法（必须走 H3-B A2A）
+# - A2A source 派生仅信任显式 envelope.metadata.source_runtime_kind
+#   （F098 Phase D post-review 修复：缺信号默认 main）
+# - F099 Phase C：worker 环境下注入 source_runtime_kind=worker（extra_control_metadata 路径）
+#
+# 关键 audit chain 路径（实测）：
+# - capability_pack._launch_child_task (capability_pack.py:1251) 写 control_metadata：
+#     base_control_metadata + extra_control_metadata（worker 路径注入 source_runtime_kind=worker）
+# - task_runner._emit_subagent_delegation_init_if_needed 写 CONTROL_METADATA_UPDATED:
+#     source = "subagent_delegation_init"
+#     control_metadata.source_runtime_kind = "worker"（F099 注入，仅 worker spawn 时存在）
+#     control_metadata.subagent_delegation.delegation_id = ULID（BaseDelegation 公共字段）
+# - SUBAGENT_SPAWNED 写入；DelegationManager max_depth=2 兜底防递归
+
+task_id: T3-H3-WW-001
+tier: 3
+domain: philosophy_h3_ww
+philosophy: H3          # FR-F01：显式哲学维度（H3 Worker→Worker A2A 验证；Codex Round 5 P2-3 修复）
+delegation_mode: delegate_task
+prompt: |
+  请委托一个 Research Worker（worker A），要求 worker A 在执行过程中再委托另一个
+  Code Worker（worker B）协助处理代码片段查询。任务是：让 worker A 调用 worker B
+  分析 "list comprehension vs for loop in Python" 的性能差异，2-3 句话总结后回报。
+
+audit_assertions:
+  - assertion_id: H3WW-1-second-level-spawn-by-worker
+    description: |
+      F098 解禁 D14：worker A 调 worker B 触发**第二层** SUBAGENT_SPAWNED 事件。
+      第一层主→worker A 的 SUBAGENT_SPAWNED 也存在，但 depth=0；第二层 worker A→worker B
+      depth=1——必须断言 depth=1 才能严格证明 Worker→Worker spawn 真发生。
+      Codex Phase C review Round 2 P2-2 修复 2026-05-30：原仅断言 depth 字段存在
+      会让"worker A 没产生二层 spawn"的运行也 PASS。scorer 支持字符串化精确匹配
+      （depth: 1 → str(actual) == "1" 比对），可严格命中。
+    kind: event_present
+    event_type: SUBAGENT_SPAWNED
+    required_fields:
+      child_task_id_contains: ""
+      depth: 1                          # 严格匹配二层 spawn（Worker→Worker）
+
+  - assertion_id: H3WW-2-worker-source-with-delegation-id
+    description: |
+      F099 Phase C + F098 BaseDelegation 合并验证：**同一条** CONTROL_METADATA_UPDATED
+      (source=subagent_delegation_init) 必须同时满足：
+      ① control_metadata.source_runtime_kind=worker（worker A 调 delegate_task 的注入信号）
+      ② control_metadata.subagent_delegation.delegation_id 非空（BaseDelegation 字段持久化）
+
+      Codex Phase C Round 5 P2-2 修复 2026-05-30：原拆 H3WW-2 / H3WW-3 让两条不同
+      CONTROL_METADATA_UPDATED 事件分别满足两条件会 false PASS——第一层 main→worker A
+      的事件有 delegation_id 但没 source_runtime_kind=worker（主 Agent 不注入），第二层
+      worker→worker 的事件有 source_runtime_kind=worker 但若 delegation_id 丢失，
+      合并断言能正确捕获此回归（worker→worker BaseDelegation 字段丢失）。
+
+      实测路径：capability_pack._launch_child_task 在 worker 环境下注入
+      extra_control_metadata={source_runtime_kind:"worker"}; task_runner
+      ._emit_subagent_delegation_init_if_needed 同事件写入 subagent_delegation.delegation_id
+    kind: event_present
+    event_type: CONTROL_METADATA_UPDATED
+    required_fields:
+      source: subagent_delegation_init
+      control_metadata.source_runtime_kind: worker
+      control_metadata.subagent_delegation.delegation_id_contains: ""
+
+timeout_seconds: 600    # 两层 worker spawn 需要更长时间
+notes: >
+  Tier 3 哲学验证：H3 Worker→Worker A2A（F098 解禁 D14）。SUBAGENT_SPAWNED 存在 +
+  source_runtime_kind=worker 信号 + delegation_id 持久化三点共同证明：F098 关闭
+  Worker→Worker 硬禁止后，worker A→worker B 委托链路正常 + source 派生准确（不依赖
+  turn_executor_kind 错误派生）。是 F098 Phase D post-review 修复的 regression guard。
+rubric_id: tier3-v1

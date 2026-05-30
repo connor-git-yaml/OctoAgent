@@ -1,0 +1,84 @@
+# Tier 3 — H2 Worker memory 隔离：Worker 独立 AGENT_PRIVATE namespace
+#
+# 哲学依据（docs/blueprint/agent-collaboration-philosophy.md §3 H2）：
+# - Worker = 主 Agent − {hire/fire/reassign Worker} − {user-facing 表面}
+# - Worker 有完整上下文栈（Project / Memory / Behavior / Session / Persona / 决策环）
+# - Memory：F094 引入 AGENT_PRIVATE namespace 真生效（Worker 路径）
+# - 审计真实路径：AgentProfile.profile_id → AgentRuntime.profile_id
+#                  → RecallFrame.agent_runtime_id（非 agent_id）
+#
+# 关键 audit chain 路径（实测）：
+# - MEMORY_RECALL_COMPLETED payload 字段（payloads.py:165）：
+#   queried_namespace_kinds: list[str]   # F094 B6 字段，查询过的 namespace
+#   hit_namespace_kinds: list[str]       # F094 B6 字段，实际命中的 namespace
+#   agent_runtime_id: str                # F094 B6 字段，触发 recall 的 runtime
+#   （注意：F094 后无 namespace 字段，必须用 *_namespace_kinds list-aware contains）
+
+task_id: T3-H2-001
+tier: 3
+domain: philosophy_h2
+philosophy: H2          # FR-F01：显式哲学维度（Codex Round 5 P2-3 修复）
+delegation_mode: delegate_task
+prompt: |
+  请**委托** Research Worker（必须用 delegate_task 工具，target_kind=worker），让 Worker
+  第一步：把 "preferred_color=blue" 记入它**自己的私有 memory**（AGENT_PRIVATE namespace）；
+  第二步：Worker 检索自己的 memory 找到这条事实并向主 Agent 汇报。
+  注意：必须委托 Worker——若主 Agent 直接执行 memory 读写，H2 哲学不变量未被验证。
+
+# namespace_kind 真实序列化值是 MemoryNamespaceKind.AGENT_PRIVATE.value = "agent_private"
+# (enums 用 StrEnum，payload 序列化走 .value 路径；agent_context.py:165-168)
+# Codex Phase C review Round 2 P2-1 修复 2026-05-30：scorer 不做大小写归一化，
+# 必须用真实 .value 小写值才能命中真实运行事件。
+
+audit_assertions:
+  - assertion_id: H2-0-worker-spawned
+    description: |
+      Codex Phase C Round 5 P2-1 修复 2026-05-30：必须先验证 Worker spawn 真的发生——
+      否则主 Agent 自己读写 agent_private memory 也会让 H2-1/H2-3 false PASS，无法证明
+      H2 哲学不变量"Worker 拥有独立 AGENT_PRIVATE namespace"真生效。
+    kind: event_present
+    event_type: SUBAGENT_SPAWNED
+    required_fields:
+      child_task_id_contains: ""
+      target_worker_contains: ""
+
+  - assertion_id: H2-1-recall-private-hit-traceable
+    description: |
+      **同一条** MEMORY_RECALL_COMPLETED 事件必须同时满足：
+      ① hit_namespace_kinds 实际命中 agent_private（不只 queried）
+      ② agent_runtime_id 非空（Worker 拥有独立 AgentRuntime，可追溯到 RecallFrame）
+
+      Codex Phase C Round 4 P2-2 修复：原拆分 H2-1/H2-2 让"一次运行的多条 recall 事件
+      分别满足两个条件"会 false PASS——例如父 task 的初始 recall 命中 agent_private 但
+      agent_runtime_id 是主 Agent，worker recall 又只查询不命中。合并到同一 required_fields
+      确保两个条件必须由同一条 recall 事件同时满足。
+
+      字段细节（F094 B6）：
+      - hit_namespace_kinds 是 list[str]，scorer list-aware contains 命中 'agent_private'
+      - agent_runtime_id 是 str，'_contains: ""' 检查字段存在且非空
+    kind: event_present
+    event_type: MEMORY_RECALL_COMPLETED
+    required_fields:
+      hit_namespace_kinds_contains: agent_private   # 真实 enum .value
+      agent_runtime_id_contains: ""                 # 字段必须存在且非空
+
+  - assertion_id: H2-3-memory-entry-added-private
+    description: |
+      Worker 写 memory 默认 AGENT_PRIVATE namespace（F094 哲学落地）。
+      MEMORY_ENTRY_ADDED payload 含 namespace_kind 字段（memory_tools.py:763 写入 +
+      captured_namespace_kind = ns.kind.value 路径，序列化为小写 "agent_private"）。
+      Codex Phase C review P2-2 修复：必须断言 namespace_kind=agent_private，
+      否则即使 Worker 写到 PROJECT_SHARED 也会 false PASS（H2 隔离实际失效）。
+    kind: event_present
+    event_type: MEMORY_ENTRY_ADDED
+    required_fields:
+      memory_id_contains: ""              # 至少写入成功
+      namespace_kind: agent_private       # 真实 .value（StrEnum 小写序列化）
+
+timeout_seconds: 300
+notes: >
+  Tier 3 哲学验证：H2 Worker memory 隔离。AGENT_PRIVATE namespace 真生效 +
+  agent_runtime_id 字段非空两点共同证明 Worker 拥有独立完整的 Memory 上下文，
+  RecallFrame 可追溯到具体 Worker 实例。Tier 1 t1_memory_*.yaml 验证写入/recall
+  基础流程，Tier 3 此 task 验证 H2 哲学语义（独立 namespace + 可追溯 runtime）。
+rubric_id: tier3-v1

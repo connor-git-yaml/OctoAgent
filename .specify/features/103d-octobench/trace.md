@@ -164,3 +164,99 @@ spec.md 6 处 edit 已应用：§0.2 决策表（user simulator + baseline commi
   Phase B sandbox 环境无（GATE_P3_DEVIATION）；实际 5 task 跑推迟 Phase D runner 接入后做。
 
 [Phase B → review] T-B-REVIEW STARTED 2026-05-29: 同时启动 codex review --uncommitted（本地）+ codex:codex-rescue agent（远程 cloud），双路 review，等 finding 处理后 commit Phase B.
+
+[Phase B Codex review] DONE 2026-05-29（11 finding 全闭环）。phase-b-codex-review.md 记录 2 HIGH + 6 MED + 3 LOW。处置决策：
+  - HIGH 全修（2/2）：tau_bench_tool_scope async-safe（去 lock-around-yield 改 register/cleanup 两步）+ ToolRegistry conflict-detection（注册前 fail-fast）
+  - MED 全修（6/6 + 1 P2）：Pass@1 Counter 同名次数 / GAIA word-match negation guard / scorer 强制 tau_bench__ 前缀 / stratified shortage fail-fast / preflight unit test mock _missing_packages / PoC-H4 docstring 修正 / 用户拍板"tau-bench 不污染 pyproject"
+  - LOW 推迟 Phase D（3/3，已写 phase-b-codex-review.md 接管节点）
+  - 累计 65 unit tests（Phase A 16 + Phase B 49）全 PASS
+
+[Phase B → push] commit 4c0e513 push origin/master 2026-05-29。累计 Tier 1 25 + Tier 2 stratified 15 (τ-bench airline) + GAIA fallback 5 task，scorer 三层（tier1 / tier2-tau / tier2-gaia）就绪。零侵入 production 守卫保持（octoagent/packages/ apps/ frontend/ 0 行）。
+
+---
+
+[Phase C] STARTED 2026-05-29（新 worktree interesting-feynman-7924bb，分支 claude/interesting-feynman-7924bb，baseline 4c0e513）。
+目标：Tier 3 H1/H2/H3 哲学 audit chain 5 task + scorer score_tier3 / audit_chain_assert。
+
+[Phase C 设计阶段] 关键 fact 实测（决定 audit_assertions schema 严格性）：
+  - SUBAGENT_SPAWNED payload 字段（harness/delegation.py:266 _emit_spawned_event）：child_task_id / target_worker / depth / task_description_preview / callback_mode / parent_task_id。**不含** source_runtime_kind / caller_project_id（spec 写法误导校正）。
+  - source_runtime_kind 通过 CONTROL_METADATA_UPDATED.control_metadata 持久化（F099 三工具 + worker spawn extra_control_metadata 路径）。
+  - H3-A caller_project_id 写在 CONTROL_METADATA_UPDATED (source=subagent_delegation_init).control_metadata.subagent_delegation.caller_project_id（嵌套 3 层 dot path）。
+  - F099 N-H1 修复路径：worker_runtime._emit_is_caller_worker_signal (worker_runtime.py:399) 写 CONTROL_METADATA_UPDATED (source=worker_runtime_dispatch).control_metadata.is_caller_worker_signal="1"。
+  - MEMORY_RECALL_COMPLETED 真字段（F094 B6）：queried_namespace_kinds (list[str]) / hit_namespace_kinds (list[str]) / agent_runtime_id (str)，不存在 namespace 字段（沿用 Phase A list-aware contains）。
+
+[Phase C T-C-1 ~ T-C-5] DONE: 5 个 Tier 3 YAML（benchmarks/tiers/tier3/）：
+  - t3_h1_001.yaml: 3 assertion（H1-1 SUBAGENT_SPAWNED + H1-2 worker_runtime_dispatch 信号 + H1-3 event_absent user_channel 标记）
+  - t3_h2_001.yaml: 3 assertion（H2-1 queried_namespace_kinds_contains=AGENT_PRIVATE + H2-2 agent_runtime_id 非空 + H2-3 MEMORY_ENTRY_ADDED）
+  - t3_h3a_001.yaml: 4 assertion（H3A-1 SUBAGENT_SPAWNED + H3A-2 caller_project_id 嵌套路径 + H3A-3 delegation_id 持久化 + H3A-4 SUBAGENT_COMPLETED）
+  - t3_h3b_001.yaml: 4 assertion（H3B-1 N-H1 is_caller_worker_signal 持久化 + H3B-2 worker_ask_back 触发 + H3B-3 to_status=WAITING_INPUT + H3B-4 from=WAITING_INPUT→to=IN_PROGRESS resume）
+  - t3_h3_ww_001.yaml: 3 assertion（H3WW-1 SUBAGENT_SPAWNED depth 字段 + H3WW-2 source_runtime_kind=worker + H3WW-3 delegation_id 存在）
+
+[Phase C T-C-6] DONE: scorer.py 扩展 + 80 LOC 新增（实际约 230 LOC，含完整文档 + 边界处理）。
+  - 新增 dataclass AuditAssertionFailure（assertion_id / kind / event_type / expected / reason / closest_event）
+  - BenchmarkRunScore 字段 audit_chain_failures: list[AuditAssertionFailure]
+  - _get_nested_field(payload, dot_path)：嵌套字段 dot path 取值
+  - _match_required_fields_tier3：嵌套 dot path 支持 + 复用 Phase A 语义（_contains/list-aware/精确匹配）
+  - _assert_event_present：贪心匹配 + 失败时填 closest_event 用于诊断
+  - _assert_event_absent：required_fields 空时禁止任何同类型事件（"完全禁止"语义）；非空时仅过滤命中事件（"特定 payload 组合"语义）。Codex review 重点
+  - audit_chain_assert：逐条遍历不 short-circuit（FR-F03 解读，一次性看清所有失败）
+  - score_tier3：100/0/0 二值评分，weighted_score = pass_fail_score
+  - DEFAULT_TIER3_EVENT_TYPES 8 EventType（含 SUBAGENT_SPAWNED/COMPLETED + CONTROL_METADATA_UPDATED + MEMORY_* + STATE_TRANSITION）
+  - fetch_events_from_store_tier3：Tier 3 专用查询封装
+
+[Phase C Codex review 多轮闭环] DONE 2026-05-30。6 轮 codex review --uncommitted 累计 18 finding + 1 归档 Phase D：
+  - Round 1（4 P1+P2 闭环 2026-05-29）：scorer 仅按父 task_id 查事件（HIGH P1，修：fetch_events_from_store_tier3 加 child_task_ids 参数）/ H3-B IN_PROGRESS → RUNNING（TaskStatus 真名）/ H2-3 缺 namespace_kind 约束 / H3-A 删 SUBAGENT_SPAWNED 断言（subagents.spawn 路径 emit_audit_event=False）
+  - Round 2（3 P2 闭环 2026-05-30）：H2 namespace_kind=AGENT_PRIVATE → agent_private（StrEnum .value 小写）/ H3-WW depth 字段存在 → depth=1 严格化 / H3-A 加 caller_memory_namespace_ids 断言（α 共享 memory 不变量）+ scorer 加严 _contains: "" 对 list/dict 容器空检查
+  - Round 3（3 P2+P3 闭环）：fetch_events_from_store_tier3 自动递归发现 grandchild task_id（worker→worker→worker 链）/ DEFAULT_TIER3_EVENT_TYPES 加 AGENT_SESSION_TURN_PERSISTED / audit_chain_assert required_fields 类型校验前置（防 `or {}` 短路绕过）
+  - Round 4（2 P2 闭环）：H2-1/H2-2 合并到同一 required_fields（避免不同事件分别满足）/ H3-B 加 follow_up_inputs 字段（Phase D runner 接入点）
+  - Round 5（3 P2 闭环）：H2 加 SUBAGENT_SPAWNED 前置断言（防主 Agent 自执行 false PASS）/ H3-WW H3WW-2+H3WW-3 合并 / 5 YAML 加 philosophy 字段（FR-F01 显式哲学维度）
+  - Round 6（1 P2 闭环 + 1 归档 Phase D）：H1-3 改用 AGENT_SESSION_TURN_PERSISTED.agent_session_kind=direct_worker AND kind=assistant_message event_absent（更精确 H1 不变量）；P2-2 scorer event binding（audit_chain 断言间共享 binding context，绑定到具体 child_task_id/delegation_id/agent_runtime_id）超 Phase C 范围归档 Phase D scorer 框架加强
+  - 6 轮累计 18 finding 修复（HIGH 1 + MED 17）+ 1 finding 归档 Phase D（scorer event binding 框架级加强）；
+    Round 6 后剩余主要为"边际严格性优化"，非正确性 bug——决定 commit Phase C 完整状态，scorer event
+    binding 在 Phase D 主体（runner/CLI/reporter）实施时一并完成
+
+[Phase C T-C-6 单测] DONE: benchmarks/tests/unit/test_scorer_tier3.py 新增 49 tests 全 PASS:
+  - 工具函数：6 嵌套 dot path + 9 字段匹配（含 list-aware + nested + contains 边界）
+  - event_present / event_absent 语义边界 7 tests（特别覆盖 Codex review 重点：required_fields 空 vs 非空时的禁止语义）
+  - audit_chain_assert 异常路径 4 tests（empty / unknown_kind / event_type 缺失 / required_fields 非 dict）
+  - 5 Tier 3 YAML × PASS/FAIL case：H1 3 cases / H2 3 cases / H3A 3 cases / H3B 3 cases / H3WW 2 cases
+  - DEFAULT_TIER3_EVENT_TYPES 关键 EventType 覆盖
+  - error_message format 2 tests
+  - 5 YAML 冒烟级 parametrized：空事件流下必 FAIL + audit_chain_failures 非空（避免 silent PASS）
+  - Codex 6 轮 review 回归保护：每 finding 修复对应 unit test（如 H2-1/H2-2 合并 / Round 5 P2-1 SUBAGENT_SPAWNED 前置 / Round 6 H1-3 direct_worker 精确）
+  累计 155 unit tests (Phase A 16 + Phase B 65 + Phase C 74) 全 PASS（1.54s）。
+
+[Phase C 回归测试] DONE 2026-05-30：
+  - benchmarks/tests/unit/ 155 PASS（Phase A+B+C 累计）
+  - octoagent 全量回归（不含 e2e_live）：3763 passed + 13 skipped + 1 xfailed + 1 xpassed +
+    6 failed（6 失败全部 apps/gateway/tests/e2e_live/test_e2e_smoke_real_llm 等需 LLM_API_KEY 的 real_llm 路径——
+    与 Phase A trace.md 同性质 "LLM_UNAVAILABLE"，与 Phase C 改动无关）
+  - 零侵入校验：git diff HEAD -- octoagent/packages octoagent/apps octoagent/frontend = 0 字节
+  - e2e_smoke 8/8 PASS（7.04s）
+  - baseline vs F103d Phase B (4c0e513) 等价：无新 regression
+
+[Phase C 完成状态]：
+  - 5 个 Tier 3 YAML（H1/H2/H3-A/H3-B/H3-WW，含 philosophy 字段 + audit_assertions，
+    H2 4 / H3-A 4 / H3-B 4 / H3-WW 3 / H1 3 = 18 assertion）
+  - scorer.py 扩展：score_tier3 / audit_chain_assert / fetch_events_from_store_tier3
+    （含 grandchild 自动递归 + MAX_DESCENDANT_TRAVERSAL=32 安全护栏）/ AuditAssertionFailure /
+    _get_nested_field / _match_required_fields_tier3 / _assert_event_present /
+    _assert_event_absent（required_fields 空 vs 非空语义边界）/ DEFAULT_TIER3_EVENT_TYPES
+    （9 EventType 覆盖 H1/H2/H3-A/H3-B/H3-WW + AGENT_SESSION_TURN_PERSISTED）/
+    score_tier3 rubric tier3-v1 100/0/0 二值评分
+  - 单测 74 tests 覆盖：6 嵌套 dot path + 13 字段匹配（含 list/dict 空检查 + 大小写敏感）+ 7
+    event_present/absent 语义边界 + 4 audit_chain_assert 异常路径 + 14 Tier 3 YAML × PASS/FAIL
+    (H1 3 / H2 6 / H3-A 4 / H3-B 3 / H3-WW 4) + DEFAULT_TIER3_EVENT_TYPES 覆盖 + format
+    summary + parametrized YAML 加载 + 4 fetch grandchild 递归 + 2 dedup + 1 traversal cap +
+    1 e2e + philosophy 字段 SC-010 覆盖
+
+[Phase C 推迟到 Phase D 项]：
+  - Round 6 P2-2: scorer event binding（audit_chain 断言间通过 spawn 事件捕获 child_task_id /
+    delegation_id / agent_runtime_id，后续断言能绑定到具体 binding）。Phase D scorer 主体
+    实施时一并完成；当前能正确捕获大多数 false PASS（5 个 YAML 各加 1-2 个强化断言后），
+    但跨 audit chain 严格绑定需 scorer schema 大改。
+  - Round 4 P2-1: H3-B follow_up_inputs 字段已加（runner 接入点），Phase D runner 实施时
+    在 task 进入 WAITING_INPUT 时按顺序 attach_input。
+  - Phase B 推迟 3 项（LLM-judge fallback / Pass@1 order+args / GAIA Unicode normalization）+
+    Round 3 P2-2 部分接受（DEFAULT_TIER3_EVENT_TYPES 含 AGENT_SESSION_TURN_PERSISTED，
+    Round 6 已用于 H1-3 精确化）。

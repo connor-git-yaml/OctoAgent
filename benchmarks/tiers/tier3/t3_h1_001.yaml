@@ -1,0 +1,68 @@
+# Tier 3 — H1 管家 mediated 模式：主 Agent 是唯一 user-facing speaker
+#
+# 哲学依据（docs/blueprint/agent-collaboration-philosophy.md §2 H1）：
+# - 主 Agent 总是 receive 用户消息 + 总是 reply + 唯一 user-facing speaker
+# - 主 Agent 倾向派活，Worker 不直接对用户说话
+# - Worker 启动时通过 _emit_is_caller_worker_signal 写 CONTROL_METADATA_UPDATED
+#   (source="worker_runtime_dispatch", control_metadata.is_caller_worker_signal="1")
+#   显式标记 Worker 路径——这是 H1 落地的可观察信号
+#
+# 关键 audit chain 路径（实测）：
+# - SUBAGENT_SPAWNED payload 字段：child_task_id / target_worker / depth /
+#   task_description_preview / callback_mode / parent_task_id
+#   （注意：source_runtime_kind 不在 SUBAGENT_SPAWNED payload 中，
+#    H1 验证依赖 worker_runtime_dispatch 信号 + 缺主→worker H3-B 路径下的
+#    extra_control_metadata 注入 → control_metadata 中无 source_runtime_kind=worker
+#    意味着主 Agent caller，默认 main 语义）
+
+task_id: T3-H1-001
+tier: 3
+domain: philosophy_h1
+philosophy: H1          # FR-F01：显式哲学维度（Codex Round 5 P2-3 修复）
+delegation_mode: delegate_task
+prompt: |
+  请委托一个 Research Worker 帮我查找关于 'Pydantic' 框架的核心特性（2-3 句话），
+  Worker 完成后向我汇报结果，由你（主 Agent）综合后回复我。
+
+audit_assertions:
+  - assertion_id: H1-1-subagent-spawned
+    description: 主 Agent 派发 Worker 后写 SUBAGENT_SPAWNED 审计事件
+    kind: event_present
+    event_type: SUBAGENT_SPAWNED
+    required_fields:
+      target_worker_contains: ""    # 字段必须存在（值非 None / 非空，按 scorer 语义）
+      child_task_id_contains: ""    # 字段必须存在
+      parent_task_id_contains: ""   # 字段必须存在
+
+  - assertion_id: H1-2-worker-runtime-dispatch
+    description: Worker 启动时写 is_caller_worker_signal=1（H1 显式标记 Worker 路径）
+    kind: event_present
+    event_type: CONTROL_METADATA_UPDATED
+    required_fields:
+      source: worker_runtime_dispatch
+      control_metadata.is_caller_worker_signal: "1"
+
+  - assertion_id: H1-3-no-direct-worker-assistant-turn
+    description: |
+      H1 不变量精确表达：Worker 不应通过 DIRECT_WORKER session 直接向用户写 assistant_message turn。
+      实测可观察信号是 AGENT_SESSION_TURN_PERSISTED（agent_context_turn_writer.py:125-133）含
+      agent_session_kind=direct_worker AND kind=assistant_message——这正是"Worker 直接对用户
+      说话"的违规信号。合法主 Agent USER_CHANNEL session 的 ASSISTANT_MESSAGE 不被此断言误伤
+      （限定 direct_worker session）。
+      Codex Phase C Round 6 P2-1 修复 2026-05-30：原仅断言 CONTROL_METADATA_UPDATED
+      source_runtime_kind=user_channel 无法覆盖 Worker direct_worker turn 违规——
+      AgentSessionKind.DIRECT_WORKER（agent_context.py:134）是 H1 unfinalized 时为 worker 直接
+      暴露用户预留的 session 类型，当前 H1 哲学不允许使用，必须 absent。
+    kind: event_absent
+    event_type: AGENT_SESSION_TURN_PERSISTED
+    required_fields:
+      agent_session_kind: direct_worker
+      kind: assistant_message
+
+timeout_seconds: 300
+notes: >
+  Tier 3 哲学验证：H1 管家 mediated 模式。SUBAGENT_SPAWNED + worker_runtime_dispatch
+  两个事件共同证明：主 Agent 是 caller，Worker 是 callee，Worker 路径被显式标记。
+  Tier 1 t1_delegation_*.yaml 已验证流程（WORKER_DISPATCHED / SUBAGENT_SPAWNED /
+  WORKER_RETURNED），Tier 3 此 task 验证 H1 哲学语义（caller 身份 + Worker 标记）。
+rubric_id: tier3-v1

@@ -1,0 +1,94 @@
+# Tier 3 — H3-A 临时 Subagent（spawn-and-die）：调用方共享 Project / Memory
+#
+# 哲学依据（docs/blueprint/agent-collaboration-philosophy.md §4 H3-A）：
+# - 调用方需要分担一小段思考 / 执行，但不希望对方拥有独立上下文
+# - 受派方共享调用方的 Project / Memory / Context（α 共享语义）
+# - 任务完成后整个 session 可回收（spawn-and-die）
+# - 类比：函数调用（共享内存）
+#
+# 关键 audit chain 路径（实测）：
+# - F097 _emit_subagent_delegation_init_if_needed (task_runner.py:247) 写
+#   CONTROL_METADATA_UPDATED event:
+#     source = "subagent_delegation_init"
+#     control_metadata.subagent_delegation = SubagentDelegation.model_dump(mode="json")
+#   其中 subagent_delegation 含 caller_project_id（α 共享语义关键字段）
+# - F097 Phase E SUBAGENT_COMPLETED 由 cleanup hook 写入，payload:
+#     delegation_id / child_task_id / terminal_status / closed_at /
+#     parent_task_id / child_agent_session_id (payloads.py:674)
+#
+# Codex Phase C review P2-3 修复 2026-05-29：
+# - subagents.spawn 路径 emit_audit_event=False（delegation_tools.py:166）不写 SUBAGENT_SPAWNED
+# - delegate_task_tool 路径 emit_audit_event=True（delegate_task_tool.py:163）会写
+# - H3-A 哲学定义是 spawn-and-die 短生命周期 + α 共享，**两条 spawn 路径都满足**
+#   ——但 SUBAGENT_SPAWNED 只在 delegate_task 路径写。改用 CONTROL_METADATA_UPDATED
+#   (source=subagent_delegation_init) + SUBAGENT_COMPLETED 作为 spawn 证据，两条路径都写
+#   → 不要求 SUBAGENT_SPAWNED，避免 subagents.spawn 路径稳定误判 FAIL
+
+task_id: T3-H3A-001
+tier: 3
+domain: philosophy_h3a
+philosophy: H3-A        # FR-F01：显式哲学维度（Codex Round 5 P2-3 修复）
+delegation_mode: subagent
+prompt: |
+  请 spawn 一个临时 Subagent（H3-A 模式，target_kind=subagent），让它共享你的
+  Project / Memory 上下文，完成一个简短的事实查询（例如查询当前系统时区配置），
+  完成后由你向我汇报。
+  注：LLM 可自由选择 delegate_task 或 subagents.spawn 工具，两条路径都满足
+  H3-A α 共享 + spawn-and-die 哲学（H3A-2~H3A-4 共同 audit）。
+
+audit_assertions:
+  - assertion_id: H3A-2-delegation-init-caller-project
+    description: |
+      H3-A α 共享语义：CONTROL_METADATA_UPDATED (source=subagent_delegation_init) 含
+      control_metadata.subagent_delegation.caller_project_id 字段——证明 receiver 复用
+      caller project（H3-A 哲学定义）。
+    kind: event_present
+    event_type: CONTROL_METADATA_UPDATED
+    required_fields:
+      source: subagent_delegation_init
+      control_metadata.subagent_delegation.caller_project_id_contains: ""   # 字段必须存在且非空
+
+  - assertion_id: H3A-3-delegation-init-delegation-id
+    description: |
+      SubagentDelegation.delegation_id 持久化——后续 SUBAGENT_COMPLETED 通过 delegation_id
+      关联（F098 atomic 事务边界保证 session.save + SUBAGENT_COMPLETED 同事务）
+    kind: event_present
+    event_type: CONTROL_METADATA_UPDATED
+    required_fields:
+      source: subagent_delegation_init
+      control_metadata.subagent_delegation.delegation_id_contains: ""
+
+  - assertion_id: H3A-3b-delegation-init-caller-memory-namespace-ids
+    description: |
+      H3-A α 共享 memory 不变量：SubagentDelegation.caller_memory_namespace_ids
+      **列表必须非空**——生产路径 task_runner._emit_subagent_delegation_init_if_needed
+      查询 caller AGENT_PRIVATE namespace_id 列表填入；空列表 [] 是降级路径，
+      意味着 subagent 看不到 caller 私有 memory，违反 H3-A α 共享语义。
+      Codex Phase C review Round 2 P2-3 修复 2026-05-30：仅断言 caller_project_id
+      会让"namespace 传播回归但 project_id 仍存在"的退化场景 false PASS。
+      scorer `_match_required_fields_tier3` 已加严：`_contains: ""` 对 list/dict/str
+      统一执行 `len() > 0` 检查（Round 2 P2-3 修复），空 list 会被严格拒绝。
+    kind: event_present
+    event_type: CONTROL_METADATA_UPDATED
+    required_fields:
+      source: subagent_delegation_init
+      control_metadata.subagent_delegation.caller_memory_namespace_ids_contains: ""
+
+  - assertion_id: H3A-4-subagent-completed
+    description: |
+      Subagent 进入终态时由 cleanup hook 写 SUBAGENT_COMPLETED（F097 Phase E payload
+      含 delegation_id / child_task_id / terminal_status）
+    kind: event_present
+    event_type: SUBAGENT_COMPLETED
+    required_fields:
+      delegation_id_contains: ""        # 字段必须存在
+      child_task_id_contains: ""        # 字段必须存在
+      terminal_status_contains: ""      # 字段必须存在（succeeded / failed / cancelled）
+
+timeout_seconds: 300
+notes: >
+  Tier 3 哲学验证：H3-A 临时 Subagent（spawn-and-die）。caller_project_id 非空 +
+  delegation_id 持久化 + SUBAGENT_COMPLETED 闭环三点共同证明 H3-A 哲学落地（α 共享语义
+  + 短生命周期）。Tier 1 t1_delegation_*.yaml 验证流程，Tier 3 此 task 验证 H3-A 哲学
+  语义（caller project 共享 + delegation 全周期审计）。
+rubric_id: tier3-v1

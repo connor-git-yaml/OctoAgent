@@ -1,0 +1,93 @@
+# Tier 3 — H3-B A2A 真 P2P + N-H1 修复验证：Worker ask_back 中途澄清 + is_caller_worker_signal 持久化
+#
+# 哲学依据（docs/blueprint/agent-collaboration-philosophy.md §4 H3-B）：
+# - 调用方需要把任务真正委托给另一个 Agent
+# - 受派方在自己的 Project / Memory 工作，与调用方上下文隔离
+# - 受派方可中途 ask back（澄清需求）—— F099 三工具（ask_back/request_input/escalate_permission）
+# - 类比：进程间消息（隔离内存）
+#
+# N-H1 修复（F099 re-review 抓出的 HIGH，N-H1 通过 CONTROL_METADATA_UPDATED 持久化）：
+# - worker_runtime._emit_is_caller_worker_signal (worker_runtime.py:399) 在 Worker 首次 dispatch
+#   时写 CONTROL_METADATA_UPDATED:
+#     source = "worker_runtime_dispatch"
+#     control_metadata.is_caller_worker_signal = "1"
+# - 当 task 进入 WAITING_INPUT 后又 resume 时，task_runner.attach_input 无 live waiter 分支
+#   读取此持久化信号，附加到 resume_state_snapshot，WorkerRuntime 从 snapshot 恢复 is_caller_worker=True
+#
+# 关键 audit chain 路径（实测）：
+# - ask_back 工具触发 CONTROL_METADATA_UPDATED:
+#     source ∈ {worker_ask_back, worker_request_input, worker_escalate_permission}
+# - task 状态机：RUNNING → WAITING_INPUT → RUNNING（resume）
+#   （Codex Phase C review P2-1 修复 2026-05-29：TaskStatus 运行态真名是 RUNNING，
+#    不是 IN_PROGRESS。enums.py:15 TaskStatus.RUNNING；TaskService._write_state_transition
+#    写出的 payload 是 to_status='RUNNING'）
+
+task_id: T3-H3B-001
+tier: 3
+domain: philosophy_h3b
+philosophy: H3-B        # FR-F01：显式哲学维度（Codex Round 5 P2-3 修复）
+delegation_mode: delegate_task
+prompt: |
+  请委托 Worker 帮我决定一个旅行目的地，但任务描述故意模糊（"帮我规划下个月去哪儿玩"）。
+  Worker 在不确定时应当使用 worker.ask_back 工具向我澄清（如：询问预算、出行偏好），
+  我给出回答后 Worker 继续完成任务。
+
+# Codex Phase C Round 4 P2-1 修复：H3-B 多轮 ask_back 任务在无人值守 benchmark 中需要
+# runner 自动 attach follow-up 输入；否则 Worker 进入 WAITING_INPUT 后会卡到超时。
+# Phase D runner 实施接入点：runner 在 task 进入 WAITING_INPUT 状态时按顺序
+# attach_input 下列 follow_up_inputs 列表的每条 text；scorer 本身不消费该字段。
+follow_up_inputs:
+  - description: "ask_back 第一轮响应：提供预算 + 偏好"
+    text: "我的预算 5000-8000 元/人，喜欢有历史文化和美食的目的地，时间 5-7 天。"
+
+audit_assertions:
+  - assertion_id: H3B-1-worker-runtime-dispatch-signal
+    description: |
+      N-H1 修复：Worker 首次 dispatch 时持久化 is_caller_worker_signal="1"。
+      验证 worker_runtime._emit_is_caller_worker_signal 真实写入 CONTROL_METADATA_UPDATED
+    kind: event_present
+    event_type: CONTROL_METADATA_UPDATED
+    required_fields:
+      source: worker_runtime_dispatch
+      control_metadata.is_caller_worker_signal: "1"
+
+  - assertion_id: H3B-2-ask-back-tool-triggered
+    description: |
+      Worker 通过 ask_back 三工具之一触发 CONTROL_METADATA_UPDATED。
+      source 必须命中 worker_ask_back（其他两个 worker_request_input /
+      worker_escalate_permission 在 T3-H3B-001 不强制，由 LLM 选择具体工具）。
+      Phase A scorer event_store_assert 贪心匹配命中其一即 PASS。
+    kind: event_present
+    event_type: CONTROL_METADATA_UPDATED
+    required_fields:
+      source: worker_ask_back
+
+  - assertion_id: H3B-3-state-waiting-input
+    description: |
+      任务经历 WAITING_INPUT 状态转换（ask_back 触发后任务暂停等待用户输入）。
+      STATE_TRANSITION payload 含 from_status / to_status（payloads.py:204 StateTransitionPayload）。
+    kind: event_present
+    event_type: STATE_TRANSITION
+    required_fields:
+      to_status: WAITING_INPUT
+
+  - assertion_id: H3B-4-state-resumed-to-running
+    description: |
+      用户提供输入后任务从 WAITING_INPUT resume 回 RUNNING（TaskStatus 真名）。
+      验证 N-H1 修复后 resume 路径不破坏 is_caller_worker=True 信号。
+      Codex Phase C review P2-1 修复 2026-05-29：原写 IN_PROGRESS 会让真实
+      WAITING_INPUT → RUNNING 转换永远匹配不上。
+    kind: event_present
+    event_type: STATE_TRANSITION
+    required_fields:
+      from_status: WAITING_INPUT
+      to_status: RUNNING
+
+timeout_seconds: 600    # ask_back 涉及多轮交互，给宽松超时
+notes: >
+  Tier 3 哲学验证：H3-B A2A 真 P2P + N-H1 修复验证。worker_runtime_dispatch
+  is_caller_worker_signal="1" + ask_back 工具触发 + WAITING_INPUT/IN_PROGRESS
+  状态转换共同证明：H3-B ask back 能力正常 + N-H1 resume 路径信号持久化正确。
+  特别强调：F099 re-review 抓到 HIGH N-H1（is_caller_worker resume 持久化缺陷）
+  已通过 CONTROL_METADATA_UPDATED 事件机制修复，此 task 是该修复的 regression guard。
+rubric_id: tier3-v1
