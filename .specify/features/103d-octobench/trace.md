@@ -260,3 +260,82 @@ spec.md 6 处 edit 已应用：§0.2 决策表（user simulator + baseline commi
   - Phase B 推迟 3 项（LLM-judge fallback / Pass@1 order+args / GAIA Unicode normalization）+
     Round 3 P2-2 部分接受（DEFAULT_TIER3_EVENT_TYPES 含 AGENT_SESSION_TURN_PERSISTED，
     Round 6 已用于 H1-3 精确化）。
+
+[Phase D] STARTED 2026-05-30：Runner / Scorer / Reporter + octo bench CLI 完整实现。
+  - 基线: ea9fad6（F103d Phase C）
+  - Worktree: `.claude/worktrees/mystifying-feynman-21720b`（分支 claude/mystifying-feynman-21720b）
+  - 范围：T-D-1 ~ T-D-8 + Phase C/B 归档项接管 + REVIEW + REGRESSION
+
+[Phase D 实施记录]：
+  - T-D-1 包初始化 DONE：benchmarks/__init__.py + benchmarks/runner/__init__.py
+  - T-D-2 store.py DONE（432 LOC）：SQLite WAL + 两表 schema + BenchmarkStore（append_run /
+    get_completed_keys / get_pending_runs / save_baseline / get_baseline / list_baselines）+
+    Result 枚举 8 态 + EXCLUDED_FROM_DENOMINATOR (AC3-4) + BenchmarkRunRecord / Baseline
+    dataclass + frozen + UNIQUE(session,task,iter) + INSERT OR REPLACE 幂等
+  - T-D-3 worker.py DONE（450 LOC，[RISK] task）：
+    - asyncio.Semaphore(8) + gradual ramp 0.5s + run_task_with_retry(max_retries=3) +
+      retry-after 优先 + exp backoff jitter + QUOTA_SKIP/TIMEOUT/INFRA_ERROR 三态
+    - ConsecutiveInfraErrorCounter (asyncio.Lock 短临界区，不跨 await——避免 Phase B
+      threading.Lock 陷阱) + 连续 5 INFRA_ERROR 触发 stop_event
+    - run_daily_bench(planned, runner_fn, store, session_id, ...) + on_record_written 进度
+      回调 + run_in_executor 写盘异步包装
+    - TaskRunner Protocol 注入（caller 通过 OctoHarness DI 钩子 wire 真 LLM）
+    - extract_follow_up_inputs(task_raw) helper（Phase C Round 4 P2-1 归档接入）
+  - T-D-4 reporter.py DONE（500 LOC）：
+    - generate_report / generate_report_from_runs 按 plan §6.3 JSON 结构
+    - by_tier (tier1/tier2_拆 tau_bench+gaia/tier3) + by_domain + task_details
+    - majority_result (3 iter 多数 / 全异 = INCONSISTENT) + AC3-4 分母不含 SKIP/TIMEOUT/INFRA
+    - compare_with_baseline + delta 0.001 精度 + regression/improvement 列表 (W7)
+    - attach_delta_or_raise FileNotFoundError (AC6-2)
+    - write_report_json / write_report_markdown / archive_report
+    - report_to_baseline_record (Phase E T-E-4/T-E-5 用)
+  - T-D-5 conftest.py DONE（150 LOC）：复用 F087 e2e_live 模式
+    - 5 凭证 env 清单 + 4 OCTOAGENT_* 路径 env 重定向
+    - reset_module_singletons (ToolRegistry / AgentContextService×2 / ExecutionContext)
+    - hermetic_task_scope contextmanager (runtime worker.py 间手动调用)
+    - pytest autouse fixture (benchmarks/ 下单测自动获 clean state)
+  - T-D-6 scorer 整合 + LLM judge 真实实现 DONE：
+    - score_dispatch.py 新 module（170 LOC）：score(task, run_result, *, rubrics) 统一接口
+      按 tier+domain 分发到 score_tier1/2_tau/2_gaia/3；零侵入 scorer.py 现有函数
+    - llm_judge.py 升级（240 LOC）：
+      * 触发常量锁死不变（F-01 patch）：MIN_RATIO=0.5 / MAX_RATIO=1.0 / MAX_CALLS=2
+      * JudgeAdapter Protocol + StubJudgeAdapter（默认）+ ProviderRouterJudgeAdapter
+        (chat_fn DI 钩子)
+      * Sonnet 4.5 temperature=0 max_tokens=512 + JUDGE_SYSTEM_PROMPT + truncated user prompt
+      * LLM 失败 → fallback to stub (degrade gracefully)
+      * 沿用 LLMJudgeTrigger.should_trigger_judge 不变
+  - T-D-7 CLI 入口 DONE（[RISK] task）：
+    - benchmarks/runner/cli.py 主逻辑 (550 LOC)：argparse 子命令 daily / list-baselines / show
+    - apps/gateway/.../cli/bench_commands.py thin wrapper (20 LOC) lazy import
+    - apps/gateway/pyproject.toml 新增 [project.scripts] octo-bench entry point（仅新增，
+      不修改现有字段；方案 A 独立命令避免动 cli.py 主 group）
+    - --dry-run mode + --resume + --compare + --label + --tier + --skip-preflight +
+      --runner module:attr 注入 (Phase E baseline 跑时 wire 真 OctoHarness runner)
+  - T-D-8 resume 验证 DONE：单测 test_t_d_8_resume_only_runs_pending +
+    test_cli_daily_resume_via_cli 通过 (CLI 两次跑 + filter_planned_for_resume)
+  - Phase C 归档项接管：
+    * H3-B follow_up_inputs runner helper extract_follow_up_inputs() + 3 单测（Round 4 P2-1）
+    * AGENT_SESSION_TURN_PERSISTED 续扩 H1 audit task（Round 3 P2-2）：保留 Phase C 行为
+      不动；后续 H1 task 续扩留 M6 / 用户拍板时再补
+    * scorer event binding 框架级加强（Round 6 P2-2）：评估计划 → Phase E baseline 跑后
+      统计 5 Tier 3 task false PASS 比例：≤ 5% 归档 M6 F108 Capability Layer Refactor；
+      > 5% 在 Phase E 后回头补做（YAML schema + scorer state machine 扩展）。理由：
+      当前能正确捕获大多数 false PASS（Codex 6 轮 review 闭环），实际比例必须实跑后才能
+      量化评估。
+  - Phase B 归档项接管：
+    * preflight runner 入口调用 DONE：cli.py daily 命令默认调用 _preflight_check_or_fail()，
+      tier 2 task 加载前必须通过；--skip-preflight flag 允许仅跑 Tier 1/3
+    * PoC-H4 / Pass@1 order+args / env.step / GAIA LLM-judge fallback：保留 Phase E
+      实跑时实施（涉及真 LLM）
+
+[Phase D 测试与回归] PENDING：
+  - benchmarks/tests/unit/ 271 PASS (Phase A 16 + B 65 + C 74 + D 116) (1.63s)
+  - octoagent 全量回归 + e2e_smoke PENDING（即将跑）
+  - 零侵入校验 PENDING
+
+[Phase D 推迟到 Phase E / M6 项]：
+  - scorer event binding 框架级 (Round 6 P2-2)：需 M5 baseline false PASS 比例实测
+  - LLM-judge fallback 真实路径接入 (Phase B 推迟 #4)：T-D-6 已建 adapter 框架；
+    Phase E 时 wire ProviderRouter chat_fn 即可
+  - pass@1 order-aware + arguments-aware (Phase B 推迟 #2)：tau_bench env.step 真接入
+  - GAIA Unicode normalization (Phase B 推迟 #3)：可在 score_tier2_gaia 内增强

@@ -33,3 +33,6 @@ dev = [
     "pytest-asyncio>=0.24",
     "httpx>=0.27",
 ]
+
+[project.scripts]
+octo-bench = "octoagent.gateway.cli.bench_commands:app"
