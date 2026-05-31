@@ -459,14 +459,13 @@ async def _collect_token_usage(
     """
     from octoagent.core.models.enums import EventType
 
-    try:
-        events = await store_group.event_store.get_events_by_types_since(
-            task_id=task_id,
-            event_types=[EventType.MODEL_CALL_COMPLETED],
-            since_ts=since,
-        )
-    except Exception:
-        return {"input": 0, "output": 0, "cache_read": 0}
+    # Codex round 2 MED 闭环：EventStore 查询异常透传到 runner_fn 顶层 INFRA_ERROR 分类
+    # （原 except 吞掉返回全 0 会静默污染 token 指标）
+    events = await store_group.event_store.get_events_by_types_since(
+        task_id=task_id,
+        event_types=[EventType.MODEL_CALL_COMPLETED],
+        since_ts=since,
+    )
 
     sum_input = 0
     sum_output = 0
@@ -566,14 +565,13 @@ async def _discover_child_task_ids(
     """
     from octoagent.core.models.enums import EventType
 
-    try:
-        events = await store_group.event_store.get_events_by_types_since(
-            task_id=parent_task_id,
-            event_types=[EventType.SUBAGENT_SPAWNED],
-            since_ts=since,
-        )
-    except Exception:
-        return []
+    # Codex round 2 MED 闭环：EventStore 查询异常透传到 _run_tier3 → runner_fn 顶层
+    # INFRA_ERROR 分类（原 except 吞掉返回空 list 会让 Tier 3 误评分而非标 infra）
+    events = await store_group.event_store.get_events_by_types_since(
+        task_id=parent_task_id,
+        event_types=[EventType.SUBAGENT_SPAWNED],
+        since_ts=since,
+    )
     out: list[str] = []
     seen: set[str] = set()
     for evt in events:
@@ -878,28 +876,55 @@ async def runner_fn(task_meta: Any, iteration: int) -> TaskExecutionOutcome:
         if tier == 3:
             return await _run_tier3(task_meta, iteration, rubrics, started_at)
         return _outcome_error(started_at, f"unsupported tier={tier!r}")
-    except TauBenchNotIntegratedError as exc:
-        # Codex HIGH-4 闭环：τ-bench 不真集成 → INFRA_ERROR（不进分母）
-        logger.info("runner_fn_tau_bench_not_integrated", extra={"task": _task_id_repr(task_meta)})
-        return TaskExecutionOutcome(
-            result=RESULT_INFRA_ERROR,
-            score=None,
-            duration_seconds=_elapsed(started_at),
-            error_message=str(exc),
-        )
-    except (MissingInstanceConfigError, TauBenchNotIntegratedError) as exc:
-        # 结构化已知 infra-level 错误：明确不进 pass-rate 分母
-        return TaskExecutionOutcome(
-            result=RESULT_INFRA_ERROR,
-            score=None,
-            duration_seconds=_elapsed(started_at),
-            error_message=str(exc),
-        )
     except Exception as exc:
-        # 全局兜底；worker.run_task_with_retry 的 try/except 会捕获并标 INFRA_ERROR，
-        # 但我们也在这里 log + 返回结构化 outcome 便于 debug
+        # 异常分类：所有结构化 infra-level 异常都标 INFRA_ERROR（不进分母）.
+        # Codex round 2 HIGH 闭环：provider 异常（ProviderError 基类含
+        # CredentialError / AuthenticationError / ProxyUnreachableError 等）从
+        # _run_gaia_fallback 透传到这里，必须明确分类为 INFRA_ERROR——而非
+        # broad except Exception 误为 RESULT_ERROR.
+        if _is_infra_error(exc):
+            logger.info(
+                "runner_fn_infra_error",
+                extra={"task": _task_id_repr(task_meta), "error_type": type(exc).__name__},
+            )
+            return TaskExecutionOutcome(
+                result=RESULT_INFRA_ERROR,
+                score=None,
+                duration_seconds=_elapsed(started_at),
+                error_message=f"{type(exc).__name__}: {exc}",
+            )
+        # 真未知异常 → RESULT_ERROR（scorer / runner 内部 bug，要被发现）
         logger.exception("runner_fn_unexpected_error")
         return _outcome_error(started_at, f"runner_fn unexpected: {exc!r}")
+
+
+def _is_infra_error(exc: BaseException) -> bool:
+    """判断异常是否属于 infrastructure 类（应进 INFRA_ERROR 不进 pass-rate 分母）.
+
+    Codex round 2 HIGH 闭环：原 runner_fn broad except Exception 把 provider
+    异常误为 RESULT_ERROR。识别以下类别为 infra：
+
+    1. ``MissingInstanceConfigError``：缺 octoagent.yaml / bench alias
+    2. ``TauBenchNotIntegratedError``：τ-bench 集成 deferred
+    3. ``ProviderError`` 及子类：CredentialError / AuthenticationError /
+       ProxyUnreachableError / OAuthFlowError 等（packages/provider/exceptions.py）
+    4. ``ConnectionError`` / ``TimeoutError`` / ``OSError`` 等网络层异常
+    """
+    # 已知结构化 infra 异常
+    if isinstance(exc, (MissingInstanceConfigError, TauBenchNotIntegratedError)):
+        return True
+    # 网络 / IO 类
+    if isinstance(exc, (ConnectionError, TimeoutError, OSError)):
+        return True
+    # Provider 异常（lazy import 避免 benchmarks 模块加载时强依赖 provider）
+    try:
+        from octoagent.provider.exceptions import ProviderError
+
+        if isinstance(exc, ProviderError):
+            return True
+    except ImportError:
+        pass
+    return False
 
 
 def _task_id_repr(task_meta: Any) -> str:

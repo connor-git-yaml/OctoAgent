@@ -434,6 +434,118 @@ async def test_runner_fn_missing_instance_config_returns_infra_error(monkeypatch
 
 
 # ---------------------------------------------------------------------------
+# Codex round 2 闭环：runner_fn 顶层异常分类（provider error → INFRA_ERROR）
+# ---------------------------------------------------------------------------
+
+
+def test_is_infra_error_classifies_missing_instance_config():
+    assert octo_runner._is_infra_error(octo_runner.MissingInstanceConfigError("x"))
+
+
+def test_is_infra_error_classifies_tau_not_integrated():
+    assert octo_runner._is_infra_error(octo_runner.TauBenchNotIntegratedError("x"))
+
+
+def test_is_infra_error_classifies_provider_error():
+    """ProviderError 子类（CredentialError / AuthenticationError 等）应标 infra."""
+    from octoagent.provider.exceptions import (
+        AuthenticationError,
+        CredentialError,
+        CredentialNotFoundError,
+        ProviderError,
+        ProxyUnreachableError,
+    )
+
+    assert octo_runner._is_infra_error(ProviderError("x"))
+    assert octo_runner._is_infra_error(CredentialError("x"))
+    assert octo_runner._is_infra_error(CredentialNotFoundError("x"))
+    assert octo_runner._is_infra_error(AuthenticationError("x", status_code=401))
+    # ProxyUnreachableError 是 ProviderError 子类，签名为 (proxy_url, original_error)
+    assert octo_runner._is_infra_error(
+        ProxyUnreachableError("http://x", RuntimeError("conn"))
+    )
+
+
+def test_is_infra_error_classifies_network_layer():
+    """ConnectionError / TimeoutError / OSError 都应标 infra（网络层）."""
+    assert octo_runner._is_infra_error(ConnectionError())
+    assert octo_runner._is_infra_error(TimeoutError())
+    assert octo_runner._is_infra_error(OSError())
+
+
+def test_is_infra_error_rejects_generic_runtime_error():
+    """generic RuntimeError / ValueError 不应被误标 infra（避免吞 scorer bug）."""
+    assert not octo_runner._is_infra_error(RuntimeError("scorer crashed"))
+    assert not octo_runner._is_infra_error(ValueError("bad input"))
+
+
+async def test_runner_fn_provider_error_maps_to_infra_error(monkeypatch, patched_harness_session):
+    """Codex round 2 HIGH：GAIA → CredentialError 透传 → INFRA_ERROR（不 ERROR）."""
+    from octoagent.provider.exceptions import CredentialNotFoundError
+
+    async def _raise(task_meta, iteration, rubrics, started_at):
+        raise CredentialNotFoundError("SILICONFLOW_API_KEY not set", provider="siliconflow")
+
+    monkeypatch.setattr(octo_runner, "_run_tier2_gaia", _raise)
+    task = FakeGaiaTaskMeta(task_id="T2-GAIA-X", domain="gaia_fallback")
+    out = await octo_runner.runner_fn(task, iteration=1)
+    from benchmarks.runner.store import RESULT_INFRA_ERROR
+
+    assert out.result == RESULT_INFRA_ERROR
+    assert "CredentialNotFoundError" in (out.error_message or "")
+
+
+async def test_runner_fn_generic_runtime_error_maps_to_result_error(monkeypatch, patched_harness_session):
+    """generic RuntimeError → RESULT_ERROR（不吞掉 scorer / runner bug）."""
+
+    async def _raise(task_meta, iteration, rubrics, started_at):
+        raise RuntimeError("scorer crash inside tier1")
+
+    monkeypatch.setattr(octo_runner, "_run_tier1", _raise)
+    task = FakeYamlTaskMeta(task_id="T1-X", tier=1, domain="memory", raw={})
+    out = await octo_runner.runner_fn(task, iteration=1)
+    from benchmarks.runner.store import RESULT_ERROR
+
+    assert out.result == RESULT_ERROR
+    assert "scorer crash" in (out.error_message or "")
+
+
+# ---------------------------------------------------------------------------
+# Codex round 2 MED 闭环：_discover_child_task_ids / _collect_token_usage 异常透传
+# ---------------------------------------------------------------------------
+
+
+async def test_discover_child_task_ids_propagates_event_store_error():
+    """_discover_child_task_ids 不再吞 EventStore 异常 → 上抛."""
+    fake_event_store = MagicMock()
+    fake_event_store.get_events_by_types_since = AsyncMock(
+        side_effect=RuntimeError("DB locked")
+    )
+    fake_sg = MagicMock(event_store=fake_event_store)
+    from datetime import datetime, timezone
+
+    with pytest.raises(RuntimeError, match="DB locked"):
+        await octo_runner._discover_child_task_ids(
+            fake_sg, "task-x", datetime.now(timezone.utc)
+        )
+
+
+async def test_collect_token_usage_propagates_event_store_error():
+    """_collect_token_usage 不再吞 EventStore 异常 → 上抛（让 runner_fn 标 infra）."""
+    fake_event_store = MagicMock()
+    fake_event_store.get_events_by_types_since = AsyncMock(
+        side_effect=ConnectionError("DB connection lost")
+    )
+    fake_sg = MagicMock(event_store=fake_event_store)
+    from datetime import datetime, timezone
+
+    with pytest.raises(ConnectionError, match="DB connection lost"):
+        await octo_runner._collect_token_usage(
+            fake_sg, "task-x", datetime.now(timezone.utc)
+        )
+
+
+# ---------------------------------------------------------------------------
 # LLM judge wire：ProviderRouterJudgeAdapter chat_fn 单测
 # ---------------------------------------------------------------------------
 
