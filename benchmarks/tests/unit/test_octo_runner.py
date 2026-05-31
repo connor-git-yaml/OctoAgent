@@ -23,6 +23,7 @@ import datetime as dt
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -281,6 +282,155 @@ def test_read_token_field_no_match_returns_zero():
 def test_read_token_field_invalid_type_treated_as_zero():
     """非数字字符串 / None 不抛错，返回 0。"""
     assert octo_runner._read_token_field({"input_tokens": "not a number"}, ("input_tokens",)) == 0
+
+
+# Codex MED-3 闭环：production schema token_usage 嵌套支持
+def test_read_token_field_prefers_production_token_usage_nested():
+    """production ModelCallCompletedPayload schema: payload.token_usage.prompt_tokens."""
+    payload = {
+        "token_usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+    }
+    # 优先读 token_usage.prompt_tokens（不是顶层 prompt_tokens）
+    assert octo_runner._read_token_field(payload, ("prompt_tokens",)) == 100
+    assert octo_runner._read_token_field(payload, ("completion_tokens",)) == 50
+
+
+def test_read_token_field_falls_back_to_provider_usage():
+    """ProviderClient.call metadata.usage 形态：payload.usage.prompt_tokens."""
+    payload = {"usage": {"prompt_tokens": 42, "completion_tokens": 8}}
+    assert octo_runner._read_token_field(payload, ("prompt_tokens",)) == 42
+
+
+def test_normalize_provider_usage_real_provider_schema():
+    """ProviderClient 返回的真实 usage dict 形态：{prompt_tokens, completion_tokens, total_tokens}."""
+    raw = {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+    result = octo_runner._normalize_provider_usage(raw)
+    assert result == {"input": 100, "output": 50, "cache_read": 0}
+
+
+def test_normalize_provider_usage_empty_dict_safe():
+    assert octo_runner._normalize_provider_usage({}) == {"input": 0, "output": 0, "cache_read": 0}
+
+
+def test_normalize_provider_usage_non_dict_safe():
+    """非 dict（None / str）→ 全 0，不抛错。"""
+    assert octo_runner._normalize_provider_usage(None) == {"input": 0, "output": 0, "cache_read": 0}
+    assert octo_runner._normalize_provider_usage("garbage") == {"input": 0, "output": 0, "cache_read": 0}
+
+
+# Codex MED-1 闭环：WAITING_INPUT / WAITING_APPROVAL → TaskBlockedOnInputError
+async def test_submit_and_wait_task_raises_on_waiting_input(monkeypatch):
+    """task 进入 WAITING_INPUT → TaskBlockedOnInputError（不卡到 timeout）。"""
+    from octoagent.core.models.enums import TaskStatus
+
+    fake_task = MagicMock()
+    fake_task.status = TaskStatus.WAITING_INPUT
+
+    fake_task_store = MagicMock()
+    fake_task_store.get_task = AsyncMock(return_value=fake_task)
+
+    fake_sg = MagicMock(task_store=fake_task_store)
+    fake_task_runner = MagicMock(enqueue=AsyncMock())
+
+    async def _fake_create_task(self_, message):
+        return "blocked-task-id", True
+
+    monkeypatch.setattr(
+        "octoagent.gateway.services.task_service.TaskService.create_task",
+        _fake_create_task,
+    )
+    monkeypatch.setattr(octo_runner, "TASK_POLL_INTERVAL_SECONDS", 0.01)
+
+    handle = octo_runner.HarnessHandle(
+        harness=MagicMock(),
+        app=MagicMock(),
+        project_root=Path("/tmp"),
+        store_group=fake_sg,
+        task_runner=fake_task_runner,
+        provider_router=MagicMock(),
+        tool_registry=MagicMock(),
+    )
+    # mock app.state.sse_hub
+    handle.app.state.sse_hub = MagicMock()
+
+    with pytest.raises(octo_runner.TaskBlockedOnInputError, match="WAITING_INPUT"):
+        await octo_runner._submit_and_wait_task(
+            handle, prompt="p", timeout_seconds=5.0, iteration=1
+        )
+
+
+# Codex HIGH-3 闭环：GAIA provider 错误透传（不再 try/except 吞）
+async def test_gaia_fallback_provider_exception_propagates(monkeypatch):
+    """_run_gaia_fallback 不再吞 provider 异常 → runner_fn 顶层标 INFRA_ERROR."""
+
+    async def _failing_chat(router, *, messages, model, temperature, max_tokens):
+        raise RuntimeError("provider auth failed")
+
+    monkeypatch.setattr(octo_runner, "_provider_router_chat", _failing_chat)
+
+    handle = octo_runner.HarnessHandle(
+        harness=MagicMock(),
+        app=MagicMock(),
+        project_root=Path("/tmp"),
+        store_group=MagicMock(),
+        task_runner=MagicMock(),
+        provider_router=MagicMock(),
+        tool_registry=MagicMock(),
+    )
+
+    task = FakeGaiaTaskMeta(task_id="T2-GAIA-1", prompt="q")
+
+    with pytest.raises(RuntimeError, match="provider auth failed"):
+        await octo_runner._run_gaia_fallback(
+            handle, task=task, iteration=1, model_alias="bench"
+        )
+
+
+# Codex HIGH-4 闭环：τ-bench 路径显式 INFRA_ERROR
+async def test_run_tau_bench_task_raises_not_integrated():
+    """_run_tau_bench_task 显式 raise，等 env.step + user_simulator 真接入."""
+    handle = octo_runner.HarnessHandle(
+        harness=MagicMock(),
+        app=MagicMock(),
+        project_root=Path("/tmp"),
+        store_group=MagicMock(),
+        task_runner=MagicMock(),
+        provider_router=MagicMock(),
+        tool_registry=MagicMock(),
+    )
+    task = FakeTauTaskMeta(task_id="T2-TAU-1")
+    with pytest.raises(octo_runner.TauBenchNotIntegratedError, match="deferred"):
+        await octo_runner._run_tau_bench_task(handle, task=task, iteration=1)
+
+
+async def test_runner_fn_tau_bench_returns_infra_error(monkeypatch, patched_harness_session):
+    """runner_fn 接 TauBenchNotIntegratedError → INFRA_ERROR outcome（不进分母）。"""
+
+    async def _raise(task_meta, iteration, rubrics, started_at):
+        raise octo_runner.TauBenchNotIntegratedError("tau integration deferred")
+
+    monkeypatch.setattr(octo_runner, "_run_tier2_tau", _raise)
+    task = FakeTauTaskMeta(task_id="T2-TAU-1", domain="tau_bench_airline")
+    out = await octo_runner.runner_fn(task, iteration=1)
+    from benchmarks.runner.store import RESULT_INFRA_ERROR
+
+    assert out.result == RESULT_INFRA_ERROR
+    assert "tau" in (out.error_message or "").lower()
+
+
+async def test_runner_fn_missing_instance_config_returns_infra_error(monkeypatch, patched_harness_session):
+    """runner_fn 接 MissingInstanceConfigError → INFRA_ERROR（不进分母）。"""
+
+    async def _raise(task_meta, iteration, rubrics, started_at):
+        raise octo_runner.MissingInstanceConfigError("no octoagent.yaml")
+
+    monkeypatch.setattr(octo_runner, "_run_tier1", _raise)
+    task = FakeYamlTaskMeta(task_id="T1-X", tier=1, domain="memory", raw={})
+    out = await octo_runner.runner_fn(task, iteration=1)
+    from benchmarks.runner.store import RESULT_INFRA_ERROR
+
+    assert out.result == RESULT_INFRA_ERROR
+    assert "no octoagent.yaml" in (out.error_message or "")
 
 
 # ---------------------------------------------------------------------------
@@ -958,15 +1108,147 @@ async def test_octo_harness_session_creates_isolated_tmpdir(monkeypatch):
         lambda: MagicMock(),
     )
 
-    async with octo_runner.octo_harness_session() as handle1:
+    # require_config=False：mock 测试不依赖真实 instance config
+    async with octo_runner.octo_harness_session(require_config=False) as handle1:
         project1 = handle1.project_root
         assert project1.exists()
 
     # tmpdir 应已清理
     assert not project1.exists()
 
-    async with octo_runner.octo_harness_session() as handle2:
+    async with octo_runner.octo_harness_session(require_config=False) as handle2:
         project2 = handle2.project_root
         assert project2.exists()
         # 两次 session 用独立目录
         assert project2 != project1
+
+
+# ---------------------------------------------------------------------------
+# Codex HIGH-1 闭环：instance config / template root resolution + fail-fast
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_template_root_explicit_wins(tmp_path, monkeypatch):
+    """显式 template_root 优先于 env + ~/.octoagent."""
+    explicit = tmp_path / "explicit"
+    explicit.mkdir()
+    monkeypatch.setenv("OCTOAGENT_BENCH_TEMPLATE_ROOT", str(tmp_path / "env"))
+    assert octo_runner._resolve_template_root(explicit) == explicit
+
+
+def test_resolve_template_root_env_when_no_explicit(tmp_path, monkeypatch):
+    """无 explicit → OCTOAGENT_BENCH_TEMPLATE_ROOT env."""
+    env_root = tmp_path / "env"
+    monkeypatch.setenv("OCTOAGENT_BENCH_TEMPLATE_ROOT", str(env_root))
+    assert octo_runner._resolve_template_root(None) == env_root
+
+
+def test_resolve_template_root_returns_none_when_nothing_available(tmp_path, monkeypatch):
+    """都缺时 → None（caller fail-fast）."""
+    monkeypatch.delenv("OCTOAGENT_BENCH_TEMPLATE_ROOT", raising=False)
+    fake_home = tmp_path / "no_octoagent_dir"
+    monkeypatch.setattr(octo_runner.Path, "home", lambda: fake_home)
+    assert octo_runner._resolve_template_root(None) is None
+
+
+async def test_session_raises_missing_config_when_template_root_none(monkeypatch):
+    """require_config=True 但 template_root 完全找不到 → MissingInstanceConfigError."""
+    monkeypatch.delenv("OCTOAGENT_BENCH_TEMPLATE_ROOT", raising=False)
+    monkeypatch.setattr(octo_runner.Path, "home", lambda: Path("/nonexistent/x"))
+
+    with pytest.raises(octo_runner.MissingInstanceConfigError, match="No instance template_root"):
+        async with octo_runner.octo_harness_session(require_config=True) as _:
+            pass
+
+
+async def test_session_raises_missing_config_when_yaml_absent(tmp_path):
+    """template_root 存在但没 octoagent.yaml → MissingInstanceConfigError."""
+    empty_root = tmp_path / "empty_instance"
+    empty_root.mkdir()
+    with pytest.raises(octo_runner.MissingInstanceConfigError, match="Instance config not found"):
+        async with octo_runner.octo_harness_session(
+            template_root=empty_root, require_config=True
+        ) as _:
+            pass
+
+
+async def test_session_raises_missing_config_when_bench_alias_absent(tmp_path):
+    """yaml 存在但缺 bench alias → MissingInstanceConfigError."""
+    template_root = tmp_path / "template"
+    template_root.mkdir()
+    (template_root / "octoagent.yaml").write_text(
+        "config_version: 2\n"
+        "providers:\n  - id: foo\n    enabled: true\n"
+        "model_aliases:\n  main:\n    provider: foo\n    model: m\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(octo_runner.MissingInstanceConfigError, match="Bench alias 'bench' not found"):
+        async with octo_runner.octo_harness_session(
+            template_root=template_root, require_config=True, bench_model_alias="bench"
+        ) as _:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Codex HIGH-2 闭环：main alias 被重写到 bench 指向的 (provider, model)
+# ---------------------------------------------------------------------------
+
+
+def test_rewrite_main_alias_to_bench_overwrites_main_and_cheap(tmp_path):
+    """重写后 model_aliases.main 和 cheap 都指向 bench 的 (provider, model)."""
+    import yaml as _yaml
+
+    yaml_path = tmp_path / "in.yaml"
+    yaml_path.write_text(
+        "model_aliases:\n"
+        "  main:\n    provider: openai-codex\n    model: gpt-5.5\n"
+        "  cheap:\n    provider: openai-codex\n    model: gpt-5.5\n"
+        "  bench:\n    provider: siliconflow\n    model: deepseek-ai/DeepSeek-V3.2\n",
+        encoding="utf-8",
+    )
+    rewritten_text = octo_runner._rewrite_main_alias_to_bench(yaml_path, bench_alias="bench")
+    assert rewritten_text is not None
+    parsed = _yaml.safe_load(rewritten_text)
+    assert parsed["model_aliases"]["main"]["provider"] == "siliconflow"
+    assert parsed["model_aliases"]["main"]["model"] == "deepseek-ai/DeepSeek-V3.2"
+    assert parsed["model_aliases"]["cheap"]["provider"] == "siliconflow"
+    # bench alias 保留（让 LLM judge 显式引用）
+    assert parsed["model_aliases"]["bench"]["provider"] == "siliconflow"
+
+
+def test_rewrite_main_alias_to_bench_returns_none_when_bench_missing(tmp_path):
+    """bench alias 不在 yaml 时 → None（让 caller fail-fast）."""
+    yaml_path = tmp_path / "in.yaml"
+    yaml_path.write_text(
+        "model_aliases:\n  main:\n    provider: openai-codex\n    model: gpt-5.5\n",
+        encoding="utf-8",
+    )
+    assert (
+        octo_runner._rewrite_main_alias_to_bench(yaml_path, bench_alias="bench") is None
+    )
+
+
+def test_materialize_instance_config_copies_behavior_files(tmp_path):
+    """USER.md / MEMORY.md 模板复制（host 实例 → .md，test fixture → .md.template）."""
+    src = tmp_path / "src"
+    (src / "behavior" / "system").mkdir(parents=True)
+    (src / "behavior" / "system" / "USER.md").write_text("host user", encoding="utf-8")
+    (src / "behavior" / "system" / "MEMORY.md.template").write_text("tpl memory", encoding="utf-8")
+    (src / "octoagent.yaml").write_text(
+        "model_aliases:\n  bench:\n    provider: siliconflow\n    model: m\n",
+        encoding="utf-8",
+    )
+
+    dst = tmp_path / "dst"
+    dst.mkdir()
+    octo_runner._materialize_instance_config(
+        src, dst, bench_alias="bench", require_config=True
+    )
+
+    # USER.md 来自 host（无 .template 后缀）
+    assert (dst / "behavior" / "system" / "USER.md").read_text() == "host user"
+    # MEMORY.md 来自 template fallback
+    assert (dst / "behavior" / "system" / "MEMORY.md").read_text() == "tpl memory"
+    # main alias 被重写
+    rewritten = (dst / "octoagent.yaml").read_text()
+    assert "siliconflow" in rewritten and "main:" in rewritten

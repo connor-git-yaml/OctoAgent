@@ -119,31 +119,64 @@ class HarnessHandle:
     tool_registry: Any  # Tier 2 τ-bench tau_bench_tool_scope 注入用
 
 
+class MissingInstanceConfigError(RuntimeError):
+    """Codex HIGH-1 闭环：缺少 instance config 时 fail-fast，不在 tmp 内静默继续.
+
+    ``octo_harness_session`` 默认要求 ``OCTOAGENT_BENCH_TEMPLATE_ROOT`` env 或
+    ``~/.octoagent`` 下有 ``octoagent.yaml``（含 SiliconFlow provider）。缺失
+    意味着 LLM 路径无法解析 alias → 整次 baseline 跑垃圾数字。
+    """
+
+
 @asynccontextmanager
 async def octo_harness_session(
     *,
     credential_store: Any | None = None,
     llm_adapter: Any | None = None,
-    project_template_root: Path | None = None,
+    template_root: Path | None = None,
+    bench_model_alias: str | None = None,
+    require_config: bool = True,
 ):
-    """每 task 独立 tmp OctoHarness lifespan.
+    """每 task 独立 tmp OctoHarness lifespan（Codex HIGH-1/HIGH-2 闭环）.
 
-    bootstrap → yield handle → shutdown，并自动处理 tmp dir 清理。
+    bootstrap → yield handle → shutdown，并自动处理 tmp dir 清理 +
+    instance config 准备（octoagent.yaml + main alias 重写）.
+
+    工作流:
+        1. tempdir 内建 project_root / data_dir / mcp_servers_dir 骨架
+        2. 复制 ``template_root / octoagent.yaml`` → ``project_root / octoagent.yaml``
+        3. 把 ``model_aliases.main`` 重写为 bench alias 指向的 (provider, model)，
+           让 task_runner 透明使用控变量 LLM（无需修 NormalizedMessage 加新 control_metadata）
+        4. 复制 ``USER.md`` / ``MEMORY.md`` 模板（若存在）
+        5. ``OctoHarness.bootstrap`` → yield → shutdown
 
     Args:
-        credential_store: 可选注入；None 时 OctoHarness 内部读宿主 auth-profiles.json
-            （需要 caller 显式提供以便隔离）。Phase E 真跑时 caller 提供 instance 路径
-            ``~/.octoagent/auth-profiles.json`` 副本到 tmp.
+        credential_store: 可选注入；None 时 OctoHarness 读 tmp project_root 下的
+            auth-profiles.json（需要 caller 设置 SILICONFLOW_API_KEY env）。
         llm_adapter: 可选注入；None 时走默认 ProviderRouterMessageAdapter（控变量
-            LLM 路径，alias=bench）。
-        project_template_root: 可选；存在时把 ``USER.md.template`` /
-            ``MEMORY.md.template`` / ``octoagent.yaml.template`` 复制到 tmp project_root
-            （保证 LLM 路径能找到 alias 配置）。
+            LLM 路径，alias=main 已被重写到 bench）。
+        template_root: instance config 来源根路径；None 时按优先级解析：
+            ① ``OCTOAGENT_BENCH_TEMPLATE_ROOT`` env
+            ② ``~/.octoagent`` (host instance)
+            缺 octoagent.yaml 时 raise ``MissingInstanceConfigError`` (require_config=True 时)
+            或继续不复制 (require_config=False，仅 mock 测试用)
+        bench_model_alias: 控变量 alias 名（默认 ``DEFAULT_BENCH_MODEL_ALIAS``）；
+            该 alias 必须存在于 template_root/octoagent.yaml 的 model_aliases，
+            runner 把它的 (provider, model) 重写到 main alias.
+        require_config: True 时缺 octoagent.yaml fail-fast；False 时跳过（仅
+            unit test 用 mock OctoHarness 时设 False）.
+
+    Raises:
+        MissingInstanceConfigError: require_config=True 但找不到 octoagent.yaml
+            或 bench alias 未在 model_aliases 中定义.
     """
     # 延迟 import：benchmarks/ 不在 sys.path top-level 时也能 import
     from fastapi import FastAPI
 
     from octoagent.gateway.harness.octo_harness import OctoHarness
+
+    bench_alias = bench_model_alias or DEFAULT_BENCH_MODEL_ALIAS
+    resolved_template_root = _resolve_template_root(template_root)
 
     with tempfile.TemporaryDirectory(prefix="octobench_") as tmpdir_str:
         tmp_root = Path(tmpdir_str)
@@ -156,8 +189,20 @@ async def octo_harness_session(
         mcp_servers_dir.mkdir(parents=True, exist_ok=True)
         (project_root / "behavior" / "system").mkdir(parents=True, exist_ok=True)
 
-        if project_template_root is not None:
-            _copy_instance_template(project_template_root, project_root)
+        if resolved_template_root is not None:
+            _materialize_instance_config(
+                resolved_template_root,
+                project_root,
+                bench_alias=bench_alias,
+                require_config=require_config,
+            )
+        elif require_config:
+            raise MissingInstanceConfigError(
+                "No instance template_root provided and "
+                "OCTOAGENT_BENCH_TEMPLATE_ROOT env / ~/.octoagent both unavailable; "
+                "runner cannot run benchmark without octoagent.yaml. "
+                "See benchmarks/README_BENCH_ALIAS.md for setup."
+            )
 
         harness = OctoHarness(
             project_root=project_root,
@@ -168,8 +213,10 @@ async def octo_harness_session(
         )
 
         app = FastAPI()
+        bootstrap_ok = False
         try:
             await harness.bootstrap(app)
+            bootstrap_ok = True
             harness.commit_to_app(app)
             from octoagent.gateway.harness.tool_registry import get_registry
 
@@ -184,32 +231,122 @@ async def octo_harness_session(
             )
             yield handle
         finally:
-            # F089 finding #1 闭环模式：不吞 shutdown 异常
-            await harness.shutdown(app)
+            # F089 finding #1 闭环模式：不吞 shutdown 异常.
+            # Codex MED-2 闭环：先关 ProviderRouter http client（避免 150 task 累积）
+            try:
+                router = getattr(app.state, "provider_router", None)
+                if router is not None and hasattr(router, "aclose"):
+                    await router.aclose()
+            except Exception as exc:
+                logger.warning("provider_router_aclose_failed", extra={"error": repr(exc)})
+            if bootstrap_ok:
+                await harness.shutdown(app)
 
 
-def _copy_instance_template(src_root: Path, dst_root: Path) -> None:
-    """复制 ``USER.md.template`` / ``MEMORY.md.template`` / ``octoagent.yaml.template``。
+def _resolve_template_root(explicit: Path | None) -> Path | None:
+    """按优先级解析 template_root：explicit → env → ~/.octoagent."""
+    if explicit is not None:
+        return explicit
+    env_val = os.environ.get("OCTOAGENT_BENCH_TEMPLATE_ROOT", "").strip()
+    if env_val:
+        return Path(env_val).expanduser().resolve()
+    default = Path.home() / ".octoagent"
+    if default.exists():
+        return default
+    return None
 
-    复用 ``apps/gateway/tests/e2e_live/helpers/factories.copy_local_instance_template``
-    的语义，但不依赖 gateway test 模块（benchmarks 必须独立）。
+
+def _materialize_instance_config(
+    src_root: Path,
+    dst_root: Path,
+    *,
+    bench_alias: str,
+    require_config: bool,
+) -> None:
+    """复制 instance config 到 tmp project_root + 重写 main alias.
+
+    Codex HIGH-1：从 template_root 复制 octoagent.yaml + USER.md + MEMORY.md.
+    Codex HIGH-2：把 model_aliases.main 重写到 bench alias 指向的 (provider, model).
+
+    支持两种 src_root 布局:
+    - host instance 根（如 ``~/.octoagent``）：直接读 octoagent.yaml.
+    - test fixture（如 tests/fixtures/local-instance/）：读 octoagent.yaml.template.
+
+    behavior 模板同理：先找 USER.md / MEMORY.md，找不到再退到 .template 扩展.
+
+    Raises:
+        MissingInstanceConfigError: octoagent.yaml 缺失 / bench alias 不存在.
     """
     import shutil
 
+    # Step 1: behavior 文件（USER.md / MEMORY.md）
     behavior_src = src_root / "behavior" / "system"
     behavior_dst = dst_root / "behavior" / "system"
     behavior_dst.mkdir(parents=True, exist_ok=True)
-    for fname, dst_name in (
-        ("USER.md.template", "USER.md"),
-        ("MEMORY.md.template", "MEMORY.md"),
-    ):
-        src_path = behavior_src / fname
-        if src_path.exists():
-            shutil.copy(src_path, behavior_dst / dst_name)
+    for base_name in ("USER.md", "MEMORY.md"):
+        # 优先非模板（host 实例），fallback 到 .template（test fixture）
+        for candidate in (base_name, f"{base_name}.template"):
+            src_path = behavior_src / candidate
+            if src_path.exists():
+                shutil.copy(src_path, behavior_dst / base_name)
+                break
 
-    yaml_src = src_root / "octoagent.yaml.template"
-    if yaml_src.exists():
-        shutil.copy(yaml_src, dst_root / "octoagent.yaml")
+    # Step 2: octoagent.yaml（必填 + 重写 main alias）
+    yaml_candidates = (src_root / "octoagent.yaml", src_root / "octoagent.yaml.template")
+    yaml_src = next((p for p in yaml_candidates if p.exists()), None)
+    if yaml_src is None:
+        if require_config:
+            raise MissingInstanceConfigError(
+                f"Instance config not found under {src_root}: "
+                f"expected octoagent.yaml or octoagent.yaml.template. "
+                f"See benchmarks/README_BENCH_ALIAS.md for setup."
+            )
+        return
+
+    rewritten = _rewrite_main_alias_to_bench(yaml_src, bench_alias=bench_alias)
+    if rewritten is None and require_config:
+        raise MissingInstanceConfigError(
+            f"Bench alias {bench_alias!r} not found in {yaml_src}: "
+            f"model_aliases must contain a '{bench_alias}' entry. "
+            f"See benchmarks/README_BENCH_ALIAS.md §Step 2."
+        )
+
+    (dst_root / "octoagent.yaml").write_text(
+        rewritten if rewritten is not None else yaml_src.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+
+def _rewrite_main_alias_to_bench(
+    yaml_path: Path,
+    *,
+    bench_alias: str,
+) -> str | None:
+    """把 model_aliases.main 重写为 bench alias 指向的 (provider, model).
+
+    Codex HIGH-2 闭环：task_runner 默认 model_alias="main"（看 capability_pack.py
+    + worker_service.py 多处 default_model_alias="main"）；我们把 main 重写到
+    bench 让所有 task 透明使用控变量 LLM，不需要侵入 NormalizedMessage 加新 control_metadata.
+
+    Returns:
+        重写后的 yaml 文本；bench alias 不存在时返回 None（caller 决定 fail-fast）.
+    """
+    import yaml as _yaml
+
+    data = _yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
+    aliases = data.get("model_aliases") or {}
+    bench_def = aliases.get(bench_alias)
+    if not isinstance(bench_def, dict):
+        return None  # bench alias 缺失 → caller fail-fast
+
+    # 重写 main / cheap 都指向 bench（避免 cheap fallback 用了别的 model）
+    new_main = dict(bench_def)
+    new_main["description"] = f"F103d OctoBench：rewritten to {bench_alias}（控变量）"
+    aliases["main"] = new_main
+    aliases["cheap"] = dict(new_main, description=f"F103d OctoBench：cheap = main = {bench_alias}")
+    # 保留原 bench alias 自身（运行时显式引用时仍可用）
+    data["model_aliases"] = aliases
+    return _yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
 
 
 # ---------------------------------------------------------------------------
@@ -261,16 +398,36 @@ async def _submit_and_wait_task(
 
     await task_runner.enqueue(task_id, msg.text)
 
-    # 轮询 task_store 等终态
+    # 轮询 task_store 等终态（Codex MED-1 闭环）
+    # Benchmark 终态语义：
+    # - SUCCEEDED / FAILED / CANCELLED：正常终态（baseline 计入）
+    # - WAITING_INPUT / WAITING_APPROVAL：benchmark task 不应进入（H3-B ask_back
+    #   task 除外，但 runner_fn 不卡到 timeout——视为 FAIL，error_message 标记）
+    #
+    # 不含 REJECTED：TaskStatus 枚举无此值（实测 packages/core/.../enums.py）.
+    terminal_statuses = {
+        TaskStatus.SUCCEEDED,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELLED,
+    }
+    # 这些视为 benchmark FAIL（runner 无人值守 → 不可能继续）：
+    fail_as_benchmark = {
+        TaskStatus.WAITING_INPUT,
+        TaskStatus.WAITING_APPROVAL,
+    }
+
     deadline = asyncio.get_running_loop().time() + max(0.5, timeout_seconds)
     while True:
         task = await sg.task_store.get_task(task_id)
-        if task is not None and task.status in {
-            TaskStatus.SUCCEEDED,
-            TaskStatus.FAILED,
-            TaskStatus.CANCELLED,
-        }:
-            break
+        if task is not None:
+            if task.status in terminal_statuses:
+                break
+            if task.status in fail_as_benchmark:
+                # benchmark 卡在等待状态：直接当 FAIL 终态
+                raise TaskBlockedOnInputError(
+                    f"task {task_id} blocked on {task.status.value} "
+                    f"(benchmark runner is non-interactive; cannot supply input)"
+                )
         if asyncio.get_running_loop().time() > deadline:
             raise TimeoutError(
                 f"task {task_id} did not reach terminal state within {timeout_seconds}s"
@@ -281,6 +438,13 @@ async def _submit_and_wait_task(
     return task_id, started_at, token_usage
 
 
+class TaskBlockedOnInputError(RuntimeError):
+    """Codex MED-1 闭环：task 进入 WAITING_INPUT/WAITING_APPROVAL 而 runner 无人值守.
+
+    被 ``_run_tier1`` / ``_run_tier3`` 顶层抓到 → 标 FAIL（不是 INFRA_ERROR）.
+    """
+
+
 async def _collect_token_usage(
     store_group: Any,
     task_id: str,
@@ -288,8 +452,10 @@ async def _collect_token_usage(
 ) -> dict[str, int]:
     """从 EventStore ``MODEL_CALL_COMPLETED`` payload 汇总 input/output/cache_read token.
 
-    payload 字段可能因 provider / version 不同：兼容
-    ``token_input`` / ``input_tokens`` / ``usage.input_tokens`` 等候选键。
+    Codex MED-3 闭环：对齐 production schema (``ModelCallCompletedPayload``):
+    payload 含 ``token_usage: dict[str, int]`` 嵌套，键 ``prompt_tokens`` /
+    ``completion_tokens`` / ``total_tokens``（packages/core/.../payloads.py:90）.
+    旧 schema 候选保留：``input_tokens`` / ``output_tokens`` / 顶层 ``token_input``.
     """
     from octoagent.core.models.enums import EventType
 
@@ -309,14 +475,16 @@ async def _collect_token_usage(
         payload = _event_payload(evt)
         if not isinstance(payload, dict):
             continue
+        # Codex MED-3: 优先 production schema token_usage 嵌套
         sum_input += _read_token_field(
-            payload, ("token_input", "input_tokens", "prompt_tokens")
+            payload, ("prompt_tokens", "input_tokens", "token_input")
         )
         sum_output += _read_token_field(
-            payload, ("token_output", "output_tokens", "completion_tokens")
+            payload, ("completion_tokens", "output_tokens", "token_output")
         )
         sum_cache_read += _read_token_field(
-            payload, ("token_cache_read", "cache_read_tokens", "cache_read_input_tokens")
+            payload,
+            ("cache_read_input_tokens", "cache_read_tokens", "token_cache_read"),
         )
     return {"input": sum_input, "output": sum_output, "cache_read": sum_cache_read}
 
@@ -333,21 +501,53 @@ def _event_payload(evt: Any) -> dict[str, Any] | None:
 
 
 def _read_token_field(payload: dict[str, Any], candidates: tuple[str, ...]) -> int:
-    """从 payload 多候选 key 中读 int token 数。"""
+    """从 payload 多候选 key 中读 int token 数.
+
+    优先顺序（Codex MED-3）：
+    1. ``payload["token_usage"][key]``——production ModelCallCompletedPayload.token_usage
+    2. ``payload["usage"][key]``——ProviderClient.call return metadata.usage
+    3. 顶层 ``payload[key]``——旧 schema 兼容
+    """
+    nested_containers = ("token_usage", "usage")
+    for container in nested_containers:
+        inner = payload.get(container)
+        if isinstance(inner, dict):
+            for key in candidates:
+                if key in inner:
+                    try:
+                        return int(inner[key])
+                    except (TypeError, ValueError):
+                        continue
+
     for key in candidates:
         if key in payload:
             try:
                 return int(payload[key])
             except (TypeError, ValueError):
                 continue
-        if "usage" in payload and isinstance(payload["usage"], dict):
-            inner = payload["usage"].get(key)
-            if inner is not None:
-                try:
-                    return int(inner)
-                except (TypeError, ValueError):
-                    continue
     return 0
+
+
+def _normalize_provider_usage(raw: Any) -> dict[str, int]:
+    """ProviderClient.call return metadata.usage → {input, output, cache_read}.
+
+    Provider 真实返回 dict 形如 ``{prompt_tokens, completion_tokens, total_tokens}``
+    （packages/provider/.../provider_client.py:_call_openai_chat usage_data）.
+    """
+    if not isinstance(raw, dict):
+        return {"input": 0, "output": 0, "cache_read": 0}
+    return {
+        "input": _read_token_field(
+            {"usage": raw}, ("prompt_tokens", "input_tokens", "token_input")
+        ),
+        "output": _read_token_field(
+            {"usage": raw}, ("completion_tokens", "output_tokens", "token_output")
+        ),
+        "cache_read": _read_token_field(
+            {"usage": raw},
+            ("cache_read_input_tokens", "cache_read_tokens", "token_cache_read"),
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -403,6 +603,10 @@ async def _run_gaia_fallback(
 
     不走 task_service.create_task；GAIA 是单轮答题 benchmark，不需要 task 编排。
 
+    Codex HIGH-3 闭环：provider 异常（auth / quota / network）不在此层吞掉，
+    上抛到 ``runner_fn`` 顶层 → worker.run_task_with_retry 的 except 路径分类为
+    INFRA_ERROR（不污染 FAIL 分母）。空 prompt 仍走正常路径返回空 answer.
+
     Returns:
         (actual_answer, token_usage_dict)
     """
@@ -426,28 +630,18 @@ async def _run_gaia_fallback(
         {"role": "user", "content": prompt},
     ]
 
-    # ProviderRouter 直连：alias=bench → SiliconFlow DeepSeek-V3.2
-    try:
-        resp = await _provider_router_chat(
-            router,
-            messages=messages,
-            model=model_alias,
-            temperature=DEFAULT_BENCH_TEMPERATURE,
-            max_tokens=512,
-        )
-        text = resp.get("text", "") if isinstance(resp, dict) else str(resp)
-        token_usage = resp.get("usage", {}) if isinstance(resp, dict) else {}
-        return text.strip(), {
-            "input": int(token_usage.get("input_tokens", 0) or 0),
-            "output": int(token_usage.get("output_tokens", 0) or 0),
-            "cache_read": int(token_usage.get("cache_read_tokens", 0) or 0),
-        }
-    except Exception as exc:
-        logger.warning(
-            "gaia_provider_chat_failed",
-            extra={"task_id": getattr(task, "task_id", "?"), "error": repr(exc)},
-        )
-        return "", {"input": 0, "output": 0, "cache_read": 0}
+    # ProviderRouter 直连：alias=bench → SiliconFlow DeepSeek-V3.2.
+    # 异常透传：让 runner_fn 顶层兜底标 INFRA_ERROR（Codex HIGH-3）.
+    resp = await _provider_router_chat(
+        router,
+        messages=messages,
+        model=model_alias,
+        temperature=DEFAULT_BENCH_TEMPERATURE,
+        max_tokens=512,
+    )
+    text = resp.get("text", "") if isinstance(resp, dict) else str(resp)
+    token_usage = resp.get("usage", {}) if isinstance(resp, dict) else {}
+    return text.strip(), _normalize_provider_usage(token_usage)
 
 
 async def _provider_router_chat(
@@ -549,83 +743,41 @@ def _normalize_chat_response(resp: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+# Codex HIGH-4 闭环：τ-bench 真实 user_simulator + env.step 接入是独立 Feature
+# 的工作量（handoff §3.E）。在它就绪前，Tier 2 τ-bench 路径不能产 baseline 数据
+# ——否则 scorer 看 TOOL_CALL_STARTED tool name 即给 PASS/FAIL，是系统性假评分.
+# Phase E Step 1 显式 raise，让 runner_fn 顶层兜底为 INFRA_ERROR（不进分母）.
+TAU_BENCH_NOT_INTEGRATED_MESSAGE = (
+    "Tier 2 τ-bench env.step + user_simulator integration is deferred "
+    "(see handoff §3.E). Phase E Step 1 explicitly returns INFRA_ERROR to "
+    "prevent generating false PASS/FAIL data from incomplete tool-name matching."
+)
+
+
+class TauBenchNotIntegratedError(RuntimeError):
+    """τ-bench 完整集成（env.step + user_simulator）尚未就绪 → INFRA_ERROR."""
+
+
 async def _run_tau_bench_task(
     handle: HarnessHandle,
     *,
     task: Any,
     iteration: int,
 ) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """τ-bench airline 跑一 task → 返回 ``(actual_tool_calls, token_usage)``.
+    """Codex HIGH-4 闭环：显式不跑（INFRA_ERROR），等真集成.
 
-    Phase E 第 1 步实现：tau_bench_tool_scope 注册 + 通过 ``TOOL_CALL_STARTED`` 事件
-    收集实际调用的 tool name + arguments。不实现完整的 user_simulator multi-turn
-    loop（推迟到 F108 或下游 Feature——见 handoff §3.E）。
+    历史尝试：tau_bench_tool_scope 注册 14 个 tool + 抓 TOOL_CALL_STARTED 收集
+    tool name。但 scorer 单看 tool name 是否被覆盖给 PASS @1，系统性假评分。
 
-    Returns:
-        (actual_tool_calls, token_usage_dict)
+    真集成需要：
+    1. tau_bench env.step (mock DB state machine) 真驱动
+    2. user_simulator multi-turn loop（Sonnet 4.6）
+    3. score_tier2_tau order-aware + arguments-aware 比对
+
+    在以上未就绪前，显式 raise，让 runner_fn 顶层 except 标 INFRA_ERROR ——
+    符合 AC3-4：INFRA_ERROR 不进 pass rate 分母，避免污染 baseline 数据.
     """
-    from benchmarks.tiers.tier2.tau_bench_adapter import (
-        TAU_BENCH_TOOL_PREFIX,
-        tau_bench_tool_scope,
-    )
-
-    # 加载 14 个 tau_bench airline tools
-    try:
-        from tau_bench.envs.airline.tools import ALL_TOOLS as TAU_TOOLS
-    except ImportError:
-        logger.warning(
-            "tau_bench_not_installed",
-            extra={"hint": "uv pip install 'git+https://github.com/sierra-research/tau-bench.git'"},
-        )
-        return [], {"input": 0, "output": 0, "cache_read": 0}
-
-    instruction = getattr(task, "instruction", "")
-    scope_id = f"i{iteration}-{getattr(task, 'task_idx', 0):03d}"
-
-    actual_tool_calls: list[dict[str, Any]] = []
-
-    started_at = dt.datetime.now(dt.timezone.utc)
-
-    with tau_bench_tool_scope(
-        handle.tool_registry, list(TAU_TOOLS), scope_id=scope_id
-    ):
-        try:
-            task_id, _, token_usage = await _submit_and_wait_task(
-                handle,
-                prompt=instruction,
-                timeout_seconds=120.0,
-                iteration=iteration,
-            )
-        except (TimeoutError, RuntimeError) as exc:
-            logger.warning(
-                "tau_task_submit_failed",
-                extra={"task_id": getattr(task, "task_id", "?"), "error": repr(exc)},
-            )
-            return [], {"input": 0, "output": 0, "cache_read": 0}
-
-        # 收集 actual_tool_calls：query TOOL_CALL_STARTED events，按 prefix 过滤
-        try:
-            from octoagent.core.models.enums import EventType
-
-            events = await handle.store_group.event_store.get_events_by_types_since(
-                task_id=task_id,
-                event_types=[EventType.TOOL_CALL_STARTED],
-                since_ts=started_at,
-            )
-            for evt in events:
-                payload = _event_payload(evt) or {}
-                name = str(payload.get("tool_name", "") or "")
-                if name.startswith(TAU_BENCH_TOOL_PREFIX):
-                    actual_tool_calls.append(
-                        {"name": name, "arguments": payload.get("arguments", {})}
-                    )
-        except Exception as exc:
-            logger.warning(
-                "tau_tool_calls_collect_failed",
-                extra={"task_id": task_id, "error": repr(exc)},
-            )
-
-    return actual_tool_calls, token_usage
+    raise TauBenchNotIntegratedError(TAU_BENCH_NOT_INTEGRATED_MESSAGE)
 
 
 # ---------------------------------------------------------------------------
@@ -726,11 +878,33 @@ async def runner_fn(task_meta: Any, iteration: int) -> TaskExecutionOutcome:
         if tier == 3:
             return await _run_tier3(task_meta, iteration, rubrics, started_at)
         return _outcome_error(started_at, f"unsupported tier={tier!r}")
+    except TauBenchNotIntegratedError as exc:
+        # Codex HIGH-4 闭环：τ-bench 不真集成 → INFRA_ERROR（不进分母）
+        logger.info("runner_fn_tau_bench_not_integrated", extra={"task": _task_id_repr(task_meta)})
+        return TaskExecutionOutcome(
+            result=RESULT_INFRA_ERROR,
+            score=None,
+            duration_seconds=_elapsed(started_at),
+            error_message=str(exc),
+        )
+    except (MissingInstanceConfigError, TauBenchNotIntegratedError) as exc:
+        # 结构化已知 infra-level 错误：明确不进 pass-rate 分母
+        return TaskExecutionOutcome(
+            result=RESULT_INFRA_ERROR,
+            score=None,
+            duration_seconds=_elapsed(started_at),
+            error_message=str(exc),
+        )
     except Exception as exc:
         # 全局兜底；worker.run_task_with_retry 的 try/except 会捕获并标 INFRA_ERROR，
         # 但我们也在这里 log + 返回结构化 outcome 便于 debug
         logger.exception("runner_fn_unexpected_error")
         return _outcome_error(started_at, f"runner_fn unexpected: {exc!r}")
+
+
+def _task_id_repr(task_meta: Any) -> str:
+    """安全 repr task_id（log 用）."""
+    return str(_raw_dict(task_meta).get("task_id") or getattr(task_meta, "task_id", "?"))
 
 
 # ---------------------------------------------------------------------------
@@ -767,6 +941,14 @@ async def _run_tier1(
             return TaskExecutionOutcome(
                 result=RESULT_TIMEOUT,
                 score=None,
+                duration_seconds=_elapsed(started_at),
+                error_message=str(exc),
+            )
+        except TaskBlockedOnInputError as exc:
+            # Codex MED-1：waiting on input → benchmark FAIL（无人值守）
+            return TaskExecutionOutcome(
+                result=RESULT_FAIL,
+                score=0.0,
                 duration_seconds=_elapsed(started_at),
                 error_message=str(exc),
             )
@@ -875,6 +1057,14 @@ async def _run_tier3(
             return TaskExecutionOutcome(
                 result=RESULT_TIMEOUT,
                 score=None,
+                duration_seconds=_elapsed(started_at),
+                error_message=str(exc),
+            )
+        except TaskBlockedOnInputError as exc:
+            # Codex MED-1：T3-H3B 等 ask_back 类 task 可能命中；视为 FAIL（无人值守）
+            return TaskExecutionOutcome(
+                result=RESULT_FAIL,
+                score=0.0,
                 duration_seconds=_elapsed(started_at),
                 error_message=str(exc),
             )
