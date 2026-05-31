@@ -545,6 +545,94 @@ async def test_collect_token_usage_propagates_event_store_error():
         )
 
 
+# Codex round 3 端到端：_run_tier1/_run_tier3 不再 swallow infra 异常
+async def test_run_tier1_fetch_events_connection_error_propagates(monkeypatch):
+    """_run_tier1 fetch_events 抛 ConnectionError → 上抛 → runner_fn 顶层 INFRA_ERROR."""
+    fake_event_store = MagicMock()
+    fake_event_store.get_events_by_types_since = AsyncMock(return_value=[])
+    from octoagent.core.models.enums import TaskStatus
+
+    fake_task = MagicMock()
+    fake_task.status = TaskStatus.SUCCEEDED
+    fake_task_store = MagicMock(get_task=AsyncMock(return_value=fake_task))
+    fake_sg = MagicMock(event_store=fake_event_store, task_store=fake_task_store)
+    fake_task_runner = MagicMock(enqueue=AsyncMock())
+
+    async def _fake_create_task(self_, message):
+        return "tid", True
+
+    monkeypatch.setattr(
+        "octoagent.gateway.services.task_service.TaskService.create_task",
+        _fake_create_task,
+    )
+
+    async def _fetch_raises(event_store, task_id, task_start_time, event_types=None):
+        raise ConnectionError("EventStore DB busy")
+
+    monkeypatch.setattr(octo_runner, "fetch_events_from_store", _fetch_raises)
+
+    @asynccontextmanager
+    async def _fake_session(**kwargs):
+        async with _fake_harness_session(
+            store_group=fake_sg, task_runner=fake_task_runner, provider_router=MagicMock()
+        ) as handle:
+            yield handle
+
+    monkeypatch.setattr(octo_runner, "octo_harness_session", _fake_session)
+
+    task = FakeYamlTaskMeta(task_id="T1-CE", tier=1, domain="memory", raw={"prompt": "p", "timeout_seconds": 5})
+    out = await octo_runner.runner_fn(task, iteration=1)
+
+    # _run_tier1 不再 swallow → ConnectionError 透传到 runner_fn 顶层
+    # _is_infra_error 识别 ConnectionError → INFRA_ERROR
+    from benchmarks.runner.store import RESULT_INFRA_ERROR
+
+    assert out.result == RESULT_INFRA_ERROR
+    assert "ConnectionError" in (out.error_message or "")
+
+
+async def test_run_tier3_fetch_events_provider_error_propagates(monkeypatch):
+    """_run_tier3 _discover_child_task_ids ConnectionError → INFRA_ERROR（不 ERROR）."""
+    from octoagent.core.models.enums import TaskStatus
+
+    fake_task = MagicMock()
+    fake_task.status = TaskStatus.SUCCEEDED
+    fake_task_store = MagicMock(get_task=AsyncMock(return_value=fake_task))
+    fake_event_store = MagicMock()
+    fake_event_store.get_events_by_types_since = AsyncMock(
+        side_effect=ConnectionError("EventStore down")
+    )
+    fake_sg = MagicMock(event_store=fake_event_store, task_store=fake_task_store)
+    fake_task_runner = MagicMock(enqueue=AsyncMock())
+
+    async def _fake_create_task(self_, message):
+        return "tid", True
+
+    monkeypatch.setattr(
+        "octoagent.gateway.services.task_service.TaskService.create_task",
+        _fake_create_task,
+    )
+
+    @asynccontextmanager
+    async def _fake_session(**kwargs):
+        async with _fake_harness_session(
+            store_group=fake_sg, task_runner=fake_task_runner, provider_router=MagicMock()
+        ) as handle:
+            yield handle
+
+    monkeypatch.setattr(octo_runner, "octo_harness_session", _fake_session)
+
+    task = FakeYamlTaskMeta(
+        task_id="T3-CE", tier=3, domain="philosophy_h1", raw={"prompt": "p", "timeout_seconds": 5}
+    )
+    out = await octo_runner.runner_fn(task, iteration=1)
+
+    from benchmarks.runner.store import RESULT_INFRA_ERROR
+
+    assert out.result == RESULT_INFRA_ERROR
+    assert "ConnectionError" in (out.error_message or "")
+
+
 # ---------------------------------------------------------------------------
 # LLM judge wire：ProviderRouterJudgeAdapter chat_fn 单测
 # ---------------------------------------------------------------------------

@@ -434,8 +434,11 @@ async def _submit_and_wait_task(
             )
         await asyncio.sleep(TASK_POLL_INTERVAL_SECONDS)
 
-    token_usage = await _collect_token_usage(sg, task_id, started_at)
-    return task_id, started_at, token_usage
+    # Codex round 3 MED 闭环：_collect_token_usage 不再在轮询的 try/except
+    # TimeoutError 路径内调用——caller (_run_tier1/_run_tier3) 单独调，
+    # 让 EventStore TimeoutError 抛到 runner_fn 顶层 _is_infra_error → INFRA_ERROR
+    # 而非被 _submit_and_wait_task 外层 except TimeoutError 误标 RESULT_TIMEOUT.
+    return task_id, started_at, {"input": 0, "output": 0, "cache_read": 0}
 
 
 class TaskBlockedOnInputError(RuntimeError):
@@ -956,7 +959,7 @@ async def _run_tier1(
 
     async with octo_harness_session() as handle:
         try:
-            task_id, started_dt, token_usage = await _submit_and_wait_task(
+            task_id, started_dt, _ = await _submit_and_wait_task(
                 handle,
                 prompt=prompt,
                 timeout_seconds=timeout_seconds,
@@ -978,16 +981,17 @@ async def _run_tier1(
                 error_message=str(exc),
             )
 
-        try:
-            actual_events = await fetch_events_from_store(
-                event_store=handle.store_group.event_store,
-                task_id=task_id,
-                task_start_time=started_dt,
-            )
-        except Exception as exc:
-            return _outcome_error(
-                started_at, f"fetch_events failed: {exc!r}"
-            )
+        # Codex round 3 闭环：fetch_events + _collect_token_usage 异常不在此 swallow.
+        # ProviderError / ConnectionError / TimeoutError 等 infra 异常透传到 runner_fn
+        # 顶层 _is_infra_error → INFRA_ERROR（不被这里 except Exception 吞成 RESULT_ERROR）.
+        actual_events = await fetch_events_from_store(
+            event_store=handle.store_group.event_store,
+            task_id=task_id,
+            task_start_time=started_dt,
+        )
+        token_usage = await _collect_token_usage(
+            handle.store_group, task_id, started_dt
+        )
 
         # LLM judge wire：真实控变量 LLM 路径（DeepSeek-V3.2 via SiliconFlow alias=bench）
         judge_trigger = _build_judge_trigger(handle.provider_router)
@@ -1072,7 +1076,7 @@ async def _run_tier3(
 
     async with octo_harness_session() as handle:
         try:
-            task_id, started_dt, token_usage = await _submit_and_wait_task(
+            task_id, started_dt, _ = await _submit_and_wait_task(
                 handle,
                 prompt=prompt,
                 timeout_seconds=timeout_seconds,
@@ -1094,23 +1098,24 @@ async def _run_tier3(
                 error_message=str(exc),
             )
 
+        # Codex round 3 闭环：fetch_events_tier3 + _discover_child_task_ids +
+        # _collect_token_usage 异常不在此 swallow——透传到 runner_fn 顶层
+        # _is_infra_error → INFRA_ERROR（避免 EventStore 抖动被误标 RESULT_ERROR）.
         # H1/H2/H3 audit chain 信号常写在 child task_id 上——
         # _discover_child_task_ids 拿一层，fetch_events_from_store_tier3 内部
         # 递归发现 grandchild。
-        try:
-            child_task_ids = await _discover_child_task_ids(
-                handle.store_group, task_id, started_dt
-            )
-            actual_events = await fetch_events_from_store_tier3(
-                event_store=handle.store_group.event_store,
-                task_id=task_id,
-                task_start_time=started_dt,
-                child_task_ids=child_task_ids,
-            )
-        except Exception as exc:
-            return _outcome_error(
-                started_at, f"fetch_events_tier3 failed: {exc!r}"
-            )
+        child_task_ids = await _discover_child_task_ids(
+            handle.store_group, task_id, started_dt
+        )
+        actual_events = await fetch_events_from_store_tier3(
+            event_store=handle.store_group.event_store,
+            task_id=task_id,
+            task_start_time=started_dt,
+            child_task_ids=child_task_ids,
+        )
+        token_usage = await _collect_token_usage(
+            handle.store_group, task_id, started_dt
+        )
 
         run_result = RunResult(
             actual_events=actual_events,
