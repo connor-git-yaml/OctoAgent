@@ -243,6 +243,7 @@ def score_tier1(
     actual_events: list[dict[str, Any]],
     rubric: dict[str, Any] | None = None,
     token_usage: int | None = None,
+    judge_trigger: LLMJudgeTrigger | None = None,
 ) -> BenchmarkRunScore:
     """
     Tier 1 task 主评分函数。
@@ -252,6 +253,10 @@ def score_tier1(
     - actual_events：task 执行后从 EventStore 查到的事件列表
     - rubric：scoring_rubrics.yaml 中的 tier1-v1 rubric（None 时使用默认权重）
     - token_usage：本次 task 消耗的 token 数量（input+output 之和）
+    - judge_trigger：（F103d Phase E）外部注入的 LLMJudgeTrigger 实例（含 adapter）；
+      None 时新建默认 LLMJudgeTrigger（adapter=StubJudgeAdapter，Phase A 默认行为）.
+      Phase E runner 通过 ``LLMJudgeTrigger(adapter=ProviderRouterJudgeAdapter(...))``
+      注入控变量 bench alias 真实 judge 路径；单测 / Phase A-D 不传保持向后兼容。
 
     评分流程：
     1. EventStore 断言（event_store_assert）
@@ -276,8 +281,9 @@ def score_tier1(
         # Step 1: EventStore 断言
         match_ratio, event_matches = event_store_assert(expected_events, actual_events)
 
-        # Step 2: 决定 verdict
-        judge_trigger = LLMJudgeTrigger()
+        # Step 2: 决定 verdict（外部 trigger 优先，否则新建默认 stub）
+        if judge_trigger is None:
+            judge_trigger = LLMJudgeTrigger()
         judge_result: JudgeResult | None = None
         pass_fail_score: float
         partial_score: float | None = None

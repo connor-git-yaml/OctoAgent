@@ -22,6 +22,7 @@ from __future__ import annotations
 import dataclasses
 from typing import Any
 
+from benchmarks.runner.llm_judge import LLMJudgeTrigger
 from benchmarks.runner.scorer import (
     BenchmarkRunScore,
     TaskVerdict,
@@ -88,6 +89,7 @@ def score(
     run_result: RunResult,
     *,
     rubrics: dict[str, dict[str, Any]] | None = None,
+    judge_trigger: LLMJudgeTrigger | None = None,
 ) -> BenchmarkRunScore:
     """统一 scorer 入口（T-D-6）。按 tier + domain 分发到对应 score_tier* 函数。
 
@@ -95,11 +97,14 @@ def score(
     任何上游异常被捕获并返回 verdict=ERROR + 字符串化 message。
 
     分发规则：
-    - tier 1 → ``score_tier1(task, actual_events, rubric, token_usage)``
+    - tier 1 → ``score_tier1(task, actual_events, rubric, token_usage, judge_trigger)``
     - tier 2 + domain 含 "tau" → ``score_tier2_tau(task, actual_tool_calls, rubric, token_usage)``
     - tier 2 + domain 含 "gaia" → ``score_tier2_gaia(task, actual_answer, rubric, token_usage)``
     - tier 3 → ``score_tier3(task, actual_events, rubric, token_usage)``
     - 其他 → verdict=ERROR
+
+    F103d Phase E：``judge_trigger`` 仅对 Tier 1 partial score 路径生效；Tier 2/3
+    100/0/0 二值评分不依赖 LLM judge。
     """
     tier = _get_tier(task)
     domain = _get_domain(task).lower()
@@ -110,7 +115,9 @@ def score(
     try:
         if tier == 1:
             events = run_result.actual_events or []
-            return score_tier1(task, events, rubric, token_usage)
+            return score_tier1(
+                task, events, rubric, token_usage, judge_trigger=judge_trigger
+            )
 
         if tier == 2:
             if "tau" in domain:
