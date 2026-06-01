@@ -251,6 +251,11 @@ class RepeatedFailureDetector:
 
         # 使用最早失败事件时间作为 last_progress_ts 参照
         earliest_failure_ts = min(e.ts for e in failure_events)
+        # event.ts 可能是 offset-naive（store 反序列化未带 tzinfo），与 offset-aware
+        # 的 now 相减会 raise "can't compare offset-naive and offset-aware datetimes"。
+        # 按本文件其它 detector（NoProgressDetector 等）既有 pattern 统一补 UTC。
+        if earliest_failure_ts.tzinfo is None:
+            earliest_failure_ts = earliest_failure_ts.replace(tzinfo=UTC)
 
         stall_duration = (now - earliest_failure_ts).total_seconds()
 

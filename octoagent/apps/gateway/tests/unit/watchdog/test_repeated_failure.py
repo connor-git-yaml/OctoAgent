@@ -421,6 +421,45 @@ class TestRepeatedFailureDetectorTerminalStates:
         assert result is None
 
 
+class TestRepeatedFailureDetectorNaiveTimestamp:
+    """offset-naive event.ts 回归（F103d 真跑暴露）"""
+
+    @pytest.mark.asyncio
+    async def test_naive_event_ts_does_not_raise(self):
+        """event.ts 为 offset-naive 时，now - earliest_failure_ts 不再 raise
+        TypeError（"can't compare offset-naive and offset-aware datetimes"）。
+
+        F103d OctoBench 多 task 并发真跑时报 watchdog_detector_error TypeError；
+        根因是 RepeatedFailureDetector 未像同文件其它 detector 那样把 naive ts
+        归一化为 UTC。本测试用 AsyncMock 直接喂 naive ts 事件复现并锁定修复。
+        """
+        task = _make_task("task-050", TaskStatus.RUNNING)
+        config = _make_config(repeated_failure_threshold=3)
+
+        # 构造 3 条 offset-naive ts 的失败事件（模拟 store 反序列化未带 tzinfo）
+        naive_now = datetime.now(UTC).replace(tzinfo=None)
+        assert naive_now.tzinfo is None
+        events = [
+            _make_failure_event(
+                "task-050", EventType.MODEL_CALL_FAILED,
+                naive_now - timedelta(seconds=10 + i), i + 1,
+            )
+            for i in range(3)
+        ]
+        event_store = AsyncMock()
+        event_store.get_events_by_types_since.return_value = events
+
+        detector = RepeatedFailureDetector()
+        # 修复前此处 raise TypeError；修复后正常返回 DriftResult
+        result = await detector.check(task, event_store, config)
+
+        assert result is not None
+        assert result.failure_count == 3
+        assert result.stall_duration_seconds >= 0
+        # last_progress_ts 已归一化为 offset-aware（与 detected_at 语义一致）
+        assert result.last_progress_ts.tzinfo is not None
+
+
 class TestRepeatedFailureDetectorConstants:
     """FAILURE_EVENT_TYPES 常量验证（FR-012）"""
 
