@@ -149,16 +149,34 @@ def _merge_system_messages_to_front(
     return [{"role": "system", "content": merged}, *non_system]
 
 
+def _build_v1_url(api_base: str, endpoint: str) -> str:
+    """拼接 ``{api_base}/v1/{endpoint}``，幂等处理已含 ``/v1`` 的 api_base。
+
+    ``endpoint`` 为不含前导斜杠的端点路径（如 ``chat/completions`` /
+    ``embeddings`` / ``messages`` / ``responses``）。
+
+    若 api_base 已以 ``/v1`` 结尾（如 SiliconFlow 把 api_base 配成
+    ``https://api.siliconflow.cn/v1``），不再重复拼接 ``/v1``——否则会拼出
+    double ``/v1/v1/...`` 导致 provider 返回 404 Not Found。
+    """
+    base = api_base.rstrip("/")
+    if base.endswith("/v1"):
+        return f"{base}/{endpoint}"
+    return f"{base}/v1/{endpoint}"
+
+
 def _build_responses_url(api_base: str) -> str:
     """根据 api_base 推断 Responses API 端点。
 
     - ``chatgpt.com/backend-api`` 或 ``backend-api/codex`` 结尾 → 加 ``/responses``
-    - 其他（含 OpenAI 标准 ``api.openai.com``）→ 加 ``/v1/responses``
+      （ChatGPT Codex 后端不走标准 ``/v1`` 前缀）
+    - 其他（含 OpenAI 标准 ``api.openai.com`` 与已含 ``/v1`` 的自定义 base）→
+      委托 :func:`_build_v1_url`，由它幂等处理 ``/v1`` 前缀
     """
     base = api_base.rstrip("/")
     if base.endswith("/backend-api") or base.endswith("/backend-api/codex"):
         return f"{base}/responses"
-    return f"{base}/v1/responses"
+    return _build_v1_url(api_base, "responses")
 
 
 def _history_to_responses_input(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -712,7 +730,7 @@ class ProviderClient:
             else:
                 body.setdefault("tool_choice", "auto")
 
-        target_url = f"{self._runtime.api_base}/v1/chat/completions"
+        target_url = _build_v1_url(self._runtime.api_base, "chat/completions")
         target_headers: dict[str, str] = {
             "Authorization": f"Bearer {auth.bearer_token}",
             "Content-Type": "application/json",
@@ -856,7 +874,7 @@ class ProviderClient:
             "encoding_format": encoding_format,
         }
         body.update(self._runtime.extra_body)
-        target_url = f"{self._runtime.api_base}/v1/embeddings"
+        target_url = _build_v1_url(self._runtime.api_base, "embeddings")
         target_headers = {
             "Authorization": f"Bearer {auth.bearer_token}",
             "Content-Type": "application/json",
@@ -1072,7 +1090,7 @@ class ProviderClient:
         if reasoning is not None:
             body["thinking"] = reasoning
 
-        target_url = f"{self._runtime.api_base}/v1/messages"
+        target_url = _build_v1_url(self._runtime.api_base, "messages")
         target_headers: dict[str, str] = {
             "Authorization": f"Bearer {auth.bearer_token}",
             "Content-Type": "application/json",
