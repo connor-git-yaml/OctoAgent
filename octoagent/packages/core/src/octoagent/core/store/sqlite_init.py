@@ -157,6 +157,30 @@ _SIDE_EFFECT_LEDGER_INDEXES = [
     ("CREATE INDEX IF NOT EXISTS idx_side_effect_ledger_task_id ON side_effect_ledger(task_id);"),
 ]
 
+# Feature 067 / session memory shutdown 竞态修复：记忆提取 SoR 写入的 per-item 幂等账本。
+# idempotency_key = sha256(session_id:cursor_before:max_turn_seq:type:subject_key:content)
+# —— 确定性内容指纹（不含 item_index，重放顺序无关）。confirm-only：仅 SoR 提交成功后
+# 记录；重放（cursor 因 closed-conn 未推进时）按 key 命中即跳过，避免重复落库。
+# 无 task FK（session 级，不绑 task）。
+_MEMORY_EXTRACTION_LEDGER_DDL = """
+CREATE TABLE IF NOT EXISTS memory_extraction_ledger (
+    idempotency_key  TEXT PRIMARY KEY,
+    session_id       TEXT NOT NULL,
+    scope_id         TEXT NOT NULL DEFAULT '',
+    sor_id           TEXT NOT NULL,
+    cursor_before    INTEGER NOT NULL,
+    max_turn_seq     INTEGER NOT NULL,
+    created_at       TEXT NOT NULL
+);
+"""
+
+_MEMORY_EXTRACTION_LEDGER_INDEXES = [
+    (
+        "CREATE INDEX IF NOT EXISTS idx_memory_extraction_ledger_session "
+        "ON memory_extraction_ledger(session_id);"
+    ),
+]
+
 # Feature 025: projects/workspaces/bindings/migration_runs
 _PROJECTS_DDL = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -1633,6 +1657,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     # Feature 084 Phase 2: 新增 snapshot_records + observation_candidates 表（T019/T020）
     await conn.execute(_SNAPSHOT_RECORDS_DDL)
     await conn.execute(_OBSERVATION_CANDIDATES_DDL)
+    await conn.execute(_MEMORY_EXTRACTION_LEDGER_DDL)
     await _migrate_legacy_tables(conn)
 
     # 创建索引
@@ -1649,6 +1674,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _APPROVAL_OVERRIDES_INDEXES
         + _SNAPSHOT_RECORDS_INDEXES
         + _OBSERVATION_CANDIDATES_INDEXES
+        + _MEMORY_EXTRACTION_LEDGER_INDEXES
     ):
         await conn.execute(idx_sql)
 

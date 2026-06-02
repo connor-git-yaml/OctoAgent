@@ -564,11 +564,24 @@ class AgentContextService(AgentContextTurnWriterMixin):
     # Feature 080 Phase 5：ProviderRouter 单例。main.py lifespan 在所有 service 创建
     # 之前 set_provider_router(...)，让 task / orchestrator 等多入口都能拿到同一个 router。
     _shared_provider_router: Any | None = None
+    # harness shutdown drain 集合（app.state.background_tasks）。启动时注入，让
+    # fire-and-forget 的 Session 记忆提取 task 注册进来，shutdown 关 DB 连接前先 drain。
+    _shared_background_tasks: set[asyncio.Task[Any]] | None = None
 
     @classmethod
     def set_llm_service(cls, llm_service: Any) -> None:
         """启动时注入 LLMService 单例，供 SessionMemoryExtractor 等使用。"""
         cls._shared_llm_service = llm_service
+
+    @classmethod
+    def set_background_tasks(cls, background_tasks: set[asyncio.Task[Any]] | None) -> None:
+        """启动时注入 harness 的 background_tasks 集合（app.state.background_tasks）。
+
+        让 fire-and-forget 的 Session 记忆提取 task 注册进该集合，harness shutdown
+        会在关闭 DB 连接前统一 await/cancel（octo_harness.shutdown drain），避免在途
+        提取落库命中已关闭连接，也避免最后一轮提取因无后续触发而永久丢失。
+        """
+        cls._shared_background_tasks = background_tasks
 
     @classmethod
     def set_provider_router(cls, provider_router: Any) -> None:
@@ -1650,29 +1663,10 @@ class AgentContextService(AgentContextTurnWriterMixin):
 
         # Feature 067: fire-and-forget 触发 Session 驱动记忆提取
         if agent_session is not None:
-            extractor = self.get_session_memory_extractor()
-            if extractor is not None:
-                task = asyncio.create_task(
-                    extractor.extract_and_commit(
-                        agent_session=agent_session,
-                        project=project,
-                    )
-                )
-
-                def _on_extraction_done(t: asyncio.Task) -> None:
-                    if t.exception() is not None:
-                        log.error(
-                            "session_memory_extraction_task_failed",
-                            error=str(t.exception()),
-                        )
-
-                task.add_done_callback(_on_extraction_done)
-            else:
-                log.warning(
-                    "session_memory_extractor_unavailable",
-                    llm_service_set=self._llm_service is not None,
-                    shared_llm_service_set=self._shared_llm_service is not None,
-                )
+            self._spawn_session_memory_extraction(
+                agent_session=agent_session,
+                project=project,
+            )
 
     async def record_delayed_recall_state(
         self,
@@ -3043,6 +3037,58 @@ class AgentContextService(AgentContextTurnWriterMixin):
                 log.warning("session_memory_extractor_init_failed", exc_info=True)
                 self._session_memory_extractor = None
         return self._session_memory_extractor
+
+    def _spawn_session_memory_extraction(
+        self,
+        *,
+        agent_session: Any,
+        project: Any | None,
+    ) -> asyncio.Task[Any] | None:
+        """fire-and-forget 触发 Session 记忆提取，并注册进 harness shutdown drain 集合。
+
+        注册进 ``_shared_background_tasks`` 后，harness shutdown 会在关闭 DB 连接前
+        统一 await/cancel（octo_harness.shutdown，drain timeout 10s ≫ 提取 ~2s），
+        避免在途提取落库命中已关闭连接，也避免最后一轮提取永久丢失（根因修复）。
+        SessionMemoryExtractor 内部对残留的 closed-conn 竞态仍有 defense-in-depth
+        降级（drain 超时被 cancel 的极端情形）。返回创建的 task（便于测试断言注册）。
+        """
+        extractor = self.get_session_memory_extractor()
+        if extractor is None:
+            log.warning(
+                "session_memory_extractor_unavailable",
+                llm_service_set=self._llm_service is not None,
+                shared_llm_service_set=self._shared_llm_service is not None,
+            )
+            return None
+
+        task = asyncio.create_task(
+            extractor.extract_and_commit(
+                agent_session=agent_session,
+                project=project,
+            )
+        )
+
+        # 注册进 shutdown drain 集合（若已注入）。集合是 set，add/discard 是 O(1)；
+        # discard 回调在 task 结束后自动移除，避免集合无界增长。
+        background_tasks = self._shared_background_tasks
+        if isinstance(background_tasks, set):
+            background_tasks.add(task)
+            task.add_done_callback(background_tasks.discard)
+
+        def _on_extraction_done(t: asyncio.Task[Any]) -> None:
+            # shutdown drain 超时会 cancel task；cancelled 时 t.exception() 会
+            # raise CancelledError，必须先判 cancelled 再取 exception。
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                log.error(
+                    "session_memory_extraction_task_failed",
+                    error=str(exc),
+                )
+
+        task.add_done_callback(_on_extraction_done)
+        return task
 
     def get_reranker_service(self):
         """获取 ModelRerankerService 实例（Feature 065 Phase 2, US-6）。

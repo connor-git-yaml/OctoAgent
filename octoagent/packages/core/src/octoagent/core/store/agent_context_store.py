@@ -818,6 +818,52 @@ class SqliteAgentContextStore:
         )
         await self._conn.commit()
 
+    async def lookup_extraction_commit(self, idempotency_key: str) -> str | None:
+        """查 memory_extraction_ledger：返回已确认提交的 sor_id；未记录返回 None。
+
+        Feature 067 / shutdown 竞态修复：session memory 提取重放（cursor 因
+        closed-conn 未推进时）用它跳过已落库的 item，避免重复写 SoR。
+        """
+        cursor = await self._conn.execute(
+            "SELECT sor_id FROM memory_extraction_ledger WHERE idempotency_key = ?",
+            (idempotency_key,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
+    async def record_extraction_commit(
+        self,
+        *,
+        idempotency_key: str,
+        session_id: str,
+        scope_id: str,
+        sor_id: str,
+        cursor_before: int,
+        max_turn_seq: int,
+    ) -> None:
+        """记录一条 SoR 提交到幂等账本（confirm-only：仅 SoR 提交成功后调用）。
+
+        ``INSERT OR IGNORE``：重放时同 idempotency_key 已存在则不重复写（幂等）。
+        """
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO memory_extraction_ledger "
+            "(idempotency_key, session_id, scope_id, sor_id, "
+            "cursor_before, max_turn_seq, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                idempotency_key,
+                session_id,
+                scope_id,
+                sor_id,
+                cursor_before,
+                max_turn_seq,
+                datetime.now(tz=UTC).isoformat(),
+            ),
+        )
+        await self._conn.commit()
+
     async def delete_agent_session_turns(self, *, agent_session_id: str) -> None:
         await self._conn.execute(
             "DELETE FROM agent_session_turns WHERE agent_session_id = ?",

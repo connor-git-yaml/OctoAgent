@@ -38,6 +38,7 @@ from octoagent.gateway.services.session_memory_extractor import (
     ExtractionItem,
     SessionExtractionResult,
     SessionMemoryExtractor,
+    _is_connection_closed_error,
 )
 
 
@@ -666,3 +667,210 @@ async def test_no_new_turns_returns_skipped(
 
     assert result.skipped_reason == "no_new_turns"
     llm_service.call.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# harness shutdown 竞态：DB 连接已关闭（"no active connection"）
+# F103d OctoBench 真跑暴露——fire-and-forget 提取含慢 LLM 调用，shutdown 关连接后
+# 在途提取落库/推进 cursor 命中已关闭连接。应干净 skip（info）而非污染日志当真故障。
+# ---------------------------------------------------------------------------
+
+
+def test_is_connection_closed_error_detector():
+    """_is_connection_closed_error 仅匹配明确的连接已关签名，不泛化拦截。"""
+    # aiosqlite 实测签名
+    assert _is_connection_closed_error(ValueError("no active connection")) is True
+    # sqlite3 直连签名
+    assert _is_connection_closed_error(
+        Exception("Cannot operate on a closed database.")
+    ) is True
+    # 大小写无关
+    assert _is_connection_closed_error(ValueError("No Active Connection")) is True
+    # 不该匹配的真实错误（避免 mask）
+    assert _is_connection_closed_error(ValueError("invalid json")) is False
+    assert _is_connection_closed_error(RuntimeError("disk full")) is False
+    assert _is_connection_closed_error(TimeoutError("llm timeout")) is False
+
+
+@pytest.mark.asyncio
+async def test_connection_closed_before_read_skips_cleanly(
+    store: SqliteAgentContextStore,
+    setup_session: AgentSession,
+):
+    """conn 在读取 turns 前就关了（shutdown 抢跑）→ 干净 skip connection_closed。"""
+    llm_service = _make_llm_service([])
+    extractor = _make_extractor(store, llm_service=llm_service)
+    session = await store.get_agent_session("sess-ext-001")
+    assert session is not None
+
+    # 模拟 harness shutdown 关闭连接：第一处 DB 读即抛 aiosqlite 真实错误
+    store.list_turns_after_seq = AsyncMock(  # type: ignore[method-assign]
+        side_effect=ValueError("no active connection")
+    )
+
+    result = await extractor.extract_and_commit(agent_session=session, project=None)
+
+    assert result.skipped_reason == "connection_closed"
+    # 不当真故障：errors 不记录该竞态
+    assert result.errors == []
+    # LLM 都没来得及调
+    llm_service.call.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_connection_closed_during_cursor_update_skips_cleanly(
+    store: SqliteAgentContextStore,
+    setup_session: AgentSession,
+):
+    """主场景：慢 LLM 调用期间 conn 被关，调用成功后推进 cursor 命中已关闭连接 → 干净 skip。"""
+    llm_service = _make_llm_service([])  # 空结果 → 走 update_memory_cursor 推进路径
+    extractor = _make_extractor(store, llm_service=llm_service)
+    session = await store.get_agent_session("sess-ext-001")
+    assert session is not None
+
+    # 读 turns 成功（真 store）、LLM 成功，仅推进 cursor 时连接已关
+    store.update_memory_cursor = AsyncMock(  # type: ignore[method-assign]
+        side_effect=ValueError("no active connection")
+    )
+
+    result = await extractor.extract_and_commit(agent_session=session, project=None)
+
+    assert result.skipped_reason == "connection_closed"
+    assert result.errors == []
+    llm_service.call.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_non_closed_connection_error_not_masked(
+    store: SqliteAgentContextStore,
+    setup_session: AgentSession,
+):
+    """精度反例：非连接已关的真实错误仍当 failure 记录（不被 connection_closed 误吞）。"""
+    llm_service = _make_llm_service([])
+    extractor = _make_extractor(store, llm_service=llm_service)
+    session = await store.get_agent_session("sess-ext-001")
+    assert session is not None
+
+    store.update_memory_cursor = AsyncMock(  # type: ignore[method-assign]
+        side_effect=RuntimeError("disk full")
+    )
+
+    result = await extractor.extract_and_commit(agent_session=session, project=None)
+
+    # 不是关闭竞态 → 不 skip，按真故障记录
+    assert result.skipped_reason != "connection_closed"
+    assert any("RuntimeError" in e and "disk full" in e for e in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# HIGH#2: per-item 幂等账本（memory_extraction_ledger）
+# cursor 因 closed-conn 未推进时整批重放不重复写 SoR。直接测 _commit_extractions。
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_commit_extractions_idempotent_on_replay(
+    store: SqliteAgentContextStore,
+    setup_session: AgentSession,
+):
+    """同一批重放 _commit_extractions：第二次按账本命中跳过，不重复写 SoR（复用 sor_id）。"""
+    memory_service = _make_memory_service()  # fast_commit → sor-fast-001
+    extractor = _make_extractor(store, memory_service=memory_service)
+    item = ExtractionItem(type="fact", subject_key="editor", content="用户喜欢 Vim", confidence=0.9)
+
+    committed1: list[str] = []
+    facts1, *_ = await extractor._commit_extractions(
+        items=[item],
+        scope_id="proj-001/default",
+        memory_service=memory_service,
+        committed_sor_ids=committed1,
+        errors=[],
+        session_id="sess-ext-001",
+        cursor_before=0,
+        max_turn_seq=3,
+    )
+    assert facts1 == 1
+    assert committed1 == ["sor-fast-001"]
+    assert memory_service.fast_commit.call_count == 1
+
+    # 重放同一批 → 账本命中 → 跳过 SoR 写
+    committed2: list[str] = []
+    facts2, *_ = await extractor._commit_extractions(
+        items=[item],
+        scope_id="proj-001/default",
+        memory_service=memory_service,
+        committed_sor_ids=committed2,
+        errors=[],
+        session_id="sess-ext-001",
+        cursor_before=0,
+        max_turn_seq=3,
+    )
+    assert facts2 == 1  # 幂等命中也计入"已提交"
+    assert committed2 == ["sor-fast-001"]  # 复用账本里的 sor_id
+    assert memory_service.fast_commit.call_count == 1  # ★ 没有第二次写 SoR
+
+
+@pytest.mark.asyncio
+async def test_commit_extractions_partial_then_replay_skips_committed(
+    store: SqliteAgentContextStore,
+    setup_session: AgentSession,
+):
+    """item1 成功+记账本、item2 closed-conn 失败；重放时 item1 账本跳过、只补写 item2。"""
+    item1 = ExtractionItem(type="fact", subject_key="k1", content="fact one", confidence=0.9)
+    item2 = ExtractionItem(type="fact", subject_key="k2", content="fact two", confidence=0.9)
+    extractor = _make_extractor(store)
+
+    # run1：item1（k1）成功 sor-k1，item2（k2）fast_commit 抛 closed-conn
+    async def _fc_run1(**kw):
+        if kw.get("subject_key") == "k2":
+            raise ValueError("no active connection")
+        m = MagicMock()
+        m.sor_id = "sor-k1"
+        return m
+
+    ms1 = AsyncMock()
+    ms1.fast_commit = AsyncMock(side_effect=_fc_run1)
+
+    committed1: list[str] = []
+    errors1: list[str] = []
+    await extractor._commit_extractions(
+        items=[item1, item2],
+        scope_id="proj-001/default",
+        memory_service=ms1,
+        committed_sor_ids=committed1,
+        errors=errors1,
+        session_id="sess-ext-001",
+        cursor_before=0,
+        max_turn_seq=3,
+    )
+    assert committed1 == ["sor-k1"]  # 仅 item1 成功
+    assert any("no active connection" in e for e in errors1)  # item2 closed-conn 进 errors（cursor 不会推进）
+
+    # run2（重放）：fast_commit 全成功 —— item1 应被账本跳过，不再调用
+    calls: list[str] = []
+
+    async def _fc_run2(**kw):
+        sk = kw.get("subject_key")
+        calls.append(sk)
+        m = MagicMock()
+        m.sor_id = f"sor-{sk}"
+        return m
+
+    ms2 = AsyncMock()
+    ms2.fast_commit = AsyncMock(side_effect=_fc_run2)
+
+    committed2: list[str] = []
+    await extractor._commit_extractions(
+        items=[item1, item2],
+        scope_id="proj-001/default",
+        memory_service=ms2,
+        committed_sor_ids=committed2,
+        errors=[],
+        session_id="sess-ext-001",
+        cursor_before=0,
+        max_turn_seq=3,
+    )
+    assert "k1" not in calls  # ★ item1 账本命中，未重复写
+    assert "k2" in calls  # item2 这次补写
+    assert "sor-k1" in committed2  # item1 复用账本 sor_id
+    assert "sor-k2" in committed2  # item2 新写

@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -147,6 +148,21 @@ class SessionExtractionResult:
     errors: list[str] = field(default_factory=list)
 
 
+def _is_connection_closed_error(exc: BaseException) -> bool:
+    """识别 DB 连接已关闭错误（harness shutdown 竞态）。
+
+    fire-and-forget 记忆提取含慢 LLM 调用（~1.8s+），harness shutdown 关闭
+    DB 连接后，在途提取的落库 / 推进 cursor 会命中已关闭连接：
+    - aiosqlite 在已关闭的 Connection 上操作抛 ``ValueError("no active connection")``
+    - sqlite3 直连路径可能抛 ``ProgrammingError("Cannot operate on a closed database")``
+
+    按错误文本识别（避免 import aiosqlite 内部类型耦合），**仅**匹配这两个明确
+    签名，不泛化拦截其它错误——否则会 mask 真实的连接 / 逻辑 bug。
+    """
+    text = str(exc).lower()
+    return "no active connection" in text or "closed database" in text
+
+
 class SessionMemoryExtractor:
     """Session 驱动的统一记忆提取服务。
 
@@ -246,6 +262,19 @@ class SessionMemoryExtractor:
                 )
 
         except Exception as exc:
+            if _is_connection_closed_error(exc):
+                # Defense-in-depth：根因修复是把提取 task 注册进 harness
+                # background_tasks，shutdown 关 DB 连接前先 drain（见 agent_context
+                # ._spawn_session_memory_extraction）。此分支兜底未注册路径 / 注入缺失下
+                # 残留的 closed-conn 竞态——提取是 best-effort，降级为 info skip 避免污染
+                # 日志。非该签名的错误仍按 WARNING，不 mask 真实连接 / 逻辑 bug。
+                result.skipped_reason = "connection_closed"
+                log.info(
+                    "session_memory_extraction_skipped",
+                    session_id=session_id,
+                    reason=result.skipped_reason,
+                )
+                return result
             log.warning(
                 "session_memory_extraction_failed",
                 session_id=session_id,
@@ -408,6 +437,9 @@ class SessionMemoryExtractor:
             memory_service=memory_service,
             committed_sor_ids=committed_sor_ids,
             errors=result.errors,
+            session_id=session_id,
+            cursor_before=cursor_before,
+            max_turn_seq=max_turn_seq,
         )
         result.facts_committed = facts
         result.solutions_committed = solutions
@@ -447,12 +479,21 @@ class SessionMemoryExtractor:
                 )
                 result.fragments_created = len(frag_run.fragment_refs)
             except Exception as exc:
-                log.warning(
-                    "session_memory_extraction_fragment_failed",
-                    session_id=session_id,
-                    error=str(exc),
-                )
-                result.errors.append(f"fragment_failed: {exc}")
+                if _is_connection_closed_error(exc):
+                    # 同关闭竞态（commit 已成功、conn 在建溯源 Fragment 前被关）。
+                    # 静默降级，随后的 update_memory_cursor 会命中同样的已关闭连接，
+                    # 由外层 except 统一收敛为 connection_closed skip。
+                    log.debug(
+                        "session_memory_extraction_fragment_skipped_connection_closed",
+                        session_id=session_id,
+                    )
+                else:
+                    log.warning(
+                        "session_memory_extraction_fragment_failed",
+                        session_id=session_id,
+                        error=str(exc),
+                    )
+                    result.errors.append(f"fragment_failed: {exc}")
 
         # 11. 更新 cursor -- 仅在所有写入成功后推进
         result.new_cursor_seq = max_turn_seq
@@ -554,11 +595,19 @@ class SessionMemoryExtractor:
         memory_service: MemoryService,
         committed_sor_ids: list[str],
         errors: list[str],
+        session_id: str,
+        cursor_before: int,
+        max_turn_seq: int,
     ) -> tuple[int, int, int, int]:
-        """逐条通过 propose-validate-commit 写入 SoR。
+        """逐条通过 propose-validate-commit 写入 SoR，带 per-item 幂等账本。
+
+        每个 item 按确定性内容指纹（session_id:cursor_before:max_turn_seq:type:
+        subject_key:content）查 memory_extraction_ledger：已确认提交过则跳过（复用旧
+        sor_id），避免 cursor 因 closed-conn 未推进时重放整批导致重复落库；SoR 提交
+        成功后 confirm 写账本。
 
         Returns:
-            (facts, solutions, entities, tom) 各类型提交计数。
+            (facts, solutions, entities, tom) 各类型提交计数（含幂等跳过的）。
         """
         counts = {"fact": 0, "solution": 0, "entity": 0, "tom": 0}
 
@@ -591,6 +640,27 @@ class SessionMemoryExtractor:
                 elif item.type == "tom" and item.inference:
                     content = f"推理: {item.inference}\n证据: {', '.join(item.supporting_evidence)}" if item.supporting_evidence else f"推理: {item.inference}"
 
+                # per-item 幂等键（确定性内容指纹，\x1f 分隔防字段拼接歧义，重放顺序无关）
+                item_key = hashlib.sha256(
+                    "\x1f".join(
+                        [
+                            session_id,
+                            str(cursor_before),
+                            str(max_turn_seq),
+                            item.type,
+                            item.subject_key,
+                            content,
+                        ]
+                    ).encode("utf-8")
+                ).hexdigest()
+                # 账本查重：本批本内容已确认落库 → 跳过（复用 sor_id 供 fragment 溯源）。
+                # 这让 cursor 因 closed-conn 未推进时的整批重放不再重复写 SoR。
+                existing_sor = await self._agent_context_store.lookup_extraction_commit(item_key)
+                if existing_sor:
+                    committed_sor_ids.append(existing_sor)
+                    counts[item.type] = counts.get(item.type, 0) + 1
+                    continue
+
                 # 快速路径：低风险自动提取使用 fast_commit
                 if (
                     write_action == WriteAction.ADD
@@ -612,6 +682,14 @@ class SessionMemoryExtractor:
                     )
                     if commit_result.sor_id:
                         committed_sor_ids.append(commit_result.sor_id)
+                        await self._agent_context_store.record_extraction_commit(
+                            idempotency_key=item_key,
+                            session_id=session_id,
+                            scope_id=scope_id,
+                            sor_id=commit_result.sor_id,
+                            cursor_before=cursor_before,
+                            max_turn_seq=max_turn_seq,
+                        )
                     counts[item.type] = counts.get(item.type, 0) + 1
                 else:
                     # 完整治理路径
@@ -638,6 +716,14 @@ class SessionMemoryExtractor:
                         commit_result = await memory_service.commit_memory(proposal.proposal_id)
                         if commit_result.sor_id:
                             committed_sor_ids.append(commit_result.sor_id)
+                            await self._agent_context_store.record_extraction_commit(
+                                idempotency_key=item_key,
+                                session_id=session_id,
+                                scope_id=scope_id,
+                                sor_id=commit_result.sor_id,
+                                cursor_before=cursor_before,
+                                max_turn_seq=max_turn_seq,
+                            )
                         counts[item.type] = counts.get(item.type, 0) + 1
                     else:
                         # ADD 被拒（已存在）时尝试 UPDATE
@@ -669,6 +755,14 @@ class SessionMemoryExtractor:
                                     )
                                     if commit_result.sor_id:
                                         committed_sor_ids.append(commit_result.sor_id)
+                                        await self._agent_context_store.record_extraction_commit(
+                                            idempotency_key=item_key,
+                                            session_id=session_id,
+                                            scope_id=scope_id,
+                                            sor_id=commit_result.sor_id,
+                                            cursor_before=cursor_before,
+                                            max_turn_seq=max_turn_seq,
+                                        )
                                     counts[item.type] = counts.get(item.type, 0) + 1
                             except Exception as update_exc:
                                 errors.append(f"update_fallback_failed[{item.subject_key}]: {type(update_exc).__name__}: {update_exc}")

@@ -41,6 +41,46 @@ if TYPE_CHECKING:
     from octoagent.provider.dx.credential_store import CredentialStore
 
 
+async def _final_drain_background_tasks(
+    background_tasks: set[Any],
+    *,
+    timeout_s: float,
+    log: Any,
+) -> None:
+    """关 DB 连接前对 background_tasks 做有界 loop-drain，直到为空或总超时。
+
+    与 shutdown 首轮 drain 的区别：首轮只对 background_tasks 做**一次**快照，
+    producer（task_runner 在途 turn）可能在首轮 drain 期间经 record_response_context
+    新注册 Session 记忆提取 task，那些 task 不在首轮快照里、不会被等待，DB close 后
+    会命中已关闭连接 + 最后一轮提取丢失。本函数在所有 producer 已停止后调用，每轮
+    **重新快照** background_tasks，直到没有未完成 task（或总超时后 cancel + gather），
+    杜绝"首轮 drain 后新注册 task 抢跑 DB close"的竞态窗口。
+    """
+    import asyncio
+
+    if not background_tasks:
+        return
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while True:
+        remaining = [t for t in background_tasks if not t.done()]
+        if not remaining:
+            return
+        budget = deadline - loop.time()
+        if budget <= 0:
+            log.warning(
+                "background_tasks_final_drain_timeout",
+                pending_count=len(remaining),
+                timeout_s=timeout_s,
+            )
+            for task in remaining:
+                task.cancel()
+            # await 已 cancel 的 task，吞掉 CancelledError/异常，确保关连接前真正收尾
+            await asyncio.gather(*remaining, return_exceptions=True)
+            return
+        await asyncio.wait(remaining, timeout=budget)
+
+
 class OctoHarness:
     """FastAPI 应用 lifespan 装配器。
 
@@ -205,6 +245,16 @@ class OctoHarness:
             await app.state.telegram_service.shutdown()
         if hasattr(app.state, "task_runner") and app.state.task_runner:
             await app.state.task_runner.shutdown()
+
+        # shutdown 竞态修复：producer（task_runner 等）已停止后，对 background_tasks 做
+        # 终态有界 loop-drain（关 DB 连接前），覆盖首轮 drain 期间新注册的 Session 记忆
+        # 提取 task，杜绝"首轮 drain 后新注册 task 抢跑 DB close"→ closed-conn + 丢失。
+        await _final_drain_background_tasks(
+            getattr(app.state, "background_tasks", set()),
+            timeout_s=_BACKGROUND_TASK_SHUTDOWN_TIMEOUT_S,
+            log=_log,
+        )
+
         if hasattr(app.state, "store_group") and app.state.store_group:
             await app.state.store_group.conn.close()
 
@@ -586,6 +636,9 @@ class OctoHarness:
         AgentContextService.set_llm_service(llm_service)
         app.state.alias_registry = alias_registry
         app.state.background_tasks: set[asyncio.Task] = set()
+        # Feature 067 / shutdown 竞态修复：让 Session 记忆提取 fire-and-forget task
+        # 注册进同一集合，shutdown 关 DB 连接前先 drain（见 octo_harness.shutdown）。
+        AgentContextService.set_background_tasks(app.state.background_tasks)
 
         # 让所有 AgentContextService 实例都拿到同一个 router 实例
         AgentContextService.set_provider_router(provider_router)
