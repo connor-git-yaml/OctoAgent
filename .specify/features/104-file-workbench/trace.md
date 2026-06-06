@@ -70,4 +70,26 @@
   - [medium] checklist §6.1/§7/§11 旧 ✅/⚠️ 断言 → 重写指向新模型 + 标已闭环
 - [Phase 3] round 4 修复完成 + grep 复查（Codex rg 清单）：spec.md 主事实源 0 残留；辅助文档 banner 覆盖
 - [Phase 3] **Codex re-review round 5 = APPROVE ✅**（聚焦 spec.md，No material findings）。5 轮收敛：4→3→2→2→0 finding，共 11 finding 全闭环
-- [GATE: spec 定稿] spec 阶段完成 → commit spec 制品（纯文档，SKIP_E2E）→ Phase 4 plan
+- [GATE: spec 定稿] spec 阶段完成 → commit spec 制品 b65ed17（纯文档，SKIP_E2E）
+
+## Phase 4 plan + Phase 5 tasks
+
+- [Phase 4] 委托 spec-driver:plan（opus）→ plan.md（5 Phase + schema + 事务边界决策 + 测试分层 + 风险）
+- [Phase 4] plan 子代理实测纠正：①put_artifact 不自 commit（FR-021 同事务天然满足）→ SD-2 BEGIN IMMEDIATE 与隐式事务冲突风险（标 Phase 1 HIGH 必实测 + Codex review 重点）；②API 鉴权实际是路由级 require_front_door_access（非 handler Bearer）
+- [Phase 4] 主 session 审查 plan：忠实 spec + Constitution 10 条核查 + 事务边界 HIGH 处理得当；小发现 FR-020 MAY 未注明跳过（让 tasks 注明）
+- [Phase 5] tasks.md 产出（38 task / 5 Phase，FR 21/22 + FR-020 deferred，SC 6/6，FR×Task 矩阵 = analyze 一致性核心）
+- [Phase 4-5] plan+tasks Codex review（needs-attention，1C+2H，聚焦单连接事务正确性）：
+  - [critical] BEGIN IMMEDIATE put_artifact 开/调用方 commit 在单连接 async 下不可靠（事务连接级跨 await，mixed-writer 污染）
+  - [high] UNIQUE 重试无 SAVEPOINT 粒度（冲突 rollback 撤主表 / 不 rollback 下轮 BEGIN 失败）
+  - [high] SD-10 失败回滚给不 rollback 的调用方（脏事务 + 失败事件被回滚吞）
+- [Phase 4-5] 修复采纳 Codex 核心：versionable 自包含事务 + SAVEPOINT 重试 + durable 失败信号
+- [Phase 4-5] plan+tasks re-review round 2（needs-attention，1C+2H 修复遗留矛盾/缺口）：
+  - [critical] plan §0.2/§0 旧"调用方 commit"与 §1.2 自包含矛盾 + 逻辑顺序错 → 消除旧文案 + §1.2 改两互斥分支（先校验后事务，主表 INSERT 在事务内）
+  - [high] durable 事件无 emit 路径（artifact_store 无 event_store）→ 实测 StoreGroup 持 event_store 共享 conn + append_event_committed 独立提交 → 注入 wiring + events 表断言
+  - [high] T5.1 mixed-writer 测试与范围取舍矛盾 → 条件化（依 T1.3 硬 gate：顺序→串行化不变量+合成交错 xfail；并发→升级后测互不污染）
+- [Phase 4-5] round 2 修复完成（plan §0.2/§0/§1.2 + §4 + tasks T1.3/T1.4/T1.7/T5.1/T5.4 + 文件索引）
+- [Phase 4-5] round 3 re-review：codex 挂起卡住（输出仅 3 行 Turn started）→ 主 session 自查收敛（grep 无矛盾残留，line 40 修正语境；新事务模型 19 处一致贯穿）
+- [GATE_TASKS] 硬门禁通过（用户拍板）：✅ 批准进 implement + ✅ mixed-writer = 实测驱动（T1.3 硬 gate）
+- [GATE_TASKS] commit plan+tasks 制品 → implement（plan Phase 1 起）
+
+## Implement（plan Phase 1-5）
