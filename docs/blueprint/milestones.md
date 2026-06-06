@@ -496,20 +496,23 @@ M5 acceptance gate 全部关闭：
 
 ---
 
-### M6（Surface 扩张：F104-F110）⏳ 待启动
+### M6（Surface 扩张：F104-F111）⏳ 待启动
 
 M5 全部关闭后启动。M6 不再做架构债清理（已在 M5 完成），聚焦用户感知 surface 扩张。
 
+> **2026-05-25 端到端 review 重排**（对照 Hermes Agent 抓出真差距）：新增 F105 Multi-Platform Gateway（P0）；原 F105 Companion → F106 改为 User Plugin Loader（社区 skill 扩展基础设施，Companion 推到 M7）；F107 起编号顺延。
+
 | Feature | 一句话目的 | 依赖 |
 |---------|-----------|------|
-| **F104 文件工作台 v0.1**（diff 视图）| git-aware artifact diff UI；复用 F084 SnapshotStore | F084 |
-| **F105 Companion 基础**（PWA shell）| 最小 PWA shell + multi-device session sync | M5 全闭环 |
-| **F106 文件工作台 v0.2**（git-aware）| branch/commit/blame 浏览 | F104 |
-| **F107 Capability Layer Refactor** | 清理 D9/D11/D12（tooling/harness/capability_pack 三层职责 + LLMWorkerAdapter 命名 + BehaviorFileRegistry）；+ F090 D2 完全合并：WorkerProfile 与 AgentProfile 真正合并（独立 SQL 表数据迁移 + revision 机制收口 + FE 类型同步）；+ F101 推迟 4 项：D8 control_plane domain service 隐性耦合、dismiss 跨重启持久化、FR-D4 API 显式参数、FR-E1 control_plane 参数评估 | F101 / F102 |
-| **F108 语音 PoC**（STT only）| 单向语音输入 → text | — |
-| **F109 语音 v0.1**（STT+TTS+voice session）| 完整 voice session | F093（Worker Full Session Parity）|
-| **F110 Behavior Compactor LLM 智能合并** | F063 Phase 3 推迟项；token 成本下降后做 | — |
+| **F104 文件工作台 v0.1**（diff 视图）| git-aware artifact diff UI。**注意**：F084 SnapshotStore 仅服务 prefix-cache，无 history/diff；真实 diff 数据源是 artifact_store 但旧版本内容不可取——v0.1 必须动 backend（artifact 版本历史存储方案），非纯 UI | F084 |
+| **F105 Multi-Platform Gateway v0.1**（新增，P0）| Slack + Discord adapter + platform_registry 统一管理框架；**仍守 H1**：平台 adapter 是接入层，主 Agent 是唯一发声方；Hermes `gateway/platforms/` 35 adapter 是参考 | M5 全闭环 |
+| **F106 User Plugin Loader**（原 Companion 改名）| `~/.octoagent/plugins/` 用户可装载自定义 skill / behavior pack；复用现有 skill loader 升级为 plugin_registry；Companion 推到 M7 | M5 全闭环 |
+| **F107 文件工作台 v0.2**（git-aware）| branch/commit/blame 浏览；Behavior 文件版本历史可视化 | F104 |
+| **F108 Capability Layer Refactor**（编号顺延，原 F107）| 清理 D9/D11/D12（tooling/harness/capability_pack 三层职责 + LLMWorkerAdapter 命名 + BehaviorFileRegistry）；+ F090 D2 完全合并：WorkerProfile 与 AgentProfile 真正合并（独立 SQL 表数据迁移 + revision 机制收口 + FE 类型同步）；+ F101 推迟 4 项：D8 control_plane domain service 隐性耦合、dismiss 跨重启持久化、FR-D4 API 显式参数、FR-E1 control_plane 参数评估 | F101 / F102 |
+| **F109 语音 PoC**（STT only）| 单向语音输入 → text | — |
+| **F110 语音 v0.1**（STT+TTS+voice session）| 完整 voice session | F093（Worker Full Session Parity）|
+| **F111 Behavior Compactor LLM 智能合并** | F063 Phase 3 推迟项；token 成本下降后做 | — |
 
-**不进 M5/M6 的项**：071b Slice D 高层工具暴露（命中"不需要 Codex review 的微改"，空闲间隙顺手做）；Agent Zero Extensions / Instruments 系统（规模 ≥ 1 个月，放 M7 评估）；front-door 公网暴露 / 多用户 / 团队 / 家庭模式（Blueprint §0 已锁单用户深度）
+**不进 M5/M6 的项**：071b Slice D 高层工具暴露（命中"不需要 Codex review 的微改"，空闲间隙顺手做）；Agent Zero Extensions / Instruments 系统（规模 ≥ 1 个月，放 M7 评估）；front-door 公网暴露 / 多用户 / 团队 / 家庭模式（Blueprint §0 已锁单用户深度）；Companion（原 F105，推 M7）
 
 ---

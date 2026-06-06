@@ -9,6 +9,12 @@
 
 ### OQ-1：FR-B05 user simulator 用 Haiku 还是 Sonnet 4.5？
 
+> **✅ SUPERSEDED（2026-05-31 Phase F）**：本 OQ 前提已被后续决策覆盖，无需再拍板。
+> ①控变量 LLM 已统一改为 **DeepSeek-V3.2 @ SiliconFlow**（CLAUDE.local.md §"Benchmark 控变量 LLM 配置"），不再是 Sonnet 4.5。
+> ②Phase B 实施时 user_simulator_model 已默认 **Sonnet 4.6**（tau_bench_adapter.py）。
+> ③Tier2 τ-bench 真跑本身尚未纳入（handoff §4 L2 backlog），user simulator 选型在 Tier2 真跑 Feature 启动时按当时控变量重新定，不在 F103d 范围。
+> 下方原始分析保留作历史。
+
 **spec 现状**：FR-B05 标注 `[AUTO-RESOLVED]`，τ-bench user simulator 使用 Haiku（成本低）而非 Sonnet 4.5，理由是"不影响被测 Agent 控变量"。
 
 **冲突**：用户原约束"控变量 LLM = Claude Sonnet 4.5"（FR-H02）。user simulator 虽非被测对象，但它决定了 τ-bench 评分质量——如果 user simulator 用 Haiku，弱模型可能产生不合理的 user action 序列，导致 Pass@1 偏低、baseline 数据可信度下降。
