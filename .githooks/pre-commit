@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # F087 P3 T-P3-7/8/10: pre-commit hook 跑 e2e_smoke 套件，commit 前 ≤ 180s 反馈。
+# 附加：agent-config 同步检查——防 CLAUDE.md / AGENTS.md 与 .agent-config 源脱节
+#       （快速、确定性、无环境依赖；先于 e2e 跑；bypass: SKIP_SYNC_CHECK=1）。
 # F087 P3 fixup#3 (Codex finding-3): portable timeout——不依赖 macOS 上需要
 # brew install coreutils 才有的 timeout 命令；改用内嵌 python3 watchdog（标准库
 # subprocess + signal，跨 macOS / Linux 一致行为）。
@@ -12,6 +14,8 @@
 # 失败输出（FR-31）：3 行核心 + 日志路径，不刷屏；不全量 dump LLM 响应。
 #
 # bypass 文档：
+#   - agent-config 同步失败 → 跑 ./repo-scripts/sync-agent-config.sh 再 git add；
+#     紧急可 SKIP_SYNC_CHECK=1 git commit
 #   - 紧急 commit 用 SKIP_E2E=1 git commit -m "..."
 #   - 网络不可用 / OAuth profile 失效时 e2e 自然 SKIP（不阻断 commit）
 #
@@ -19,6 +23,24 @@
 #       `git config core.hooksPath .githooks`
 
 set -e
+
+# ---- agent-config 同步检查（先于一切：快速 + 确定性 + 无环境依赖）----
+# 防止：改了 .agent-config/shared.md 或 templates/ 忘了重新生成；或直接改了
+# 自动生成的 CLAUDE.md / AGENTS.md。刻意放在 SKIP_E2E bypass 之前——同步漂移
+# 与 e2e 环境问题是独立关注点，SKIP_E2E=1 不应顺带跳过同步校验。
+if [[ "${SKIP_SYNC_CHECK:-0}" != "1" ]]; then
+  SYNC_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  SYNC_SCRIPT="${SYNC_REPO_ROOT}/repo-scripts/sync-agent-config.sh"
+  if [[ -x "${SYNC_SCRIPT}" ]]; then
+    if ! "${SYNC_SCRIPT}" --check >/dev/null 2>&1; then
+      echo "[SYNC FAIL] CLAUDE.md / AGENTS.md 与 .agent-config 源不一致"
+      echo "  原因:   改了 shared.md / templates 未重新生成，或直接改了自动生成文件"
+      echo "  修复:   ./repo-scripts/sync-agent-config.sh  然后 git add CLAUDE.md AGENTS.md"
+      echo "  bypass: SKIP_SYNC_CHECK=1 git commit"
+      exit 1
+    fi
+  fi
+fi
 
 # ---- bypass 路径 ----
 if [[ "${SKIP_E2E:-0}" == "1" ]]; then
