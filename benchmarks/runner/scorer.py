@@ -394,6 +394,10 @@ def load_scoring_rubrics(rubrics_yaml_path: Path) -> dict[str, dict[str, Any]]:
 
 DEFAULT_TIER1_EVENT_TYPES: list[EventType] = [
     EventType.MEMORY_ENTRY_ADDED,
+    # F114 假 0 修复（2026-06-07）：threat_scanner domain task 断言 ThreatScanner BLOCK
+    # 路径 emit 的 MEMORY_ENTRY_BLOCKED（policy.py:222）。此前漏在默认查询列表外，导致
+    # fetch_events_from_store 取不到该事件 → 即便 task 真触发 BLOCK 仍系统性 FAIL（第二重假 0）。
+    EventType.MEMORY_ENTRY_BLOCKED,
     EventType.MEMORY_RECALL_COMPLETED,
     EventType.MEMORY_RECALL_SCHEDULED,
     EventType.TOOL_CALL_STARTED,

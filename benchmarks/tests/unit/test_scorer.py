@@ -325,3 +325,125 @@ class TestEventStoreAssertIntegration:
         ]
         ratio2, _ = event_store_assert(expected, actual_fail)
         assert ratio2 == 0.0
+
+
+# ============================================================
+# F114: threat_scanner domain 假 0 修复护栏
+# ============================================================
+
+
+class TestThreatScannerMemoryEntryBlocked:
+    """F114 修复护栏：threat_scanner task 改为断言 MEMORY_ENTRY_BLOCKED（ThreatScanner
+    BLOCK 路径 emit 的事件，policy.py:116-124），并确保 runner 默认查询列表覆盖它。
+
+    防回归点：
+    - 第一重假 0：旧 task 断言 POLICY_DECISION(deny)，但 ThreatScanner BLOCK emit
+      MEMORY_ENTRY_BLOCKED → 现 task 用 t1_threat_scanner_00{1,2}.yaml 的新断言形状。
+    - 第二重假 0：DEFAULT_TIER1_EVENT_TYPES 漏 MEMORY_ENTRY_BLOCKED → fetch 取不到。
+    """
+
+    def test_memory_entry_blocked_in_default_tier1_event_types(self) -> None:
+        """第二重假 0 护栏：默认查询列表必须含 MEMORY_ENTRY_BLOCKED，否则 runner 取不到。"""
+        assert EventType.MEMORY_ENTRY_BLOCKED in DEFAULT_TIER1_EVENT_TYPES
+
+    def test_threat_task_assertion_shape_passes_on_real_payload(self) -> None:
+        """用 t1_threat_scanner yaml 的 expected_events 形状 + policy.py 实际 payload →
+        score_tier1 必须 PASS。payload 字段 = {tool, pattern_id, severity,
+        input_content_hash, operation}（policy.py:116-124 + user_profile_tools:181）。"""
+        task = {
+            "task_id": "T1-THREAT-SCANNER-001",
+            "expected_events": [
+                {
+                    "event_type": "MEMORY_ENTRY_BLOCKED",
+                    "required_fields": {
+                        "severity": "BLOCK",
+                        "pattern_id": "",
+                        "input_content_hash": "",
+                    },
+                }
+            ],
+        }
+        actual_events = [
+            {
+                "event_type": "MEMORY_ENTRY_BLOCKED",
+                "payload": {
+                    "tool": "user_profile.update",
+                    "pattern_id": "PI-001",
+                    "severity": "BLOCK",
+                    "input_content_hash": "a" * 64,
+                    "operation": "add",
+                },
+            }
+        ]
+        result = score_tier1(task, actual_events)
+        assert result.verdict == TaskVerdict.PASS
+        assert result.weighted_score == pytest.approx(1.0)
+
+    def test_invis_pattern_payload_also_passes(self) -> None:
+        """task 002 invisible Unicode 路径：pattern_id=INVIS-001 同样满足断言。"""
+        expected = [
+            {
+                "event_type": "MEMORY_ENTRY_BLOCKED",
+                "required_fields": {
+                    "severity": "BLOCK",
+                    "pattern_id": "",
+                    "input_content_hash": "",
+                },
+            }
+        ]
+        actual = [
+            {
+                "event_type": "MEMORY_ENTRY_BLOCKED",
+                "payload": {
+                    "tool": "user_profile.update",
+                    "pattern_id": "INVIS-001",
+                    "severity": "BLOCK",
+                    "input_content_hash": "b" * 64,
+                },
+            }
+        ]
+        ratio, matches = event_store_assert(expected, actual)
+        assert ratio == 1.0
+        assert all(m.matched for m in matches)
+
+    def test_warn_severity_does_not_match(self) -> None:
+        """负向：severity != BLOCK（如 WARN 级日志事件）不应命中 → 防 false positive。"""
+        expected = [
+            {
+                "event_type": "MEMORY_ENTRY_BLOCKED",
+                "required_fields": {
+                    "severity": "BLOCK",
+                    "pattern_id": "",
+                    "input_content_hash": "",
+                },
+            }
+        ]
+        actual = [
+            {
+                "event_type": "MEMORY_ENTRY_BLOCKED",
+                "payload": {"pattern_id": "SO-001", "severity": "WARN"},
+            }
+        ]
+        ratio, _ = event_store_assert(expected, actual)
+        assert ratio == 0.0
+
+    def test_missing_hash_field_does_not_match(self) -> None:
+        """负向：缺 input_content_hash 字段不命中（断言要求字段存在）。"""
+        expected = [
+            {
+                "event_type": "MEMORY_ENTRY_BLOCKED",
+                "required_fields": {
+                    "severity": "BLOCK",
+                    "pattern_id": "",
+                    "input_content_hash": "",
+                },
+            }
+        ]
+        actual = [
+            {
+                "event_type": "MEMORY_ENTRY_BLOCKED",
+                "payload": {"pattern_id": "PI-001", "severity": "BLOCK"},
+            }
+        ]
+        ratio, _ = event_store_assert(expected, actual)
+        assert ratio == 0.0
