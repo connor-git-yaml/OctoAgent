@@ -152,7 +152,7 @@ async def test_explicit_grant_id_must_belong_to_actor(tmp_path: Path) -> None:
         assert payload == {}
         assert decision.allowed is False
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -190,7 +190,7 @@ async def test_empty_scope_binding_does_not_leak_proposals(tmp_path: Path) -> No
         # scope binding 改动后不再生成 "没有可用的 memory scope" 警告
         # 空 project 的 proposal_audit 应该没有泄漏的 proposals
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -221,7 +221,7 @@ async def test_export_inspect_rejects_unbound_scope_ids(tmp_path: Path) -> None:
         assert decision.allowed is False
         assert decision.reason_code == "MEMORY_PERMISSION_SCOPE_UNBOUND"
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -268,7 +268,7 @@ async def test_restore_verify_uses_snapshot_scope_ids_for_conflicts(tmp_path: Pa
         assert decision.allowed is True
         assert "scope 未绑定到当前 project: memory/orphan-scope" in payload["scope_conflicts"]
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -296,4 +296,4 @@ async def test_proposal_audit_filters_by_source(tmp_path: Path) -> None:
         assert len(audit.items) == 1
         assert audit.items[0].metadata["source"] == "import"
     finally:
-        await store_group.conn.close()
+        await store_group.close()

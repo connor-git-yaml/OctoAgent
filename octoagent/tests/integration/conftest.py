@@ -33,7 +33,7 @@ async def integration_app(tmp_path: Path):
 
     yield app
 
-    await store_group.conn.close()
+    await store_group.close()
     os.environ.pop("OCTOAGENT_DB_PATH", None)
     os.environ.pop("OCTOAGENT_ARTIFACTS_DIR", None)
     os.environ.pop("LOGFIRE_SEND_TO_LOGFIRE", None)
@@ -103,7 +103,7 @@ async def app_with_checkpoint(tmp_path: Path):
 
     yield app
 
-    await store_group.conn.close()
+    await store_group.close()
     for key in ("OCTOAGENT_DB_PATH", "OCTOAGENT_ARTIFACTS_DIR", "LOGFIRE_SEND_TO_LOGFIRE"):
         os.environ.pop(key, None)
 
@@ -160,7 +160,7 @@ async def watchdog_integration_app(tmp_path: Path):
 
     # teardown: 清理数据库连接
     # fixture 为 function-scoped，每次测试均获得独立的 CooldownRegistry 实例（FR-010）
-    await store_group.conn.close()
+    await store_group.close()
     for key in (
         "OCTOAGENT_DB_PATH", "OCTOAGENT_ARTIFACTS_DIR", "LOGFIRE_SEND_TO_LOGFIRE",
         "WATCHDOG_NO_PROGRESS_CYCLES", "WATCHDOG_SCAN_INTERVAL_SECONDS",
@@ -226,7 +226,7 @@ async def full_integration_app(tmp_path: Path):
     yield app
 
     await task_runner.shutdown()
-    await store_group.conn.close()
+    await store_group.close()
     for key in ("OCTOAGENT_DB_PATH", "OCTOAGENT_ARTIFACTS_DIR", "LOGFIRE_SEND_TO_LOGFIRE"):
         os.environ.pop(key, None)
 

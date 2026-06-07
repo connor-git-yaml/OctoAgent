@@ -85,7 +85,7 @@ async def test_phase_i_target_worker_profile_runtime_alignment(tmp_path: Path):
         "Phase I AC-I1 Layer 1 失败：target Worker profile 未独立加载（仍用 source profile）"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---- AC-I2: AgentRuntime worker_capability 字段填充（Layer 2 间接）----
@@ -143,7 +143,7 @@ async def test_phase_i_worker_runtime_metadata_includes_capability(tmp_path: Pat
         "Phase I AC-I2 失败：AgentRuntime.role 不是 WORKER"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---- AC-I3: worker→worker audit chain 链式追溯（Phase C 解禁 + B-1 source 派生协同）----
@@ -272,4 +272,4 @@ async def test_phase_i_independent_runtimes_independent_audit_chains(tmp_path: P
         "Phase I AC-I4 失败：两个 worker runtime 复用同一 profile_id（audit chain 串扰）"
     )
 
-    await store_group.conn.close()
+    await store_group.close()

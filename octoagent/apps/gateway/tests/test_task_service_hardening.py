@@ -39,7 +39,7 @@ async def service_with_store(tmp_path: Path):
 
     yield service, store_group
 
-    await store_group.conn.close()
+    await store_group.close()
     os.environ.pop("OCTOAGENT_DB_PATH", None)
     os.environ.pop("OCTOAGENT_ARTIFACTS_DIR", None)
     os.environ.pop("LOGFIRE_SEND_TO_LOGFIRE", None)

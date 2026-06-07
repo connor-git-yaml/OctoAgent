@@ -163,7 +163,7 @@ async def test_main_and_worker_session_turns_are_isolated(tmp_path: Path) -> Non
     assert "worker.tool" in worker_lines
     assert "main.tool" not in worker_lines
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -222,7 +222,7 @@ async def test_recent_conversation_filters_by_session_id(tmp_path: Path) -> None
         assert "worker.search" in joined
         assert "main.search" not in joined
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -286,4 +286,4 @@ async def test_worker_turn_persisted_event_emitted(tmp_path: Path) -> None:
             == AgentSessionKind.MAIN_BOOTSTRAP.value
         )
 
-    await store_group.conn.close()
+    await store_group.close()

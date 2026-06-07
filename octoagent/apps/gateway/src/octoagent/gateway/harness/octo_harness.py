@@ -256,7 +256,8 @@ class OctoHarness:
         )
 
         if hasattr(app.state, "store_group") and app.state.store_group:
-            await app.state.store_group.conn.close()
+            # F104：关闭主连接 + versionable 独立写连接（StoreGroup.close 幂等）。
+            await app.state.store_group.close()
 
     def commit_to_app(self, app: FastAPI) -> None:
         """commit_to_app（F087 P1 设计）。

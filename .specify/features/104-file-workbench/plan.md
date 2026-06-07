@@ -37,7 +37,7 @@ F104 是 M6 Surface 扩张第一个 Feature。F084 SnapshotStore 只服务 prefi
 | 前端 NavLink | `WorkbenchLayout.tsx:430-459` NavLink 数组（含 badge/renderNavDescription 逻辑）| 数组加 `{to:"/files",label:"文件"}` + `renderNavDescription` 文案 |
 | 前端栈 | React 19 + React Router 7 + Vite + 原生 fetch（`api/client.ts`）+ 纯手工 CSS（tokens.css），**无** diff/UI 库 | 新增 `diff`（jsdiff）npm 包 + 自建 CSS diff 组件（D-DIFF） |
 
-**结论（Codex re-review critical 修正）**：原"调用方统一 commit 使 FR-021 天然满足"在单连接 async 下**不可靠**（事务连接级跨 await，mixed-writer 污染）。修订：**versionable=True 路径自包含事务**（§1.2 分支 B，put_artifact 内 `_write_lock` + BEGIN IMMEDIATE + 主表 INSERT + 版本 INSERT + commit/rollback），FR-021 由自包含事务保证；versionable=False 保持调用方 commit（0 regression）。mixed-writer 完全正确性 T1.3 硬 gate 实测（§4 风险）。
+**结论（Codex re-review critical + 方案 B 修正）**：原"调用方统一 commit 使 FR-021 天然满足"在单连接 async 下**不可靠**（事务连接级跨 await，mixed-writer 污染）。修订：**versionable=True 路径自包含事务，走独立 `versionable_conn`**（方案 B，§1.2 分支 B，put_artifact 内 `_write_lock` + BEGIN IMMEDIATE + 主表 INSERT + 版本 INSERT + commit/rollback；失败 event 也走 versionable_conn），FR-021 由自包含事务 + 连接隔离保证；versionable=False 保持调用方主连接 commit（0 regression）。独立连接物理隔离 mixed-writer；T1.3 硬 gate 实测验证（§4 风险）。
 
 ### 0.3 Codebase Reality Check
 
@@ -155,45 +155,49 @@ async def put_artifact(
 2. 计算版本行字段：`storage_kind` 按 `artifact.storage_ref` 是否设置判定；`content` 取 inline 分支 `parts[0].content`（小文件）或 `None`（大文件）；`hash`/`size` 复用主表已算值。
 3. **自包含事务 + 版本号原子分配**（SD-2/CL-4，**主表 INSERT 也在此事务内**）：
 
-⚠️ Codex review 指出原"put_artifact 开 BEGIN / 调用方 commit"模型在单连接（StoreGroup 共享 `aiosqlite.Connection`）+ async 多 coroutine 下**不可靠**——SQLite 事务是连接级、跨 await 边界，其他 coroutine 可在同连接写入/提交，污染事务边界（破坏 FR-021 原子性 + 0 regression）。修订为 **versionable 路径自包含事务 + 写锁 + SAVEPOINT 重试**：
+⚠️ Codex review 指出原"put_artifact 开 BEGIN / 调用方 commit"模型在单连接（StoreGroup 共享 `aiosqlite.Connection`）+ async 多 coroutine 下**不可靠**——SQLite 事务是连接级、跨 await 边界，其他 coroutine 可在同连接写入/提交，污染事务边界（破坏 FR-021 原子性 + 0 regression）。修订为 **versionable 路径自包含事务 + 写锁 + SAVEPOINT 重试**。
+
+> **方案 B（用户选 B 真修隔离，Codex 修复 2）**：versionable 自包含事务**走独立写连接 `versionable_conn`**（不复用主连接 conn）——主连接上调用方默认 versionable=False 的未提交写不被 versionable 路径的 commit/rollback 卷入，mixed-writer 在事务层面物理隔离。下方伪代码用 `vconn` 代指 `self._versionable_conn`；主连接 `conn` 不参与 versionable 事务。失败 event 也走 `vconn` 提交（versionable 失败已 rollback 干净，详见下文 FR-021 失败策略）。
 
 ```python
-# artifact_store.__init__: self._write_lock = asyncio.Lock()
-# versionable=True 路径（自包含，不依赖调用方 commit）：
+# artifact_store.__init__: self._write_lock = asyncio.Lock(); self._versionable_conn (独立写连接)
+# versionable=True 路径（自包含，走独立 vconn，不依赖调用方 commit、不碰主连接 conn）：
+vconn = self._versionable_conn
 async with self._write_lock:                       # 串行化写事务，防 mixed-writer 交错
     try:
-        await conn.execute("BEGIN IMMEDIATE")       # 一个事务、只 BEGIN 一次
-        await conn.execute("INSERT INTO artifacts ...")           # 主表（versionable 路径自己做）
+        await vconn.execute("BEGIN IMMEDIATE")      # 一个事务、只 BEGIN 一次（独立 vconn）
+        await vconn.execute("INSERT INTO artifacts ...")          # 主表（versionable 路径自己做）
         for attempt in range(MAX_VERSION_RETRY):    # =3
-            await conn.execute("SAVEPOINT sp_ver")
+            await vconn.execute("SAVEPOINT sp_ver")
             next_no = COALESCE(MAX(version_no),0)+1 WHERE (task_id, logical_file_id)
             try:
-                await conn.execute("INSERT INTO artifact_versions ... version_no=next_no")
-                await conn.execute("RELEASE sp_ver"); break
+                await vconn.execute("INSERT INTO artifact_versions ... version_no=next_no")
+                await vconn.execute("RELEASE sp_ver"); break
             except aiosqlite.IntegrityError:         # UNIQUE 冲突
-                await conn.execute("ROLLBACK TO sp_ver")   # 撤版本 INSERT、保留主表行，不重 BEGIN
+                await vconn.execute("ROLLBACK TO sp_ver")  # 撤版本 INSERT、保留主表行，不重 BEGIN
                 if attempt == MAX_VERSION_RETRY-1: raise    # 耗尽 → 外层 rollback 整事务
-        await conn.commit()                          # 自 commit
+        await vconn.commit()                         # 自 commit
     except Exception:
-        await conn.rollback()                        # 失败自 rollback（主表+版本都撤，无脏事务残留）
+        await vconn.rollback()                       # 失败自 rollback（vconn 主表+版本都撤，无脏事务残留）
         raise
-# durable 失败信号：rollback 之后、事务外 emit ARTIFACT_VERSION_APPEND_FAILED
-#   （结构化日志/指标，不在被回滚事务内 → 信号不被吞，Constitution #8）
+# best-effort 失败信号：rollback 之后、事务外 emit ARTIFACT_VERSION_APPEND_FAILED
+#   ① structlog.warning（best-effort local log，不依赖 DB 写）
+#   ② DB 可写时 append_event_committed(conn=vconn)（best-effort durable，DB locked 时写不进 → 仅 structlog）
 ```
 
 **三项修正（Codex plan-review）**：
 - **[critical] 自包含事务**：versionable 自己 BEGIN/commit/rollback，**不再依赖调用方 commit**——边界在 put_artifact 内闭合、不跨方法。progress_note user step 原 `conn.commit()`（:136）对 versionable 变 no-op，Phase 1 调整。
 - **[high] SAVEPOINT 重试粒度**：一事务只 BEGIN 一次；版本 INSERT 用 SAVEPOINT，冲突 `ROLLBACK TO sp_ver`（保留主表行）后重 SELECT MAX+INSERT、**不重 BEGIN**；耗尽 rollback 整事务（两表均不留 → 失败注入断言：成功时 artifacts+versions 各 1 行匹配，耗尽时两表均 0 行）。
-- **[high] durable 失败信号 + 自 rollback**：失败在 rollback 后、事务外 emit（progress_note catch 不 rollback 的缺陷由自包含 rollback 解决；失败事件不被事务回滚吞）。
+- **[high] best-effort 失败信号 + 自 rollback**：失败在 rollback 后、事务外 emit（progress_note catch 不 rollback 的缺陷由自包含 rollback 解决；失败事件不被事务回滚吞）。两轨均 best-effort（structlog local log + DB 可写时 versionable_conn event），见下文 FR-021 失败策略。
 
-> ⚠️ **mixed-writer 残留约束（Codex critical 核心，T1.3 实测 + GATE_TASKS 用户确认）**：versionable 自包含 + 写锁已收敛主体；但默认 versionable=False 路径保持调用方 commit（0 regression），其 commit 在锁外，理论上"默认 INSERT 未 commit window × versionable BEGIN IMMEDIATE"在**真并发**下仍可能交错。**T1.3 实测 OctoAgent 实际写并发模型**：①若写为单 task 顺序队列（CL-4 倾向）→ 窗口不触发 → 当前方案足够 + 记已知约束；②若多 task 真并发共享连接 → 默认路径也需自包含 commit（评估调用方事务粒度 regression）或连接级事务管理（**架构 follow-up，超 F104 v0.1**）。T1.3/T5.1 补 mixed versionable/default writer 并发测试（不只测同 key version_no）。**此范围取舍 GATE_TASKS 提请用户确认**。
+> ⚠️ **mixed-writer 约束（Codex critical 核心，T1.3 实测 + 用户选 B 真修隔离）**：原方案 versionable 与默认路径共享主连接，理论上"默认 INSERT 未 commit window × versionable BEGIN IMMEDIATE"在真并发下可能交错。**方案 B 真修**：versionable 走**独立 `versionable_conn`**，与主连接物理隔离——默认 versionable=False 路径在主连接的调用方 commit（0 regression）与 versionable 事务不再共享连接，mixed-writer 在事务层面消解。失败 event 也走 versionable_conn（避免把失败路径重新拉回主连接、转移 mixed-writer）。T1.3/T5.1 仍补 mixed versionable/default writer 并发测（验证隔离）；连接级更广义事务管理（如默认路径也独立连接）若评估 regression 可控为**架构 follow-up，超 F104 v0.1**。
 
-**FR-021 失败策略（durable，Codex re-review high #2 修正 emit 路径）**：
-- 实测：StoreGroup 持 `event_store = SqliteEventStore(conn)`（与 artifact_store **共享 conn**），`append_event_committed`（event_store.py:54）**独立提交 + task_seq 重试**（在 put_artifact rollback 后调用仍 durable、不被前面 rollback 吞）。
-- **wiring**：StoreGroup 构造把 `event_store` **注入 `SqliteArtifactStore`**（同 conn）。put_artifact versionable 失败 → 自 `rollback`（撤主表+版本，连接不留脏事务，修复 high #3）→ **双轨失败信号**：①`structlog.warning`（store 层 always durable 日志）②`event_store.append_event_committed(ARTIFACT_VERSION_APPEND_FAILED)`（独立提交；event: `task_id=artifact.task_id` / `actor=SYSTEM` / payload=失败详情）→ raise。
+**FR-021 失败策略（best-effort，Codex re-review high #2 + 方案 B 修正 emit 路径）**：
+- 实测：`append_event_committed`（event_store.py:54）**独立提交 + task_seq 重试**（在 put_artifact rollback 后调用仍 durable、不被前面 rollback 吞）。**方案 B**：失败 event 走**独立 `versionable_conn`**（versionable 失败已 rollback 干净，连接处于干净状态），不走主连接——避免把调用方主连接上未提交的默认 versionable=False 写一并提前提交（否则调用方后续 rollback 失效，mixed-writer 转移到失败路径，Codex 修复 2）。
+- **wiring**：StoreGroup 构造把 `event_store` + `versionable_conn` **注入 `SqliteArtifactStore`**。put_artifact versionable 失败 → 自 `rollback`（撤 versionable_conn 主表+版本，连接不留脏事务，修复 high #3）→ **双轨 best-effort 信号**：①`structlog.warning`（best-effort local log——经 logging_config 仅挂 StreamHandler 输出进程 stderr，无独立文件/审计 sink，可见性取决于环境是否持久化进程流，独立 sink 超 v0.1）②DB 可写时 `event_store.append_event_committed(ARTIFACT_VERSION_APPEND_FAILED, conn=versionable_conn)`（best-effort durable；event: `task_id=artifact.task_id` / `actor=SYSTEM` / payload=失败详情；DB locked / 不可写时写不进 → 降级仅 structlog）→ raise。
 - progress_note 调用方降级 `persisted=False` 不阻断 Worker；连接干净。
 - 建表失败（启动期）→ fail-fast 阻断服务（DDL 致命，不静默降级）。
-- **T5.4 断言 events 表确有 `ARTIFACT_VERSION_APPEND_FAILED`**（Codex 要求可审计）。
+- **T5.4 断言**：**DB 可写场景** events 表确有 `ARTIFACT_VERSION_APPEND_FAILED`（走 versionable_conn 独立提交，Codex 要求可审计）；**DB locked 场景** events 表无该 event 是预期（best-effort，不强求；SQLite 单写锁物理限制——失败 event 自身也写不进被锁的 DB），断言 structlog best-effort local log 降级被调用。
 
 ### 1.3 版本查询方法（artifact_store.py，FR-006~FR-010）
 
@@ -404,9 +408,9 @@ uv run --no-sync python -m pytest -m e2e_smoke -x -q --tb=short
 
 | 风险 | 严重度 | 实测结论 / Mitigation |
 |------|--------|----------------------|
-| **单连接共享事务边界（mixed-writer）** | **CRITICAL** | Codex plan-review：单连接 async 下"put_artifact 开 BEGIN / 调用方 commit"不可靠（事务连接级跨 await，其他 coroutine 污染/提前提交）。Mitigation：versionable **自包含事务**（自 BEGIN/commit/rollback）+ `_write_lock` 串行化 + SAVEPOINT 重试 + durable 失败信号（§1.2）。**mixed-writer 完全正确性 T1.3 实测**：①顺序队列→当前方案足够 + 记已知约束；②真并发→默认路径自 commit 或连接级事务管理（架构 follow-up 超 v0.1）。GATE_TASKS 提请用户确认范围取舍；T1.3/T5.1 补 mixed-writer 并发测 |
+| **单连接共享事务边界（mixed-writer）** | **CRITICAL → 已修（方案 B）** | Codex plan-review：单连接 async 下"put_artifact 开 BEGIN / 调用方 commit"不可靠（事务连接级跨 await，其他 coroutine 污染/提前提交）。Mitigation（方案 B 真修）：versionable **自包含事务走独立 `versionable_conn`**（自 BEGIN/commit/rollback，与主连接物理隔离）+ `_write_lock` 串行化 + SAVEPOINT 重试 + best-effort 失败信号（§1.2，失败 event 也走 versionable_conn 不转移 mixed-writer）。默认 versionable=False 路径在主连接 commit（0 regression）与 versionable 事务不共享连接。T1.3/T5.1 补 mixed-writer 并发测验证隔离；默认路径也独立连接为架构 follow-up 超 v0.1 |
 | **并发版本号重复 + 重试粒度** | MED | UNIQUE MUST + `_write_lock` + **SAVEPOINT 重试**（一事务一 BEGIN，冲突 ROLLBACK TO sp_ver 保留主表，耗尽 rollback 整事务）+ 并发回归测（SD-2/FR-002，Codex high）|
-| **失败信号不 durable** | MED | 失败事件 rollback 后、事务外 emit（不被回滚吞，Constitution #8）；put_artifact 自 rollback 不留脏事务（Codex high #3）|
+| **失败信号 best-effort（非永久 durable）** | MED | 失败事件双轨均 best-effort：①structlog best-effort local log（仅 StreamHandler 输出 stderr，无独立文件/审计 sink，环境持久化进程流时可见，超 v0.1）；②DB 可写时 versionable_conn best-effort durable event（rollback 后、事务外独立 emit 不被吞，DB locked 时写不进 → 降级仅 structlog，Constitution #8）。put_artifact 自 rollback 不留脏事务（Codex high #3）|
 | **0 regression 被破坏** | MED | 默认 versionable=False 完全不碰版本表 + artifacts 主表零改 + 新表纯新增；每 Phase 后全回归 gate |
 | **大文件版本不可取回** | LOW（已知局限）| SD-8 明确大文件 best-effort，FR-010 占位，SC-002 仅保证小文件 100%；v0.1 versionable 来源（progress-note）几乎都是小文本，主路径走 inline |
 | **logical_file_id 含 `:` 路由解析** | LOW | Phase 2 实测：URL-encode 或改 query param |

@@ -58,7 +58,7 @@ async def operator_app(tmp_path: Path):
 
     yield app, store_group, approval_manager, state_store
 
-    await store_group.conn.close()
+    await store_group.close()
     for key in [
         "OCTOAGENT_DB_PATH",
         "OCTOAGENT_ARTIFACTS_DIR",

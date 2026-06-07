@@ -158,7 +158,7 @@ async def test_cleanup_emits_event_and_closes_session_atomic(tmp_path: Path):
             f"AC-G1 失败：session 状态未更新到 CLOSED，实际 {session.status}"
         )
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 # ---- AC-G2: idempotency 守护 ----
@@ -191,7 +191,7 @@ async def test_cleanup_idempotent_via_idempotency_key(tmp_path: Path):
             f"({completed_count_first} → {completed_count_second})"
         )
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 # ---- AC-G3: rollback on failure ----
@@ -263,4 +263,4 @@ async def test_cleanup_session_save_failure_audit_chain_preserved(tmp_path: Path
             f"AC-G3 最终一致性失败：重试后 session 仍未 close，实际 {session_final.status}"
         )
     finally:
-        await store_group.conn.close()
+        await store_group.close()

@@ -131,7 +131,7 @@ async def test_a2a_store_roundtrip(tmp_path: Path) -> None:
     assert stored_messages[1].direction == A2AMessageDirection.INBOUND
     assert next_seq == 3
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_a2a_store_append_message_assigns_unique_seq_under_concurrency(
@@ -200,4 +200,4 @@ async def test_a2a_store_append_message_assigns_unique_seq_under_concurrency(
     assert sorted([first.message_seq, second.message_seq]) == [1, 2]
     assert [item.message_seq for item in stored_messages] == [1, 2]
 
-    await store_group.conn.close()
+    await store_group.close()

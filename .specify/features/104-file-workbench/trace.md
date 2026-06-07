@@ -137,3 +137,32 @@
 - [偏离] 首版保留文案 + previous content=null 退回当前内容纯展示（FR-010 合理新增分支）
 - [T4.review] Phase 4 Codex review：0 high + 1 medium（FR-015 无差异分支缺失：相同内容被当普通 diff 渲染全 unchanged 行/空文件空面板，spec.md:190/:301 要求明确"无差异"提示）→ 委托子代理修：DiffBody 渲染 DiffLineList 前加 current.content===previous.content 无差异空态 + 补相同非空/空文件测试
 - [T4.review] 修复完成：无差异分支（FR-015，spec.md:301 [必须]）+ 2 测试（相同非空→无差异且无 data-diff-kind 行 / 两空文件→无差异）；0 high 无需单独 re-review（Final cross-Phase 覆盖）；FilesCenter 14 passed + 全 vitest 11 failed/176 = 0 regression + tsc 0 → commit Phase 4（含 diff 依赖）
+- [T4.commit] commit 40a708c（5 files +686/-57，含 diff@9 + @types/diff 依赖，不 push）
+
+### Phase 5（边界/并发/负向/失败注入测试 + Final review）
+- [T5.1-T5.6] 委托子代理测试补全（检查 Phase1-4 已有只补缺）：T5.1 并发（新建 test_artifact_versions_concurrency.py：12 次同 key 版本号连续 1..N + 16 inline/storage_ref 混合串行化 + 独立 lfid 序列 + mixed-writer xfail strict=False 诚实标 v0.1 非目标不声明互不污染）+ T5.2 __merged_history__ 非 versionable 不进表/Files Tab + T5.3 tool_output/llm/chat-import 非 versionable 不进 + T5.4 失败注入（missing table fail-fast + 版本失败 durable ARTIFACT_VERSION_APPEND_FAILED，②③⑤Phase1 已覆盖）+ T5.5 大文件 storage_ref 取回 + 删除占位 + T5.6 单版本不进（后端已覆盖，前端补 1）
+- [审查] T5.1 真断言版本号连续 + mixed-writer xfail 诚实（不 mask，明确 v0.1 限制 in_transaction guard RuntimeError）
+- [回归] backend 783 passed + 1 xfailed（+10 Phase5）+ 前端 15 passed = 0 regression
+- [T5.7] Final cross-Phase Codex review 启动（Phase 1-5 全 diff + spec + plan，重点事务原子性/0 regression/SD-9 边界/技术字段 0 泄漏/并发防线/FR-010 占位）
+- [T5.7] Final review = needs-attention（1 high + 2 medium）：
+  - [high] versionable 写锁不隔离并发默认写（versionable=False 不进 _write_lock + 共享连接，默认写在 in_transaction 检查后插入会被卷入 versionable 事务边界，破坏 FR-004/FR-021）→ **= GATE_TASKS 用户已拍板 mixed-writer 实测驱动归档项（T1.3 实测顺序队列 v0.1 不触发，真并发完全正确=连接级写锁架构 follow-up）；Final review 重提为 high → AskUserQuestion 用户再拍板**
+  - [medium] __merged_history__ 仅合并路径排除，调用方传 step_id='__merged_history__' 可绕过 SD-9 进版本表 → 委托子代理修（execute_progress_note 保留命名空间 guard + 负向测试）
+  - [medium] DiffSide 主响应暴露 version_no/storage_kind（违反 SC-004 主视图技术字段 0，前端虽不显示但 API 契约泄漏）→ 委托子代理修（DiffSide 移除 version_no/storage_kind 仅保留 content/availability/oversize；技术字段只走 /versions）
+- [T5.7] 2 medium 修复完成：__merged_history__ step_id guard（execute_progress_note 强制 versionable=False + 负向测试）+ DiffSide 移除 version_no/storage_kind（后端+前端 types+测试断言改）；280 passed +1 xfailed + 前端 15 + tsc 0
+- [T5.7-high] **用户选 B（撤销 GATE_TASKS mixed-writer 推迟，真修连接级写隔离）**——与 F098"用户选 B 撤销推迟"同 pattern。方案：versionable 独立连接彻底隔离（autocommit + BEGIN IMMEDIATE 拿 SQLite 写锁 + busy_timeout=5000 跨连接串行 + _write_lock 串行化连接访问；versionable commit/rollback 只影响独立连接不卷入主连接 versionable=False 写）→ 委托子代理实施 + 强制 Codex review
+- [T5.7-high] 方案 B 实施完成：create_store_group versionable_conn（autocommit + busy_timeout）+ StoreGroup.close() + artifact_store versionable_conn + put_artifact versionable 用 versionable_conn + BEGIN IMMEDIATE + _insert_artifact_row 加 conn 参数 + mixed-writer 去 xfail 改必过（双向隔离断言）+ octo_harness/7 生产处 close 改；实测验证（autocommit BEGIN IMMEDIATE + WAL 跨连接可见 + busy 兜底不死锁）；786 passed + e2e_smoke 8 = 0 regression。偏离：versionable_conn 可选默认 None 退化到主 conn（兼容 watchdog 直接构造 StoreGroup，退化仅服务不触发 versionable 写的旧测试）+ 测试 200+ conn.close 未改（versionable_conn GC，范围控制）→ 启动方案 B Codex review
+- [T5.7-high] 方案 B Codex review = needs-attention（2 high + 2 medium，独立连接引入新约束漏洞，印证大改动必 re-review）：
+  - [high] versionable_conn 未开 foreign_keys（连接级）→ versionable 写绕过 task 外键孤儿 + 行为分裂 → 委托修（连接 PRAGMA helper 主+versionable 共用 foreign_keys=ON + 回归测）
+  - [high] 失败事件 _emit_version_append_failed 用主连接 commit → 主连接持写锁致 versionable busy 失败时卷入主连接未提交默认写 → 委托修（失败事件改用 versionable_conn 干净独立连接 commit + 测主连接 pending 不被提交）
+  - [medium] versionable_conn=None 退化静默用主连接保留污染窗口 → 委托修（记录 is_isolated，退化时 versionable=True 显式拒绝）
+  - [medium] 测试 200+ teardown 只关主连接泄漏 versionable_conn → 委托修（批量改 store_group.close() + conftest）
+- [T5.7-high] 方案 B 4 finding 修复完成：connection.py apply_write_connection_pragmas helper（versionable_conn FK=ON；主连接 FK 实测 OFF 是历史缺陷 _migrate_legacy_tables 临时关+finally no-op，收窄不动避 7 regression）+ 失败事件 append_event_committed conn=versionable_conn 路由（不卷主连接）+ _versionable_isolated 退化拒绝 + teardown 272 处改 close()；790 passed + e2e_smoke 8
+- [T5.7-high] 方案 B re-review round 2（1 high + 1 medium）：
+  - [high] locked 场景失败事件吞 durable（versionable BEGIN IMMEDIATE busy 失败时 versionable_conn 同锁→失败事件也写不进→仅 structlog，与 FR-021 宣称 DB locked durable event 不一致；根因 SQLite 单写锁物理限制，locked 时两连接都无法干净写 event）→ 委托务实降级修（outbox 过度工程）：修 spec FR-021/SD-10 明确双轨（structlog always durable + event best-effort）+ locked-path 测试
+  - [medium] teardown 86 处漏扫（skills/integration/provider）→ 委托全仓 close()
+- [T5.7-high] 方案 B round 2 修复完成：high locked 务实降级（spec SD-10/FR-021 双轨措辞 structlog always durable + event best-effort，SQLite 单写锁物理限制 outbox 超 v0.1；tasks T5.4 + locked-path 测试 TestDbLockedDegradesToStructlog）+ medium teardown 88 处/21 文件全仓 close()（grep 0 残留）
+- [环境根因] **worktree .venv 是 symlink→主仓 .venv（Jun6 13:51 并发操作），主仓 editable 指向主仓 master src → 裸 pytest 跑 master（ImportError connection/MAX_VERSION_RETRY）**。修复：验证用 PYTHONPATH 锁 worktree 全 packages/apps src → concurrency 4 passed + 全回归 791 passed（worktree 真实代码 0 regression）。worktree venv 独立化是环境 follow-up（不阻 F104，git commit 内容不受 venv 影响）→ round 3 re-review
+- [T5.7-high] 方案 B round 3 re-review = 0 high + 2 medium（HIGH 收敛 2H→1H→0H，剩文档诚实性）：
+  - [medium] structlog "always durable 文件日志" 过度宣称（实测 logging_config 只 StreamHandler 无文件 sink，locked 时进程流不持久化则信号丢）→ 委托修（核实 logging_config + 诚实降级"best-effort local log"）
+  - [medium] plan.md:191-196 仍旧 FR-021 契约（共享 conn + 必 durable event）未同步 spec/tasks best-effort → 委托 plan 同步 + 三文件闭合 grep
+  - 处理后 0 high + 文档闭合可收口（grep 验证一致性，不必 re-review round 4）

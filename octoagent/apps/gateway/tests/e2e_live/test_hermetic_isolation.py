@@ -118,7 +118,7 @@ async def test_octo_harness_bootstrap_stores_uses_data_dir_di(
     expected_db = data_dir / "sqlite" / "octoagent.db"
     assert expected_db.exists(), f"db should be at {expected_db}"
 
-    await harness._store_group.conn.close()
+    await harness._store_group.close()
 
 
 async def test_octo_harness_runtime_services_uses_mcp_servers_dir_di(
@@ -164,7 +164,7 @@ async def test_octo_harness_runtime_services_uses_mcp_servers_dir_di(
     assert mcp_dir.exists(), "mcp_dir DI 路径应被 mkdir"
 
     # cleanup
-    await harness._store_group.conn.close()
+    await harness._store_group.close()
 
 
 def test_di_consumption_no_fail_fast(tmp_path: Path, fake_credential_store) -> None:

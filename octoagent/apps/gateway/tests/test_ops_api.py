@@ -115,7 +115,7 @@ async def test_app(tmp_path: Path):
 
     yield app, tmp_path, store_group
 
-    await store_group.conn.close()
+    await store_group.close()
     for key in [
         "OCTOAGENT_DB_PATH",
         "OCTOAGENT_ARTIFACTS_DIR",

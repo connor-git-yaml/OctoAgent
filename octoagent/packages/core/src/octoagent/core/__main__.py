@@ -50,7 +50,7 @@ async def rebuild_projections() -> None:
         )
         print(f"重建完成，处理 {event_count} 条事件")
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 if __name__ == "__main__":

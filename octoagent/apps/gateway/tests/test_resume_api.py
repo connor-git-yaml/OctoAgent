@@ -26,7 +26,7 @@ async def test_app(tmp_path: Path):
     app.state.llm_service = None
 
     yield app
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest_asyncio.fixture

@@ -153,7 +153,7 @@ async def test_subagent_path_target_kind_signal_skips_find_active_runtime(tmp_pa
     )
     assert sub_runtime.agent_runtime_id.startswith("runtime-"), "新 runtime 应有独立 ULID"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---- AC-F2: agent_profile.kind=subagent → 不复用 ----
@@ -190,7 +190,7 @@ async def test_subagent_path_profile_kind_signal_skips_find_active_runtime(tmp_p
         "AC-F2 闭环失败：profile.kind=subagent 信号未生效"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---- AC-F3: subagent_delegation_id 写入 metadata ----
@@ -222,7 +222,7 @@ async def test_subagent_runtime_metadata_contains_delegation_id(tmp_path: Path) 
         f"AC-F3 闭环失败：metadata 缺 subagent_delegation_id，实际 {sub_runtime.metadata}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---- AC-F4: main 路径行为不变 ----
@@ -260,7 +260,7 @@ async def test_main_path_still_uses_find_active_runtime(tmp_path: Path) -> None:
         "AC-F4 闭环失败：main 路径不复用 active runtime（regression）"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---- AC-F5: worker 路径仍走复用 ----
@@ -299,7 +299,7 @@ async def test_worker_path_still_uses_find_active_runtime(tmp_path: Path) -> Non
         "AC-F5 闭环失败：worker 路径不复用 active runtime（regression）"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---- AC-F6: 多个 subagent 各自独立 runtime ----
@@ -341,4 +341,4 @@ async def test_multiple_subagents_independent_runtimes(tmp_path: Path) -> None:
         f"AC-F6 闭环失败：subagent runtimes 互相复用，仅 {len(runtime_ids)} 个独立"
     )
 
-    await store_group.conn.close()
+    await store_group.close()

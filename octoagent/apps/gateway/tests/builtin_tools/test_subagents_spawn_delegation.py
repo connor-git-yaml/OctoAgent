@@ -97,7 +97,7 @@ async def deps_with_stores(tmp_path: Path):
 
     yield deps
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def _bind_mock_plane_and_capture_handler(

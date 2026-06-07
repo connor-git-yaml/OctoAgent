@@ -317,7 +317,7 @@ async def test_handler_missing_sets_failed_status(tmp_path: Path) -> None:
     assert "recovery_hint" in run.metadata
     assert "error_message" in run.metadata
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -351,7 +351,7 @@ async def test_node_timeout_sets_failed_status(tmp_path: Path) -> None:
     assert run.metadata.get("failure_category") == "timeout"
     assert run.metadata.get("failed_node_id") == "slow-step"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -388,7 +388,7 @@ async def test_failed_outcome_has_unified_metadata(tmp_path: Path) -> None:
     assert "recovery_hint" in run.metadata
     assert "error_message" in run.metadata
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -409,7 +409,7 @@ async def test_list_returns_available_pipelines(tmp_path: Path) -> None:
     assert "Trigger:" in result.detail
     assert 'graph_pipeline(action="start"' in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_list_empty_registry(tmp_path: Path) -> None:
@@ -419,7 +419,7 @@ async def test_list_empty_registry(tmp_path: Path) -> None:
     result = await tool.execute(action="list")
     assert "No pipelines available" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_list_with_input_schema(tmp_path: Path) -> None:
@@ -436,7 +436,7 @@ async def test_list_with_input_schema(tmp_path: Path) -> None:
     assert "branch (string, required)" in result.detail
     assert "skip_tests" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -468,7 +468,7 @@ async def test_start_creates_run_and_returns_run_id(tmp_path: Path) -> None:
     assert run is not None
     assert run.status == PipelineRunStatus.SUCCEEDED  # 3 个 passthrough 应该成功
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -484,7 +484,7 @@ async def test_start_pipeline_not_found(tmp_path: Path) -> None:
     assert "Error: pipeline not found" in result.detail
     assert "nonexistent" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_start_missing_pipeline_id(tmp_path: Path) -> None:
@@ -494,7 +494,7 @@ async def test_start_missing_pipeline_id(tmp_path: Path) -> None:
     result = await tool.execute(action="start")
     assert "Error:" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_start_missing_required_params(tmp_path: Path) -> None:
@@ -514,7 +514,7 @@ async def test_start_missing_required_params(tmp_path: Path) -> None:
     assert "Error: invalid params" in result.detail
     assert "branch" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_start_with_valid_required_params(tmp_path: Path) -> None:
@@ -534,7 +534,7 @@ async def test_start_with_valid_required_params(tmp_path: Path) -> None:
     assert "started successfully" in result.detail
 
     await asyncio.sleep(0.3)
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -561,7 +561,7 @@ async def test_concurrent_run_limit(tmp_path: Path) -> None:
     result3 = await tool.execute(action="start", pipeline_id="gate-pipeline")
     assert "Error: maximum concurrent pipeline runs reached" in result3.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -588,7 +588,7 @@ async def test_status_returns_run_info(tmp_path: Path) -> None:
     assert "waiting_for:" in result.detail
     assert "resume_command:" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_status_run_not_found(tmp_path: Path) -> None:
@@ -598,7 +598,7 @@ async def test_status_run_not_found(tmp_path: Path) -> None:
     result = await tool.execute(action="status", run_id="nonexistent-run-id")
     assert "Error: pipeline run not found" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_status_missing_run_id(tmp_path: Path) -> None:
@@ -608,7 +608,7 @@ async def test_status_missing_run_id(tmp_path: Path) -> None:
     result = await tool.execute(action="status")
     assert "Error:" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_status_failed_run_includes_failure_info(tmp_path: Path) -> None:
@@ -635,7 +635,7 @@ async def test_status_failed_run_includes_failure_info(tmp_path: Path) -> None:
     assert "failure_category:" in result.detail
     assert "failed_node:" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -670,7 +670,7 @@ async def test_resume_approval_approved(tmp_path: Path) -> None:
     assert run is not None
     assert run.status == PipelineRunStatus.SUCCEEDED
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_resume_approval_denied(tmp_path: Path) -> None:
@@ -692,7 +692,7 @@ async def test_resume_approval_denied(tmp_path: Path) -> None:
     assert run is not None
     assert run.status == PipelineRunStatus.CANCELLED
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_resume_approval_missing_approved(tmp_path: Path) -> None:
@@ -710,7 +710,7 @@ async def test_resume_approval_missing_approved(tmp_path: Path) -> None:
     assert "Error:" in result.detail
     assert "approved" in result.detail.lower()
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -746,7 +746,7 @@ async def test_resume_input_with_data(tmp_path: Path) -> None:
     assert run is not None
     assert run.status == PipelineRunStatus.SUCCEEDED
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_resume_input_missing_data(tmp_path: Path) -> None:
@@ -764,7 +764,7 @@ async def test_resume_input_missing_data(tmp_path: Path) -> None:
     assert "Error:" in result.detail
     assert "input_data" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_resume_not_in_resumable_state(tmp_path: Path) -> None:
@@ -782,7 +782,7 @@ async def test_resume_not_in_resumable_state(tmp_path: Path) -> None:
     result = await tool.execute(action="resume", run_id=run_id)
     assert "Error: cannot resume" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_resume_run_not_found(tmp_path: Path) -> None:
@@ -792,7 +792,7 @@ async def test_resume_run_not_found(tmp_path: Path) -> None:
     result = await tool.execute(action="resume", run_id="nonexistent")
     assert "Error: pipeline run not found" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -819,7 +819,7 @@ async def test_cancel_running_pipeline(tmp_path: Path) -> None:
     assert run is not None
     assert run.status == PipelineRunStatus.CANCELLED
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_cancel_terminal_pipeline(tmp_path: Path) -> None:
@@ -837,7 +837,7 @@ async def test_cancel_terminal_pipeline(tmp_path: Path) -> None:
     assert "Error: cannot cancel" in result.detail
     assert "SUCCEEDED" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_cancel_run_not_found(tmp_path: Path) -> None:
@@ -847,7 +847,7 @@ async def test_cancel_run_not_found(tmp_path: Path) -> None:
     result = await tool.execute(action="cancel", run_id="nonexistent")
     assert "Error: pipeline run not found" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -897,7 +897,7 @@ async def test_retry_failed_pipeline(tmp_path: Path) -> None:
     assert run is not None
     assert run.status == PipelineRunStatus.SUCCEEDED
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_retry_non_failed_pipeline(tmp_path: Path) -> None:
@@ -915,7 +915,7 @@ async def test_retry_non_failed_pipeline(tmp_path: Path) -> None:
     assert "Error: cannot retry" in result.detail
     assert "WAITING_APPROVAL" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_retry_run_not_found(tmp_path: Path) -> None:
@@ -925,7 +925,7 @@ async def test_retry_run_not_found(tmp_path: Path) -> None:
     result = await tool.execute(action="retry", run_id="nonexistent")
     assert "Error: pipeline run not found" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -965,7 +965,7 @@ async def test_terminal_state_sync_on_success(tmp_path: Path) -> None:
     assert task is not None
     assert task.status.value in ("SUCCEEDED",)
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -987,7 +987,7 @@ async def test_definition_snapshot_cached(tmp_path: Path) -> None:
     assert tool._run_definitions[run_id].pipeline_id == "test-pipeline"
 
     await asyncio.sleep(0.3)
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -1029,7 +1029,7 @@ async def test_unknown_action(tmp_path: Path) -> None:
     assert "Error: unknown action" in result.detail
     assert "invalid_action" in result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -1068,7 +1068,7 @@ async def test_e2e_pipeline_execution(tmp_path: Path) -> None:
     assert len(checkpoints) == 3  # 3 个节点
     assert all(cp.status == PipelineRunStatus.RUNNING for cp in checkpoints)
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_e2e_hitl_approval_flow(tmp_path: Path) -> None:
@@ -1097,7 +1097,7 @@ async def test_e2e_hitl_approval_flow(tmp_path: Path) -> None:
     status_result = await tool.execute(action="status", run_id=run_id)
     assert "SUCCEEDED" in status_result.detail
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_e2e_failure_and_retry(tmp_path: Path) -> None:
@@ -1136,4 +1136,4 @@ async def test_e2e_failure_and_retry(tmp_path: Path) -> None:
     status_result = await tool.execute(action="status", run_id=run_id)
     assert "SUCCEEDED" in status_result.detail
 
-    await store_group.conn.close()
+    await store_group.close()

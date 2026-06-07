@@ -423,7 +423,7 @@ async def test_a2a_task_message_can_drive_worker_runtime_and_return_result(
         assert task is not None
         assert task.status == TaskStatus.SUCCEEDED
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -626,4 +626,4 @@ async def test_a2a_task_message_timeout_maps_to_error_and_failed_state(
         assert task is not None
         assert task.status == TaskStatus.FAILED
     finally:
-        await store_group.conn.close()
+        await store_group.close()

@@ -37,7 +37,7 @@ async def test_app(tmp_path: Path):
 
     yield app
 
-    await store_group.conn.close()
+    await store_group.close()
     os.environ.pop("OCTOAGENT_DB_PATH", None)
     os.environ.pop("OCTOAGENT_ARTIFACTS_DIR", None)
     os.environ.pop("LOGFIRE_SEND_TO_LOGFIRE", None)
@@ -91,7 +91,7 @@ class TestHealthCheck:
         """GET /ready SQLite 不可用时返回 503"""
         # 关闭数据库连接模拟不可用
         store_group = test_app.state.store_group
-        await store_group.conn.close()
+        await store_group.close()
 
         async with AsyncClient(
             transport=ASGITransport(app=test_app),

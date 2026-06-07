@@ -155,7 +155,7 @@ class CrashBeforeModelStartedCheckpointTaskService(TaskService):
 
 
 async def _close_store_group(store_group) -> None:
-    await store_group.conn.close()
+    await store_group.close()
     await asyncio.sleep(0)
 
 

@@ -1989,15 +1989,13 @@ export interface LogicalFilesResponse {
   files: LogicalFileItem[];
 }
 
-/** diff 单侧（当前版 / 上一版） */
+/** diff 单侧（当前版 / 上一版）。主响应 0 技术字段（SC-004）：
+ *  version_no / hash / size / storage_kind 只走 /versions Advanced endpoint。 */
 export interface DiffSide {
-  version_no: number;
   /** 文本内容；二进制 / 超限 / 不可用时为 null */
   content: string | null;
   /** 'available' | 'unavailable' */
   availability: string;
-  /** 存储类型（技术字段，主界面不直接展示） */
-  storage_kind: string;
   oversize: boolean;
 }
 

@@ -101,7 +101,7 @@ async def test_prepare_dispatch_routes_dev_request_and_persists_work(
     assert stored.pipeline_run_id
     assert stored.project_id == "project-default"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 
@@ -178,7 +178,7 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
         plan.work.metadata["runtime_context"]["context_frame_id"] == "context-frame-1"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_universe(
@@ -231,7 +231,7 @@ async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_unive
     assert plan.dispatch_envelope is not None
     assert plan.dispatch_envelope.metadata["requested_worker_profile_id"] == profile.profile_id
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool_universe(
@@ -311,7 +311,7 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
     )
     assert plan.tool_selection.selected_tools, "selected_tools 不应为空"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_prepare_dispatch_does_not_promote_session_owner_to_delegation_target(
@@ -351,7 +351,7 @@ async def test_prepare_dispatch_does_not_promote_session_owner_to_delegation_tar
     assert not plan.dispatch_envelope.metadata.get("delegation_target_profile_id")
     assert not plan.dispatch_envelope.metadata.get("requested_worker_profile_id")
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_prepare_dispatch_preserves_typed_metadata_in_dispatch_envelope(
@@ -387,7 +387,7 @@ async def test_prepare_dispatch_preserves_typed_metadata_in_dispatch_envelope(
     assert isinstance(plan.dispatch_envelope.metadata["selected_tools"], list)
     assert plan.dispatch_envelope.metadata["target_kind"] == "worker"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> None:
@@ -489,7 +489,7 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
     assert beta_plan.work.context_frame_id == "context-frame-beta"
     assert beta_plan.work.agent_profile_id == "agent-profile-beta"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_prepare_dispatch_pause_resume_and_cancel_pipeline(tmp_path: Path) -> None:
@@ -564,7 +564,7 @@ async def test_prepare_dispatch_pause_resume_and_cancel_pipeline(tmp_path: Path)
     assert scheduled_dispatches[0].task_id == resume_task_id
     assert scheduled_dispatches[0].metadata["work_id"] == resume_plan.work.work_id
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_retry_work_requeues_successful_preflight_and_dispatches(tmp_path: Path) -> None:
@@ -608,7 +608,7 @@ async def test_retry_work_requeues_successful_preflight_and_dispatches(tmp_path:
     assert scheduled_dispatches[0].worker_capability == "dev"
     assert scheduled_dispatches[0].metadata["work_id"] == plan.work.work_id
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_cancel_work_cascades_to_descendant_works(tmp_path: Path) -> None:
@@ -661,7 +661,7 @@ async def test_cancel_work_cascades_to_descendant_works(tmp_path: Path) -> None:
     assert child_run.status.value == "cancelled"
     assert child_run.pause_reason == "work_cancelled:cascade_cancelled:cascade"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_prepare_dispatch_honors_explicit_parent_and_worker_route(tmp_path: Path) -> None:
@@ -697,7 +697,7 @@ async def test_prepare_dispatch_honors_explicit_parent_and_worker_route(tmp_path
     assert plan.dispatch_envelope.metadata["selected_worker_type"] == "research"
     assert plan.dispatch_envelope.metadata["target_kind"] == "subagent"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_prepare_dispatch_preserves_resume_state_for_top_level_work(tmp_path: Path) -> None:
@@ -733,7 +733,7 @@ async def test_prepare_dispatch_preserves_resume_state_for_top_level_work(tmp_pa
         "llm_call_idempotency_key": "task-top-level:llm_call:main:test",
     }
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_prepare_dispatch_clears_resume_state_for_child_subagent(tmp_path: Path) -> None:
@@ -772,7 +772,7 @@ async def test_prepare_dispatch_clears_resume_state_for_child_subagent(tmp_path:
     assert plan.work.metadata["request_context"]["resume_from_node"] == ""
     assert plan.work.metadata["request_context"]["resume_state_snapshot"] == {}
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ============================================================
@@ -802,7 +802,7 @@ async def test_mark_dispatched_rejects_terminal_work(tmp_path: Path) -> None:
         await delegation_plane.mark_dispatched(
             work_id=plan.work.work_id, worker_id="w2", dispatch_id="d2",
         )
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_escalate_rejects_created_work(tmp_path: Path) -> None:
@@ -820,4 +820,4 @@ async def test_escalate_rejects_created_work(tmp_path: Path) -> None:
     # work 目前是 CREATED，不能直接 escalate（需要先 RUNNING）
     with pytest.raises(WorkTransitionError):
         await delegation_plane.escalate_work(plan.work.work_id, reason="test")
-    await store_group.conn.close()
+    await store_group.close()

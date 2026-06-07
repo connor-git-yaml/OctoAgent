@@ -117,7 +117,7 @@ class TestWorkerRuntime:
         assert result.retryable is False
         assert result.error_type == "WorkerProfileDeniedError"
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_required_docker_backend_fails_when_unavailable(self, tmp_path: Path) -> None:
         store_group, sse_hub, _, envelope = await _create_task_with_envelope(
@@ -136,7 +136,7 @@ class TestWorkerRuntime:
         assert result.retryable is False
         assert result.error_type == "WorkerBackendUnavailableError"
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_max_exec_timeout_marks_task_failed(self, tmp_path: Path) -> None:
         store_group, sse_hub, service, envelope = await _create_task_with_envelope(
@@ -160,7 +160,7 @@ class TestWorkerRuntime:
         assert task is not None
         assert task.status == "FAILED"
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_cancel_signal_returns_cancelled_result(self, tmp_path: Path) -> None:
         store_group, sse_hub, service, envelope = await _create_task_with_envelope(
@@ -184,7 +184,7 @@ class TestWorkerRuntime:
         assert task is not None
         assert task.status == "CANCELLED"
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_runtime_forwards_dispatch_metadata_to_llm_service(self, tmp_path: Path) -> None:
         store_group, sse_hub, _, envelope = await _create_task_with_envelope(
@@ -220,7 +220,7 @@ class TestWorkerRuntime:
         # 注入，在无完整 agent context 的单元测试环境中可能为空或缺失，
         # 此处仅验证 dispatch metadata 的原始字段被正确转发。
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_graph_target_kind_uses_real_graph_backend(self, tmp_path: Path) -> None:
         store_group, sse_hub, _, envelope = await _create_task_with_envelope(
@@ -254,7 +254,7 @@ class TestWorkerRuntime:
         assert session.metadata["work_id"] == "work-graph-1"
         assert session.current_step == "graph.finalize"
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_graph_target_kind_fails_closed_when_docker_is_required(
         self, tmp_path: Path
@@ -285,4 +285,4 @@ class TestWorkerRuntime:
             == "graph backend is unavailable when docker isolation is required"
         )
 
-        await store_group.conn.close()
+        await store_group.close()

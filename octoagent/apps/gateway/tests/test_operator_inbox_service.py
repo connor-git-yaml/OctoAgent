@@ -147,7 +147,7 @@ async def test_operator_inbox_aggregates_four_item_types(tmp_path: Path) -> None
     assert inbox.summary.pairing_requests == 1
     assert any(item.item_id == f"alert:{alert_task}:{drift_event.event_id}" for item in inbox.items)
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -198,7 +198,7 @@ async def test_operator_inbox_hides_acknowledged_alert(tmp_path: Path) -> None:
     assert inbox.summary.alerts == 0
     assert not any(item.kind == "alert" for item in inbox.items)
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -259,4 +259,4 @@ async def test_operator_inbox_hides_retryable_failure_after_retry_succeeds(
     assert inbox.summary.retryable_failures == 0
     assert not any(item.item_id == f"task:{task_id}" for item in inbox.items)
 
-    await store_group.conn.close()
+    await store_group.close()

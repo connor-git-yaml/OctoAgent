@@ -54,12 +54,14 @@ class LogicalFilesResponse(BaseModel):
 
 
 class DiffSide(BaseModel):
-    """diff 一侧（当前版 / 上一版）内容（主响应无 artifact_id/storage_ref/hash）。"""
+    """diff 一侧（当前版 / 上一版）内容（主响应 0 技术字段，SC-004）。
 
-    version_no: int
+    version_no / hash / size / storage_kind 等技术字段一律不进主 diff 响应，
+    只走 /versions Advanced endpoint（VersionMetaItem）。
+    """
+
     content: str | None = None
     availability: str
-    storage_kind: str
     oversize: bool = False
 
 
@@ -168,11 +170,11 @@ async def get_logical_file_diff(
     def _to_side(v) -> DiffSide | None:
         if v is None:
             return None
+        # 主响应 0 技术字段（SC-004）：不透传 version_no/storage_kind，
+        # 这些只走 /versions Advanced endpoint。
         return DiffSide(
-            version_no=v.version_no,
             content=v.content,
             availability=v.availability,
-            storage_kind=v.storage_kind,
             oversize=v.oversize,
         )
 

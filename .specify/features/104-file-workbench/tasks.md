@@ -92,15 +92,15 @@ uv run --no-sync python -m pytest -m e2e_smoke -x -q --tb=short
 
 ---
 
-### T1.4: 【HIGH】put_artifact versionable 自包含事务 + SAVEPOINT 重试 + durable 失败
+### T1.4: 【HIGH】put_artifact versionable 自包含事务 + SAVEPOINT 重试 + best-effort 失败信号
 
 - **Phase**: 1
-- **详情**: `put_artifact` 签名加 `*, versionable: bool = False, logical_file_id: str | None = None`（plan §1.2）；artifact_store `__init__` 加 `self._write_lock = asyncio.Lock()`。逻辑：①versionable 路径主表 INSERT 移入自包含事务；默认 `versionable=False` 路径不变（FR-004）；②`if not versionable: return`（默认完全不碰版本表，SD-3）；③`versionable=True` 但 `logical_file_id` 空 → `raise ValueError`（无 name 回退，SD-1/Codex round2 #5）；④计算版本行 storage_kind/content/storage_ref/hash（SD-8 混合，复用主表已算值）；⑤**自包含事务**（Codex plan-review critical，按 T1.3 选定方案）：`async with self._write_lock:` → `BEGIN IMMEDIATE`（一次）→ 主表 INSERT → `for attempt in range(3)`: `SAVEPOINT sp_ver` → `MAX(version_no)+1` → 版本 INSERT → 冲突 `ROLLBACK TO sp_ver` 重试（**不重 BEGIN**）/ 成功 `RELEASE sp_ver` → `commit`（**自 commit**）；except → `rollback` + **事务外** emit `ARTIFACT_VERSION_APPEND_FAILED`（durable）+ raise。顺手更新过时文件头 docstring。
+- **详情**: `put_artifact` 签名加 `*, versionable: bool = False, logical_file_id: str | None = None`（plan §1.2）；artifact_store `__init__` 加 `self._write_lock = asyncio.Lock()`。逻辑：①versionable 路径主表 INSERT 移入自包含事务；默认 `versionable=False` 路径不变（FR-004）；②`if not versionable: return`（默认完全不碰版本表，SD-3）；③`versionable=True` 但 `logical_file_id` 空 → `raise ValueError`（无 name 回退，SD-1/Codex round2 #5）；④计算版本行 storage_kind/content/storage_ref/hash（SD-8 混合，复用主表已算值）；⑤**自包含事务**（Codex plan-review critical，按 T1.3 选定方案）：`async with self._write_lock:` → `BEGIN IMMEDIATE`（一次）→ 主表 INSERT → `for attempt in range(3)`: `SAVEPOINT sp_ver` → `MAX(version_no)+1` → 版本 INSERT → 冲突 `ROLLBACK TO sp_ver` 重试（**不重 BEGIN**）/ 成功 `RELEASE sp_ver` → `commit`（**自 commit**）；except → `rollback` + **事务外** emit `ARTIFACT_VERSION_APPEND_FAILED`（双 best-effort 信号：structlog best-effort local log + DB 可写时 versionable_conn best-effort durable event，详见 T1.7）+ raise。顺手更新过时文件头 docstring。
 - **改动文件**: artifact_store
 - **依赖**: T1.1, T1.2, T1.3
 - **覆盖**: FR-001/FR-002/FR-005/FR-021/FR-022
 - **测试**: T1.5（unit：MAX+1 单调 / inline vs storage_ref / 空 logical_file_id raise / SAVEPOINT 冲突重试成功时 artifacts+versions 各 1 行匹配）；并发/失败注入延 T5.1/T5.4
-- **风险**: **HIGH** — Codex review 重点（自包含事务正确性 + SAVEPOINT 重试 + durable 失败 + 0 regression 默认路径）
+- **风险**: **HIGH** — Codex review 重点（自包含事务正确性 + SAVEPOINT 重试 + best-effort 失败信号 + 0 regression 默认路径）
 
 ---
 
@@ -129,11 +129,11 @@ uv run --no-sync python -m pytest -m e2e_smoke -x -q --tb=short
 ### T1.7: ARTIFACT_VERSION_APPEND_FAILED EventType + payload + emit wiring
 
 - **Phase**: 1
-- **详情**（Codex re-review high #2，明确可实现 emit 路径）：①enums 加 `ARTIFACT_VERSION_APPEND_FAILED` EventType；payloads 加对应 payload（task_id / logical_file_id / reason / attempt）；②**wiring**：StoreGroup 构造**注入 `event_store` 到 `SqliteArtifactStore`**（实测 event_store 与 artifact_store 共享 conn，`append_event_committed` 独立提交 durable）；③put_artifact versionable 失败时（T1.4）rollback 后双轨：`structlog.warning`（always durable）+ `event_store.append_event_committed(failed_event)`（event: task_id=artifact.task_id / actor=SYSTEM / payload）——独立提交不被 rollback 吞。
-- **改动文件**: enums, payloads, `store/__init__.py`（StoreGroup 注入 event_store 到 artifact_store）, artifact_store
+- **详情**（Codex re-review high #2 + 方案 B 修正，明确可实现 emit 路径）：①enums 加 `ARTIFACT_VERSION_APPEND_FAILED` EventType；payloads 加对应 payload（task_id / logical_file_id / reason / attempt）；②**wiring**：StoreGroup 构造**注入 `event_store` 到 `SqliteArtifactStore`**；失败 event 走**独立 versionable 写连接**（`append_event_committed(failed_event, conn=versionable_conn)`，方案 B / Codex 修复 2——versionable 失败已 rollback 干净，不卷主连接事务，避免 mixed-writer 转移到失败路径）；③put_artifact versionable 失败时（T1.4）rollback 后双轨 best-effort：`structlog.warning`（best-effort local log，仅 StreamHandler 输出进程 stderr，无独立文件/审计 sink）+ DB 可写时 `event_store.append_event_committed(failed_event, conn=versionable_conn)`（event: task_id=artifact.task_id / actor=SYSTEM / payload，best-effort durable，DB locked 时写不进、降级仅 structlog）。
+- **改动文件**: enums, payloads, `store/__init__.py`（StoreGroup 注入 event_store + versionable_conn 到 artifact_store）, artifact_store
 - **依赖**: T1.4
-- **覆盖**: FR-021（可观测 durable）；Constitution #8
-- **测试**: T5.4 断言 events 表确有该事件 + structlog
+- **覆盖**: FR-021（可观测 best-effort）；Constitution #8
+- **测试**: T5.4 断言 DB 可写场景 events 表确有该事件（走 versionable_conn）+ structlog best-effort local log；locked 场景 event 不强求
 
 ---
 
@@ -442,10 +442,10 @@ uv run --no-sync python -m pytest -m e2e_smoke -x -q --tb=short
 
 ---
 
-### T5.4: 【失败注入】FR-021 自 rollback + SAVEPOINT 重试 + durable 失败信号 + 连接状态
+### T5.4: 【失败注入】FR-021 自 rollback + SAVEPOINT 重试 + best-effort 失败信号 + 连接状态
 
 - **Phase**: 5
-- **详情**: 失败注入回归测（FR-021/SD-10，Codex plan-review high #2/#3）：①missing table → fail-fast；②DB locked → 重试；③UNIQUE 冲突 → SAVEPOINT `ROLLBACK TO sp_ver` 重试至成功（断言 artifacts+versions 各 1 行匹配）或耗尽（断言两表均 0 行，整事务 rollback）；④版本写失败 → put_artifact **自 rollback**（主表+版本都撤，**断言连接不留脏事务**——后续 commit 不落盘无版本 artifact）+ **事务外** emit `ARTIFACT_VERSION_APPEND_FAILED`（`append_event_committed` 独立提交；**断言 events 表确有该事件** + structlog，rollback 后仍 durable 不被吞）；⑤progress_note 调用方降级 persisted=False 不阻断 Worker，连接状态干净（Codex high #3 修复验证）。
+- **详情**: 失败注入回归测（FR-021/SD-10，Codex plan-review high #2/#3 + re-review round 2/3 high）：①missing table → fail-fast；②**DB locked → 主连接 `BEGIN IMMEDIATE` 持写锁不释放 + versionable put_artifact → 重试至 `busy_timeout` 后 raise（`OperationalError: database is locked`）**；断言 **structlog 降级路径被调用（best-effort local log——仅 StreamHandler 输出进程 stderr，无独立文件/审计 sink）**；**event best-effort：locked 时 events 表无 `ARTIFACT_VERSION_APPEND_FAILED` 是预期，断言不强求该 event**（SQLite 单写锁物理限制——失败 event 自身也写不进被锁的 DB）；断言 raise + 主连接写锁未被破坏；③UNIQUE 冲突 → SAVEPOINT `ROLLBACK TO sp_ver` 重试至成功（断言 artifacts+versions 各 1 行匹配）或耗尽（断言两表均 0 行，整事务 rollback）；④版本写失败（**非 locked**，DB 可写）→ put_artifact **自 rollback**（主表+版本都撤，**断言连接不留脏事务**——后续 commit 不落盘无版本 artifact）+ **事务外** emit `ARTIFACT_VERSION_APPEND_FAILED`（`append_event_committed(conn=versionable_conn)` 独立提交；**断言 events 表确有该事件** + structlog best-effort local log，rollback 后仍 durable 不被吞——DB 可写场景 event best-effort 命中）；⑤progress_note 调用方降级 persisted=False 不阻断 Worker，连接状态干净（Codex high #3 修复验证）。
 - **改动文件**: `packages/core/tests/store/test_artifact_versions.py`
 - **依赖**: T1.4, T1.7
 - **覆盖**: FR-021；SD-10

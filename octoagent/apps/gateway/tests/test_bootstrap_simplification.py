@@ -124,7 +124,7 @@ async def test_worker_bootstrap_is_shared_only(tmp_path: Path) -> None:
             assert f"Worker Type: {wtype}" in content
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 # ============================================================
@@ -163,7 +163,7 @@ async def test_role_card_present_on_agent_runtime(tmp_path: Path) -> None:
         assert loaded.permission_preset == "normal"
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_role_card_empty_by_default(tmp_path: Path) -> None:
@@ -189,7 +189,7 @@ async def test_role_card_empty_by_default(tmp_path: Path) -> None:
         assert loaded.permission_preset == "normal"
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 # ============================================================
@@ -221,7 +221,7 @@ async def test_no_worker_type_specific_templates_in_pack(tmp_path: Path) -> None
         assert pack.bootstrap_files[0].file_id == "bootstrap:shared"
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_all_worker_types_share_unified_tool_groups(tmp_path: Path) -> None:
@@ -241,4 +241,4 @@ async def test_all_worker_types_share_unified_tool_groups(tmp_path: Path) -> Non
         assert required_groups.issubset(set(general.default_tool_groups))
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()

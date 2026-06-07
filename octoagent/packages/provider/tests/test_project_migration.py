@@ -230,7 +230,7 @@ async def _seed_legacy_instance(project_root: Path) -> None:
         ),
     )
     await store_group.conn.commit()
-    await store_group.conn.close()
+    await store_group.close()
 
     (project_root / "data" / "backups").mkdir(parents=True, exist_ok=True)
     (project_root / "data" / "exports").mkdir(parents=True, exist_ok=True)
@@ -280,7 +280,7 @@ async def test_migration_apply_creates_default_project_for_empty_instance(tmp_pa
         assert default_project is not None
         # workspace 概念已废弃，不再验证 primary workspace
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_migration_backfills_legacy_metadata_bindings(tmp_path: Path) -> None:
@@ -317,7 +317,7 @@ async def test_migration_backfills_legacy_metadata_bindings(tmp_path: Path) -> N
         assert (ProjectBindingType.ENV_REF, "TELEGRAM_BOT_TOKEN") in binding_index
         assert (ProjectBindingType.BACKUP_ROOT, str((tmp_path / "data").resolve())) in binding_index
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_migration_is_idempotent(tmp_path: Path) -> None:
@@ -338,7 +338,7 @@ async def test_migration_is_idempotent(tmp_path: Path) -> None:
         projects = await store_group.project_store.list_projects()
         assert len(projects) == 1
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_validation_failure_rolls_back_new_records(tmp_path: Path) -> None:
@@ -357,7 +357,7 @@ async def test_validation_failure_rolls_back_new_records(tmp_path: Path) -> None
         task = await store_group.task_store.get_task("task-025-legacy")
         assert task is not None
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_rollback_latest_removes_current_run_records_only(tmp_path: Path) -> None:
@@ -376,7 +376,7 @@ async def test_rollback_latest_removes_current_run_records_only(tmp_path: Path) 
         task = await store_group.task_store.get_task("task-025-legacy")
         assert task is not None
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_rollback_latest_skips_failed_run_and_failed_run_is_not_revertible(
@@ -398,7 +398,7 @@ async def test_rollback_latest_skips_failed_run_and_failed_run_is_not_revertible
     try:
         assert await store_group.project_store.get_default_project() is not None
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
     rolled_back = await service.rollback("latest")
     assert rolled_back.run_id == succeeded.run_id

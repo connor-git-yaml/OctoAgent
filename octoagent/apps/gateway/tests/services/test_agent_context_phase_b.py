@@ -189,7 +189,7 @@ async def test_ensure_session_creates_subagent_internal(tmp_path: Path) -> None:
     assert session.kind is AgentSessionKind.SUBAGENT_INTERNAL, (
         f"期望 SUBAGENT_INTERNAL，实际 {session.kind}"
     )
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +227,7 @@ async def test_ensure_session_fills_parent_worker_runtime_id(tmp_path: Path) -> 
     assert session.parent_worker_runtime_id == delegation.caller_agent_runtime_id, (
         f"期望 {delegation.caller_agent_runtime_id}，实际 {session.parent_worker_runtime_id}"
     )
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +271,7 @@ async def test_ensure_session_worker_no_parent_is_direct_worker(tmp_path: Path) 
     assert session.kind is AgentSessionKind.DIRECT_WORKER, (
         f"regression: 期望 DIRECT_WORKER，实际 {session.kind}"
     )
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +315,7 @@ async def test_ensure_session_worker_with_parent_is_worker_internal(tmp_path: Pa
     assert session.kind is AgentSessionKind.WORKER_INTERNAL, (
         f"regression: 期望 WORKER_INTERNAL，实际 {session.kind}"
     )
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -362,7 +362,7 @@ async def test_ensure_session_main_agent_is_main_bootstrap(tmp_path: Path) -> No
     assert session.kind is AgentSessionKind.MAIN_BOOTSTRAP, (
         f"regression: 期望 MAIN_BOOTSTRAP，实际 {session.kind}"
     )
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +398,7 @@ async def test_spawn_writes_subagent_delegation_to_child_task(tmp_path: Path) ->
     assert parsed.caller_project_id is not None, "caller_project_id 不能为 None"
     assert parsed.spawned_by == _SPAWNED_BY
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -450,7 +450,7 @@ async def test_ensure_session_backfills_child_agent_session_id(tmp_path: Path) -
     assert parsed.child_agent_session_id == session.agent_session_id, (
         f"child_agent_session_id 期望 {session.agent_session_id}，实际 {parsed.child_agent_session_id}"
     )
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -527,7 +527,7 @@ async def test_p2_3_event_emitted_before_session_save(tmp_path: Path) -> None:
                 f"P2-3 失败：event_emit({event_idx}) 应在 session_save({session_idx}) 之前"
             )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +574,7 @@ async def test_p2_4_dispatch_exception_triggers_cleanup(tmp_path: Path) -> None:
         "P2-4 失败：dispatch exception 路径没有调用 _close_subagent_session_if_needed"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -661,7 +661,7 @@ async def test_spawn_to_cleanup_end_to_end(tmp_path: Path) -> None:
     completed_events = [e for e in parent_events if e.type is EventType.SUBAGENT_COMPLETED]
     assert len(completed_events) >= 1, "E2E 失败：SUBAGENT_COMPLETED 事件未写入父任务事件流"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -734,7 +734,7 @@ async def test_p1_2_emit_before_enqueue_no_race(tmp_path: Path) -> None:
         f"P1-2 闭环：child_task_id 应为真实 task_id={task_id}，实际 {delegation.child_task_id}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -794,7 +794,7 @@ async def test_p1_1_emit_preserves_target_kind(tmp_path: Path) -> None:
     )
     assert merged.get("subagent_delegation") is not None
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -853,7 +853,7 @@ async def test_p2_5_cleanup_skips_non_terminal_task(tmp_path: Path) -> None:
         "P2-5 闭环失败：非终态 task 不应 emit SUBAGENT_COMPLETED 事件"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -918,7 +918,7 @@ async def test_p2_6_caller_unknown_when_no_execution_context(tmp_path: Path) -> 
         f"P2-6 闭环失败：caller_agent_runtime_id 不应 fallback 为 task_id"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # 注：_make_delegation 复用文件头部 helper；以下为 Codex Round 2 闭环测试专属 helpers

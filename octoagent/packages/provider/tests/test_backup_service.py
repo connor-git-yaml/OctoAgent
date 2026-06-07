@@ -117,7 +117,7 @@ async def _seed_project(
     )
     await store_group.artifact_store.put_artifact(artifact, content=b"hello world")
     await store_group.conn.commit()
-    await store_group.conn.close()
+    await store_group.close()
     return task_id
 
 
@@ -161,7 +161,7 @@ async def _append_follow_up(
     )
     await store_group.artifact_store.put_artifact(artifact, content=b"follow up")
     await store_group.conn.commit()
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def _seed_additional_chat_task(
@@ -237,7 +237,7 @@ async def _seed_additional_chat_task(
     )
     await store_group.artifact_store.put_artifact(artifact, content=text.encode("utf-8"))
     await store_group.conn.commit()
-    await store_group.conn.close()
+    await store_group.close()
     return task_id
 
 
@@ -308,7 +308,7 @@ async def _seed_ops_chat_import_task(project_root: Path) -> str:
     )
     await store_group.artifact_store.put_artifact(artifact, content=b"{}")
     await store_group.conn.commit()
-    await store_group.conn.close()
+    await store_group.close()
     return task_id
 
 
@@ -401,7 +401,7 @@ async def _seed_session_continuity(project_root: Path) -> None:
         )
     )
     await store_group.conn.commit()
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -436,7 +436,7 @@ async def test_create_bundle_excludes_plaintext_secrets_and_updates_state(tmp_pa
         EventType.BACKUP_STARTED,
         EventType.BACKUP_COMPLETED,
     ]
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio

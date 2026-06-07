@@ -56,17 +56,13 @@ describe("FilesCenter 两级导航", () => {
     });
     fetchLogicalFileDiffMock.mockResolvedValue({
       current: {
-        version_no: 3,
         content: "公共行\n新增内容",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       previous: {
-        version_no: 2,
         content: "公共行\n删除内容",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       binary: false,
@@ -132,17 +128,13 @@ describe("FilesCenter 两级导航", () => {
     });
     fetchLogicalFileDiffMock.mockResolvedValue({
       current: {
-        version_no: 2,
         content: "当前内容",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       previous: {
-        version_no: 1,
         content: "上一版内容",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       binary: false,
@@ -211,10 +203,8 @@ describe("FilesCenter 两级导航", () => {
     });
     fetchLogicalFileDiffMock.mockResolvedValue({
       current: {
-        version_no: 1,
         content: "唯一内容",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       previous: null,
@@ -251,17 +241,13 @@ describe("FilesCenter 两级导航", () => {
     });
     fetchLogicalFileDiffMock.mockResolvedValue({
       current: {
-        version_no: 2,
         content: null,
         availability: "unavailable",
-        storage_kind: "snapshot",
         oversize: false,
       },
       previous: {
-        version_no: 1,
         content: null,
         availability: "unavailable",
-        storage_kind: "snapshot",
         oversize: false,
       },
       binary: true,
@@ -315,17 +301,13 @@ describe("FilesCenter 两级导航", () => {
     });
     fetchLogicalFileDiffMock.mockResolvedValue({
       current: {
-        version_no: 2,
         content: null,
         availability: "available",
-        storage_kind: "snapshot",
         oversize: true,
       },
       previous: {
-        version_no: 1,
         content: null,
         availability: "available",
-        storage_kind: "snapshot",
         oversize: true,
       },
       binary: false,
@@ -361,17 +343,13 @@ describe("FilesCenter 两级导航", () => {
     });
     fetchLogicalFileDiffMock.mockResolvedValue({
       current: {
-        version_no: 2,
         content: "当前可用内容",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       previous: {
-        version_no: 1,
         content: null,
         availability: "unavailable",
-        storage_kind: "snapshot",
         oversize: false,
       },
       binary: false,
@@ -408,17 +386,13 @@ describe("FilesCenter 两级导航", () => {
     });
     fetchLogicalFileDiffMock.mockResolvedValue({
       current: {
-        version_no: 2,
         content: "完全相同的内容\n第二行",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       previous: {
-        version_no: 1,
         content: "完全相同的内容\n第二行",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       binary: false,
@@ -457,17 +431,13 @@ describe("FilesCenter 两级导航", () => {
     });
     fetchLogicalFileDiffMock.mockResolvedValue({
       current: {
-        version_no: 2,
         content: "",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       previous: {
-        version_no: 1,
         content: "",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       binary: false,
@@ -655,17 +625,13 @@ describe("FilesCenter 两级导航", () => {
     // 先 resolve A（旧请求），再 resolve B（新请求）
     resolveA({
       current: {
-        version_no: 2,
         content: "A 当前内容",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       previous: {
-        version_no: 1,
         content: "A 旧内容",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       binary: false,
@@ -673,17 +639,13 @@ describe("FilesCenter 两级导航", () => {
     });
     resolveB({
       current: {
-        version_no: 2,
         content: "B 当前内容",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       previous: {
-        version_no: 1,
         content: "B 旧内容",
         availability: "available",
-        storage_kind: "inline",
         oversize: false,
       },
       binary: false,
@@ -697,5 +659,32 @@ describe("FilesCenter 两级导航", () => {
     expect(screen.getByText("B 旧内容")).toBeInTheDocument();
     expect(screen.queryByText("A 当前内容")).not.toBeInTheDocument();
     expect(screen.queryByText("A 旧内容")).not.toBeInTheDocument();
+  });
+
+  it("单版本逻辑文件 100% 不进文件列表（SC-006/CL-1，后端已过滤 → 空列表展示空态）", async () => {
+    // 后端 list_versionable_files_for_task 用 HAVING COUNT>=2 过滤单版本文件，
+    // 故该 task 全是单版本时前端收到空列表 → 展示"暂无可对比的文件"空态，
+    // 不渲染任何文件卡片，也不出现"1 个版本"chip（CL-1 完全隐藏，无占位备选）。
+    fetchFileTasksMock.mockResolvedValue({
+      tasks: [{ task_id: "task-single", title: "只产出单版本的任务" }],
+    });
+    // 后端已过滤单版本 → 返回空 files（这是契约：单版本永远不返回给前端）
+    fetchLogicalFilesMock.mockResolvedValue({ files: [] });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByText("只产出单版本的任务")).toBeInTheDocument()
+    );
+    await user.click(screen.getByText("只产出单版本的任务"));
+
+    // 空态文案出现
+    await waitFor(() =>
+      expect(screen.getByText("这个任务暂无可对比的文件")).toBeInTheDocument()
+    );
+    // 不渲染任何文件卡片：无 "N 个版本" chip（chip 文案格式 "{n} 个版本"）
+    expect(screen.queryByText(/1 个版本/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/\d+ 个版本/)).not.toBeInTheDocument();
   });
 });

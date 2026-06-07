@@ -77,7 +77,7 @@ async def test_worker_session_rolling_summary_round_trip(tmp_path: Path) -> None
     assert reloaded is not None
     assert reloaded.rolling_summary == "Worker compaction summary 第 2 段"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -105,7 +105,7 @@ async def test_worker_session_memory_cursor_seq_round_trip(tmp_path: Path) -> No
     assert cursored is not None
     assert cursored.memory_cursor_seq == 99
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -175,7 +175,7 @@ async def test_worker_session_field_isolation_from_main(tmp_path: Path) -> None:
     assert worker_unchanged.rolling_summary == "Worker side updated"
     assert worker_unchanged.memory_cursor_seq == 12
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -213,7 +213,7 @@ async def test_worker_session_fields_persist_across_store_reopen(tmp_path: Path)
         "sess-worker-reopen-001", 23
     )
     await store_group_1.conn.commit()
-    await store_group_1.conn.close()
+    await store_group_1.close()
 
     # 第二阶段：用全新 store_group 打开同一 db 文件
     store_group_2 = await create_store_group(str(db_path), str(artifacts_dir))
@@ -225,4 +225,4 @@ async def test_worker_session_fields_persist_across_store_reopen(tmp_path: Path)
     assert reopened.rolling_summary == "Persisted summary 跨进程"
     assert reopened.memory_cursor_seq == 23
 
-    await store_group_2.conn.close()
+    await store_group_2.close()

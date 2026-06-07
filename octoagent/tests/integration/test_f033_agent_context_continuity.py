@@ -205,7 +205,7 @@ async def test_f033_context_survives_restart(
         user_text="第二轮：继续沿用上一轮约束",
         llm_service=llm_1,
     )
-    await store_group_1.conn.close()
+    await store_group_1.close()
 
     store_group_2 = await create_store_group(str(db_path), str(artifacts_dir))
     service_2 = TaskService(store_group_2, SSEHub())
@@ -236,7 +236,7 @@ async def test_f033_context_survives_restart(
     assert session_state.rolling_summary
     assert session_state.last_context_frame_id
 
-    await store_group_2.conn.close()
+    await store_group_2.close()
 
 
 @pytest.mark.skip(
@@ -364,4 +364,4 @@ async def test_f033_project_context_does_not_leak_across_projects(
     assert beta_state is not None
     assert alpha_state.session_id != beta_state.session_id
 
-    await store_group.conn.close()
+    await store_group.close()

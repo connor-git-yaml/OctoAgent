@@ -149,15 +149,14 @@ class TestFilesEndpoints:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["current"]["version_no"] == 2
         assert data["current"]["content"] == "第一行\n新内容"
-        assert data["previous"]["version_no"] == 1
         assert data["previous"]["content"] == "第一行\n旧内容"
         assert data["binary"] is False
         assert data["oversize"] is False
 
     async def test_diff_no_technical_fields(self, files_client):
-        """SC-004/FR-017：diff 主响应不含 artifact_id/storage_ref/hash。"""
+        """SC-004/FR-017：diff 主响应 0 技术字段（不含 artifact_id/storage_ref/hash，
+        且 DiffSide 不含 version_no/storage_kind）。"""
         resp = await files_client.get(
             f"/api/files/tasks/{TASK_ID}/diff",
             params={"logical_file_id": LFID_MULTI},
@@ -166,6 +165,13 @@ class TestFilesEndpoints:
         assert "artifact_id" not in body
         assert "storage_ref" not in body
         assert "hash" not in body
+        # SC-004：技术字段 version_no/storage_kind 只走 /versions Advanced endpoint，
+        # 不在 diff 主响应 DiffSide 出现
+        data = resp.json()
+        assert "version_no" not in data["current"]
+        assert "storage_kind" not in data["current"]
+        assert "version_no" not in data["previous"]
+        assert "storage_kind" not in data["previous"]
 
     async def test_logical_files_lists_slash_key(self, files_client):
         """Codex Phase2 medium：含 '/' 的 logical_file_id 出现在 /logical-files 列表。"""
@@ -182,9 +188,7 @@ class TestFilesEndpoints:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["current"]["version_no"] == 2
         assert data["current"]["content"] == "斜杠键\n新"
-        assert data["previous"]["version_no"] == 1
         assert data["previous"]["content"] == "斜杠键\n旧"
 
     async def test_versions_slash_logical_file_id_via_query(self, files_client):
@@ -296,6 +300,91 @@ class TestFilesEndpoints:
         assert [v["version_no"] for v in versions] == [2, 1]
         assert all(v["hash"] for v in versions)
         assert all(v["storage_kind"] == "inline" for v in versions)
+
+
+class TestNonVersionableExcludedFromFilesTab:
+    """F104 T5.2/T5.3：非 versionable artifact 不进 Files Tab 逻辑文件列表（SD-9）。
+
+    Files Tab `/logical-files` 数据源是 artifact_versions 表（只含 versionable=True 写入）。
+    默认 put_artifact（versionable=False）只写 artifacts 主表 → 永远不出现在 Files Tab。
+    本测试用独立 task 隔离种子，覆盖 __merged_history__ / tool_output:* / llm-* / chat-import。
+    """
+
+    _NEG_TASK = "01JFILES_NEG_00000000000001"
+
+    async def _seed_non_versionable(self, app) -> None:
+        store_group = app.state.store_group
+        now = datetime.now(UTC)
+        task = Task(
+            task_id=self._NEG_TASK,
+            created_at=now,
+            updated_at=now,
+            title="负向：非版本化产物",
+            requester=RequesterInfo(channel="web", sender_id="owner"),
+        )
+        await store_group.task_store.create_task(task)
+        await store_group.conn.commit()
+
+        artifact_store = store_group.artifact_store
+
+        async def _put_default(name: str, content: str) -> None:
+            art = Artifact(
+                artifact_id=str(ULID()),
+                task_id=self._NEG_TASK,
+                ts=datetime.now(UTC),
+                name=name,
+                parts=[ArtifactPart(type=PartType.TEXT, content=content)],
+            )
+            # 默认路径 versionable=False（不传 versionable）→ 不写版本表
+            await artifact_store.put_artifact(art, content.encode())
+            await store_group.conn.commit()
+
+        # __merged_history__（SD-9 合并历史排除，T5.2）
+        await _put_default("progress-note:__merged_history__", "历史汇总 1")
+        await _put_default("progress-note:__merged_history__", "历史汇总 2")
+        # tool_output:web_search 同工具多次写（T5.3）
+        await _put_default("tool_output:web_search", "搜索结果 1")
+        await _put_default("tool_output:web_search", "搜索结果 2")
+        await _put_default("tool_output:web_search", "搜索结果 3")
+        # llm-* / chat-import 抽样（T5.3）
+        await _put_default("llm-response", "LLM 输出 1")
+        await _put_default("llm-response", "LLM 输出 2")
+        await _put_default("chat-import", "导入对话 1")
+        await _put_default("chat-import", "导入对话 2")
+
+    async def test_non_versionable_artifacts_absent_from_logical_files(self, files_app):
+        """__merged_history__ / tool_output:* / llm-* / chat-import 多次写均不进 Files Tab。"""
+        await self._seed_non_versionable(files_app)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=files_app), base_url="http://test"
+        ) as client:
+            resp = await client.get(
+                f"/api/files/tasks/{self._NEG_TASK}/logical-files"
+            )
+        assert resp.status_code == 200
+        files = resp.json()["files"]
+        # 该 task 只有非版本化产物 → 逻辑文件列表为空
+        assert files == []
+        body = resp.text
+        assert "__merged_history__" not in body
+        assert "tool_output" not in body
+        assert "llm-response" not in body
+        assert "chat-import" not in body
+
+    async def test_non_versionable_task_absent_from_tasks_list(self, files_app):
+        """只含非版本化产物的 task 不出现在 Files Tab 一级任务列表（无 >=2 版本逻辑文件）。"""
+        await self._seed_non_versionable(files_app)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=files_app), base_url="http://test"
+        ) as client:
+            resp = await client.get("/api/files/tasks")
+        assert resp.status_code == 200
+        task_ids = {t["task_id"] for t in resp.json()["tasks"]}
+        # 含 versionable 版本的 TASK_ID 在列表里，纯非版本化的 _NEG_TASK 不在
+        assert TASK_ID in task_ids
+        assert self._NEG_TASK not in task_ids
 
 
 class TestFilesFrontDoorAuth:

@@ -62,7 +62,7 @@ async def test_app(tmp_path: Path):
     yield app
 
     await task_runner.shutdown()
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest_asyncio.fixture

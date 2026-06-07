@@ -165,7 +165,7 @@ async def test_write_state_transition_invokes_callback_on_terminal(tmp_path: Pat
         "AC-H1+H2 闭环失败：终态后 callback 未被触发"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -208,4 +208,4 @@ async def test_write_state_transition_callback_failure_does_not_break_transition
         f"AC-H5 闭环失败：task 状态未更新到 COMPLETED，实际 {task.status}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()

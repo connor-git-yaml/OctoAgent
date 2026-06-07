@@ -64,7 +64,7 @@ class TestResumeEngine:
         assert EventType.RESUME_STARTED in event_types
         assert EventType.RESUME_SUCCEEDED in event_types
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_try_resume_snapshot_corrupt(self, tmp_path: Path) -> None:
         store_group, _task_service, task_id = await _prepare_running_task(tmp_path)
@@ -102,7 +102,7 @@ class TestResumeEngine:
         event_types = [e.type for e in events]
         assert EventType.RESUME_FAILED in event_types
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_concurrent_resume_returns_lease_conflict(self, tmp_path: Path) -> None:
         store_group, _task_service, task_id = await _prepare_running_task(tmp_path)
@@ -141,4 +141,4 @@ class TestResumeEngine:
         assert failures[0].failure_type is not None
         assert failures[0].failure_type.value == "lease_conflict"
 
-        await store_group.conn.close()
+        await store_group.close()

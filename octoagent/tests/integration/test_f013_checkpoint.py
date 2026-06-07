@@ -79,7 +79,7 @@ class TestF013ScenarioB:
         )
         await sg1.checkpoint_store.save_checkpoint(cp)
         await sg1.conn.commit()
-        await sg1.conn.close()  # 模拟进程退出，WAL 持久化已完成
+        await sg1.close()  # 模拟进程退出，WAL 持久化已完成
 
         # --- 阶段 2: 重建 StoreGroup，模拟进程重启后恢复 ---
         sg2 = await create_store_group(db_path, artifacts_dir)
@@ -97,7 +97,7 @@ class TestF013ScenarioB:
             f"checkpoint_id 不符，期望 'cp-{task_id}'，实际: {result.checkpoint_id}"
         )
 
-        await sg2.conn.close()
+        await sg2.close()
 
     async def test_resume_idempotency(
         self,
@@ -143,7 +143,7 @@ class TestF013ScenarioB:
         )
         await sg1.checkpoint_store.save_checkpoint(cp)
         await sg1.conn.commit()
-        await sg1.conn.close()
+        await sg1.close()
 
         # 重建 StoreGroup，连续两次恢复
         sg2 = await create_store_group(db_path, artifacts_dir)
@@ -176,7 +176,7 @@ class TestF013ScenarioB:
             "RESUME_SUCCEEDED 事件应至少存在 1 条"
         )
 
-        await sg2.conn.close()
+        await sg2.close()
 
     async def test_resume_with_corrupted_checkpoint(
         self,
@@ -243,4 +243,4 @@ class TestF013ScenarioB:
             f"实际事件类型: {[e.type.value for e in all_events]}"
         )
 
-        await sg.conn.close()
+        await sg.close()

@@ -169,7 +169,11 @@ FR-001（每次 versionable 写入 append）vs FR-004（0 regression）的张力
 - **同事务原子**：版本 append 与 `put_artifact` 主表 INSERT 在**同一 SQLite 事务**（一致性优先，Constitution #1/#2）。版本写失败 → 整体回滚（主表也不写）。
 - **正常路径无 regression**：版本表 DDL 启动建好（`CREATE TABLE IF NOT EXISTS`）；UNIQUE 冲突走重试（SD-2）不抛用户；默认 `versionable=False` 路径完全不碰版本表。仅 DB 真故障（locked/磁盘满）下主+版本一起失败（原 artifact 写本也会失败，非新增 regression）。
 - **迁移 fail-fast**：启动建表失败 → 阻断服务（不静默降级，Observability #8）。
-- **可观测 + 测试**：版本 append 失败 emit 错误事件/指标；必须补回归测试：missing table / DB locked / UNIQUE 冲突重试 / 版本写失败回滚。
+- **可观测（双 best-effort 信号）**：版本 append 失败的信号分两轨，**两轨都是 best-effort**，不宣称 event 全覆盖、也不宣称信号永不丢失：
+  - **① structlog.warning（best-effort local log）**：经 `logging_config` 仅挂 StreamHandler（输出进程 stderr，**无独立文件/审计 sink**——Logfire 默认 off 且 opt-in）；不依赖任何 DB 写，DB 整体不可写时仍会调用。**可见性取决于环境是否持久化进程流**（stdout/stderr 被收集时可见；否则进程退出即丢）；独立文件/审计 sink 超 v0.1 范围。
+  - **② `ARTIFACT_VERSION_APPEND_FAILED` event（best-effort durable）**：DB 可写时在独立 versionable 写连接上 durable emit（不卷主连接事务，F104 Codex 修复 2）；**DB locked / 不可写时降级仅 structlog best-effort local log，不强求该 event**。
+  - **根因（SQLite 单写锁物理限制）**：versionable append 走 `BEGIN IMMEDIATE` 拿写锁；当主连接/其他 writer 已持写锁（locked 场景），versionable 连接的版本写**与失败 event 写都被同一把写锁阻塞**至 `busy_timeout` 超时——DB 被锁时任何 DB 写（含失败 event 自身）物理上写不进。outbox/延迟重试是过度工程（超 v0.1 范围），故 locked 场景接受"失败 event 缺失、structlog 兜底"的务实降级。
+- **测试**：必须补回归测试：missing table / DB locked / UNIQUE 冲突重试 / 版本写失败回滚。其中 **DB locked → 重试至 busy_timeout 后 raise（database is locked），断言 structlog 降级路径（event best-effort：locked 时 events 表无 `ARTIFACT_VERSION_APPEND_FAILED` 是预期，不强求该 event）**。
 
 ---
 
@@ -281,7 +285,7 @@ FR-001（每次 versionable 写入 append）vs FR-004（0 regression）的张力
 - **FR-003** [必须]：版本历史 MUST 落盘持久化，进程重启后历史不丢失。（Story 3 AC-2，Constitution #1）
 - **FR-004** [必须]：F104 改造 MUST NOT 修改 artifacts 主表 schema 或改变现有 artifact 写入/读取行为；全量回归 0 regression vs baseline da947ce。（Story 3 AC-3，方案 A 约束）
 - **FR-005** [必须]：版本记录写入 MUST 为 append-only，正常路径不更新、不删除既有版本记录（Constitution #2 精神）；**唯一例外**：删除 task/session 时版本表按 task_id 级联清理（与 `delete_artifacts_by_task_ids` 同事务，属数据归属一致、非篡改）。（Story 3 AC-1，SD-8）
-- **FR-021** [必须]：版本 append MUST 与 `put_artifact` 主表写入**同一事务原子**——版本写失败整体回滚（一致性优先）；版本表 DDL 启动 `CREATE TABLE IF NOT EXISTS` 建好，建表失败 fail-fast 阻断服务；版本 append 失败 MUST emit 错误事件/指标（可观测）。MUST 补回归测试：missing table / DB locked / 版本写失败回滚。（SD-10，Codex medium 修正，Constitution #1/#6/#8）
+- **FR-021** [必须]：版本 append MUST 与 `put_artifact` 主表写入**同一事务原子**（走独立 versionable 写连接，与主连接隔离，F104 方案 B / Codex 修复 2）——版本写失败整体回滚（一致性优先）；版本表 DDL 启动 `CREATE TABLE IF NOT EXISTS` 建好，建表失败 fail-fast 阻断服务；版本 append 失败 MUST 产生 **double-track best-effort 信号**：① structlog.warning（best-effort local log，不依赖 DB 写；经 logging_config 仅挂 StreamHandler 输出进程 stderr，无独立文件/审计 sink，可见性取决于环境是否持久化进程流，独立 sink 超 v0.1）；② `ARTIFACT_VERSION_APPEND_FAILED` event 为 **best-effort durable**（DB 可写时在独立 versionable 写连接 emit；DB locked / 不可写时降级仅 structlog best-effort local log，不强求 event——SQLite 单写锁物理限制，见 SD-10）。MUST 补回归测试：missing table / DB locked（重试至 busy_timeout 后 raise + 断言 structlog best-effort local log 降级、event best-effort 不强求）/ 版本写失败回滚。（SD-10，Codex medium / re-review round 2 + round 3 修正，Constitution #1/#6/#8）
 - **FR-022** [必须]：`versionable` 判定 MUST 在**写入方**显式传参，`artifact_store` 不得在存储层硬编码 name 黑白名单（避免 Constitution #9 风险）。v0.1 versionable allowlist = `progress-note:{step_id}` **用户 step 记录**（§3.5 SD-9，**排除**内部 `progress-note:__merged_history__` 合并汇总）；`llm-*` / `tool_output:*` / `chat-import` / `__merged_history__` MUST NOT 标记 versionable（避免误导 diff + 跨 scope 暴露 + 维护性产物泄漏）。（SD-1/SD-9，Codex high/round3 修正，Constitution #5/#9）
 
 #### 后端版本查询（追溯 Story 1 / Story 2）

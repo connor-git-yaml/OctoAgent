@@ -46,7 +46,7 @@ class TestSC2Durability:
                 task_id = resp.json()["task_id"]
 
             # 关闭连接（模拟进程退出）
-            await sg1.conn.close()
+            await sg1.close()
 
             # 第二次启动：验证数据完整
             app2 = create_app()
@@ -68,7 +68,7 @@ class TestSC2Durability:
                 # 事件也完整
                 assert len(data["events"]) >= 2
 
-            await sg2.conn.close()
+            await sg2.close()
         finally:
             os.environ.pop("OCTOAGENT_DB_PATH", None)
             os.environ.pop("OCTOAGENT_ARTIFACTS_DIR", None)

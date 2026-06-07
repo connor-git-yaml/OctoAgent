@@ -787,7 +787,7 @@ class ChatImportService:
             await self._ensure_project_migration(store_group)
             yield store_group
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     async def _ensure_project_migration(self, store_group: StoreGroup) -> None:
         if self._project_migration_ensured:

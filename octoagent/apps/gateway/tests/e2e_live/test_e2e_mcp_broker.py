@@ -117,7 +117,7 @@ async def harness_mcp_broker(tmp_path: Path) -> dict[str, Any]:
     # 在 supervisor 自己的 task 内执行（F089 修复点），不再触发 cross-task
     # cancel scope 错误。
     await registry.shutdown()
-    await sg.conn.close()
+    await sg.close()
 
 
 async def _seed_audit_task(sg: Any, task_id: str) -> None:

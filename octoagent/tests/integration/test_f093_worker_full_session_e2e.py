@@ -184,4 +184,4 @@ async def test_worker_dispatch_full_propagate_chain_writes_turn_to_worker_sessio
     )
     assert len(main_turns_after) == main_baseline_count
 
-    await store_group.conn.close()
+    await store_group.close()

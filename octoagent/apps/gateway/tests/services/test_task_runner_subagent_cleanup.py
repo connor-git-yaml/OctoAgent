@@ -162,7 +162,7 @@ async def test_cleanup_on_succeeded_closes_session(tmp_path: Path) -> None:
     assert session.status == AgentSessionStatus.CLOSED
     assert session.closed_at is not None
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +204,7 @@ async def test_cleanup_on_failed_closes_session(tmp_path: Path) -> None:
     assert session is not None
     assert session.status == AgentSessionStatus.CLOSED
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +246,7 @@ async def test_cleanup_on_cancelled_closes_session(tmp_path: Path) -> None:
     assert session is not None
     assert session.status == AgentSessionStatus.CLOSED
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -315,7 +315,7 @@ async def test_cleanup_idempotent_already_closed_session(tmp_path: Path) -> None
     # closed_at 应与第一次一致（delegation.closed_at 已设置，early return 在 session save 之前）
     assert session_after_second.closed_at == first_closed_at
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -382,7 +382,7 @@ async def test_cleanup_preserves_recall_frames(tmp_path: Path) -> None:
     frame_ids = [f.recall_frame_id for f in frames]
     assert "recall-phase-e-001" in frame_ids
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +405,7 @@ async def test_cleanup_noop_for_non_subagent_task(tmp_path: Path) -> None:
         # 不应 raise，不应 emit 任何事件
         await runner._close_subagent_session_if_needed("task-non-subagent-001")
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -433,7 +433,7 @@ async def test_cleanup_skips_when_no_child_session_id(tmp_path: Path) -> None:
         # 不应 raise，也不调用 get_agent_session
         await runner._close_subagent_session_if_needed(parent_task_id)
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -483,7 +483,7 @@ async def test_subagent_completed_event_emitted(tmp_path: Path) -> None:
     assert payload["parent_task_id"] == parent_task_id
     assert payload["child_agent_session_id"] == _CHILD_SESSION_ID
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -507,7 +507,7 @@ async def test_cleanup_exception_does_not_propagate(tmp_path: Path) -> None:
         # 不应 raise，异常应被 try-except 捕获并 log warn
         await runner._close_subagent_session_if_needed("task-exception-001")
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -550,7 +550,7 @@ async def test_cleanup_skips_when_session_not_found(tmp_path: Path) -> None:
     session = await store_group.agent_context_store.get_agent_session("session-not-exist-phase-b")
     assert session is None  # 确认没有被意外创建
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -701,4 +701,4 @@ async def test_cleanup_idempotent_via_event_store_check(tmp_path: Path) -> None:
     # 同一事件还在
     assert events_second[0].event_id == first_event.event_id
 
-    await store_group.conn.close()
+    await store_group.close()

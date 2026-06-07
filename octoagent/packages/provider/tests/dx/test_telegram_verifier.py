@@ -296,7 +296,7 @@ async def test_verifier_first_message_completes_after_detecting_inbound_task(
         )
         assert created is True
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
     verifier = TelegramOnboardingVerifier(
         environ={"TELEGRAM_BOT_TOKEN": "test-token"},
@@ -346,7 +346,7 @@ async def test_verifier_first_message_ignores_group_task_from_same_user(
         )
         assert created is True
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
     verifier = TelegramOnboardingVerifier(
         environ={"TELEGRAM_BOT_TOKEN": "test-token"},

@@ -203,7 +203,7 @@ async def test_unknown_dm_creates_pairing_request(tmp_path: Path) -> None:
     assert "Pairing Code" in bot_client.sent_messages[0].text
     assert await store_group.task_store.list_tasks() == []
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -228,7 +228,7 @@ async def test_webhook_blocks_when_secret_env_is_configured_but_missing(
     assert result.status == "blocked"
     assert result.detail == "telegram_webhook_secret_unavailable"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -263,7 +263,7 @@ async def test_pairing_notice_failure_does_not_raise_500(tmp_path: Path) -> None
     assert result.status == "pairing_required"
     assert state_store.get_pending_pairing("1001") is not None
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -321,7 +321,7 @@ async def test_authorized_dm_creates_task_and_dedupes_update(tmp_path: Path) -> 
     assert approved.last_message_id == 11
     assert len(await store_group.task_store.list_tasks()) == 1
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -376,7 +376,7 @@ async def test_control_plane_command_executes_registry_action_without_creating_t
     tasks = await store_group.task_store.list_tasks()
     assert [task.task_id for task in tasks] == ["ops-control-plane"]
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -426,7 +426,7 @@ async def test_web_and_telegram_project_select_share_action_semantics(
     assert web_result.code == telegram_result.code == "PROJECT_SELECTED"
     assert web_result.data["project_id"] == telegram_result.data["project_id"]
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -463,7 +463,7 @@ async def test_telegram_cancel_command_maps_to_session_interrupt(
         is None
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -516,7 +516,7 @@ async def test_non_pairing_dm_policies_do_not_create_pending_pairings(
     assert result.status == expected_status
     assert state_store.get_pending_pairing(str(update_sender_id)) is None
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -553,7 +553,7 @@ async def test_group_open_accepts_message_without_allowlist(tmp_path: Path) -> N
     assert task.scope_id == "chat:telegram:-10099"
     assert task.thread_id == "tg_group:-10099"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -601,7 +601,7 @@ async def test_group_updates_preserve_stable_thread_routing(
     assert task.scope_id == "chat:telegram:-10099"
     assert task.thread_id == expected_thread
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -659,7 +659,7 @@ async def test_polling_update_models_preserve_thread_routing(
     assert task is not None
     assert task.thread_id == expected_thread
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -728,7 +728,7 @@ async def test_group_followup_reply_to_bot_message_keeps_same_thread_id(
     assert first_task.thread_id == "tg_group:-10099:reply:88"
     assert second_task.thread_id == first_task.thread_id
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -823,4 +823,4 @@ async def test_notify_task_result_and_approval_event_reply_to_original_thread(
     assert bot_client.sent_messages[1].disable_notification is True
     assert bot_client.sent_messages[1].reply_markup is not None
 
-    await store_group.conn.close()
+    await store_group.close()

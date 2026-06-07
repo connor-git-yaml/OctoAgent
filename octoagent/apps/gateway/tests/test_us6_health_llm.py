@@ -49,7 +49,7 @@ async def test_app_with_litellm_client(tmp_path: Path):
 
     yield app
 
-    await store_group.conn.close()
+    await store_group.close()
     for key in ["OCTOAGENT_DB_PATH", "OCTOAGENT_ARTIFACTS_DIR", "LOGFIRE_SEND_TO_LOGFIRE"]:
         os.environ.pop(key, None)
 
@@ -78,7 +78,7 @@ async def test_app_echo_mode(tmp_path: Path):
 
     yield app
 
-    await store_group.conn.close()
+    await store_group.close()
     for key in ["OCTOAGENT_DB_PATH", "OCTOAGENT_ARTIFACTS_DIR", "LOGFIRE_SEND_TO_LOGFIRE"]:
         os.environ.pop(key, None)
 

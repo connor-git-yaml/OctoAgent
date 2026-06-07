@@ -198,7 +198,7 @@ async def test_import_workbench_detect_preview_run_and_resume(tmp_path: Path) ->
         artifacts = await store_group.artifact_store.list_artifacts_for_task("ops-chat-import")
         assert len(artifacts) == 2
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
     _write_wechat_export(export_path, media_root, include_followup=True)
     source = await service.detect_source(

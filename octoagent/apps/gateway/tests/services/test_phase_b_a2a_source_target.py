@@ -238,7 +238,7 @@ async def test_resolve_target_agent_profile_explicit_id_lookup_success(tmp_path:
     assert result_profile_id == "profile-target-explicit"
     assert result_profile_id != "profile-source-fallback"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -280,7 +280,7 @@ async def test_resolve_target_agent_profile_capability_via_capability_pack(tmp_p
         fallback_worker_type="code",
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -319,7 +319,7 @@ async def test_resolve_target_agent_profile_explicit_id_via_resolve_worker_bindi
         fallback_worker_type="research",
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -350,7 +350,7 @@ async def test_resolve_target_agent_profile_fallback_to_source_when_all_fail(
     # fail-loud fallback：返回 source profile（保持兼容性）
     assert result_profile_id == "profile-source-fallback"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -372,7 +372,7 @@ async def test_resolve_target_agent_profile_no_delegation_plane_falls_back(
 
     assert result_profile_id == "profile-source-fallback"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -410,4 +410,4 @@ async def test_target_profile_independent_from_source_profile(tmp_path: Path):
         "H3-B 核心失败：A2A target 复用 source profile（receiver 没在自己 context 工作）"
     )
 
-    await store_group.conn.close()
+    await store_group.close()

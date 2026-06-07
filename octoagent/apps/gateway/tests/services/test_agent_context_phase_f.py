@@ -229,7 +229,7 @@ async def test_ensure_memory_namespaces_subagent_alpha_shared(tmp_path: Path) ->
         f"subagent 不应创建新的 AGENT_PRIVATE namespace，实际找到: {len(subagent_ns)}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +276,7 @@ async def test_ensure_memory_namespaces_worker_creates_own_namespace(tmp_path: P
         f"namespace 的 agent_runtime_id 应为 worker runtime，实际: {worker_private_ns[0].agent_runtime_id}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +319,7 @@ async def test_ensure_memory_namespaces_main_creates_own_namespace(tmp_path: Pat
         f"main 路径应创建独立 AGENT_PRIVATE namespace，实际: {len(main_private_ns)}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -376,7 +376,7 @@ async def test_ensure_memory_namespaces_subagent_empty_caller_ids(tmp_path: Path
         f"降级路径不应在 store 中创建新 AGENT_PRIVATE namespace，实际: {len(stored_private)}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -459,7 +459,7 @@ async def test_spawn_fills_caller_memory_namespace_ids(tmp_path: Path) -> None:
         f"caller_memory_namespace_ids 应包含 {_CALLER_NS_ID}，实际: {caller_ns_ids}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -530,7 +530,7 @@ async def test_spawn_caller_without_namespace_gets_empty_ids(tmp_path: Path) -> 
         f"无 namespace 时 caller_memory_namespace_ids 应为 []，实际: {caller_ns_ids}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -600,7 +600,7 @@ async def test_spawn_unknown_caller_skips_namespace_query(tmp_path: Path) -> Non
         f"<unknown> caller 时 caller_memory_namespace_ids 应为 []，实际: {caller_ns_ids}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -661,7 +661,7 @@ async def test_subagent_memory_namespace_ids_match_caller(tmp_path: Path) -> Non
         f"实际: {private_ns[0].agent_runtime_id}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -720,7 +720,7 @@ async def test_p2_1_subagent_session_no_delegation_fails_closed(tmp_path: Path) 
         f"实际有 {len(subagent_private)} 条"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -808,4 +808,4 @@ async def test_p2_2_subagent_memory_write_uses_caller_scope(tmp_path: Path) -> N
     # 关键：subagent 共享的 namespace 与 caller list 出来的是同一 namespace_id
     assert private_ns[0].namespace_id == caller_listed[0].namespace_id
 
-    await store_group.conn.close()
+    await store_group.close()

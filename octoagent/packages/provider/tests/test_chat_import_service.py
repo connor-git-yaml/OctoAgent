@@ -132,7 +132,7 @@ async def test_chat_import_persists_artifact_fragment_and_fact_commit(tmp_path: 
         ]
         assert len(artifacts) == 1
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -241,7 +241,7 @@ async def test_chat_import_preserves_small_binary_attachment_bytes(tmp_path: Pat
         )
         assert restored == attachment_bytes
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 class _FailOnceChatImportService(ChatImportService):
@@ -285,4 +285,4 @@ async def test_chat_import_retry_after_mid_window_failure_does_not_duplicate(
         assert len(artifacts) == 1
         assert len(windows) == 1
     finally:
-        await store_group.conn.close()
+        await store_group.close()

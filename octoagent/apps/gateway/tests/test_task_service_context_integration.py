@@ -563,7 +563,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert "当前未预取详细命中" in request_text
     assert final_tokens > history_tokens
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_agent_led_recall_uses_model_planned_query(
@@ -708,7 +708,7 @@ async def test_task_service_agent_led_recall_uses_model_planned_query(
     assert "memory-recall-plan-request" in artifact_names
     assert "memory-recall-plan-response" in artifact_names
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 
@@ -842,7 +842,7 @@ async def test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phas
     assert "memory-recall-plan-request" not in artifact_names
     assert "memory-recall-plan-response" not in artifact_names
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_single_loop_executor_skips_auxiliary_recall_planner_phase(
@@ -905,7 +905,7 @@ async def test_task_service_single_loop_executor_skips_auxiliary_recall_planner_
     assert "memory-recall-plan-request" not in artifact_names
     assert "memory-recall-plan-response" not in artifact_names
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_agent_session_replay_projection_pairs_tool_turns_and_drops_orphans(
@@ -1032,7 +1032,7 @@ async def test_agent_session_replay_projection_pairs_tool_turns_and_drops_orphan
     assert projection.dropped_orphan_tool_calls == 1
     assert projection.dropped_orphan_tool_results == 1
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_worker_context_defaults_to_private_namespace_hint_first_recall(
@@ -1253,7 +1253,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
     assert "当前未预取详细命中" in joined
     assert "memory.recall / memory.search / memory.read" in joined
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_worker_context_enables_planned_recall_by_default(
@@ -1433,7 +1433,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
     )
     assert frame.memory_hits[0]["record_id"] == "memory-worker-plan-1"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_worker_context_respects_explicit_detailed_prefetch_override(
@@ -1603,7 +1603,7 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
     assert "MemoryRecall:" in joined
     assert "显式覆盖后重新回到 detailed prefetch" in joined
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hints_across_sessions(
@@ -1750,7 +1750,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
     assert "MemoryRecallHints:" in joined
     assert "当前未预取详细命中" in joined
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # Feature 067: test_task_service_worker_tool_writeback_commits_sor... 已删除
@@ -2015,7 +2015,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
     assert "MemoryRecallHints:" in joined
     assert "memory.recall / memory.search / memory.read" in joined
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_prompt_context_only_exposes_sanitized_control_metadata(
@@ -2100,7 +2100,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
     assert "attacker-profile" not in request_text
     assert "secret-token-123" not in request_text
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_injects_runtime_hints_block_into_prompt_and_request_snapshot(
@@ -2179,7 +2179,7 @@ async def test_task_service_injects_runtime_hints_block_into_prompt_and_request_
     assert "RuntimeHints:" in request_text
     # effective_location_hint 已废弃（硬编码天气定位逻辑已删除）
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_events(
@@ -2468,7 +2468,7 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
     assert "summary" in first_hit
     assert "layer" in first_hit
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_f096_audit_chain_profile_runtime_recallframe_consistency(
@@ -2620,7 +2620,7 @@ async def test_f096_audit_chain_profile_runtime_recallframe_consistency(
         "MEMORY_RECALL_COMPLETED.agent_runtime_id 必与 RecallFrame.agent_runtime_id 一致"
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_delayed_recall_save_recall_frame_failure_does_not_block_emit(
@@ -2806,7 +2806,7 @@ async def test_task_service_delayed_recall_save_recall_frame_failure_does_not_bl
     delayed = [f for f in recall_frames if f.metadata.get("source") == "delayed_recall"]
     assert len(delayed) == 0, "raise 后不应有 delayed RecallFrame 持久化"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_migrates_legacy_session_and_trims_prompt_budget(
@@ -2920,7 +2920,7 @@ async def test_task_service_migrates_legacy_session_and_trims_prompt_budget(
     assert "context_budget_exceeded" in frame.degraded_reason
     assert len(frame.memory_hits) < 4 or len(frame.recent_summary) < len(long_summary)
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
@@ -3015,7 +3015,7 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
         ref["ref_type"] == "runtime_context" for ref in frames[0].source_refs
     )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_session_create_with_project_does_not_double_write_agent_rows(
@@ -3183,7 +3183,7 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
             f"composite-key session leaked: {sess.agent_session_id}"
         )
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> None:
@@ -3290,7 +3290,7 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
         )
     )
     await store_group.conn.commit()
-    await store_group.conn.close()
+    await store_group.close()
 
     # 重新打开 → 触发 init_db → _migrate_composite_agent_identity_rows
     store_group_2 = await create_store_group(db_path, artifacts_dir)
@@ -3320,7 +3320,7 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
         assert not sid.startswith("runtime:"), f"composite session not migrated: {sid}"
         assert "|" not in sid, f"composite session not migrated: {sid}"
 
-    await store_group_2.conn.close()
+    await store_group_2.close()
 
 
 # ---------------------------------------------------------------------------
@@ -3372,7 +3372,7 @@ async def test_f094_d2_worker_default_memory_recall_matches_baseline(
             "max_hits": 8,
         }
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_d4_immutable_defaults_constant_cannot_be_mutated(
@@ -3490,7 +3490,7 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
         assert mirrored_bad is not None
         assert mirrored_bad.context_budget_policy["memory_recall"] == baseline_defaults
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_d5_existing_profile_overrides_module_defaults(
@@ -3552,4 +3552,4 @@ async def test_f094_d5_existing_profile_overrides_module_defaults(
         assert memory_recall["per_scope_limit"] == 4
         assert memory_recall["max_hits"] == 8
     finally:
-        await store_group.conn.close()
+        await store_group.close()

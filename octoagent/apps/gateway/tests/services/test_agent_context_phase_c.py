@@ -143,7 +143,7 @@ async def test_subagent_helper_does_not_persist(tmp_path: Path):
     # 验证：调用 helper 不写持久化
     mock_save_profile.assert_not_called()
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +211,7 @@ async def test_resolve_context_bundle_subagent_short_circuits_resolve_agent_prof
         mock_resolve_profile.assert_not_called()
         assert profile.kind == "subagent"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -247,7 +247,7 @@ async def test_resolve_context_bundle_worker_does_not_short_circuit(tmp_path: Pa
         # 验证：worker 路径不调用 helper（regression 防护）
         assert len(helper_calls) == 0, "worker 路径不应调用 _build_ephemeral_subagent_profile"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ---------------------------------------------------------------------------

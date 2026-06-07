@@ -96,4 +96,4 @@ async def test_prepare_dispatch_writes_delegation_mode_matching_final_target_kin
         f"actual={plan.dispatch_envelope.runtime_context.delegation_mode}"
     )
 
-    await store_group.conn.close()
+    await store_group.close()

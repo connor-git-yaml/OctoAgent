@@ -42,7 +42,7 @@ async def make_service(tmp_path):
 
     yield _factory
     for sg in created:
-        await sg.conn.close()
+        await sg.close()
 
 
 def _stub_extractor(coro_factory):

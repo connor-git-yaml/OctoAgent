@@ -99,7 +99,7 @@ async def test_approval_action_resolves_and_records_audit(tmp_path: Path) -> Non
     assert events[-1].type == EventType.OPERATOR_ACTION_RECORDED
     assert events[-1].payload["action_kind"] == "approve_once"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -166,7 +166,7 @@ async def test_retry_task_creates_successor_and_records_audit(tmp_path: Path) ->
     assert retry_user_event.payload["control_metadata"]["retry_action_source"] == "web"
     assert retry_user_event.payload["control_metadata"]["retry_actor_id"] == "user:web"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -228,7 +228,7 @@ async def test_retry_task_is_idempotent_after_first_success(tmp_path: Path) -> N
         )
     ]
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -271,7 +271,7 @@ async def test_ack_alert_is_idempotent_after_first_success(tmp_path: Path) -> No
     assert first.outcome == OperatorActionOutcome.SUCCEEDED
     assert second.outcome == OperatorActionOutcome.ALREADY_HANDLED
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -313,4 +313,4 @@ async def test_pairing_action_uses_operational_audit_task(tmp_path: Path) -> Non
     assert audit_events[-1].type == EventType.OPERATOR_ACTION_RECORDED
     assert audit_events[-1].payload["item_id"] == "pairing:1001"
 
-    await store_group.conn.close()
+    await store_group.close()

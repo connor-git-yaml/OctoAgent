@@ -111,7 +111,7 @@ async def store_group(tmp_path: Path):
     except Exception:
         pass
     yield sg
-    await sg.conn.close()
+    await sg.close()
 
 
 @pytest_asyncio.fixture

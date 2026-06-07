@@ -39,7 +39,7 @@ async def store_group(tmp_path: Path):
         artifacts_dir=str(artifacts_dir),
     )
     yield sg
-    await sg.conn.close()
+    await sg.close()
 
 
 async def _ensure_audit_task(sg, task_id: str) -> None:

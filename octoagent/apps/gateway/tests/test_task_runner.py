@@ -132,7 +132,7 @@ class TestTaskRunner:
         assert job.status == "SUCCEEDED"
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_startup_recovery_marks_orphan_running_failed(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
@@ -178,7 +178,7 @@ class TestTaskRunner:
         assert job.status == "FAILED"
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_shutdown_marks_running_task_failed_instead_of_leaving_task_running(
         self, tmp_path: Path
@@ -224,7 +224,7 @@ class TestTaskRunner:
         assert session.state == ExecutionSessionState.FAILED
         assert llm_service.cancelled.is_set()
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_enqueue_notifies_completion(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
@@ -263,7 +263,7 @@ class TestTaskRunner:
         assert notified == [task_id]
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_cancel_running_job_marks_task_and_job_cancelled(
         self, tmp_path: Path
@@ -310,7 +310,7 @@ class TestTaskRunner:
         assert [item.message_type for item in messages][-1] == "CANCEL"
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_cancel_running_job_cancels_underlying_llm_call(
         self,
@@ -355,7 +355,7 @@ class TestTaskRunner:
         assert task.status == TaskStatus.CANCELLED
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     @pytest.mark.parametrize(
         ("deferred_status", "job_status"),
@@ -426,7 +426,7 @@ class TestTaskRunner:
         assert job is not None
         assert job.status == job_status
 
-        await store_group.conn.close()
+        await store_group.close()
 
     @pytest.mark.parametrize(
         ("deferred_status", "mark_job"),
@@ -488,7 +488,7 @@ class TestTaskRunner:
         assert job is not None
         assert job.status == "CANCELLED"
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_schedule_dispatch_envelope_requeues_terminal_job_and_executes(
         self,
@@ -570,7 +570,7 @@ class TestTaskRunner:
         assert job is not None
         assert job.status == "SUCCEEDED"
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_startup_recovery_resumes_from_checkpoint(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
@@ -628,7 +628,7 @@ class TestTaskRunner:
         assert job.status == "SUCCEEDED"
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     @pytest.mark.parametrize(
         ("terminal_status", "expected_job_status"),
@@ -691,7 +691,7 @@ class TestTaskRunner:
         assert notified == [task_id]
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_recover_twice_side_effect_executes_only_once(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
@@ -796,7 +796,7 @@ class TestTaskRunner:
         assert llm_service.calls == 1
 
         await runner2.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_resume_event_chain_order(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
@@ -864,7 +864,7 @@ class TestTaskRunner:
             assert started_idx < chain.index("RESUME_FAILED")
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_attach_input_live_path_updates_session_and_job(
         self, tmp_path: Path
@@ -976,7 +976,7 @@ class TestTaskRunner:
         assert message_types[-1] == "RESULT"
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_attach_input_after_restart_resumes_waiting_task(
         self, tmp_path: Path
@@ -1013,7 +1013,7 @@ class TestTaskRunner:
             raise AssertionError("task did not enter WAITING_INPUT before restart")
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
         store_group_2 = await create_store_group(db_path, artifacts_dir)
         sse_hub_2 = SSEHub()
@@ -1067,7 +1067,7 @@ class TestTaskRunner:
         assert final_session.session_id == original_session_id
 
         await runner_2.shutdown()
-        await store_group_2.conn.close()
+        await store_group_2.close()
 
     async def test_cancel_waiting_input_without_live_runner_marks_execution_cancelled(
         self, tmp_path: Path
@@ -1104,7 +1104,7 @@ class TestTaskRunner:
             raise AssertionError("task did not enter WAITING_INPUT before shutdown")
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
         store_group_2 = await create_store_group(db_path, artifacts_dir)
         sse_hub_2 = SSEHub()
@@ -1156,7 +1156,7 @@ class TestTaskRunner:
         assert [item.message_type for item in messages][-1] == "CANCEL"
 
         await runner_2.shutdown()
-        await store_group_2.conn.close()
+        await store_group_2.close()
 
     async def test_attach_input_requires_approval_when_requested(
         self, tmp_path: Path
@@ -1242,7 +1242,7 @@ class TestTaskRunner:
         assert final_session.pending_approval_id is None
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_task_runner_ask_back_state_transition(
         self, tmp_path: Path
@@ -1337,4 +1337,4 @@ class TestTaskRunner:
         )
 
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()

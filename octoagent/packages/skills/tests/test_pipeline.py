@@ -137,7 +137,7 @@ async def test_pipeline_engine_checkpoint_replay_and_resume(tmp_path: Path) -> N
     assert EventType.PIPELINE_RUN_UPDATED in event_types
     assert EventType.PIPELINE_CHECKPOINT_SAVED in event_types
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_pipeline_engine_retry_current_node_increments_retry_cursor(
@@ -181,7 +181,7 @@ async def test_pipeline_engine_retry_current_node_increments_retry_cursor(
     assert retried.status == PipelineRunStatus.PAUSED
     assert retried.retry_cursor["gate"] == 1
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def _capture_event(

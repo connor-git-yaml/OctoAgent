@@ -34,7 +34,7 @@ async def provider_store_group(tmp_path: Path):
         tmp_path / "data" / "artifacts",
     )
     yield store_group
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def _seed_project(store_group):

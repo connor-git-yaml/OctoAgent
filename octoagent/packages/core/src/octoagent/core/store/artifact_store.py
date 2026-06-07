@@ -69,13 +69,26 @@ class SqliteArtifactStore:
         conn: aiosqlite.Connection,
         artifacts_dir: Path,
         *,
+        versionable_conn: aiosqlite.Connection | None = None,
         event_store: "SqliteEventStore | None" = None,
     ) -> None:
         self._conn = conn
         self._artifacts_dir = artifacts_dir
+        # F104：versionable=True 写专用独立写连接（autocommit + 手动 BEGIN IMMEDIATE）。
+        # 事务边界与主连接 _conn 彻底隔离——versionable 写的 commit/rollback 不会卷入
+        # 主连接上并发的默认 versionable=False 写（FR-004/FR-021）。
+        # 为空时（未注入独立连接）退化到主连接（兼容直接构造 store 的旧测试，
+        # 但此时 mixed-writer 隔离不成立——生产/StoreGroup 路径必注入独立连接）。
+        self._versionable_conn = versionable_conn if versionable_conn is not None else conn
+        # F104 修复 3：记录 versionable 写是否真正隔离（独立物理连接 != 主连接）。
+        # 未注入独立连接时退化到主连接，此时 mixed-writer 隔离不成立——put_artifact
+        # versionable=True 入口将显式 raise，不静默退化到污染主连接事务边界的路径。
+        self._versionable_isolated = (
+            versionable_conn is not None and versionable_conn is not conn
+        )
         # F104：注入的 event_store 用于 versionable append 失败时 emit durable 事件
         self._event_store = event_store
-        # F104：串行化 versionable 写事务（取代 BEGIN IMMEDIATE 的写锁作用），防 mixed-writer 交错
+        # F104：串行化 versionable 写事务（aiosqlite 单连接不能并发事务），防同连接交错
         self._write_lock = asyncio.Lock()
 
     def _process_content(
@@ -118,13 +131,22 @@ class SqliteArtifactStore:
                 artifact.parts[0].content = content.decode("utf-8")
                 artifact.parts[0].uri = None
 
-    async def _insert_artifact_row(self, artifact: Artifact) -> None:
-        """写入 artifacts 主表元数据行（不 commit，由调用方/事务管理）。"""
+    async def _insert_artifact_row(
+        self,
+        artifact: Artifact,
+        conn: aiosqlite.Connection | None = None,
+    ) -> None:
+        """写入 artifacts 主表元数据行（不 commit，由调用方/事务管理）。
+
+        conn：默认 None 用主连接 _conn（versionable=False 默认路径，0 regression）；
+        versionable=True 路径显式传 versionable_conn，使主表 INSERT 也走独立写连接。
+        """
+        target_conn = conn if conn is not None else self._conn
         parts_json = json.dumps(
             [p.model_dump() for p in artifact.parts],
             ensure_ascii=False,
         )
-        await self._conn.execute(
+        await target_conn.execute(
             """
             INSERT INTO artifacts (artifact_id, task_id, ts, name, description,
                                    parts, storage_ref, size, hash, version)
@@ -159,11 +181,14 @@ class SqliteArtifactStore:
         其余小文本 inline 存储在 parts.content 中。
 
         F104：
-        - versionable=False（默认）：现状路径，主表 INSERT 由调用方 commit，**完全不碰版本表**
-          （0 regression，FR-004）。
-        - versionable=True：自包含事务——`_write_lock` 串行化 + 隐式事务 + SAVEPOINT 重试，
-          在同一事务内写主表 + 版本副本并自 commit（FR-021 原子）；`logical_file_id` 必须非空
-          （无 name 回退，SD-1）。失败自 rollback 并 emit durable ARTIFACT_VERSION_APPEND_FAILED。
+        - versionable=False（默认）：现状路径，主表 INSERT 走主连接 _conn 由调用方 commit，
+          **完全不碰版本表 / 不碰独立写连接**（0 regression，FR-004）。
+        - versionable=True：独立写连接 _versionable_conn 上的自包含事务——`_write_lock`
+          串行化 + 手动 `BEGIN IMMEDIATE`（autocommit 连接显式拿写锁）+ SAVEPOINT 重试，
+          在同一事务内写主表 + 版本副本并自 commit（FR-021 原子）；commit/rollback 边界与
+          主连接隔离，不影响主连接上并发的默认写。`logical_file_id` 必须非空（无 name 回退，
+          SD-1）。失败自 rollback 并 emit durable ARTIFACT_VERSION_APPEND_FAILED（走主连接
+          event_store，不受 versionable_conn rollback 影响）。
         """
         # 分支 A — versionable=False（默认）：行为零变更，调用方 commit，不碰版本表
         if not versionable:
@@ -172,6 +197,13 @@ class SqliteArtifactStore:
             return
 
         # 分支 B — versionable=True：自包含事务 + 版本号原子分配
+        # F104 修复 3：versionable 写必须有独立隔离写连接，否则会污染主连接事务边界
+        # （mixed-writer）。未注入独立连接（如 watchdog 直接构造 StoreGroup 不做 versionable
+        # 写的退化路径）显式拒绝，不静默退化。生产 create_store_group 始终注入独立连接。
+        if not self._versionable_isolated:
+            raise RuntimeError(
+                "versionable 写需独立隔离连接（StoreGroup 未注入 versionable_conn）"
+            )
         # 先校验（任何 INSERT 之前）：logical_file_id 必须非空，无 name 回退
         if not logical_file_id:
             raise ValueError(
@@ -182,12 +214,12 @@ class SqliteArtifactStore:
 
         attempt = 0
         async with self._write_lock:
-            # [Codex Phase1 high] 自包含事务必须从干净连接状态开始：共享单连接下，若调用方已有
-            # 未提交写入，本路径的 commit/rollback 会波及其事务。显式拒绝，要求调用方先 commit。
-            if self._conn.in_transaction:
+            # [F104 方案 B] 独立写连接事务必须从干净状态开始：本连接专供 versionable 写，
+            # 正常情况不应有脏事务（每次都自 commit/rollback 收尾）。防御性检查。
+            if self._versionable_conn.in_transaction:
                 raise RuntimeError(
-                    "versionable=True 要求调用方无未提交事务："
-                    "自包含事务的 commit/rollback 不能影响共享连接上的既有写入。"
+                    "versionable 独立写连接存在未收尾事务："
+                    "BEGIN IMMEDIATE 不能在已开事务的连接上重入。"
                 )
             # [Codex Phase1 medium] 文件写移入 _write_lock 内（防同 artifact_id 并发污染）；
             # 记录本次新写的大文件路径，失败时仅清理本次新建（不动既有）。
@@ -222,11 +254,15 @@ class SqliteArtifactStore:
                         else ""
                     )
                     ver_storage_ref = None
-                # 主表 INSERT 自动开隐式事务（isolation_level=''，T1.3 实测），不显式 BEGIN
-                await self._insert_artifact_row(artifact)
+                # [F104 方案 B] 独立写连接 autocommit + 手动 BEGIN IMMEDIATE 显式拿 SQLite
+                # 写锁（phase-1-recon #4 实测可行）。主表 + 版本 INSERT 全在此事务内，
+                # commit/rollback 仅作用于本连接，与主连接彻底隔离（busy_timeout 5s 兜底）。
+                await self._versionable_conn.execute("BEGIN IMMEDIATE")
+                # 主表 INSERT 走独立写连接（与版本 INSERT 同事务原子提交）
+                await self._insert_artifact_row(artifact, conn=self._versionable_conn)
                 for attempt in range(MAX_VERSION_RETRY):
-                    await self._conn.execute("SAVEPOINT sp_ver")
-                    cursor = await self._conn.execute(
+                    await self._versionable_conn.execute("SAVEPOINT sp_ver")
+                    cursor = await self._versionable_conn.execute(
                         """
                         SELECT COALESCE(MAX(version_no), 0) + 1
                         FROM artifact_versions
@@ -237,7 +273,7 @@ class SqliteArtifactStore:
                     row = await cursor.fetchone()
                     next_no = int(row[0]) if row else 1
                     try:
-                        await self._conn.execute(
+                        await self._versionable_conn.execute(
                             """
                             INSERT INTO artifact_versions (
                                 version_id, task_id, logical_file_id, version_no,
@@ -260,18 +296,18 @@ class SqliteArtifactStore:
                                 artifact.hash,
                             ),
                         )
-                        await self._conn.execute("RELEASE sp_ver")
+                        await self._versionable_conn.execute("RELEASE sp_ver")
                         break
                     except aiosqlite.IntegrityError:
                         # UNIQUE(task_id, logical_file_id, version_no) 冲突
                         # → 撤版本 INSERT、保留主表行重试
-                        await self._conn.execute("ROLLBACK TO sp_ver")
+                        await self._versionable_conn.execute("ROLLBACK TO sp_ver")
                         if attempt == MAX_VERSION_RETRY - 1:
                             raise
-                await self._conn.commit()
+                await self._versionable_conn.commit()
             except Exception as exc:
-                # 失败自 rollback（撤主表+版本，连接不留脏事务）
-                await self._conn.rollback()
+                # 失败自 rollback（撤主表+版本，独立写连接不留脏事务，主连接不受影响）
+                await self._versionable_conn.rollback()
                 # [Codex Phase1 high#2] 仅清理本次 O_EXCL 独占创建的文件（owns_file）——O_EXCL 失败
                 # （文件已存在=别的 writer）时 owns_file=False，不误删他人文件。
                 if owns_file and written_file_path is not None:
@@ -293,10 +329,16 @@ class SqliteArtifactStore:
         exc: Exception,
         attempt: int,
     ) -> None:
-        """versionable append 失败的 durable 双轨信号（事务外，rollback 之后调用）。
+        """versionable append 失败的 best-effort 双轨信号（事务外，rollback 之后调用）。
 
-        ①structlog.warning（store 层 always durable 日志）；
-        ②event_store.append_event_committed（独立提交，不被前面的 rollback 吞）。
+        ①structlog.warning（best-effort local log；经 logging_config 仅挂 StreamHandler，
+          输出进程 stderr，无独立文件/审计 sink，可见性取决于环境是否持久化进程流——
+          独立文件 sink 超 v0.1 范围）；
+        ②event_store.append_event_committed 在 **versionable 独立写连接** 上提交——
+          versionable 失败已 rollback，该连接处于干净状态；不走主连接 commit，避免把
+          调用方在主连接上未提交的默认 versionable=False 写一并提前提交（调用方后续
+          rollback 失效，mixed-writer 转移到失败路径，F104 Codex finding 修复 2）。
+          失败事件仍 durable（versionable_conn 独立 commit）+ 不影响主连接事务。
         """
         reason = f"{type(exc).__name__}: {exc}"
         log.warning(
@@ -328,7 +370,9 @@ class SqliteArtifactStore:
                 payload=payload.model_dump(),
                 trace_id=f"trace-{task_id}",
             )
-            await self._event_store.append_event_committed(failed_event)
+            await self._event_store.append_event_committed(
+                failed_event, conn=self._versionable_conn
+            )
         except Exception as emit_exc:
             # 失败事件 emit 本身失败不再向上传播（structlog 已记录主失败），仅记录降级
             log.warning(

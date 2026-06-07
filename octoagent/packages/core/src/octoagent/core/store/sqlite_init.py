@@ -9,6 +9,8 @@ from datetime import UTC, datetime
 import aiosqlite
 from ulid import ULID
 
+from .connection import apply_write_connection_pragmas
+
 # tasks 表 DDL
 _TASKS_DDL = """
 CREATE TABLE IF NOT EXISTS tasks (
@@ -1647,10 +1649,16 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     Args:
         conn: aiosqlite 数据库连接
     """
-    # 设置 PRAGMA
+    # 设置 PRAGMA：WAL 是库级状态，必须主连接先建立；foreign_keys/busy_timeout 是连接级
+    # PRAGMA，统一走 apply_write_connection_pragmas helper（与 versionable 独立写连接共用单一
+    # 事实源，F104 Codex finding 修复 1）。
+    # 注意：主连接随后的 _migrate_legacy_tables 会临时 `PRAGMA foreign_keys = OFF` 执行 schema
+    # 迁移，其 finally 的 `= ON` 恢复在迁移 DML 已开启的事务中执行 → 事务内 PRAGMA 是 no-op，
+    # 故主连接 init_db 结束后 foreign_keys 实际仍为 OFF（历史既有行为，全量代码/测试隐性依赖
+    # 主连接不强制 task 外键，本次不改动以零 regression）。versionable 独立写连接是 autocommit
+    # 且不跑迁移，FK 真正生效 → versionable 写绕不过 task 外键（修复 1 的安全目标落在该连接）。
     await conn.execute("PRAGMA journal_mode = WAL;")
-    await conn.execute("PRAGMA foreign_keys = ON;")
-    await conn.execute("PRAGMA busy_timeout = 5000;")
+    await apply_write_connection_pragmas(conn)
 
     # 创建表
     await conn.execute(_TASKS_DDL)

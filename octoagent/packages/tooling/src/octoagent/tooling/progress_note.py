@@ -113,6 +113,12 @@ async def execute_progress_note(
     if artifact_store is None:
         return ProgressNoteOutput(note_id=note_id, persisted=False)
 
+    # F104/SD-9：__merged_history__ 是合并历史派生汇总命名空间，必须排除在版本化之外
+    # （否则进 Files Tab，违反 SD-9）。即便调用方（非自动合并路径）显式传 step_id=
+    # '__merged_history__'，也强制 versionable=False（与 _maybe_merge_old_notes 自动合并一致）。
+    is_merged_history = input_data.step_id == "__merged_history__"
+    versionable = not is_merged_history
+
     try:
         from octoagent.core.models import Artifact, ArtifactPart, PartType
 
@@ -133,11 +139,14 @@ async def execute_progress_note(
         )
         # F104：user step 笔记接入 versionable append（保留版本历史用于 diff，FR-022/SD-9）。
         # versionable=True 路径自包含事务自 commit，下方 conn.commit() 对其为 no-op。
+        # __merged_history__ 例外：versionable=False + logical_file_id=None，不进版本表。
         await artifact_store.put_artifact(
             artifact,
             content_json.encode("utf-8"),
-            versionable=True,
-            logical_file_id=f"progress-note:{input_data.step_id}",
+            versionable=versionable,
+            logical_file_id=(
+                f"progress-note:{input_data.step_id}" if versionable else None
+            ),
         )
         if conn is not None:
             await conn.commit()

@@ -71,7 +71,7 @@ async def test_agent_session_turn_hook_records_tool_call_and_result(tmp_path: Pa
     assert "Alpha runtime" in turns[0].summary
     assert "官网结果" in turns[1].summary
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -133,7 +133,7 @@ async def test_hook_records_tool_turns_for_direct_worker_session(
     assert "Beta" in turns[0].summary
     assert "worker 结果" in turns[1].summary
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -216,7 +216,7 @@ async def test_hook_records_tool_turns_for_worker_internal_session(
     # Parent main session 完全不被 worker hook 污染
     assert parent_turns == []
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -303,4 +303,4 @@ async def test_hook_records_tool_turns_for_subagent_internal_session(
     # Parent worker session 不被 subagent hook 污染
     assert parent_worker_turns == []
 
-    await store_group.conn.close()
+    await store_group.close()

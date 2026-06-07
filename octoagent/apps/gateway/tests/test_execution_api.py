@@ -89,7 +89,7 @@ async def execution_test_app(
         yield app, TaskService(store_group, sse_hub), runner, approval_manager
     finally:
         await runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
         os.environ.pop("LOGFIRE_SEND_TO_LOGFIRE", None)
 
 

@@ -34,7 +34,7 @@ def test_config_migrate_dry_run_does_not_persist_records(tmp_path: Path) -> None
         try:
             assert await store_group.project_store.get_default_project() is None
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     asyncio.run(_assert_no_project())
 
@@ -56,7 +56,7 @@ def test_config_migrate_apply_then_rollback_latest(tmp_path: Path) -> None:
         try:
             assert await store_group.project_store.get_default_project() is not None
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     asyncio.run(_assert_project_exists())
 
@@ -73,6 +73,6 @@ def test_config_migrate_apply_then_rollback_latest(tmp_path: Path) -> None:
         try:
             assert await store_group.project_store.get_default_project() is None
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     asyncio.run(_assert_project_removed())

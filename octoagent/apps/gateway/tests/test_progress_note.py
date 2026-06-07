@@ -127,6 +127,36 @@ class TestProgressNoteExecution:
         assert user_calls[0]["versionable"] is True
         assert user_calls[0]["logical_file_id"] == "progress-note:impl_step"
 
+    async def test_caller_merged_history_step_id_forced_non_versionable(self) -> None:
+        """F104/SD-9：调用方（非自动合并路径）显式传 step_id='__merged_history__' 写多次，
+        必须强制 versionable=False + logical_file_id=None，不进版本表（不污染 Files Tab）。
+
+        负向断言：__merged_history__ 命名空间无论谁写都不版本化（与自动合并一致）。
+        """
+        store = MockArtifactStore()
+        conn = MockConn()
+        for i in range(2):
+            result = await execute_progress_note(
+                input_data=ProgressNoteInput(
+                    step_id="__merged_history__",
+                    description=f"调用方手动合并 {i}",
+                ),
+                task_id="task-merged-guard",
+                agent_session_id="sess-guard",
+                artifact_store=store,
+                conn=conn,
+            )
+            assert result.persisted is True
+
+        merged_calls = [
+            c for c in store.put_calls
+            if c["name"] == "progress-note:__merged_history__"
+        ]
+        assert len(merged_calls) == 2
+        for c in merged_calls:
+            assert c["versionable"] is False
+            assert c["logical_file_id"] is None
+
     async def test_write_note_without_artifact_store(self) -> None:
         """Artifact Store 不可用时返回 persisted=False。"""
         input_data = ProgressNoteInput(
@@ -381,6 +411,44 @@ class TestProgressNoteAutoMerge:
         assert merged_content["step_id"] == "__merged_history__"
         assert "milestones" in merged_content
         assert len(merged_content["milestones"]) > 0
+
+    async def test_merged_history_written_non_versionable(self) -> None:
+        """F104 T5.2/SD-9/FR-022：__merged_history__ 合并笔记走默认 put_artifact
+        （versionable=False），不进版本表/不被当版本化逻辑文件。
+
+        负向断言：所有 name='progress-note:__merged_history__' 的 put_call 必须
+        versionable=False 且 logical_file_id=None；user step 笔记才 versionable=True。
+        """
+        store = MockArtifactStore()
+        conn = MockConn()
+        threshold = 15
+        for i in range(threshold + 2):
+            await execute_progress_note(
+                input_data=ProgressNoteInput(step_id=f"s{i}", description=f"步骤{i}"),
+                task_id="task-merge-nonver",
+                artifact_store=store,
+                conn=conn,
+                merge_threshold=threshold,
+            )
+
+        merged_calls = [
+            c for c in store.put_calls
+            if c["name"] == "progress-note:__merged_history__"
+        ]
+        assert len(merged_calls) >= 1
+        for c in merged_calls:
+            # SD-9：合并历史是派生汇总，明确排除在版本化之外
+            assert c["versionable"] is False
+            assert c["logical_file_id"] is None
+
+        # 反向对照：user step 笔记仍 versionable=True（确认不是全局关版本化）
+        user_calls = [
+            c for c in store.put_calls
+            if c["name"].startswith("progress-note:")
+            and c["name"] != "progress-note:__merged_history__"
+        ]
+        assert user_calls
+        assert all(c["versionable"] is True for c in user_calls)
 
 
 class TestProgressNoteInput:

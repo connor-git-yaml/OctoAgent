@@ -92,7 +92,7 @@ async def _seed_project(project_root: Path) -> None:
     )
     await store_group.artifact_store.put_artifact(artifact, content=b"hello world")
     await store_group.conn.commit()
-    await store_group.conn.close()
+    await store_group.close()
 
 
 def test_backup_create_command_writes_zip(tmp_path: Path) -> None:

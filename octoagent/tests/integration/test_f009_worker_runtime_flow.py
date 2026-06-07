@@ -86,7 +86,7 @@ async def timeout_app(tmp_path: Path):
     )
     yield app
     await app.state.task_runner.shutdown()
-    await app.state.store_group.conn.close()
+    await app.state.store_group.close()
 
 
 @pytest_asyncio.fixture
@@ -101,7 +101,7 @@ async def cancel_app(tmp_path: Path):
     )
     yield app
     await app.state.task_runner.shutdown()
-    await app.state.store_group.conn.close()
+    await app.state.store_group.close()
 
 
 @pytest_asyncio.fixture

@@ -235,7 +235,7 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
         assert len(general_bootstraps) == 0
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_capability_pack_setup_quick_connect_tool_reuses_canonical_setup_flow(
@@ -345,7 +345,7 @@ async def test_capability_pack_setup_quick_connect_tool_reuses_canonical_setup_f
         assert payload["status"] == "written"
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_capability_pack_general_tools_support_filesystem_and_terminal_with_governance(
@@ -453,7 +453,7 @@ async def test_capability_pack_general_tools_support_filesystem_and_terminal_wit
         assert "done" in executed_payload["stdout"]
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_render_bootstrap_context_includes_ambient_runtime_and_capability_summary(
@@ -494,7 +494,7 @@ async def test_render_bootstrap_context_includes_ambient_runtime_and_capability_
         assert "ToolBroker / Policy / audit" in joined
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_render_bootstrap_context_marks_missing_owner_profile_as_degraded(
@@ -522,7 +522,7 @@ async def test_render_bootstrap_context_marks_missing_owner_profile_as_degraded(
         assert "Ambient Degraded Reasons: owner_timezone_missing, owner_locale_missing" in joined
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degradation(
@@ -625,7 +625,7 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
         assert echo_payload["tool_name"] == "echo"
         assert echo_payload["content"][0]["text"] == "echo:hello"
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_capability_pack_honors_mcp_mount_policy_defaults(
@@ -719,7 +719,7 @@ async def test_capability_pack_honors_mcp_mount_policy_defaults(
             is True
         )
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_web_search_tool_returns_parsed_results(
@@ -784,7 +784,7 @@ async def test_web_search_tool_returns_parsed_results(
         assert payload["results"][0]["url"] == "https://example.com/article"
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_memory_recall_tool_returns_structured_recall_pack(
@@ -859,7 +859,7 @@ async def test_memory_recall_tool_returns_structured_recall_pack(
         assert payload["backend_status"]["active_backend"]
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_browser_tools_persist_session_and_follow_clickable_refs(
@@ -985,7 +985,7 @@ async def test_browser_tools_persist_session_and_follow_clickable_refs(
         assert json.loads(missing.output)["status"] == "missing"
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 @pytest.mark.xfail(reason="subagents.list 内部依赖变更，需要适配")
@@ -1156,7 +1156,7 @@ async def test_subagent_management_tools_list_kill_and_steer_descendants(
         assert updated_child.status.value == "cancelled"
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
@@ -1256,7 +1256,7 @@ async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
             await task_runner.cancel_task(str(child["task_id"]))
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_work_split_allows_worker_to_worker_delegation_after_F098(
@@ -1339,7 +1339,7 @@ async def test_work_split_allows_worker_to_worker_delegation_after_F098(
             )
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
@@ -1408,7 +1408,7 @@ async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
         assert {item["tool_profile"] for item in payload["assignments"]} == {"standard"}
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_runtime_now_tool_returns_owner_local_time_payload(
@@ -1481,7 +1481,7 @@ async def test_runtime_now_tool_returns_owner_local_time_payload(
         assert payload["current_datetime_local"]
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_runtime_now_tool_marks_missing_owner_profile_as_degraded(
@@ -1546,7 +1546,7 @@ async def test_runtime_now_tool_marks_missing_owner_profile_as_degraded(
         assert "owner_locale_missing" in payload["degraded_reasons"]
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
@@ -1635,7 +1635,7 @@ async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
         assert child.metadata["requested_worker_type"] == "research"
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_subagents_spawn_allows_worker_to_worker_delegation_after_F098(
@@ -1715,7 +1715,7 @@ async def test_subagents_spawn_allows_worker_to_worker_delegation_after_F098(
             )
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_subagents_spawn_keeps_local_document_queries_on_minimal_profile(
@@ -1798,7 +1798,7 @@ async def test_subagents_spawn_keeps_local_document_queries_on_minimal_profile(
         assert child.metadata["requested_tool_profile"] == "standard"
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_subagents_spawn_uses_objective_as_child_prompt_when_title_is_provided(
@@ -1876,7 +1876,7 @@ async def test_subagents_spawn_uses_objective_as_child_prompt_when_title_is_prov
         assert user_event.payload["control_metadata"]["child_title"] == "研究子任务"
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 # ============================================================
@@ -1910,7 +1910,7 @@ async def test_bootstrap_shared_only_no_type_specific_templates(
             assert type_id not in template_ids
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_bootstrap_shared_template_no_redundant_fields(
@@ -1942,7 +1942,7 @@ async def test_bootstrap_shared_template_no_redundant_fields(
         assert "Default Tool Groups:" not in shared.content
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_bootstrap_shared_renders_for_all_worker_types(
@@ -1980,7 +1980,7 @@ async def test_bootstrap_shared_renders_for_all_worker_types(
             assert "capability pack" in content
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_unified_worker_profiles_share_same_tool_groups(
@@ -2014,7 +2014,7 @@ async def test_unified_worker_profiles_share_same_tool_groups(
         assert required_groups.issubset(set(general.default_tool_groups))
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_bootstrap_token_budget_within_limit(
@@ -2054,7 +2054,7 @@ async def test_bootstrap_token_budget_within_limit(
         )
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_ask_back_tools_in_broker_registration(
@@ -2091,4 +2091,4 @@ async def test_ask_back_tools_in_broker_registration(
         )
     finally:
         await task_runner.shutdown()
-        await store_group.conn.close()
+        await store_group.close()

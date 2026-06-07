@@ -38,7 +38,7 @@ async def store_group(tmp_path: Path):
         str(tmp_path / "artifacts"),
     )
     yield sg
-    await sg.conn.close()
+    await sg.close()
 
 
 class TestApplyEvent:

@@ -99,7 +99,7 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
     by_parent = await store_group.work_store.list_works(parent_work_id="work-parent")
     assert [item.work_id for item in by_parent] == ["work-child"]
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_work_store_persists_pipeline_run_and_checkpoints(tmp_path: Path) -> None:
@@ -153,4 +153,4 @@ async def test_work_store_persists_pipeline_run_and_checkpoints(tmp_path: Path) 
     listed_checkpoints = await store_group.work_store.list_pipeline_checkpoints("run-1")
     assert [item.checkpoint_id for item in listed_checkpoints] == ["checkpoint-1"]
 
-    await store_group.conn.close()
+    await store_group.close()

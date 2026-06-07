@@ -23,12 +23,18 @@ class SqliteEventStore:
         self._task_locks_guard = asyncio.Lock()
         self._max_task_seq_retries = 3
 
-    async def append_event(self, event: Event) -> None:
+    async def append_event(
+        self, event: Event, *, conn: aiosqlite.Connection | None = None
+    ) -> None:
         """追加事件（append-only）
 
         注意：此方法不自动提交事务，需由调用方管理事务。
+
+        conn：默认 None 用主连接 _conn（0 regression）；显式传入时（如 F104 versionable
+        失败路径传 versionable 独立写连接）在该连接上 INSERT，使失败事件不卷主连接事务。
         """
-        await self._conn.execute(
+        target_conn = conn if conn is not None else self._conn
+        await target_conn.execute(
             """
             INSERT INTO events (event_id, task_id, task_seq, ts, type,
                                 schema_version, actor, payload, trace_id, span_id,
@@ -56,20 +62,27 @@ class SqliteEventStore:
         event: Event,
         *,
         update_task_pointer: bool = True,
+        conn: aiosqlite.Connection | None = None,
     ) -> Event:
         """追加事件并提交事务（含 task_seq 冲突重试）
 
         用于非事务聚合场景（如 Skills/Tooling 的单事件写入），
         在同一连接内完成 append + 可选 pointers 更新 + commit。
+
+        conn：默认 None 用主连接 _conn（现有调用 0 regression）；显式传入时（F104
+        versionable append 失败路径传 versionable 独立写连接，该连接 versionable 失败已
+        rollback 处于干净状态）在该连接上完成 append + commit，使 durable 失败事件不卷入
+        主连接上调用方未提交的默认写（修复 2 — mixed-writer 转移到失败路径）。
         """
+        target_conn = conn if conn is not None else self._conn
         lock = await self._get_task_lock(event.task_id)
         async with lock:
             current_event = event
             for attempt in range(1, self._max_task_seq_retries + 1):
                 try:
-                    await self.append_event(current_event)
+                    await self.append_event(current_event, conn=target_conn)
                     if update_task_pointer:
-                        await self._conn.execute(
+                        await target_conn.execute(
                             """
                             UPDATE tasks
                             SET updated_at = ?,
@@ -82,10 +95,10 @@ class SqliteEventStore:
                                 current_event.task_id,
                             ),
                         )
-                    await self._conn.commit()
+                    await target_conn.commit()
                     return current_event
                 except aiosqlite.IntegrityError as exc:
-                    await self._conn.rollback()
+                    await target_conn.rollback()
                     if (
                         self._is_task_seq_conflict(exc)
                         and attempt < self._max_task_seq_retries
@@ -97,7 +110,7 @@ class SqliteEventStore:
                         continue
                     raise
                 except Exception:
-                    await self._conn.rollback()
+                    await target_conn.rollback()
                     raise
 
         raise RuntimeError("failed to append event after retries")

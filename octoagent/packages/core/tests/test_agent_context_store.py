@@ -117,7 +117,7 @@ async def test_agent_context_store_roundtrip(tmp_path: Path) -> None:
     )
     assert [item.context_frame_id for item in frames] == ["context-frame-alpha"]
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_agent_profile_kind_persists_round_trip(tmp_path: Path) -> None:
@@ -158,7 +158,7 @@ async def test_agent_profile_kind_persists_round_trip(tmp_path: Path) -> None:
     assert loaded_worker is not None and loaded_worker.kind == "worker"
     assert loaded_subagent is not None and loaded_subagent.kind == "subagent"
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> None:
@@ -266,7 +266,7 @@ async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> N
     assert [item.namespace_id for item in namespaces] == [namespace.namespace_id]
     assert [item.recall_frame_id for item in recalls] == [recall.recall_frame_id]
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_worker_profile_and_revision_roundtrip(tmp_path: Path) -> None:
@@ -320,7 +320,7 @@ async def test_worker_profile_and_revision_roundtrip(tmp_path: Path) -> None:
     assert stored_revisions[0].change_summary == "首次发布"
     assert stored_revisions[0].snapshot_payload["selected_tools"] == ["filesystem.read"]
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_find_active_runtime_selects_active_ulid_and_skips_closed(
@@ -379,7 +379,7 @@ async def test_find_active_runtime_selects_active_ulid_and_skips_closed(
     )
     assert miss is None
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 # ────────────── Feature 082 P0：OwnerProfile 默认值 + last_synced_from_profile_at ──────────────
@@ -436,7 +436,7 @@ async def test_owner_profile_last_synced_field_persistence(tmp_path: Path) -> No
         loaded2 = await store_group.agent_context_store.get_owner_profile("owner-test")
         assert loaded2.last_synced_from_profile_at is None
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_owner_profile_legacy_table_without_new_column_readable(tmp_path: Path) -> None:
@@ -476,7 +476,7 @@ async def test_owner_profile_legacy_table_without_new_column_readable(tmp_path: 
         # 新列在老行上为 None
         assert loaded.last_synced_from_profile_at is None
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -532,7 +532,7 @@ async def test_f094_c2_memory_namespaces_unique_triple_active(tmp_path: Path) ->
             await store_group.agent_context_store.save_memory_namespace(ns_b)
             await store_group.conn.commit()
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_c2_archived_namespaces_do_not_block_active(tmp_path: Path) -> None:
@@ -563,7 +563,7 @@ async def test_f094_c2_archived_namespaces_do_not_block_active(tmp_path: Path) -
         await store_group.agent_context_store.save_memory_namespace(ns_active)
         await store_group.conn.commit()
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_c5_recall_frame_double_field_round_trip(tmp_path: Path) -> None:
@@ -605,7 +605,7 @@ async def test_f094_c5_recall_frame_double_field_round_trip(tmp_path: Path) -> N
         ]
         assert loaded.hit_namespace_kinds == [MemoryNamespaceKind.PROJECT_SHARED]
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_c7_list_recall_frames_namespace_filter(tmp_path: Path) -> None:
@@ -687,7 +687,7 @@ async def test_f094_c7_list_recall_frames_namespace_filter(tmp_path: Path) -> No
         )
         assert len(by_runtime) == 3
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f096_b5_list_recall_frames_offset_pagination(tmp_path: Path) -> None:
@@ -764,7 +764,7 @@ async def test_f096_b5_list_recall_frames_offset_pagination(tmp_path: Path) -> N
         )
         assert page_empty == []
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f096_b5_list_recall_frames_time_window(tmp_path: Path) -> None:
@@ -838,7 +838,7 @@ async def test_f096_b5_list_recall_frames_time_window(tmp_path: Path) -> None:
         )
         assert cnt == 1
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_c7b_list_memory_namespaces_archived_filter(tmp_path: Path) -> None:
@@ -896,7 +896,7 @@ async def test_f094_c7b_list_memory_namespaces_archived_filter(tmp_path: Path) -
         assert explicit_get_archived is not None
         assert explicit_get_archived.namespace_id == "ns-archived"
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_c2_dedupe_prefers_canonical_namespace_id(tmp_path: Path) -> None:
@@ -980,7 +980,7 @@ async def test_f094_c2_dedupe_prefers_canonical_namespace_id(tmp_path: Path) -> 
         assert stranger is not None
         assert stranger.archived_at is not None
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_c2_dedupe_tie_break_by_namespace_id_when_created_at_equal(
@@ -1042,7 +1042,7 @@ async def test_f094_c2_dedupe_tie_break_by_namespace_id_when_created_at_equal(
             assert row is not None
             assert row.archived_at is not None
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_c2_dedupe_handles_malformed_metadata(tmp_path: Path) -> None:
@@ -1110,7 +1110,7 @@ async def test_f094_c2_dedupe_handles_malformed_metadata(tmp_path: Path) -> None
             == "F094_dedupe_unique_constraint_setup"
         )
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1150,7 +1150,7 @@ async def test_f094_b7_worker_dispatch_creates_agent_private_only(tmp_path: Path
         assert MemoryNamespaceKind.AGENT_PRIVATE in kinds
         assert MemoryNamespaceKind.WORKER_PRIVATE not in kinds
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_b7_two_workers_agent_private_isolation(tmp_path: Path) -> None:
@@ -1207,7 +1207,7 @@ async def test_f094_b7_two_workers_agent_private_isolation(tmp_path: Path) -> No
         assert "ns-runtime-B" not in {n.namespace_id for n in a_ns}
         assert "ns-runtime-A" not in {n.namespace_id for n in b_ns}
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_b5_recall_priority_private_before_project_shared(
@@ -1324,7 +1324,7 @@ async def test_f094_b7_main_agent_recall_does_not_hit_worker_agent_private(
         assert "ns-worker" not in {n.namespace_id for n in main_view}
         assert "ns-main" not in {n.namespace_id for n in worker_view}
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_b3_resolve_worker_default_scope_id_helper(tmp_path: Path) -> None:
@@ -1413,7 +1413,7 @@ async def test_f094_b3_resolve_worker_default_scope_id_helper(tmp_path: Path) ->
                 agent_runtime_id="runtime-b3-arch",
             )
     finally:
-        await store_group.conn.close()
+        await store_group.close()
 
 
 async def test_f094_b3_helper_raises_on_multiple_active_namespaces(
@@ -1599,4 +1599,4 @@ async def test_f094_c2_dedupe_archives_duplicates_at_init(tmp_path: Path) -> Non
             == "F094_dedupe_unique_constraint_setup"
         )
     finally:
-        await store_group.conn.close()
+        await store_group.close()

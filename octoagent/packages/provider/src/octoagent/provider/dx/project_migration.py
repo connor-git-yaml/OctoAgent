@@ -996,4 +996,4 @@ class ProjectWorkspaceMigrationService:
         try:
             yield store_group
         finally:
-            await store_group.conn.close()
+            await store_group.close()

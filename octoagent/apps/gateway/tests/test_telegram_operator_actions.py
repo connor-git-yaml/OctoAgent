@@ -207,4 +207,4 @@ async def test_telegram_callback_executes_operator_action_and_is_idempotent(
     assert "结果: succeeded" in bot_client.edited_messages[0][2]
     assert "结果: already_handled" in bot_client.edited_messages[1][2]
 
-    await store_group.conn.close()
+    await store_group.close()

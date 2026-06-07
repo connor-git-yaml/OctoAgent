@@ -110,7 +110,7 @@ async def test_legacy_butler_runtime_row_normalized_to_main(tmp_path: Path) -> N
     assert runtime.role is AgentRuntimeRole.MAIN  # ← 关键：normalize 兜底
     assert runtime.status is AgentRuntimeStatus.ACTIVE  # 未受影响
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_legacy_butler_session_row_normalized_to_main_bootstrap(tmp_path: Path) -> None:
@@ -139,7 +139,7 @@ async def test_legacy_butler_session_row_normalized_to_main_bootstrap(tmp_path: 
     assert session.kind is AgentSessionKind.MAIN_BOOTSTRAP  # ← 关键：normalize 兜底
     assert session.status is AgentSessionStatus.ACTIVE
 
-    await store_group.conn.close()
+    await store_group.close()
 
 
 async def test_canonical_main_role_unaffected(tmp_path: Path) -> None:
@@ -167,4 +167,4 @@ async def test_canonical_main_role_unaffected(tmp_path: Path) -> None:
     assert runtime is not None
     assert runtime.role is AgentRuntimeRole.MAIN
 
-    await store_group.conn.close()
+    await store_group.close()

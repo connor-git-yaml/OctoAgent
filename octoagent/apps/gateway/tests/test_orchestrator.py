@@ -279,7 +279,7 @@ class TestOrchestrator:
         assert "MODEL_CALL_COMPLETED" in event_types
         assert "ARTIFACT_CREATED" in event_types
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_dispatch_owner_self_worker_session_executes_without_delegation(
         self,
@@ -352,7 +352,7 @@ class TestOrchestrator:
             assert runtime.role is AgentRuntimeRole.WORKER
             assert runtime.worker_profile_id == worker_profile.profile_id
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     async def test_dispatch_owner_self_worker_session_binds_execution_context(
         self,
@@ -406,7 +406,7 @@ class TestOrchestrator:
             assert snapshot["runtime_kind"] == "worker"
             assert snapshot["session_id"]
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     async def test_dispatch_prepared_roundtrips_through_a2a_and_restores_runtime_context(
         self, tmp_path: Path
@@ -499,7 +499,7 @@ class TestOrchestrator:
             "agent_session_id"
         ]
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_routing_hop_guard_fails_before_dispatch(
         self, tmp_path: Path
@@ -533,7 +533,7 @@ class TestOrchestrator:
         assert task is not None
         assert task.status == "FAILED"
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_high_risk_task_denied_without_approval(
         self, tmp_path: Path
@@ -568,7 +568,7 @@ class TestOrchestrator:
         assert task is not None
         assert task.status == "REJECTED"
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_high_risk_task_allowed_with_valid_approval_id(
         self, tmp_path: Path
@@ -626,7 +626,7 @@ class TestOrchestrator:
         assert result.retryable is False
         assert approval_manager.consume_allow_once(approval_id) is False
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_missing_worker_capability_returns_non_retryable_failure(
         self, tmp_path: Path
@@ -656,7 +656,7 @@ class TestOrchestrator:
         assert task is not None
         assert task.status == "FAILED"
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_record_cancel_marks_all_active_a2a_conversations_for_task(
         self, tmp_path: Path
@@ -719,7 +719,7 @@ class TestOrchestrator:
         assert [message.message_type for message in waiting_messages] == ["CANCEL"]
         assert completed_messages == []
 
-        await store_group.conn.close()
+        await store_group.close()
 
     async def test_under_specified_work_priority_request_no_longer_uses_compat_fallback(
         self,
@@ -742,7 +742,7 @@ class TestOrchestrator:
             assert result.worker_id == "main.agent"
             assert result.summary != "agent_clarification:work_priority_context"
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     async def test_weather_without_delegation_plane_uses_single_loop_executor(
         self,
@@ -767,7 +767,7 @@ class TestOrchestrator:
             events = await store_group.event_store.get_events_for_task(task_id)
             assert [event.type for event in events].count("MODEL_CALL_COMPLETED") == 1
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     async def test_single_loop_executor_bypasses_agent_decision_preflight(
         self,
@@ -804,7 +804,7 @@ class TestOrchestrator:
             assert "agent-decision-request" not in artifact_names
             assert "agent-decision-response" not in artifact_names
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     async def test_single_loop_executor_supports_explicit_research_worker_lens(
         self,
@@ -853,7 +853,7 @@ class TestOrchestrator:
             assert metadata["selected_worker_type"] == "research"
             assert "decision_phase" not in metadata
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     async def test_single_loop_executor_supports_requested_worker_profile_id(
         self,
@@ -896,7 +896,7 @@ class TestOrchestrator:
             assert metadata["requested_worker_type_source"] == "delegation_target_profile_id"
             assert "decision_phase" not in metadata
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 
     async def test_recent_conversation_prefers_agent_session_transcript(
         self,
@@ -965,5 +965,5 @@ class TestOrchestrator:
             assert "我还缺少城市 / 区县信息。" in block
             assert "用户正在补充天气地点。" in block
         finally:
-            await store_group.conn.close()
+            await store_group.close()
 

@@ -272,7 +272,7 @@ async def _seed_update_restore_fixture(project_root: Path) -> None:
     )
     await store_group.artifact_store.put_artifact(artifact, content=b"ready")
     await store_group.conn.commit()
-    await store_group.conn.close()
+    await store_group.close()
 
 
 @pytest.mark.asyncio
