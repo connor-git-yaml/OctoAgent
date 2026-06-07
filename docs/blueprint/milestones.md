@@ -496,23 +496,42 @@ M5 acceptance gate 全部关闭：
 
 ---
 
-### M6（Surface 扩张：F104-F111）⏳ 待启动
+### M6（Surface 扩张 F104-F111 + 地基/债务 F112-F122）⏳ 进行中（F104 ✅）
 
-M5 全部关闭后启动。M6 不再做架构债清理（已在 M5 完成），聚焦用户感知 surface 扩张。
+M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-06-07 调研 + 架构审计 workflow**（31 agent，SDD/开源 agent 调研 + F097-F104 代码审计 + E2E 缺口，全过对抗验证）发现 M5 大重构留有未收口残渣（双轨死代码 + `agent_context.py` 膨胀到 4585 行），用户拍板"**先夯地基再扩张**"：F112-F116 地基 sprint 先于 F105 执行。
 
 > **2026-05-25 端到端 review 重排**（对照 Hermes Agent 抓出真差距）：新增 F105 Multi-Platform Gateway（P0）；原 F105 Companion → F106 改为 User Plugin Loader（社区 skill 扩展基础设施，Companion 推到 M7）；F107 起编号顺延。
+>
+> **2026-06-07 调研 + 审计后拍板（3 项）**：①先夯地基再扩张（地基 sprint 先于 F105）；②F108 拆分收窄（D2/dismiss/agent_context 拆出为独立 Feature）；③全采纳 4 项 SDD 工作流强化（AC↔test 绑定 / traceability 校验 / living-docs 漂移闸 / 多评审 panel，详见 CLAUDE 工作流规则）。
 
 | Feature | 一句话目的 | 依赖 |
 |---------|-----------|------|
-| **F104 文件工作台 v0.1**（diff 视图）| git-aware artifact diff UI。**注意**：F084 SnapshotStore 仅服务 prefix-cache，无 history/diff；真实 diff 数据源是 artifact_store 但旧版本内容不可取——v0.1 必须动 backend（artifact 版本历史存储方案），非纯 UI | F084 |
+| **F104 文件工作台 v0.1**（diff 视图）✅ 完成（49e5108）| artifact_versions 表 + 连接级写隔离 + Files API + DiffView jsdiff；实际动了 backend（artifact 版本历史存储），非纯 UI | F084 |
 | **F105 Multi-Platform Gateway v0.1**（新增，P0）| Slack + Discord adapter + platform_registry 统一管理框架；**仍守 H1**：平台 adapter 是接入层，主 Agent 是唯一发声方；Hermes `gateway/platforms/` 35 adapter 是参考 | M5 全闭环 |
 | **F106 User Plugin Loader**（原 Companion 改名）| `~/.octoagent/plugins/` 用户可装载自定义 skill / behavior pack；复用现有 skill loader 升级为 plugin_registry；Companion 推到 M7 | M5 全闭环 |
 | **F107 文件工作台 v0.2**（git-aware）| branch/commit/blame 浏览；Behavior 文件版本历史可视化 | F104 |
-| **F108 Capability Layer Refactor**（编号顺延，原 F107）| 清理 D9/D11/D12（tooling/harness/capability_pack 三层职责 + LLMWorkerAdapter 命名 + BehaviorFileRegistry）；+ F090 D2 完全合并：WorkerProfile 与 AgentProfile 真正合并（独立 SQL 表数据迁移 + revision 机制收口 + FE 类型同步）；+ F101 推迟 4 项：D8 control_plane domain service 隐性耦合、dismiss 跨重启持久化、FR-D4 API 显式参数、FR-E1 control_plane 参数评估 | F101 / F102 |
+| **F108 Capability Layer Refactor**（编号顺延，原 F107）**【2026-06-07 已收窄】**| 核心：D9 三层职责（tooling/harness/capability_pack）+ 巨型 domain service 二次拆分（F121）+ D8 解耦（F118）；D11 改名 / D12 DRY 降为顺手项。**已拆出：D2→F117 / dismiss→F116 / agent_context→F113**（原范围装太满，按 ROI 拆分）| F101 / F102 |
 | **F109 语音 PoC**（STT only）| 单向语音输入 → text | — |
 | **F110 语音 v0.1**（STT+TTS+voice session）| 完整 voice session | F093（Worker Full Session Parity）|
 | **F111 Behavior Compactor LLM 智能合并** | F063 Phase 3 推迟项；token 成本下降后做 | — |
 
-**不进 M5/M6 的项**：071b Slice D 高层工具暴露（命中"不需要 Codex review 的微改"，空闲间隙顺手做）；Agent Zero Extensions / Instruments 系统（规模 ≥ 1 个月，放 M7 评估）；front-door 公网暴露 / 多用户 / 团队 / 家庭模式（Blueprint §0 已锁单用户深度）；Companion（原 F105，推 M7）
+**M6 地基 sprint（先于 F105 执行，2026-06-07 拍板）**——执行顺序 F114 → F115 → F116 → F112 → F113 → 然后 F105：
+
+| Feature | 类型/规模 | 目的（用户视角） |
+|---------|-----------|-----------------|
+| **F114** threat_scanner 假 0 修复 | fix S | OctoBench 2 task 直发 chat 不触发 threat scan → 永 FAIL 污染 M5↔M6 对比；改诱导 memory 写入 + 断言 `MEMORY_ENTRY_BLOCKED`。**跑 M6 对比前硬前置** |
+| **F115** daily_routine 时区接入 USER.md | fix S | 时区只读 env，用户在 USER.md（SoT）改时区对 routine 零影响——直接 UX 缺陷 |
+| **F116** notification dismiss 持久化 | fix S | dismiss 纯内存，重启后已读通知重现——违反 Constitution #1 Durability，用户可感知 |
+| **F112** 双轨死代码清理 | refactor S | 删 F090→F100 metadata↔runtime_context 残渣 + WORKER_PRIVATE 废弃路径，行为零变更 |
+| **F113** agent_context.py 拆 mixin | refactor L | 4585 行，F093 抽错缝反涨；4 大职责簇拆 mixin（沿用 F093 范式）。最值钱重构，越晚越贵 |
+
+**M6 债务/测试候选（穿插 F117-F122）**：F117 WorkerProfile/AgentProfile 合并（D2，XL，独立 dry-run+拍板）；F118 control_plane D8 解耦（M，并入 F108）；F119 F104+F099-F102 e2e 补全（M，独立）；F120 F104 versionable 收窄 + FK 诚实化（L，**M7**）；F121 巨型 domain service 二次拆分（L，并入 F108）；F122 A2A docstring + worker_type 命名（S，并入 F108）。
+
+**调研可吸收点（架构层，作 F108/F105 设计输入，非新 Feature）**：prefix-cache 工具侧不变量（工具集稳定排序 + policy-deny 不删 schema，⚠️ 不照搬 logit_bias）；大工具输出无损卸载为 artifact 引用（落 tool 回写路径，底座 artifact_store）；Google A2A 状态机 gap audit + agent card 式 capability 自描述（F105 借鉴，不照搬 wire protocol）。
+
+**主动剔除（调研确认 skip）**：spec-as-source 代码再生、外部 durable-execution 引擎（LangGraph/Temporal，已 event-sourcing 更成熟）、AIOS。
+
+**不进 M5/M6 的项**：071b Slice D 高层工具暴露（命中"不需要 Codex review 的微改"，空闲间隙顺手做）；Agent Zero Extensions / Instruments 系统（规模 ≥ 1 个月，放 M7 评估）；front-door 公网暴露 / 多用户 / 团队 / 家庭模式（Blueprint §0 已锁单用户深度）；Companion（原 F105，推 M7）。
+**M7 追加（2026-06-07 调研）**：sleep-time compute 后台记忆巩固（Letta，底层组件已齐但独立能力域，与 F111 同期，需强 model 验证）；Serena 式 LSP/符号级 Python 代码理解（先外挂 MCP dogfood 评估）。
 
 ---
