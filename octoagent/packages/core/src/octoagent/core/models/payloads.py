@@ -220,6 +220,15 @@ class ArtifactCreatedPayload(BaseModel):
     source: str = Field(default="", description="artifact 来源分类")
 
 
+class ArtifactVersionAppendFailedPayload(BaseModel):
+    """ARTIFACT_VERSION_APPEND_FAILED 事件 payload（F104 durable 失败信号）"""
+
+    task_id: str = Field(description="触发版本 append 的任务 ID")
+    logical_file_id: str = Field(description="目标逻辑文件标识")
+    reason: str = Field(description="失败原因（异常类型 + 摘要）")
+    attempt: int = Field(default=0, description="失败时已尝试的 SAVEPOINT 重试次数")
+
+
 class ErrorPayload(BaseModel):
     """ERROR 事件 payload"""
 

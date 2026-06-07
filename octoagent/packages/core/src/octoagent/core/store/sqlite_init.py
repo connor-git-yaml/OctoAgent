@@ -366,6 +366,35 @@ CREATE TABLE IF NOT EXISTS worker_profile_revisions (
 );
 """
 
+# F104 文件工作台 v0.1：artifact 版本历史表（append-only，仅 versionable=True 写入）
+_ARTIFACT_VERSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS artifact_versions (
+    version_id        TEXT PRIMARY KEY,
+    task_id           TEXT NOT NULL,
+    logical_file_id   TEXT NOT NULL,
+    version_no        INTEGER NOT NULL,
+    artifact_id       TEXT NOT NULL,
+    ts                TEXT NOT NULL,
+    storage_kind      TEXT NOT NULL,
+    content           TEXT,
+    storage_ref       TEXT,
+    size              INTEGER NOT NULL DEFAULT 0,
+    hash              TEXT NOT NULL DEFAULT '',
+
+    FOREIGN KEY (task_id) REFERENCES tasks(task_id),
+    UNIQUE(task_id, logical_file_id, version_no)
+);
+"""
+
+_ARTIFACT_VERSIONS_INDEXES = [
+    # 按逻辑文件 key 取版本列表 + 取 MAX(version_no)（FR-006/FR-007）
+    "CREATE INDEX IF NOT EXISTS idx_artifact_versions_logical "
+    "ON artifact_versions(task_id, logical_file_id, version_no DESC);",
+    # 按 task 聚合逻辑文件清单（FR-008）+ 级联删除（CL-3）
+    "CREATE INDEX IF NOT EXISTS idx_artifact_versions_task "
+    "ON artifact_versions(task_id);",
+]
+
 _OWNER_PROFILES_DDL = """
 CREATE TABLE IF NOT EXISTS owner_profiles (
     owner_profile_id              TEXT PRIMARY KEY,
@@ -1639,6 +1668,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_AGENT_PROFILES_DDL)
     await conn.execute(_WORKER_PROFILES_DDL)
     await conn.execute(_WORKER_PROFILE_REVISIONS_DDL)
+    await conn.execute(_ARTIFACT_VERSIONS_DDL)
     await conn.execute(_OWNER_PROFILES_DDL)
     await conn.execute(_OWNER_PROFILE_OVERLAYS_DDL)
     # F084 Phase 4 T068：不再 CREATE bootstrap_sessions（已退役，_migrate_legacy_tables 会 DROP 旧表）
@@ -1665,6 +1695,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         _TASKS_INDEXES
         + _EVENTS_INDEXES
         + _ARTIFACTS_INDEXES
+        + _ARTIFACT_VERSIONS_INDEXES
         + _TASK_JOBS_INDEXES
         + _CHECKPOINTS_INDEXES
         + _SIDE_EFFECT_LEDGER_INDEXES

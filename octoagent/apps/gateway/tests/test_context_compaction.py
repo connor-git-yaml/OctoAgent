@@ -2229,7 +2229,14 @@ class TestEdgeCaseRegression:
             def __init__(self):
                 self.artifacts: dict[str, Artifact] = {}
 
-            async def put_artifact(self, artifact: Artifact, content: bytes) -> None:
+            async def put_artifact(
+                self,
+                artifact: Artifact,
+                content: bytes,
+                *,
+                versionable: bool = False,
+                logical_file_id: str | None = None,
+            ) -> None:
                 self.artifacts[artifact.artifact_id] = artifact
 
             async def list_artifacts_for_task(self, task_id: str) -> list[Artifact]:

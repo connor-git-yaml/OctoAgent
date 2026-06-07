@@ -80,6 +80,9 @@ async def delete_session_cascade(
         stats["task_jobs"] = await stores.task_job_store.delete_jobs_by_task_ids(
             task_ids
         )
+        stats["artifact_versions"] = (
+            await stores.artifact_store.delete_artifact_versions_by_task_ids(task_ids)
+        )
         stats["artifacts"] = (
             await stores.artifact_store.delete_artifacts_by_task_ids(task_ids)
         )

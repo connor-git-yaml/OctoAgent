@@ -28,10 +28,27 @@ class MockArtifactStore:
     def __init__(self) -> None:
         self.artifacts: dict[str, Artifact] = {}
         self.contents: dict[str, bytes] = {}
+        # F104：记录每次写入的 versionable / logical_file_id 调用参数，供断言
+        self.put_calls: list[dict] = []
 
-    async def put_artifact(self, artifact: Artifact, content: bytes) -> None:
+    async def put_artifact(
+        self,
+        artifact: Artifact,
+        content: bytes,
+        *,
+        versionable: bool = False,
+        logical_file_id: str | None = None,
+    ) -> None:
         self.artifacts[artifact.artifact_id] = artifact
         self.contents[artifact.artifact_id] = content
+        self.put_calls.append(
+            {
+                "artifact_id": artifact.artifact_id,
+                "name": artifact.name,
+                "versionable": versionable,
+                "logical_file_id": logical_file_id,
+            }
+        )
 
     async def get_artifact(self, artifact_id: str) -> Artifact | None:
         return self.artifacts.get(artifact_id)
@@ -92,6 +109,24 @@ class TestProgressNoteExecution:
         assert content["task_id"] == "task-001"
         assert content["agent_session_id"] == "sess-001"
 
+    async def test_user_step_passes_versionable_true(self) -> None:
+        """F104 T1.8/SD-9：user step 写入传 versionable=True + logical_file_id=progress-note:{step_id}。"""
+        store = MockArtifactStore()
+        conn = MockConn()
+        input_data = ProgressNoteInput(step_id="impl_step", description="实现进度")
+        result = await execute_progress_note(
+            input_data=input_data,
+            task_id="task-vt",
+            agent_session_id="sess-vt",
+            artifact_store=store,
+            conn=conn,
+        )
+        assert result.persisted is True
+        user_calls = [c for c in store.put_calls if c["name"] == "progress-note:impl_step"]
+        assert len(user_calls) == 1
+        assert user_calls[0]["versionable"] is True
+        assert user_calls[0]["logical_file_id"] == "progress-note:impl_step"
+
     async def test_write_note_without_artifact_store(self) -> None:
         """Artifact Store 不可用时返回 persisted=False。"""
         input_data = ProgressNoteInput(
@@ -112,7 +147,7 @@ class TestProgressNoteExecution:
         """Artifact Store 抛异常时降级为 persisted=False。"""
 
         class FailingStore:
-            async def put_artifact(self, artifact, content):
+            async def put_artifact(self, artifact, content, **kwargs):
                 raise RuntimeError("存储不可用")
             async def list_artifacts_for_task(self, task_id):
                 return []

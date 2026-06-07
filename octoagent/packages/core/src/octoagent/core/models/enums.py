@@ -82,6 +82,8 @@ class EventType(StrEnum):
     MEMORY_RECALL_FAILED = "MEMORY_RECALL_FAILED"
     STATE_TRANSITION = "STATE_TRANSITION"
     ARTIFACT_CREATED = "ARTIFACT_CREATED"
+    # F104 文件工作台 v0.1：versionable artifact 版本 append 失败（durable 失败信号）
+    ARTIFACT_VERSION_APPEND_FAILED = "ARTIFACT_VERSION_APPEND_FAILED"
     ERROR = "ERROR"
 
     # Feature 003: 凭证生命周期事件 -- 对齐 FR-012

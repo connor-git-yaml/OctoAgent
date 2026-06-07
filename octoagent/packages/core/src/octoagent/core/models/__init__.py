@@ -55,6 +55,11 @@ from .agent_context import (
     WorkerProfileStatus,
 )
 from .artifact import Artifact, ArtifactPart
+from .artifact_version import (
+    ArtifactVersionContent,
+    ArtifactVersionMeta,
+    LogicalFileSummary,
+)
 from .backup import (
     BackupBundle,
     BackupFileEntry,
@@ -299,6 +304,7 @@ from .orchestrator import (
 from .payloads import (
     A2AMessageAuditPayload,
     ArtifactCreatedPayload,
+    ArtifactVersionAppendFailedPayload,
     BackupLifecyclePayload,
     ChatImportLifecyclePayload,
     CheckpointSavedPayload,
@@ -448,6 +454,10 @@ __all__ = [
     # Artifact
     "Artifact",
     "ArtifactPart",
+    # Artifact Version (F104)
+    "ArtifactVersionMeta",
+    "ArtifactVersionContent",
+    "LogicalFileSummary",
     # Agent Context
     "AgentProfileScope",
     "OwnerOverlayScope",
@@ -622,6 +632,7 @@ __all__ = [
     "StateTransitionPayload",
     "A2AMessageAuditPayload",
     "ArtifactCreatedPayload",
+    "ArtifactVersionAppendFailedPayload",
     "BackupLifecyclePayload",
     "ChatImportLifecyclePayload",
     "ErrorPayload",

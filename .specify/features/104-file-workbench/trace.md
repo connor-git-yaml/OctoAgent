@@ -93,3 +93,18 @@
 - [GATE_TASKS] commit plan+tasks 制品 → implement（plan Phase 1 起）
 
 ## Implement（plan Phase 1-5）
+
+### Phase 1（backend 版本表）
+- [T1.3] 事务硬 gate 实测 → **推翻 BEGIN IMMEDIATE**（默认 isolation_level='' 报 "cannot start transaction within transaction"），选定 _write_lock + 隐式事务 + SAVEPOINT（phase-1-recon.md 权威）
+- [T1.1-T1.8] 委托 implement 子代理实现（artifact_versions DDL + put_artifact versionable 自包含 + event wiring append_event_committed + progress_note 接入 + session 级联），主 session 审查 T1.4 事务正确性 + 补 T1.8t 断言
+- [T1.5/T1.6/T1.8t] 测试 34 passed（SAVEPOINT 重试/失败回滚/级联/versionable 断言）；core+tooling 656 passed 0 regression；子代理改现有测试=签名适配非 mask
+- [T1.9] Phase 1 Codex review：2 finding（[high] versionable 未检查 in_transaction→污染调用方共享连接事务 / [medium] 文件写在锁外+失败不清理）→ 修复（in_transaction 检查 raise + 文件写移入 _write_lock + 失败 unlink-if-new）+ 2 测试
+- [T1.9] Phase 1 re-review round 2：1 high（versionable 大文件失败路径覆盖既有文件内容，medium 修复遗留）→ 修复（写前 exists 则 raise 拒绝覆盖 + _process_content 移入 try + 失败 unlink 本次新建）+ test_existing_file_not_overwritten（既有 bytes 不变）
+- [T1.9] Phase 1 re-review round 3：2 high（均真并发场景，本质用户已拍板 mixed-writer）：
+  - [high#1] in_transaction 入口检查不阻止并发默认写加入 versionable 事务（= GATE_TASKS 拍板的 mixed-writer）
+  - [high#2] 大文件 exists() TOCTTOU + 失败清理跨 writer（真并发文件竞态）
+  - 二者 v0.1 顺序队列不触发；完全正确 = 连接级写锁/独立连接（架构 follow-up 超 v0.1）
+- [T1.9] 用户拍板**折中**：
+  - high#2 修复：O_EXCL 原子独占创建（_process_content exclusive 参数）+ owns_file 标记（仅本次独占创建成功才失败清理，O_EXCL 失败=他人文件不误删）+ test_existing_file_not_overwritten（既有 bytes 不变）
+  - high#1 **归档**：mixed-writer 事务污染 = GATE_TASKS 拍板的实测驱动；真并发完全正确 = 连接级写锁架构 follow-up（超 v0.1），已记 plan §4 风险表 + spec SD-8 已知约束；T1.3 实测顺序队列 v0.1 不触发
+- [T1.10] Phase 1 收口：35 store/progress 测试绿 → 全回归 0 regression → commit

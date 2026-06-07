@@ -131,7 +131,14 @@ async def execute_progress_note(
                 ),
             ],
         )
-        await artifact_store.put_artifact(artifact, content_json.encode("utf-8"))
+        # F104：user step 笔记接入 versionable append（保留版本历史用于 diff，FR-022/SD-9）。
+        # versionable=True 路径自包含事务自 commit，下方 conn.commit() 对其为 no-op。
+        await artifact_store.put_artifact(
+            artifact,
+            content_json.encode("utf-8"),
+            versionable=True,
+            logical_file_id=f"progress-note:{input_data.step_id}",
+        )
         if conn is not None:
             await conn.commit()
 

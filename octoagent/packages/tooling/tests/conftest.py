@@ -63,8 +63,11 @@ class MockArtifactStore:
         self,
         artifact: Artifact,
         content: bytes | None = None,
+        *,
+        versionable: bool = False,
+        logical_file_id: str | None = None,
     ) -> None:
-        """存储 Artifact"""
+        """存储 Artifact（F104：接受 versionable/logical_file_id 转发参数）"""
         if self._fail:
             raise RuntimeError("MockArtifactStore: 模拟存储失败")
         self.artifacts[artifact.artifact_id] = artifact

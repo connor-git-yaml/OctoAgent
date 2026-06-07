@@ -36,7 +36,11 @@ class StoreGroup:
         self.conn = conn
         self.task_store = SqliteTaskStore(conn)
         self.event_store = SqliteEventStore(conn)
-        self.artifact_store = SqliteArtifactStore(conn, artifacts_dir)
+        # F104：注入 event_store 到 artifact_store，使 versionable append 失败时可
+        # 通过 append_event_committed 独立提交 durable 失败事件（不被 rollback 吞）。
+        self.artifact_store = SqliteArtifactStore(
+            conn, artifacts_dir, event_store=self.event_store
+        )
         self.task_job_store = SqliteTaskJobStore(conn)
         self.checkpoint_store = SqliteCheckpointStore(conn)
         self.side_effect_ledger_store = SqliteSideEffectLedgerStore(conn)
