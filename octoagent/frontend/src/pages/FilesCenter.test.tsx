@@ -9,17 +9,20 @@ vi.mock("../api/client", () => ({
   fetchFileTasks: vi.fn(),
   fetchLogicalFiles: vi.fn(),
   fetchLogicalFileDiff: vi.fn(),
+  fetchLogicalFileVersions: vi.fn(),
 }));
 
 import {
   fetchFileTasks,
   fetchLogicalFileDiff,
+  fetchLogicalFileVersions,
   fetchLogicalFiles,
 } from "../api/client";
 
 const fetchFileTasksMock = vi.mocked(fetchFileTasks);
 const fetchLogicalFilesMock = vi.mocked(fetchLogicalFiles);
 const fetchLogicalFileDiffMock = vi.mocked(fetchLogicalFileDiff);
+const fetchLogicalFileVersionsMock = vi.mocked(fetchLogicalFileVersions);
 
 function renderPage() {
   return render(
@@ -54,14 +57,14 @@ describe("FilesCenter 两级导航", () => {
     fetchLogicalFileDiffMock.mockResolvedValue({
       current: {
         version_no: 3,
-        content: "新版内容",
+        content: "公共行\n新增内容",
         availability: "available",
         storage_kind: "inline",
         oversize: false,
       },
       previous: {
         version_no: 2,
-        content: "旧版内容",
+        content: "公共行\n删除内容",
         availability: "available",
         storage_kind: "inline",
         oversize: false,
@@ -95,14 +98,102 @@ describe("FilesCenter 两级导航", () => {
         "task-1",
         "task-1/report.md"
       );
-      expect(screen.getByText("新版内容")).toBeInTheDocument();
-      expect(screen.getByText("旧版内容")).toBeInTheDocument();
+      expect(screen.getByText("新增内容")).toBeInTheDocument();
+      expect(screen.getByText("删除内容")).toBeInTheDocument();
     });
-    // 主视图不暴露内部版本号（SC-004 / CL-1）：仅纯文案「上一版」「当前版」
-    expect(screen.getByText("当前版")).toBeInTheDocument();
-    expect(screen.getByText("上一版")).toBeInTheDocument();
+
+    // jsdiff 行级高亮：added 行含新增内容（绿）/ removed 行含删除内容（红）/ 公共行未变
+    const addedRow = screen.getByText("新增内容").closest("[data-diff-kind]");
+    expect(addedRow).toHaveAttribute("data-diff-kind", "added");
+    const removedRow = screen.getByText("删除内容").closest("[data-diff-kind]");
+    expect(removedRow).toHaveAttribute("data-diff-kind", "removed");
+    const unchangedRow = screen.getByText("公共行").closest("[data-diff-kind]");
+    expect(unchangedRow).toHaveAttribute("data-diff-kind", "unchanged");
+
+    // 主 diff 视图不暴露任何技术字段（SC-004）：无版本号 vN
     expect(screen.queryByText(/v3/)).not.toBeInTheDocument();
     expect(screen.queryByText(/v2/)).not.toBeInTheDocument();
+    // Advanced 折叠默认收起：未点击展开时不应触发版本元信息请求
+    expect(fetchLogicalFileVersionsMock).not.toHaveBeenCalled();
+  });
+
+  it("展开 Advanced 折叠区懒加载版本元信息（技术字段仅此区）", async () => {
+    fetchFileTasksMock.mockResolvedValue({
+      tasks: [{ task_id: "task-1", title: "周报生成" }],
+    });
+    fetchLogicalFilesMock.mockResolvedValue({
+      files: [
+        {
+          logical_file_id: "task-1/report.md",
+          display_name: "report.md",
+          version_count: 2,
+        },
+      ],
+    });
+    fetchLogicalFileDiffMock.mockResolvedValue({
+      current: {
+        version_no: 2,
+        content: "当前内容",
+        availability: "available",
+        storage_kind: "inline",
+        oversize: false,
+      },
+      previous: {
+        version_no: 1,
+        content: "上一版内容",
+        availability: "available",
+        storage_kind: "inline",
+        oversize: false,
+      },
+      binary: false,
+      oversize: false,
+    });
+    fetchLogicalFileVersionsMock.mockResolvedValue({
+      versions: [
+        {
+          version_no: 2,
+          ts: "2026-06-06T10:00:00Z",
+          size: 128,
+          hash: "abcdef1234567890",
+          storage_kind: "inline",
+        },
+        {
+          version_no: 1,
+          ts: "2026-06-06T09:00:00Z",
+          size: 64,
+          hash: "0011223344556677",
+          storage_kind: "snapshot",
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByText("周报生成")).toBeInTheDocument());
+    await user.click(screen.getByText("周报生成"));
+    await waitFor(() => expect(screen.getByText("report.md")).toBeInTheDocument());
+    await user.click(screen.getByText("report.md"));
+    await waitFor(() => expect(screen.getByText("当前内容")).toBeInTheDocument());
+
+    // 收起状态下技术字段不出现在 DOM（默认收起 + 懒加载）
+    expect(fetchLogicalFileVersionsMock).not.toHaveBeenCalled();
+
+    // 展开 Advanced 折叠区
+    await user.click(screen.getByText("高级信息（版本详情）"));
+
+    await waitFor(() => {
+      expect(fetchLogicalFileVersionsMock).toHaveBeenCalledWith(
+        "task-1",
+        "task-1/report.md"
+      );
+      // 技术字段（版本号 / hash 前 8 位 / size / storage_kind）只在此区出现
+      expect(screen.getByText("版本号：v2")).toBeInTheDocument();
+      expect(screen.getByText("版本号：v1")).toBeInTheDocument();
+      expect(screen.getByText("哈希：abcdef12")).toBeInTheDocument();
+      expect(screen.getByText("大小：128 字节")).toBeInTheDocument();
+      expect(screen.getByText("存储：inline")).toBeInTheDocument();
+    });
   });
 
   it("首版（previous=null）展示首版无对比", async () => {
@@ -142,6 +233,259 @@ describe("FilesCenter 两级导航", () => {
     await waitFor(() => {
       expect(screen.getByText("首版无对比")).toBeInTheDocument();
       expect(screen.getByText("唯一内容")).toBeInTheDocument();
+    });
+  });
+
+  it("二进制文件降级文案 + Advanced 区仍可展开（FR-018）", async () => {
+    fetchFileTasksMock.mockResolvedValue({
+      tasks: [{ task_id: "task-1", title: "导出" }],
+    });
+    fetchLogicalFilesMock.mockResolvedValue({
+      files: [
+        {
+          logical_file_id: "task-1/data.bin",
+          display_name: "data.bin",
+          version_count: 2,
+        },
+      ],
+    });
+    fetchLogicalFileDiffMock.mockResolvedValue({
+      current: {
+        version_no: 2,
+        content: null,
+        availability: "unavailable",
+        storage_kind: "snapshot",
+        oversize: false,
+      },
+      previous: {
+        version_no: 1,
+        content: null,
+        availability: "unavailable",
+        storage_kind: "snapshot",
+        oversize: false,
+      },
+      binary: true,
+      oversize: false,
+    });
+    fetchLogicalFileVersionsMock.mockResolvedValue({
+      versions: [
+        {
+          version_no: 2,
+          ts: "2026-06-06T10:00:00Z",
+          size: 2048,
+          hash: "deadbeefcafef00d",
+          storage_kind: "snapshot",
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText("导出")).toBeInTheDocument());
+    await user.click(screen.getByText("导出"));
+    await waitFor(() => expect(screen.getByText("data.bin")).toBeInTheDocument());
+    await user.click(screen.getByText("data.bin"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("这是二进制文件，暂时无法显示内容对比。")
+      ).toBeInTheDocument()
+    );
+
+    // 即使内容不可 diff，Advanced 区版本元信息仍可展开
+    await user.click(screen.getByText("高级信息（版本详情）"));
+    await waitFor(() => {
+      expect(screen.getByText("版本号：v2")).toBeInTheDocument();
+      expect(screen.getByText("哈希：deadbeef")).toBeInTheDocument();
+    });
+  });
+
+  it("超大文件降级文案（FR-019 / SC-005）", async () => {
+    fetchFileTasksMock.mockResolvedValue({
+      tasks: [{ task_id: "task-1", title: "日志" }],
+    });
+    fetchLogicalFilesMock.mockResolvedValue({
+      files: [
+        {
+          logical_file_id: "task-1/huge.log",
+          display_name: "huge.log",
+          version_count: 2,
+        },
+      ],
+    });
+    fetchLogicalFileDiffMock.mockResolvedValue({
+      current: {
+        version_no: 2,
+        content: null,
+        availability: "available",
+        storage_kind: "snapshot",
+        oversize: true,
+      },
+      previous: {
+        version_no: 1,
+        content: null,
+        availability: "available",
+        storage_kind: "snapshot",
+        oversize: true,
+      },
+      binary: false,
+      oversize: true,
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText("日志")).toBeInTheDocument());
+    await user.click(screen.getByText("日志"));
+    await waitFor(() => expect(screen.getByText("huge.log")).toBeInTheDocument());
+    await user.click(screen.getByText("huge.log"));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("文件内容过大，暂时无法显示内容对比。")
+      ).toBeInTheDocument()
+    );
+  });
+
+  it("上一版内容不可用时退回当前内容纯展示（FR-010）", async () => {
+    fetchFileTasksMock.mockResolvedValue({
+      tasks: [{ task_id: "task-1", title: "文档" }],
+    });
+    fetchLogicalFilesMock.mockResolvedValue({
+      files: [
+        {
+          logical_file_id: "task-1/doc.md",
+          display_name: "doc.md",
+          version_count: 2,
+        },
+      ],
+    });
+    fetchLogicalFileDiffMock.mockResolvedValue({
+      current: {
+        version_no: 2,
+        content: "当前可用内容",
+        availability: "available",
+        storage_kind: "inline",
+        oversize: false,
+      },
+      previous: {
+        version_no: 1,
+        content: null,
+        availability: "unavailable",
+        storage_kind: "snapshot",
+        oversize: false,
+      },
+      binary: false,
+      oversize: false,
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText("文档")).toBeInTheDocument());
+    await user.click(screen.getByText("文档"));
+    await waitFor(() => expect(screen.getByText("doc.md")).toBeInTheDocument());
+    await user.click(screen.getByText("doc.md"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("上一版内容暂不可用，仅显示当前内容")
+      ).toBeInTheDocument();
+      expect(screen.getByText("当前可用内容")).toBeInTheDocument();
+    });
+  });
+
+  it("两版内容完全相同（非空）显示无差异且不渲染 diff 行（FR-015）", async () => {
+    fetchFileTasksMock.mockResolvedValue({
+      tasks: [{ task_id: "task-1", title: "稳定文档" }],
+    });
+    fetchLogicalFilesMock.mockResolvedValue({
+      files: [
+        {
+          logical_file_id: "task-1/same.md",
+          display_name: "same.md",
+          version_count: 2,
+        },
+      ],
+    });
+    fetchLogicalFileDiffMock.mockResolvedValue({
+      current: {
+        version_no: 2,
+        content: "完全相同的内容\n第二行",
+        availability: "available",
+        storage_kind: "inline",
+        oversize: false,
+      },
+      previous: {
+        version_no: 1,
+        content: "完全相同的内容\n第二行",
+        availability: "available",
+        storage_kind: "inline",
+        oversize: false,
+      },
+      binary: false,
+      oversize: false,
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText("稳定文档")).toBeInTheDocument());
+    await user.click(screen.getByText("稳定文档"));
+    await waitFor(() => expect(screen.getByText("same.md")).toBeInTheDocument());
+    await user.click(screen.getByText("same.md"));
+
+    await waitFor(() => {
+      expect(screen.getByText("无差异")).toBeInTheDocument();
+      expect(
+        screen.getByText("当前版与上一版内容相同。")
+      ).toBeInTheDocument();
+    });
+    // 不渲染任何逐行 diff（无 data-diff-kind 行）
+    expect(document.querySelector("[data-diff-kind]")).toBeNull();
+  });
+
+  it("两空文件（''==='')显示无差异（FR-015）", async () => {
+    fetchFileTasksMock.mockResolvedValue({
+      tasks: [{ task_id: "task-1", title: "空文件" }],
+    });
+    fetchLogicalFilesMock.mockResolvedValue({
+      files: [
+        {
+          logical_file_id: "task-1/empty.txt",
+          display_name: "empty.txt",
+          version_count: 2,
+        },
+      ],
+    });
+    fetchLogicalFileDiffMock.mockResolvedValue({
+      current: {
+        version_no: 2,
+        content: "",
+        availability: "available",
+        storage_kind: "inline",
+        oversize: false,
+      },
+      previous: {
+        version_no: 1,
+        content: "",
+        availability: "available",
+        storage_kind: "inline",
+        oversize: false,
+      },
+      binary: false,
+      oversize: false,
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+    await waitFor(() => expect(screen.getByText("空文件")).toBeInTheDocument());
+    await user.click(screen.getByText("空文件"));
+    await waitFor(() => expect(screen.getByText("empty.txt")).toBeInTheDocument());
+    await user.click(screen.getByText("empty.txt"));
+
+    await waitFor(() => {
+      expect(screen.getByText("无差异")).toBeInTheDocument();
+      expect(
+        screen.getByText("当前版与上一版内容相同。")
+      ).toBeInTheDocument();
     });
   });
 

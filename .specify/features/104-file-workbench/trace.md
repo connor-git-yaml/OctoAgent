@@ -127,3 +127,13 @@
   - [high] openTask/openFile 异步竞态（快速切换 task/file 旧响应无条件 setFiles/setDiff 覆盖新选择→显示错文件内容；主 session 审查曾低估为 v0.1 可接受，Codex 升 high 成立）→ request token（useRef 单调 seq）+ 响应前校验 seq 最新 + deferred promise 乱序返回测试
   - [medium] 主 diff 标题暴露内部版本号 v{N}（version_no 是后端内部计数器，违反 SC-004/CL-1 主视图 0 技术字段）→ 标题改"上一版"/"当前版"去 vN，version_no 留 Phase 4 Advanced 区 + 更新测试
 - [T3.review] 修复完成：race token（useRef 单调 seq，openTask/openFile 入口 ++seq + 响应前 seq 校验 + 回退 backTo* ++seq 使在途失效）+ 2 乱序测试（deferred promise 点 A→回退→点 B，resolve A 再 B，断言 B 显示 A 丢弃，files+diff 两层）+ vN 移除；FilesCenter 8 passed + 全 vitest 11 failed/170 = 0 regression（11 pre-existing 不变）+ tsc 0 错 → re-review 确认
+- [T3.review] Phase 3 re-review = **approve**（race token 覆盖完整 + 回退失效 + vN 移除，No material findings）→ commit 4cad03f（7 files +953/-1，diff 依赖留 Phase 4，不 push）
+
+### Phase 4（DiffView jsdiff 行级高亮 + Advanced 折叠）— F104 核心 diff 视图
+- [env] npm install diff@9 + @types/diff（package.json/lock 留 Phase 4 commit）
+- [T4.x] 委托 implement 子代理：①buildDiffLineRows（jsdiff diffLines + added/removed/unchanged 逐行 + trailing newline 剔除）②DiffLineList 行级高亮（--cp-success-soft +/--cp-danger-soft -/unchanged + data-diff-kind + useMemo）③DiffBody 5 降级分支（binary/oversize/current null/首版/previous null）④AdvancedVersionMeta（details 默认收起 + onToggle 懒加载 fetchLogicalFileVersions + loadedRef 单次 + seqRef 独立 race；技术字段 vN/hash前8/size/storage_kind 仅此区，SC-004 主视图 0）
+- [审查] 主 session：jsdiff trailing newline 处理对 + 降级分支完整 + Advanced 折叠 race 隔离 + 技术字段仅 Advanced；小观察 DiffLineList key=idx（静态渲染可接受）+ 较大文件（<256KB）全量 diff DOM（v0.1 可接受）
+- [验证] tsc 0 + FilesCenter 12 passed（+4 Phase4）+ 全 vitest 11 failed/174 = 0 regression（11 pre-existing 不变）
+- [偏离] 首版保留文案 + previous content=null 退回当前内容纯展示（FR-010 合理新增分支）
+- [T4.review] Phase 4 Codex review：0 high + 1 medium（FR-015 无差异分支缺失：相同内容被当普通 diff 渲染全 unchanged 行/空文件空面板，spec.md:190/:301 要求明确"无差异"提示）→ 委托子代理修：DiffBody 渲染 DiffLineList 前加 current.content===previous.content 无差异空态 + 补相同非空/空文件测试
+- [T4.review] 修复完成：无差异分支（FR-015，spec.md:301 [必须]）+ 2 测试（相同非空→无差异且无 data-diff-kind 行 / 两空文件→无差异）；0 high 无需单独 re-review（Final cross-Phase 覆盖）；FilesCenter 14 passed + 全 vitest 11 failed/176 = 0 regression + tsc 0 → commit Phase 4（含 diff 依赖）
