@@ -515,7 +515,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | **F110 语音 v0.1**（STT+TTS+voice session）| 完整 voice session | F093（Worker Full Session Parity）|
 | **F111 Behavior Compactor LLM 智能合并** | F063 Phase 3 推迟项；token 成本下降后做 | — |
 
-**M6 地基 sprint（先于 F105 执行）**——执行顺序 F114 ✅ →〔F115 / F116 / F112 / F123 可并行〕→ F113（待 F112）→ 然后 F105：
+**M6 地基 sprint（先于 F105 执行）**——执行顺序 F114 ✅ →〔F115 / F116 / F112 / F123 ✅ 可并行〕→ F113（待 F112）→ 然后 F105：
 
 | Feature | 类型/规模 | 目的（用户视角） |
 |---------|-----------|-----------------|
@@ -532,7 +532,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 **主动剔除（调研确认 skip）**：spec-as-source 代码再生、外部 durable-execution 引擎（LangGraph/Temporal，已 event-sourcing 更成熟）、AIOS。
 
 **M6 竞品源码深读增量（2026-06-08，workflow 深读 vendored Hermes/OpenClaw/Agent Zero/Pydantic AI/Claude Code + 反向验证）**：
-- **新增 F123（fix 安全 S，独立可并入并行波）**：出站 SSRF 预检——`_validate_remote_url`(capability_pack.py:1836) 仅检 scheme+netloc + `follow_redirects=True` 无逐跳校验 → **LLM 可被诱导抓 169.254.169.254 偷云凭证 / 302 进内网**（Hermes 对比 confirmed HIGH 真缺陷）。升级 ipaddress + 私网/元数据黑名单 + 重定向钩子。F105 复用其校验层。
+- **F123 出站 SSRF 预检 ✅**（fix 安全 S）：新增 `harness/url_safety.py`——`ensure_url_safe`/`async_ensure_url_safe` 解析目标 IP 拦私网(RFC1918)/loopback/link-local/CGNAT/unspecified/multicast/reserved + 云元数据 always-block 地板（169.254.169.254 / ECS / Azure IMDS / 阿里云 / IPv4-mapped + NAT64 + 6to4 内嵌形态，开关也不放开）；`_fetch_browser_page` + `_search_web` 接入 + httpx request event-hook 逐跳重校验 302；`security.allow_private_urls` 开关（yaml mtime 失效缓存 + `OCTOAGENT_ALLOW_PRIVATE_URLS` env 覆盖，默认 false）。删旧 `_validate_remote_url`（仅检 scheme/netloc）。**已挡**：字面量内网/元数据、静态 DNS 解析到内网、302 绕内网、混淆 IP（依赖同 resolver）。**limitation**：DNS rebinding TOCTOU 需连接级 pinning（pre-flight 无法根治，列 M6/M7 egress 域）。Codex 2 轮 + 独立 Claude review，0 HIGH 残留。F105 复用其校验层。
 - **F105 设计输入（OpenClaw）**：channel plugin registry / ConversationBinding（**H1：所有平台收敛单一主 Agent，不指向不同 agentId**）/ last-route 出站解析 / per-job delivery+isolated / outbound delivery-queue。
 - **F108 设计输入**：tool 结果 context-scope scan（Hermes，与 F114 同源，引擎只接 memory 窄管道）/ 执行前 schema 校验 + 结构化 retry（Pydantic）/ artifact read-back + per-turn 预算（Hermes）/ tool_call_id 确定性 tail eviction + AmbientRuntime 时间戳挪出缓存前缀（Claude Code，零风险缓存收益）/ 决策环具名扩展缝（Agent Zero）。
 - **F106 设计输入**：plugin toggle/热重载/git（Agent Zero az-2，在现有 SkillDiscovery 上扩）。

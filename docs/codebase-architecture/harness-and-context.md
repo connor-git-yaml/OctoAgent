@@ -101,6 +101,29 @@ apps/gateway/src/octoagent/gateway/harness/
 - `WARN` → 由 GatewayToolBroker 触发 ApprovalGate（reversible+ 工具）
 - 通过 → dispatch
 
+### 2.7 出站 URL 安全 / SSRF 预检（Feature 123，harness/url_safety.py）
+
+ThreatScanner 管**入站**（memory 写入等），出站 web/browser 请求此前是裸 httpx
+（仅 `_validate_remote_url` 检 scheme/netloc）→ LLM 可被诱导抓内网 / 云元数据偷凭证。
+F123 新增 `harness/url_safety.py` 作出站方向的统一安全控制（与 ThreatScanner 同层兄弟）：
+
+- **入口**：`ensure_url_safe(url)` / `async_ensure_url_safe(url)`（后者 `asyncio.to_thread`
+  跑阻塞 DNS，不阻塞 event loop）；不安全抛 `UnsafeUrlError(RuntimeError)`（沿用既有
+  tool-error 事件路径，`is_error=True`）。
+- **chokepoint 收敛（Constitution C10）**：`web.fetch` / `browser.open` / `browser.navigate`
+  / `browser.act` 全经 `CapabilityPackService._fetch_browser_page`；该函数对初始 URL 预检 +
+  其 httpx client 挂 `event_hooks={"request":[_ssrf_request_hook]}`，对**每跳 302 目标**连接前
+  重校验。`_search_web` 同样接入（host 虽固定 DDG，defense-in-depth）。
+- **三层 IP 判定**：①云元数据 always-block 地板（169.254.169.254 / ECS / Azure IMDS /
+  阿里云 / IPv4-mapped / NAT64 / 6to4 内嵌形态——`allow_private_urls=true` 也拦）；②本机/内部
+  地址永远拦（loopback / link-local / multicast / unspecified / reserved）；③普通私网
+  （RFC1918 / benchmark / ULA / CGNAT）默认拦，仅 `allow_private_urls=true` 放行。
+- **开关 `security.allow_private_urls`**（默认 false）：env `OCTOAGENT_ALLOW_PRIVATE_URLS`
+  优先 → yaml（按 octoagent.yaml mtime 失效缓存，改 yaml 即时生效，无需重启）。
+- **fail-closed**：scheme 非法 / DNS 解析失败 / 空解析 / 解析异常一律拦。
+- **已知 limitation**：DNS rebinding（TOCTOU）需连接级 IP pinning（pre-flight 无法根治，
+  列 M6/M7 egress 域）；出站 tool 结果**内容**扫描属 F108。
+
 ## 3. Context 层组件
 
 ```

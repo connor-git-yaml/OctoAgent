@@ -491,6 +491,25 @@ class ChannelsConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# SecurityConfig — 安全策略块（F123 出站 URL SSRF）
+# ---------------------------------------------------------------------------
+
+
+class SecurityConfig(BaseModel):
+    """安全策略配置块。"""
+
+    allow_private_urls: bool = Field(
+        default=False,
+        description=(
+            "是否允许出站 web/browser 工具访问私网/内部 IP（默认 false，拦截 SSRF）。"
+            "仅在 DNS 把外域解析到内网/benchmark 段的特殊部署才置 true；"
+            "云元数据端点（169.254.169.254 等）即便置 true 也永远拦截。"
+            "可被环境变量 OCTOAGENT_ALLOW_PRIVATE_URLS 覆盖（优先级更高）。"
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # OctoAgentConfig — 统一配置根模型
 # ---------------------------------------------------------------------------
 
@@ -532,6 +551,10 @@ class OctoAgentConfig(BaseModel):
     channels: ChannelsConfig = Field(
         default_factory=ChannelsConfig,
         description="多渠道配置块",
+    )
+    security: SecurityConfig = Field(
+        default_factory=SecurityConfig,
+        description="安全策略配置块（出站 URL SSRF 等）",
     )
 
     @model_validator(mode="after")

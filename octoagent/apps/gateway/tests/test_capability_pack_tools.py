@@ -864,7 +864,14 @@ async def test_memory_recall_tool_returns_structured_recall_pack(
 
 async def test_browser_tools_persist_session_and_follow_clickable_refs(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # F123：把 example.com 的 DNS 解析 stub 成公网 IP，保持 hermetic（SSRF
+    # request hook 会对每个出站 URL 做 getaddrinfo，否则会引入真实网络依赖）。
+    from octoagent.gateway.harness import url_safety
+
+    monkeypatch.setattr(url_safety, "_resolve_host", lambda _h: ["93.184.216.34"])
+
     (
         store_group,
         _sse_hub,
@@ -983,6 +990,79 @@ async def test_browser_tools_persist_session_and_follow_clickable_refs(
         assert closed.is_error is False
         assert json.loads(closed.output)["closed"] is True
         assert json.loads(missing.output)["status"] == "missing"
+    finally:
+        await task_runner.shutdown()
+        await store_group.close()
+
+
+async def test_web_fetch_redirect_to_internal_blocked(
+    tmp_path: Path,
+) -> None:
+    """F123 AC-10：公网 URL 经 302 重定向到云元数据被 redirect hook 拦（is_error=True）。"""
+    (
+        store_group,
+        _sse_hub,
+        task_service,
+        _capability_pack,
+        delegation_plane,
+        task_runner,
+        tool_broker,
+    ) = await _build_runtime_services(tmp_path)
+
+    try:
+        task_id, created = await task_service.create_task(
+            NormalizedMessage(
+                text="请抓取页面",
+                idempotency_key="feature-123-ssrf-redirect",
+            )
+        )
+        assert created is True
+        plan = await delegation_plane.prepare_dispatch(
+            OrchestratorRequest(
+                task_id=task_id,
+                trace_id=f"trace-{task_id}",
+                user_text="请抓取页面",
+                worker_capability="llm_generation",
+                metadata={},
+            )
+        )
+        assert plan.dispatch_envelope is not None
+
+        broker_context = ExecutionContext(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            caller="worker:test",
+            permission_preset=PermissionPreset.NORMAL,
+        )
+
+        # 初始用字面量公网 IP（免 DNS）→ 302 跳到 AWS 元数据端点。
+        def handler(request: httpx.Request) -> httpx.Response:
+            if str(request.url) == "https://93.184.216.34/":
+                return httpx.Response(
+                    302,
+                    headers={"location": "http://169.254.169.254/latest/meta-data/"},
+                )
+            # 不应到达：重定向目标会被 hook 拦在发送前。
+            return httpx.Response(200, text="LEAKED", headers={"content-type": "text/plain"})
+
+        transport = httpx.MockTransport(handler)
+        real_async_client = httpx.AsyncClient
+
+        def client_factory(*args, **kwargs):
+            return real_async_client(*args, transport=transport, **kwargs)
+
+        with patch(
+            "octoagent.gateway.services.capability_pack.httpx.AsyncClient",
+            new=client_factory,
+        ):
+            result = await tool_broker.execute(
+                "web.fetch",
+                {"url": "https://93.184.216.34/"},
+                broker_context,
+            )
+
+        assert result.is_error is True
+        assert "LEAKED" not in result.output  # 内网响应未被读取
     finally:
         await task_runner.shutdown()
         await store_group.close()

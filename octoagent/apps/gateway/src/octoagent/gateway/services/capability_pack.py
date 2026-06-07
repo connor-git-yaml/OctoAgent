@@ -42,6 +42,7 @@ from octoagent.core.models import (
     WorkStatus,
 )
 from octoagent.core.models.payloads import UserMessagePayload
+from octoagent.gateway.harness.url_safety import async_ensure_url_safe
 from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
 from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 from octoagent.skills import SkillDiscovery
@@ -67,6 +68,14 @@ from .execution_context import get_current_execution_context
 if TYPE_CHECKING:
     from .mcp_installer import McpInstallerService
     from .mcp_registry import McpRegistryService
+
+
+async def _ssrf_request_hook(request: httpx.Request) -> None:
+    """httpx request event-hook：对每个出站请求（含每跳 302 重定向目标）重跑
+    SSRF 校验。命中即抛 UnsafeUrlError 中断本次请求，阻止公网 URL 经重定向绕进内网。
+    """
+    await async_ensure_url_safe(str(request.url))
+
 
 class _WorkerPlanAssignment(BaseModel):
     objective: str = Field(min_length=1)
@@ -1833,14 +1842,6 @@ class CapabilityPackService:
     # F084 D1 根治后该函数仅是 ToolRegistry 的 thin wrapper，没有独立价值。
 
     @staticmethod
-    def _validate_remote_url(url: str) -> str:
-        normalized = url.strip()
-        parsed = urlparse(normalized)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise RuntimeError("url must be a valid http/https address")
-        return normalized
-
-    @staticmethod
     def _parse_browser_snapshot(
         base_url: str,
         html: str,
@@ -1858,10 +1859,13 @@ class CapabilityPackService:
         *,
         timeout_seconds: float = 30.0,
     ) -> _BrowserSessionState:
-        normalized_url = self._validate_remote_url(url)
+        # F123：出站 URL SSRF 预检（初始 URL）+ redirect hook 逐跳重校验，
+        # 防止 LLM 诱导抓内网/云元数据，或公网 URL 经 302 绕进内网。
+        normalized_url = await async_ensure_url_safe(url)
         async with httpx.AsyncClient(
             timeout=max(0.1, timeout_seconds),
             headers={"User-Agent": "OctoAgent Browser Tool/0.1"},
+            event_hooks={"request": [_ssrf_request_hook]},
         ) as client:
             response = await client.get(normalized_url, follow_redirects=True)
         html = response.text[:500_000]  # 安全保底，LargeOutputHandler 按上下文比例统一管理
@@ -2005,7 +2009,13 @@ class CapabilityPackService:
             )
         }
 
-        async with httpx.AsyncClient(timeout=max(0.1, timeout_seconds), headers=headers) as client:
+        # F123：搜索 host 虽固定（DuckDuckGo，非 LLM 可控），仍挂 redirect hook
+        # 逐跳重校验，保持单一硬化出站路径（defense-in-depth）。
+        async with httpx.AsyncClient(
+            timeout=max(0.1, timeout_seconds),
+            headers=headers,
+            event_hooks={"request": [_ssrf_request_hook]},
+        ) as client:
             for search_url in search_urls:
                 try:
                     response = await client.get(

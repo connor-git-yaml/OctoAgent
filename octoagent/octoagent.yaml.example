@@ -97,3 +97,12 @@ front_door:
   trusted_proxy_cidrs:
     - 127.0.0.1/32
     - ::1/128
+
+# 安全策略 — 出站网络等
+# allow_private_urls:
+#   false（默认）：拦截 web.fetch / browser.* 访问私网/内部 IP（防 SSRF）。
+#   true：仅在 DNS 把外域解析到内网/benchmark 段的特殊部署才置 true。
+#   ⚠️ 云元数据端点（169.254.169.254 等）即便 true 也【永远】拦截。
+#   可被环境变量 OCTOAGENT_ALLOW_PRIVATE_URLS 覆盖（优先级更高）。
+security:
+  allow_private_urls: false
