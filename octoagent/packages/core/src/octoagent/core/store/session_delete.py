@@ -87,6 +87,11 @@ async def delete_session_cascade(
             await stores.artifact_store.delete_artifacts_by_task_ids(task_ids)
         )
         stats["events"] = await stores.event_store.delete_events_by_task_ids(task_ids)
+        # F116：清 notification_active + 关联 dismissals，否则删除后重启 rehydrate 复活
+        # stale 通知（含 payload 用户数据）。
+        stats["notification_active"] = (
+            await stores.notification_store.delete_by_task_ids(task_ids)
+        )
         stats["tasks"] = await stores.task_store.delete_tasks(task_ids)
         stats["agent_sessions"] = (
             await stores.agent_context_store.delete_agent_sessions_by_ids(

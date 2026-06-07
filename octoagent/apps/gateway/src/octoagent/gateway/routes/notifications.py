@@ -60,12 +60,23 @@ async def dismiss_notification(
         notification_id: 通知 ID（sha256 前 16 位）
 
     Returns:
-        JSON 对象：{"ok": true, "notification_id": "..."}
+        JSON 对象：{"ok": true, "notification_id": "...", "persisted": bool}
+        persisted=False 表示 dismiss 仅内存生效未 durable 落盘（F116 Codex H1：
+        不谎报 durable 成功；前端可据此提示降级 / 由用户重试）。
     """
     notification_service = _get_notification_service(request)
     if notification_service is None:
         # NotificationService 不可用时仍返回 200（Constitution #6 降级）
-        return JSONResponse({"ok": True, "notification_id": notification_id, "note": "service_unavailable"})
+        return JSONResponse(
+            {
+                "ok": True,
+                "notification_id": notification_id,
+                "persisted": False,
+                "note": "service_unavailable",
+            }
+        )
 
-    notification_service.dismiss(notification_id, source="web")
-    return JSONResponse({"ok": True, "notification_id": notification_id})
+    persisted = await notification_service.dismiss(notification_id, source="web")
+    return JSONResponse(
+        {"ok": True, "notification_id": notification_id, "persisted": bool(persisted)}
+    )

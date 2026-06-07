@@ -14,6 +14,7 @@ from .agent_context_store import SqliteAgentContextStore
 from .artifact_store import SqliteArtifactStore
 from .checkpoint_store import SqliteCheckpointStore
 from .event_store import SqliteEventStore
+from .notification_store import SqliteNotificationStore
 from .project_store import SqliteProjectStore
 from .side_effect_ledger_store import SqliteSideEffectLedgerStore
 from .sqlite_init import init_db
@@ -61,6 +62,8 @@ class StoreGroup:
         self.agent_context_store = SqliteAgentContextStore(conn)
         self.a2a_store = SqliteA2AStore(conn)
         self.work_store = SqliteWorkStore(conn)
+        # F116：通知 dismiss/active 持久化（NotificationService rehydrate 用）
+        self.notification_store = SqliteNotificationStore(conn)
 
     async def close(self) -> None:
         """关闭主连接 + versionable 独立写连接（幂等，suppress 已关闭异常）。
@@ -123,6 +126,7 @@ __all__ = [
     "SqliteTaskStore",
     "SqliteTaskJobStore",
     "SqliteEventStore",
+    "SqliteNotificationStore",
     "SqliteArtifactStore",
     "SqliteCheckpointStore",
     "SqliteSideEffectLedgerStore",

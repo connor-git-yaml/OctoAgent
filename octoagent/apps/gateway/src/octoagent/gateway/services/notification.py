@@ -216,6 +216,7 @@ class NotificationService:
         *,
         snapshot_store: Any | None = None,
         event_store: Any | None = None,
+        notification_store: Any | None = None,
     ) -> None:
         """初始化 NotificationService。
 
@@ -224,6 +225,8 @@ class NotificationService:
                 若为 None，active_hours 降级为 None（全时段推送）。
             event_store: EventStore 实例，用于写审计事件（H4 discard 审计链）。
                 若为 None，跳过 event_store 写入（Constitution #6 降级）。
+            notification_store: F116 SqliteNotificationStore 实例，用于 dismiss/active
+                跨重启持久化。若为 None，dismiss/active 仅内存（baseline 行为，降级）。
         """
         self._channels: list[NotificationChannelProtocol] = []
         # 通知去重集合：存储 notification_id（sha256 前 16 位），FR-B8
@@ -234,6 +237,8 @@ class NotificationService:
         self._snapshot_store = snapshot_store
         # H-6：event_store 注入（discard 审计链）
         self._event_store = event_store
+        # F116：notification_store 注入（dismiss/active 持久化）
+        self._notification_store = notification_store
         # H-4：存储 notification 元数据供 list_active 使用（session_id → list）
         self._active_notifications: dict[str, list[dict[str, Any]]] = {}
 
@@ -244,6 +249,39 @@ class NotificationService:
     def bind_event_store(self, event_store: Any) -> None:
         """延迟绑定 event_store（bootstrap 顺序修复）。"""
         self._event_store = event_store
+
+    def bind_notification_store(self, notification_store: Any) -> None:
+        """延迟绑定 notification_store（F116 bootstrap 顺序）。"""
+        self._notification_store = notification_store
+
+    async def rehydrate(self) -> None:
+        """从 notification_store 恢复 dismiss/active 状态（F116 跨重启）。
+
+        bootstrap 构造 NotificationService 后调用一次。store 为 None 或读取失败时
+        降级为空（等价 baseline 全内存行为，Constitution #6），不阻断启动。
+        """
+        if self._notification_store is None:
+            return
+        try:
+            self._dismissed_set = await self._notification_store.list_dismissed()
+            self._active_notifications = await self._notification_store.list_active_all()
+            # Codex H2：去重集合 _notified_set 也必须从持久化状态恢复，否则重启后
+            # 同一 task/event 被恢复流程 / 重试 / monitor 再次 notify 时，dedup 命中失败
+            # → 重复落 active + 重复推 channel（用户收到重复 Telegram/SSE）。用已落盘的
+            # active + dismissed notification_id 作为「曾经派发过」的种子（quiet-hours 被
+            # 过滤、从未推送的 id 不在此列，重启后允许在 active 时段重新派发，符合预期）。
+            self._notified_set = set(self._dismissed_set)
+            for entries in self._active_notifications.values():
+                for entry in entries:
+                    self._notified_set.add(entry["notification_id"])
+            log.info(
+                "notification_rehydrated",
+                dismissed_count=len(self._dismissed_set),
+                active_sessions=len(self._active_notifications),
+                notified_seed=len(self._notified_set),
+            )
+        except Exception:
+            log.warning("notification_rehydrate_failed", exc_info=True)
 
     def register_channel(self, channel: NotificationChannelProtocol) -> None:
         """注册通知渠道。"""
@@ -259,15 +297,22 @@ class NotificationService:
         """已注册的渠道数量。"""
         return len(self._channels)
 
-    def dismiss(self, notification_id: str, source: str = "unknown") -> None:
-        """幂等 dismiss（FR-B5 / AC-B6）。
+    async def dismiss(self, notification_id: str, source: str = "unknown") -> bool:
+        """幂等 dismiss（FR-B5 / AC-B6）+ F116 best-effort 持久化。
 
         同一 notification_id 第二次 dismiss 不报错，直接返回。
         dismiss 语义：Web 下次刷新不再显示；Telegram 已推送消息不撤回。
 
-        Args:
-            notification_id: 通知 ID（sha256 前 16 位）
-            source: dismiss 来源（"web", "telegram", "unknown"）
+        F116 持久化语义（best-effort + 降级，非保证 durable）：先更新内存集合
+        （保证 is_dismissed 同步读立即可见），再尝试落盘 notification_store。
+        - store 为 None（未配置持久层）→ 返回 False（内存生效，但不 durable）。
+        - 落盘抛异常（DB locked / 磁盘满）→ WARNING + 返回 False（内存仍生效，不 crash
+          用户操作，Constitution #6 降级）。调用方据返回值向用户暴露 degraded 状态，
+          不谎报 durable 成功（Codex H1）。重复 dismiss 即天然重试路径。
+        - 落盘成功 → 返回 True（已 durable）。
+
+        Returns:
+            True 表示已 durable 落盘；False 表示仅内存生效（无持久层或落盘失败）。
         """
         self._dismissed_set.add(notification_id)
         log.debug(
@@ -275,6 +320,19 @@ class NotificationService:
             notification_id=notification_id,
             source=source,
         )
+        if self._notification_store is None:
+            return False
+        try:
+            await self._notification_store.record_dismissal(notification_id, source)
+            return True
+        except Exception:
+            log.warning(
+                "notification_dismiss_persist_failed",
+                notification_id=notification_id,
+                source=source,
+                exc_info=True,
+            )
+            return False
 
     def is_dismissed(self, notification_id: str) -> bool:
         """检查通知是否已 dismiss。"""
@@ -292,7 +350,7 @@ class NotificationService:
         entries = self._active_notifications.get(session_id, [])
         return [e for e in entries if e["notification_id"] not in self._dismissed_set]
 
-    def _record_active(
+    async def _record_active(
         self,
         session_id: str | None,
         notification_id: str,
@@ -301,7 +359,11 @@ class NotificationService:
         priority: "NotificationPriority",
         payload: dict[str, Any],
     ) -> None:
-        """记录通知到 _active_notifications（供 list_active 使用）。"""
+        """记录通知到 _active_notifications（供 list_active 使用）+ F116 落盘。
+
+        session_id 为 None 时不记录（list_active 按 session 查询）。
+        落盘失败时静默降级（Constitution #6），内存语义不变。
+        """
         if session_id is None:
             return
         entry = {
@@ -315,6 +377,17 @@ class NotificationService:
         if session_id not in self._active_notifications:
             self._active_notifications[session_id] = []
         self._active_notifications[session_id].append(entry)
+        # F116：持久化 active 通知（rehydrate 用）。store entry 额外带 session_id。
+        if self._notification_store is not None:
+            try:
+                await self._notification_store.record_active({**entry, "session_id": session_id})
+            except Exception:
+                log.warning(
+                    "notification_active_persist_failed",
+                    notification_id=notification_id,
+                    session_id=session_id,
+                    exc_info=True,
+                )
 
     def _read_active_hours(self) -> str | None:
         """从 USER.md live state 读取 active_hours（FR-B4 SoT）。
@@ -518,6 +591,20 @@ class NotificationService:
             task_id, event_type, state_transition_event_id
         )
 
+        # Codex H2：已 dismiss 的通知绝不再次派发（dispatch 不能只靠 _notified_set，
+        # 因重启后该集合即便已 seed，也可能漏掉边界 id；显式查 _dismissed_set 兜底，
+        # 保证用户关掉的状态变更通知不会因任何重放而重现到 Telegram/SSE/Web）。
+        # 仅作用于 state_change（LOW/MED/HIGH）；approval 走 notify_approval_request
+        # 不受此 guard 影响（CRITICAL 审批待办需可重新浮现）。
+        if notification_id in self._dismissed_set:
+            log.debug(
+                "notification_skipped_already_dismissed",
+                task_id=task_id,
+                event_type=event_type,
+                notification_id=notification_id,
+            )
+            return
+
         # 去重检查（FR-B8：按 notification_id 去重）
         if notification_id in self._notified_set:
             log.debug(
@@ -561,7 +648,7 @@ class NotificationService:
             return
 
         # H-4：记录到 _active_notifications（供 Web list_active）
-        self._record_active(
+        await self._record_active(
             session_id=session_id,
             notification_id=notification_id,
             task_id=task_id,
@@ -654,7 +741,7 @@ class NotificationService:
             return
 
         # H-4：记录到 _active_notifications（供 Web list_active）
-        self._record_active(
+        await self._record_active(
             session_id=session_id,
             notification_id=notification_id,
             task_id=task_id,

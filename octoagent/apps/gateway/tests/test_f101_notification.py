@@ -220,22 +220,24 @@ async def test_notify_approval_request_called_on_waiting_approval() -> None:
 # ============================================================
 
 
-def test_dismiss_idempotent() -> None:
+@pytest.mark.asyncio
+async def test_dismiss_idempotent() -> None:
     """AC-B6：同一 notification_id 两次 dismiss → 第二次不报错，is_dismissed 返回 True。"""
     svc = NotificationService()
 
-    svc.dismiss("notif-001")
+    await svc.dismiss("notif-001")
     assert svc.is_dismissed("notif-001") is True
 
     # 第二次 dismiss 不抛异常
-    svc.dismiss("notif-001")
+    await svc.dismiss("notif-001")
     assert svc.is_dismissed("notif-001") is True
 
 
-def test_dismiss_does_not_affect_other_notifications() -> None:
+@pytest.mark.asyncio
+async def test_dismiss_does_not_affect_other_notifications() -> None:
     """dismiss 一条通知不影响其他通知。"""
     svc = NotificationService()
-    svc.dismiss("notif-A")
+    await svc.dismiss("notif-A")
 
     assert svc.is_dismissed("notif-A") is True
     assert svc.is_dismissed("notif-B") is False
@@ -447,7 +449,7 @@ async def test_m4_3_dismiss_approval_not_affect_completion() -> None:
     assert approval_id != completion_id, "approval 和 completion 应有不同 notification_id"
 
     # dismiss approval notification
-    svc.dismiss(approval_id, source="telegram")
+    await svc.dismiss(approval_id, source="telegram")
     assert svc.is_dismissed(approval_id) is True
 
     # completion notification 的 id 未被 dismiss
@@ -484,7 +486,7 @@ async def test_h3_telegram_dismiss_then_web_list_active_filtered() -> None:
     assert expected_id in notification_ids, "通知应出现在 list_active 中"
 
     # Telegram dismiss
-    svc.dismiss(expected_id, source="telegram")
+    await svc.dismiss(expected_id, source="telegram")
 
     # dismiss 后 list_active 不返回该 id
     notifications_after = svc.list_active(session_id)
@@ -512,7 +514,7 @@ async def test_h3_web_dismiss_persists_same_session() -> None:
     expected_id = generate_notification_id("task-h3-web", "TASK_COMPLETED", "evt-h3-web-001")
 
     # Web dismiss
-    svc.dismiss(expected_id, source="web")
+    await svc.dismiss(expected_id, source="web")
 
     # 同 session list_active 不返回
     notifications = svc.list_active(session_id)

@@ -183,6 +183,36 @@ _MEMORY_EXTRACTION_LEDGER_INDEXES = [
     ),
 ]
 
+# Feature 116: 通知 dismiss / active 跨重启持久化。
+# 两表无 task FK——通知是 UI 状态，notification_id 为 sha256 派生，不绑 task 生命周期
+# （对齐 memory_extraction_ledger 无 FK 设计）。CREATE ... IF NOT EXISTS 对老库幂等补表。
+_NOTIFICATION_DISMISSALS_DDL = """
+CREATE TABLE IF NOT EXISTS notification_dismissals (
+    notification_id  TEXT PRIMARY KEY,
+    source           TEXT NOT NULL DEFAULT 'unknown',
+    dismissed_at     TEXT NOT NULL
+);
+"""
+
+_NOTIFICATION_ACTIVE_DDL = """
+CREATE TABLE IF NOT EXISTS notification_active (
+    notification_id    TEXT PRIMARY KEY,
+    session_id         TEXT NOT NULL,
+    task_id            TEXT NOT NULL,
+    notification_type  TEXT NOT NULL,
+    priority           TEXT NOT NULL,
+    payload            TEXT NOT NULL DEFAULT '{}',
+    created_at         TEXT NOT NULL
+);
+"""
+
+_NOTIFICATION_ACTIVE_INDEXES = [
+    (
+        "CREATE INDEX IF NOT EXISTS idx_notification_active_session "
+        "ON notification_active(session_id);"
+    ),
+]
+
 # Feature 025: projects/workspaces/bindings/migration_runs
 _PROJECTS_DDL = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -1696,6 +1726,8 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_SNAPSHOT_RECORDS_DDL)
     await conn.execute(_OBSERVATION_CANDIDATES_DDL)
     await conn.execute(_MEMORY_EXTRACTION_LEDGER_DDL)
+    await conn.execute(_NOTIFICATION_DISMISSALS_DDL)
+    await conn.execute(_NOTIFICATION_ACTIVE_DDL)
     await _migrate_legacy_tables(conn)
 
     # 创建索引
@@ -1714,6 +1746,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _SNAPSHOT_RECORDS_INDEXES
         + _OBSERVATION_CANDIDATES_INDEXES
         + _MEMORY_EXTRACTION_LEDGER_INDEXES
+        + _NOTIFICATION_ACTIVE_INDEXES
     ):
         await conn.execute(idx_sql)
 

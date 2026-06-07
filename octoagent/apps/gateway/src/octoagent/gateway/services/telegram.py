@@ -773,10 +773,10 @@ class TelegramGatewayService:
                 )
             return TelegramIngestResult(status="blocked", detail="invalid_dismiss_callback")
 
-        # 调用 notification_service.dismiss（若可用）
+        # 调用 notification_service.dismiss（若可用）。F116：dismiss 改 async（落盘）。
         if self._notification_service is not None:
             with contextlib.suppress(Exception):
-                self._notification_service.dismiss(notification_id, source="telegram")
+                await self._notification_service.dismiss(notification_id, source="telegram")
 
         # 应答 callback query（移除 inline keyboard）
         with contextlib.suppress(Exception):

@@ -963,6 +963,12 @@ class OctoHarness:
                         chat_id=_tg_chat_id,
                     )
                     _notification_service.register_channel(_tg_ch)
+            # F116：绑定 notification_store + rehydrate（dismiss/active 跨重启恢复）。
+            # store 缺失或 rehydrate 失败时降级（Constitution #6），不阻断 bootstrap。
+            _notif_store = getattr(store_group, "notification_store", None)
+            if _notif_store is not None:
+                _notification_service.bind_notification_store(_notif_store)
+                await _notification_service.rehydrate()
             app.state.notification_service = _notification_service
         except Exception as _exc:
             _log.warning("notification_service_init_skipped", error=str(_exc))

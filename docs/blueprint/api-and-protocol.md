@@ -150,7 +150,8 @@ PartTypeMapping:
 
 - `GET /api/notifications?session_id=...`：list_active（自动过滤 dismissed）
   - 返回：notifications 数组（含 `notification_id` / `priority` / `task_id` / `notification_type` / `created_at` / `dismissed`）
-- `POST /api/notifications/{notification_id}/dismiss`：dismiss notification（跨通道统一 state）
+- `POST /api/notifications/{notification_id}/dismiss`：dismiss notification（跨通道统一 state + F116 跨重启持久化）
+  - 返回：`{ok, notification_id, persisted}`；`persisted=false` 表示仅内存生效未 durable 落盘（DB 故障降级，不升级为 500，前端可提示/重试，Constitution #6）
 - Web SSE：通过 SSEHub 推送 `NOTIFICATION_DISPATCHED` 事件给前端红点 badge
 
 #### `NotificationService.notify_task_state_change()` 签名
