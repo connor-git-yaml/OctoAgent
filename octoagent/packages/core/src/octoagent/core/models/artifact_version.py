@@ -45,6 +45,13 @@ class ArtifactVersionContent(BaseModel):
     availability: Literal["available", "unavailable"] = Field(
         description="内容可用性：unavailable 表示大文件副本已随主表/文件清理（FR-010 占位）",
     )
+    oversize: bool = Field(
+        default=False,
+        description=(
+            "内容存在但因超大被读前拦截省略（content=None + availability='available'，"
+            "区别于 unavailable 文件不存在）；FR-019/SC-005 后端真降级"
+        ),
+    )
     size: int = Field(default=0, description="内容大小（字节）")
     hash: str = Field(default="", description="SHA-256 哈希")
 

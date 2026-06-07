@@ -107,4 +107,11 @@
 - [T1.9] 用户拍板**折中**：
   - high#2 修复：O_EXCL 原子独占创建（_process_content exclusive 参数）+ owns_file 标记（仅本次独占创建成功才失败清理，O_EXCL 失败=他人文件不误删）+ test_existing_file_not_overwritten（既有 bytes 不变）
   - high#1 **归档**：mixed-writer 事务污染 = GATE_TASKS 拍板的实测驱动；真并发完全正确 = 连接级写锁架构 follow-up（超 v0.1），已记 plan §4 风险表 + spec SD-8 已知约束；T1.3 实测顺序队列 v0.1 不触发
-- [T1.10] Phase 1 收口：35 store/progress 测试绿 → 全回归 0 regression → commit
+- [T1.10] Phase 1 收口：commit 6fa4010（746 回归 0 regression + e2e_smoke 8/8 + 3 轮 review 闭环）
+
+### Phase 2（后端查询 + HTTP API）
+- [T2.1-T2.5] 委托 implement 子代理：4 查询方法 + routes/files.py 4 endpoint + main.py front-door 路由级鉴权；主响应无技术字段（FR-017/SC-004）+ binary/unavailable 语义分离 + 友好命名兜底；762 回归 0 regression + files.py 审查通过
+- [T2.6] Phase 2 Codex review：2 finding（[high] oversize 事后打标仍 read_bytes 全量读+返回超大内容 FR-019/SC-005 后端失效 / [medium] slash logical_file_id path 参数不匹配 diff/versions 路由）→ 委托子代理修：oversize 读前 size 元数据拦截 + logical_file_id path→query + 顺手清 Phase 1 6 E501（35 测试绿 + 768 回归 0 regression）
+- [T2.6] Phase 2 re-review round 2：2 finding（[high] oversize 短路在 storage_ref 文件存在检查之前→超大已删文件误报 available+oversize 而非 unavailable，混淆三态 / [medium] get_current_and_previous 一次性 SELECT content，超大 inline 已被 SQL 读入再标 oversize 非真拦截）→ 委托子代理修：storage_ref 先文件存在检查再 oversize（优先级）+ 两阶段查询（先元数据 size 判定，inline 未超阈值再懒加载 content）（39 测试 + 772 回归 0 regression）
+- [T2.6] Phase 2 re-review round 3：0 high + 1 medium（storage_ref oversize 信任陈旧 DB size，read_bytes 前未 stat 实际文件→TOCTOU/metadata stale 可绕过读前拦截 FR-019）→ 主 session 自改 stat 实际大小用 max(DB size, actual) 判 oversize + 委托子代理补 TOCTOU 测试（actual>db→oversize 不 read_bytes，spy read_bytes_called==0）+ 清 SIM105（contextlib.suppress）
+- [T2.7] Phase 2 收口：oversize 3 轮 review 收敛（high→high→medium，0 high 残留）；40 Phase2 测试（store 27 + endpoint 13）+ 773 全回归 0 regression + ruff All checks passed（src+测试）→ commit

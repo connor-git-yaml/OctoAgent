@@ -44,6 +44,7 @@ from .routes import (
     chat,
     control_plane,
     execution,
+    files,
     health,
     memory_candidates,
     message,
@@ -343,6 +344,7 @@ def create_app() -> FastAPI:
     app.include_router(message.router, tags=["message"], dependencies=protected)
     app.include_router(telegram.router, tags=["telegram"])
     app.include_router(tasks.router, tags=["tasks"], dependencies=protected)
+    app.include_router(files.router, tags=["files"], dependencies=protected)
     app.include_router(cancel.router, tags=["cancel"], dependencies=protected)
     app.include_router(execution.router, tags=["execution"], dependencies=protected)
     app.include_router(stream.router, tags=["stream"], dependencies=protected)

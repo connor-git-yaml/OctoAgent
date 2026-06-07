@@ -14,8 +14,8 @@ from pathlib import Path
 import aiosqlite
 import pytest
 import pytest_asyncio
-from octoagent.core.models import Artifact, ArtifactPart, PartType, RequesterInfo, Task
 from octoagent.core.config import ARTIFACT_INLINE_THRESHOLD
+from octoagent.core.models import Artifact, ArtifactPart, PartType, RequesterInfo, Task
 from octoagent.core.store.artifact_store import SqliteArtifactStore
 from octoagent.core.store.sqlite_init import init_db
 from octoagent.core.store.task_store import SqliteTaskStore
@@ -77,10 +77,15 @@ class TestVersionAppend:
         lfid = "progress-note:step_1"
         for i in range(3):
             art = _make_artifact(f"01JART_V{i}_0000000000000001", f"内容版本{i}")
-            await store.put_artifact(art, f"内容版本{i}".encode(), versionable=True, logical_file_id=lfid)
+            await store.put_artifact(
+                art, f"内容版本{i}".encode(), versionable=True, logical_file_id=lfid
+            )
 
         cursor = await conn.execute(
-            "SELECT version_no FROM artifact_versions WHERE task_id = ? AND logical_file_id = ? ORDER BY version_no",
+            (
+                "SELECT version_no FROM artifact_versions "
+                "WHERE task_id = ? AND logical_file_id = ? ORDER BY version_no"
+            ),
             (TASK_ID, lfid),
         )
         rows = await cursor.fetchall()
@@ -109,7 +114,10 @@ class TestVersionAppend:
         await store.put_artifact(art, content.encode(), versionable=True, logical_file_id=lfid)
 
         cursor = await conn.execute(
-            "SELECT storage_kind, content, storage_ref, size, hash FROM artifact_versions WHERE logical_file_id = ?",
+            (
+                "SELECT storage_kind, content, storage_ref, size, hash "
+                "FROM artifact_versions WHERE logical_file_id = ?"
+            ),
             (lfid,),
         )
         row = await cursor.fetchone()
@@ -120,7 +128,8 @@ class TestVersionAppend:
         assert row["hash"]
 
     async def test_storage_ref_branch_stores_pointer(self, store_env):
-        """大文件 storage_ref → storage_kind='storage_ref' + content NULL + storage_ref/hash 非空。"""
+        """大文件 storage_ref → storage_kind='storage_ref' + content NULL
+        + storage_ref/hash 非空。"""
         store, conn, _, _ = store_env
         lfid = "progress-note:big"
         big = "x" * 5000  # > 4096 inline 阈值
@@ -128,7 +137,10 @@ class TestVersionAppend:
         await store.put_artifact(art, big.encode(), versionable=True, logical_file_id=lfid)
 
         cursor = await conn.execute(
-            "SELECT storage_kind, content, storage_ref, hash FROM artifact_versions WHERE logical_file_id = ?",
+            (
+                "SELECT storage_kind, content, storage_ref, hash "
+                "FROM artifact_versions WHERE logical_file_id = ?"
+            ),
             (lfid,),
         )
         row = await cursor.fetchone()
@@ -170,7 +182,10 @@ class TestVersionAppend:
         assert await _count_versions(conn, lfid) == 2
         # 主表对应 2 个 artifact
         cursor = await conn.execute(
-            "SELECT artifact_id FROM artifact_versions WHERE logical_file_id = ? ORDER BY version_no",
+            (
+                "SELECT artifact_id FROM artifact_versions "
+                "WHERE logical_file_id = ? ORDER BY version_no"
+            ),
             (lfid,),
         )
         rows = await cursor.fetchall()
@@ -314,7 +329,8 @@ class TestConnTransactionAndFileCleanup:
         assert not file_path.exists()
 
     async def test_existing_file_not_overwritten_on_versionable(self, store_env):
-        """re-review high：相同 artifact_id 大文件路径已存在 → versionable 拒绝（FileExistsError），既有 bytes 不变。"""
+        """re-review high：相同 artifact_id 大文件路径已存在
+        → versionable 拒绝（FileExistsError），既有 bytes 不变。"""
         store, conn, _, _ = store_env
         big1 = b"original" * (ARTIFACT_INLINE_THRESHOLD // 4)
         art1 = _make_artifact("01JART_DUP_00000000000001", "")
@@ -329,3 +345,323 @@ class TestConnTransactionAndFileCleanup:
         with pytest.raises(FileExistsError):
             await store.put_artifact(art2, big2, versionable=True, logical_file_id="lf:dup")
         assert file_path.read_bytes() == original_bytes  # 既有文件 bytes 不变
+
+
+class TestVersionQueries:
+    """F104 Phase 2 T2.2：4 个版本查询方法 unit 测 + FR-010 占位。"""
+
+    async def _write_versions(self, store, lfid: str, contents: list[str]) -> None:
+        from ulid import ULID
+
+        for c in contents:
+            art = _make_artifact(str(ULID()), c)
+            await store.put_artifact(
+                art, c.encode(), versionable=True, logical_file_id=lfid
+            )
+
+    async def test_list_versions_ordering(self, store_env):
+        """list_versions 按 version_no DESC, ts DESC 排序。"""
+        store, _, _, _ = store_env
+        lfid = "progress-note:list_a"
+        await self._write_versions(store, lfid, ["v1", "v2", "v3"])
+        versions = await store.list_versions(TASK_ID, lfid)
+        assert [v.version_no for v in versions] == [3, 2, 1]
+        # 元信息齐全
+        assert all(v.storage_kind == "inline" for v in versions)
+        assert all(v.size > 0 and v.hash for v in versions)
+
+    async def test_get_current_and_previous_two_versions(self, store_env):
+        """get_current_and_previous：返回当前版（最大）+ 上一版（次大）内容。"""
+        store, _, _, _ = store_env
+        lfid = "progress-note:cp_b"
+        await self._write_versions(store, lfid, ["旧内容", "新内容"])
+        current, previous = await store.get_current_and_previous(TASK_ID, lfid)
+        assert current is not None and current.version_no == 2
+        assert current.content == "新内容"
+        assert current.availability == "available"
+        assert previous is not None and previous.version_no == 1
+        assert previous.content == "旧内容"
+
+    async def test_get_current_and_previous_single_version(self, store_env):
+        """< 2 版本 → previous=None。"""
+        store, _, _, _ = store_env
+        lfid = "progress-note:cp_c"
+        await self._write_versions(store, lfid, ["唯一版本"])
+        current, previous = await store.get_current_and_previous(TASK_ID, lfid)
+        assert current is not None and current.version_no == 1
+        assert previous is None
+
+    async def test_get_current_and_previous_no_version(self, store_env):
+        """逻辑文件不存在 → (None, None)。"""
+        store, _, _, _ = store_env
+        current, previous = await store.get_current_and_previous(TASK_ID, "nope:x")
+        assert current is None and previous is None
+
+    async def test_storage_ref_file_deleted_availability_unavailable(self, store_env):
+        """FR-010：storage_ref 文件被删 → availability='unavailable' 不抛异常。"""
+        store, conn, artifacts_dir, _ = store_env
+        lfid = "progress-note:del_d"
+        big = "y" * 5000  # > 4KB → storage_ref
+        art = _make_artifact("01JART_DELD_0000000000001", big)
+        await store.put_artifact(art, big.encode(), versionable=True, logical_file_id=lfid)
+        # 删除底层文件
+        file_path = store._get_artifact_path(TASK_ID, art.artifact_id)
+        assert file_path.exists()
+        file_path.unlink()
+        # 不抛异常，占位 unavailable
+        current, _ = await store.get_current_and_previous(TASK_ID, lfid)
+        assert current is not None
+        assert current.storage_kind == "storage_ref"
+        assert current.availability == "unavailable"
+        assert current.content is None
+
+    async def test_storage_ref_file_present_available(self, store_env):
+        """storage_ref 文件存在且 UTF-8 → availability='available' + content 可取回。"""
+        store, _, _, _ = store_env
+        lfid = "progress-note:big_e"
+        big = "数据" * 2000  # > 4KB UTF-8
+        art = _make_artifact("01JART_BIGE_0000000000001", big)
+        await store.put_artifact(art, big.encode(), versionable=True, logical_file_id=lfid)
+        current, _ = await store.get_current_and_previous(TASK_ID, lfid)
+        assert current is not None
+        assert current.storage_kind == "storage_ref"
+        assert current.availability == "available"
+        assert current.content == big
+
+    async def test_oversize_blocked_before_read(self, store_env, monkeypatch):
+        """Codex Phase2 high / FR-019/SC-005：size 超 max_content_bytes → 读前拦截。
+
+        storage_ref 大文件不调用 read_bytes（用 size 元数据短路），oversize=True +
+        content=None + availability='available'（内容存在但因超大省略）。
+        """
+        from pathlib import Path
+
+        store, _, _, _ = store_env
+        lfid = "progress-note:oversize_h"
+        # 写 2 版 > 4KB 的 storage_ref 文件
+        big = "数" * 5000  # > 4KB UTF-8 → storage_ref
+        await self._write_versions(store, lfid, [big + "a", big + "b"])
+
+        # 监控 read_bytes 是否被调用：读前拦截命中时不应被调用
+        read_bytes_called = {"n": 0}
+        orig_read_bytes = Path.read_bytes
+
+        def _spy_read_bytes(self: Path):  # type: ignore[no-untyped-def]
+            read_bytes_called["n"] += 1
+            return orig_read_bytes(self)
+
+        monkeypatch.setattr(Path, "read_bytes", _spy_read_bytes)
+
+        # max_content_bytes 设为远小于内容 size → 读前拦截两侧
+        current, previous = await store.get_current_and_previous(
+            TASK_ID, lfid, max_content_bytes=1024
+        )
+        assert current is not None
+        assert current.oversize is True
+        assert current.content is None
+        assert current.availability == "available"
+        assert current.storage_kind == "storage_ref"
+        assert previous is not None
+        assert previous.oversize is True
+        assert previous.content is None
+        # 关键断言：读前拦截命中，根本不 read_bytes 超大文件
+        assert read_bytes_called["n"] == 0
+
+    async def test_under_threshold_still_reads(self, store_env):
+        """max_content_bytes 给定但 size 未超阈值 → 正常读取，oversize=False。"""
+        store, _, _, _ = store_env
+        lfid = "progress-note:under_i"
+        await self._write_versions(store, lfid, ["小内容a", "小内容b"])
+        current, _ = await store.get_current_and_previous(
+            TASK_ID, lfid, max_content_bytes=256 * 1024
+        )
+        assert current is not None
+        assert current.oversize is False
+        assert current.content == "小内容b"
+        assert current.availability == "available"
+
+    async def test_oversize_storage_ref_deleted_reports_unavailable_not_oversize(
+        self, store_env
+    ):
+        """Codex Phase2 re-review high：超大 storage_ref 文件被删 → unavailable 优先于 oversize。
+
+        FR-010 优先于 oversize：文件存在检查在 oversize 拦截之前，已被清理的超大文件
+        应报 availability='unavailable' + oversize=False，不误报 available+oversize。
+        """
+        store, _, _, _ = store_env
+        lfid = "progress-note:oversize_del_j"
+        big = "数" * 5000  # > 4KB UTF-8 → storage_ref
+        art = _make_artifact("01JART_OVDEL_000000000001", big)
+        await store.put_artifact(
+            art, big.encode(), versionable=True, logical_file_id=lfid
+        )
+        # 删除底层文件（模拟清理）
+        file_path = store._get_artifact_path(TASK_ID, art.artifact_id)
+        assert file_path.exists()
+        file_path.unlink()
+        # max_content_bytes 远小于 size：若顺序错会误报 oversize；正确应先报 unavailable
+        current, _ = await store.get_current_and_previous(
+            TASK_ID, lfid, max_content_bytes=1024
+        )
+        assert current is not None
+        assert current.storage_kind == "storage_ref"
+        assert current.availability == "unavailable"
+        assert current.oversize is False
+        assert current.content is None
+
+    async def test_stale_db_size_uses_actual_file_size_for_oversize(
+        self, store_env, monkeypatch
+    ):
+        """Codex Phase2 round3 medium / TOCTOU：DB size 小（<=max）但磁盘实际文件 >max →
+        以 max(DB size, 实际 size) 判 oversize，跳过 read_bytes 不全量读超大文件。
+
+        防御陈旧 DB size：版本写入后文件被替换/扩大（DB size 未同步），若仅按 DB size
+        判定会绕过读前拦截把超大文件全量读进 Python（FR-019/SC-005）。
+        """
+        from pathlib import Path
+
+        store, conn, _, _ = store_env
+        lfid = "progress-note:stale_size_m"
+        # 写一个 storage_ref 版本（> 4KB → storage_ref 落盘）
+        big = "数" * 5000  # > 4KB UTF-8
+        art = _make_artifact("01JART_STALE_000000000001", big)
+        await store.put_artifact(
+            art, big.encode(), versionable=True, logical_file_id=lfid
+        )
+        file_path = store._get_artifact_path(TASK_ID, art.artifact_id)
+        assert file_path.exists()
+
+        # 制造陈旧 DB size：把版本行 size 改小到 <= max_content_bytes 阈值
+        small_max = 1024
+        await conn.execute(
+            "UPDATE artifact_versions SET size = ? WHERE task_id = ? AND logical_file_id = ?",
+            (10, TASK_ID, lfid),
+        )
+        await conn.commit()
+        # 同时把磁盘实际文件改写为远超阈值的超大内容（TOCTOU：文件被替换扩大）
+        huge = ("巨" * 100000).encode()  # 远 > small_max
+        assert len(huge) > small_max
+        file_path.write_bytes(huge)
+
+        # spy read_bytes：以实际 size 判 oversize 命中时不应被调用
+        read_bytes_called = {"n": 0}
+        orig_read_bytes = Path.read_bytes
+
+        def _spy_read_bytes(self: Path):  # type: ignore[no-untyped-def]
+            read_bytes_called["n"] += 1
+            return orig_read_bytes(self)
+
+        monkeypatch.setattr(Path, "read_bytes", _spy_read_bytes)
+
+        current, _ = await store.get_current_and_previous(
+            TASK_ID, lfid, max_content_bytes=small_max
+        )
+        assert current is not None
+        assert current.storage_kind == "storage_ref"
+        # DB size 小但实际文件大 → effective_size=max(10, len(huge)) 超阈 → oversize 拦截
+        assert current.oversize is True
+        assert current.content is None
+        assert current.availability == "available"
+        # 关键断言：超大实际文件未被全量读取（TOCTOU 防御生效）
+        assert read_bytes_called["n"] == 0
+
+    async def test_inline_oversize_skips_content_column_query(
+        self, store_env, monkeypatch
+    ):
+        """Codex Phase2 re-review medium：inline 超大 → 两阶段懒加载不取 content 列。
+
+        第一阶段元数据判定 size>max → content=None + oversize=True，根本不执行含 content 的
+        SELECT（读前拦截，不把超大 inline content 拉进 Python）。
+        """
+        store, conn, _, _ = store_env
+        lfid = "progress-note:inline_over_k"
+        # inline（< 4KB threshold）但构造小 max_content_bytes 使其超阈值
+        await self._write_versions(store, lfid, ["小a" * 50, "小b" * 50])
+
+        # spy conn.execute：统计含 content 列的 SELECT 次数
+        content_selects = {"n": 0}
+        orig_execute = conn.execute
+
+        def _spy_execute(sql, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if "content" in sql.lower() and "select" in sql.lower():
+                content_selects["n"] += 1
+            return orig_execute(sql, *args, **kwargs)
+
+        monkeypatch.setattr(conn, "execute", _spy_execute)
+
+        current, previous = await store.get_current_and_previous(
+            TASK_ID, lfid, max_content_bytes=4
+        )
+        assert current is not None
+        assert current.storage_kind == "inline"
+        assert current.oversize is True
+        assert current.content is None
+        assert current.availability == "available"
+        assert previous is not None
+        assert previous.oversize is True
+        assert previous.content is None
+        # 关键断言：超大 inline 读前拦截 → 第二阶段 content 列查询根本不执行
+        assert content_selects["n"] == 0
+
+    async def test_inline_under_threshold_lazy_loads_content(
+        self, store_env, monkeypatch
+    ):
+        """两阶段懒加载正向：inline size<=max → 第二阶段确实执行 content 列查询并取回内容。"""
+        store, conn, _, _ = store_env
+        lfid = "progress-note:inline_lazy_l"
+        await self._write_versions(store, lfid, ["内容a", "内容b"])
+
+        content_selects = {"n": 0}
+        orig_execute = conn.execute
+
+        def _spy_execute(sql, *args, **kwargs):  # type: ignore[no-untyped-def]
+            if "content" in sql.lower() and "select" in sql.lower():
+                content_selects["n"] += 1
+            return orig_execute(sql, *args, **kwargs)
+
+        monkeypatch.setattr(conn, "execute", _spy_execute)
+
+        current, previous = await store.get_current_and_previous(
+            TASK_ID, lfid, max_content_bytes=256 * 1024
+        )
+        assert current is not None
+        assert current.content == "内容b"
+        assert current.oversize is False
+        assert previous is not None
+        assert previous.content == "内容a"
+        # 两版各一次第二阶段 content 列查询
+        assert content_selects["n"] == 2
+
+    async def test_list_versionable_files_only_multi_version(self, store_env):
+        """SD-4：list_versionable_files_for_task 只返回 version count >= 2 的逻辑文件。"""
+        store, _, _, _ = store_env
+        await self._write_versions(store, "progress-note:multi_f", ["a", "b", "c"])
+        await self._write_versions(store, "progress-note:single_g", ["only"])
+        summaries = await store.list_versionable_files_for_task(TASK_ID)
+        lfids = {s.logical_file_id for s in summaries}
+        assert "progress-note:multi_f" in lfids
+        assert "progress-note:single_g" not in lfids
+        multi = next(s for s in summaries if s.logical_file_id == "progress-note:multi_f")
+        assert multi.version_count == 3
+
+    async def test_list_tasks_with_versionable_files(self, store_env):
+        """list_tasks_with_versionable_files 只含有 version>=2 逻辑文件的 task。"""
+        store, conn, _, _ = store_env
+        # 另建一个只有单版本逻辑文件的 task
+        other_task = "01JTEST_VER_00000000000002"
+        await _make_task(conn, other_task)
+        await self._write_versions(store, "progress-note:multi_h", ["a", "b"])
+        # other_task 单版本
+        art = Artifact(
+            artifact_id="01JART_OTHER_000000000001",
+            task_id=other_task,
+            ts=datetime.now(UTC),
+            name="doc",
+            parts=[ArtifactPart(type=PartType.TEXT, content="single")],
+        )
+        await store.put_artifact(
+            art, b"single", versionable=True, logical_file_id="progress-note:lone_i"
+        )
+        tasks = await store.list_tasks_with_versionable_files()
+        assert TASK_ID in tasks
+        assert other_task not in tasks

@@ -8,6 +8,7 @@ logical_file_id=...)` 时，在自包含事务内同步写一行 artifact_versio
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import os
@@ -20,6 +21,11 @@ import structlog
 
 from ..config import ARTIFACT_INLINE_THRESHOLD
 from ..models.artifact import Artifact, ArtifactPart
+from ..models.artifact_version import (
+    ArtifactVersionContent,
+    ArtifactVersionMeta,
+    LogicalFileSummary,
+)
 from ..models.enums import ActorType, EventType
 from ..models.event import Event
 from ..models.payloads import ArtifactVersionAppendFailedPayload
@@ -195,9 +201,11 @@ class SqliteArtifactStore:
                 )
             owns_file = False
             try:
-                # 文件写 + 主表/版本 INSERT 全在 try 内：任何失败 rollback + 清理本次独占创建的文件。
-                # [Codex Phase1 high#2] versionable 大文件 O_EXCL 原子独占创建（已存在 raise FileExistsError，
-                # 不覆盖既有/防 TOCTTOU）；仅 O_EXCL 成功后标记 owns_file，失败清理只删本次独占创建的。
+                # 文件写 + 主表/版本 INSERT 全在 try 内：
+                # 任何失败 rollback + 清理本次独占创建的文件。
+                # [Codex Phase1 high#2] versionable 大文件 O_EXCL 原子独占创建
+                # （已存在 raise FileExistsError，不覆盖既有/防 TOCTTOU）；
+                # 仅 O_EXCL 成功后标记 owns_file，失败清理只删本次独占创建的。
                 self._process_content(artifact, content, exclusive=True)
                 if written_file_path is not None:
                     owns_file = True
@@ -255,7 +263,8 @@ class SqliteArtifactStore:
                         await self._conn.execute("RELEASE sp_ver")
                         break
                     except aiosqlite.IntegrityError:
-                        # UNIQUE(task_id, logical_file_id, version_no) 冲突 → 撤版本 INSERT、保留主表行重试
+                        # UNIQUE(task_id, logical_file_id, version_no) 冲突
+                        # → 撤版本 INSERT、保留主表行重试
                         await self._conn.execute("ROLLBACK TO sp_ver")
                         if attempt == MAX_VERSION_RETRY - 1:
                             raise
@@ -266,10 +275,8 @@ class SqliteArtifactStore:
                 # [Codex Phase1 high#2] 仅清理本次 O_EXCL 独占创建的文件（owns_file）——O_EXCL 失败
                 # （文件已存在=别的 writer）时 owns_file=False，不误删他人文件。
                 if owns_file and written_file_path is not None:
-                    try:
+                    with contextlib.suppress(OSError):
                         written_file_path.unlink(missing_ok=True)
-                    except OSError:
-                        pass
                 await self._emit_version_append_failed(
                     task_id=artifact.task_id,
                     logical_file_id=logical_file_id,
@@ -418,7 +425,9 @@ class SqliteArtifactStore:
             return []
         placeholders = ",".join("?" * len(task_ids))
         cursor = await self._conn.execute(
-            f"SELECT storage_ref FROM artifacts WHERE task_id IN ({placeholders}) AND storage_ref IS NOT NULL AND storage_ref != ''",
+            "SELECT storage_ref FROM artifacts "
+            f"WHERE task_id IN ({placeholders}) "
+            "AND storage_ref IS NOT NULL AND storage_ref != ''",
             tuple(task_ids),
         )
         rows = await cursor.fetchall()
@@ -453,3 +462,233 @@ class SqliteArtifactStore:
         cursor = await self._conn.execute("SELECT changes()")
         row = await cursor.fetchone()
         return int(row[0]) if row else 0
+
+    # ------------------------------------------------------------------
+    # F104 Phase 2：版本查询方法（FR-006~FR-010）
+    # ------------------------------------------------------------------
+
+    async def list_versions(
+        self, task_id: str, logical_file_id: str
+    ) -> list[ArtifactVersionMeta]:
+        """FR-006：按逻辑文件 key 取版本列表（版本号 + 元信息，不含大内容）。
+
+        ORDER BY version_no DESC, ts DESC（ts 兜底排序）。
+        """
+        cursor = await self._conn.execute(
+            """
+            SELECT version_no, ts, size, hash, storage_kind
+            FROM artifact_versions
+            WHERE task_id = ? AND logical_file_id = ?
+            ORDER BY version_no DESC, ts DESC
+            """,
+            (task_id, logical_file_id),
+        )
+        rows = await cursor.fetchall()
+        return [
+            ArtifactVersionMeta(
+                version_no=int(row[0]),
+                ts=row[1],
+                size=int(row[2]) if row[2] is not None else 0,
+                hash=row[3] or "",
+                storage_kind=row[4],
+            )
+            for row in rows
+        ]
+
+    async def get_current_and_previous(
+        self,
+        task_id: str,
+        logical_file_id: str,
+        max_content_bytes: int | None = None,
+    ) -> tuple[ArtifactVersionContent | None, ArtifactVersionContent | None]:
+        """FR-007：取当前版（MAX version_no）与上一版（次大）内容。
+
+        inline → 读 content 列；storage_ref → 读文件，文件不存在/被清理 →
+        availability='unavailable' 占位（FR-010），不抛异常。
+        < 2 版本 → previous=None。
+
+        max_content_bytes：读前 oversize 拦截阈值（FR-019/SC-005）。两阶段懒加载：
+        第一阶段只取元数据（不含 content 列），按 size + storage_kind 判定；
+        - inline size>max：oversize=True + content=None，**不执行 content 列查询**；
+        - inline size<=max：第二阶段懒加载 content 列；
+        - storage_ref：先做文件存在检查（FR-010 优先于 oversize），不存在 → unavailable，
+          存在 + size>max → oversize=True 跳过 read_bytes，存在 + size<=max → 读取内容。
+        """
+        # 第一阶段：只取元数据，不取 content 列（避免超大 inline content 被拉进 Python）。
+        cursor = await self._conn.execute(
+            """
+            SELECT version_id, version_no, storage_kind, storage_ref, size, hash
+            FROM artifact_versions
+            WHERE task_id = ? AND logical_file_id = ?
+            ORDER BY version_no DESC, ts DESC
+            LIMIT 2
+            """,
+            (task_id, logical_file_id),
+        )
+        rows = await cursor.fetchall()
+        if not rows:
+            return None, None
+        current = await self._meta_row_to_version_content(
+            rows[0], max_content_bytes=max_content_bytes
+        )
+        previous = (
+            await self._meta_row_to_version_content(
+                rows[1], max_content_bytes=max_content_bytes
+            )
+            if len(rows) >= 2
+            else None
+        )
+        return current, previous
+
+    async def _load_inline_content(self, version_id: str) -> str | None:
+        """第二阶段懒加载：按 version_id 单独查询 inline content 列。"""
+        cursor = await self._conn.execute(
+            "SELECT content FROM artifact_versions WHERE version_id = ?",
+            (version_id,),
+        )
+        row = await cursor.fetchone()
+        if row is None:
+            return None
+        return row[0]
+
+    async def _meta_row_to_version_content(
+        self,
+        row: aiosqlite.Row,
+        max_content_bytes: int | None = None,
+    ) -> ArtifactVersionContent:
+        """将第一阶段元数据行（不含 content）转换为 ArtifactVersionContent，含 FR-010 占位逻辑。
+
+        三态判定优先级（不互相混淆）：
+        - storage_ref：**先做文件存在检查**（FR-010），文件不存在/非法 → content=None +
+          availability='unavailable' + oversize=False（FR-010 优先于 oversize）；
+          文件存在 + size>max → oversize=True 跳过 read_bytes；
+          文件存在 + size<=max → read_bytes → decode（UTF-8 成功 available+content /
+          非 UTF-8 available+content=None=binary，FR-018）。
+        - inline：size>max → oversize=True + content=None（不执行 content 列查询）；
+          size<=max → 第二阶段懒加载 content 列，availability='available'。
+        """
+        version_id = row[0]
+        version_no = int(row[1])
+        storage_kind = row[2]
+        storage_ref = row[3]
+        size = int(row[4]) if row[4] is not None else 0
+        hash_hex = row[5] or ""
+
+        content: str | None = None
+        availability = "available"
+        oversize = False
+
+        if storage_kind == "storage_ref":
+            # FR-010 优先于 oversize：先做文件存在检查，已被清理的超大文件应报 unavailable。
+            file_path = (
+                self._resolve_storage_ref(storage_ref) if storage_ref else None
+            )
+            if file_path is None or not file_path.exists() or not file_path.is_file():
+                # 文件不存在/非法 → 不可用占位（FR-010），oversize=False
+                content = None
+                availability = "unavailable"
+            else:
+                # 文件存在：read_bytes 前 stat 实际大小，用 max(DB size, 实际 size) 判 oversize。
+                # 避免陈旧 DB size（文件写入后被替换/扩大、TOCTOU）按低 size 绕过读前拦截
+                # 全量读入超大文件（Codex Phase2 round3 medium，FR-019/SC-005）。
+                try:
+                    actual_size = file_path.stat().st_size
+                except OSError:
+                    # stat 失败（文件刚被删/IO 异常）→ 不可用占位（FR-010），不抛异常
+                    content = None
+                    availability = "unavailable"
+                else:
+                    effective_size = max(size, actual_size)
+                    if (
+                        max_content_bytes is not None
+                        and effective_size > max_content_bytes
+                    ):
+                        # 记录或实际大小超阈 → 读前拦截，跳过 read_bytes（FR-019/SC-005）
+                        content = None
+                        availability = "available"
+                        oversize = True
+                    else:
+                        try:
+                            raw = file_path.read_bytes()
+                        except OSError:
+                            # 文件读 IO 失败 → 内容不可用占位（FR-010），不抛异常
+                            content = None
+                            availability = "unavailable"
+                        else:
+                            try:
+                                content = raw.decode("utf-8")
+                                availability = "available"
+                            except UnicodeDecodeError:
+                                # 非 UTF-8（二进制大文件）→ 文件可用但无文本，
+                                # content=None + availability='available'，
+                                # 上层据此预判 binary（FR-018）。
+                                content = None
+                                availability = "available"
+        else:
+            # inline：读前 oversize 拦截用 size 元数据短路（FR-019/SC-005）。
+            if max_content_bytes is not None and size > max_content_bytes:
+                # 超大 → 不执行 content 列查询，content=None + oversize=True
+                content = None
+                availability = "available"
+                oversize = True
+            else:
+                # 未超阈值 → 第二阶段懒加载 content 列
+                content = await self._load_inline_content(version_id)
+                availability = "available"
+
+        return ArtifactVersionContent(
+            version_no=version_no,
+            content=content,
+            storage_kind=storage_kind,
+            availability=availability,
+            oversize=oversize,
+            size=size,
+            hash=hash_hex,
+        )
+
+    async def list_versionable_files_for_task(
+        self, task_id: str
+    ) -> list[LogicalFileSummary]:
+        """FR-008 第二级：列出该 task 下 version count >= 2 的逻辑文件（SD-4 过滤）。
+
+        单版本逻辑文件不返回（SC-006 完全隐藏）。按 logical_file_id 升序稳定排序。
+        """
+        cursor = await self._conn.execute(
+            """
+            SELECT logical_file_id, COUNT(*) AS version_count
+            FROM artifact_versions
+            WHERE task_id = ?
+            GROUP BY logical_file_id
+            HAVING COUNT(*) >= 2
+            ORDER BY logical_file_id ASC
+            """,
+            (task_id,),
+        )
+        rows = await cursor.fetchall()
+        return [
+            LogicalFileSummary(
+                logical_file_id=row[0],
+                version_count=int(row[1]),
+            )
+            for row in rows
+        ]
+
+    async def list_tasks_with_versionable_files(self) -> list[str]:
+        """FR-008 第一级（SD-7 两级导航第一级）：列出有 >=2 版本逻辑文件的 task_id 清单。
+
+        只返回至少含一个 version count >= 2 逻辑文件的 task（DISTINCT）。
+        """
+        cursor = await self._conn.execute(
+            """
+            SELECT DISTINCT task_id
+            FROM (
+                SELECT task_id, logical_file_id
+                FROM artifact_versions
+                GROUP BY task_id, logical_file_id
+                HAVING COUNT(*) >= 2
+            )
+            ORDER BY task_id ASC
+            """
+        )
+        rows = await cursor.fetchall()
+        return [row[0] for row in rows]
