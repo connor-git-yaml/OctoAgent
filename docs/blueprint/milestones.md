@@ -515,11 +515,11 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | **F110 语音 v0.1**（STT+TTS+voice session）| 完整 voice session | F093（Worker Full Session Parity）|
 | **F111 Behavior Compactor LLM 智能合并** | F063 Phase 3 推迟项；token 成本下降后做 | — |
 
-**M6 地基 sprint（先于 F105 执行，2026-06-07 拍板）**——执行顺序 F114 → F115 → F116 → F112 → F113 → 然后 F105：
+**M6 地基 sprint（先于 F105 执行）**——执行顺序 F114 ✅ →〔F115 / F116 / F112 / F123 可并行〕→ F113（待 F112）→ 然后 F105：
 
 | Feature | 类型/规模 | 目的（用户视角） |
 |---------|-----------|-----------------|
-| **F114** threat_scanner 假 0 修复 | fix S | OctoBench 2 task 直发 chat 不触发 threat scan → 永 FAIL 污染 M5↔M6 对比；改诱导 memory 写入 + 断言 `MEMORY_ENTRY_BLOCKED`。**跑 M6 对比前硬前置** |
+| **F114** threat_scanner 假 0 修复 ✅（d2936e0）| fix S | 已修双重假 0（断言路径 + scorer 取数遗漏）；L1 确定性 PASS。L2 DeepSeek FAIL 属控变量画像非 bug |
 | **F115** daily_routine 时区接入 USER.md | fix S | 时区只读 env，用户在 USER.md（SoT）改时区对 routine 零影响——直接 UX 缺陷 |
 | **F116** notification dismiss 持久化 | fix S | dismiss 纯内存，重启后已读通知重现——违反 Constitution #1 Durability，用户可感知 |
 | **F112** 双轨死代码清理 | refactor S | 删 F090→F100 metadata↔runtime_context 残渣 + WORKER_PRIVATE 废弃路径，行为零变更 |
@@ -530,6 +530,15 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 **调研可吸收点（架构层，作 F108/F105 设计输入，非新 Feature）**：prefix-cache 工具侧不变量（工具集稳定排序 + policy-deny 不删 schema，⚠️ 不照搬 logit_bias）；大工具输出无损卸载为 artifact 引用（落 tool 回写路径，底座 artifact_store）；Google A2A 状态机 gap audit + agent card 式 capability 自描述（F105 借鉴，不照搬 wire protocol）。
 
 **主动剔除（调研确认 skip）**：spec-as-source 代码再生、外部 durable-execution 引擎（LangGraph/Temporal，已 event-sourcing 更成熟）、AIOS。
+
+**M6 竞品源码深读增量（2026-06-08，workflow 深读 vendored Hermes/OpenClaw/Agent Zero/Pydantic AI/Claude Code + 反向验证）**：
+- **新增 F123（fix 安全 S，独立可并入并行波）**：出站 SSRF 预检——`_validate_remote_url`(capability_pack.py:1836) 仅检 scheme+netloc + `follow_redirects=True` 无逐跳校验 → **LLM 可被诱导抓 169.254.169.254 偷云凭证 / 302 进内网**（Hermes 对比 confirmed HIGH 真缺陷）。升级 ipaddress + 私网/元数据黑名单 + 重定向钩子。F105 复用其校验层。
+- **F105 设计输入（OpenClaw）**：channel plugin registry / ConversationBinding（**H1：所有平台收敛单一主 Agent，不指向不同 agentId**）/ last-route 出站解析 / per-job delivery+isolated / outbound delivery-queue。
+- **F108 设计输入**：tool 结果 context-scope scan（Hermes，与 F114 同源，引擎只接 memory 窄管道）/ 执行前 schema 校验 + 结构化 retry（Pydantic）/ artifact read-back + per-turn 预算（Hermes）/ tool_call_id 确定性 tail eviction + AmbientRuntime 时间戳挪出缓存前缀（Claude Code，零风险缓存收益）/ 决策环具名扩展缝（Agent Zero）。
+- **F106 设计输入**：plugin toggle/热重载/git（Agent Zero az-2，在现有 SkillDiscovery 上扩）。
+- **M7**：文件系统 checkpoint/rollback（Hermes，亦 F107 输入）；用户/Agent 自助 proactive cron（OC-5，后端 CRUD 已在缺工具+UI，F102 同域）；skill 自改进闭环（sleep-time 同期）。
+- **剔除**：Pydantic typed deps DI（已有 ToolDeps+ExecutionRuntimeContext）/ Claude Code 细分 failure hook（走 event-sourcing）/ Agent Zero 自改写规则（违 #4/#7）。
+- **待核查**：`behavior.write_file` 的 `confirmed=true` LLM 自填未接 ApprovalGate，疑似自确认绕过人审，需实测。
 
 **不进 M5/M6 的项**：071b Slice D 高层工具暴露（命中"不需要 Codex review 的微改"，空闲间隙顺手做）；Agent Zero Extensions / Instruments 系统（规模 ≥ 1 个月，放 M7 评估）；front-door 公网暴露 / 多用户 / 团队 / 家庭模式（Blueprint §0 已锁单用户深度）；Companion（原 F105，推 M7）。
 **M7 追加（2026-06-07 调研）**：sleep-time compute 后台记忆巩固（Letta，底层组件已齐但独立能力域，与 F111 同期，需强 model 验证）；Serena 式 LSP/符号级 Python 代码理解（先外挂 MCP dogfood 评估）。
