@@ -34,14 +34,16 @@
 
 ### Daily Routine 偏好
 
-<!-- F102 Proactive Followup FR-D1：机器可读字段，供 DailyRoutineService 解析 -->
+<!-- F102 FR-D1 + F115：机器可读字段，供 DailyRoutineService 解析 -->
 <!-- daily_summary_time: "HH:MM"，每日 active hours 内自动推送昨日 Worker 摘要的时间，默认 08:30 -->
 <!-- routine_active: "true" / "false"，是否启用 daily routine，默认 true -->
 <!-- summary_channels: 逗号分隔 "telegram" / "web" / "telegram,web"，默认全渠道 -->
+<!-- user_timezone: IANA 名（如 Asia/Shanghai），缺失/非法降级 env OCTOAGENT_USER_TIMEZONE → UTC -->
 <!-- 注意：daily_summary_time 落在 quiet hours 内时通知会被 discard 不补发，建议落在 active hours 内 -->
 - **daily_summary_time**: "08:30"
 - **routine_active**: "true"
 - **summary_channels**: "telegram,web"
+- **user_timezone**: （留空，或填 IANA 名如 "Asia/Shanghai"）
 
 ---
 

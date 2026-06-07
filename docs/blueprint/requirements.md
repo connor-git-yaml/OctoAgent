@@ -224,8 +224,8 @@
   - 9 步执行：触发 → check `routine_active` → 加载 USER.md 配置 → check timezone → 查 yesterday tasks → 聚合 attention/failed/worker_count → LLM 摘要（cheap alias）/fallback 模板 → check quiet hours → emit notification
   - LLM token budget 截断：`max_input ≤ 2000 字符` + `max_output ≤ 512 token`；attention task 详情优先 → succeeded task title-only → "... 以及 N 个其他完成任务"
   - 4 EventType（`ROUTINE_TRIGGERED / ROUTINE_COMPLETED / ROUTINE_FAILED / ROUTINE_SKIPPED`）挂在 `_daily_routine_audit` task
-  - 时区语义（SD-10）：用户本地"昨日"边界 → UTC 归一化 → SQLite created_at 比较；`task_store.list_tasks_in_time_range` 方法
-  - USER.md 机器可读字段：`daily_summary_time` / `routine_active` / `summary_channels`（`"telegram,web"` 含 `"web"→"web_sse"` 映射）
+  - 时区语义（SD-10 / F115）：用户本地"昨日"边界 → UTC 归一化 → SQLite created_at 比较；`task_store.list_tasks_in_time_range` 方法。生效时区按 USER.md `user_timezone` > env `OCTOAGENT_USER_TIMEZONE` > `UTC` 降级（每次读 config 时从 USER.md 派生，不再 `__init__` env-only 缓存）
+  - USER.md 机器可读字段（F115 起 4 个）：`daily_summary_time` / `routine_active` / `summary_channels`（`"telegram,web"` 含 `"web"→"web_sse"` 映射）/ `user_timezone`（IANA 名，缺失/非法降级 env→UTC）
   - 与 F101 NotificationService 集成：`notify_task_state_change(channels=summary_channels)`（F102 引入 channels 可选参数，向后兼容）
   - LLM 不可用时 deterministic fallback（1s 内完成）
 

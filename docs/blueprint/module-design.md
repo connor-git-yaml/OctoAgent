@@ -97,7 +97,7 @@ octoagent/
 - `MemoryService`：read/write arbitration；F094 引入 `AGENT_PRIVATE` namespace（Worker 路径生效）；F096 引入 `list_recall_frames` audit endpoint + `MEMORY_RECALL_COMPLETED` 同步路径 emit
 - `SchedulerService`：APScheduler wrapper，定时任务触发 → 创建 Task（UC1 例行任务）
 - `NotificationService`（F101 新增）：四级优先级（CRITICAL/HIGH/MEDIUM/LOW）+ quiet hours discard + dismiss 跨通道统一 + USER.md SoT；`NOTIFICATION_DISPATCHED` EventType 记录每条 notification（含 quiet hours 内被过滤的）；Telegram callback + Web `/api/notifications` endpoint
-- `DailyRoutineService`（F102 新增）：cron 触发 + 9 步执行 + LLM/fallback 双路径（LLM token budget 截断 max_input ≤ 2000 字符 + max_output ≤ 512 token）；4 EventType（ROUTINE_TRIGGERED/COMPLETED/FAILED/SKIPPED）挂在 `_daily_routine_audit` task；USER.md 3 机器可读字段（daily_summary_time / routine_active / summary_channels）
+- `DailyRoutineService`（F102 新增）：cron 触发 + 9 步执行 + LLM/fallback 双路径（LLM token budget 截断 max_input ≤ 2000 字符 + max_output ≤ 512 token）；4 EventType（ROUTINE_TRIGGERED/COMPLETED/FAILED/SKIPPED）挂在 `_daily_routine_audit` task；USER.md 4 机器可读字段（daily_summary_time / routine_active / summary_channels / user_timezone[F115]，时区按 USER.md > env OCTOAGENT_USER_TIMEZONE > UTC 降级，每次读 config 派生不缓存）
 - `OrchestratorService` D7 拆分（F098）：`A2ADispatchMixin` 提取到 `dispatch_service.py`（15 helpers / 972 行），orchestrator.py 3623→2733 行（-890）
 
 ### 9.5 workers/*

@@ -117,16 +117,31 @@ class DailyRoutineService:
         self._provider_router = provider_router
         self._started: bool = False
         self._cron_registered: bool = False
-        # spec NFR-3 SD-10：用户时区解析顺序：
-        #   1. 环境变量 OCTOAGENT_USER_TIMEZONE（部署侧配置，最高优先级）
-        #   2. fallback "UTC"
-        # 注：USER.md 当前没有机器可读 timezone 字段（"时区/地点"是人类可读），
-        # 后续 Feature 可加 user_timezone 字段从 USER.md 解析覆盖此值
-        self._user_timezone: str = self._resolve_user_timezone()
+        # F115：生效时区不再在 __init__ 缓存 env-only 值，改为每次读 config 时由
+        # _resolve_user_timezone(config.user_timezone) 从 USER.md 派生（降级 env → UTC）。
+        # 消除了原 self._user_timezone 这个 stale 缓存（USER.md 改时区永不生效的根因）。
 
     @staticmethod
-    def _resolve_user_timezone() -> str:
-        """解析 user timezone（环境变量优先 + zoneinfo 合法性校验，fallback UTC）。"""
+    def _resolve_user_timezone(user_md_tz: str | None = None) -> str:
+        """解析生效时区，降级链 USER.md → env → UTC（F115 / spec NFR-3 SD-10）。
+
+        优先级（"USER.md is SoT"）：
+          1. USER.md 机器可读 user_timezone 字段（已由
+             ``extract_user_timezone_from_user_md`` zoneinfo 校验，非 None 即合法）
+          2. 环境变量 OCTOAGENT_USER_TIMEZONE（部署侧覆盖兜底）
+          3. ``"UTC"``（最终默认）
+
+        契约：``user_md_tz`` 唯一合法来源是 ``DailyRoutineConfig.user_timezone``
+        （已校验）；无参调用退化为原 env → UTC 行为（向后兼容现有用例）。
+
+        Args:
+            user_md_tz: USER.md 解析出的合法 IANA 名，或 ``None``（未提供）
+
+        Returns:
+            生效 IANA 时区名
+        """
+        if user_md_tz:
+            return user_md_tz
         candidate = os.environ.get("OCTOAGENT_USER_TIMEZONE", "").strip()
         if not candidate:
             return "UTC"
@@ -156,19 +171,20 @@ class DailyRoutineService:
             logger.exception("daily_routine_audit_task_ensure_failed")
             # 不阻塞 startup，继续尝试注册 cron
 
-        # 读 USER.md 获取 daily_summary_time + user timezone（NFR-3）
+        # 读 USER.md 获取 daily_summary_time + user timezone（NFR-3 / F115）
         config = self._read_config()
+        effective_tz = self._resolve_user_timezone(config.user_timezone)
 
         # FR-B1：注册 cron job
         try:
-            self._register_cron(config)
+            self._register_cron(config, effective_tz)
             self._cron_registered = True
             logger.info(
                 "daily_routine_started",
                 job_id=DAILY_ROUTINE_JOB_ID,
                 cron_expr=config.to_crontab(),
                 routine_active=config.routine_active,
-                timezone=self._user_timezone,
+                timezone=effective_tz,
             )
         except asyncio.CancelledError:
             raise
@@ -218,8 +234,10 @@ class DailyRoutineService:
                 return
 
             # Step 4：计算昨日 UTC 时间窗 + 查询 task 列表
+            # F115：时区每次从重读的 config 派生（USER.md 改时区下次触发即生效，无需重启）
+            effective_tz = self._resolve_user_timezone(config.user_timezone)
             yesterday_start_utc, yesterday_end_utc, yesterday_date_str = (
-                self._compute_yesterday_range_utc(run_started_ts)
+                self._compute_yesterday_range_utc(run_started_ts, effective_tz)
             )
             tasks = await self._task_store.list_tasks_in_time_range(
                 yesterday_start_utc, yesterday_end_utc
@@ -522,19 +540,23 @@ class DailyRoutineService:
             return None
 
     def _compute_yesterday_range_utc(
-        self, now_utc: datetime
+        self, now_utc: datetime, user_timezone: str
     ) -> tuple[datetime, datetime, str]:
-        """按用户本地时区计算"昨日"窗口，转为 UTC datetime（spec SD-10）。
+        """按用户本地时区计算"昨日"窗口，转为 UTC datetime（spec SD-10 / F115）。
+
+        Args:
+            now_utc: 当前 UTC 时间
+            user_timezone: 生效 IANA 时区名（由 caller 经 _resolve_user_timezone 派生）
 
         Returns:
             (yesterday_start_utc, yesterday_end_utc, yesterday_date_str "YYYY-MM-DD")
         """
         try:
-            user_tz = zoneinfo.ZoneInfo(self._user_timezone)
+            user_tz = zoneinfo.ZoneInfo(user_timezone)
         except (zoneinfo.ZoneInfoNotFoundError, ValueError):
             logger.warning(
                 "daily_routine_user_timezone_invalid_fallback_utc",
-                user_timezone=self._user_timezone,
+                user_timezone=user_timezone,
             )
             user_tz = UTC
 
@@ -580,11 +602,11 @@ class DailyRoutineService:
             except Exception:
                 logger.exception("daily_routine_audit_task_commit_failed")
 
-    def _register_cron(self, config: DailyRoutineConfig) -> None:
-        """向 AutomationSchedulerService 注册 cron job（spec FR-B1）。"""
+    def _register_cron(self, config: DailyRoutineConfig, user_timezone: str) -> None:
+        """向 AutomationSchedulerService 注册 cron job（spec FR-B1 / F115）。"""
         cron_expr = config.to_crontab()
         try:
-            user_tz_zoneinfo = zoneinfo.ZoneInfo(self._user_timezone)
+            user_tz_zoneinfo = zoneinfo.ZoneInfo(user_timezone)
         except (zoneinfo.ZoneInfoNotFoundError, ValueError):
             user_tz_zoneinfo = UTC
 

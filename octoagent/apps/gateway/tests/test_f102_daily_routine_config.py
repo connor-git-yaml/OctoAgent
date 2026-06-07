@@ -24,6 +24,7 @@ from octoagent.gateway.services.daily_routine_config import (
     extract_daily_summary_time_from_user_md,
     extract_routine_active_from_user_md,
     extract_summary_channels_from_user_md,
+    extract_user_timezone_from_user_md,
 )
 
 
@@ -255,6 +256,87 @@ class TestSummaryChannelsParsing:
 
 
 # ============================================================
+# extract_user_timezone_from_user_md (F115 AC-5)
+# ============================================================
+
+
+class TestExtractUserTimezone:
+    """F115：user_timezone 机器可读字段解析（缺失/非法返回 None 交上层降级）。"""
+
+    def test_standard_list_format(self) -> None:
+        content = '- **user_timezone**: "Asia/Shanghai"'
+        assert extract_user_timezone_from_user_md(content) == "Asia/Shanghai"
+
+    def test_naked_value(self) -> None:
+        content = "user_timezone: America/New_York"
+        assert extract_user_timezone_from_user_md(content) == "America/New_York"
+
+    def test_multi_slash_iana_name(self) -> None:
+        """覆盖多斜杠 IANA 名（如 America/Argentina/Buenos_Aires）。"""
+        content = '- **user_timezone**: "America/Argentina/Buenos_Aires"'
+        assert (
+            extract_user_timezone_from_user_md(content)
+            == "America/Argentina/Buenos_Aires"
+        )
+
+    def test_etc_gmt_offset_name(self) -> None:
+        """覆盖含 +/数字 的 IANA 名（如 Etc/GMT+8）。"""
+        content = "user_timezone: Etc/GMT+8"
+        assert extract_user_timezone_from_user_md(content) == "Etc/GMT+8"
+
+    def test_missing_field_returns_none(self) -> None:
+        assert extract_user_timezone_from_user_md("no timezone here") is None
+
+    def test_none_content_returns_none(self) -> None:
+        assert extract_user_timezone_from_user_md(None) is None
+
+    def test_empty_string_returns_none(self) -> None:
+        assert extract_user_timezone_from_user_md("") is None
+
+    def test_invalid_timezone_returns_none(self) -> None:
+        """非法 IANA 名 → None（+ WARNING），交由 service 降级 env/UTC。"""
+        content = '- **user_timezone**: "Mars/Olympus_Mons"'
+        assert extract_user_timezone_from_user_md(content) is None
+
+    def test_comment_line_with_valid_example_is_skipped(self) -> None:
+        """关键：注释行里的合法时区示例（如文档注释）不被当作真实值误命中。
+
+        其他三字段靠占位符（非法值）天然规避，user_timezone 示例是真值，
+        extract 必须显式跳过 HTML 注释行（否则 premature return 漏掉真实 value 行）。
+        """
+        content = (
+            '<!-- user_timezone: 机器可读 IANA 名，如 "Asia/Shanghai" -->\n'
+            '- **user_timezone**: "Europe/London"'
+        )
+        assert extract_user_timezone_from_user_md(content) == "Europe/London"
+
+    def test_comment_only_no_value_line_returns_none(self) -> None:
+        """只有注释行（无真实 value 行）→ None（不取注释里的示例值）。"""
+        content = '<!-- user_timezone: 如 "Asia/Shanghai"，留空则降级 -->'
+        assert extract_user_timezone_from_user_md(content) is None
+
+    def test_placeholder_value_returns_none(self) -> None:
+        """USER.md 模板的占位文字（非 IANA 名）→ None → 降级 env/UTC。"""
+        content = "- **user_timezone**: （留空，或填 IANA 名如 \"Asia/Shanghai\"）"
+        assert extract_user_timezone_from_user_md(content) is None
+
+    def test_shipped_template_user_timezone_is_unset(self) -> None:
+        """出厂 USER.md 模板 user_timezone 必须解析为 None（占位符发布）。
+
+        守卫：模板不得硬编码具体时区——否则对所有新实例覆盖 env，
+        破坏 "USER.md 未填 → 降级 env/UTC" 的默认语义。
+        """
+        from importlib import resources
+
+        template = (
+            resources.files("octoagent.core.behavior_templates")
+            .joinpath("USER.md")
+            .read_text(encoding="utf-8")
+        )
+        assert extract_user_timezone_from_user_md(template) is None
+
+
+# ============================================================
 # AC-D4：全部字段缺失时整体行为
 # ============================================================
 
@@ -276,6 +358,42 @@ class TestAcD4AllFieldsMissing:
         assert cfg.daily_summary_time == DEFAULT_DAILY_SUMMARY_TIME
         assert cfg.routine_active is DEFAULT_ROUTINE_ACTIVE
         assert cfg.summary_channels == DEFAULT_SUMMARY_CHANNELS
+
+    def test_user_timezone_none_when_missing(self) -> None:
+        """F115：USER.md 无 user_timezone 字段时 config.user_timezone 为 None。"""
+        cfg = DailyRoutineConfig.from_user_md("")
+        assert cfg.user_timezone is None
+
+
+# ============================================================
+# F115 AC-6：DailyRoutineConfig 携带 user_timezone
+# ============================================================
+
+
+class TestConfigIncludesUserTimezone:
+    """F115：from_user_md 把解析到的 user_timezone 纳入 config。"""
+
+    def test_config_carries_valid_user_timezone(self) -> None:
+        content = (
+            '- **daily_summary_time**: "08:30"\n'
+            '- **user_timezone**: "Asia/Tokyo"'
+        )
+        cfg = DailyRoutineConfig.from_user_md(content)
+        assert cfg.user_timezone == "Asia/Tokyo"
+
+    def test_config_user_timezone_none_for_invalid(self) -> None:
+        content = '- **user_timezone**: "Not/AZone"'
+        cfg = DailyRoutineConfig.from_user_md(content)
+        assert cfg.user_timezone is None
+
+    def test_direct_construction_defaults_user_timezone_none(self) -> None:
+        """末位默认 None：既有直接构造（不传时区）零改动仍合法。"""
+        cfg = DailyRoutineConfig(
+            daily_summary_time="08:30",
+            routine_active=True,
+            summary_channels=DEFAULT_SUMMARY_CHANNELS,
+        )
+        assert cfg.user_timezone is None
 
 
 # ============================================================

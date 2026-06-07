@@ -520,7 +520,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | Feature | 类型/规模 | 目的（用户视角） |
 |---------|-----------|-----------------|
 | **F114** threat_scanner 假 0 修复 ✅（d2936e0）| fix S | 已修双重假 0（断言路径 + scorer 取数遗漏）；L1 确定性 PASS。L2 DeepSeek FAIL 属控变量画像非 bug |
-| **F115** daily_routine 时区接入 USER.md | fix S | 时区只读 env，用户在 USER.md（SoT）改时区对 routine 零影响——直接 UX 缺陷 |
+| **F115** daily_routine 时区接入 USER.md ✅ | fix S | 已修：USER.md 新增机器可读 `user_timezone` 字段，时区按 USER.md > env OCTOAGENT_USER_TIMEZONE > UTC 降级（每次读 config 派生，移除 `__init__` env-only stale 缓存）；cron 触发时刻 + "昨日"窗口现真正受 USER.md 控制 |
 | **F116** notification dismiss 持久化 | fix S | dismiss 纯内存，重启后已读通知重现——违反 Constitution #1 Durability，用户可感知 |
 | **F112** 双轨死代码清理 | refactor S | 删 F090→F100 metadata↔runtime_context 残渣 + WORKER_PRIVATE 废弃路径，行为零变更 |
 | **F113** agent_context.py 拆 mixin | refactor L | 4585 行，F093 抽错缝反涨；4 大职责簇拆 mixin（沿用 F093 范式）。最值钱重构，越晚越贵 |

@@ -1,12 +1,20 @@
 """F102 Proactive Followup — DailyRoutine 配置解析与 Payload schema。
 
 本模块包含：
-- USER.md 三个新字段的解析函数（spec FR-D2）：
+- USER.md 机器可读字段的解析函数（spec FR-D2 + F115 时区接入）：
   - extract_daily_summary_time_from_user_md → "HH:MM"
   - extract_routine_active_from_user_md → bool
   - extract_summary_channels_from_user_md → frozenset[str]
+  - extract_user_timezone_from_user_md → str | None（F115）
 - DailyRoutineConfig dataclass（spec FR-DI1 配置抽象）
 - Routine 事件 payload schema（spec FR-E2/E3）
+
+USER.md 机器可读字段清单（F102 handoff 洞察：USER.md 既有人类可读"时区/地点"，
+也需机器可读字段供运行时解析；二者并存）：
+- 通知偏好：active_hours（F101，NotificationService quiet hours）
+- Daily Routine：daily_summary_time / routine_active / summary_channels（F102）
+  + user_timezone（F115，本模块新增；缺失/非法时由 DailyRoutineService 降级
+  到 env OCTOAGENT_USER_TIMEZONE → UTC）
 
 设计要点（spec SD-1 + SD-6 + SD-10 + plan Phase A 实测）：
 - 解析函数所有非法值 fallback 到默认值 + WARNING log（Constitution C6 graceful degrade）
@@ -18,6 +26,7 @@
 from __future__ import annotations
 
 import re
+import zoneinfo
 from dataclasses import dataclass
 from typing import Final, Literal
 
@@ -102,6 +111,22 @@ _SUMMARY_CHANNELS_PATTERN = re.compile(
     \s*:\s*
     "?
     ([a-z][a-z_,\s]+)               # 逗号分隔 channel 名（小写 + _ + 逗号 + 空格）
+    "?
+    """,
+    re.VERBOSE,
+)
+
+# user_timezone 强制 key prefix（F115）。
+# 捕获 IANA 时区名字符集：字母 + 数字 + / + _ + + + -
+# （覆盖 "Asia/Shanghai" / "America/Argentina/Buenos_Aires" / "Etc/GMT+8" / "UTC"）。
+_USER_TIMEZONE_PATTERN = re.compile(
+    r"""
+    (?:\*\*)?
+    user_timezone                   # MUST 出现
+    (?:\*\*)?
+    \s*:\s*
+    "?
+    ([A-Za-z][A-Za-z0-9_/+-]+)      # IANA 时区名（捕获组）
     "?
     """,
     re.VERBOSE,
@@ -282,6 +307,52 @@ def extract_summary_channels_from_user_md(
     return DEFAULT_SUMMARY_CHANNELS
 
 
+def extract_user_timezone_from_user_md(user_md_content: str | None) -> str | None:
+    """从 USER.md 中提取 user_timezone 机器可读字段（F115）。
+
+    格式（机器可读，与人类可读"时区/地点"字段并存）：
+    - ``- **user_timezone**: "Asia/Shanghai"``（标准 USER.md 列表格式）
+    - ``user_timezone: America/New_York``（简洁格式）
+
+    返回值经 ``zoneinfo.ZoneInfo`` 合法性校验。与其他三个 extract 函数不同，
+    本字段**返回 None 而非默认值**——因为时区的完整降级链（USER.md → env
+    OCTOAGENT_USER_TIMEZONE → UTC）由 ``DailyRoutineService._resolve_user_timezone``
+    统一裁决；None 表示"USER.md 未提供有效时区"，交由上层降级。
+
+    Args:
+        user_md_content: USER.md 全文字符串
+
+    Returns:
+        合法 IANA 时区名；字段缺失或非法时返回 ``None``（上层降级到 env / UTC）
+    """
+    if not user_md_content:
+        return None
+
+    for line in user_md_content.splitlines():
+        # 跳过 HTML 注释行：user_timezone 的文档示例（如 "Asia/Shanghai"）是合法
+        # IANA 名，会被正则当作真实值误命中并 premature return；其他三字段靠占位符
+        # （"HH:MM" 等非法值）天然规避，本字段示例是真值，必须显式跳过注释行。
+        if line.lstrip().startswith("<!--"):
+            continue
+        if "user_timezone" not in line:
+            continue
+        m = _USER_TIMEZONE_PATTERN.search(line)
+        if m is None:
+            continue
+        value = m.group(1)
+        try:
+            zoneinfo.ZoneInfo(value)
+        except (zoneinfo.ZoneInfoNotFoundError, ValueError):
+            logger.warning(
+                "user_timezone value invalid; ignoring (fall back to env/UTC)",
+                raw_value=value,
+            )
+            return None
+        return value
+
+    return None
+
+
 # ============================================================
 # DailyRoutineConfig（聚合配置）
 # ============================================================
@@ -299,19 +370,26 @@ class DailyRoutineConfig:
         routine_active: 是否启用 daily routine
         summary_channels: 内部 channel.channel_name 集合
             （元素来自 {"telegram", "web_sse"}）
+        user_timezone: USER.md 中的机器可读 IANA 时区名（F115）；``None`` 表示
+            USER.md 未提供有效时区，由 ``DailyRoutineService._resolve_user_timezone``
+            降级到 env OCTOAGENT_USER_TIMEZONE → UTC
     """
 
     daily_summary_time: str
     routine_active: bool
     summary_channels: frozenset[str]
+    # F115：末位 + 默认 None，使既有直接构造（不传时区，如 crontab 测试）零改动；
+    # None 语义 = "USER.md 未提供有效时区"，由 service 降级 env → UTC
+    user_timezone: str | None = None
 
     @classmethod
     def from_user_md(cls, user_md_content: str | None) -> DailyRoutineConfig:
-        """从 USER.md 全文构造 config（spec FR-DI1 / FR-B2 步骤 2）。"""
+        """从 USER.md 全文构造 config（spec FR-DI1 / FR-B2 步骤 2 + F115 时区）。"""
         return cls(
             daily_summary_time=extract_daily_summary_time_from_user_md(user_md_content),
             routine_active=extract_routine_active_from_user_md(user_md_content),
             summary_channels=extract_summary_channels_from_user_md(user_md_content),
+            user_timezone=extract_user_timezone_from_user_md(user_md_content),
         )
 
     def to_crontab(self) -> str:
@@ -411,4 +489,5 @@ __all__ = [
     "extract_daily_summary_time_from_user_md",
     "extract_routine_active_from_user_md",
     "extract_summary_channels_from_user_md",
+    "extract_user_timezone_from_user_md",
 ]

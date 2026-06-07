@@ -631,10 +631,13 @@ class TestLLMPromptTokenBudget:
 
 
 class TestUserTimezoneResolver:
-    """Codex Final review HIGH bug fix：_user_timezone 字段必须从环境变量初始化。
+    """F115：_resolve_user_timezone 降级链 USER.md → env → UTC。
 
     spec NFR-3 / SD-10：用户本地时区影响 cron 触发时刻和"昨日"窗口边界。
+    无参调用（user_md_tz=None）退化为原 env → UTC 行为（向后兼容）。
     """
+
+    # --- 原 env → UTC 行为（无参调用，向后兼容）---
 
     def test_default_fallback_to_utc(self, monkeypatch: Any) -> None:
         monkeypatch.delenv("OCTOAGENT_USER_TIMEZONE", raising=False)
@@ -651,6 +654,80 @@ class TestUserTimezoneResolver:
     def test_empty_string_falls_back_to_utc(self, monkeypatch: Any) -> None:
         monkeypatch.setenv("OCTOAGENT_USER_TIMEZONE", "   ")
         assert DailyRoutineService._resolve_user_timezone() == "UTC"
+
+    # --- F115 新增：USER.md 优先级（AC-1 / AC-2 / AC-4）---
+
+    def test_user_md_overrides_env(self, monkeypatch: Any) -> None:
+        """AC-1：USER.md 有效时区优先于 env（USER.md is SoT）。"""
+        monkeypatch.setenv("OCTOAGENT_USER_TIMEZONE", "Asia/Shanghai")
+        assert (
+            DailyRoutineService._resolve_user_timezone("America/New_York")
+            == "America/New_York"
+        )
+
+    def test_user_md_overrides_env_even_when_env_absent(
+        self, monkeypatch: Any
+    ) -> None:
+        monkeypatch.delenv("OCTOAGENT_USER_TIMEZONE", raising=False)
+        assert (
+            DailyRoutineService._resolve_user_timezone("Europe/London")
+            == "Europe/London"
+        )
+
+    def test_env_fallback_when_user_md_none(self, monkeypatch: Any) -> None:
+        """AC-2：USER.md 未提供（None）时降级到 env。"""
+        monkeypatch.setenv("OCTOAGENT_USER_TIMEZONE", "Asia/Shanghai")
+        assert (
+            DailyRoutineService._resolve_user_timezone(None) == "Asia/Shanghai"
+        )
+
+    def test_utc_when_both_absent(self, monkeypatch: Any) -> None:
+        """AC-3：USER.md + env 均缺 → UTC。"""
+        monkeypatch.delenv("OCTOAGENT_USER_TIMEZONE", raising=False)
+        assert DailyRoutineService._resolve_user_timezone(None) == "UTC"
+
+
+class TestUserMdTimezoneAffectsYesterdayWindow:
+    """F115 AC-7：USER.md 机器可读时区真实影响"昨日"窗口边界（service 集成）。
+
+    这是 F115 的核心修复——baseline 的 self._user_timezone 是 __init__ env-only
+    缓存，USER.md 改时区对昨日窗口零影响；修复后窗口从重读的 config 派生。
+    """
+
+    def test_user_md_timezone_changes_yesterday_date(
+        self,
+        store_group: StoreGroup,
+        notification_service: NotificationService,
+        monkeypatch: Any,
+    ) -> None:
+        # env 清空，确保 UTC 分支不被部署 env 污染
+        monkeypatch.delenv("OCTOAGENT_USER_TIMEZONE", raising=False)
+        # now_utc 选在 UTC 当日 18:00：Asia/Shanghai(UTC+8) 已跨入次日凌晨
+        # → Shanghai 的"昨日" = UTC 的"今日"，与 UTC 的"昨日"差一天，断言清晰
+        now_utc = datetime(2026, 6, 8, 18, 0, tzinfo=UTC)
+
+        # USER.md 配 Asia/Shanghai：昨日 = 2026-06-08
+        svc_sh = _build_service(
+            store_group,
+            notification_service,
+            user_md='- **user_timezone**: "Asia/Shanghai"',
+        )
+        config_sh = svc_sh._read_config()
+        tz_sh = svc_sh._resolve_user_timezone(config_sh.user_timezone)
+        assert tz_sh == "Asia/Shanghai"
+        _, _, date_sh = svc_sh._compute_yesterday_range_utc(now_utc, tz_sh)
+        assert date_sh == "2026-06-08"
+
+        # USER.md 无时区字段 + env 空 → UTC：昨日 = 2026-06-07
+        svc_utc = _build_service(store_group, notification_service, user_md="")
+        config_utc = svc_utc._read_config()
+        tz_utc = svc_utc._resolve_user_timezone(config_utc.user_timezone)
+        assert tz_utc == "UTC"
+        _, _, date_utc = svc_utc._compute_yesterday_range_utc(now_utc, tz_utc)
+        assert date_utc == "2026-06-07"
+
+        # 同一 now_utc，时区不同 → 昨日日期不同（核心证明）
+        assert date_sh != date_utc
 
 
 class TestCancelledErrorRespected:
