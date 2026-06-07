@@ -7,6 +7,7 @@ import WorkbenchLayout from "./components/shell/WorkbenchLayout";
 
 const AgentCenter = lazy(() => import("./pages/AgentCenter"));
 const ChatWorkbench = lazy(() => import("./pages/ChatWorkbench"));
+const FilesCenter = lazy(() => import("./pages/FilesCenter"));
 const MemoryCenter = lazy(() => import("./pages/MemoryCenter"));
 const McpProviderCenter = lazy(() => import("./pages/McpProviderCenter"));
 const SettingsCenter = lazy(() => import("./pages/SettingsCenter"));
@@ -66,6 +67,7 @@ export default function App() {
             <Route path="agents/skills" element={<Navigate to="/skills" replace />} />
             <Route path="agents/mcp" element={<Navigate to="/mcp" replace />} />
             <Route path="work" element={withRouteSuspense(<TaskList />, "任务列表")} />
+            <Route path="files" element={withRouteSuspense(<FilesCenter />, "文件工作台")} />
             <Route path="memory" element={withRouteSuspense(<MemoryCenter />, "记忆中心")} />
             <Route
               path="memory/candidates"

@@ -1958,3 +1958,67 @@ export interface PhaseState {
 export interface ClassifiedResult {
   phases: PhaseState[];
 }
+
+// ---------------------------------------------------------------------------
+// F104 文件工作台 -- 对齐 backend apps/gateway/.../routes/files.py 的响应模型
+// ---------------------------------------------------------------------------
+
+/** 有产出文件的任务（GET /api/files/tasks 的列表项） */
+export interface FileTaskItem {
+  task_id: string;
+  title: string;
+}
+
+/** GET /api/files/tasks 响应 */
+export interface FileTasksResponse {
+  tasks: FileTaskItem[];
+}
+
+/** 逻辑文件（同一文件在任务内的多个版本聚合） */
+export interface LogicalFileItem {
+  /** 内部标识（不在 UI 直接展示原始 key，仅用于后续取 diff/versions） */
+  logical_file_id: string;
+  /** 面向用户的友好名称 */
+  display_name: string;
+  /** 版本数（后端已过滤 >= 2） */
+  version_count: number;
+}
+
+/** GET /api/files/tasks/{task_id}/logical-files 响应 */
+export interface LogicalFilesResponse {
+  files: LogicalFileItem[];
+}
+
+/** diff 单侧（当前版 / 上一版） */
+export interface DiffSide {
+  version_no: number;
+  /** 文本内容；二进制 / 超限 / 不可用时为 null */
+  content: string | null;
+  /** 'available' | 'unavailable' */
+  availability: string;
+  /** 存储类型（技术字段，主界面不直接展示） */
+  storage_kind: string;
+  oversize: boolean;
+}
+
+/** GET /api/files/tasks/{task_id}/diff 响应 */
+export interface DiffResponse {
+  current: DiffSide | null;
+  previous: DiffSide | null;
+  binary: boolean;
+  oversize: boolean;
+}
+
+/** 版本元数据（GET .../versions 列表项） */
+export interface VersionMetaItem {
+  version_no: number;
+  ts: string;
+  size: number;
+  hash: string;
+  storage_kind: string;
+}
+
+/** GET /api/files/tasks/{task_id}/versions 响应 */
+export interface VersionsResponse {
+  versions: VersionMetaItem[];
+}

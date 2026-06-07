@@ -102,6 +102,8 @@ function renderNavDescription(path: string): string {
       return "查看和管理技能";
     case "/mcp":
       return "外部工具和服务连接";
+    case "/files":
+      return "查看任务产出文件的版本变化";
     case "/memory":
       return "回看系统记住的背景";
     case "/settings":
@@ -431,6 +433,7 @@ export default function WorkbenchLayout() {
               { to: "/agents", label: "智能体" },
               { to: "/skills", label: "技能" },
               { to: "/mcp", label: "MCP" },
+              { to: "/files", label: "文件" },
               { to: "/memory", label: "记忆" },
               { to: "/settings", label: "设置" },
             ].map((item) => (

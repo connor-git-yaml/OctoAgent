@@ -114,4 +114,16 @@
 - [T2.6] Phase 2 Codex review：2 finding（[high] oversize 事后打标仍 read_bytes 全量读+返回超大内容 FR-019/SC-005 后端失效 / [medium] slash logical_file_id path 参数不匹配 diff/versions 路由）→ 委托子代理修：oversize 读前 size 元数据拦截 + logical_file_id path→query + 顺手清 Phase 1 6 E501（35 测试绿 + 768 回归 0 regression）
 - [T2.6] Phase 2 re-review round 2：2 finding（[high] oversize 短路在 storage_ref 文件存在检查之前→超大已删文件误报 available+oversize 而非 unavailable，混淆三态 / [medium] get_current_and_previous 一次性 SELECT content，超大 inline 已被 SQL 读入再标 oversize 非真拦截）→ 委托子代理修：storage_ref 先文件存在检查再 oversize（优先级）+ 两阶段查询（先元数据 size 判定，inline 未超阈值再懒加载 content）（39 测试 + 772 回归 0 regression）
 - [T2.6] Phase 2 re-review round 3：0 high + 1 medium（storage_ref oversize 信任陈旧 DB size，read_bytes 前未 stat 实际文件→TOCTOU/metadata stale 可绕过读前拦截 FR-019）→ 主 session 自改 stat 实际大小用 max(DB size, actual) 判 oversize + 委托子代理补 TOCTOU 测试（actual>db→oversize 不 read_bytes，spy read_bytes_called==0）+ 清 SIM105（contextlib.suppress）
-- [T2.7] Phase 2 收口：oversize 3 轮 review 收敛（high→high→medium，0 high 残留）；40 Phase2 测试（store 27 + endpoint 13）+ 773 全回归 0 regression + ruff All checks passed（src+测试）→ commit
+- [T2.7] Phase 2 收口：oversize 3 轮 review 收敛（high→high→medium，0 high 残留）；40 Phase2 测试（store 27 + endpoint 13）+ 773 全回归 0 regression + ruff All checks passed（src+测试）→ commit c4f33d9（8 files +1166/-17，不 push）
+
+### Phase 3（前端 Files Tab 两级导航）
+- [env] worktree frontend 无 node_modules → npm install（exit 0）
+- [T3.1-T3.6] 委托 implement 子代理：client.ts 4 fetch（走内部 apiFetch front-door 鉴权，非裸 fetch）+ types/index.ts 8 类型 + FilesCenter.tsx 两级导航（task→逻辑文件→diff 基础并排 pre）+ App.tsx lazy route + WorkbenchLayout 导航项「文件」+ FilesCenter.test 6 测试
+- [审查] 主 session：两级导航 state/回退/三态完整 + binary/oversize/unavailable 降级文案 + 非技术 UX（display_name 不暴露技术字段）+ apiFetch 鉴权 + CSS token（--cp-soft/--cp-radius-md tokens.css 确在含 dark mode）；小观察 openTask/openFile 无 cancelled 保护（快速切换轻微 race，v0.1 可接受）
+- [验证] tsc -b 0 错 + FilesCenter 6 + WorkbenchLayout 3 tests passed
+- [回归] 前端全 vitest：Phase3 后 11 failed/168（25 文件）vs baseline(stash -u) 11 failed/162（24 文件）→ **11 failed 数量相同 = pre-existing master 前端测试债（与 F104 无关），Phase 3 引入 0 regression**（+1 文件 +6 tests 全 passed）
+- [偏离] CSS token 修正（误用未定义 token→实际 token）+ fetchLogicalFileVersions 提供未消费（版本时间线后续 Phase）+ 未做 preview 浏览器验证（tsc+vitest 替代，worktree 无 dev server）
+- [T3.review] Phase 3 Codex review：1 high + 1 medium（均成立）→ 委托子代理修：
+  - [high] openTask/openFile 异步竞态（快速切换 task/file 旧响应无条件 setFiles/setDiff 覆盖新选择→显示错文件内容；主 session 审查曾低估为 v0.1 可接受，Codex 升 high 成立）→ request token（useRef 单调 seq）+ 响应前校验 seq 最新 + deferred promise 乱序返回测试
+  - [medium] 主 diff 标题暴露内部版本号 v{N}（version_no 是后端内部计数器，违反 SC-004/CL-1 主视图 0 技术字段）→ 标题改"上一版"/"当前版"去 vN，version_no 留 Phase 4 Advanced 区 + 更新测试
+- [T3.review] 修复完成：race token（useRef 单调 seq，openTask/openFile 入口 ++seq + 响应前 seq 校验 + 回退 backTo* ++seq 使在途失效）+ 2 乱序测试（deferred promise 点 A→回退→点 B，resolve A 再 B，断言 B 显示 A 丢弃，files+diff 两层）+ vN 移除；FilesCenter 8 passed + 全 vitest 11 failed/170 = 0 regression（11 pre-existing 不变）+ tsc 0 错 → re-review 确认

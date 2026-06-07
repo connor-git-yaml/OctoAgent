@@ -10,10 +10,14 @@ import type {
   BackupBundle,
   ControlPlaneActionResponse,
   ControlPlaneSnapshot,
+  DiffResponse,
   ExecutionSessionResponse,
   ExportFilter,
   ExportManifest,
+  FileTasksResponse,
+  LogicalFilesResponse,
   MemoryConsoleDocument,
+  VersionsResponse,
   OperatorActionRequest,
   OperatorActionResult,
   OperatorInboxResponse,
@@ -396,6 +400,48 @@ export async function fetchTaskExecutionSession(
 
 export async function fetchApprovals(): Promise<ApprovalsListResponse> {
   return apiFetch<ApprovalsListResponse>("/api/approvals");
+}
+
+// ---------------------------------------------------------------------------
+// F104 文件工作台 -- 经 front-door 鉴权（复用内部 apiFetch + buildQueryString）
+// ---------------------------------------------------------------------------
+
+/** GET /api/files/tasks -- 有产出文件的任务列表 */
+export async function fetchFileTasks(): Promise<FileTasksResponse> {
+  return apiFetch<FileTasksResponse>("/api/files/tasks");
+}
+
+/** GET /api/files/tasks/{task_id}/logical-files -- 任务内逻辑文件列表 */
+export async function fetchLogicalFiles(
+  taskId: string
+): Promise<LogicalFilesResponse> {
+  return apiFetch<LogicalFilesResponse>(
+    `/api/files/tasks/${encodeURIComponent(taskId)}/logical-files`
+  );
+}
+
+/** GET /api/files/tasks/{task_id}/diff -- 逻辑文件当前版 vs 上一版 diff 数据 */
+export async function fetchLogicalFileDiff(
+  taskId: string,
+  logicalFileId: string
+): Promise<DiffResponse> {
+  return apiFetch<DiffResponse>(
+    `/api/files/tasks/${encodeURIComponent(taskId)}/diff${buildQueryString({
+      logical_file_id: logicalFileId,
+    })}`
+  );
+}
+
+/** GET /api/files/tasks/{task_id}/versions -- 逻辑文件版本元数据列表 */
+export async function fetchLogicalFileVersions(
+  taskId: string,
+  logicalFileId: string
+): Promise<VersionsResponse> {
+  return apiFetch<VersionsResponse>(
+    `/api/files/tasks/${encodeURIComponent(taskId)}/versions${buildQueryString({
+      logical_file_id: logicalFileId,
+    })}`
+  );
 }
 
 export async function attachExecutionInput(
