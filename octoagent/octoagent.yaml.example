@@ -2,12 +2,12 @@
 # 由 octo config 管理，安全纳入版本管理
 #
 # NEVER 在此文件存储 API Key 明文 — 使用 api_key_env 存储环境变量名
-# API Key 明文由 .env.litellm 管理（已在 .gitignore）
+# API Key 明文由 .env 管理（已在 .gitignore，模板见 .env.example）
 #
 # 快速开始：
 #   cp octoagent.yaml.example octoagent.yaml
 #   octo config provider add openrouter   # 添加 Provider 并配置 API Key
-#   octo config sync                       # 生成 litellm-config.yaml
+#   octo config sync                       # 校验配置 + 查看已启用 Provider/别名摘要
 
 config_version: 1
 updated_at: "2026-03-08"
@@ -74,14 +74,11 @@ model_aliases:
   #   description: "低成本模型（GPT-5.4，轻量推理）"
   #   thinking_level: low
 
-# 运行时配置 — 控制 OctoAgent 运行时行为
-# llm_mode: litellm（真实调用）或 echo（开发测试回显，不发起网络请求）
-# litellm_proxy_url: LiteLLM Proxy 地址
-# master_key_env: LiteLLM Master Key 所在的环境变量名
-runtime:
-  llm_mode: litellm
-  litellm_proxy_url: "http://localhost:4000"
-  master_key_env: LITELLM_MASTER_KEY
+# 运行时配置 — 预留块（当前无字段）
+# F081 退役 LiteLLM Proxy（改为 ProviderRouter 直连）后，原 llm_mode /
+# litellm_proxy_url / master_key_env 三个字段均已删除，RuntimeConfig 现为空占位。
+# schema 暂无运行时字段，故此处不写 runtime: 键（OctoAgentConfig 会用空的
+# RuntimeConfig 默认值）；未来新增运行时配置项时在此添加 runtime: 块。
 
 # Front-door 边界 — 保护 owner-facing API（Control Plane / Tasks / Ops / Chat / SSE）
 # mode:
