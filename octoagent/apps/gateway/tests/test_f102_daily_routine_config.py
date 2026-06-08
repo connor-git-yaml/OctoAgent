@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+from importlib import resources
+
 import pytest
 
 from octoagent.gateway.services.daily_routine_config import (
@@ -23,6 +25,15 @@ from octoagent.gateway.services.daily_routine_config import (
     extract_routine_active_from_user_md,
     extract_summary_channels_from_user_md,
 )
+
+
+def _load_factory_user_md() -> str:
+    """读取出厂 USER.md 模板原文（与运行时 behavior_templates 同一资源包）。"""
+    return (
+        resources.files("octoagent.core.behavior_templates")
+        .joinpath("USER.md")
+        .read_text(encoding="utf-8")
+    )
 
 
 # ============================================================
@@ -82,6 +93,25 @@ class TestDailySummaryTimeParsing:
             content = f'- **daily_summary_time**: "{time_str}"'
             assert extract_daily_summary_time_from_user_md(content) == time_str
 
+    def test_comment_line_with_real_value_is_skipped(self) -> None:
+        """HTML 注释行即使含合法 HH:MM 值也不被解析（守卫生效，不靠 "HH:MM" 占位符侥幸）。
+
+        无守卫时注释里的 "07:15" 会被捕获并 return；有守卫时该行跳过 → 返回默认。
+        """
+        content = '<!-- daily_summary_time: "07:15" 示例 -->'
+        assert (
+            extract_daily_summary_time_from_user_md(content)
+            == DEFAULT_DAILY_SUMMARY_TIME
+        )
+
+    def test_comment_line_before_value_does_not_shadow(self) -> None:
+        """注释行（含示例时间）在 value 行之前，value 行 "09:00" 必须胜出。"""
+        content = (
+            '<!-- daily_summary_time: "07:15"，每日推送时间 -->\n'
+            '- **daily_summary_time**: "09:00"'
+        )
+        assert extract_daily_summary_time_from_user_md(content) == "09:00"
+
 
 # ============================================================
 # extract_routine_active_from_user_md (AC-D2)
@@ -115,6 +145,24 @@ class TestRoutineActiveParsing:
 
     def test_none_returns_default(self) -> None:
         assert extract_routine_active_from_user_md(None) is DEFAULT_ROUTINE_ACTIVE
+
+    def test_comment_true_does_not_shadow_value_false(self) -> None:
+        """F102 核心 bug 回归守卫：USER.md 注释行含字面 ``routine_active: "true"``，
+        写在用户改成 ``"false"`` 的 value 行之前。
+
+        旧实现逐行扫描时注释行的 "true" 先命中 → 立即 return True → 用户无法在
+        USER.md 关闭 daily routine。守卫跳过注释行后 value 行 "false" 必须胜出。
+        """
+        content = (
+            '<!-- routine_active: "true" / "false"，是否启用 daily routine，默认 true -->\n'
+            '- **routine_active**: "false"'
+        )
+        assert extract_routine_active_from_user_md(content) is False
+
+    def test_comment_only_line_is_skipped(self) -> None:
+        """仅含注释行（无 value 行）时，注释里的 "false" 不被解析 → 返回默认 True。"""
+        content = '<!-- routine_active: "false" 示例 -->'
+        assert extract_routine_active_from_user_md(content) is DEFAULT_ROUTINE_ACTIVE
 
 
 # ============================================================
@@ -185,6 +233,24 @@ class TestSummaryChannelsParsing:
     def test_naked_value_without_list_marker(self) -> None:
         """spec SD-1 / FR-D1 支持的写法：裸 key:value（无 **bold** 列表标记）。"""
         content = "summary_channels: telegram"
+        assert extract_summary_channels_from_user_md(content) == frozenset({"telegram"})
+
+    def test_comment_line_with_real_value_is_skipped(self) -> None:
+        """HTML 注释行即使含合法 channel 名也不被解析（守卫生效，不靠注释接中文侥幸）。
+
+        无守卫时注释里的 "telegram" 会被捕获并 return；有守卫时该行跳过 → 返回默认全渠道。
+        """
+        content = "<!-- summary_channels: telegram example -->"
+        assert (
+            extract_summary_channels_from_user_md(content) == DEFAULT_SUMMARY_CHANNELS
+        )
+
+    def test_comment_line_before_value_does_not_shadow(self) -> None:
+        """注释行（含示例 channel）在 value 行之前，value 行 "telegram" 必须胜出。"""
+        content = (
+            "<!-- summary_channels: web example -->\n"
+            '- **summary_channels**: "telegram"'
+        )
         assert extract_summary_channels_from_user_md(content) == frozenset({"telegram"})
 
 
@@ -328,3 +394,35 @@ class TestPayloadSchemas:
     def test_routine_skipped_with_reason(self) -> None:
         p = RoutineSkippedPayload(reason="routine_disabled")
         assert p.reason == "routine_disabled"
+
+
+# ============================================================
+# 出厂 USER.md 模板：注释守卫端到端（F102 真 bug 回归）
+# ============================================================
+
+
+class TestFactoryTemplateCommentGuard:
+    """用真实出厂 USER.md 模板验证注释守卫——模板的 F102 字段注释块（含字面
+    routine_active: "true"）真实存在，是 bug 的诱因，必须端到端覆盖。"""
+
+    def test_factory_template_parses_to_defaults(self) -> None:
+        """出厂模板原文（routine_active="true"）应解析出与默认值一致的 config。"""
+        cfg = DailyRoutineConfig.from_user_md(_load_factory_user_md())
+        assert cfg.daily_summary_time == "08:30"
+        assert cfg.routine_active is True
+        assert cfg.summary_channels == frozenset({"telegram", "web_sse"})
+
+    def test_factory_template_user_can_disable_routine(self) -> None:
+        """F102 核心 bug：用户把出厂模板 value 行改成 "false" 必须能真正关闭 routine。
+
+        注释块（line 39）含字面 ``routine_active: "true"``——无守卫时它先命中导致
+        改 "false" 也关不掉。本测试是用户视角的最终回归守卫。
+        """
+        tpl = _load_factory_user_md()
+        disabled = tpl.replace(
+            '- **routine_active**: "true"', '- **routine_active**: "false"'
+        )
+        # 防止模板字段格式漂移让 replace 变 no-op（否则测试会假阳性通过）
+        assert disabled != tpl, "出厂模板 routine_active value 行格式已变，需更新本测试"
+        cfg = DailyRoutineConfig.from_user_md(disabled)
+        assert cfg.routine_active is False

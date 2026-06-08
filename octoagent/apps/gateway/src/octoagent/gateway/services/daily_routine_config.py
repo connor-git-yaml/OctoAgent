@@ -142,6 +142,12 @@ def extract_daily_summary_time_from_user_md(user_md_content: str | None) -> str:
         return DEFAULT_DAILY_SUMMARY_TIME
 
     for line in user_md_content.splitlines():
+        # 跳过 HTML 注释行：USER.md 中字段文档示例（如 daily_summary_time 注释）写在
+        # value 行之前，会被正则误命中并 premature return。本字段当前靠占位符 "HH:MM"
+        # （非法值）侥幸规避，此守卫是 defense-in-depth，与 F115 user_timezone 一致——
+        # 不依赖注释文案侥幸，未来改注释也不回归。
+        if line.lstrip().startswith("<!--"):
+            continue
         if "daily_summary_time" not in line:
             continue
         m = _DAILY_SUMMARY_TIME_PATTERN.search(line)
@@ -179,6 +185,12 @@ def extract_routine_active_from_user_md(user_md_content: str | None) -> bool:
         return DEFAULT_ROUTINE_ACTIVE
 
     for line in user_md_content.splitlines():
+        # 跳过 HTML 注释行：USER.md 的 routine_active 字段注释（line 39）含字面
+        # `routine_active: "true"`，写在 value 行之前。无此守卫时注释行的 "true" 会被
+        # 正则先命中并立即 return → 用户把 value 行改 "false" 也关不掉 routine（F102 真 bug）。
+        # 与 F115 user_timezone 同范式：先于字段匹配跳过注释行。
+        if line.lstrip().startswith("<!--"):
+            continue
         if "routine_active" not in line:
             continue
         m = _ROUTINE_ACTIVE_PATTERN.search(line)
@@ -226,6 +238,11 @@ def extract_summary_channels_from_user_md(
         return DEFAULT_SUMMARY_CHANNELS
 
     for line in user_md_content.splitlines():
+        # 跳过 HTML 注释行：USER.md 的 summary_channels 字段注释含字面 channel 名
+        # （"telegram" / "web"），会被正则误命中并 premature return。本字段当前靠注释冒号后
+        # 接中文（正则 [a-z] 不命中）侥幸规避，此守卫是 defense-in-depth，与 F115 一致。
+        if line.lstrip().startswith("<!--"):
+            continue
         if "summary_channels" not in line:
             continue
         m = _SUMMARY_CHANNELS_PATTERN.search(line)
