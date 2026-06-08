@@ -67,9 +67,9 @@ class TestRuntimeControlHelperPerf:
 
     def test_is_recall_planner_skip_none_path_fast(self) -> None:
         """N runtime_context → early return False，应最快。"""
-        avg_us = _measure_microseconds(is_recall_planner_skip, None, {})
+        avg_us = _measure_microseconds(is_recall_planner_skip, None)
         assert avg_us < SINGLE_CALL_MAX_MICROSECONDS, (
-            f"is_recall_planner_skip(None, {{}}) 平均 {avg_us:.2f}μs，"
+            f"is_recall_planner_skip(None) 平均 {avg_us:.2f}μs，"
             f"超过 {SINGLE_CALL_MAX_MICROSECONDS}μs 容忍上限"
         )
 
@@ -78,7 +78,7 @@ class TestRuntimeControlHelperPerf:
         ctx = RuntimeControlContext(
             task_id="t1", delegation_mode="main_inline", recall_planner_mode="skip"
         )
-        avg_us = _measure_microseconds(is_recall_planner_skip, ctx, {})
+        avg_us = _measure_microseconds(is_recall_planner_skip, ctx)
         assert avg_us < SINGLE_CALL_MAX_MICROSECONDS
 
     def test_is_recall_planner_skip_auto_inline_fast(self) -> None:
@@ -86,7 +86,7 @@ class TestRuntimeControlHelperPerf:
         ctx = RuntimeControlContext(
             task_id="t1", delegation_mode="main_inline", recall_planner_mode="auto"
         )
-        avg_us = _measure_microseconds(is_recall_planner_skip, ctx, {})
+        avg_us = _measure_microseconds(is_recall_planner_skip, ctx)
         assert avg_us < SINGLE_CALL_MAX_MICROSECONDS
 
     def test_is_recall_planner_skip_force_full_recall_fast(self) -> None:
@@ -97,17 +97,17 @@ class TestRuntimeControlHelperPerf:
             recall_planner_mode="skip",
             force_full_recall=True,
         )
-        avg_us = _measure_microseconds(is_recall_planner_skip, ctx, {})
+        avg_us = _measure_microseconds(is_recall_planner_skip, ctx)
         assert avg_us < SINGLE_CALL_MAX_MICROSECONDS
 
     def test_is_single_loop_main_active_main_inline_fast(self) -> None:
         ctx = RuntimeControlContext(task_id="t1", delegation_mode="main_inline")
-        avg_us = _measure_microseconds(is_single_loop_main_active, ctx, {})
+        avg_us = _measure_microseconds(is_single_loop_main_active, ctx)
         assert avg_us < SINGLE_CALL_MAX_MICROSECONDS
 
     def test_is_single_loop_main_active_unspecified_fast(self) -> None:
         ctx = RuntimeControlContext(task_id="t1", delegation_mode="unspecified")
-        avg_us = _measure_microseconds(is_single_loop_main_active, ctx, {})
+        avg_us = _measure_microseconds(is_single_loop_main_active, ctx)
         assert avg_us < SINGLE_CALL_MAX_MICROSECONDS
 
 
@@ -133,7 +133,7 @@ def test_perf_all_paths_under_tolerance(
         recall_planner_mode=recall_planner_mode,
         force_full_recall=force_full_recall,
     )
-    avg_us = _measure_microseconds(is_recall_planner_skip, ctx, {})
+    avg_us = _measure_microseconds(is_recall_planner_skip, ctx)
     assert avg_us < SINGLE_CALL_MAX_MICROSECONDS, (
         f"path delegation={delegation_mode}, recall={recall_planner_mode}, "
         f"override={force_full_recall} 平均 {avg_us:.2f}μs 超容忍 {SINGLE_CALL_MAX_MICROSECONDS}μs"

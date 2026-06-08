@@ -53,6 +53,7 @@ from .agent_context import (
     WorkerProfileOriginKind,
     WorkerProfileRevision,
     WorkerProfileStatus,
+    is_private_namespace,
 )
 from .artifact import Artifact, ArtifactPart
 from .artifact_version import (
@@ -468,6 +469,7 @@ __all__ = [
     "AgentSessionTurnKind",
     "AgentSessionStatus",
     "MemoryNamespaceKind",
+    "is_private_namespace",
     "A2AConversationStatus",
     "A2AMessageDirection",
     "AgentRuntime",

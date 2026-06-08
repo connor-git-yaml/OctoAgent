@@ -695,7 +695,7 @@ class TestIsRecallPlannerSkipIntegration:
                     delegation_mode=delegation_mode,
                     recall_planner_mode=recall_planner_mode,
                 )
-                result = is_recall_planner_skip(ctx, {})
+                result = is_recall_planner_skip(ctx)
                 assert result is False, (
                     f"force_full_recall=True 时 is_recall_planner_skip 应返回 False，"
                     f"delegation_mode={delegation_mode}, recall_planner_mode={recall_planner_mode}，"
@@ -714,7 +714,7 @@ class TestIsRecallPlannerSkipIntegration:
             delegation_mode="main_inline",
             recall_planner_mode="skip",
         )
-        result = is_recall_planner_skip(ctx, {})
+        result = is_recall_planner_skip(ctx)
         assert result is True, (
             f"baseline（force_full_recall=False, main_inline, skip）应返回 True，实际 {result}"
         )

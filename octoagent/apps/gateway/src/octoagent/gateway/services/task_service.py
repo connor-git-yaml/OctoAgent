@@ -42,6 +42,7 @@ from octoagent.core.models import (
     RuntimeControlContext,
     Task,
     TaskStatus,
+    is_private_namespace,
     validate_transition,
 )
 from octoagent.core.models.message import NormalizedMessage
@@ -1107,13 +1108,6 @@ class TaskService:
             }
         )
 
-    @staticmethod
-    def _metadata_flag(metadata: dict[str, Any], key: str) -> bool:
-        value = metadata.get(key)
-        if isinstance(value, bool):
-            return value
-        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
     async def _build_memory_recall_plan(
         self,
         *,
@@ -1130,8 +1124,8 @@ class TaskService:
         precomputed_plan = self._parse_precomputed_recall_plan(dispatch_metadata)
         if precomputed_plan is not None:
             return precomputed_plan
-        # F091 Phase C: 优先读 runtime_context.recall_planner_mode == "skip"；fallback metadata flag
-        if is_recall_planner_skip(runtime_context, dispatch_metadata):
+        # F091 Phase C: 读 runtime_context.recall_planner_mode 决议 recall skip（F100/F112 已无 metadata fallback）
+        if is_recall_planner_skip(runtime_context):
             return None
         if not self._supports_recall_planning(llm_service):
             return None
@@ -2145,12 +2139,7 @@ class TaskService:
                     (
                         item
                         for item in namespaces
-                        if item.kind
-                        in {
-                            MemoryNamespaceKind.AGENT_PRIVATE,
-                            MemoryNamespaceKind.WORKER_PRIVATE,
-                        }
-                        and item.memory_scope_ids
+                        if is_private_namespace(item.kind) and item.memory_scope_ids
                     ),
                     None,
                 )

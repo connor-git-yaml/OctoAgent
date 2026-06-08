@@ -378,9 +378,9 @@ class LLMService:
             return None
 
         worker_type = self._normalize_worker_type(metadata.get("selected_worker_type", ""))
-        # F091 Phase C: 优先读 runtime_context.delegation_mode；fallback metadata flag（兼容期）
+        # F091 Phase C: 读 runtime_context.delegation_mode 决议 single-loop（F100/F112 已无 metadata fallback）
         runtime_context = runtime_context_from_metadata(metadata)
-        single_loop_executor = is_single_loop_main_active(runtime_context, metadata)
+        single_loop_executor = is_single_loop_main_active(runtime_context)
         base_description = self._build_skill_description(
             worker_type,
             selected_tools,
@@ -1000,10 +1000,3 @@ class LLMService:
                 f"{terminal_hint}{ownership_hint}"
             )
         return ""
-
-    @staticmethod
-    def _metadata_flag(metadata: dict[str, Any], key: str) -> bool:
-        value = metadata.get(key)
-        if isinstance(value, bool):
-            return value
-        return str(value or "").strip().lower() in {"1", "true", "yes", "on"}

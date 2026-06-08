@@ -117,7 +117,7 @@ class TestIsRecallPlannerSkipPath:
             delegation_mode="unspecified",
             force_full_recall=False,
         )
-        result = is_recall_planner_skip(ctx, {})
+        result = is_recall_planner_skip(ctx)
         assert result is False, (
             f"ask_back resume 后 unspecified + force_full_recall=False 应返回 False（full recall），"
             f"实际: {result}。这是 AC-F1 选 C 预期行为。"
@@ -130,7 +130,7 @@ class TestIsRecallPlannerSkipPath:
 
         # resume_after_user_input_full_recall_expected
         """
-        result = is_recall_planner_skip(None, {})
+        result = is_recall_planner_skip(None)
         assert result is False, (
             f"runtime_context=None 应返回 False（full recall），实际: {result}。"
             f"这是 AC-F1 选 C 预期行为。"
@@ -158,7 +158,7 @@ class TestIsRecallPlannerSkipPath:
         iterations = 1000
         start = time.perf_counter()
         for _ in range(iterations):
-            is_recall_planner_skip(None, {})
+            is_recall_planner_skip(None)
         elapsed_us = (time.perf_counter() - start) / iterations * 1_000_000
         # full recall 路径（return False 分支）耗时不超过 10μs（基准：F100 测试 < 1μs）
         # 即使有 10x 空间，1000 次循环中平均 10μs 以内是合理要求
@@ -286,9 +286,8 @@ class TestAcF1AskBackResumeFullRecall:
         # （runtime_context_json 不在 TASK_SCOPED_CONTROL_KEYS，resume 后重置为 unspecified）
         result_unspecified = is_recall_planner_skip(
             RuntimeControlContext(task_id=task_id, delegation_mode="unspecified"),
-            {},
         )
-        result_none = is_recall_planner_skip(None, {})
+        result_none = is_recall_planner_skip(None)
 
         assert result_unspecified is False, (
             "resume 后 unspecified delegation_mode → is_recall_planner_skip 应返回 False（full recall）。"
@@ -394,7 +393,6 @@ class TestAcF1AskBackResumeFullRecall:
         # 验证 is_recall_planner_skip（模拟 turn N+1 orchestrator 的调用）
         skip_result = is_recall_planner_skip(
             RuntimeControlContext(task_id=task_id, delegation_mode="unspecified"),
-            {},
         )
         assert skip_result is False, (
             "# resume_after_user_input_full_recall_expected: "
@@ -552,7 +550,6 @@ class TestMultiRoundAskBackLoop:
             start_t = time.perf_counter()
             skip_result_unspecified = is_recall_planner_skip(
                 RuntimeControlContext(task_id=task_id, delegation_mode="unspecified"),
-                {},
             )
             elapsed_us = (time.perf_counter() - start_t) * 1_000_000
             full_recall_timing_us.append(elapsed_us)
@@ -563,7 +560,7 @@ class TestMultiRoundAskBackLoop:
                 f"每轮 ask_back 后 full recall 是预期行为（spec §8 选 C）。"
             )
 
-            skip_result_none = is_recall_planner_skip(None, {})
+            skip_result_none = is_recall_planner_skip(None)
             assert skip_result_none is False, (
                 f"Round {round_num}: runtime_context=None → is_recall_planner_skip 应返回 False。"
                 f"# resume_after_user_input_full_recall_expected"
@@ -717,7 +714,7 @@ class TestMultiRoundAskBackLoop:
             )
 
             # 每轮 resume 后 is_recall_planner_skip=False（full recall 预期）
-            assert is_recall_planner_skip(None, {}) is False, (
+            assert is_recall_planner_skip(None) is False, (
                 f"Round {round_num}: # resume_after_user_input_full_recall_expected"
             )
 
@@ -736,7 +733,6 @@ class TestMultiRoundAskBackLoop:
             start = time.perf_counter()
             result = is_recall_planner_skip(
                 RuntimeControlContext(task_id=f"task-round-{round_num}", delegation_mode="unspecified"),
-                {},
             )
             elapsed_us = (time.perf_counter() - start) * 1_000_000
             round_timings.append(elapsed_us)
@@ -759,7 +755,7 @@ class TestMultiRoundAskBackLoop:
         none_timings = []
         for _ in range(3):
             start = time.perf_counter()
-            is_recall_planner_skip(None, {})
+            is_recall_planner_skip(None)
             none_timings.append((time.perf_counter() - start) * 1_000_000)
 
         assert max(none_timings) < 100.0, (

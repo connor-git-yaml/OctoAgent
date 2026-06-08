@@ -168,6 +168,27 @@ class MemoryNamespaceKind(StrEnum):
     WORKER_PRIVATE = "worker_private"
 
 
+_PRIVATE_MEMORY_NAMESPACE_KINDS: frozenset[MemoryNamespaceKind] = frozenset(
+    {MemoryNamespaceKind.AGENT_PRIVATE, MemoryNamespaceKind.WORKER_PRIVATE}
+)
+
+
+def is_private_namespace(kind: MemoryNamespaceKind) -> bool:
+    """命名空间是否属于"私有"族（agent / worker 私有，区别于 PROJECT_SHARED）。
+
+    F112: 收敛 agent_context / task_service 中散落的
+    ``kind in {AGENT_PRIVATE, WORKER_PRIVATE}`` 重复成员判断为单一语义入口。
+
+    WORKER_PRIVATE 写路径自 F094 已废弃（新 dispatch 统一写 AGENT_PRIVATE），但枚举值与
+    本判断必须保留：托管实例 ``~/.octoagent`` 仍存在既有 ``kind=worker_private`` 的
+    MemoryNamespace 记录（F112 实测活跃实例 5 条；Migration 094 为 no-op）。删除会导致这些
+    行反序列化时 ``MemoryNamespaceKind("worker_private")`` raise ValueError，违反
+    Constitution #1 Durability（同 F091 ``AgentRuntimeRole("butler")`` legacy 行教训）。
+    """
+
+    return kind in _PRIVATE_MEMORY_NAMESPACE_KINDS
+
+
 class AgentProfile(BaseModel):
     """主 Agent / automation / delegation 可消费的正式 profile。
 

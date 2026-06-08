@@ -20,7 +20,6 @@ from octoagent.gateway.services.runtime_control import (
     decode_runtime_context,
     encode_runtime_context,
     is_recall_planner_skip,
-    is_single_loop_main_active,
 )
 
 
@@ -53,7 +52,7 @@ class TestForceFullRecallOverride:
             recall_planner_mode="skip",
             force_full_recall=True,
         )
-        assert is_recall_planner_skip(ctx, {}) is False
+        assert is_recall_planner_skip(ctx) is False
 
     @pytest.mark.parametrize(
         "delegation_mode",
@@ -72,7 +71,7 @@ class TestForceFullRecallOverride:
             recall_planner_mode=recall_planner_mode,
             force_full_recall=True,
         )
-        assert is_recall_planner_skip(ctx, {}) is False, (
+        assert is_recall_planner_skip(ctx) is False, (
             f"force_full_recall=True 应该 override "
             f"delegation_mode={delegation_mode}, recall_planner_mode={recall_planner_mode}"
         )
@@ -104,7 +103,7 @@ class TestAutoModeResolution:
             recall_planner_mode="auto",
             force_full_recall=False,
         )
-        assert is_recall_planner_skip(ctx, {}) is expected_skip
+        assert is_recall_planner_skip(ctx) is expected_skip
 
     def test_unknown_recall_planner_mode_raises(self) -> None:
         """defense-in-depth：未来若引入未识别的 recall_planner_mode 取值，应 raise。
@@ -121,7 +120,7 @@ class TestAutoModeResolution:
             force_full_recall=False,
         )
         with pytest.raises(ValueError, match="Unknown recall_planner_mode"):
-            is_recall_planner_skip(ctx, {})
+            is_recall_planner_skip(ctx)
 
 
 # ============================================================
@@ -134,21 +133,21 @@ class TestWorkerInlineBaselineUnchanged:
 
     def test_ac4_worker_inline_skip_returns_true(self) -> None:
         ctx = _ctx(delegation_mode="worker_inline", recall_planner_mode="skip")
-        assert is_recall_planner_skip(ctx, {}) is True
+        assert is_recall_planner_skip(ctx) is True
 
     def test_ac4_worker_inline_full_returns_false(self) -> None:
         ctx = _ctx(delegation_mode="worker_inline", recall_planner_mode="full")
-        assert is_recall_planner_skip(ctx, {}) is False
+        assert is_recall_planner_skip(ctx) is False
 
     def test_ac4_main_inline_skip_returns_true_baseline(self) -> None:
         """baseline F091 行为：main_inline + skip → True"""
         ctx = _ctx(delegation_mode="main_inline", recall_planner_mode="skip")
-        assert is_recall_planner_skip(ctx, {}) is True
+        assert is_recall_planner_skip(ctx) is True
 
     def test_ac4_main_delegate_full_returns_false_baseline(self) -> None:
         """baseline F091 行为：main_delegate + full → False"""
         ctx = _ctx(delegation_mode="main_delegate", recall_planner_mode="full")
-        assert is_recall_planner_skip(ctx, {}) is False
+        assert is_recall_planner_skip(ctx) is False
 
 
 # ============================================================
@@ -303,7 +302,7 @@ class TestE2EAutoAndOverride:
             force_full_recall=True,
         )
         # H1 完整决策环启用：override 让 inline 也走 full
-        assert is_recall_planner_skip(ctx, {}) is False
+        assert is_recall_planner_skip(ctx) is False
 
     def test_auto_inline_no_override_still_skip(self) -> None:
         """AUTO + main_inline 默认（不 override）→ skip（F051 性能兼容）"""
@@ -312,7 +311,7 @@ class TestE2EAutoAndOverride:
             recall_planner_mode="auto",
             force_full_recall=False,
         )
-        assert is_recall_planner_skip(ctx, {}) is True
+        assert is_recall_planner_skip(ctx) is True
 
     def test_auto_delegate_no_override_full(self) -> None:
         """AUTO + main_delegate（不 override）→ full（H1 默认走完整决策）"""
@@ -321,4 +320,4 @@ class TestE2EAutoAndOverride:
             recall_planner_mode="auto",
             force_full_recall=False,
         )
-        assert is_recall_planner_skip(ctx, {}) is False
+        assert is_recall_planner_skip(ctx) is False

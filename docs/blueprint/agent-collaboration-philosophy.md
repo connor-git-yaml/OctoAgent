@@ -62,11 +62,12 @@ class RuntimeControlContext(BaseModel):
 
 #### F100 `RecallPlannerMode="auto"` 自动决议
 
-实际实施：`apps/gateway/src/octoagent/gateway/services/runtime_control.py:106` `is_recall_planner_skip()` 函数
+实际实施：`apps/gateway/src/octoagent/gateway/services/runtime_control.py` 的 `is_recall_planner_skip()` 函数
 
 ```python
-# 简化语义（实际逻辑见 runtime_control.py:106）
-def is_recall_planner_skip(runtime_context, metadata) -> bool:
+# 简化语义（实际逻辑见 runtime_control.py 的 is_recall_planner_skip）
+# F112：已删除原 metadata 形参，决议完全基于 runtime_context（F100 已移除 metadata fallback）
+def is_recall_planner_skip(runtime_context) -> bool:
     # 优先级 1: force_full_recall override 最高（H1 完整决策环 override）
     if runtime_context.force_full_recall:
         return False  # 强制完整 recall

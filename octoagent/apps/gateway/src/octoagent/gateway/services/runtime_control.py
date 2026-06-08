@@ -1,10 +1,12 @@
 """Feature 037: runtime control context helpers。
 
-F091 Phase C: 加 is_single_loop_main_active / is_recall_planner_skip helpers，
+F091 Phase C 引入 is_single_loop_main_active / is_recall_planner_skip，
 统一各服务（orchestrator / llm_service / task_service）读取 single_loop 控制流的入口。
-读取优先级：
-1. runtime_context.delegation_mode / recall_planner_mode（F090 引入显式字段）
-2. metadata flag fallback（F091 兼容期；F100 收口删除）
+决议完全基于 runtime_context 显式字段（delegation_mode / recall_planner_mode /
+force_full_recall）：
+- F100 Phase E2 已移除 metadata flag fallback 逻辑；
+- F112 进一步删除两 helper 残留的死 metadata 形参，以及从未被生产采纳的
+  module-level metadata_flag helper（generic flag 解析各服务自有 _metadata_flag）。
 """
 
 from __future__ import annotations
@@ -59,23 +61,8 @@ def runtime_context_from_metadata(
     return decode_runtime_context(metadata.get(RUNTIME_CONTEXT_JSON_KEY))
 
 
-def metadata_flag(metadata: Mapping[str, Any] | None, key: str) -> bool:
-    """通用 metadata flag 解析（与各服务内同名 helper 行为一致）。
-
-    Feature 091 Phase C: 抽到 runtime_control 作为单一来源；
-    runtime_control 之外的 generic flag 仍可继续用各服务的 _metadata_flag。
-    """
-    if metadata is None:
-        return False
-    value = metadata.get(key)
-    if isinstance(value, bool):
-        return value
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
 def is_single_loop_main_active(
     runtime_context: RuntimeControlContext | None,
-    metadata: Mapping[str, Any] | None,
 ) -> bool:
     """当前轮次是否走 single-loop 主路径（main 或 worker 自跑）。
 
@@ -92,14 +79,12 @@ def is_single_loop_main_active(
     """
     if runtime_context is not None and runtime_context.delegation_mode != "unspecified":
         return runtime_context.delegation_mode in _SINGLE_LOOP_DELEGATION_MODES
-    # F100 Phase E2：unspecified / None → return False（移除 metadata fallback）
-    # _ = metadata  # 参数保留以兼容 caller signature
+    # F100 Phase E2：unspecified / None → return False（已移除 metadata fallback）
     return False
 
 
 def is_recall_planner_skip(
     runtime_context: RuntimeControlContext | None,
-    metadata: Mapping[str, Any] | None,
 ) -> bool:
     """当前轮次是否跳过 recall planner。
 

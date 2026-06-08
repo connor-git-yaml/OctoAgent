@@ -47,6 +47,7 @@ from octoagent.core.models import (
     MemoryNamespace,
     MemoryNamespaceKind,
     MemoryRetrievalProfile,
+    is_private_namespace,
     OwnerOverlayScope,
     OwnerProfile,
     OwnerProfileOverlay,
@@ -477,11 +478,9 @@ def build_private_memory_scope_ids(
     agent_runtime_id: str,
     agent_session_id: str = "",
 ) -> list[str]:
-    if kind not in {
-        MemoryNamespaceKind.AGENT_PRIVATE,
-        MemoryNamespaceKind.WORKER_PRIVATE,
-    }:
+    if not is_private_namespace(kind):
         return []
+    # WORKER_PRIVATE 写路径已死（F094）；owner 派生保留以正确读出既有 worker_private records
     owner = "worker" if kind is MemoryNamespaceKind.WORKER_PRIVATE else "main"
     scope_ids: list[str] = []
     if agent_session_id:
@@ -3786,13 +3785,7 @@ class AgentContextService(AgentContextTurnWriterMixin):
         ordered_namespaces = sorted(
             memory_namespaces,
             key=lambda namespace: (
-                0
-                if namespace.kind
-                in {
-                    MemoryNamespaceKind.AGENT_PRIVATE,
-                    MemoryNamespaceKind.WORKER_PRIVATE,
-                }
-                else 1,
+                0 if is_private_namespace(namespace.kind) else 1,
                 namespace.kind.value,
                 namespace.namespace_id,
             ),

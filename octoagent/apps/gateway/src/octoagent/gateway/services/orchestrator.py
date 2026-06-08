@@ -766,13 +766,12 @@ class OrchestratorService(A2ADispatchMixin):
             else 0
         )
         stored_rev = metadata.get("_pack_revision", 0)
-        # F091 Phase C: 优先读 runtime_context.delegation_mode == "main_inline"；fallback metadata flag
+        # F091 Phase C: 读 runtime_context.delegation_mode == "main_inline" 决议（F100/F112 已无 metadata fallback）
         runtime_context_for_check = request.runtime_context or runtime_context_from_metadata(metadata)
-        if is_single_loop_main_active(runtime_context_for_check, metadata) and pack_rev == stored_rev:
-            # F091 Phase D medium #1 闭环：short-circuit 前确保 runtime_context.delegation_mode == "main_inline"
-            # 兼容 case：metadata flag = True 但 runtime_context.delegation_mode = "unspecified"
-            # （caller 预填 metadata flag 但未显式 patch runtime_context）。
-            # 需补 patch 让 runtime_context 与完整路径输出对称，避免单/双轨不一致。
+        if is_single_loop_main_active(runtime_context_for_check) and pack_rev == stored_rev:
+            # F091 Phase D medium #1 闭环：short-circuit 前确保 runtime_context.delegation_mode == "main_inline"。
+            # 命中此分支时 delegation_mode 为 worker_inline（is_single_loop_main_active 已排除 unspecified/None）；
+            # 补 patch 让 runtime_context 与完整路径输出对称，避免单/双轨不一致。
             if (
                 runtime_context_for_check is None
                 or runtime_context_for_check.delegation_mode != "main_inline"
@@ -1074,11 +1073,11 @@ class OrchestratorService(A2ADispatchMixin):
         self,
         request: OrchestratorRequest,
     ) -> tuple[AgentDecision | None, dict[str, Any]]:
-        # F091 Phase C: 优先读 runtime_context.delegation_mode；fallback metadata flag
+        # F091 Phase C: 读 runtime_context.delegation_mode 决议（F100/F112 已无 metadata fallback）
         runtime_context_for_check = request.runtime_context or runtime_context_from_metadata(
             request.metadata
         )
-        if is_single_loop_main_active(runtime_context_for_check, request.metadata):
+        if is_single_loop_main_active(runtime_context_for_check):
             return None, {}
         if not self._is_routing_decision_eligible(request):
             return None, {}
