@@ -4189,9 +4189,9 @@ class AgentContextService(AgentContextTurnWriterMixin):
         # **经 ContentThreatScanService 单一 scanner 入口**（不直调 harness.scan_context，守 C10，FR-F3）。
         from octoagent.gateway.services.content_threat_scan import ContentThreatScanService
 
-        findings = ContentThreatScanService().scan_tool_context(
-            f"{summary}\n{result_text}", source_field="output"
-        )
+        # review round-2 修正：扫**完整 LLM-visible block**（含 error_summary 等所有自由文本字段），
+        # 而非仅 summary+result_text——否则 research_error_summary 携带的注入会绕过标注进主 Agent 上下文。
+        findings = ContentThreatScanService().scan_tool_context(block, source_field="output")
         return render_tool_result_for_llm(block, findings)
 
     def _fit_prompt_budget(
