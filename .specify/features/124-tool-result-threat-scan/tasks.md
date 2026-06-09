@@ -103,9 +103,9 @@
 
 - [x] T035 PolicyGate 改经 `ContentThreatScanService.scan_memory`（模块级单例，C10 单一入口，字节级等价）+ `test_constitution_compliance.py` C10 表述更新为"两入口一 service"（FR-5.4/6.3）✅ 91 passed 零回归
 - [x] T036 Blueprint 同步：`docs/codebase-architecture/harness-and-context.md` 2.3 ThreatScanner（scope 维度 + tool 结果管道）+ 2.6 改"两入口一 service"（ContentThreatScanService / PolicyGate 拦截 / ToolBroker 标注）✅。`docs/blueprint/` 索引级文档（core-design/module-design/architecture-audit）的 ThreatScanner 提及 → completion-report living-docs drift 项
-- [ ] T037 全量回归 0 regression vs d2936e0 + `pytest -m e2e_smoke` 全过（FR-5.5/SC-005）
-- [ ] T038 **Codex final cross-Phase review**（输入 plan + 全 Phase diff；命中重大架构变更，CLAUDE.local.md 强制）；含 **no-bypass 权威测试对真实代码暴露的残留 sink**（plan PR4-F1 收口）
-- [ ] T039 产出 completion-report.md（对照 plan Phase 实际 vs 计划）+ handoff.md + living-docs drift 检查
+- [x] T037 broad 回归 2765 passed 0 失败（apps/gateway 除 e2e_live + tooling/skills/core）+ e2e_smoke 8 passed；MEMORY 字节级等价（FR-5.5/SC-005）✅
+- [x] T038 **Codex final review 3 轮闭环**：r1 2H+2M（finalize final-output / 去 chunk / research-handoff via service / 有界 hash）+ r2 1H（error_summary 扫完整 block）+ r3 1H（**SDK 范围外，用户拍板 + 文档排除**）。0 HIGH 残留 ✅
+- [x] T039 completion-report.md（Phase 实际 vs 计划 + 11 轮 Codex 闭环 + limitations + master 合入建议）✅
 
 ---
 

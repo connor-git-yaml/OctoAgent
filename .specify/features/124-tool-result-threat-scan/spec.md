@@ -81,6 +81,7 @@ round 2 暴露：F124 真正的成本在 **"in-context 标注扛过重启/replay
 | per-tool 信任分级 opt-out | 未来 MAY | fail-safe 全扫；future 降噪 |
 | 改 LargeOutputHandler 截断 | 不做 | 现状不变，检测扫其上游全文 |
 | Agent 协作模型 H1/H2/H3 | 不做 | 工具层护栏 |
+| **`octoagent-sdk` 独立 agent 运行面**（用户拍板范围外，final review round-3）| 未来/独立 | F124 scope = **gateway Agent 产品主路径**（ToolBroker→provider_model_client）。`octoagent-sdk` 是独立 agent 构建库：自带 loop + tool 执行 + 自带 policy 检查，**零依赖 gateway/tooling、不被 gateway 产品路径使用**。接入需把 scanner 下沉共享包（独立架构活，超 F124）。FR-3.5 的"任何 tool-derived 内容进 LLM 必扫"**限定在 gateway Agent runtime**；SDK 作为独立运行面显式排除 |
 
 ---
 

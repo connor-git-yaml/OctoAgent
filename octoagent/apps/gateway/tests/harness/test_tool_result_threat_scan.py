@@ -211,7 +211,13 @@ class TestReplaySurvivalD2:
 
 
 class TestNoBypassContract:
-    """T027 / FR-3.5：枚举 LLM-bound sink 模块 MUST 经 render helper（有界保证）。"""
+    """T027 / FR-3.5：枚举 LLM-bound sink 模块 MUST 经 render helper（有界保证）。
+
+    **范围说明（final review round-3 用户拍板）**：F124 scope = gateway Agent 产品主路径
+    （ToolBroker→provider_model_client）。`packages/sdk`（octoagent-sdk 独立 agent 构建库，
+    零依赖 gateway/tooling、不被产品路径使用、自带 loop+policy）**显式排除**——下方 no-direct-import
+    扫描刻意不覆盖 packages/sdk（它不参与 scanner 管道，非 bypass-by-import）。详见 spec §2.2。
+    """
 
     # 已知 LLM-bound sink 文件 → 期望引用的 render helper（plan §6 函数级清单）
     _SINKS = {
@@ -244,7 +250,8 @@ class TestNoBypassContract:
         offenders: list[str] = []
         for src_dir in ("apps/gateway/src", "packages"):
             for py in (root / src_dir).rglob("*.py"):
-                if "/tests/" in str(py) or py.name in allowed:
+                # packages/sdk 是 F124 范围外的独立运行面（spec §2.2，用户拍板）——不police
+                if "/tests/" in str(py) or "/sdk/" in str(py) or py.name in allowed:
                     continue
                 for ln, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
                     s = line.strip()

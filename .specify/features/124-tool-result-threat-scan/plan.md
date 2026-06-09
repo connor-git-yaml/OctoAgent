@@ -2,7 +2,7 @@
 
 **Branch**: `feature/124-tool-result-threat-scan` | **Date**: 2026-06-08 | **Spec**: [spec.md](./spec.md)
 **Input**: `.specify/features/124-tool-result-threat-scan/spec.md`（v0.5，Codex review round 1-4 全闭环）
-**Status**: Draft v5（Codex Plan review r1-r4 闭环：r1 4H+1M、r2 2H+1M、r3 2H、r4 1H 全接受；架构层 r2/r3 全封，r4 唯一 HIGH 为 sink 枚举尾巴；见 §11。**用户拍板：修第 5 类 sink（research handoff）+ no-bypass 升级为原则+权威测试 → 进 tasks**，残留 sink 由实施期权威测试 + tasks/implement Codex 闸兜底，不再刷 spec-review 轮）
+**Status**: ✅ 实现完整（Codex Plan review r1-r4 + **implement final review r1-r3 全闭环 0 HIGH**）。final review：r1 2H+2M（finalize final-output 重扫 / 去 chunk 单遍 / research-handoff via service / 有界 hash）+ r2 1H（error_summary 扫完整 block）+ r3 1H（**octoagent-sdk 独立运行面用户拍板范围外**，spec §2.2 文档排除）。broad 2765 passed + e2e_smoke 8 passed。详见 completion-report.md。待用户拍板 master 合入
 
 ---
 
