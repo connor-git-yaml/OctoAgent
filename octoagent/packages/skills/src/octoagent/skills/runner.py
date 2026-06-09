@@ -701,6 +701,7 @@ class SkillRunner:
             artifact_ref=tool_result.artifact_ref,
             parts=parts,
             tool_call_id=tool_call_id,
+            security_findings=tool_result.security_findings,  # F124 T021：透传威胁 finding
         )
 
     @staticmethod

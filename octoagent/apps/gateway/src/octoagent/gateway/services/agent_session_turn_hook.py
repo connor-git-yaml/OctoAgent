@@ -80,4 +80,5 @@ class AgentSessionTurnHook:
             error=feedback.error,
             artifact_ref=feedback.artifact_ref,
             duration_ms=feedback.duration_ms,
+            security_findings=feedback.security_findings,  # F124 E1：持久化威胁 finding
         )

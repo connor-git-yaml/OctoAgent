@@ -26,6 +26,7 @@ from typing import Any
 
 import structlog
 from octoagent.provider.provider_router import ProviderRouter
+from octoagent.tooling.security_render import render_tool_result_for_llm  # F124 T021
 
 # Feature 081 P4：compactor.py 已删除。运行时 compaction 主线在
 # gateway/services/context_compaction.py（走 llm_service.call → ProviderRouter），
@@ -181,9 +182,11 @@ class ProviderModelClient:
                         {
                             "role": "tool",
                             "tool_call_id": call_id,
-                            "content": fb.output
-                            if not fb.is_error
-                            else f"ERROR: {fb.error}",
+                            # F124 T021：finding 派生 [security-warning] 前缀，不改 fb.output/error
+                            "content": render_tool_result_for_llm(
+                                fb.output if not fb.is_error else f"ERROR: {fb.error}",
+                                fb.security_findings,
+                            ),
                         }
                     )
                     already_emitted_call_ids.add(call_id)
@@ -191,6 +194,8 @@ class ProviderModelClient:
                     label = "执行出错" if fb.is_error else "执行结果"
                     body = fb.error if fb.is_error else fb.output
                     body = body or "（空输出）"
+                    # F124 T021：finding 派生 [security-warning] 前缀，不改 fb.output/error
+                    body = render_tool_result_for_llm(body, fb.security_findings)
                     history.append(
                         {
                             "role": "user",

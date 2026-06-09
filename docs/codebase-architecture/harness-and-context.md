@@ -65,14 +65,18 @@ apps/gateway/src/octoagent/gateway/harness/
 - `append_entry(file_path, new_entry, char_limit)`：read+append+limit+write 全程持锁（防 F21 concurrent 数据丢失）
 - `persist_snapshot_record(tool_call_id, result_summary)`：每次工具调用回显落库（snapshot_records 表，TTL 30 天）
 
-### 2.3 ThreatScanner（FR-3，Hermes pattern table 模式）
+### 2.3 ThreatScanner（FR-3，Hermes pattern table 模式；F124 扩 scope 维度 + tool 结果管道）
 
 | 检测 | 实现 |
 |------|------|
-| Prompt Injection / Role Hijacking / Exfiltration / SSH backdoor / base64 payload | `_MEMORY_THREAT_PATTERNS` ≥17 条正则 |
+| Prompt Injection / Role Hijacking / Exfiltration / SSH backdoor / base64 payload + CONTEXT 间接注入族（C2-promptware / role-play / fake-update / hidden-HTML / deception） | `_THREAT_PATTERNS`（17 baseline + 10 CONTEXT，正则）|
 | Invisible Unicode 字符（U+200B / U+200C / U+200D / ZWNBSP）| `_INVISIBLE_CHARS` frozenset O(n) 遍历 |
 
-每条 pattern 含 `pattern_id` + `severity`（WARN / BLOCK）。BLOCK 命中由 PolicyGate 统一拦截，写 `MEMORY_ENTRY_BLOCKED` 事件（不含原始恶意内容，Constitution C5）。
+每条 pattern 含 `pattern_id` + `severity`（WARN / BLOCK）+ **`scopes`**（F124）。
+
+**F124 scope 维度（显式成员，非累积）**：`ScanScope{MEMORY, CONTEXT}`。
+- **MEMORY**（冻结 = 17 baseline）：memory/profile 写入路径，`scan(scope=MEMORY)`（默认）由 PolicyGate 触发，BLOCK 命中拦截写 `MEMORY_ENTRY_BLOCKED`。
+- **CONTEXT**（tool 结果路径）：`scan_context()` 对 web.fetch/search/MCP/terminal 结果做有界全覆盖扫描（带 overlap 分块 + 输入上限 2MB；MEMORY 超限 degraded-block / CONTEXT 超限 degraded-annotate）。命中**只标注不拦截**（tool 结果是用户未撰写内容），写 `TOOL_RESULT_THREAT_FLAGGED`（hash 无原文，C5）。新 CONTEXT pattern 用有界量词 → ReDoS-safe + 有限 max_span。
 
 ### 2.4 ApprovalGate（FR-4）
 
@@ -94,16 +98,24 @@ apps/gateway/src/octoagent/gateway/harness/
 
 通过约束 → 写 `SUBAGENT_SPAWNED` 事件 + 调 `launch_child` 真实派发（与 `subagents.spawn` 同路径）。失败不写假事件。
 
-### 2.6 PolicyGate（Constitution C10 统一入口）
+### 2.6 内容威胁扫描入口（Constitution C10；F124 两入口一 service）
 
-工具层不再直接调 `threat_scan`；统一通过 `PolicyGate.check()` 入口：
-- `BLOCK` → 拦截 + 写 `MEMORY_ENTRY_BLOCKED` 事件（含 `ensure_audit_task` 防 FK violation）
+内容威胁扫描统一经 **`ContentThreatScanService`**（C10 单一 scanner 入口），分两个语义入口：
+
+**① PolicyGate（权限/拦截入口，MEMORY scope）** —— memory/profile 写入：
+- `BLOCK` → 拦截 + 写 `MEMORY_ENTRY_BLOCKED`（含 `ensure_audit_task` 防 FK violation）；超输入上限 degraded → 同样 block
 - `WARN` → 由 GatewayToolBroker 触发 ApprovalGate（reversible+ 工具）
 - 通过 → dispatch
 
+**② ToolBroker `_finalize_result`（内容标注入口，CONTEXT scope）** —— tool 结果（F124）：
+- broker 所有 ToolResult 退出分支（success / error / 异常）统一经 `finalize_result`，对 output + error 做 CONTEXT 扫描（截断前全文）
+- 命中 → 挂 `ToolSecurityFinding` 到 `ToolResult.security_findings`（**不改 raw output/error**）+ emit `TOOL_RESULT_THREAT_FLAGGED`；**永不 block**
+- LLM 渲染层（`provider_model_client._append_feedback_to_history` live + replay / memory-extraction / research-handoff 从持久化 finding 重渲染）经唯一 `render_tool_result_for_llm` helper 前置 `[security-warning]`，扛 replay（finding JSON-native 持久化进 `AgentSessionTurn.metadata`）
+- `ContentThreatScanProtocol` 定义在 `packages/tooling`（scope-free），broker 经 DI 注入、不反向依赖 gateway
+
 ### 2.7 出站 URL 安全 / SSRF 预检（Feature 123，harness/url_safety.py）
 
-ThreatScanner 管**入站**（memory 写入等），出站 web/browser 请求此前是裸 httpx
+ThreatScanner 管**入站**（memory 写入 + F124 tool 结果），出站 web/browser 请求此前是裸 httpx
 （仅 `_validate_remote_url` 检 scheme/netloc）→ LLM 可被诱导抓内网 / 云元数据偷凭证。
 F123 新增 `harness/url_safety.py` 作出站方向的统一安全控制（与 ThreatScanner 同层兄弟）：
 
@@ -122,7 +134,7 @@ F123 新增 `harness/url_safety.py` 作出站方向的统一安全控制（与 T
   优先 → yaml（按 octoagent.yaml mtime 失效缓存，改 yaml 即时生效，无需重启）。
 - **fail-closed**：scheme 非法 / DNS 解析失败 / 空解析 / 解析异常一律拦。
 - **已知 limitation**：DNS rebinding（TOCTOU）需连接级 IP pinning（pre-flight 无法根治，
-  列 M6/M7 egress 域）；出站 tool 结果**内容**扫描属 F108。
+  列 M6/M7 egress 域）；出站 web/browser tool 结果的**入站内容**扫描已由 F124 覆盖。
 
 ## 3. Context 层组件
 

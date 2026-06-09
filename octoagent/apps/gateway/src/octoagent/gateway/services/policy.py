@@ -26,12 +26,18 @@ from ulid import ULID
 
 from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event
-from octoagent.gateway.harness.threat_scanner import ThreatScanResult, scan as threat_scan
+from octoagent.gateway.harness.threat_scanner import ThreatScanResult
+from octoagent.gateway.services.content_threat_scan import ContentThreatScanService
 
 if TYPE_CHECKING:
     pass
 
 log = structlog.get_logger(__name__)
+
+# F124 T035 / FR-6.3：内容威胁扫描统一经 ContentThreatScanService（C10 单一 scanner 入口）。
+# PolicyGate = 权限/拦截入口（MEMORY scope）；ToolBroker = 内容标注入口（CONTEXT scope）；
+# 二者共用此 service。MEMORY scope `scan_memory` 与 baseline `scan(MEMORY)` 字节级等价（零回归）。
+_CONTENT_SCAN_SERVICE = ContentThreatScanService()
 
 # 审计专用占位 task_id（与 operator_actions / user_profile_tools 一致）
 _POLICY_AUDIT_TASK_ID = "_policy_gate_audit"
@@ -108,7 +114,8 @@ class PolicyGate:
         Returns:
             PolicyCheckResult：allowed=True 表示安全；False 表示 BLOCK 命中。
         """
-        scan_result = threat_scan(content)
+        # F124 T035：经 ContentThreatScanService（MEMORY scope）——C10 单一 scanner 入口。
+        scan_result = _CONTENT_SCAN_SERVICE.scan_memory(content)
 
         if scan_result.blocked:
             # BLOCK 级：写审计事件，不含原始恶意内容（Constitution C5 / FR-3.4）

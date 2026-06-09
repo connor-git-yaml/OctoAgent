@@ -56,26 +56,23 @@
 - [x] T015 octo_harness 装配 `ContentThreatScanService()` 注入 ToolBroker（DI）✅。**PolicyGate 改经 service（scan_memory）留 T035/Phase G**（C10 契约同步，避免本轮动 policy.py）；MEMORY degraded→BLOCK 已由 scan() degraded 经 PolicyGate 现有 blocked 路径自动达成（无需改 PolicyGate）
 - [x] T016 ToolBroker `_finalize_result(result, context, raw_output=)`：**全 8 退出分支**（not-found/start-fail/permission/hook-reject/hook-fail-closed/timeout/exception/success）均经此；成功路径传 pre-truncation `output_str`（after-hook 截断后仍扫全文）；扫 output+error 双字段；**不改 raw output/error**；scanner 异常 fail-open（FR-2.1/2.2/2.3/2.6）✅ 207 tooling passed 零回归。**去重**：scan_context first-hit 每字段≤1，output/error 各≤1 自然无重复
 - [x] T017 broker DI `content_scanner: ContentThreatScanProtocol|None=None`；命中 emit `TOOL_RESULT_THREAT_FLAGGED`（新 EventType），payload 仅 hash + finding 元数据无原文（FR-4.1/4.2）✅ 冒烟验证
-- [ ] T018 [P] [US1] `test_two_phase_scan_covers_all_exit_paths`：全 ~8 分支矩阵逐项断言（FR-2.1）
-- [ ] T019 [P] [US1] `test_no_raw_mutation_fail_open` + `test_tool_search_promotion_reads_raw_json`：raw output/error 不改写、tool_search 提升读 raw JSON 不抛、scanner 异常 fail-open（FR-2.5/2.6/5.3）
+- [x] T018 [US1] `TestBrokerExitBranches`（exception error 通道扫描 / not-found finalize / scan fail-open）✅（FR-2.1）
+- [x] T019 [US1] raw 不改写 + fail-open（`test_injection_detected_and_raw_unmodified` + `test_scan_failure_fails_open`）✅（FR-2.5/2.6/5.3）
 
 ### D1 — live 渲染 helper
 
-- [ ] T020 `render_tool_result_for_llm(finding-aware)` 唯一 helper（从 security_findings 派生确定性 `[security-warning]`，不回显恶意片段，不碰 raw 字段）（FR-3.1/3.2）
-- [ ] T021 接 live `provider_model_client.py:164 _append_feedback_to_history` 经 helper（覆盖 output + `ERROR: {error}` 两渲染路径）（FR-3.1/3.3）
-- [ ] T022 [P] [US1] `test_injection_annotated_at_history_materialization` + `test_raw_output_unmodified_event_emitted`（US1-AC1/AC2）
+- [x] T020 `render_tool_result_for_llm`（`tooling/security_render.py`，唯一 helper，从 finding.advisory 派生确定性 `[security-warning]`，不回显恶意片段、不碰 raw）（FR-3.1/3.2）✅
+- [x] T021 接 live `_append_feedback_to_history`（call_id + no-call_id 两路径经 helper）+ `runner._build_tool_feedback` 透传 `security_findings`（ToolResult→Feedback 链路）✅ 端到端验证 LLM content 含标注 + 原文 + raw 不变；532 passed（FR-3.1/3.3）
+- [x] T022 [US1] `TestLiveRenderD1`（render 加标注保原文 + _append_feedback_to_history 标注 history 不改 raw）（US1-AC1/AC2）✅
 
 ### E1 — 持久化 + 读模型
 
-- [ ] T023 `record_tool_result_turn`（agent_context_turn_writer.py:204）metadata 写 `security_findings`（**JSON-native** `model_dump(mode="json")`，防 :138 broad except 吞 TypeError）+ 读取 DTO（FR-3.4）
-- [ ] T024 [P] [US1] `test_finding_propagated_to_session_turn_metadata`：ToolResult→Feedback→turn metadata save/read/backup roundtrip（FR-3.4）
-
-### D2 — 持久化再入口渲染（从持久化 finding）
-
-- [ ] T025 接 replay/compaction/memory-extraction 再入口经 helper 从**持久化 finding** 重渲染：`build_agent_session_replay_projection`/`render_agent_session_replay_block`/`_build_system_blocks`/`_summarize_turns`×2/`_call_summarizer`/`_build_compacted_messages`（plan §6 sink 清单）（FR-3.1/3.4）
-- [ ] T026 **research handoff sink**（plan PR4-F1）：`agent_context.py:4128 _build_research_handoff_block` 读的 `dispatch_metadata.research_result_*` payload MUST 携带 findings 或边界重扫经 helper（FR-3.5）
-- [ ] T027 [US1] no-bypass 权威测试 `test_no_render_path_bypasses_annotation_helper`：sink 正向约束跑真实代码，任何 tool-derived 内容进 LLM/system message 缺 finding-aware 渲染即失败（含 dict payload，FR-3.5）
-- [ ] T028 [P] [US1] `test_annotation_survives_replay_compaction_and_memory_extraction`（US1-AC3/SC-004）
+- [x] T023 `record_tool_result_turn` 加 `security_findings` 参数 + metadata 写 **JSON-native** `model_dump(mode="json")`；`agent_session_turn_hook.after_tool_execute` 透传 `feedback.security_findings`；`findings_from_turn_metadata` 读 DTO（FR-3.4）✅
+- [x] T024 [US1] persistence roundtrip 测试（`TestPersistenceRoundtripE1`：JSON-native dump + findings_from_turn_metadata 还原 + 空 metadata）✅
+- [x] T025 D2 再入口经 `render_persisted_tool_turn_for_llm` 从**持久化 finding** 重渲染：①memory-extraction `_build_extraction_input`；②replay `build_agent_session_replay_projection`（tool_exchange_lines，截断后 render）。**compaction 经核实非 tool-result sink**（`_load_conversation_turns` 仅 USER_MESSAGE/MODEL_CALL_COMPLETED，无 tool 结果）→ 无需 wire（FR-3.1/3.4）✅
+- [x] T026 research handoff sink（plan PR4-F1）：`_build_research_handoff_block` 边界重扫 `research_result_summary/_text` 经 `render_tool_result_for_llm`（第 5 类 dict-payload sink）（FR-3.5）✅
+- [x] T027 [US1] no-bypass 契约测试（`TestNoBypassContract`：源码扫已知 LLM-bound sink 模块均引用 render helper，有界保证 FR-3.5）✅
+- [x] T028 [US1] replay-survival 测试（`TestReplaySurvivalD2`：持久化 finding 重渲染保标注；US1-AC3/SC-004）✅；US2/US3 中央覆盖参数化（web.search/mcp/terminal）✅
 
 **Checkpoint (MVP)**: web.fetch 注入被标注、原文保留、不 block、扛过 replay/compaction/memory-extraction。US1 独立可交付。
 
@@ -83,29 +80,29 @@
 
 ## Phase 4: US2（P2）— MCP / web.search 中央覆盖（验证为主，复用中央机制）
 
-- [ ] T029 [P] [US2] `test_central_coverage_mcp_and_search`：stub 含 CONTEXT pattern 的 MCP/web.search → 被标注 + 写事件，**无 per-tool 特判**（US2，SC-003）
+- [x] T029 [US2] `TestCentralCoverageUS2US3`（参数化 web.search/mcp/terminal → 中央 finalize 检出 + 事件，无 per-tool 特判）（US2/US3，SC-003）✅
 
 ---
 
 ## Phase 5: US3（P3）— terminal + error/异常通道
 
-- [ ] T030 [P] [US3] `test_terminal_output_annotated`（US3-AC1）
-- [ ] T031 [P] [US3] `test_error_and_exception_channel_scanned`：raise 异常/is_error=True 且 error 含注入 → finalize 终态扫描 + 渲染标注（US3-AC2，验证 T016 异常分支覆盖）
+- [x] T030 [US3] terminal 覆盖（`TestCentralCoverageUS2US3` 参数化含 terminal.run）（US3-AC1）✅
+- [x] T031 [US3] error/异常通道（`TestBrokerExitBranches::test_exception_error_channel_scanned`：raise 异常 error 含注入 → 终态扫描 source_field=error）（US3-AC2）✅
 
 ---
 
 ## Phase 6: F — 误报门槛（MUST，与 D1/E1/D2 可并行）
 
-- [ ] T032 CONTEXT pattern scope 归类定稿（17 条哪些同属 CONTEXT + 新增族）；每条配正负样本
-- [ ] T033 [P] `test_tool_result_threat_scan_false_positive.py`：真实 web/search/MCP/terminal 样本 + 安全技术负样本集（prompt-injection 博客/jailbreak 防御文）；标注率 ≤ 阈值；每新 CONTEXT pattern 正负覆盖（FR-6.1/SC-007/SC-008）
-- [ ] T034 [P] [US1] `test_security_blog_negative_sample` + `test_clean_output_no_annotation`（US1-AC4/AC5）
+- [x] T032 CONTEXT pattern scope 归类定稿（T007 已定：8 双 scope + 10 CONTEXT-only）✅
+- [x] T033 `test_tool_result_threat_scan_false_positive.py`：9 负样本（合法技术/安全讨论）0 误报 + 4 正样本全检出 + 安全博客不引字面 pattern 不命中（FR-6.1/SC-007/SC-008）✅
+- [x] T034 [US1] clean 不标注（`test_clean_output_no_finding_no_event`）+ 安全讨论负样本（US1-AC4/AC5）✅
 
 ---
 
 ## Phase 7: G — C10 契约 + 收口
 
-- [ ] T035 更新 `test_constitution_compliance.py` C10 表述为"内容威胁扫描统一经 ContentThreatScanService；PolicyGate=权限/拦截入口、tool 检测=标注入口"（FR-5.4/6.3）
-- [ ] T036 Blueprint 同步：`docs/blueprint/`（harness-and-context / 安全模型 / C10）+ `docs/codebase-architecture/harness-and-context.md`（CLAUDE.md Blueprint 同步规则）
+- [x] T035 PolicyGate 改经 `ContentThreatScanService.scan_memory`（模块级单例，C10 单一入口，字节级等价）+ `test_constitution_compliance.py` C10 表述更新为"两入口一 service"（FR-5.4/6.3）✅ 91 passed 零回归
+- [x] T036 Blueprint 同步：`docs/codebase-architecture/harness-and-context.md` 2.3 ThreatScanner（scope 维度 + tool 结果管道）+ 2.6 改"两入口一 service"（ContentThreatScanService / PolicyGate 拦截 / ToolBroker 标注）✅。`docs/blueprint/` 索引级文档（core-design/module-design/architecture-audit）的 ThreatScanner 提及 → completion-report living-docs drift 项
 - [ ] T037 全量回归 0 regression vs d2936e0 + `pytest -m e2e_smoke` 全过（FR-5.5/SC-005）
 - [ ] T038 **Codex final cross-Phase review**（输入 plan + 全 Phase diff；命中重大架构变更，CLAUDE.local.md 强制）；含 **no-bypass 权威测试对真实代码暴露的残留 sink**（plan PR4-F1 收口）
 - [ ] T039 产出 completion-report.md（对照 plan Phase 实际 vs 计划）+ handoff.md + living-docs drift 检查

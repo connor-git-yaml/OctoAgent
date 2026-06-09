@@ -23,6 +23,7 @@ from octoagent.core.models import (
     AgentSessionTurnKind,
     EventType,
 )
+from octoagent.tooling.models import ToolSecurityFinding  # F124 E1：持久化威胁 finding
 from octoagent.core.models.event import Event
 from ulid import ULID
 
@@ -185,6 +186,7 @@ class AgentContextTurnWriterMixin:
         error: str | None = None,
         artifact_ref: str | None = None,
         duration_ms: int = 0,
+        security_findings: list[ToolSecurityFinding] | None = None,
     ) -> None:
         tool_name = str(tool_name).strip()
         if not agent_session_id.strip() or not tool_name:
@@ -193,6 +195,9 @@ class AgentContextTurnWriterMixin:
         summary = truncate_chars(" ".join(str(result_preview).split()), 720)
         if not summary:
             summary = "[empty tool result]"
+        # F124 E1：威胁 finding **JSON-native** 持久化进 turn metadata（防 :138 broad except
+        # 吞 TypeError → replay 丢标注，FR-3.4）；D2 再入口从此重渲染 [security-warning]。
+        findings_json = [f.model_dump(mode="json") for f in (security_findings or [])]
         await self._append_agent_session_turn(
             agent_session_id=agent_session_id,
             task_id=task_id,
@@ -205,6 +210,7 @@ class AgentContextTurnWriterMixin:
                 "is_error": bool(is_error),
                 "error": str(error or "").strip(),
                 "duration_ms": int(duration_ms or 0),
+                "security_findings": findings_json,
             },
         )
         await self._stores.conn.commit()

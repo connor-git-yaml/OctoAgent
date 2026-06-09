@@ -32,6 +32,7 @@ from octoagent.memory import (
     WriteAction,
 )
 from octoagent.gateway.services.inference.llm_common import LlmServiceProtocol, parse_llm_json_array
+from octoagent.tooling.security_render import render_persisted_tool_turn_for_llm  # F124 D2
 
 log = structlog.get_logger()
 
@@ -525,6 +526,10 @@ class SessionMemoryExtractor:
                 # 压缩 tool call/result
                 tool_name = turn.tool_name or "unknown_tool"
                 summary = turn.summary.strip() if turn.summary else "(no summary)"
+                # F124 D2：TOOL_RESULT 从持久化 finding 重渲染 [security-warning]，防记忆提取 LLM
+                # 把被标记的恶意 tool 输出当作可信文本提取成持久 memory（plan PR4-F1）。
+                if turn.kind == AgentSessionTurnKind.TOOL_RESULT:
+                    summary = render_persisted_tool_turn_for_llm(summary, turn.metadata)
                 lines.append(f"[Tool: {tool_name}] {summary}")
             elif turn.kind == AgentSessionTurnKind.CONTEXT_SUMMARY:
                 # 上下文摘要 -- 保留但标记来源

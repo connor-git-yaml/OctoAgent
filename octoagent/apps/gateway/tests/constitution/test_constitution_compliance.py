@@ -11,7 +11,9 @@ C6  Degrade Gracefully    — utility model 不可用时 observation routine 降
 C7  User-in-Control       — Approval Gate 审批卡片 + 候选 reject 路径可用
 C8  Observability         — 所有新模块有 structlog span（代码 grep 验证）
 C9  Agent Autonomy        — bootstrap.complete grep 为零，工具调用时机由 LLM 决策
-C10 Policy-Driven Access  — ThreatScanner 统一在 PolicyGate 触发
+C10 Policy-Driven Access  — 内容威胁扫描统一经 ContentThreatScanService（F124 两入口一 service）：
+                            PolicyGate=权限/拦截入口（MEMORY scope）、ToolBroker=内容标注入口
+                            （CONTEXT scope，tool 结果），工具层不旁路直接 scan
 """
 
 from __future__ import annotations
