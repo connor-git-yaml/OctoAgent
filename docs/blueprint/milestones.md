@@ -544,4 +544,11 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 **不进 M5/M6 的项**：071b Slice D 高层工具暴露（命中"不需要 Codex review 的微改"，空闲间隙顺手做）；Agent Zero Extensions / Instruments 系统（规模 ≥ 1 个月，放 M7 评估）；front-door 公网暴露 / 多用户 / 团队 / 家庭模式（Blueprint §0 已锁单用户深度）；Companion（原 F105，推 M7）。
 **M7 追加（2026-06-07 调研）**：sleep-time compute 后台记忆巩固（Letta，底层组件已齐但独立能力域，与 F111 同期，需强 model 验证）；Serena 式 LSP/符号级 Python 代码理解（先外挂 MCP dogfood 评估）。
 
+**M6 并行合并集成 review 结论（2026-06-08，6 Feature 合并后交叉影响 + 回归 + F113 就绪度）**：
+- **0 真回归**：组合态 master 实测 3919 passed / 0 failed（远超 ≥3026 baseline）；agent_context.py(F112∩F124) / octo_harness.py(F116∩F124) / daily_routine_config.py(F115∩F102) 三交叉热点实读验证不冲突。
+- **新立 F125（fix M）**：F124 工具结果扫描两个真实质量问题——①HIGH：扫描在 broker `_finalize_result` 同步执行阻塞 event loop ~176ms（应 to_thread 卸载）；②MED：CONTEXT pattern 对常见 web/技术文档高误报（~89%），踩 spec 反"狼来了"护栏 SC-008。同源合一，可与 F113 并行。F124 其余 LOW 归 F108 顺手。
+- **F113 就绪确认**：agent_context.py 现 4600 行，4 簇成立，建议实际拆 **5 个 mixin**（多 Memory-service ~203），Entity-ensure ~1075 优先抽，`build_task_context`+`_resolve_context_bundle` 必须留基类。
+- **e2e 缺口归 F119**：F123/F124/F116 均有单测无 e2e_live。
+- **基础设施待修**：主仓 `octoagent/.venv` editable .pth 指向已删 worktree → pre-commit 裸 pytest ModuleNotFoundError（SKIP_E2E 根因），重跑 `uv sync` 可修。
+
 ---
