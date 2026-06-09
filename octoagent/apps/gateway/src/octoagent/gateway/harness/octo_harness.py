@@ -443,6 +443,8 @@ class OctoHarness:
         )
         from octoagent.tooling import LargeOutputHandler, ToolBroker
 
+        from ..services.content_threat_scan import ContentThreatScanService
+
         from .. import main as _main_module
         from ..main import _resolve_telegram_polling_timeout
 
@@ -520,6 +522,7 @@ class OctoHarness:
             artifact_store=store_group.artifact_store,
             override_cache=approval_override_cache,
             approval_manager=approval_manager,
+            content_scanner=ContentThreatScanService(),  # F124 T015：tool 结果 CONTEXT 检测/标注
         )
         tool_broker.add_hook(
             LargeOutputHandler(

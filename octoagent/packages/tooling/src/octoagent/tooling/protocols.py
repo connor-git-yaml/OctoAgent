@@ -17,6 +17,7 @@ from .models import (
     RegistryDiagnostic,
     ToolMeta,
     ToolResult,
+    ToolSecurityFinding,
 )
 
 
@@ -136,6 +137,33 @@ class AfterHook(Protocol):
         context: ExecutionContext,
     ) -> ToolResult:
         """执行后钩子"""
+        ...
+
+
+@runtime_checkable
+class ContentThreatScanProtocol(Protocol):
+    """F124 T009：tool 结果内容威胁扫描的注入抽象。
+
+    定义在 tooling（下层），ToolBroker 依赖此抽象、**不依赖 gateway**（plan PR2-F1，防反向依赖）；
+    具体实现 `ContentThreatScanService` 在 gateway，由 gateway 装配时注入 broker。
+
+    方法 **scope-free**：CONTEXT scope 是实现内部事，`ScanScope` 枚举不跨边界（避免 tooling 反向
+    import gateway 或常量分叉）。返回命中的 `ToolSecurityFinding`（不命中空 list），调用方（broker）
+    负责挂到 ToolResult.security_findings + emit 审计事件。
+    """
+
+    def scan_tool_context(
+        self, content: str, source_field: str = "output"
+    ) -> list[ToolSecurityFinding]:
+        """扫 tool 结果内容（CONTEXT scope，chunk 全覆盖 + degraded 兜底）。
+
+        Args:
+            content: 待扫描的 tool 结果文本。
+            source_field: 命中来源字段（"output"|"error"，去重键用，FR-2.7）。
+
+        Returns:
+            命中的 ToolSecurityFinding 列表（含 degraded 兜底）；clean 时空 list。
+        """
         ...
 
 

@@ -183,6 +183,25 @@ class ToolMeta(BaseModel):
     )
 
 
+class ToolSecurityFinding(BaseModel):
+    """F124 T008：tool 结果/写入命中威胁的标记（JSON-native，可序列化进 turn metadata）。
+
+    检测层（broker finalize）挂到 ToolResult.security_findings，**不碰 raw output/error**；
+    渲染层从（持久化的）finding 派生 [security-warning]。
+    `scope` 用 str（"MEMORY"/"CONTEXT"）保持 tooling **不依赖** gateway 的 ScanScope 枚举（plan PR2-F1）。
+    全字段 str/bool → `model_dump(mode="json")` 为 JSON-native dict（防 turn metadata json.dumps TypeError，FR-3.4）。
+    """
+
+    pattern_id: str = Field(description="命中 pattern ID（如 PI-001）；degraded 兜底时为 DEGRADED")
+    scope: str = Field(description="扫描语境值：MEMORY | CONTEXT")
+    severity: str = Field(description="WARN | BLOCK")
+    advisory: str = Field(description="固定 advisory 文案（不回显恶意片段，FR-3.2）")
+    source_field: str = Field(default="output", description="命中字段 output|error（去重键用，FR-2.7）")
+    degraded: bool = Field(
+        default=False, description="超扫描预算的'按不可信处理'兜底（FR-1.5）"
+    )
+
+
 class ToolResult(BaseModel):
     """工具执行结果 -- 对齐 spec FR-011, data-model.md §2.2
 
@@ -207,6 +226,10 @@ class ToolResult(BaseModel):
     # 扩展字段
     tool_name: str = Field(default="", description="执行的工具名称")
     truncated: bool = Field(default=False, description="输出是否被裁切")
+    security_findings: list[ToolSecurityFinding] = Field(
+        default_factory=list,
+        description="F124 T010：威胁检测命中（默认空，向后兼容）。检测层挂载，不改 output/error。",
+    )
 
 
 class RegisterToolResult(BaseModel):

@@ -11,6 +11,7 @@ from enum import StrEnum
 from typing import Any
 
 from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
+from octoagent.tooling.models import ToolSecurityFinding  # F124 T010：透传威胁 finding
 from pydantic import BaseModel, Field
 
 _MAX_STEPS_HARD_CEILING = 500  # 降级重试 clamp 上限
@@ -364,6 +365,13 @@ class ToolFeedbackMessage(BaseModel):
         description=(
             "feedback 来源分类，决定 model_client 如何写入 LLM prompt。"
             "向后兼容：旧调用点不指定时默认 TOOL_RESULT（最常见语义）。"
+        ),
+    )
+    security_findings: list[ToolSecurityFinding] = Field(
+        default_factory=list,
+        description=(
+            "F124 T010：从 ToolResult 透传的威胁 finding（默认空，向后兼容）。"
+            "渲染层（_append_feedback_to_history 等）据此从 finding 派生 [security-warning]，不改 output/error。"
         ),
     )
 

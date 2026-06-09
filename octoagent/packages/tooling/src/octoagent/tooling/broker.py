@@ -8,6 +8,7 @@ Hook Chain 仅保留用于非权限类扩展（如 LargeOutputHandler）。
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import time
 from collections.abc import Callable
@@ -35,13 +36,20 @@ from .models import (
     RegistryDiagnostic,
     ToolMeta,
     ToolResult,
+    ToolSecurityFinding,
 )
 from .permission import (
     ApprovalManagerProtocol,
     ApprovalOverrideCacheProtocol,
     check_permission,
 )
-from .protocols import AfterHook, ArtifactStoreProtocol, BeforeHook, EventStoreProtocol
+from .protocols import (
+    AfterHook,
+    ArtifactStoreProtocol,
+    BeforeHook,
+    ContentThreatScanProtocol,
+    EventStoreProtocol,
+)
 from .sanitizer import sanitize_for_event
 
 logger = structlog.get_logger(__name__)
@@ -64,6 +72,7 @@ class ToolBroker:
         artifact_store: ArtifactStoreProtocol | None = None,
         override_cache: ApprovalOverrideCacheProtocol | None = None,
         approval_manager: ApprovalManagerProtocol | None = None,
+        content_scanner: ContentThreatScanProtocol | None = None,
     ) -> None:
         """初始化 ToolBroker
 
@@ -72,6 +81,8 @@ class ToolBroker:
             artifact_store: ArtifactStore 实例（可选，用于大输出存储）
             override_cache: always 覆盖缓存（Feature 070，可选）
             approval_manager: 审批管理器（Feature 070，可选）
+            content_scanner: F124 内容威胁扫描 service（可选，注入则对 tool 结果做 CONTEXT
+                扫描 + 挂 finding + emit 事件；None 则跳过，向后兼容）
         """
         # 注册表：tool_name -> (ToolMeta, handler)
         self._registry: dict[str, tuple[ToolMeta, Callable[..., Any]]] = {}
@@ -85,6 +96,8 @@ class ToolBroker:
         # Feature 070: 权限依赖
         self._override_cache = override_cache
         self._approval_manager = approval_manager
+        # F124: 内容威胁扫描 service（注入则 finalize 时对 tool 结果 CONTEXT 扫描）
+        self._content_scanner = content_scanner
 
     # ============================================================
     # 注册与发现（Phase 4: US2）
@@ -275,13 +288,13 @@ class ToolBroker:
         # 步骤 1: 查找工具
         entry = self._registry.get(tool_name)
         if entry is None:
-            return ToolResult(
+            return await self._finalize_result(ToolResult(
                 output="",
                 is_error=True,
                 error=f"Tool '{tool_name}' not found",
                 duration=0.0,
                 tool_name=tool_name,
-            )
+            ), context)
 
         meta, handler = entry
 
@@ -291,13 +304,13 @@ class ToolBroker:
         )
         if not started_ok:
             duration = time.monotonic() - start_time
-            return ToolResult(
+            return await self._finalize_result(ToolResult(
                 output="",
                 is_error=True,
                 error="TOOL_CALL_STARTED 事件写入失败，已拒绝执行以避免无审计副作用",
                 duration=duration,
                 tool_name=tool_name,
-            )
+            ), context)
 
         # 步骤 3: Feature 070 — 权限检查（替代三套 Hook）
         perm = await check_permission(
@@ -316,13 +329,13 @@ class ToolBroker:
                 error_type="permission_denied",
                 error_message=f"权限拒绝: {perm.reason}",
             )
-            return ToolResult(
+            return await self._finalize_result(ToolResult(
                 output="",
                 is_error=True,
                 error=f"权限拒绝: {perm.reason}",
                 duration=duration,
                 tool_name=tool_name,
-            )
+            ), context)
 
         # 步骤 4: 执行 before hook 链（仅非权限类 hook，如参数变换等）
         current_args = dict(args)
@@ -339,13 +352,13 @@ class ToolBroker:
                         error_type="rejection",
                         error_message=reason,
                     )
-                    return ToolResult(
+                    return await self._finalize_result(ToolResult(
                         output="",
                         is_error=True,
                         error=reason,
                         duration=duration,
                         tool_name=tool_name,
-                    )
+                    ), context)
                 if hook_result.modified_args is not None:
                     current_args = hook_result.modified_args
             except Exception as e:
@@ -359,13 +372,13 @@ class ToolBroker:
                         error_type="hook_failure",
                         error_message=error_msg,
                     )
-                    return ToolResult(
+                    return await self._finalize_result(ToolResult(
                         output="",
                         is_error=True,
                         error=error_msg,
                         duration=duration,
                         tool_name=tool_name,
-                    )
+                    ), context)
                 else:
                     logger.warning(
                         "before_hook_failed_open",
@@ -401,13 +414,13 @@ class ToolBroker:
                 error_type="timeout",
                 error_message=f"Tool '{tool_name}' timed out after {meta.timeout_seconds}s",
             )
-            return ToolResult(
+            return await self._finalize_result(ToolResult(
                 output="",
                 is_error=True,
                 error=f"Tool '{tool_name}' timed out after {meta.timeout_seconds}s",
                 duration=duration,
                 tool_name=tool_name,
-            )
+            ), context)
         except Exception as e:
             duration = time.monotonic() - start_time
             await self._emit_failed_event(
@@ -417,13 +430,13 @@ class ToolBroker:
                 error_type="exception",
                 error_message=str(e),
             )
-            return ToolResult(
+            return await self._finalize_result(ToolResult(
                 output="",
                 is_error=True,
                 error=str(e),
                 duration=duration,
                 tool_name=tool_name,
-            )
+            ), context)
 
         # 步骤 5: 执行 after hook 链
         for hook in self._after_hooks:
@@ -463,7 +476,9 @@ class ToolBroker:
                 artifact_ref=result.artifact_ref,
             )
 
-        return result
+        # F124 T016：成功路径终态 finalize——扫**截断前完整 output**（output_str，after-hook 可能已截断
+        # result.output）+ 最终 error，挂 finding + emit；fail-closed 重建即便丢 findings 也由此重挂。
+        return await self._finalize_result(result, context, raw_output=output_str)
 
     # ============================================================
     # 内部方法
@@ -614,6 +629,88 @@ class ToolBroker:
             )
         except Exception as e:
             logger.error("failed_to_emit_failed_event", error=str(e))
+
+    async def _finalize_result(
+        self,
+        result: ToolResult,
+        context: ExecutionContext,
+        *,
+        raw_output: str | None = None,
+    ) -> ToolResult:
+        """F124 T016：所有 ToolResult return 前统一过此——CONTEXT 内容威胁扫描 + 挂 finding + emit。
+
+        **永不 block / 不改 raw output/error**（FR-2.4/2.5）；scanner 异常 fail-open（FR-2.6 / C6）。
+        成功路径传 `raw_output`=截断前完整 output（after-hook 在此之前可能已截断 result.output，
+        故扫 raw 保全覆盖，FR-2.3）；error/早退路径 raw_output=None → 扫 result.error（覆盖异常通道，FR-2.1）。
+        覆盖 execute 的全部 ~8 退出分支（每个 return 都经此）。
+        """
+        if self._content_scanner is None:
+            return result
+        findings: list[ToolSecurityFinding] = []
+        hashes: dict[str, str] = {}
+        try:
+            out_src = raw_output if raw_output is not None else result.output
+            if out_src:
+                out_hits = self._content_scanner.scan_tool_context(out_src, source_field="output")
+                if out_hits:
+                    findings.extend(out_hits)
+                    hashes["output"] = hashlib.sha256(out_src.encode("utf-8")).hexdigest()
+            if result.error:
+                err_hits = self._content_scanner.scan_tool_context(result.error, source_field="error")
+                if err_hits:
+                    findings.extend(err_hits)
+                    hashes["error"] = hashlib.sha256(result.error.encode("utf-8")).hexdigest()
+        except Exception as e:
+            # fail-open（C6）：扫描异常绝不拖垮工具结果
+            logger.warning("content_threat_scan_failed_open", tool_name=result.tool_name, error=str(e))
+            return result
+        if not findings:
+            return result
+        merged = [*result.security_findings, *findings]
+        result = result.model_copy(update={"security_findings": merged})
+        await self._emit_threat_flagged_event(result.tool_name, context, findings, hashes)
+        return result
+
+    async def _emit_threat_flagged_event(
+        self,
+        tool_name: str,
+        context: ExecutionContext,
+        findings: list[ToolSecurityFinding],
+        hashes: dict[str, str],
+    ) -> None:
+        """F124 T017：emit TOOL_RESULT_THREAT_FLAGGED（payload 仅 hash + finding 元数据，无原文，C5）。"""
+        if self._event_store is None:
+            return
+        try:
+            payload = {
+                "tool": tool_name,
+                "findings": [
+                    {
+                        "pattern_id": f.pattern_id,
+                        "scope": f.scope,
+                        "severity": f.severity,
+                        "source_field": f.source_field,
+                        "degraded": f.degraded,
+                    }
+                    for f in findings
+                ],
+                "content_hashes": hashes,
+                "agent_session_id": context.agent_session_id,
+                "work_id": context.work_id,
+            }
+            event = Event(
+                event_id=str(ULID()),
+                task_id=context.task_id,
+                task_seq=await self._event_store.get_next_task_seq(context.task_id),
+                ts=datetime.now(),
+                type=EventType.TOOL_RESULT_THREAT_FLAGGED,
+                actor=ActorType.TOOL,
+                payload=payload,
+                trace_id=context.trace_id,
+            )
+            await self._persist_event(event)
+        except Exception as e:
+            logger.warning("failed_to_emit_threat_flagged_event", error=str(e))
 
     async def _persist_event(self, event: Event) -> None:
         """持久化事件：优先使用带提交/重试的实现。"""
