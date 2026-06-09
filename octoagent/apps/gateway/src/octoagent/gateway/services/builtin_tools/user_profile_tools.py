@@ -39,7 +39,6 @@ from octoagent.core.models.tool_results import (
 from octoagent.gateway.harness.snapshot_store import CharLimitExceeded
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
-from octoagent.gateway.harness.threat_scanner import scan as threat_scan  # 保留备用（observe 直接用）
 from octoagent.gateway.services.policy import PolicyGate
 from octoagent.tooling import reflect_tool_schema, tool_contract
 

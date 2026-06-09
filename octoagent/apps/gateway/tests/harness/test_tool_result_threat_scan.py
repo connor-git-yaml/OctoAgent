@@ -220,17 +220,41 @@ class TestNoBypassContract:
         "apps/gateway/src/octoagent/gateway/services/agent_context.py": "render_",
     }
 
-    def test_known_sinks_reference_render_helper(self) -> None:
-        # 从本测试文件向上定位 octoagent 仓库根
+    @staticmethod
+    def _octoagent_root() -> Path:
         root = Path(__file__).resolve()
         while root.name != "octoagent" and root.parent != root:
             root = root.parent
+        return root
+
+    def test_known_sinks_reference_render_helper(self) -> None:
+        root = self._octoagent_root()
         missing: list[str] = []
         for rel, marker in self._SINKS.items():
             src = (root / rel).read_text(encoding="utf-8")
             if marker not in src:
                 missing.append(f"{rel} 缺 {marker}")
         assert not missing, f"LLM-bound sink 未经 render helper（no-bypass，FR-3.5）：{missing}"
+
+    def test_no_direct_scanner_import_outside_service(self) -> None:
+        # C10 / review FR-F3：内容扫描统一经 ContentThreatScanService，production 模块不得直接
+        # import threat_scanner.scan / scan_context（仅 service 与 scanner 自身允许）。
+        root = self._octoagent_root()
+        allowed = {"content_threat_scan.py", "threat_scanner.py"}
+        offenders: list[str] = []
+        for src_dir in ("apps/gateway/src", "packages"):
+            for py in (root / src_dir).rglob("*.py"):
+                if "/tests/" in str(py) or py.name in allowed:
+                    continue
+                for ln, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
+                    s = line.strip()
+                    if "threat_scanner import" in s and (
+                        "scan_context" in s or "scan as" in s or "import scan" in s
+                    ):
+                        offenders.append(f"{py.relative_to(root)}:{ln}")
+        assert not offenders, (
+            f"production 模块直 import scanner（绕过 ContentThreatScanService，C10/FR-F3）：{offenders}"
+        )
 
 
 class TestCentralCoverageUS2US3:

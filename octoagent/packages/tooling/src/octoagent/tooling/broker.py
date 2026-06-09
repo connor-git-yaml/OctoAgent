@@ -54,6 +54,10 @@ from .sanitizer import sanitize_for_event
 
 logger = structlog.get_logger(__name__)
 
+# F124 FR-F4：finalize 审计 hash 的输入上限（字符）。只对前缀做 sha256 + 记录 length，
+# 保证 degraded（超大）路径不对全量内容做无界 hash（重新引入 O(n)）。
+_FINALIZE_HASH_PREFIX_CAP = 65_536
+
 
 class ToolBroker:
     """ToolBroker -- 工具注册、发现、执行的中央中介者
@@ -648,18 +652,35 @@ class ToolBroker:
             return result
         findings: list[ToolSecurityFinding] = []
         hashes: dict[str, str] = {}
+        seen: set[tuple[str, str]] = set()  # (source_field, pattern_id) 去重（FR-2.7）
+
+        def _bounded_hash(text: str) -> str:
+            # FR-F4：有界 hash——prefix + length，绝不对超大（degraded）内容做全量 sha256。
+            prefix = text[:_FINALIZE_HASH_PREFIX_CAP].encode("utf-8")
+            return f"len={len(text)}:sha256_prefix={hashlib.sha256(prefix).hexdigest()}"
+
+        def _collect(text: str, field: str) -> None:
+            if not text:
+                return
+            for f in self._content_scanner.scan_tool_context(text, source_field=field):
+                key = (f.source_field, f.pattern_id)
+                if key in seen:
+                    continue
+                seen.add(key)
+                findings.append(f)
+                hashes[field] = _bounded_hash(text)
+
         try:
-            out_src = raw_output if raw_output is not None else result.output
-            if out_src:
-                out_hits = self._content_scanner.scan_tool_context(out_src, source_field="output")
-                if out_hits:
-                    findings.extend(out_hits)
-                    hashes["output"] = hashlib.sha256(out_src.encode("utf-8")).hexdigest()
-            if result.error:
-                err_hits = self._content_scanner.scan_tool_context(result.error, source_field="error")
-                if err_hits:
-                    findings.extend(err_hits)
-                    hashes["error"] = hashlib.sha256(result.error.encode("utf-8")).hexdigest()
+            if raw_output is not None:
+                # 成功路径：扫截断前 raw output（全覆盖，FR-2.3）
+                _collect(raw_output, "output")
+                # FR-F1：after-hook 改写过最终 output（≠ raw）→ 也扫最终 output（防新内容带空 finding 进 LLM）
+                if result.output and result.output != raw_output:
+                    _collect(result.output, "output")
+            else:
+                _collect(result.output, "output")
+            # error/异常通道（FR-2.1）
+            _collect(result.error or "", "error")
         except Exception as e:
             # fail-open（C6）：扫描异常绝不拖垮工具结果
             logger.warning("content_threat_scan_failed_open", tool_name=result.tool_name, error=str(e))

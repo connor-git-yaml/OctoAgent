@@ -4183,12 +4183,15 @@ class AgentContextService(AgentContextTurnWriterMixin):
             f"result_text: {result_text}\n"
             f"error_summary: {error_summary}"
         )
-        # F124 PR4-F1：research handoff 是 worker 外部输出经 dict-payload 进主 Agent 上下文的
-        # 第 5 类 sink（不带 ToolSecurityFinding）。边界重扫 summary+result_text（CONTEXT scope），
-        # 命中则前置 [security-warning]（不改原文，经唯一 render helper，满足 no-bypass 契约 FR-3.5）。
-        from octoagent.gateway.harness.threat_scanner import scan_context
+        # F124 PR4-F1 + review FR-F3：research handoff 是 worker 外部输出经 dict-payload 进主 Agent
+        # 上下文的第 5 类 sink（不带 ToolSecurityFinding）。边界重扫 summary+result_text（CONTEXT scope），
+        # 命中则前置 [security-warning]（不改原文，经唯一 render helper，no-bypass FR-3.5）。
+        # **经 ContentThreatScanService 单一 scanner 入口**（不直调 harness.scan_context，守 C10，FR-F3）。
+        from octoagent.gateway.services.content_threat_scan import ContentThreatScanService
 
-        findings = scan_context(f"{summary}\n{result_text}", source_field="output")
+        findings = ContentThreatScanService().scan_tool_context(
+            f"{summary}\n{result_text}", source_field="output"
+        )
         return render_tool_result_for_llm(block, findings)
 
     def _fit_prompt_budget(
