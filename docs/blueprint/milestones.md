@@ -521,8 +521,8 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 |---------|-----------|-----------------|
 | **F114** threat_scanner 假 0 修复 ✅（d2936e0）| fix S | 已修双重假 0（断言路径 + scorer 取数遗漏）；L1 确定性 PASS。L2 DeepSeek FAIL 属控变量画像非 bug |
 | **F115** daily_routine 时区接入 USER.md ✅ | fix S | 已修：USER.md 新增机器可读 `user_timezone` 字段，时区按 USER.md > env OCTOAGENT_USER_TIMEZONE > UTC 降级（每次读 config 派生，移除 `__init__` env-only stale 缓存）；cron 触发时刻 + "昨日"窗口现真正受 USER.md 控制 |
-| **F116** notification dismiss 持久化 | fix S | dismiss 纯内存，重启后已读通知重现——违反 Constitution #1 Durability，用户可感知 |
-| **F112** 双轨死代码清理 | refactor S | 删 F090→F100 metadata↔runtime_context 残渣 + WORKER_PRIVATE 废弃路径，行为零变更 |
+| **F116** notification dismiss 持久化 ✅（9d5e12d）| fix S | 已修：新增 notification_store.py（SQLite）+ sqlite_init 表 + 启动 rehydrate；dismiss/active 跨重启持久化，跨通道统一 |
+| **F112** 双轨死代码清理 ✅（6b60e26）| refactor S | 已清：metadata fallback 残渣 + WORKER_PRIVATE 守卫收敛，行为零变更 |
 | **F113** agent_context.py 拆 mixin | refactor L | 4585 行，F093 抽错缝反涨；4 大职责簇拆 mixin（沿用 F093 范式）。最值钱重构，越晚越贵 |
 
 **M6 债务/测试候选（穿插 F117-F122）**：F117 WorkerProfile/AgentProfile 合并（D2，XL，独立 dry-run+拍板）；F118 control_plane D8 解耦（M，并入 F108）；F119 F104+F099-F102 e2e 补全（M，独立）；F120 F104 versionable 收窄 + FK 诚实化（L，**M7**）；F121 巨型 domain service 二次拆分（L，并入 F108）；F122 A2A docstring + worker_type 命名（S，并入 F108）。
@@ -534,7 +534,8 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 **M6 竞品源码深读增量（2026-06-08，workflow 深读 vendored Hermes/OpenClaw/Agent Zero/Pydantic AI/Claude Code + 反向验证）**：
 - **F123 出站 SSRF 预检 ✅**（fix 安全 S）：新增 `harness/url_safety.py`——`ensure_url_safe`/`async_ensure_url_safe` 解析目标 IP 拦私网(RFC1918)/loopback/link-local/CGNAT/unspecified/multicast/reserved + 云元数据 always-block 地板（169.254.169.254 / ECS / Azure IMDS / 阿里云 / IPv4-mapped + NAT64 + 6to4 内嵌形态，开关也不放开）；`_fetch_browser_page` + `_search_web` 接入 + httpx request event-hook 逐跳重校验 302；`security.allow_private_urls` 开关（yaml mtime 失效缓存 + `OCTOAGENT_ALLOW_PRIVATE_URLS` env 覆盖，默认 false）。删旧 `_validate_remote_url`（仅检 scheme/netloc）。**已挡**：字面量内网/元数据、静态 DNS 解析到内网、302 绕内网、混淆 IP（依赖同 resolver）。**limitation**：DNS rebinding TOCTOU 需连接级 pinning（pre-flight 无法根治，列 M6/M7 egress 域）。Codex 2 轮 + 独立 Claude review，0 HIGH 残留。F105 复用其校验层。
 - **F105 设计输入（OpenClaw）**：channel plugin registry / ConversationBinding（**H1：所有平台收敛单一主 Agent，不指向不同 agentId**）/ last-route 出站解析 / per-job delivery+isolated / outbound delivery-queue。
-- **F108 设计输入**：tool 结果 context-scope scan（Hermes，与 F114 同源，引擎只接 memory 窄管道）/ 执行前 schema 校验 + 结构化 retry（Pydantic）/ artifact read-back + per-turn 预算（Hermes）/ tool_call_id 确定性 tail eviction + AmbientRuntime 时间戳挪出缓存前缀（Claude Code，零风险缓存收益）/ 决策环具名扩展缝（Agent Zero）。
+- **F124 工具结果威胁扫描 ✅**（6f69512，5 commit + Codex final 2H+2M）：Hermes F2 落地——ThreatScanner 加 ScanScope（MEMORY/CONTEXT）维度 + broker after-hook 对 tool 结果（web.fetch/MCP/terminal 输出）做 context-scope 扫描，**只标注 `[security-warning]` 不 block/不改 raw**；新增 security_render.py（live/replay/memory-extraction 三路径渲染单一 helper）+ content_threat_scan.py（C10 单一入口）。MEMORY scope 冻结零回归（不破 F114）。原计划是 F108 设计输入，实施时提升为独立 Feature。
+- **F108 设计输入**：~~tool 结果 context-scope scan（Hermes F2）~~ **已独立实现为 F124 ✅** / 执行前 schema 校验 + 结构化 retry（Pydantic）/ artifact read-back + per-turn 预算（Hermes）/ tool_call_id 确定性 tail eviction + AmbientRuntime 时间戳挪出缓存前缀（Claude Code，零风险缓存收益）/ 决策环具名扩展缝（Agent Zero）。
 - **F106 设计输入**：plugin toggle/热重载/git（Agent Zero az-2，在现有 SkillDiscovery 上扩）。
 - **M7**：文件系统 checkpoint/rollback（Hermes，亦 F107 输入）；用户/Agent 自助 proactive cron（OC-5，后端 CRUD 已在缺工具+UI，F102 同域）；skill 自改进闭环（sleep-time 同期）。
 - **剔除**：Pydantic typed deps DI（已有 ToolDeps+ExecutionRuntimeContext）/ Claude Code 细分 failure hook（走 event-sourcing）/ Agent Zero 自改写规则（违 #4/#7）。
