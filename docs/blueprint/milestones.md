@@ -546,7 +546,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 
 **M6 并行合并集成 review 结论（2026-06-08，6 Feature 合并后交叉影响 + 回归 + F113 就绪度）**：
 - **0 真回归**：组合态 master 实测 3919 passed / 0 failed（远超 ≥3026 baseline）；agent_context.py(F112∩F124) / octo_harness.py(F116∩F124) / daily_routine_config.py(F115∩F102) 三交叉热点实读验证不冲突。
-- **新立 F125（fix M）**：F124 工具结果扫描两个真实质量问题——①HIGH：扫描在 broker `_finalize_result` 同步执行阻塞 event loop ~176ms（应 to_thread 卸载）；②MED：CONTEXT pattern 对常见 web/技术文档高误报（~89%），踩 spec 反"狼来了"护栏 SC-008。同源合一，可与 F113 并行。F124 其余 LOW 归 F108 顺手。
+- **F125（fix M）✅ 完成**（f3532ca5，rebase F113 零冲突，3899 passed 0 regression）：broker `_finalize_result` 同步扫描 → `asyncio.to_thread` 卸载（GIL 下 event loop 单次停顿 200-325ms→~54ms，最慢 CTX-C2-004 82→31ms）+ CONTEXT 真实语料误报 89%→0%（≥44 负样本锁死）+ docstring 单遍全文 + 线程安全契约。**4 轮 Codex re-review 收敛**（3H/2M/1L→0H/1M/2L）+ 主节点自查抓 14 边界误报（比 re-review 早抓 9 个）。**越权授予检测维度归档**（developer/elevated/root/superuser/unlimited 与运维 IAM/DB/SSH + SaaS 术语不可区分，CTX-RH-005 收敛 unrestricted/unbounded + you 主语/越狱对象约束，Codex round-4 接受为工程权衡，伴指令版 CTX-RH-004 兜底）。制品 + 归档（Unicode 同形字 / CONTEXT decode / 窗口填充 / RH-003 developer mode / GIL）见 `.specify/features/125-f124-hotpath-falsepos/completion-report.md §7`。
 - **F113 就绪确认**：agent_context.py 现 4600 行，4 簇成立，建议实际拆 **5 个 mixin**（多 Memory-service ~203），Entity-ensure ~1075 优先抽，`build_task_context`+`_resolve_context_bundle` 必须留基类。
 - **e2e 缺口归 F119**：F123/F124/F116 均有单测无 e2e_live。
 - **基础设施待修**：主仓 `octoagent/.venv` editable .pth 指向已删 worktree → pre-commit 裸 pytest ModuleNotFoundError（SKIP_E2E 根因），重跑 `uv sync` 可修。
