@@ -20,14 +20,16 @@ services/
 
 ```python
 class AgentContextService(
-    AgentContextEntityEnsureMixin,
+    AgentContextPromptAssemblyMixin,
+    AgentContextSessionReplayMixin,
     AgentContextMemoryRecallMixin,
     AgentContextMemoryServiceMixin,
-    AgentContextSessionReplayMixin,
-    AgentContextPromptAssemblyMixin,
+    AgentContextEntityEnsureMixin,
     AgentContextTurnWriterMixin,
 ):
 ```
+
+> 实施记录：实际声明顺序如上（逐批插入产生，与本节初稿示意相反）。6 mixin + 基类**零方法名碰撞**已实测（第二评审复核），MRO 顺序对解析无影响。
 
 依赖方向（无环）：`helpers ← {mixin 文件, agent_context.py}`；`mixin 文件 ← agent_context.py`。mixin 之间运行时经 `self` 互调、文件层面互不 import。
 

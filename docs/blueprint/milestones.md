@@ -523,7 +523,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | **F115** daily_routine 时区接入 USER.md ✅ | fix S | 已修：USER.md 新增机器可读 `user_timezone` 字段，时区按 USER.md > env OCTOAGENT_USER_TIMEZONE > UTC 降级（每次读 config 派生，移除 `__init__` env-only stale 缓存）；cron 触发时刻 + "昨日"窗口现真正受 USER.md 控制 |
 | **F116** notification dismiss 持久化 ✅（9d5e12d）| fix S | 已修：新增 notification_store.py（SQLite）+ sqlite_init 表 + 启动 rehydrate；dismiss/active 跨重启持久化，跨通道统一 |
 | **F112** 双轨死代码清理 ✅（6b60e26）| refactor S | 已清：metadata fallback 残渣 + WORKER_PRIVATE 守卫收敛，行为零变更 |
-| **F113** agent_context.py 拆 mixin | refactor L | 4585 行，F093 抽错缝反涨；4 大职责簇拆 mixin（沿用 F093 范式）。最值钱重构，越晚越贵 |
+| **F113** agent_context.py 拆 mixin ✅ | refactor L | 已拆：4600 → 1079 行（-76.5%），5 mixin（EntityEnsure 1049 / PromptAssembly 773 / SessionReplay 644 / MemoryRecall 476 / MemoryService 192）+ helpers 叶子文件（打破循环 import）+ 主文件留编排根（build_task_context 等跨簇组合根，审计 A4 决议不可抽）；re-export 保外部 import 零改动；AST 92 定义逐节点对账零丢失；行为零变更 |
 
 **M6 债务/测试候选（穿插 F117-F122）**：F117 WorkerProfile/AgentProfile 合并（D2，XL，独立 dry-run+拍板）；F118 control_plane D8 解耦（M，并入 F108）；F119 F104+F099-F102 e2e 补全（M，独立）；F120 F104 versionable 收窄 + FK 诚实化（L，**M7**）；F121 巨型 domain service 二次拆分（L，并入 F108）；F122 A2A docstring + worker_type 命名（S，并入 F108）。
 

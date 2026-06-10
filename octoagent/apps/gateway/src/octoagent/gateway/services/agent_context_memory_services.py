@@ -231,9 +231,7 @@ class AgentContextMemoryServiceMixin:
         """
         if not hasattr(self, "_reranker_service"):
             try:
-                from octoagent.gateway.services.inference.model_reranker_service import (
-                    ModelRerankerService,
-                )
+                from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
 
                 self._reranker_service = ModelRerankerService(auto_load=True)
             except Exception:
