@@ -150,6 +150,8 @@ class OctoHarness:
         self._alias_registry: AliasRegistry | None = None
         self._llm_mode_env: str = ""
         self._telegram_service: Any | None = None
+        # F105：渠道 adapter 中央注册表（_bootstrap_channels 构造，executors 段消费）
+        self._platform_registry: Any | None = None
         self._approval_override_cache: Any | None = None
         self._tool_broker: Any | None = None
         self._llm_service_ref: list[Any] = []
@@ -241,8 +243,11 @@ class OctoHarness:
         )
         if callable(clear_runtime_state):
             clear_runtime_state()
-        if hasattr(app.state, "telegram_service") and app.state.telegram_service:
-            await app.state.telegram_service.shutdown()
+        # F105：渠道生命周期统一走 registry（注册逆序停止；registry 与
+        # telegram_service 在 _bootstrap_channels 同段原子构造，registry 存在
+        # 即覆盖 baseline 的 telegram shutdown 语义，plan C-4）。
+        if hasattr(app.state, "platform_registry") and app.state.platform_registry:
+            await app.state.platform_registry.shutdown_all()
         if hasattr(app.state, "task_runner") and app.state.task_runner:
             await app.state.task_runner.shutdown()
 
@@ -489,6 +494,23 @@ class OctoHarness:
         )
         app.state.telegram_service = telegram_service
         app.state.telegram_state_store = telegram_state_store
+
+        # F105：platform_registry——渠道 adapter 中央注册表（注册序 web → telegram
+        # 对应 baseline 通知注册序 SSE → Telegram，等价论证见 plan C-1/C-2）。
+        # adapter 在此构造（wrap 现有对象），通知渠道实例化推迟到 executors 段
+        # adapter.notification_channel() 调用时——保 baseline first_approved_user
+        # chat_id 冻结时机不变。
+        from ..channels import (
+            PlatformRegistry,
+            TelegramChannelAdapter,
+            WebChannelAdapter,
+        )
+
+        platform_registry = PlatformRegistry()
+        platform_registry.register(WebChannelAdapter(app.state.sse_hub))
+        platform_registry.register(TelegramChannelAdapter(telegram_service))
+        app.state.platform_registry = platform_registry
+        self._platform_registry = platform_registry
 
         # Feature 070: ApprovalManager + Override 持久化（不再使用 PolicyEngine）
         sse_broadcaster = SSEApprovalBroadcaster(app.state.sse_hub)
@@ -916,14 +938,16 @@ class OctoHarness:
         app.state.capability_pack_service.bind_delegation_plane(app.state.delegation_plane_service)
         llm_service = app.state.llm_service
 
-        # F101 Phase C T-C-00：创建 NotificationService 实例并注册 SSE + Telegram 渠道。
+        # F101 Phase C T-C-00：创建 NotificationService 实例并注册渠道。
         # NotificationService 由 TaskRunner 在 WAITING_APPROVAL 进入时调用（FR-B1）。
         # 采用 lazy import 避免循环依赖；创建失败时降级为 None（Constitution #6）。
+        # F105：渠道注册改为遍历 platform_registry（注册序 web → telegram ==
+        # baseline SSE → Telegram）；各渠道实例构造逻辑逐行迁移进 adapter
+        # （telegram_adapter.notification_channel —— 含 first_approved_user
+        # chat_id 冻结 + bot_client None 不注册语义，等价论证见 plan C-1/C-2）。
         try:
             from ..services.notification import (
                 NotificationService as _NotificationService,
-                SSENotificationChannel as _SSENotificationChannel,
-                TelegramNotificationChannel as _TelegramNotificationChannel,
             )
             # H-7：注入 snapshot_store 供 NotificationService 读取 USER.md active_hours
             # H-6：注入 event_store 供 NotificationService 写审计事件
@@ -932,40 +956,12 @@ class OctoHarness:
                 snapshot_store=snapshot_store,
                 event_store=_notif_event_store,
             )
-            # 注册 SSE 渠道（Web UI 订阅者接收通知）
-            _sse_ch = _SSENotificationChannel(getattr(app.state, "sse_hub", None))
-            _notification_service.register_channel(_sse_ch)
-            # H-1 修复：TelegramNotificationChannel 构造签名为 send_message_fn + chat_id，
-            # 不是整个 telegram_service 对象。从 telegram_service 提取正确参数。
-            if telegram_service is not None:
-                _tg_bot_client = getattr(telegram_service, "_bot_client", None)
-                _tg_state_store = getattr(telegram_service, "_state_store", None)
-                # 提取第一个已授权用户的 chat_id 作为通知目标
-                _tg_chat_id: str | None = None
-                if _tg_state_store is not None:
-                    try:
-                        _approved = _tg_state_store.first_approved_user()
-                        if _approved is not None:
-                            _tg_chat_id = str(getattr(_approved, "chat_id", "") or "")
-                            if not _tg_chat_id:
-                                _tg_chat_id = None
-                    except Exception:
-                        _tg_chat_id = None
-                # 构造适配闭包：TelegramNotificationChannel.notify 以位置参数调用
-                # send_message_fn(chat_id, text, reply_markup)，但 bot_client.send_message
-                # 的 reply_markup 是关键字参数——用闭包适配
-                if _tg_bot_client is not None:
-                    async def _tg_send_fn(chat_id: str, text: str, reply_markup=None):
-                        await _tg_bot_client.send_message(
-                            chat_id,
-                            text,
-                            reply_markup=reply_markup or None,
-                        )
-                    _tg_ch = _TelegramNotificationChannel(
-                        send_message_fn=_tg_send_fn,
-                        chat_id=_tg_chat_id,
-                    )
-                    _notification_service.register_channel(_tg_ch)
+            _platform_registry = self._platform_registry
+            if _platform_registry is not None:
+                for _adapter in _platform_registry.list_adapters():
+                    _channel = _adapter.notification_channel()
+                    if _channel is not None:
+                        _notification_service.register_channel(_channel)
             # F116：绑定 notification_store + rehydrate（dismiss/active 跨重启恢复）。
             # store 缺失或 rehydrate 失败时降级（Constitution #6），不阻断 bootstrap。
             _notif_store = getattr(store_group, "notification_store", None)
@@ -988,12 +984,16 @@ class OctoHarness:
         if _tool_deps_rebind is not None:
             _tool_deps_rebind._notification_service = app.state.notification_service
 
+        # F105：completion_notifier 改 platform_registry 扇出（plan C-3 等价论证：
+        # web adapter no-op + telegram adapter 调同一 service.notify_task_result，
+        # 其内部 requester.channel guard 原样；baseline 本就对每个完成 task 调
+        # telegram notify_task_result）。
         app.state.task_runner = TaskRunner(
             store_group=store_group,
             sse_hub=app.state.sse_hub,
             llm_service=llm_service,
             approval_manager=app.state.approval_manager,
-            completion_notifier=telegram_service.notify_task_result,
+            completion_notifier=self._platform_registry.notify_task_completion,
             delegation_plane=app.state.delegation_plane_service,
             project_root=project_root,
             notification_service=app.state.notification_service,  # F101 Phase C T-C-00
@@ -1110,7 +1110,6 @@ class OctoHarness:
         project_root = self._project_root
         store_group = self._store_group
         assert store_group is not None
-        telegram_service = self._telegram_service
         provider_router = self._provider_router
 
         # F084 Phase 3 T049：启动 ObservationRoutine（feature flag 检查）
@@ -1130,8 +1129,10 @@ class OctoHarness:
                 default=_obs_feature_enabled,
             )
 
-        # Telegram 通知函数（异步）：如果 telegram_service 有 notify_text，直接用；否则 None
-        _obs_telegram_notify = getattr(telegram_service, "notify_text", None)
+        # F105 D7：原 `getattr(telegram_service, "notify_text", None)` 是死引用——
+        # TelegramGatewayService 从无 notify_text 方法（grep 实证），恒 None。
+        # 改为显式 None（字面等价），避免误导后续实现者以为存在 text 通知面。
+        _obs_telegram_notify = None
 
         _observation_routine = ObservationRoutine(
             conn=store_group.conn,
@@ -1144,7 +1145,10 @@ class OctoHarness:
         await _observation_routine.start()
         app.state.observation_routine = _observation_routine
 
-        await telegram_service.startup()
+        # F105：渠道生命周期统一走 registry（注册序启动；v0.1 telegram 是唯一
+        # 非 no-op startup，时序与 baseline `telegram_service.startup()` 一致，
+        # 异常传播语义不变——registry.startup_all 不吞异常，plan C-4）。
+        await self._platform_registry.startup_all()
 
         # Feature 011: 注册 WatchdogScanner APScheduler job
         watchdog_config = WatchdogConfig.from_env()
