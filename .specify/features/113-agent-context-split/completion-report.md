@@ -40,7 +40,10 @@
 - 全仓 38 个外部 import 名字逐一可解析 ✅
 - focused 测试组（services 全目录 + 4 直调测试文件 + 跨包 store 测试）：377 passed × 5 轮
 - e2e_smoke：**8 passed** ✅（PYTHONPATH 锁 worktree 手动跑）
-- 全量回归 vs baseline：{{PENDING_FULL_REGRESSION}}
+- 全量回归 vs baseline（同环境同命令控变量，PYTHONPATH 锁 worktree，串行各 ~40 min）：
+  - baseline（167b9cf4 未改动）：6 failed / **3958 passed** / 13 skipped / 1 xfailed / 1 xpassed
+  - 改后（3f2202a6；其后 d5708ab4/627dbf44 仅 1 处 AST 等价 import 换行还原 + 文档，commit 后 focused 258 passed 复验）：6 failed / **3958 passed** / 13 skipped / 1 xfailed / 1 xpassed
+  - **完全一致，0 regression**；6 个 failed 两侧同为 `e2e_live/*real_llm*`（需真实 LLM 凭证，本环境必失败的环境性失败，baseline 即失败，与 F113 无关）
 - ruff（F821/E402/F401 新引入维度）：全干净；主文件保留与 baseline 一致的 9 个预存 F401（不顺手清理）
 
 ## 5. Codex adversarial review + 第二模型 spec-对齐 review（多评审 panel）
