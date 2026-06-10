@@ -59,6 +59,56 @@ logger = structlog.get_logger(__name__)
 _FINALIZE_HASH_PREFIX_CAP = 65_536
 
 
+def _scan_collect_findings(
+    scanner: ContentThreatScanProtocol,
+    *,
+    output: str | None,
+    raw_output: str | None,
+    result_error: str | None,
+) -> tuple[list[ToolSecurityFinding], dict[str, str]]:
+    """F125：纯 CPU 扫描收集块（`_finalize_result` 经 `asyncio.to_thread` 在后台线程调用）。
+
+    把 CONTEXT 内容威胁扫描（near-上限输出可达 ~200ms 的 O(n) 正则 + 零宽字符遍历）从 async
+    event loop 卸载到线程，避免阻塞事件循环（集成 review HIGH）。**纯函数**：只读 str 入参、无
+    await、无共享可变状态、不碰 event_store/emit——结果回 event loop 后由调用方挂 finding + emit。
+
+    覆盖 success（raw_output=截断前完整 output）/ after-hook 改写（output≠raw）/ error 三通道；
+    (source_field, pattern_id) 去重跨三通道共享（FR-2.7）。fail-open 由调用方 try 包裹（线程内异常
+    经 future 重抛到 await 处）。
+    """
+    findings: list[ToolSecurityFinding] = []
+    hashes: dict[str, str] = {}
+    seen: set[tuple[str, str]] = set()  # (source_field, pattern_id) 去重（FR-2.7）
+
+    def _bounded_hash(text: str) -> str:
+        # FR-F4：有界 hash——prefix + length，绝不对超大（degraded）内容做全量 sha256。
+        prefix = text[:_FINALIZE_HASH_PREFIX_CAP].encode("utf-8")
+        return f"len={len(text)}:sha256_prefix={hashlib.sha256(prefix).hexdigest()}"
+
+    def _collect(text: str, field: str) -> None:
+        if not text:
+            return
+        for f in scanner.scan_tool_context(text, source_field=field):
+            key = (f.source_field, f.pattern_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            findings.append(f)
+            hashes[field] = _bounded_hash(text)
+
+    if raw_output is not None:
+        # 成功路径：扫截断前 raw output（全覆盖，FR-2.3）
+        _collect(raw_output, "output")
+        # FR-F1：after-hook 改写过最终 output（≠ raw）→ 也扫最终 output（防新内容带空 finding 进 LLM）
+        if output and output != raw_output:
+            _collect(output, "output")
+    else:
+        _collect(output or "", "output")
+    # error/异常通道（FR-2.1）
+    _collect(result_error or "", "error")
+    return findings, hashes
+
+
 class ToolBroker:
     """ToolBroker -- 工具注册、发现、执行的中央中介者
 
@@ -644,45 +694,26 @@ class ToolBroker:
         """F124 T016：所有 ToolResult return 前统一过此——CONTEXT 内容威胁扫描 + 挂 finding + emit。
 
         **永不 block / 不改 raw output/error**（FR-2.4/2.5）；scanner 异常 fail-open（FR-2.6 / C6）。
+        F125：扫描（near-上限输出 ~200ms 的 O(n) 正则 + 零宽字符遍历）经 `asyncio.to_thread` 卸载到
+        后台线程，不阻塞 async event loop（集成 review HIGH）；挂 finding（model_copy）+ emit 留 event loop。
         成功路径传 `raw_output`=截断前完整 output（after-hook 在此之前可能已截断 result.output，
         故扫 raw 保全覆盖，FR-2.3）；error/早退路径 raw_output=None → 扫 result.error（覆盖异常通道，FR-2.1）。
         覆盖 execute 的全部 ~8 退出分支（每个 return 都经此）。
         """
         if self._content_scanner is None:
             return result
-        findings: list[ToolSecurityFinding] = []
-        hashes: dict[str, str] = {}
-        seen: set[tuple[str, str]] = set()  # (source_field, pattern_id) 去重（FR-2.7）
-
-        def _bounded_hash(text: str) -> str:
-            # FR-F4：有界 hash——prefix + length，绝不对超大（degraded）内容做全量 sha256。
-            prefix = text[:_FINALIZE_HASH_PREFIX_CAP].encode("utf-8")
-            return f"len={len(text)}:sha256_prefix={hashlib.sha256(prefix).hexdigest()}"
-
-        def _collect(text: str, field: str) -> None:
-            if not text:
-                return
-            for f in self._content_scanner.scan_tool_context(text, source_field=field):
-                key = (f.source_field, f.pattern_id)
-                if key in seen:
-                    continue
-                seen.add(key)
-                findings.append(f)
-                hashes[field] = _bounded_hash(text)
-
         try:
-            if raw_output is not None:
-                # 成功路径：扫截断前 raw output（全覆盖，FR-2.3）
-                _collect(raw_output, "output")
-                # FR-F1：after-hook 改写过最终 output（≠ raw）→ 也扫最终 output（防新内容带空 finding 进 LLM）
-                if result.output and result.output != raw_output:
-                    _collect(result.output, "output")
-            else:
-                _collect(result.output, "output")
-            # error/异常通道（FR-2.1）
-            _collect(result.error or "", "error")
+            # F125：纯 CPU 扫描+去重+bounded hash 卸载到线程（单次往返做完 output/raw/error）。
+            findings, hashes = await asyncio.to_thread(
+                _scan_collect_findings,
+                self._content_scanner,
+                output=result.output,
+                raw_output=raw_output,
+                result_error=result.error,
+            )
         except Exception as e:
-            # fail-open（C6）：扫描异常绝不拖垮工具结果
+            # fail-open（C6）：扫描异常绝不拖垮工具结果。CancelledError 是 BaseException、不被本
+            # except 捕获 → 取消语义正常向上传播（取消不是扫描失败）。
             logger.warning("content_threat_scan_failed_open", tool_name=result.tool_name, error=str(e))
             return result
         if not findings:

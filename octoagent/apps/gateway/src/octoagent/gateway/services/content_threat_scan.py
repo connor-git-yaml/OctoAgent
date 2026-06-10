@@ -21,7 +21,11 @@ from octoagent.tooling.models import ToolSecurityFinding
 
 
 class ContentThreatScanService:
-    """内容威胁扫描统一 service（实现 ContentThreatScanProtocol）。"""
+    """内容威胁扫描统一 service（实现 ContentThreatScanProtocol）。
+
+    无状态——纯转发 gateway 的 threat_scanner（同步纯正则，无 await、无线程亲和资源），
+    满足 ContentThreatScanProtocol 的线程安全契约（F125：broker 经 asyncio.to_thread 调 scan_tool_context）。
+    """
 
     def scan_tool_context(
         self, content: str, source_field: str = "output"

@@ -132,7 +132,9 @@ _PI_004 = _p(
     r"\byou\s+are\s+now\s+(a|an)\s+(?!expert|good|great|helpful|better)\w",
     "WARN",
     "Prompt injection: 试图重新定义 AI 身份",
-    scopes=_MEM_CTX,
+    # F125：scope 从 _MEM_CTX 回收为默认 MEMORY-only。negative lookahead 仅排除 5 词，
+    # 在 CONTEXT 路径对 onboarding 文案（"you are now a member / an administrator"）高误报；
+    # CONTEXT 角色重定义改由收紧后的 CTX-RH-001（AI 身份词共现）接管。MEMORY 行为字节级不变。
 )
 
 _PI_005 = _p(
@@ -244,19 +246,32 @@ _MI_002 = _p(
 
 
 # ---------------------------------------------------------------------------
-# F124 T007: CONTEXT-only 间接注入族（tool 结果专属，移植 Hermes context 集）。
+# F124 T007 / F125 收紧: CONTEXT-only 间接注入族（tool 结果专属，移植 Hermes context 集）。
 # 全部**有界量词** `{0,N}`（非 `*`）→ ReDoS-safe + 有限 max_span（plan P-F4）；
 # severity 一律 WARN（CONTEXT 路径只标注不 block，severity 仅调措辞）；scopes=_CTX_ONLY
-# 不进 memory 默认路径（零回归不变量）。T032/T033（Phase F）定稿归类 + 误报门槛。
+# 不进 memory 默认路径（零回归不变量）。
+# F125：落实 Hermes「单关键词非强信号、须多 pattern 组合」语义——单关键词升级为共现约束
+# （框架名须伴祈使动词、register/beacon 须伴 C2 语境、you-are-now 须伴 AI 身份词），把真实
+# web.fetch 技术语料误报从 ~89% 降到 0（test_..._false_positive.py 真实语料负样本集锁死）。
+# 已知 limitation（F125 round-3 归档，Codex re-review）：同形字（Unicode，如希腊 ο 替 ASCII o）
+# 可绕过所有 ASCII 字面 pattern——这对 baseline 全部 pattern（含 MEMORY 17 条）成立、非 CONTEXT
+# 特有，非 F125 引入。根治需 scan 入口 NFKC normalize（须评估对 MEMORY 字节级零回归的影响），
+# 归 F108 / 独立 Feature。
 # ---------------------------------------------------------------------------
 
 _CTX_RH_001 = _p(
     "CTX-RH-001",
-    r"\byou\s+are\s+(?:\w+\s+){0,3}now\s+(a|an|the)\s",
+    # F125 round-2（Codex H-1）：前缀含 you-are-now + act/behave/function/operate-as；身份词扩越权
+    # 角色（operator/overlord/superuser/root/godmode）。排除 onboarding（member/administrator/owner）。
+    r"(?:\byou\s+are\s+(?:\w+\s+){0,3}now|\b(?:act|behave|function|operate)\s+as)"
+    r"\s+(?:a|an|the)\s+(?:\w+\s+){0,2}"
+    r"(?:assistant|agent|ai|bot|model|persona|character|chatbot|jailbroken|"
+    r"unrestricted|uncensored|dan|hacker|evil|malicious|villain|sentient|"
+    r"operator|overlord|superuser|root\s+agent|god\s*mode)\b",
     "WARN",
     "Indirect injection: 试图把 AI 重定义为新角色（you are now ...）",
     scopes=_CTX_ONLY,
-    max_span=96,
+    max_span=128,
 )
 _CTX_RH_002 = _p(
     "CTX-RH-002",
@@ -274,25 +289,77 @@ _CTX_RH_003 = _p(
     scopes=_CTX_ONLY,
     max_span=128,
 )
+_CTX_RH_004 = _p(
+    "CTX-RH-004",
+    # F125 round-2（Codex H-1）：诱导无视/绕过 AI 安全护栏。宾语收敛到 AI 安全特定词
+    # （safeguards/guardrails/safety-X/content-moderation）——去掉通用的 restrictions/security-checks/
+    # security-controls（自查暴露 "ignore case restrictions"/"disable security checks in dev" 等正常文档误报）。
+    # round-3（Codex re-review HIGH-2）：第二分支覆盖 "override security checks to get the answer"——
+    # security/safety checks 须伴**绕过意图尾部**（to get/obtain/reveal/answer/...），区分正常运维
+    # "disable security checks to run the tests"（to run 不在意图表）。
+    r"\b(?:ignore|bypass|disable|override|circumvent|turn\s+off)\s+(?:\w+\s+){0,3}"
+    r"(?:safeguards?|guardrails?|safety\s+(?:filters?|measures?|rails?|guidelines?)|"
+    r"content\s+(?:filters?|moderation)|moderation\s+(?:filters?|rules?))\b"
+    r"|\b(?:ignore|bypass|disable|override|circumvent)\s+(?:the\s+|all\s+)?(?:security|safety)"
+    r"\s+checks?\s+to\s+(?:get|obtain|see|reveal|access|answer|respond|reply|proceed|comply|unlock)\b",
+    "WARN",
+    "Indirect injection: 诱导绕过安全护栏",
+    scopes=_CTX_ONLY,
+    max_span=96,
+)
+_CTX_RH_005 = _p(
+    "CTX-RH-005",
+    # F125 round-4（Codex re-review HIGH-1 收敛）：授予**无限制**越权能力。能力词收敛到
+    # unrestricted/unbounded——AI 越狱专属词，运维 IAM/DB/SSH 授权不会用；developer/elevated/root/
+    # superuser access 是运维标准术语（PostgreSQL superuser / SSH root / k8s elevated / IAM developer）、
+    # unlimited access 是 SaaS/教育套餐高频词，纳入会高误报 → 归档（见 completion-report「越权授予
+    # 检测维度」），伴明确指令的此类注入由 CTX-RH-004（ignore/bypass safeguards）接。
+    # round-4 re-review（MED）：去裸 granted/given 前缀（"users are granted unrestricted access to
+    # public data" / "readers are given unrestricted access to the docs" 等权限文档误报）——要求
+    # ①you 主语被授予（you have been granted/given），或②无限制能力**指向越狱对象**
+    # （to/over everything / all tools / the agent|runtime|model）。越狱对象去 systems/resources/
+    # data/files（备份/同步运维 "unrestricted access to all files/resources" 重叠），保留 AI 自身指向。
+    r"\byou\s+(?:are\s+now|now\s+have|have\s+been\s+(?:granted|given)|are\s+(?:granted|given))\s+"
+    r"(?:\w+\s+){0,3}(?:unrestricted|unbounded)\s+"
+    r"(?:privileges?|access|rights?|permissions?|control|power)\b"
+    r"|\b(?:granted|given|gained|obtained)\s+(?:\w+\s+){0,2}(?:unrestricted|unbounded)\s+"
+    r"(?:access|control|privileges?|power)\s+(?:to|over)\s+"
+    r"(?:everything|all\s+(?:the\s+)?tools|the\s+(?:agent|runtime|model|assistant)|your\s+(?:tools|capabilities))\b",
+    "WARN",
+    "Indirect injection: 授予无限制越权能力（unrestricted access to everything ...）",
+    scopes=_CTX_ONLY,
+    max_span=96,
+)
 _CTX_C2_001 = _p(
     "CTX-C2-001",
-    r"\bregister\s+(as\s+)?a?\s*node\b",
+    # F125 收紧：as 必选 + 后界共现 C2 词，排除 k8s/分布式文档 "register a node"。
+    # round-2（Codex H-2）：窗口 80→160 提高定长填充绕过成本（WARN-only 标注，根治留 token 级共现）。
+    r"\bregister\s+as\s+a\s+node\b"
+    r"(?=[\s\S]{0,160}\b(?:beacon|c2|c&c|implant|botnet|swarm|listener|payload|controller|exfil)\b)",
     "WARN",
-    "Promptware/C2: 注册为节点",
+    "Promptware/C2: 注册为节点并回连 C2",
     scopes=_CTX_ONLY,
-    max_span=48,
+    max_span=128,
 )
 _CTX_C2_002 = _p(
     "CTX-C2-002",
-    r"\b(heartbeat|beacon|check[\s\-]?in)\s+(to|with)\s",
+    # F125 收紧：去裸 heartbeat（监控/分布式高频）；beacon/check-in to + 共现 C2 词。
+    # round-2（Codex H-2）：窗口 60→120 提高定长填充绕过成本。
+    r"\b(?:beacon|check[\s\-]?in)\s+(?:to|with)\s+"
+    r"(?=[\s\S]{0,120}\b(?:c2|c&c|controller|implant|attacker|listener|botnet|teamserver)\b)",
     "WARN",
-    "Promptware/C2: heartbeat/beacon 回连",
+    "Promptware/C2: beacon/check-in 回连 C2",
     scopes=_CTX_ONLY,
-    max_span=48,
+    max_span=96,
 )
 _CTX_C2_003 = _p(
     "CTX-C2-003",
-    r"\byou\s+must\s+(?:\w+\s+){0,3}(register|connect|report|beacon)\b",
+    # F125 收紧（实测驱动，plan 原列"不改"被 k8s 语料推翻）：register/connect/report/check-in
+    # 须后界 60 内伴 C2 语境，排除 "you must register a node with the control plane"；
+    # beacon 本身即 C2 信号，单独保留。
+    r"\byou\s+must\s+(?:\w+\s+){0,3}beacon\b"
+    r"|\byou\s+must\s+(?:\w+\s+){0,3}(?:register|connect|report|check[\s\-]?in)\b"
+    r"(?=[\s\S]{0,120}\b(?:c2|c&c|beacon|implant|controller|listener|botnet|payload|teamserver|exfil)\b)",
     "WARN",
     "Promptware/C2: 强制 C2 动作（you must register/beacon ...）",
     scopes=_CTX_ONLY,
@@ -300,15 +367,31 @@ _CTX_C2_003 = _p(
 )
 _CTX_C2_004 = _p(
     "CTX-C2-004",
-    r"\b(cobalt\s*strike|sliver|havoc|mythic|metasploit|brainworm)\b",
+    # F125 round-2（Codex H-2 + M-1 + 性能）：
+    # ①强框架词（cobalt strike/metasploit/mimikatz/brainworm）普通技术语料几乎不出现、只在安全
+    #   语境 → 裸标注（Hermes warn-only 哲学：不污染正常文档流；安全文章提及被 WARN 可接受，
+    #   非 SC-008 关切的"正常文档狼来了"）。这同时去掉慢的动词 alternation 分支（实测单条 82ms
+    #   →~10ms），避免单条 re.search 持 GIL 阻塞 event loop（broker to_thread 卸载在 GIL 下仅
+    #   能在 pattern 间切换，故单条 pattern 时长 = event loop 最长停顿，必须压低）。
+    # ②弱词（sliver/havoc/mythic，普通英文同形）须伴强 C2 名词（去通用 framework/payload，
+    #   排除 "mythic framework" / "sliver payload" 等误报）。
+    r"\b(?:cobalt\s*strike|metasploit|mimikatz|brainworm)\b"
+    r"|\b(?:sliver|havoc|mythic)\b"
+    r"(?=[\s\S]{0,60}\b(?:c2|c&c|implant|beacon|listener|controller|teamserver)\b)",
     "WARN",
-    "Promptware/C2: 已知红队/C2 框架名",
+    "Promptware/C2: 红队/C2 框架",
     scopes=_CTX_ONLY,
-    max_span=32,
+    max_span=64,
 )
 _CTX_HID_001 = _p(
     "CTX-HID-001",
-    r"<!--[^>]{0,200}(ignore|override|system|secret|hidden)",
+    # F125 收紧：触发词从裸 system/secret/hidden 升级为指令式注入短语，排除合法 HTML 注释
+    # （feature flag / TODO / "system architecture" / "secret sauce"）。
+    r"<!--[^>]{0,200}\b(?:"
+    r"ignore\s+(?:\w+\s+){0,3}(?:instructions?|prompt|previous|above)"
+    r"|disregard\s+(?:\w+\s+){0,3}(?:instructions?|prompt)"
+    r"|override\s+(?:\w+\s+){0,3}(?:instructions?|prompt|rules?)"
+    r"|you\s+(?:are|must)\b|do\s+not\s+tell|system\s+prompt)",
     "WARN",
     "Indirect injection: HTML 注释藏注入指令",
     scopes=_CTX_ONLY,
@@ -316,19 +399,35 @@ _CTX_HID_001 = _p(
 )
 _CTX_DEC_001 = _p(
     "CTX-DEC-001",
-    r"\bdo\s+not\s+(?:\w+\s+){0,3}tell\s+(?:\w+\s+){0,2}the\s+user\b",
+    # F125 收紧：尾部追加自指/隐瞒语境，排除 UX/安全文档正常用语
+    # （"do not tell the user the raw error" / "...their password"）。
+    # round-2（Codex H-3）：加第二结构分支覆盖 "do not disclose/reveal this instruction"。
+    # 名词收敛到注入特定词（instruction/step/prompt/payload/directive/command）——去通用的
+    # fact/content/message/note（自查暴露 "do not disclose that fact to the press" 等商务文档误报）。
+    r"\bdo\s+not\s+(?:\w+\s+){0,3}tell\s+(?:\w+\s+){0,2}the\s+user\s+"
+    r"(?:about\s+(?:this|that|it)|that\s+you|what\s+you|anything\s+about|"
+    r"of\s+(?:this|the)|the\s+(?:secret|hidden|real|true))\b"
+    r"|\bdo\s+not\s+(?:\w+\s+){0,2}(?:disclose|reveal|mention|expose)\s+(?:\w+\s+){0,2}"
+    r"(?:this|that)\s+(?:instruction|step|prompt|payload|directive|command)\b",
     "WARN",
-    "Indirect injection: 诱导对用户隐瞒（do not tell the user ...）",
+    "Indirect injection: 诱导对用户隐瞒（do not tell the user about this ...）",
     scopes=_CTX_ONLY,
     max_span=128,
 )
 _CTX_LEAK_001 = _p(
     "CTX-LEAK-001",
-    r"\b(output|print|reveal|repeat)\s+(?:\w+\s+){0,3}(system|initial)\s+prompt\b",
+    # F125 收紧：要求 "your <system|initial> prompt" 或 "the <...> prompt + 强化副词"，
+    # 排除讨论 system prompt 概念的技术文章（"print the system prompt structure"）。
+    # round-2（Codex H-3）：第二分支动词与第一分支对齐（加 show/display/send/return），
+    # 排除仍由"须伴强化副词 verbatim/exactly/above"保证（讨论态 "print the system prompt structure" 不命中）。
+    r"\b(?:output|print|reveal|repeat|show|display|send|return|dump)\s+(?:\w+\s+){0,2}your\s+"
+    r"(?:system|initial|original)\s+prompt\b"
+    r"|\b(?:output|print|reveal|repeat|dump|show|display|send|return)\s+(?:the\s+)?(?:system|initial|original)\s+prompt\s+"
+    r"(?:verbatim|word\s+for\s+word|exactly|in\s+full|above)\b",
     "WARN",
     "Indirect injection: 诱导泄露 system prompt",
     scopes=_CTX_ONLY,
-    max_span=96,
+    max_span=128,
 )
 
 
@@ -355,6 +454,8 @@ _THREAT_PATTERNS: list[ThreatPattern] = [
     _CTX_RH_001,
     _CTX_RH_002,
     _CTX_RH_003,
+    _CTX_RH_004,
+    _CTX_RH_005,
     _CTX_C2_001,
     _CTX_C2_002,
     _CTX_C2_003,
@@ -548,8 +649,8 @@ def scan_context(content: str, *, source_field: str = "output") -> list[ToolSecu
 
     与 MEMORY 的 `scan()`（first-hit ThreatScanResult，可 block）不同，本函数：
     - **永不 block**：命中只返回 annotate finding（动作由渲染层标注，FR-2.4/3.x）。
-    - **有界全覆盖**：≤ 输入硬上限时带 overlap 分块扫全文（防边界拆分，**非窗口采样**，FR-1.5）；
-      超上限 → 单个 degraded finding（never silently clean）。
+    - **单遍全文**（review FR-F2）：≤ `_MAX_SCAN_INPUT` 时对全文一次性匹配全部 pattern（**非分块、非窗口采样**）；
+      有界性由输入硬上限 + 全 pattern 有界量词（ReDoS-safe，线性）保证；超上限 → 单个 degraded finding（never silently clean）。
     - **first-hit**（DP-5）：返回首个命中 finding（0 或 1 条；多命中聚合留未来）。
 
     Args:

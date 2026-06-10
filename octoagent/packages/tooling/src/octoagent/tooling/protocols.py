@@ -150,12 +150,17 @@ class ContentThreatScanProtocol(Protocol):
     方法 **scope-free**：CONTEXT scope 是实现内部事，`ScanScope` 枚举不跨边界（避免 tooling 反向
     import gateway 或常量分叉）。返回命中的 `ToolSecurityFinding`（不命中空 list），调用方（broker）
     负责挂到 ToolResult.security_findings + emit 审计事件。
+
+    **线程安全契约（F125）**：`scan_tool_context` 实现 MUST 为**同步 + 线程安全 + 无副作用**——
+    broker 经 `asyncio.to_thread` 在后台线程调用它（避免大输出扫描阻塞 event loop）。实现不得
+    在内部 `await`、调用 `asyncio.get_running_loop()`、或依赖线程亲和资源；否则线程内异常会被
+    broker 的 fail-open 吞掉，导致恶意输出无 finding 通过（M-2）。
     """
 
     def scan_tool_context(
         self, content: str, source_field: str = "output"
     ) -> list[ToolSecurityFinding]:
-        """扫 tool 结果内容（CONTEXT scope，chunk 全覆盖 + degraded 兜底）。
+        """扫 tool 结果内容（CONTEXT scope，单遍全文 + degraded 兜底）。
 
         Args:
             content: 待扫描的 tool 结果文本。
