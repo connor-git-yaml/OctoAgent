@@ -1,6 +1,7 @@
 """F113：agent_context module-level 常量 / dataclass / 自由函数。
 
-从 agent_context.py 抽出的零依赖叶子模块：不依赖 AgentContextService 与任何 mixin，
+从 agent_context.py 抽出的拆分叶子模块：不依赖 AgentContextService 与任何 mixin
+（对外部包 octoagent.core/memory 及同目录 agent_decision 的依赖与拆分前一致），
 供主文件与各 mixin 单向 import（打破 mixin ↔ 主文件循环依赖）。
 对外 import 路径保持不变：agent_context.py 对本模块全部名字做 re-export。
 """

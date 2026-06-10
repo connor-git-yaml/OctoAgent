@@ -7,7 +7,7 @@
 ```
 services/
 ├── agent_context.py                    # 主文件 ~1050 行：import + re-export + AgentContextService(编排根 905)
-├── agent_context_helpers.py            # 新：常量 3 + SystemPromptContext + 3 dataclass + 20 自由函数 ≈ 470 行
+├── agent_context_helpers.py            # 新：常量 + dataclass + 自由函数（拆分叶子，无回向依赖）
 ├── agent_context_entity_ensure.py      # 新：AgentContextEntityEnsureMixin（14 方法 ≈ 1049 行）
 ├── agent_context_memory_services.py    # 新：AgentContextMemoryServiceMixin（8 方法 ≈ 192 行）
 ├── agent_context_memory_recall.py      # 新：AgentContextMemoryRecallMixin（7 方法 ≈ 476 行）
@@ -35,7 +35,7 @@ class AgentContextService(
 
 ## 关键决策
 
-1. **helpers 先行（Batch 1）**：常量/dataclass/自由函数移到零依赖叶子文件是打破"mixin ↔ 主文件"循环 import 的前提，不只是减行数。
+1. **helpers 先行（Batch 1）**：常量/dataclass/自由函数移到拆分叶子文件（不依赖本目录 service/mixin；对 core/memory/agent_decision 的依赖与拆分前一致）是打破"mixin ↔ 主文件"循环 import 的前提，不只是减行数。
 2. **re-export 保契约**：agent_context.py 对全部移出的 module-level 名字（含 `_dynamic_transcript_limit` 被 orchestrator.py:84 跨模块 import 的私有名）做显式 re-export；6 个生产文件 + 4+ 测试文件的 import 路径零改动。ruff F401 处理：主文件继续使用的名字天然豁免；纯 re-export 名字用 redundant-alias（`import X as X`）或 `# noqa: F401`，以 `ruff check` 实测为准。
 3. **沿用 F093 范式**：mixin 无状态、类级 annotation 声明依赖属性（`_stores: Any` 等）、docstring 写"依赖约定（由继承类提供）"+ 职责边界声明（防后续 Feature 堆回，对应任务要求的边界注释）。
 4. **`_shared_*` 3 个类属性 + 3 个 `set_*` classmethod 留主类**（e2e 测试直接 get/setattr `AgentContextService.<attr>`）。

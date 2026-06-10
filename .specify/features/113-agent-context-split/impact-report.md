@@ -58,7 +58,7 @@
 
 ### 3.5 循环 import 风险（本次拆分的核心结构约束）
 mixin 文件需要引用 dataclass（`SessionReplayProjection`/`SystemPromptContext` 等）与自由函数（`build_scope_aware_session_id` 等）。若它们留在 agent_context.py，则 mixin → agent_context → mixin 成环。
-**解法（定稿）**：常量 + 4 个 dataclass + 全部 module-level 自由函数先移 `agent_context_helpers.py`（零依赖叶子文件），mixin 与主文件单向依赖 helpers；agent_context.py 显式 re-export 保持全部外部 import 路径不变。F093 的 turn_writer mixin 已验证此模式（它只依赖 core models，无回向依赖）。
+**解法（定稿）**：常量 + 4 个 dataclass + 全部 module-level 自由函数先移 `agent_context_helpers.py`（拆分叶子文件：不依赖本目录 service/mixin），mixin 与主文件单向依赖 helpers；agent_context.py 显式 re-export 保持全部外部 import 路径不变。F093 的 turn_writer mixin 已验证此模式（它只依赖 core models，无回向依赖）。
 
 ## 4. 测试环境约束（防假 0 regression）
 

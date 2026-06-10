@@ -27,7 +27,7 @@
 
 ## 3. 关键技术决策记录
 
-1. **helpers 文件先行**：常量/dataclass/自由函数移到零依赖叶子文件 `agent_context_helpers.py`，是打破"mixin ↔ 主文件"循环 import 的结构前提（非单纯减行数）
+1. **helpers 文件先行**：常量/dataclass/自由函数移到拆分叶子文件 `agent_context_helpers.py`（不依赖本目录 service/mixin；对 core/memory/agent_decision 依赖与拆分前一致），是打破"mixin ↔ 主文件"循环 import 的结构前提（非单纯减行数）
 2. **re-export 保契约**：主文件以 redundant-alias 形式（`X as X`）re-export 全部 30 个模块级名字，含 orchestrator.py:84 跨模块 import 的私有名 `_dynamic_transcript_limit`；外部 import 零改动
 3. **沿用 F093 mixin 范式**：无状态 mixin + 类级 annotation（`_stores: Any`）+ docstring 依赖约定；测试类名直调的 4 个静态方法（含 task_service 生产代码直调 `_memory_hit_payload`）经 MRO 继承保持可见（实测 callable）
 4. **`_shared_*` 3 类属性 + `set_*` classmethod 留主类**：e2e_live/conftest 等 4 处直接 get/setattr `AgentContextService.<attr>`
@@ -45,7 +45,27 @@
 
 ## 5. Codex adversarial review + 第二模型 spec-对齐 review（多评审 panel）
 
-{{PENDING_REVIEW_RESULTS}}
+**双 review 总结论：0 HIGH 残留，可合入。**
+
+### Codex adversarial review（GPT-5.4 挑战者立场）：0 HIGH + 1 MED + 4 LOW
+
+| # | finding | 处理 |
+|---|---------|------|
+| M1 | logger name 真实可观测变化：各 mixin `structlog.get_logger()` 取本模块名，日志 `logger` 字段不再是 `...services.agent_context` | **拒绝绑回旧名**。理由：①F093 baseline 先例——turn_writer mixin 用 `get_logger(__name__)`，logger name 当年即跟随新模块；②绑回旧名属命名失真 + 兼容层叠加（违协作准则）；③仓库内零按 logger name 过滤的代码/断言（Codex 实测）。外部 Logfire dashboard/alert 若按旧 logger name 过滤需一次性调整——已列归总报告提示用户 |
+| L1 | dataclass `__module__` 变为 `agent_context_helpers` | 接受记录为 introspection drift（仓库无 pickle/copyreg/`__module__` 消费，Codex 实测） |
+| L2 | re-export 块无 `__all__` | 接受记录。验收口径=显式 import 路径兼容；无 star import 用户；新增 `__all__` 反会引入新的 star-import 语义面 |
+| L3 | helpers"零依赖叶子"措辞不准（实依赖 core.models/memory/同目录 agent_decision） | **已修**：helpers docstring + 3 个制品文档措辞改为"拆分叶子（不依赖本目录 service/mixin；对外部包依赖与拆分前一致）" |
+| L4 | `_render_snapshot` 豁免的 monkeypatch 边界：外部若 patch `AgentContextService._render_list` 不会被跟随 | 拒绝改 classmethod（那是真实签名变更，比现状更违零变更）；接受记录边界（仓库零 monkeypatch 此方法，Codex 实测） |
+
+Codex 已验证无问题维度：MRO 零同名碰撞 / 4 处外部类名直调全解析 / `_dynamic_transcript_limit` re-export 链完整 / 循环 import 无 / `_shared_*` 查找路径不变 / 方法边界抽查无错误吸收。
+
+### 第二评审（Claude Opus spec-对齐专项，SDD 多评审 panel）：PASS 可合入，0 high + 0 med + 3 low
+
+独立验证：AST 全量对账 + 5 大方法字节级 diff（全部 byte-identical）+ 81 签名 AST 比对（0 mismatch）+ live MRO 解析 + 377 focused 实跑。3 low 全闭环（commit d5708ab4）：①抓出 Batch3 ruff 漏网的第 5 个 getter `get_reranker_service` import 换行（AST 等价但违字节级标准）→ 还原 baseline 原文，对账标准随之从 AST 级升级为字节级（90/91 byte-identical + 唯一豁免）；②residual-report 行数表 stale 数字刷新；③refactor-plan 补记实际 MRO 声明顺序。
+
+### 两评审分歧 / 需人裁清单
+
+**无残留需人裁项。** Opus 提出的"get_reranker_service 换行是否违字节级承诺"已通过还原 baseline 原文消解（两评审推荐方向一致）；两评审对 `_render_snapshot` 唯一豁免的等价性判断一致。M1 的拒绝决策若用户不认可，翻转成本低（5 个 mixin 各 1 行显式传 logger name）。
 
 ## 6. Living-docs 漂移闸
 
