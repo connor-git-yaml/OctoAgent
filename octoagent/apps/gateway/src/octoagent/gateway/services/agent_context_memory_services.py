@@ -59,10 +59,8 @@ class AgentContextMemoryServiceMixin:
         """
         if not hasattr(self, "_consolidation_service"):
             try:
-                from octoagent.gateway.services.inference.consolidation_service import (
-                    ConsolidationService,
-                )
                 from octoagent.memory import SqliteMemoryStore
+                from octoagent.gateway.services.inference.consolidation_service import ConsolidationService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -91,10 +89,8 @@ class AgentContextMemoryServiceMixin:
         """
         if not hasattr(self, "_derived_extraction_service"):
             try:
-                from octoagent.gateway.services.inference.derived_extraction_service import (
-                    DerivedExtractionService,
-                )
                 from octoagent.memory import SqliteMemoryStore
+                from octoagent.gateway.services.inference.derived_extraction_service import DerivedExtractionService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -115,10 +111,8 @@ class AgentContextMemoryServiceMixin:
         """
         if not hasattr(self, "_tom_extraction_service"):
             try:
-                from octoagent.gateway.services.inference.tom_extraction_service import (
-                    ToMExtractionService,
-                )
                 from octoagent.memory import SqliteMemoryStore
+                from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -139,10 +133,8 @@ class AgentContextMemoryServiceMixin:
         """
         if not hasattr(self, "_profile_generator_service"):
             try:
-                from octoagent.gateway.services.inference.profile_generator_service import (
-                    ProfileGeneratorService,
-                )
                 from octoagent.memory import SqliteMemoryStore
+                from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
