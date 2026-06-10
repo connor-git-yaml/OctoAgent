@@ -150,7 +150,7 @@ class OctoHarness:
         self._alias_registry: AliasRegistry | None = None
         self._llm_mode_env: str = ""
         self._telegram_service: Any | None = None
-        # F105：渠道 adapter 中央注册表（_bootstrap_channels 构造，executors 段消费）
+        # F105：渠道 adapter 中央注册表（_bootstrap_runtime_services 构造，executors 段消费）
         self._platform_registry: Any | None = None
         self._approval_override_cache: Any | None = None
         self._tool_broker: Any | None = None
@@ -244,8 +244,8 @@ class OctoHarness:
         if callable(clear_runtime_state):
             clear_runtime_state()
         # F105：渠道生命周期统一走 registry（注册逆序停止；registry 与
-        # telegram_service 在 _bootstrap_channels 同段原子构造，registry 存在
-        # 即覆盖 baseline 的 telegram shutdown 语义，plan C-4）。
+        # telegram_service 在 _bootstrap_runtime_services 同段原子构造，registry
+        # 存在即覆盖 baseline 的 telegram shutdown 语义，plan C-4）。
         if hasattr(app.state, "platform_registry") and app.state.platform_registry:
             await app.state.platform_registry.shutdown_all()
         if hasattr(app.state, "task_runner") and app.state.task_runner:

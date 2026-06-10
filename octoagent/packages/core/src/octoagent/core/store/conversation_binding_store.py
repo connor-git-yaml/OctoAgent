@@ -120,7 +120,10 @@ class SqliteConversationBindingStore:
         )
         await self._conn.commit()
         stored = await self.get(platform, conversation_id, project_id=project_id)
-        assert stored is not None  # upsert 后必存在
+        if stored is None:  # upsert 后必存在；不用 assert（-O 下被剥离，F124 同类 LOW）
+            raise RuntimeError(
+                f"conversation binding upsert 后读取失败: {platform}/{conversation_id}"
+            )
         return stored
 
     async def get(

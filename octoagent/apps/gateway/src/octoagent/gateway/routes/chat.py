@@ -556,13 +556,20 @@ async def send_chat_message(
                 text=body.message,
                 control_metadata=chat_control_metadata,
             )
-            # F105 FR-E3：续聊同样 touch last-route（direct-worker 排除在 helper 内）
+            # F105 FR-E3：续聊同样 touch last-route（direct-worker 排除在 helper 内）。
+            # project_id 必须从 existing_task.scope_id 反解而非请求变量（Codex Final
+            # H1）：纯 task_id 续聊时请求侧 project_id 为空，会写出 (web, thread, '')
+            # 第二行（四元组含 project_id），污染 last-route——从 scope 反解与该行
+            # 首条创建时的 project 语义恒一致（legacy scope 反解为 '' 同样一致）。
+            binding_project = await store_group.project_store.resolve_project_for_scope(
+                existing_task.scope_id
+            )
             await _record_web_conversation_binding(
                 store_group,
                 owner_turn_executor_kind=owner_turn_executor_kind,
                 thread_id=existing_task.thread_id,
                 scope_id=existing_task.scope_id,
-                project_id=project_id,
+                project_id=binding_project.project_id if binding_project else "",
             )
             dispatch_metadata = dict(chat_control_metadata)
             # F101 Phase A FR-D2：force_full_recall 已通过 chat_control_metadata 写入 USER_MESSAGE event

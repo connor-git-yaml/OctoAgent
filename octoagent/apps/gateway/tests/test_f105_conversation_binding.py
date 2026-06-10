@@ -184,6 +184,43 @@ async def test_web_send_records_binding_and_continue_touches(
 
 
 @pytest.mark.asyncio
+async def test_project_scoped_continue_touches_same_binding(
+    web_client: AsyncClient, web_app
+) -> None:
+    """Codex Final H1：project-scoped 会话纯 task_id 续聊不得写出空 project 第二行。
+
+    续聊路径的 project_id 必须从 existing_task.scope_id 反解（与首条创建语义
+    恒一致），否则四元组含 project_id 时会新增 (web, thread, '') 行污染 last-route。
+    """
+    from octoagent.core.models import Project
+
+    await web_app.state.store_group.project_store.create_project(
+        Project(project_id="proj-f105", slug="proj-f105", name="F105 测试项目")
+    )
+    await web_app.state.store_group.conn.commit()
+
+    resp = await web_client.post(
+        "/api/chat/send", json={"message": "hello", "project_id": "proj-f105"}
+    )
+    assert resp.status_code == 200
+    task_id = resp.json()["task_id"]
+
+    store = web_app.state.store_group.conversation_binding_store
+    rows = await store.list_by_platform("web")
+    assert len(rows) == 1
+    assert rows[0].project_id == "proj-f105"
+
+    # 纯 task_id 续聊（请求不带 project_id）→ 仍 touch 同一行，不新增空 project 行
+    resp2 = await web_client.post(
+        "/api/chat/send", json={"message": "again", "task_id": task_id}
+    )
+    assert resp2.status_code == 200
+    rows = await store.list_by_platform("web")
+    assert len(rows) == 1
+    assert rows[0].project_id == "proj-f105"
+
+
+@pytest.mark.asyncio
 async def test_direct_worker_session_not_bound(
     web_client: AsyncClient, web_app
 ) -> None:
