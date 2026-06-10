@@ -507,7 +507,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | Feature | 一句话目的 | 依赖 |
 |---------|-----------|------|
 | **F104 文件工作台 v0.1**（diff 视图）✅ 完成（49e5108）| artifact_versions 表 + 连接级写隔离 + Files API + DiffView jsdiff；实际动了 backend（artifact 版本历史存储），非纯 UI | F084 |
-| **F105 Multi-Platform Gateway v0.1**（新增，P0）| Slack + Discord adapter + platform_registry 统一管理框架；**仍守 H1**：平台 adapter 是接入层，主 Agent 是唯一发声方；Hermes `gateway/platforms/` 35 adapter 是参考 | M5 全闭环 |
+| **F105 Multi-Platform Gateway v0.1**（新增，P0）**【2026-06-10 范围收窄】**| v0.1 = platform_registry + ChannelAdapter 抽象 + 把现有 Telegram/Web 改造成 adapter（**行为零变更，先验证抽象**）；**Slack/Discord 推 v0.2**（抽象稳了再加新平台，降返工风险）。**仍守 H1**：平台 adapter 是接入层，所有平台 binding 收敛单一主 Agent（不学 OpenClaw 指向不同 agentId）。设计输入见下方竞品段 OC-1/2/6 | M5 全闭环 |
 | **F106 User Plugin Loader**（原 Companion 改名）| `~/.octoagent/plugins/` 用户可装载自定义 skill / behavior pack；复用现有 skill loader 升级为 plugin_registry；Companion 推到 M7 | M5 全闭环 |
 | **F107 文件工作台 v0.2**（git-aware）| branch/commit/blame 浏览；Behavior 文件版本历史可视化 | F104 |
 | **F108 Capability Layer Refactor**（编号顺延，原 F107）**【2026-06-07 已收窄】**| 核心：D9 三层职责（tooling/harness/capability_pack）+ 巨型 domain service 二次拆分（F121）+ D8 解耦（F118）；D11 改名 / D12 DRY 降为顺手项。**已拆出：D2→F117 / dismiss→F116 / agent_context→F113**（原范围装太满，按 ROI 拆分）| F101 / F102 |
