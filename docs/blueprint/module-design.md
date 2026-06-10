@@ -68,6 +68,13 @@ octoagent/
 - 出站消息发送（Telegram/Web）
 - SSE/WS stream 转发（从 Kernel 订阅）
 
+F105 v0.1 落地的渠道抽象层（`gateway/channels/`，详见 `docs/codebase-architecture/platform-gateway.md`）：
+
+- `ChannelAdapter` Protocol + `ChannelCapabilityMeta`（OC-1）：outbound 通知面 / 任务完成回复 / 生命周期 / capability meta 四面收敛；**inbound 留 per-platform**（telegram ingest 分流语义不可压扁，强行统一是假抽象）
+- `PlatformRegistry`：harness 装配点——通知注册（序 web→telegram）/ completion_notifier 扇出 / startup_all/shutdown_all；alias 解析空间 = platform_id ∪ aliases ∪ notification_channel_name（"web_sse"/"telegram" 是用户可见契约不可改名）
+- `TelegramChannelAdapter` / `WebChannelAdapter`：现有双渠道 wrap（行为零变更验证抽象）
+- `ConversationBinding`（OC-2/OC-6）：`conversation_bindings` 表 UNIQUE(platform, account_id, conversation_id, project_id)；conversation_id=平台出站寻址单元（telegram=chat 级 / web=thread 级）；**H1 构造性保证**——runtime 写入面无 agent_profile_id 参数（恒主 Agent），direct-worker 会话不写 binding；`resolve_outbound_route`（explicit→last_active(runtime)→single-configured）v0.1 未接出站路径，v0.2 接线；account_id 恒 'default'（OC-7 字段位）
+
 对外 API（Gateway 暴露给渠道/Web UI）：
 
 - `POST /api/message`（接收用户消息）
