@@ -397,6 +397,8 @@ class TelegramGatewayService:
 
         service = TaskService(self._stores, self._sse_hub)
         task_id, created = await service.create_task(message)
+        # F105 FR-E3：accepted 与 duplicate 都 touch（幂等重投不丢 last-route）
+        await self._record_conversation_binding(context, scope_id, reply_thread_root_id)
         self._remember_inbound_reply_thread(context, reply_thread_root_id)
         if created and self._task_runner is not None:
             await self._task_runner.enqueue(task_id, context.text)
@@ -405,6 +407,42 @@ class TelegramGatewayService:
             task_id=task_id,
             created=created,
         )
+
+    async def _record_conversation_binding(
+        self,
+        context: TelegramInboundContext,
+        scope_id: str,
+        reply_thread_root_id: str,
+    ) -> None:
+        """F105 FR-E3：登记/touch 渠道会话路由绑定（OC-2 + OC-6 last-route 状态）。
+
+        - conversation_id=chat_id：出站寻址单元=chat 级（spec 已知 limitation L3：
+          多 topic 群塌成一行，topic 维度滚动记录在 metadata.last_*）
+        - project_id=''：telegram scope 解析不到 project（recon §4）
+        - 失败 WARNING 降级，不阻断消息主链（Constitution #6）
+        """
+        binding_store = getattr(self._stores, "conversation_binding_store", None)
+        if binding_store is None:
+            return
+        metadata: dict[str, Any] = {}
+        if context.message_thread_id:
+            metadata["last_message_thread_id"] = context.message_thread_id
+        if reply_thread_root_id:
+            metadata["last_reply_thread_root_id"] = reply_thread_root_id
+        try:
+            await binding_store.upsert_runtime_binding(
+                "telegram",
+                context.chat_id,
+                scope_id=scope_id,
+                project_id="",
+                metadata=metadata,
+            )
+        except Exception:
+            logger.warning(
+                "telegram_conversation_binding_failed chat_id=%s",
+                context.chat_id,
+                exc_info=True,
+            )
 
     async def _handle_control_command(
         self,

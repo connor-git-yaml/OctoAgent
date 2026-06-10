@@ -286,6 +286,42 @@ def _build_project_scoped_chat_scope_id(
     return f"project:{project_id}:chat:{channel}:{thread_id}"
 
 
+async def _record_web_conversation_binding(
+    store_group,
+    *,
+    owner_turn_executor_kind: TurnExecutorKind,
+    thread_id: str,
+    scope_id: str,
+    project_id: str,
+) -> None:
+    """F105 FR-E3：登记/touch web 会话路由绑定（OC-2 + OC-6 last-route 状态）。
+
+    H1 排除（Codex pre-impl H4）：direct-worker 会话
+    （owner_turn_executor_kind=WORKER，用户显式选 worker 直聊）不写 binding——
+    ConversationBinding 只登记主 Agent 默认路由，worker 会话不得伪装成
+    主 Agent last-route。失败 WARNING 降级，不阻断消息主链（Constitution #6）。
+    """
+    if owner_turn_executor_kind is TurnExecutorKind.WORKER:
+        logger.debug(
+            "web_conversation_binding_skipped_direct_worker thread_id=%s", thread_id
+        )
+        return
+    binding_store = getattr(store_group, "conversation_binding_store", None)
+    if binding_store is None:
+        return
+    try:
+        await binding_store.upsert_runtime_binding(
+            "web",
+            thread_id,
+            scope_id=scope_id,
+            project_id=project_id,
+        )
+    except Exception:
+        logger.warning(
+            "web_conversation_binding_failed thread_id=%s", thread_id, exc_info=True
+        )
+
+
 def _parse_projected_session_ref(session_id: str) -> tuple[str, str]:
     thread_id = ""
     project_id = ""
@@ -416,7 +452,10 @@ async def send_chat_message(
 
     # 创建 Task 记录（如果是新对话）
     if not body.task_id:
-        from octoagent.core.models.message import NormalizedMessage
+        # F105 FR-D2：NormalizedMessage 构造经 web adapter 工厂（module-level
+        # import，channel="web"/sender 字面量收敛进 channels.web_adapter；
+        # scope_id 构造留本 call site，OPUS-L1 边界）。
+        from ..channels.web_adapter import build_web_inbound_message
 
         effective_thread_id = requested_thread_id or task_id
         effective_scope_id = (
@@ -429,12 +468,9 @@ async def send_chat_message(
             else f"chat:web:{effective_thread_id}"
         )
 
-        msg = NormalizedMessage(
-            channel="web",
+        msg = build_web_inbound_message(
             thread_id=effective_thread_id,
             scope_id=effective_scope_id,
-            sender_id="owner",
-            sender_name="Owner",
             text=body.message,
             control_metadata=chat_control_metadata,
             idempotency_key=f"chat-{task_id}",
@@ -452,6 +488,14 @@ async def send_chat_message(
             ) from exc
         if created:
             task_id = created_task_id
+            # F105 FR-E3：登记 web 会话路由绑定（direct-worker 排除在 helper 内）
+            await _record_web_conversation_binding(
+                store_group,
+                owner_turn_executor_kind=owner_turn_executor_kind,
+                thread_id=effective_thread_id,
+                scope_id=effective_scope_id,
+                project_id=project_id,
+            )
             dispatch_metadata = dict(chat_control_metadata)
             runtime_metadata: dict[str, Any] = {}
             if new_conversation_token:
@@ -511,6 +555,14 @@ async def send_chat_message(
                 task_id=task_id,
                 text=body.message,
                 control_metadata=chat_control_metadata,
+            )
+            # F105 FR-E3：续聊同样 touch last-route（direct-worker 排除在 helper 内）
+            await _record_web_conversation_binding(
+                store_group,
+                owner_turn_executor_kind=owner_turn_executor_kind,
+                thread_id=existing_task.thread_id,
+                scope_id=existing_task.scope_id,
+                project_id=project_id,
             )
             dispatch_metadata = dict(chat_control_metadata)
             # F101 Phase A FR-D2：force_full_recall 已通过 chat_control_metadata 写入 USER_MESSAGE event
