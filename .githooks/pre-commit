@@ -79,12 +79,24 @@ import time
 octoagent_dir, log_file, timeout_s = sys.argv[1], sys.argv[2], int(sys.argv[3])
 
 # 起子进程跑 pytest（写到 log_file）
+#
+# 基础设施修复（hermetic 调用）：用 `uv run python -m pytest` 而非裸 `uv run pytest`。
+# 根因：裸 `pytest` 是 console-script，会逃出 venv——venv 的 .venv/bin/pytest shebang
+# 可能指向已删 worktree 的解释器（共享 venv symlink 设计的副作用），uv 退化到 PATH 上
+# 的全局 pytest（Homebrew python3.14）。该解释器 site-packages 里有 SWE-bench 残留的
+# __editable__ 安装（SWE-L003 pytest src / SWE-L002 astropy），既把 bench worktree
+# 路径塞进 sys.path，又缺 aiosqlite → ConftestImportFailure，逼迫每次 SKIP_E2E。
+# `python -m pytest` 强制用 venv 解释器（3.12，干净 sys.path + aiosqlite 齐全），
+# 绕开 console-script shebang 与 PATH 回退；PYTHONNOUSERSITE=1 再防 user-site
+# editable 污染（venv 默认已禁 user-site，双保险）。
+hermetic_env = {**os.environ, "PYTHONNOUSERSITE": "1"}
 with open(log_file, "wb") as logf:
     proc = subprocess.Popen(
-        ["uv", "run", "pytest", "-m", "e2e_smoke", "--maxfail=1", "-q"],
+        ["uv", "run", "python", "-m", "pytest", "-m", "e2e_smoke", "--maxfail=1", "-q"],
         cwd=octoagent_dir,
         stdout=logf,
         stderr=subprocess.STDOUT,
+        env=hermetic_env,
         # 新建独立 process group，便于一次性 SIGKILL 整个子树
         preexec_fn=os.setsid,
     )
