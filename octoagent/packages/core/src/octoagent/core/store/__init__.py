@@ -13,6 +13,7 @@ from .connection import apply_write_connection_pragmas
 from .agent_context_store import SqliteAgentContextStore
 from .artifact_store import SqliteArtifactStore
 from .checkpoint_store import SqliteCheckpointStore
+from .conversation_binding_store import SqliteConversationBindingStore
 from .event_store import SqliteEventStore
 from .notification_store import SqliteNotificationStore
 from .project_store import SqliteProjectStore
@@ -64,6 +65,8 @@ class StoreGroup:
         self.work_store = SqliteWorkStore(conn)
         # F116：通知 dismiss/active 持久化（NotificationService rehydrate 用）
         self.notification_store = SqliteNotificationStore(conn)
+        # F105：渠道会话路由绑定（OC-2 ConversationBinding + OC-6 last-route 状态）
+        self.conversation_binding_store = SqliteConversationBindingStore(conn)
 
     async def close(self) -> None:
         """关闭主连接 + versionable 独立写连接（幂等，suppress 已关闭异常）。
@@ -127,6 +130,7 @@ __all__ = [
     "SqliteTaskJobStore",
     "SqliteEventStore",
     "SqliteNotificationStore",
+    "SqliteConversationBindingStore",
     "SqliteArtifactStore",
     "SqliteCheckpointStore",
     "SqliteSideEffectLedgerStore",

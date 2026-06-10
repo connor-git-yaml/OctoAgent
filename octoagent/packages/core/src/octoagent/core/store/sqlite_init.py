@@ -213,6 +213,45 @@ _NOTIFICATION_ACTIVE_INDEXES = [
     ),
 ]
 
+# F105: ConversationBinding（OC-2）—— (platform, account_id, conversation_id,
+# project_id) → scope 路由绑定 + last_active_at（OC-6 last-route 状态）。
+# 无 task FK：binding 是路由缓存态，可由 inbound 重建，不绑 task 生命周期。
+# 唯一键含 project_id（Codex pre-impl H3）：web 的 conversation_id=thread_id
+# 不跨 project 全局唯一（如 "default"），不含 project 维度会让两个 project 的
+# 同名 thread 互相覆盖 project_id/scope_id 列；telegram project_id 恒 ''，
+# 四元组退化为三元组语义不变。
+# H1 不变量：agent_profile_id 字段保留供 v0.2 显式配置面，但 v0.1 写入 API
+# 不暴露该参数（恒 ''=主 Agent）——见 conversation_binding_store.py。
+# account_id 恒 'default'（OC-7 multi-account 字段位预留，v0.1 不实施）。
+_CONVERSATION_BINDINGS_DDL = """
+CREATE TABLE IF NOT EXISTS conversation_bindings (
+    binding_id        TEXT PRIMARY KEY,
+    platform          TEXT NOT NULL,
+    account_id        TEXT NOT NULL DEFAULT 'default',
+    conversation_id   TEXT NOT NULL,
+    scope_id          TEXT NOT NULL DEFAULT '',
+    project_id        TEXT NOT NULL DEFAULT '',
+    agent_profile_id  TEXT NOT NULL DEFAULT '',
+    binding_kind      TEXT NOT NULL DEFAULT 'runtime',
+    last_active_at    TEXT NOT NULL,
+    metadata          TEXT NOT NULL DEFAULT '{}',
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    UNIQUE(platform, account_id, conversation_id, project_id)
+);
+"""
+
+_CONVERSATION_BINDINGS_INDEXES = [
+    (
+        "CREATE INDEX IF NOT EXISTS idx_conversation_bindings_last_active "
+        "ON conversation_bindings(last_active_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_conversation_bindings_platform "
+        "ON conversation_bindings(platform);"
+    ),
+]
+
 # Feature 025: projects/workspaces/bindings/migration_runs
 _PROJECTS_DDL = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -1728,6 +1767,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_MEMORY_EXTRACTION_LEDGER_DDL)
     await conn.execute(_NOTIFICATION_DISMISSALS_DDL)
     await conn.execute(_NOTIFICATION_ACTIVE_DDL)
+    await conn.execute(_CONVERSATION_BINDINGS_DDL)
     await _migrate_legacy_tables(conn)
 
     # 创建索引
@@ -1747,6 +1787,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _OBSERVATION_CANDIDATES_INDEXES
         + _MEMORY_EXTRACTION_LEDGER_INDEXES
         + _NOTIFICATION_ACTIVE_INDEXES
+        + _CONVERSATION_BINDINGS_INDEXES
     ):
         await conn.execute(idx_sql)
 

@@ -264,6 +264,7 @@ from .enums import (
     TaskStatus,
     validate_transition,
 )
+from .conversation_binding import ConversationBinding, ConversationBindingKind
 from .event import Event, EventCausality
 from .execution import (
     ExecutionBackend,
@@ -452,6 +453,9 @@ __all__ = [
     # Event
     "Event",
     "EventCausality",
+    # ConversationBinding (F105)
+    "ConversationBinding",
+    "ConversationBindingKind",
     # Artifact
     "Artifact",
     "ArtifactPart",
