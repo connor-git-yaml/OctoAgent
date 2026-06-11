@@ -1892,6 +1892,7 @@ version = "0.1.0"
 source = { editable = "apps/gateway" }
 dependencies = [
     { name = "apscheduler" },
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "logfire" },
     { name = "octoagent-core" },
@@ -1912,6 +1913,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "apscheduler", specifier = ">=3.10,<4.0" },
+    { name = "cryptography", specifier = ">=43,<47" },
     { name = "fastapi", specifier = ">=0.115,<1.0" },
     { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.27" },
     { name = "logfire", specifier = ">=3.0" },

@@ -7,6 +7,7 @@
 """
 
 from .adapter import ChannelAdapter, ChannelCapabilityMeta
+from .discord_adapter import DiscordChannelAdapter
 from .registry import PlatformRegistry
 from .slack_adapter import SlackChannelAdapter
 from .telegram_adapter import TelegramChannelAdapter
@@ -15,6 +16,7 @@ from .web_adapter import WebChannelAdapter, build_web_inbound_message
 __all__ = [
     "ChannelAdapter",
     "ChannelCapabilityMeta",
+    "DiscordChannelAdapter",
     "PlatformRegistry",
     "SlackChannelAdapter",
     "TelegramChannelAdapter",

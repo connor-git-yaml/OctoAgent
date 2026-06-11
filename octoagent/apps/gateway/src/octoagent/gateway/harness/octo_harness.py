@@ -460,6 +460,8 @@ class OctoHarness:
         TelegramGatewayService = _main_module.TelegramGatewayService
         SlackGatewayService = _main_module.SlackGatewayService
         SlackApiClient = _main_module.SlackApiClient
+        DiscordGatewayService = _main_module.DiscordGatewayService
+        DiscordApiClient = _main_module.DiscordApiClient
         CompositeApprovalBroadcaster = _main_module.CompositeApprovalBroadcaster
         TelegramApprovalBroadcaster = _main_module.TelegramApprovalBroadcaster
         SSEApprovalBroadcaster = _main_module.SSEApprovalBroadcaster
@@ -503,13 +505,14 @@ class OctoHarness:
         # adapter.notification_channel() 调用时——保 baseline first_approved_user
         # chat_id 冻结时机不变。
         from ..channels import (
+            DiscordChannelAdapter,
             PlatformRegistry,
             SlackChannelAdapter,
             TelegramChannelAdapter,
             WebChannelAdapter,
         )
 
-        # F105 v0.2：Slack 渠道 service（Events API webhook，无常驻连接）。
+        # F105 v0.2：Slack / Discord 渠道 service（webhook，无常驻连接）。
         # 恒构造 + route 恒挂载（telegram 先例：enabled 在 ingest 时校验，
         # disabled → 503）；notification_channel 仅 enabled+token 可解析时注册。
         slack_service = SlackGatewayService(
@@ -519,12 +522,20 @@ class OctoHarness:
             api_client=SlackApiClient(project_root),
         )
         app.state.slack_service = slack_service
+        discord_service = DiscordGatewayService(
+            project_root=project_root,
+            store_group=store_group,
+            sse_hub=app.state.sse_hub,
+            api_client=DiscordApiClient(project_root),
+        )
+        app.state.discord_service = discord_service
 
         platform_registry = PlatformRegistry()
         platform_registry.register(WebChannelAdapter(app.state.sse_hub))
         platform_registry.register(TelegramChannelAdapter(telegram_service))
         # v0.2 新平台尾部追加（D16：前缀序 = baseline 通知注册序不变）
         platform_registry.register(SlackChannelAdapter(slack_service))
+        platform_registry.register(DiscordChannelAdapter(discord_service))
         app.state.platform_registry = platform_registry
         self._platform_registry = platform_registry
 
@@ -1072,10 +1083,13 @@ class OctoHarness:
         await app.state.capability_pack_service.refresh()
         app.state.execution_console = app.state.task_runner.execution_console
         telegram_service.bind_task_runner(app.state.task_runner)
-        # F105 v0.2：slack service 同款延迟绑定（telegram 先例同段）
+        # F105 v0.2：slack / discord service 同款延迟绑定（telegram 先例同段）
         _slack_service = getattr(app.state, "slack_service", None)
         if _slack_service is not None:
             _slack_service.bind_task_runner(app.state.task_runner)
+        _discord_service = getattr(app.state, "discord_service", None)
+        if _discord_service is not None:
+            _discord_service.bind_task_runner(app.state.task_runner)
         # F101 Phase C v2 H-3：绑定 NotificationService 到 TelegramGatewayService，
         # 使 Telegram dismiss callback 能调用 notification_service.dismiss
         if hasattr(telegram_service, "bind_notification_service"):
