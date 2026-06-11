@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from fastapi import APIRouter
+
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.gateway.services.notification import SSENotificationChannel
 
@@ -70,6 +72,13 @@ class WebChannelAdapter:
     @property
     def meta(self) -> ChannelCapabilityMeta:
         return _WEB_META
+
+    def inbound_router(self) -> APIRouter | None:
+        """None：web inbound（chat.py / message.py）是受 front-door 保护的
+        产品 API 面，挂载留 main.py register_routes（spec v0.2 FR-A2）——
+        ingress 契约只承接"平台自鉴权 webhook"类 inbound。
+        """
+        return None
 
     def notification_channel(self) -> SSENotificationChannel:
         return SSENotificationChannel(self._sse_hub)

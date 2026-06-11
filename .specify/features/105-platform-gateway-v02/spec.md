@@ -272,7 +272,7 @@ v0.2 与 v0.1 不同——**不是全局零变更**，而是分区：
 | US-5 AC-3 | 既有 test_notification.py / test_f101_notification.py 全绿（0 修改，机械校验） |
 | FR-D1 棘轮（R7） | packages/core/tests/test_conversation_binding_store.py::test_configured_upgrades_runtime_not_reverse |
 | FR-D6 resolver v2（D17b） | packages/core/tests/test_conversation_binding_store.py::test_configured_upgrade_keeps_runtime_activity_rank + test_resolver_v2_runtime_only_and_configured_only_unchanged |
-| SC-4 | apps/gateway/tests/test_f105v02_ingress.py::test_fake_adapter_router_mounted_by_harness_loop |
+| SC-4 | apps/gateway/tests/test_f105v02_ingress.py::test_harness_bootstrap_mounts_adapter_routers（真 bootstrap 集成证明，强于 fake 模拟） |
 
 测试前提：slack/discord 单测均本地构造签名请求（HMAC 用测试 secret 现算；Ed25519 用测试密钥对现签），不依赖外部网络；harness wiring 序断言在默认（未配置 slack/discord）环境维持 `["web_sse","telegram"]`。
 

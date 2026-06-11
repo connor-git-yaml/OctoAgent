@@ -16,6 +16,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from fastapi import APIRouter
+
+from octoagent.gateway.routes import telegram as telegram_routes
 from octoagent.gateway.services.notification import TelegramNotificationChannel
 
 from .adapter import ChannelCapabilityMeta
@@ -40,6 +43,17 @@ class TelegramChannelAdapter:
     @property
     def meta(self) -> ChannelCapabilityMeta:
         return _TELEGRAM_META
+
+    def inbound_router(self) -> APIRouter | None:
+        """返回 telegram webhook router（v0.2 ingress 契约，spec D2）。
+
+        routes/telegram.py 模块保留（路由函数/handler 原样，test_telegram_route
+        契约不动）——adapter 只接管"挂载自描述"：返回模块单例 router，
+        由 harness 统一挂载（原 main.py register_routes 直挂行撤销）。
+        route 函数继续直读 ``request.app.state.telegram_service``
+        （inbound 解析 per-platform，v0.1 D3 边界不变）。
+        """
+        return telegram_routes.router
 
     def notification_channel(self) -> TelegramNotificationChannel | None:
         """构造 Telegram 通知渠道（逐行迁移自 octo_harness L938-968）。

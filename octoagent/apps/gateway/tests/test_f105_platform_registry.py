@@ -47,6 +47,10 @@ class FakeAdapter:
     def notification_channel(self) -> object | None:
         return self._notification_channel
 
+    def inbound_router(self) -> object | None:
+        """F105 v0.2 ingress 契约成员（Protocol 演化，additive 补方法）。"""
+        return None
+
     async def notify_task_result(self, task_id: str) -> None:
         if self.fail_notify:
             raise RuntimeError("模拟 notify 失败")

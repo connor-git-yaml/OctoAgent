@@ -7,7 +7,9 @@ from typing import Any
 from fastapi import APIRouter, Header, Request
 from fastapi.responses import JSONResponse
 
-router = APIRouter()
+# F105 v0.2：tags 收进 router 自描述（原 main.py 挂载行携带 tags=["telegram"]，
+# 挂载迁入 harness ingress 契约后由 router 构造自带——OpenAPI 分组等价，EQ-A6）
+router = APIRouter(tags=["telegram"])
 
 
 @router.post("/api/telegram/webhook")

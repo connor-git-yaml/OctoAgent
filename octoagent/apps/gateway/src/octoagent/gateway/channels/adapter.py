@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Protocol, runtime_checkable
 
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 
@@ -70,6 +71,21 @@ class ChannelAdapter(Protocol):
         返回 None 表示该渠道当前无可用通知通道（如 telegram bot 未配置），
         registry 装配时跳过注册——与 baseline "bot_client 为 None 不注册"
         语义一致。
+        """
+        ...
+
+    def inbound_router(self) -> APIRouter | None:
+        """返回该渠道自描述的 inbound HTTP router（F105 v0.2 ingress 契约）。
+
+        - harness 在 bootstrap 段（platform_registry 构造后、lifespan yield 前）
+          统一挂载非 None router，**不带 front-door protected 依赖**——webhook
+          以平台自带机制鉴权（telegram secret header / slack v0 HMAC /
+          discord Ed25519），与 baseline main.py 挂载 telegram.router 不带
+          protected 的先例一致（spec v0.2 D1/FR-A1）。
+        - 返回 None = 该渠道无自描述 HTTP inbound（如 web：其 inbound 是受
+          front-door 保护的产品 API 面，留 main.py 挂载）。
+        - 事件解析仍 per-platform（v0.1 D3 边界不变）——本契约只统一
+          "route 自描述 + 挂载"，不统一 parse 签名。
         """
         ...
 

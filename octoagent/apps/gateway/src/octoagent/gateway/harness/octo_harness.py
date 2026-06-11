@@ -512,6 +512,21 @@ class OctoHarness:
         app.state.platform_registry = platform_registry
         self._platform_registry = platform_registry
 
+        # F105 v0.2 ingress 契约（FR-A3）：统一挂载 adapter 自描述 inbound router。
+        # - 不带 front-door protected 依赖（平台自鉴权：telegram secret /
+        #   slack HMAC / discord Ed25519）——与 baseline main.py 挂载
+        #   telegram.router 不带 protected 等价（EQ-A5）。
+        # - 挂载发生在 lifespan yield 前，生产请求只在 lifespan 完成后到达
+        #   （EQ-A2；telegram 原 main.py 直挂行已撤销）。
+        for _adapter in platform_registry.list_adapters():
+            _inbound_router = _adapter.inbound_router()
+            if _inbound_router is not None:
+                app.include_router(_inbound_router)
+                _main_module.log.info(
+                    "platform_inbound_router_mounted",
+                    platform_id=_adapter.meta.platform_id,
+                )
+
         # Feature 070: ApprovalManager + Override 持久化（不再使用 PolicyEngine）
         sse_broadcaster = SSEApprovalBroadcaster(app.state.sse_hub)
         approval_broadcaster = CompositeApprovalBroadcaster(

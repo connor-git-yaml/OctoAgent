@@ -55,7 +55,6 @@ from .routes import (
     skills,
     stream,
     tasks,
-    telegram,
     watchdog,
 )
 from .services.agent_session_turn_hook import AgentSessionTurnHook
@@ -342,7 +341,9 @@ def create_app() -> FastAPI:
     protected = [Depends(require_front_door_access)]
     app.include_router(watchdog.router, tags=["watchdog"], dependencies=protected)
     app.include_router(message.router, tags=["message"], dependencies=protected)
-    app.include_router(telegram.router, tags=["telegram"])
+    # F105 v0.2 ingress 契约：telegram webhook 挂载迁入 harness bootstrap
+    # （adapter.inbound_router 自描述，octo_harness._bootstrap_runtime_services
+    # 统一挂载，不带 protected——平台自鉴权，spec v0.2 D1/D2/FR-A3）。
     app.include_router(tasks.router, tags=["tasks"], dependencies=protected)
     app.include_router(files.router, tags=["files"], dependencies=protected)
     app.include_router(cancel.router, tags=["cancel"], dependencies=protected)
