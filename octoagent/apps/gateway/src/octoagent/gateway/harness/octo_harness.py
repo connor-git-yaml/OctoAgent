@@ -554,6 +554,46 @@ class OctoHarness:
                     platform_id=_adapter.meta.platform_id,
                 )
 
+        # F105 v0.2（FR-D3）：default_notify_channel → CONFIGURED binding。
+        # 配置即可收通知（无需先发一条消息）；per-platform try/except 降级
+        # （Constitution #6），失败不阻断 bootstrap；重启幂等（upsert）。
+        # 仅 enabled 平台写入——disabled 平台的通知通道本就不注册，写入只会
+        # 留下无消费者的 stale 行。
+        _binding_store = getattr(store_group, "conversation_binding_store", None)
+        if _binding_store is not None:
+            try:
+                from ..services.config.config_wizard import load_config as _load_cfg
+
+                _channels_cfg = getattr(_load_cfg(project_root), "channels", None)
+            except Exception:
+                _channels_cfg = None
+            for _platform_name in ("slack", "discord"):
+                try:
+                    _channel_cfg = getattr(_channels_cfg, _platform_name, None)
+                    if not bool(getattr(_channel_cfg, "enabled", False)):
+                        continue
+                    _notify_target = str(
+                        getattr(_channel_cfg, "default_notify_channel", "") or ""
+                    ).strip()
+                    if not _notify_target:
+                        continue
+                    await _binding_store.upsert_configured_binding(
+                        _platform_name,
+                        _notify_target,
+                        scope_id=f"chat:{_platform_name}:{_notify_target}",
+                    )
+                    _main_module.log.info(
+                        "platform_default_notify_binding_configured",
+                        platform_id=_platform_name,
+                        conversation_id=_notify_target,
+                    )
+                except Exception:
+                    _main_module.log.warning(
+                        "platform_default_notify_binding_failed",
+                        platform_id=_platform_name,
+                        exc_info=True,
+                    )
+
         # Feature 070: ApprovalManager + Override 持久化（不再使用 PolicyEngine）
         sse_broadcaster = SSEApprovalBroadcaster(app.state.sse_hub)
         approval_broadcaster = CompositeApprovalBroadcaster(

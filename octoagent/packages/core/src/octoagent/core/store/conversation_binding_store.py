@@ -22,22 +22,41 @@ from ..models.conversation_binding import ConversationBinding, ConversationBindi
 DEFAULT_ACCOUNT_ID = "default"
 
 
+def _runtime_activity_at(binding: ConversationBinding) -> Any | None:
+    """提取 runtime 活跃证据时间（F105 v0.2 D17b）。
+
+    - ``last_runtime_active_at`` 非 None → 直接用（runtime upsert 恒写；
+      configured 升级保留原值——配置动作不抹除活跃证据）
+    - 否则 RUNTIME kind 兜底用 ``last_active_at``（v0.1 存量行/手工构造行
+      尚无新列值，其 last_active 即 inbound 活跃，语义等价）
+    - CONFIGURED 且无活跃证据 → None（配置时间不是活跃证据）
+    """
+    if binding.last_runtime_active_at is not None:
+        return binding.last_runtime_active_at
+    if binding.binding_kind is ConversationBindingKind.RUNTIME:
+        return binding.last_active_at
+    return None
+
+
 def resolve_outbound_route(
     bindings: list[ConversationBinding],
     *,
     explicit: tuple[str, str] | None = None,
 ) -> ConversationBinding | None:
-    """OC-6 last-route 出站渠道选择（纯函数，spec FR-E4）。
+    """OC-6 last-route 出站渠道选择（纯函数，spec v0.1 FR-E4 / v0.2 D17b）。
 
     三级策略：
-    1. explicit=(platform, conversation_id) 精确命中 → 该 binding
-    2. RUNTIME binding 中 last_active_at 最新者（"用户最后说话的地方"——
-       仅 runtime 的 last_active 代表真实 inbound 流量；CONFIGURED 的时间戳
-       是配置时间不是活跃证据，混入会让新配置压过真实活跃会话）
-    3. 唯一 CONFIGURED binding（已配置但尚无流量、且不歧义时才可用）
+    1. explicit=(platform, conversation_id) 精确命中 → 该 binding。
+       **list-order 契约（v0.2 FR-D4 / OPUS2-L2 文档化）**：explicit 元组
+       不含 project_id——多 project 同 conversation 时命中传入 list 的
+       首条；调用方若按 project 维度出站，须自行预过滤 bindings 或在
+       引入首个 explicit 生产消费者时扩三元组（v0.2 生产消费者均不使用
+       explicit）。
+    2. **runtime 活跃证据**最新者（v0.2 D17b：按 ``_runtime_activity_at``
+       排序、不分 kind——CONFIGURED 升级后的会话凭保留的活跃证据继续
+       参与排序，修复"配置动作把活跃会话踢出路由"缺陷 CODEX-H3）。
+    3. 唯一 CONFIGURED binding（已配置但尚无流量、且不歧义时才可用）。
     全不命中 → None。
-
-    v0.1 仅供单测与 v0.2 接线消费，不接入任何现有出站路径（行为零变更）。
     """
     if explicit is not None:
         explicit_platform, explicit_conversation = explicit
@@ -48,11 +67,13 @@ def resolve_outbound_route(
             ):
                 return binding
 
-    runtime_bindings = [
-        b for b in bindings if b.binding_kind is ConversationBindingKind.RUNTIME
+    active = [
+        (activity_at, binding)
+        for binding in bindings
+        if (activity_at := _runtime_activity_at(binding)) is not None
     ]
-    if runtime_bindings:
-        return max(runtime_bindings, key=lambda b: b.last_active_at)
+    if active:
+        return max(active, key=lambda pair: pair[0])[1]
 
     configured = [
         b for b in bindings if b.binding_kind is ConversationBindingKind.CONFIGURED
@@ -94,14 +115,16 @@ class SqliteConversationBindingStore:
             INSERT INTO conversation_bindings (
                 binding_id, platform, account_id, conversation_id,
                 scope_id, project_id, agent_profile_id, binding_kind,
-                last_active_at, metadata, created_at, updated_at
+                last_active_at, last_runtime_active_at, metadata,
+                created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)
             ON CONFLICT(platform, account_id, conversation_id, project_id)
             DO UPDATE SET
                 scope_id = excluded.scope_id,
                 metadata = excluded.metadata,
                 last_active_at = excluded.last_active_at,
+                last_runtime_active_at = excluded.last_runtime_active_at,
                 updated_at = excluded.updated_at
             """,
             (
@@ -113,6 +136,7 @@ class SqliteConversationBindingStore:
                 project_id,
                 ConversationBindingKind.RUNTIME.value,
                 now,
+                now,  # F105 v0.2 D17b：runtime 活跃证据恒写（与 kind 解耦）
                 metadata_json,
                 now,
                 now,
@@ -123,6 +147,78 @@ class SqliteConversationBindingStore:
         if stored is None:  # upsert 后必存在；不用 assert（-O 下被剥离，F124 同类 LOW）
             raise RuntimeError(
                 f"conversation binding upsert 后读取失败: {platform}/{conversation_id}"
+            )
+        return stored
+
+    async def upsert_configured_binding(
+        self,
+        platform: str,
+        conversation_id: str,
+        *,
+        scope_id: str = "",
+        project_id: str = "",
+        metadata: dict[str, Any] | None = None,
+        agent_profile_id: str = "",
+    ) -> ConversationBinding:
+        """登记/升级一条 CONFIGURED 绑定（F105 v0.2 FR-D1，**单一 CONFIGURED
+        写入口**——handoff §2.3 约束：加配置面必须收敛到 store 单一入口）。
+
+        H1 单点校验：``agent_profile_id`` 非空即 raise——非主 Agent 绑定
+        必须经"显式用户拍板"的配置面（未来 Feature），v0.2 物理上没有该面，
+        应用层写入面构造性收敛（spec §7 / OPUS-M3 措辞口径）。
+
+        双向 kind 规则（与 upsert_runtime_binding 并存）：
+        - 本入口把已存在的 runtime 行**升级**为 configured（用户显式意图
+          优先于 inbound 痕迹）；
+        - runtime 入口不降级 configured（v0.1 既有语义）；
+        - **不触碰 last_active_at / last_runtime_active_at**（D17b：配置
+          动作不伪造也不抹除活跃证据——升级后该会话凭保留的活跃证据继续
+          参与 last-route 排序，CODEX-H3 闭环）。
+        """
+        if agent_profile_id != "":
+            raise ValueError(
+                "H1 校验：CONFIGURED 绑定不得指向非主 Agent"
+                f"（agent_profile_id={agent_profile_id!r}）；非主 Agent 绑定"
+                "需要未来显式用户拍板的配置面，v0.2 不存在该写入路径"
+            )
+        now = datetime.now(UTC).isoformat()
+        binding_id = f"convb-{ULID()}"
+        metadata_json = json.dumps(metadata or {}, ensure_ascii=False)
+        await self._conn.execute(
+            """
+            INSERT INTO conversation_bindings (
+                binding_id, platform, account_id, conversation_id,
+                scope_id, project_id, agent_profile_id, binding_kind,
+                last_active_at, last_runtime_active_at, metadata,
+                created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, NULL, ?, ?, ?)
+            ON CONFLICT(platform, account_id, conversation_id, project_id)
+            DO UPDATE SET
+                scope_id = excluded.scope_id,
+                metadata = excluded.metadata,
+                binding_kind = excluded.binding_kind,
+                updated_at = excluded.updated_at
+            """,
+            (
+                binding_id,
+                platform,
+                DEFAULT_ACCOUNT_ID,
+                conversation_id,
+                scope_id,
+                project_id,
+                ConversationBindingKind.CONFIGURED.value,
+                now,  # 新建行的 last_active_at（NOT NULL 列）=配置时间
+                metadata_json,
+                now,
+                now,
+            ),
+        )
+        await self._conn.commit()
+        stored = await self.get(platform, conversation_id, project_id=project_id)
+        if stored is None:
+            raise RuntimeError(
+                f"configured binding upsert 后读取失败: {platform}/{conversation_id}"
             )
         return stored
 
@@ -175,6 +271,7 @@ class SqliteConversationBindingStore:
             metadata = json.loads(row["metadata"])
         except (TypeError, ValueError):
             metadata = {}
+        raw_runtime_active = row["last_runtime_active_at"]
         return ConversationBinding(
             binding_id=row["binding_id"],
             platform=row["platform"],
@@ -185,6 +282,11 @@ class SqliteConversationBindingStore:
             agent_profile_id=row["agent_profile_id"],
             binding_kind=ConversationBindingKind(row["binding_kind"]),
             last_active_at=datetime.fromisoformat(row["last_active_at"]),
+            last_runtime_active_at=(
+                datetime.fromisoformat(raw_runtime_active)
+                if raw_runtime_active
+                else None
+            ),
             metadata=metadata if isinstance(metadata, dict) else {},
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),

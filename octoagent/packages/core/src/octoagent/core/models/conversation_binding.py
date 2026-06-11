@@ -58,6 +58,14 @@ class ConversationBinding(BaseModel):
         default_factory=_utc_now,
         description="最近 inbound 活跃时间（OC-6 last-route）",
     )
+    last_runtime_active_at: datetime | None = Field(
+        default=None,
+        description=(
+            "F105 v0.2（D17b）：runtime inbound 活跃证据，与 binding_kind 解耦"
+            "——configured 升级保留该值（不丢出站排序资格），configured 写入"
+            "面从不伪造该值（None=从未有 inbound）"
+        ),
+    )
     metadata: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)

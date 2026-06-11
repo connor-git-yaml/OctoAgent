@@ -234,6 +234,7 @@ CREATE TABLE IF NOT EXISTS conversation_bindings (
     agent_profile_id  TEXT NOT NULL DEFAULT '',
     binding_kind      TEXT NOT NULL DEFAULT 'runtime',
     last_active_at    TEXT NOT NULL,
+    last_runtime_active_at TEXT,
     metadata          TEXT NOT NULL DEFAULT '{}',
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL,
@@ -1084,6 +1085,14 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     if project_columns and "primary_agent_id" not in project_columns:
         await conn.execute(
             "ALTER TABLE projects ADD COLUMN primary_agent_id TEXT NOT NULL DEFAULT ''"
+        )
+
+    # F105 v0.2（FR-D6/D17b）：binding 活跃信号与 kind 解耦——runtime 活跃
+    # 时间独立成列（configured 升级不再丢失排序资格，CODEX-H3 闭环）
+    binding_columns = await _table_columns(conn, "conversation_bindings")
+    if binding_columns and "last_runtime_active_at" not in binding_columns:
+        await conn.execute(
+            "ALTER TABLE conversation_bindings ADD COLUMN last_runtime_active_at TEXT"
         )
 
     work_columns = await _table_columns(conn, "works")

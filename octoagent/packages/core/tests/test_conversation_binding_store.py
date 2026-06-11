@@ -163,3 +163,93 @@ def test_resolve_outbound_route_three_tiers() -> None:
 
     # 4) 空集 → None
     assert resolve_outbound_route([]) is None
+
+
+# ---------------------------------------------------------------------------
+# F105 v0.2 Phase D：CONFIGURED 写入面 + 活跃信号解耦 + resolver v2
+# ---------------------------------------------------------------------------
+
+
+async def test_configured_upsert_h1_rejects_agent_profile(store) -> None:
+    """US-4 AC-4（D13 H1 单点校验）：agent_profile_id 非空必 raise。"""
+    with pytest.raises(ValueError, match="H1"):
+        await store.upsert_configured_binding(
+            "slack", "C1", agent_profile_id="wkr-x"
+        )
+    assert await store.get("slack", "C1") is None  # 未写入
+
+
+async def test_configured_upsert_creates_and_is_idempotent(store) -> None:
+    """US-4 AC-1 store 层：新建 CONFIGURED 行（活跃证据 NULL）+ 重复幂等。"""
+    first = await store.upsert_configured_binding(
+        "slack", "C1", scope_id="chat:slack:C1"
+    )
+    assert first.binding_kind is ConversationBindingKind.CONFIGURED
+    assert first.agent_profile_id == ""
+    assert first.last_runtime_active_at is None  # 配置不伪造活跃证据
+
+    second = await store.upsert_configured_binding(
+        "slack", "C1", scope_id="chat:slack:C1"
+    )
+    assert second.binding_id == first.binding_id  # 同行 upsert
+    rows = await store.list_by_platform("slack")
+    assert len(rows) == 1
+
+
+async def test_configured_upgrades_runtime_not_reverse(store) -> None:
+    """R7 棘轮：runtime → configured 单向升级；runtime upsert 不降级。"""
+    await store.upsert_runtime_binding("slack", "D1", scope_id="chat:slack:D1")
+    upgraded = await store.upsert_configured_binding(
+        "slack", "D1", scope_id="chat:slack:D1"
+    )
+    assert upgraded.binding_kind is ConversationBindingKind.CONFIGURED
+    # D17b：升级保留 runtime 活跃证据
+    assert upgraded.last_runtime_active_at is not None
+
+    touched = await store.upsert_runtime_binding(
+        "slack", "D1", scope_id="chat:slack:D1"
+    )
+    assert touched.binding_kind is ConversationBindingKind.CONFIGURED  # 不降级
+    assert touched.last_runtime_active_at is not None  # runtime 活跃证据刷新
+
+
+async def test_configured_upgrade_keeps_runtime_activity_rank(store) -> None:
+    """CODEX-H3 回归：活跃会话被配置升级后仍赢得 last-route 排序——
+    不再被平台残留的旧 runtime 行压过。"""
+    await store.upsert_runtime_binding("slack", "D_OLD", scope_id="chat:slack:D_OLD")
+    await asyncio.sleep(0.01)
+    await store.upsert_runtime_binding("slack", "D_HOT", scope_id="chat:slack:D_HOT")
+    # 把"最活跃"的会话配置为 default notify → kind 升级
+    await store.upsert_configured_binding("slack", "D_HOT", scope_id="chat:slack:D_HOT")
+
+    bindings = await store.list_by_platform("slack")
+    route = resolve_outbound_route(bindings)
+    assert route is not None
+    assert route.conversation_id == "D_HOT"  # v0.1 语义下这里会错选 D_OLD
+
+
+async def test_configured_tier_and_runtime_precedence(store) -> None:
+    """US-4 AC-2/AC-3：仅 CONFIGURED → tier 3 命中；runtime 活跃证据出现后
+    tier 2 优先（"用户最后私聊的地方"压配置兜底）。"""
+    await store.upsert_configured_binding("slack", "C_CFG", scope_id="chat:slack:C_CFG")
+    bindings = await store.list_by_platform("slack")
+    assert resolve_outbound_route(bindings).conversation_id == "C_CFG"
+
+    await asyncio.sleep(0.01)
+    await store.upsert_runtime_binding("slack", "D_DM", scope_id="chat:slack:D_DM")
+    bindings = await store.list_by_platform("slack")
+    assert resolve_outbound_route(bindings).conversation_id == "D_DM"
+
+
+def test_resolver_v2_runtime_only_and_configured_only_unchanged() -> None:
+    """FR-D6 ⑤：纯 runtime / 纯 configured 集合的行为与 v0.1 等价
+    （手工构造行无新列值——RUNTIME 走 last_active_at 兜底）。"""
+    runtime_old = _make_binding("telegram", "111", last_active_offset_s=0)
+    runtime_new = _make_binding("web", "t-1", last_active_offset_s=10)
+    assert resolve_outbound_route([runtime_old, runtime_new]) is runtime_new
+
+    configured = _make_binding(
+        "telegram", "999", kind=ConversationBindingKind.CONFIGURED
+    )
+    assert resolve_outbound_route([configured]) is configured
+    assert resolve_outbound_route([]) is None
