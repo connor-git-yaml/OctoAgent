@@ -899,6 +899,7 @@ class TelegramNotificationChannel:
         *,
         send_message_fn: Any | None = None,
         chat_id: str | None = None,
+        chat_id_resolver: Any | None = None,
     ) -> None:
         """初始化 Telegram 通知渠道。
 
@@ -906,14 +907,31 @@ class TelegramNotificationChannel:
             send_message_fn: 异步发送消息函数，签名
                 async (chat_id: str, text: str, reply_markup: dict | None) -> Any
                 如果为 None 则所有通知降级为日志记录。
-            chat_id: 默认接收通知的 Telegram chat ID
+            chat_id: 静态接收通知的 Telegram chat ID（兼容形态）
+            chat_id_resolver: F105 v0.2（FR-E1，L1 修复）：同步可调用
+                ``() -> str | None``，每次 notify/send_approval_request
+                **现查** chat_id——非 None 时优先于静态 chat_id（启动后
+                首次配对即刻生效，不再要求重启）；resolver 异常按 None
+                降级（Constitution #6）。
         """
         self._send_message_fn = send_message_fn
         self._chat_id = chat_id
+        self._chat_id_resolver = chat_id_resolver
 
     @property
     def channel_name(self) -> str:
         return "telegram"
+
+    def _effective_chat_id(self) -> str | None:
+        """解析当前通知目标 chat_id（FR-E1 解析序：resolver 现查 > 静态）。"""
+        if self._chat_id_resolver is not None:
+            try:
+                resolved = self._chat_id_resolver()
+            except Exception:
+                log.debug("telegram_chat_id_resolver_failed", exc_info=True)
+                return None
+            return str(resolved) if resolved else None
+        return self._chat_id
 
     def _format_duration(self, duration_ms: int | None) -> str:
         """将毫秒格式化为人类可读的耗时字符串。"""
@@ -1022,7 +1040,8 @@ class TelegramNotificationChannel:
         消息附带 "🔕 关闭" inline keyboard 按钮，
         用户点击后触发 dismiss_notif:<notification_id> callback。
         """
-        if self._send_message_fn is None or self._chat_id is None:
+        chat_id = self._effective_chat_id()
+        if self._send_message_fn is None or chat_id is None:
             log.debug(
                 "telegram_notification_skipped",
                 reason="no_send_fn_or_chat_id",
@@ -1036,7 +1055,7 @@ class TelegramNotificationChannel:
         keyboard = self._build_dismiss_keyboard(notification_id)
         try:
             await self._send_message_fn(
-                self._chat_id, text, keyboard,
+                chat_id, text, keyboard,
             )
             return True
         except Exception:
@@ -1056,7 +1075,8 @@ class TelegramNotificationChannel:
         payload: dict[str, Any],
     ) -> bool:
         """发送审批请求消息含 inline keyboard（FR-064-33）。"""
-        if self._send_message_fn is None or self._chat_id is None:
+        chat_id = self._effective_chat_id()
+        if self._send_message_fn is None or chat_id is None:
             log.debug(
                 "telegram_approval_skipped",
                 reason="no_send_fn_or_chat_id",
@@ -1068,7 +1088,7 @@ class TelegramNotificationChannel:
         keyboard = self._build_approval_keyboard(task_id)
         try:
             await self._send_message_fn(
-                self._chat_id, text, keyboard,
+                chat_id, text, keyboard,
             )
             return True
         except Exception:

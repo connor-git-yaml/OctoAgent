@@ -200,7 +200,12 @@ async def test_telegram_adapter_delegates_lifecycle_and_notify() -> None:
 
 @pytest.mark.asyncio
 async def test_telegram_notification_channel_construction(tmp_path: Path) -> None:
-    """bot_client None → None；有 bot + approved user → chat_id 冻结 + 闭包适配。"""
+    """bot_client None → None；chat_id 惰性解析（F105 v0.2 FR-E2，L1 修复）+ 闭包适配。
+
+    v0.1 断言的"bootstrap 冻结 _chat_id"是 spec v0.2 行为变更区显式移除的
+    limitation 本体——本测试随 spec 升级为惰性语义断言（构造语义 /
+    闭包适配 / bot_client None 语义不变）。
+    """
     _write_config(tmp_path)
     store_group = await create_store_group(
         str(tmp_path / "gateway.db"), str(tmp_path / "artifacts")
@@ -208,19 +213,15 @@ async def test_telegram_notification_channel_construction(tmp_path: Path) -> Non
     bot_client = FakeTelegramBotClient()
     service, state_store = _build_service(tmp_path, store_group, bot_client=bot_client)
 
-    # 无 approved user：channel 仍构造（baseline 行为），chat_id=None（notify 降级跳过）
+    # 无 approved user：channel 仍构造（baseline 行为），notify 降级跳过
     channel = TelegramChannelAdapter(service).notification_channel()
     assert isinstance(channel, TelegramNotificationChannel)
-    assert channel._chat_id is None
+    assert await channel.notify("task-0", "TASK_COMPLETED", {"task_title": "t"}) is False
+    assert len(bot_client.sent_messages) == 0
 
-    # 有 approved user：chat_id 冻结为 first_approved_user
+    # 配对后：**同一实例**通知即可达（v0.2 惰性解析，无需重启/重建——L1 修复）
     state_store.upsert_approved_user(user_id="2002", chat_id="1001")
-    channel2 = TelegramChannelAdapter(service).notification_channel()
-    assert channel2 is not None
-    assert channel2._chat_id == "1001"
-
-    # 闭包适配：notify 走 bot_client.send_message（reply_markup 关键字传递）
-    ok = await channel2.notify("task-x", "TASK_COMPLETED", {"task_title": "t"})
+    ok = await channel.notify("task-x", "TASK_COMPLETED", {"task_title": "t"})
     assert ok is True
     assert len(bot_client.sent_messages) == 1
     assert bot_client.sent_messages[0].chat_id == "1001"

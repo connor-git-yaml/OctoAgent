@@ -56,29 +56,30 @@ class TelegramChannelAdapter:
         return telegram_routes.router
 
     def notification_channel(self) -> TelegramNotificationChannel | None:
-        """构造 Telegram 通知渠道（逐行迁移自 octo_harness L938-968）。
+        """构造 Telegram 通知渠道。
 
-        - bot_client 为 None → 返回 None（baseline 不注册该渠道）
-        - chat_id 取 first_approved_user，**bootstrap 时一次性冻结**
-          （spec 已知 limitation L1：启动时无 approved user 则通知静默直到
-          重启——baseline 既有行为，v0.1 不修）
+        - bot_client 为 None → 返回 None（baseline 不注册该渠道，语义不变）
+        - **chat_id 惰性解析**（F105 v0.2 FR-E2，L1 修复——显式行为变更）：
+          不再 bootstrap 一次性冻结 first_approved_user；改传 resolver
+          闭包每次 notify 现查（state_store 文件读，TelegramApprovalBroadcaster
+          路径已有每次现查先例）。启动后首次配对即刻可收通知，无需重启；
+          原可达场景目标同语义（first_approved_user = approved_at 最早者，
+          稳定不重排，spec FR-E3 影响面论证）。
         """
         bot_client = getattr(self._service, "_bot_client", None)
         state_store = getattr(self._service, "_state_store", None)
 
-        chat_id: str | None = None
-        if state_store is not None:
-            try:
-                approved = state_store.first_approved_user()
-                if approved is not None:
-                    chat_id = str(getattr(approved, "chat_id", "") or "")
-                    if not chat_id:
-                        chat_id = None
-            except Exception:
-                chat_id = None
-
         if bot_client is None:
             return None
+
+        def _resolve_chat_id() -> str | None:
+            if state_store is None:
+                return None
+            approved = state_store.first_approved_user()
+            if approved is None:
+                return None
+            chat_id = str(getattr(approved, "chat_id", "") or "")
+            return chat_id or None
 
         # 适配闭包：TelegramNotificationChannel.notify 以位置参数调用
         # send_message_fn(chat_id, text, reply_markup)，而 bot_client.send_message
@@ -92,7 +93,7 @@ class TelegramChannelAdapter:
 
         return TelegramNotificationChannel(
             send_message_fn=_send_fn,
-            chat_id=chat_id,
+            chat_id_resolver=_resolve_chat_id,
         )
 
     async def notify_task_result(self, task_id: str) -> None:
