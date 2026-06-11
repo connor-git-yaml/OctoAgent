@@ -481,12 +481,136 @@ class TelegramChannelConfig(BaseModel):
         return self
 
 
+class SlackChannelConfig(BaseModel):
+    """Slack 渠道最小配置（F105 v0.2 FR-B1）。
+
+    授权模型（spec D5）：静态 allowlist，默认 deny-all——allow_users 必须
+    显式配置才放行；非 DM 消息额外要求 channel ∈ allowed_channels
+    （allowed_channels 为空 = 非 DM 一律拒绝）。
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="是否启用 Slack channel",
+    )
+    signing_secret_env: str = Field(
+        default="SLACK_SIGNING_SECRET",
+        description="Events API signing secret 所在环境变量名（v0 HMAC 验签）",
+        pattern=_ENV_NAME_PATTERN,
+    )
+    bot_token_env: str = Field(
+        default="SLACK_BOT_TOKEN",
+        description="Bot token（xoxb-）所在环境变量名（chat.postMessage 出站）",
+        pattern=_ENV_NAME_PATTERN,
+    )
+    team_id: str = Field(
+        default="",
+        description=(
+            "可选 workspace 边界（CODEX-M1）：非空时校验 event 顶层 team_id，"
+            "防 app 被装进非预期 workspace（signing secret 只证来自 Slack）"
+        ),
+    )
+    allow_users: list[str] = Field(
+        default_factory=list,
+        description="显式允许的 Slack user id 列表（空 = 全部拒绝）",
+    )
+    allowed_channels: list[str] = Field(
+        default_factory=list,
+        description="显式允许的非 DM channel id 列表（空 = 非 DM 一律拒绝）",
+    )
+    default_notify_channel: str = Field(
+        default="",
+        description=(
+            "默认通知会话 id（CONFIGURED binding 消费者，FR-D3）：非空时 "
+            "bootstrap 写入 CONFIGURED binding，未发过消息也能收通知"
+        ),
+    )
+
+    @field_validator("allow_users", "allowed_channels", mode="before")
+    @classmethod
+    def normalize_id_list(cls, value: object) -> list[str]:
+        """允许 YAML 中混写数字/字符串 id，内部统一存字符串。"""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise TypeError("Slack ID 列表必须是 list")
+        normalized: list[str] = []
+        for item in value:
+            if isinstance(item, str | int):
+                normalized.append(str(item))
+                continue
+            raise TypeError("Slack ID 仅支持 str/int")
+        return normalized
+
+
+class DiscordChannelConfig(BaseModel):
+    """Discord 渠道最小配置（F105 v0.2 FR-C1）。
+
+    public_key 是 Discord 应用公钥（hex，非 secret，可落 config）；
+    授权模型与 Slack 统一（spec D5）：DM 看 allow_users，guild 频道
+    要求 allowed_channels∋channel 且 allow_users∋sender（空 = 拒）。
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="是否启用 Discord channel",
+    )
+    public_key: str = Field(
+        default="",
+        description="Discord 应用公钥（hex，Ed25519 验签；公钥非 secret）",
+    )
+    bot_token_env: str = Field(
+        default="DISCORD_BOT_TOKEN",
+        description="Bot token 所在环境变量名（REST 出站）",
+        pattern=_ENV_NAME_PATTERN,
+    )
+    allow_users: list[str] = Field(
+        default_factory=list,
+        description="显式允许的 Discord user id 列表（空 = 全部拒绝）",
+    )
+    allowed_channels: list[str] = Field(
+        default_factory=list,
+        description=(
+            "显式允许的 guild channel id 列表（空 = guild 频道一律拒绝；"
+            "Discord channel id 全局唯一，不另设 allowed_guilds）"
+        ),
+    )
+    default_notify_channel: str = Field(
+        default="",
+        description="默认通知 channel id（CONFIGURED binding 消费者，FR-D3）",
+    )
+
+    @field_validator("allow_users", "allowed_channels", mode="before")
+    @classmethod
+    def normalize_id_list(cls, value: object) -> list[str]:
+        """允许 YAML 中混写数字/字符串 id，内部统一存字符串。"""
+        if value is None:
+            return []
+        if not isinstance(value, list):
+            raise TypeError("Discord ID 列表必须是 list")
+        normalized: list[str] = []
+        for item in value:
+            if isinstance(item, str | int):
+                normalized.append(str(item))
+                continue
+            raise TypeError("Discord ID 仅支持 str/int")
+        return normalized
+
+
 class ChannelsConfig(BaseModel):
     """统一渠道配置块。"""
 
     telegram: TelegramChannelConfig = Field(
         default_factory=TelegramChannelConfig,
         description="Telegram 渠道配置",
+    )
+    slack: SlackChannelConfig = Field(
+        default_factory=SlackChannelConfig,
+        description="Slack 渠道配置（F105 v0.2）",
+    )
+    discord: DiscordChannelConfig = Field(
+        default_factory=DiscordChannelConfig,
+        description="Discord 渠道配置（F105 v0.2）",
     )
 
 

@@ -1079,3 +1079,168 @@ class TelegramNotificationChannel:
                 exc_info=True,
             )
             return False
+
+
+# ---------------------------------------------------------------------------
+# F105 v0.2：binding 路由型通知渠道（Slack / Discord，FR-D2）
+# ---------------------------------------------------------------------------
+
+
+def _format_duration_plain(duration_ms: int | None) -> str:
+    """毫秒 → 人类可读耗时（与 TelegramNotificationChannel._format_duration
+    同语义；telegram 实例方法不动——行为零变更红线，有意平行实现）。"""
+    if duration_ms is None:
+        return ""
+    seconds = duration_ms / 1000
+    if seconds < 60:
+        return f"{seconds:.1f}秒"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{minutes:.1f}分钟"
+    hours = minutes / 60
+    return f"{hours:.1f}小时"
+
+
+def _build_plain_state_change_text(payload: dict[str, Any]) -> str:
+    """纯文本状态变更通知（无 inline 按钮——Slack/Discord v0.2 不支持
+    交互组件；文案格式与 telegram 渠道一致）。"""
+    task_title = payload.get("task_title", "未命名任务")
+    to_status = payload.get("to_status", "")
+    status_text = _STATUS_DISPLAY.get(to_status, to_status)
+    duration_ms = payload.get("duration_ms")
+
+    lines = [
+        "📋 任务通知",
+        f"任务: {task_title}",
+        f"状态: {status_text}",
+    ]
+    if duration_ms is not None:
+        lines.append(f"耗时: {_format_duration_plain(duration_ms)}")
+
+    summary = payload.get("summary", "")
+    if summary:
+        if len(summary) > 200:
+            summary = summary[:200] + "..."
+        lines.append(f"摘要: {summary}")
+    return "\n".join(lines)
+
+
+class _BindingRoutedNotificationChannel:
+    """经 ConversationBinding last-route 解析目标的通知渠道基类（FR-D2）。
+
+    每次 notify **惰性解析**（不重蹈 telegram L1 冻结）；eligibility 过滤
+    先行（spec D9 / CODEX-H2）：候选 = DM 类 runtime binding ∪ CONFIGURED
+    binding——**多人频道的 runtime binding 永不作为通用通知目标**（频道
+    发言不构成通知同意；显式配置 default_notify_channel 除外）。
+    """
+
+    _platform: str = ""
+    _channel_name: str = ""
+    _dm_conversation_types: frozenset[str] = frozenset()
+
+    def __init__(self, *, send_fn: Any | None = None, binding_store: Any | None = None) -> None:
+        """Args:
+            send_fn: 异步发送函数 async (conversation_id: str, text: str) -> Any
+            binding_store: SqliteConversationBindingStore（None 则恒降级）
+        """
+        self._send_fn = send_fn
+        self._binding_store = binding_store
+
+    @property
+    def channel_name(self) -> str:
+        return self._channel_name
+
+    async def _resolve_target_conversation(self) -> str | None:
+        from octoagent.core.models.conversation_binding import (
+            ConversationBindingKind,
+        )
+        from octoagent.core.store.conversation_binding_store import (
+            resolve_outbound_route,
+        )
+
+        if self._binding_store is None:
+            return None
+        bindings = await self._binding_store.list_by_platform(self._platform)
+        eligible = [
+            b
+            for b in bindings
+            if b.binding_kind is ConversationBindingKind.CONFIGURED
+            or (
+                b.binding_kind is ConversationBindingKind.RUNTIME
+                and str(b.metadata.get("conversation_type", ""))
+                in self._dm_conversation_types
+            )
+        ]
+        route = resolve_outbound_route(eligible)
+        if route is None:
+            return None
+        return route.conversation_id
+
+    async def notify(
+        self,
+        task_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        if self._send_fn is None:
+            log.debug(
+                f"{self._platform}_notification_skipped",
+                reason="no_send_fn",
+                task_id=task_id,
+            )
+            return False
+        try:
+            conversation_id = await self._resolve_target_conversation()
+        except Exception:
+            log.warning(
+                f"{self._platform}_notification_route_failed",
+                task_id=task_id,
+                exc_info=True,
+            )
+            return False
+        if not conversation_id:
+            log.debug(
+                f"{self._platform}_notification_skipped",
+                reason="no_eligible_binding",
+                task_id=task_id,
+            )
+            return False
+        text = _build_plain_state_change_text(payload)
+        try:
+            await self._send_fn(conversation_id, text)
+            return True
+        except Exception:
+            log.warning(
+                f"{self._platform}_notification_send_failed",
+                task_id=task_id,
+                event_type=event_type,
+                exc_info=True,
+            )
+            return False
+
+    async def send_approval_request(
+        self,
+        task_id: str,
+        tool_name: str,
+        ask_reason: str,
+        payload: dict[str, Any],
+    ) -> bool:
+        """恒 False：Slack/Discord v0.2 无交互式审批组件（spec §2.2 排除）——
+        纯文本审批推送收到也批不了，是负 UX 噪声；审批照旧走 Web/Telegram。"""
+        return False
+
+
+class SlackNotificationChannel(_BindingRoutedNotificationChannel):
+    """Slack 渠道通知实现（channel_name="slack"，F105 v0.2 FR-D2）。"""
+
+    _platform = "slack"
+    _channel_name = "slack"
+    _dm_conversation_types = frozenset({"im"})
+
+
+class DiscordNotificationChannel(_BindingRoutedNotificationChannel):
+    """Discord 渠道通知实现（channel_name="discord"，F105 v0.2 FR-D2）。"""
+
+    _platform = "discord"
+    _channel_name = "discord"
+    _dm_conversation_types = frozenset({"dm"})

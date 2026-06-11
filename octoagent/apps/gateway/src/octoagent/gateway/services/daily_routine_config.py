@@ -54,6 +54,9 @@ _USER_VISIBLE_TO_INTERNAL_CHANNEL: Final[dict[str, str]] = {
     "telegram": "telegram",
     "web": "web_sse",
     "web_sse": "web_sse",  # Codex review M3：接受内部值直写，避免误 fallback
+    # F105 v0.2（D15）：新平台 channel_name 与用户可见值同名直映
+    "slack": "slack",
+    "discord": "discord",
 }
 _VALID_INTERNAL_CHANNELS: Final[frozenset[str]] = frozenset(
     _USER_VISIBLE_TO_INTERNAL_CHANNEL.values()

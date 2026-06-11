@@ -205,10 +205,22 @@ class TestSummaryChannelsParsing:
         )
 
     def test_unknown_channel_falls_back_to_default(self) -> None:
-        """未知 channel name 时 fallback 到全渠道（Constitution C6）。"""
-        content = '- **summary_channels**: "telegram,slack"'
+        """未知 channel name 时 fallback 到全渠道（Constitution C6）。
+
+        F105 v0.2：原未知样例 "slack" 已成为合法渠道（D15 映射），换用
+        永久未知 token——测试意图（未知 → fallback）不变（spec v0.2 R5）。
+        """
+        content = '- **summary_channels**: "telegram,smoke_signal"'
         assert (
             extract_summary_channels_from_user_md(content) == DEFAULT_SUMMARY_CHANNELS
+        )
+
+    def test_f105v02_slack_discord_channels_accepted(self) -> None:
+        """F105 v0.2（D15）：slack/discord 成为合法 summary_channels 值，
+        精确路由不再 fallback（R5 语义变化的正向固化）。"""
+        content = '- **summary_channels**: "slack,discord"'
+        assert extract_summary_channels_from_user_md(content) == frozenset(
+            {"slack", "discord"}
         )
 
     def test_internal_value_web_sse_accepted(self) -> None:

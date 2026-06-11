@@ -48,6 +48,10 @@ _CRED_ENV_KEYS_TO_CLEAR: tuple[str, ...] = (
     "OPENROUTER_API_KEY",
     "ANTHROPIC_API_KEY",
     "TELEGRAM_BOT_TOKEN",
+    # F105 v0.2（spec R8 / OPUS-M1）：新平台凭证纳入 hermetic 清单
+    "SLACK_SIGNING_SECRET",
+    "SLACK_BOT_TOKEN",
+    "DISCORD_BOT_TOKEN",
 )
 
 # OCTOAGENT_* 路径 env 重定向（plan §7.2 / FR-7）

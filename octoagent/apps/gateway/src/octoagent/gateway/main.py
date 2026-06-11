@@ -68,6 +68,8 @@ from .services.llm_service import LLMService
 from .services.mcp_registry import McpRegistryService
 from .services.operator_actions import OperatorActionService
 from .services.operator_inbox import OperatorInboxService
+from .services.slack import SlackGatewayService
+from .services.slack_client import SlackApiClient
 from .services.sse_hub import SSEHub
 from .services.task_journal import TaskJournalService
 from .services.task_runner import TaskRunner

@@ -8,6 +8,7 @@
 
 from .adapter import ChannelAdapter, ChannelCapabilityMeta
 from .registry import PlatformRegistry
+from .slack_adapter import SlackChannelAdapter
 from .telegram_adapter import TelegramChannelAdapter
 from .web_adapter import WebChannelAdapter, build_web_inbound_message
 
@@ -15,6 +16,7 @@ __all__ = [
     "ChannelAdapter",
     "ChannelCapabilityMeta",
     "PlatformRegistry",
+    "SlackChannelAdapter",
     "TelegramChannelAdapter",
     "WebChannelAdapter",
     "build_web_inbound_message",
