@@ -413,3 +413,29 @@ async def test_foreign_channel_task_noop(tmp_path: Path) -> None:
     await service.notify_task_result(task_id)
     assert api.posted == []
     await store_group.close()
+
+
+@pytest.mark.asyncio
+async def test_malformed_signature_headers_rejected_not_500(tmp_path: Path) -> None:
+    """Final CODEX-F-M1：公网入口对畸形认证头必须拒绝（401 语义）而非 500——
+    inf/超大浮点时间戳（OverflowError 路径）与非 ASCII 签名
+    （compare_digest TypeError 路径）全部走 signature_invalid。"""
+    service, store_group = await _build_service(tmp_path)
+    body = _message_envelope()
+
+    for bad_ts in ("inf", "1e400", "nan", "-1", "12.5", "9" * 13, "abc"):
+        headers = {
+            "X-Slack-Request-Timestamp": bad_ts,
+            "X-Slack-Signature": _sign(body, bad_ts),
+        }
+        result = await service.handle_event_request(body, headers)
+        assert result.status == "signature_invalid", f"ts={bad_ts!r} 应拒绝"
+
+    ts = str(int(time.time()))
+    for bad_sig in ("v0=ümlaut" + "0" * 57, "v1=" + "0" * 64, "v0=" + "0" * 63, "v0=" + "G" * 64):
+        headers = {"X-Slack-Request-Timestamp": ts, "X-Slack-Signature": bad_sig}
+        result = await service.handle_event_request(body, headers)
+        assert result.status == "signature_invalid", f"sig={bad_sig!r} 应拒绝"
+
+    assert await store_group.task_store.list_tasks() == []  # 全部未触达 ingest
+    await store_group.close()

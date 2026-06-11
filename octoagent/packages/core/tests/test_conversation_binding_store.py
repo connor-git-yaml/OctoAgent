@@ -253,3 +253,76 @@ def test_resolver_v2_runtime_only_and_configured_only_unchanged() -> None:
     )
     assert resolve_outbound_route([configured]) is configured
     assert resolve_outbound_route([]) is None
+
+
+# ---------------------------------------------------------------------------
+# F105 v0.2 Final CODEX-F-H1：config-managed CONFIGURED reconcile
+# ---------------------------------------------------------------------------
+
+
+async def test_reconcile_replaces_stale_config_target(store) -> None:
+    """配置 C1 → 改 C2：旧 config-managed 行被撤销（无活跃证据 → 删除），
+    不再出现双 CONFIGURED 歧义。"""
+    await store.reconcile_config_managed_binding(
+        "slack", "C1", scope_id="chat:slack:C1"
+    )
+    await store.reconcile_config_managed_binding(
+        "slack", "C2", scope_id="chat:slack:C2"
+    )
+    rows = await store.list_by_platform("slack")
+    assert [r.conversation_id for r in rows] == ["C2"]
+    assert rows[0].metadata.get("source") == "default_notify_config"
+
+    route = resolve_outbound_route(rows)
+    assert route is not None and route.conversation_id == "C2"
+
+
+async def test_reconcile_demotes_active_stale_target(store) -> None:
+    """旧 config 目标有 runtime 活跃证据 → 降级回 RUNTIME（last-route 数据
+    保留、剥离 source 标记），不再以 CONFIGURED 身份接收通知。"""
+    await store.upsert_runtime_binding(
+        "slack", "C1", scope_id="chat:slack:C1",
+        metadata={"conversation_type": "channel"},
+    )
+    await store.reconcile_config_managed_binding(
+        "slack", "C1", scope_id="chat:slack:C1"
+    )
+    await store.reconcile_config_managed_binding(
+        "slack", "C2", scope_id="chat:slack:C2"
+    )
+
+    old = await store.get("slack", "C1")
+    assert old is not None
+    assert old.binding_kind is ConversationBindingKind.RUNTIME  # 降级
+    assert "source" not in old.metadata  # 标记剥离
+    assert old.metadata.get("conversation_type") == "channel"  # ingest 数据保留
+    new = await store.get("slack", "C2")
+    assert new is not None
+    assert new.binding_kind is ConversationBindingKind.CONFIGURED
+
+
+async def test_reconcile_empty_target_revokes(store) -> None:
+    """配置清空（target=""）→ 仅撤销旧 config-managed 行，不写新行。"""
+    await store.reconcile_config_managed_binding(
+        "slack", "C1", scope_id="chat:slack:C1"
+    )
+    result = await store.reconcile_config_managed_binding("slack", "")
+    assert result is None
+    assert await store.list_by_platform("slack") == []
+
+
+async def test_reconcile_merges_metadata_on_existing_runtime(store) -> None:
+    """目标行已有 runtime 痕迹 → metadata merge（不丢 conversation_type）+
+    活跃证据保留（D17b 不变量贯穿 reconcile）。"""
+    await store.upsert_runtime_binding(
+        "slack", "D1", scope_id="chat:slack:D1",
+        metadata={"conversation_type": "im"},
+    )
+    upgraded = await store.reconcile_config_managed_binding(
+        "slack", "D1", scope_id="chat:slack:D1"
+    )
+    assert upgraded is not None
+    assert upgraded.binding_kind is ConversationBindingKind.CONFIGURED
+    assert upgraded.metadata.get("conversation_type") == "im"  # merge 保留
+    assert upgraded.metadata.get("source") == "default_notify_config"
+    assert upgraded.last_runtime_active_at is not None  # 活跃证据保留

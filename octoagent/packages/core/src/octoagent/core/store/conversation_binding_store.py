@@ -222,6 +222,79 @@ class SqliteConversationBindingStore:
             )
         return stored
 
+    async def reconcile_config_managed_binding(
+        self,
+        platform: str,
+        conversation_id: str,
+        *,
+        scope_id: str = "",
+        project_id: str = "",
+    ) -> ConversationBinding | None:
+        """default_notify_channel 的配置单例 reconcile（F105 v0.2 Final
+        CODEX-F-H1 闭环）。
+
+        配置写入的 CONFIGURED 行带 ``metadata.source == "default_notify_config"``
+        标记；本方法保证**每平台至多一条** config-managed 行与当前配置一致：
+
+        - 旧 config-managed 行（目标变更/配置清空后残留）：
+          * 有 runtime 活跃证据 → **降级回 RUNTIME** 并剥离标记（last-route
+            数据保留；多人频道降级后自然退出通知 eligibility——隐私安全方向）
+          * 无活跃证据 → 删除（纯配置产物，撤销即清）
+        - ``conversation_id=""``（配置清空/平台禁用）→ 仅执行撤销，不写新行。
+        - 目标行 metadata **merge** 标记（不覆盖 ingest 写入的
+          conversation_type 等键）。
+
+        v0.2 没有手工 CONFIGURED 面，标记纪律安全；未来配置面共存时
+        reconcile 只动带标记的行。
+        """
+        marker = "default_notify_config"
+        rows = await self.list_by_platform(platform)
+        for row in rows:
+            if row.metadata.get("source") != marker:
+                continue
+            if (
+                conversation_id
+                and row.conversation_id == conversation_id
+                and row.project_id == project_id
+            ):
+                continue  # 当前目标行，保留（随后 upsert 刷新）
+            if row.last_runtime_active_at is not None:
+                demoted_metadata = {
+                    k: v for k, v in row.metadata.items() if k != "source"
+                }
+                await self._conn.execute(
+                    """
+                    UPDATE conversation_bindings
+                    SET binding_kind = ?, metadata = ?, updated_at = ?
+                    WHERE binding_id = ?
+                    """,
+                    (
+                        ConversationBindingKind.RUNTIME.value,
+                        json.dumps(demoted_metadata, ensure_ascii=False),
+                        datetime.now(UTC).isoformat(),
+                        row.binding_id,
+                    ),
+                )
+            else:
+                await self._conn.execute(
+                    "DELETE FROM conversation_bindings WHERE binding_id = ?",
+                    (row.binding_id,),
+                )
+        await self._conn.commit()
+
+        if not conversation_id:
+            return None
+        existing = await self.get(platform, conversation_id, project_id=project_id)
+        merged_metadata = dict(existing.metadata) if existing is not None else {}
+        merged_metadata["source"] = marker
+        return await self.upsert_configured_binding(
+            platform,
+            conversation_id,
+            scope_id=scope_id,
+            project_id=project_id,
+            metadata=merged_metadata,
+        )
+
     async def get(
         self,
         platform: str,

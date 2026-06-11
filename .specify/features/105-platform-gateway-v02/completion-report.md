@@ -12,7 +12,7 @@
 | A ingress 契约 | ✅ | 无偏离；六条等价论证全成立 |
 | B Slack | ✅ | ①DiscordChannelConfig 提前进 B commit（config 同文件拆分不值得，commit message 注明占位）；②FR-D2 通知渠道类按 plan 落 B（含 Discord 类——同 patch 自然）；③R5 预判命中：test_f102 样例 "slack" 失效 → 意图保留式闭环 |
 | C Discord | ✅ | uv.lock diff 仅 2 行（R3 最优情形，无需升级决策点） |
-| D CONFIGURED + resolver v2 | ✅ | v0.1 resolver 测试 **0 修改全绿**（FR-D6 ⑤ 评估的"或仅构造调整"未发生——_runtime_activity_at 兜底设计兑现） |
+| D CONFIGURED + resolver v2 | ✅ | ①v0.1 resolver 测试 **0 修改全绿**（FR-D6 ⑤ 评估的"或仅构造调整"未发生——_runtime_activity_at 兜底设计兑现）；②**FR-D3 偏离（OPUS2-L-1 归档）**：实现加了 spec 字面未声明的 enabled 守卫（disabled 平台不写 CONFIGURED binding——通知通道本就不注册，写入只留 stale 行），已补断言测试固化；③**Final CODEX-F-H1**：裸 upsert 升级为 reconcile（配置变更/清空回收旧行） |
 | E L1 惰性 chat_id | ✅ | test_f105_channel_adapter 冻结断言升级（spec 行为变更区内，§3 论证） |
 | F 文档 + Final 双评审 | ✅ | 见 §4 |
 
@@ -35,7 +35,8 @@
 ## 4. 双评审闭环（SC-6）
 
 - **Pre-impl**：Codex needs-attention（3 HIGH + 1 MED）+ Opus APPROVE-WITH-CHANGES（0H/3M/4L）→ 11 条全接受闭环（spec §11 表）。**分歧人裁记录**：D13 棘轮设计 Opus 认可 vs Codex H3 机制性否定——主 session 实读 resolver tier 2 代码裁定 Codex 正确（Opus 该点未检查 resolver 交互），按 Codex 方案修订（D17b）。0 HIGH 残留。
-- **Final**：见 codex-review-final 记录（spec §12 / 本报告附录）——结论 0 HIGH 残留后才收口。
+- **Final**：Codex needs-attention（1 HIGH + 1 MED：CONFIGURED reconcile 缺失 + Slack 畸形 header 500）+ Opus **APPROVE**（0H/0M/3L；pre-impl 修复 4/4 实证落地 + 零变更区实测 + 数字复现）→ 5 条全接受闭环（spec §12 表：2 已修 + 3 LOW 归档/已修）。Final 无评审分歧（互补维度）。**0 HIGH 残留。**
+- **合计 4 轮**：pre-impl Codex + pre-impl Opus + Final Codex + Final Opus = 4H + 2M + 3M + 7L，全闭环。
 
 ## 5. 已知 limitations（v0.2 显式接受，platform-gateway.md §5 镜像）
 
@@ -47,7 +48,7 @@
 | L6 | Slack/Discord 无交互式审批/dismiss 按钮（send_approval_request 恒 False） | v0.3 与 interactive components |
 | L7 | doctor 不诊断新平台 config（OPUS-M2 显式排除） | 运维指引：靠 webhook 探测信号 |
 | L8 | telegram ingest 同型"落盘未入队"窗口（baseline 既有，零变更红线未动） | 独立 fix Feature（handoff §3） |
-| L9 | `_build_plain_state_change_text` 与 telegram 实例方法 ~20 行平行实现（零变更红线下的有意重复） | 下个触碰 notification.py 的 Feature 顺手合并 |
+| L9 | **两对平行实现**（零变更红线下的有意重复，OPUS2-L-3）：①通知文本 `_build_plain_state_change_text` vs TelegramNotificationChannel 实例方法；②完成回复文本 `channel_reply.build_task_result_text` vs `TelegramGatewayService._build_result_text`（当前逐分支字节级等价，Opus 实证）——未来改其一不会传播 | 下个触碰对应文件的 Feature 顺手收口（telegram 改用共享 helper）；改动任一侧须同步另一侧 |
 
 ## 6. Living-docs 漂移闸
 

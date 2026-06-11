@@ -14,7 +14,7 @@
 
 1. **resolve_outbound_route v2 语义**：tier 2 按 `_runtime_activity_at`（last_runtime_active_at > RUNTIME 兜底 last_active_at）不分 kind；configured 升级保留活跃证据。**首个 explicit 生产消费者**须处理 list-order 契约（docstring 已写）或扩三元组（OPUS2-L2 归档至该消费者）。
 2. **通知 eligibility**：DM 类 runtime（conversation_type ∈ {im,dm}）∪ CONFIGURED；conversation_type 由各平台 ingest 写入 binding metadata——新平台必须沿用该键（CODEX-H2 防泄露不变量）。
-3. **CONFIGURED 单一入口**：`upsert_configured_binding` 是唯一合法 CONFIGURED 写入面（H1 非空 raise）；未来"显式用户拍板"的非主 Agent 配置面必须在该入口扩展校验，不得另开写入口。
+3. **CONFIGURED 单一入口**：`upsert_configured_binding` 是唯一合法 CONFIGURED 写入面（H1 非空 raise）；`reconcile_config_managed_binding`（Final CODEX-F-H1）是其上的**配置单例 reconcile**（metadata.source="default_notify_config" 标记；旧行降级/删除；内部仍经单一入口写入）。未来"显式用户拍板"的非主 Agent 配置面必须在该入口扩展校验，不得另开写入口；未来手工 CONFIGURED 面与 config-managed 行共存时，reconcile 只动带标记的行（纪律已固化在 docstring）。
 4. **L3 失效条件**：当出现"主动发消息到指定 telegram topic"类消费者时，重评 topic 级 binding row（v0.2 出站消费者全部 chat/DM 级 + task 锚定，chat 级够用）。
 
 ## 3. 待立项/顺手项清单
@@ -23,7 +23,7 @@
 |---|------|------|
 | H-1 | **telegram ingest "落盘未入队"窗口**（R9/L8）：telegram 仅 created 时 enqueue，webhook 重投/polling 重读判 duplicate 不补队——与 D17a 同型缺口，baseline 既有 | 独立小 fix Feature（~30 行 + 测试，照搬 slack `_maybe_enqueue` 状态守卫模式）；动 telegram 行为面，需走 review |
 | H-2 | **source_channel_id 写入端**：dispatch_service USER_CHANNEL 分支（F099）仍 dead branch；slack/discord 接入后该泛化更有价值 | 与 A2A source 泛化一并**单独立项**（会改 audit chain，v0.1/v0.2 两次确认不顺手做） |
-| H-3 | L9 通知文本平行实现合并（_build_plain_state_change_text vs telegram 实例方法） | 下个触碰 notification.py 的 Feature 顺手（零变更红线解除后） |
+| H-3 | L9 **两对**平行实现合并：①通知文本（_build_plain_state_change_text vs telegram 实例方法）；②完成回复文本（channel_reply.build_task_result_text vs telegram._build_result_text，OPUS2-L-3）——改任一侧须同步另一侧 | 下个触碰对应文件的 Feature 顺手（telegram 改用共享 helper，零变更红线解除后） |
 | H-4 | Slack/Discord e2e_live 用例（webhook 签名链路 + binding 出站闭环） | 归 F119 模式的下一轮 e2e 补全 |
 | H-5 | sender_name 增强：slack 仅 user id（无 display name，需 users.info API + 缓存）；discord 已有 username | v0.3 评估（出站 API 调用 + 缓存层，别顺手） |
 

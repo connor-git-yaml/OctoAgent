@@ -240,3 +240,58 @@ async def test_bootstrap_writes_configured_binding_idempotent(tmp_path: Path) ->
     finally:
         for key in env_pairs:
             os.environ.pop(key, None)
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_disabled_platform_writes_no_binding(tmp_path: Path) -> None:
+    """OPUS2-L-1 固化：enabled=False + default_notify_channel 非空 → bootstrap
+    不写 CONFIGURED binding（FR-D3 实现偏离的显式决策：disabled 平台通知
+    通道不注册，写入只留无消费者 stale 行）。"""
+    import os
+
+    from octoagent.gateway.services.config.config_schema import (
+        ChannelsConfig,
+        OctoAgentConfig,
+        SlackChannelConfig,
+    )
+    from octoagent.gateway.services.config.config_wizard import save_config
+
+    save_config(
+        OctoAgentConfig(
+            updated_at="2026-06-12",
+            channels=ChannelsConfig(
+                slack=SlackChannelConfig(
+                    enabled=False,
+                    default_notify_channel="C_DISABLED",
+                )
+            ),
+        ),
+        tmp_path,
+    )
+    env_pairs = {
+        "OCTOAGENT_DB_PATH": str(tmp_path / "data" / "sqlite" / "test.db"),
+        "OCTOAGENT_ARTIFACTS_DIR": str(tmp_path / "data" / "artifacts"),
+        "OCTOAGENT_PROJECT_ROOT": str(tmp_path),
+        "OCTOAGENT_LLM_MODE": "echo",
+        "LOGFIRE_SEND_TO_LOGFIRE": "false",
+    }
+    for key, value in env_pairs.items():
+        os.environ[key] = value
+    try:
+        from octoagent.gateway.main import create_app
+
+        application = create_app()
+        async with application.router.lifespan_context(application):
+            pass
+
+        store_group = await create_store_group(
+            env_pairs["OCTOAGENT_DB_PATH"],
+            env_pairs["OCTOAGENT_ARTIFACTS_DIR"],
+        )
+        assert await store_group.conversation_binding_store.list_by_platform(
+            "slack"
+        ) == []
+        await store_group.close()
+    finally:
+        for key in env_pairs:
+            os.environ.pop(key, None)

@@ -21,6 +21,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -38,6 +39,11 @@ logger = logging.getLogger(__name__)
 
 _SIGNATURE_VERSION = "v0"
 _TIMESTAMP_TOLERANCE_S = 300  # Slack 官方防重放窗口（recon §6）
+# Final CODEX-F-M1：公网入口对 header 做严格格式预校验——timestamp 仅接受
+# 十进制秒（拒 inf/1e400/非数字，防 int(float()) OverflowError 500）；
+# signature 仅接受 v0= + 64 位 hex（拒非 ASCII，防 compare_digest TypeError）
+_TIMESTAMP_PATTERN = re.compile(r"^\d{1,12}$")
+_SIGNATURE_PATTERN = re.compile(r"^v0=[0-9a-f]{64}$")
 
 
 @dataclass(slots=True)
@@ -165,12 +171,16 @@ class SlackGatewayService:
             return SlackIngestResult(
                 status="signature_invalid", detail="missing_signature_headers"
             )
-        try:
-            ts_value = int(float(timestamp))
-        except ValueError:
+        # 严格格式预校验（CODEX-F-M1）：畸形输入统一拒绝，不触达数值/比较层
+        if not _TIMESTAMP_PATTERN.fullmatch(timestamp):
             return SlackIngestResult(
                 status="signature_invalid", detail="malformed_timestamp"
             )
+        if not _SIGNATURE_PATTERN.fullmatch(signature):
+            return SlackIngestResult(
+                status="signature_invalid", detail="malformed_signature"
+            )
+        ts_value = int(timestamp)
         if abs(time.time() - ts_value) > _TIMESTAMP_TOLERANCE_S:
             return SlackIngestResult(
                 status="timestamp_stale", detail="timestamp_outside_tolerance"
@@ -185,7 +195,7 @@ class SlackGatewayService:
             + "="
             + hmac.new(secret.encode(), base, hashlib.sha256).hexdigest()
         )
-        if not hmac.compare_digest(expected, signature):
+        if not hmac.compare_digest(expected.encode(), signature.encode()):
             return SlackIngestResult(
                 status="signature_invalid", detail="signature_mismatch"
             )

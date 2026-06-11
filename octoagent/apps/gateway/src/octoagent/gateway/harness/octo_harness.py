@@ -502,8 +502,8 @@ class OctoHarness:
         # F105：platform_registry——渠道 adapter 中央注册表（注册序 web → telegram
         # 对应 baseline 通知注册序 SSE → Telegram，等价论证见 plan C-1/C-2）。
         # adapter 在此构造（wrap 现有对象），通知渠道实例化推迟到 executors 段
-        # adapter.notification_channel() 调用时——保 baseline first_approved_user
-        # chat_id 冻结时机不变。
+        # adapter.notification_channel() 调用时。telegram 通知 chat_id 自
+        # v0.2 起惰性解析（FR-E2 L1 修复，每次 notify 现查 first_approved_user）。
         from ..channels import (
             DiscordChannelAdapter,
             PlatformRegistry,
@@ -554,11 +554,12 @@ class OctoHarness:
                     platform_id=_adapter.meta.platform_id,
                 )
 
-        # F105 v0.2（FR-D3）：default_notify_channel → CONFIGURED binding。
-        # 配置即可收通知（无需先发一条消息）；per-platform try/except 降级
-        # （Constitution #6），失败不阻断 bootstrap；重启幂等（upsert）。
-        # 仅 enabled 平台写入——disabled 平台的通知通道本就不注册，写入只会
-        # 留下无消费者的 stale 行。
+        # F105 v0.2（FR-D3 + Final CODEX-F-H1）：default_notify_channel →
+        # config-managed CONFIGURED binding 的 **reconcile**（非裸 upsert）：
+        # - 配置非空（且 enabled）→ 撤销旧 config-managed 行 + 写当前目标
+        # - 配置清空/平台禁用 → 仅撤销（旧行降级回 runtime 或删除——防通知
+        #   发到已撤销频道 / 双 CONFIGURED 歧义静默丢失）
+        # per-platform try/except 降级（Constitution #6），重启幂等。
         _binding_store = getattr(store_group, "conversation_binding_store", None)
         if _binding_store is not None:
             try:
@@ -570,23 +571,26 @@ class OctoHarness:
             for _platform_name in ("slack", "discord"):
                 try:
                     _channel_cfg = getattr(_channels_cfg, _platform_name, None)
-                    if not bool(getattr(_channel_cfg, "enabled", False)):
-                        continue
-                    _notify_target = str(
-                        getattr(_channel_cfg, "default_notify_channel", "") or ""
-                    ).strip()
-                    if not _notify_target:
-                        continue
-                    await _binding_store.upsert_configured_binding(
+                    _notify_target = ""
+                    if bool(getattr(_channel_cfg, "enabled", False)):
+                        _notify_target = str(
+                            getattr(_channel_cfg, "default_notify_channel", "") or ""
+                        ).strip()
+                    await _binding_store.reconcile_config_managed_binding(
                         _platform_name,
                         _notify_target,
-                        scope_id=f"chat:{_platform_name}:{_notify_target}",
+                        scope_id=(
+                            f"chat:{_platform_name}:{_notify_target}"
+                            if _notify_target
+                            else ""
+                        ),
                     )
-                    _main_module.log.info(
-                        "platform_default_notify_binding_configured",
-                        platform_id=_platform_name,
-                        conversation_id=_notify_target,
-                    )
+                    if _notify_target:
+                        _main_module.log.info(
+                            "platform_default_notify_binding_configured",
+                            platform_id=_platform_name,
+                            conversation_id=_notify_target,
+                        )
                 except Exception:
                     _main_module.log.warning(
                         "platform_default_notify_binding_failed",
@@ -1024,9 +1028,9 @@ class OctoHarness:
         # NotificationService 由 TaskRunner 在 WAITING_APPROVAL 进入时调用（FR-B1）。
         # 采用 lazy import 避免循环依赖；创建失败时降级为 None（Constitution #6）。
         # F105：渠道注册改为遍历 platform_registry（注册序 web → telegram ==
-        # baseline SSE → Telegram）；各渠道实例构造逻辑逐行迁移进 adapter
-        # （telegram_adapter.notification_channel —— 含 first_approved_user
-        # chat_id 冻结 + bot_client None 不注册语义，等价论证见 plan C-1/C-2）。
+        # baseline SSE → Telegram）；各渠道实例构造逻辑在 adapter
+        # （telegram_adapter.notification_channel —— chat_id v0.2 起惰性
+        # resolver 现查（FR-E2）+ bot_client None 不注册语义不变）。
         try:
             from ..services.notification import (
                 NotificationService as _NotificationService,

@@ -12,7 +12,7 @@
 | C Discord | **3983 passed / 0 failed** | +19+1 | service 9 + route 10 |
 | D CONFIGURED + resolver v2 | **3992 passed / 0 failed** | +9 | 含 v0.1 resolver 三级策略测试 0 修改全绿（v2 向后兼容实证） |
 | E L1 惰性 chat_id | **3997 passed / 0 failed** | +5/升级1 | test_notification.py / test_f101_notification.py **0 修改全绿**（AC-3 机械校验） |
-| Final | 见 §4 | | |
+| Final 双评审修复 | **4003 passed / 0 failed** | +6 | CODEX-F-H1 reconcile 4 测试 + F-M1 畸形 header 矩阵 1 + OPUS2-L-1 disabled 断言 1 |
 
 ## 2. AC ↔ Test 机械校验表（spec §10 绑定逐条核对）
 
@@ -57,9 +57,9 @@
 | test_f105_channel_adapter.py | 冻结断言（_chat_id 内部态）升级为惰性语义断言 | spec 行为变更区（FR-E/US-5）显式移除的 limitation 本体；构造/闭包/None 语义断言保留 |
 | 其余 | 纯新增 7 文件 / 追加函数 | additive |
 
-## 4. Final 全量验证（实施完成后）
+## 4. Final 全量验证（双评审修复闭环后）
 
-- 全量回归：**3997 passed / 0 failed / 10 skipped / 97 deselected / 1 xfailed / 1 xpassed**（vs baseline 3931 = +66 新测试，0 regression）
+- 全量回归：**4003 passed / 0 failed / 10 skipped / 97 deselected / 1 xfailed / 1 xpassed**（vs baseline 3931 = +72 新测试，0 regression）
 - e2e_smoke：8/8 PASS（pre-commit hook 每个 commit 实跑，未用 SKIP_E2E）
 - uv.lock diff：仅 2 行（gateway→cryptography 直接依赖边，零版本漂移）
 - H1 grep：runtime 入口签名无 agent_profile_id；configured 入口非空 raise；生产代码无任何传非空 agent_profile_id 的调用点

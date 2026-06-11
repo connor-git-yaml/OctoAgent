@@ -298,3 +298,17 @@ v0.2 与 v0.1 不同——**不是全局零变更**，而是分区：
 1. **D13 棘轮设计**：Opus 评审"建议加强点 #4"认定棘轮语义正确，Codex H3 用 resolver tier 2 机制证明其破坏路由承诺。**裁定：Codex 正确**——实读 conversation_binding_store.py L51-55 确认 tier 2 只收 kind==RUNTIME，棘轮升级即踢出排序；Opus 该点未检查 resolver 交互（其事实核查表 #13 只验证了"runtime 不覆盖 kind"方向）。已按 Codex 方案修订（D17b）。
 2. **D9 通知目标**：Opus"建议加强点 #3"认定不对称合理，Codex H2 指出频道泄露面。**非真分歧**——Opus 评估的是 telegram↔新平台不对称（成立），Codex 攻击的是新平台内部 DM↔频道隐私边界（也成立），两者正交，均已吸收。
 3. 其余 finding 无交叉冲突。**0 HIGH 残留。**
+
+## 12. Final 双评审闭环记录（2026-06-12，实现后）
+
+**Codex Final**（needs-attention，1 HIGH + 1 MED）+ **Opus Final**（**APPROVE**，0 HIGH / 0 MED / 3 LOW；pre-impl 四个 HIGH/MED 修复 4/4 实证落地；零变更区 9 契约文件 0 diff 实测；verification 数字实跑复现 259 测试全绿）。
+
+| Finding | Severity | 处理 |
+|---------|----------|------|
+| CODEX-F-H1 default_notify_channel 变更/清空不回收旧 CONFIGURED 行（通知发到已撤销频道 / 双 CONFIGURED 歧义静默丢失） | HIGH | **接受已修**：store 新增 `reconcile_config_managed_binding` 单例 reconcile（metadata.source 标记；旧行有活跃证据→降级 RUNTIME 剥标记，无→删除；metadata merge 不丢 conversation_type）；harness 改调 reconcile（含清空/禁用撤销语义）；4 新测试（改目标/降级/清空/merge） |
+| CODEX-F-M1 Slack 验签畸形 header 500（int(float()) OverflowError / 非 ASCII compare_digest TypeError） | MED | **接受已修**：严格预校验（timestamp `^\d{1,12}$` / signature `^v0=[0-9a-f]{64}$`）+ bytes compare_digest；畸形矩阵测试（7 ts × 4 sig 全 signature_invalid 且不触达 ingest） |
+| OPUS2-L-1 FR-D3 enabled 守卫是对 spec 字面的未声明偏离 | LOW | **接受**：completion-report 偏离表显式归档 + 新增 disabled 平台不写 binding 断言测试固化决策 |
+| OPUS2-L-2 octo_harness 两处 stale "冻结"注释（Phase E 后与代码矛盾） | LOW | **接受已修**：两处注释改"惰性解析（FR-E2）" |
+| OPUS2-L-3 channel_reply 与 telegram._build_result_text 平行实现漂移风险 | LOW | **接受**：completion-report L9 扩展覆盖两对平行实现（通知文本 + 完成回复文本）+ handoff H-3 同步 |
+
+**Final 分歧**：无（Codex 两条均在 Opus 标 ✓ 的维度之外——Codex 攻配置生命周期与畸形输入面，Opus 核 spec 对齐与修复落地，互补不冲突）。**0 HIGH 残留。**
