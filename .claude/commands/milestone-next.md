@@ -32,8 +32,8 @@ workflow 很贵(每个约 100–300 万 token)。先估 ROI 再决定，**别无
 ## 4. 开下一步 Feature——能并行就发多个
 - 看哪些 Feature 文件不冲突 → 各发一个 worktree spec-driver prompt 并行;冲突的串行 + 说明原因。
 - 每个 prompt 自包含:背景(cold-start) + 诊断先复核(findings 可能未验证、行号会漂移) + 范围 + 验证 + 约束(Codex review;重大架构变更加第二模型多评审 panel;0 regression vs baseline;不主动 push 等拍板;产 completion-report + 走 living-docs 漂移闸)。
-- worktree 建好后在其 `octoagent/` 跑 `uv sync` 重指 editable 安装到本 worktree(否则裸 pytest 跑主仓 master = **假 0 regression**)。
-- pre-commit e2e 报 `aiosqlite ModuleNotFoundError` 多半是 `.venv` editable `.pth` 指向旧 worktree，主仓 `octoagent/` 重跑 `uv sync` 可治本;否则 `SKIP_E2E=1` 临时绕(仅纯文档/已手验过)。
+- **worktree 验证禁用 `uv sync`**——worktree 共享主仓 venv，`uv sync` 会把 editable `.pth` 重指到本 worktree、**污染其他 worktree**。正确范式:`export PYTHONPATH="$WT/packages/*/src:$WT/apps/gateway/src"`(锁本 worktree 全部 packages src)+ `cd $WT && uv run --no-sync python -m pytest -q -p no:cacheprovider`。否则裸 pytest 测的是 editable `.pth` 当前指向的别处代码 = **假 0 regression**。范式逐字见任一近期 Feature 的 `phase-1-recon.md §0`。
+- pre-commit e2e hook 已 hermetic 化(master 7fbd2cef:`python -m pytest` + `PYTHONNOUSERSITE=1`，绕开裸 pytest 逃逸 venv 被 SWE-bench 残留污染)——正常 commit 直接跑、**不必 SKIP_E2E**;仅纯文档想省 ~180s 时才 `SKIP_E2E=1`。
 
 ## 5. 本轮收尾报告(给用户)
 ①master 这轮的变化 ②做了什么检查/调研 + 结论(含"要不要 workflow"的成本判断) ③里程碑改了什么 ④下一步发了哪些 prompt(并行/串行 + 原因)。
