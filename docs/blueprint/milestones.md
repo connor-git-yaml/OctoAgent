@@ -525,7 +525,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | **F112** 双轨死代码清理 ✅（6b60e26）| refactor S | 已清：metadata fallback 残渣 + WORKER_PRIVATE 守卫收敛，行为零变更 |
 | **F113** agent_context.py 拆 mixin ✅ | refactor L | 已拆：4600 → 1079 行（-76.5%），5 mixin（EntityEnsure 1049 / PromptAssembly 773 / SessionReplay 644 / MemoryRecall 476 / MemoryService 192）+ helpers 叶子文件（打破循环 import）+ 主文件留编排根（build_task_context 等跨簇组合根，审计 A4 决议不可抽）；re-export 保外部 import 零改动；AST 92 定义逐节点对账零丢失；行为零变更 |
 
-**M6 债务/测试候选（穿插 F117-F122）**：F117 WorkerProfile/AgentProfile 合并（D2，XL，独立 dry-run+拍板）；F118 control_plane D8 解耦（M，并入 F108）；F119 F104+F099-F102 e2e 补全（M，独立）；F120 F104 versionable 收窄 + FK 诚实化（L，**M7**）；F121 巨型 domain service 二次拆分（L，并入 F108）；F122 A2A docstring + worker_type 命名（S，并入 F108）。
+**M6 债务/测试候选（穿插 F117-F122）**：F117 WorkerProfile/AgentProfile 合并（D2，XL，独立 dry-run+拍板）；F118 control_plane D8 解耦（M，并入 F108）；F119 e2e_live 补全 ✅（79caa367，F104/F116/F123/F124 + SSRF↔扫描互补链）；F120 F104 versionable 收窄 + FK 诚实化（L，**M7**）；F121 巨型 domain service 二次拆分（L，并入 F108）；F122 A2A docstring + worker_type 命名（S，并入 F108）。
 
 **调研可吸收点（架构层，作 F108/F105 设计输入，非新 Feature）**：prefix-cache 工具侧不变量（工具集稳定排序 + policy-deny 不删 schema，⚠️ 不照搬 logit_bias）；大工具输出无损卸载为 artifact 引用（落 tool 回写路径，底座 artifact_store）；Google A2A 状态机 gap audit + agent card 式 capability 自描述（F105 借鉴，不照搬 wire protocol）。
 
