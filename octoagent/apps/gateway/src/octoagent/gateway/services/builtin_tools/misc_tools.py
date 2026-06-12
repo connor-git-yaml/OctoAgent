@@ -20,7 +20,6 @@ import structlog
 
 from octoagent.core.behavior_workspace import (
     BOOTSTRAP_COMPLETED_MARKER,
-    check_behavior_file_budget,
     get_behavior_file_review_modes,
     mark_onboarding_completed,
 )
@@ -195,7 +194,10 @@ async def register(broker, deps: ToolDeps) -> None:
         confirmed: bool = False,
     ) -> BehaviorWriteFileResult:
         """修改行为文件内容。file_id 为短名（如 USER.md），系统自动解析路径。"""
-        from octoagent.core.behavior_workspace import resolve_write_path_by_file_id
+        from octoagent.core.behavior_workspace import (
+            commit_behavior_file_write,
+            prepare_behavior_file_write,
+        )
 
         file_id = file_id.strip()
         if not file_id:
@@ -215,9 +217,10 @@ async def register(broker, deps: ToolDeps) -> None:
 
         # 根据 file_id 自动解析磁盘路径
         try:
-            resolved = resolve_write_path_by_file_id(
+            pending = prepare_behavior_file_write(
                 deps.project_root,
                 file_id,
+                content,
                 agent_slug=agent_slug,
                 project_slug=project_slug,
             )
@@ -230,9 +233,10 @@ async def register(broker, deps: ToolDeps) -> None:
                 file_id=file_id,
                 written=False,
             )
+        resolved = pending.resolved
 
         # 字符预算检查
-        budget_result = check_behavior_file_budget(file_id, content)
+        budget_result = pending.budget
         if not budget_result["within_budget"]:
             return BehaviorWriteFileResult(
                 status="rejected",
@@ -266,8 +270,7 @@ async def register(broker, deps: ToolDeps) -> None:
 
         # 实际写入磁盘（confirmed=true 时直接信任 Agent 传入的 content）
         try:
-            resolved.parent.mkdir(parents=True, exist_ok=True)
-            resolved.write_text(content, encoding="utf-8")
+            commit_behavior_file_write(pending, content)
         except Exception as exc:
             return BehaviorWriteFileResult(
                 status="rejected",

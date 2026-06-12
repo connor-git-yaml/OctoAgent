@@ -23,11 +23,11 @@ from typing import Any
 
 import structlog
 from octoagent.core.behavior_workspace import (
-    check_behavior_file_budget,
+    commit_behavior_file_write,
     materialize_agent_behavior_files,
+    prepare_behavior_file_write,
     read_behavior_file_content,
     resolve_behavior_agent_slug,
-    resolve_write_path_by_file_id,
     validate_behavior_file_path,
 )
 from octoagent.core.models import (
@@ -561,17 +561,19 @@ class WorkerProfileDomainService(DomainServiceBase):
         project_slug = str(request.params.get("project_slug", "default")).strip()
 
         try:
-            resolved = resolve_write_path_by_file_id(
+            pending = prepare_behavior_file_write(
                 self._ctx.project_root,
                 file_id,
+                content,
                 agent_slug=agent_slug,
                 project_slug=project_slug,
             )
         except ValueError as exc:
             raise ControlPlaneActionError("INVALID_FILE_ID", str(exc)) from exc
+        resolved = pending.resolved
 
         # 字符预算检查
-        budget_result = check_behavior_file_budget(file_id, content)
+        budget_result = pending.budget
         if not budget_result["within_budget"]:
             raise ControlPlaneActionError(
                 "BUDGET_EXCEEDED",
@@ -581,8 +583,7 @@ class WorkerProfileDomainService(DomainServiceBase):
             )
 
         try:
-            resolved.parent.mkdir(parents=True, exist_ok=True)
-            resolved.write_text(content, encoding="utf-8")
+            commit_behavior_file_write(pending, content)
         except Exception as exc:
             raise ControlPlaneActionError(
                 "FILE_WRITE_ERROR", f"写入文件失败: {exc}"
