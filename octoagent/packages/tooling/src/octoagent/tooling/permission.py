@@ -41,6 +41,56 @@ class ApprovalOverrideCacheProtocol(Protocol):
     def set(self, agent_runtime_id: str, tool_name: str) -> None: ...
 
 
+class _ApprovalOverrideMemoryCache:
+    """Feature 061: ApprovalOverride 内存缓存
+
+    实现 ApprovalOverrideCacheProtocol（hooks 依赖的接口），
+    运行时 O(1) 查询，避免每次工具调用都查 SQLite。
+    key = (agent_runtime_id, tool_name) → True
+    """
+
+    def __init__(self) -> None:
+        self._cache: dict[tuple[str, str], bool] = {}
+
+    def has(self, agent_runtime_id: str, tool_name: str) -> bool:
+        """检查缓存中是否存在 always 覆盖"""
+        return self._cache.get((agent_runtime_id, tool_name), False)
+
+    def set(self, agent_runtime_id: str, tool_name: str) -> None:
+        """设置缓存条目"""
+        self._cache[(agent_runtime_id, tool_name)] = True
+
+    def remove(self, agent_runtime_id: str, tool_name: str) -> None:
+        """移除缓存条目"""
+        self._cache.pop((agent_runtime_id, tool_name), None)
+
+    def load_from_records(self, records: list) -> None:
+        """从 ApprovalOverride 记录批量加载缓存"""
+        for record in records:
+            self._cache[(record.agent_runtime_id, record.tool_name)] = True
+
+    def clear_agent(self, agent_runtime_id: str) -> None:
+        """清除指定 Agent 的所有缓存条目"""
+        keys_to_remove = [k for k in self._cache if k[0] == agent_runtime_id]
+        for key in keys_to_remove:
+            del self._cache[key]
+
+    def clear_tool(self, tool_name: str) -> None:
+        """清除指定工具的所有缓存条目"""
+        keys_to_remove = [k for k in self._cache if k[1] == tool_name]
+        for key in keys_to_remove:
+            del self._cache[key]
+
+    @property
+    def size(self) -> int:
+        """缓存条目总数"""
+        return len(self._cache)
+
+    def list_for_agent(self, agent_runtime_id: str) -> list[str]:
+        """列出指定 Agent 的所有 always 授权工具名"""
+        return [tn for (rid, tn) in self._cache if rid == agent_runtime_id]
+
+
 class ApprovalManagerProtocol(Protocol):
     """审批管理器接口 — 对齐 ApprovalManager 的 register + wait_for_decision"""
 
