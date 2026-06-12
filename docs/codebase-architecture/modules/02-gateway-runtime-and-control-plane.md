@@ -429,9 +429,9 @@
 
 说明当前 agent 管理并不是前端本地表单，而是正式控制面动作。
 
-### 10.6 `_build_registry()`
+### 10.6 `action_registry.build_action_registry()`
 
-职责：
+职责（F108a W2 起从 `_coordinator._build_registry` 方法抽为 `control_plane/action_registry.py` 模块级函数，纯声明零 self 依赖；coordinator 构造期调用）：
 
 - 定义控制面可暴露的 actions
 - 把 action id、参数、surface、资源失效规则等组织成统一 registry
