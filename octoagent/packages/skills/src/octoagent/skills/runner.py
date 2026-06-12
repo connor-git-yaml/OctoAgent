@@ -18,6 +18,7 @@ from pydantic import BaseModel, ValidationError
 from ulid import ULID
 
 from .exceptions import (
+    SkillAuthError,
     SkillInputError,
     SkillLoopDetectedError,
     SkillRepeatError,
@@ -182,6 +183,25 @@ class SkillRunner:
 
                 # Feature 064 Phase 3: 异常分类差异化处理
                 if isinstance(exc, LLMCallError):
+                    if exc.status_code in (401, 403):
+                        # 凭证失效：provider_client 在抛出前已 force_refresh 并
+                        # 重试过一次仍 401/403，说明凭证链已断（如 rotating
+                        # refresh token 被轮换作废），继续重试只会反复打同一个
+                        # 失效凭证，把 task 拖到外部 timeout 才结束（2026-06-12
+                        # production 实测 e2e_live 全部 hang 180s）。立即终止。
+                        return await self._terminate_with_failure(
+                            manifest=manifest,
+                            execution_context=execution_context,
+                            history_key=history_key,
+                            start_time=start_time,
+                            attempts=attempts,
+                            steps=steps,
+                            category=ErrorCategory.AUTH_ERROR,
+                            error=SkillAuthError(
+                                f"provider 凭证已失效（HTTP {exc.status_code}），"
+                                f"自动刷新失败，请重新授权后重试: {exc}"
+                            ),
+                        )
                     if exc.error_type == "rate_limit":
                         # 速率限制：等待后重试，不消耗 retry 计数
                         logger.warning("rate_limit_backoff", step=steps, wait_seconds=3)

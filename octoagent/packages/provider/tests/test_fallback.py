@@ -162,3 +162,50 @@ class TestFallbackManagerLazyProbe:
         call_kwargs = mock_primary.complete.call_args
         assert call_kwargs.kwargs.get("model_alias") == "cheap" or \
                (len(call_kwargs.args) > 1 and call_kwargs.args[1] == "cheap")
+
+
+class TestFallbackManagerAuthError:
+    """凭证失效（401/403）不降级 —— 2026-06-12 production OAuth 断链事故回归。
+
+    凭证断链时 Echo fallback 会把事故掩盖成"成功"回复，task 永远到不了
+    FAILED 终态。401/403 必须原样向上抛，跳过 fallback。
+    """
+
+    @pytest.mark.parametrize("status_code", [401, 403])
+    async def test_auth_error_skips_fallback_and_reraises(
+        self, mock_primary, mock_fallback, status_code
+    ):
+        from octoagent.provider.provider_client import LLMCallError
+
+        auth_error = LLMCallError(
+            "api_error",
+            f"HTTP {status_code}: refresh_token_reused",
+            retriable=True,
+            status_code=status_code,
+        )
+        mock_primary.complete.side_effect = auth_error
+        fm = FallbackManager(primary=mock_primary, fallback=mock_fallback)
+        messages = [{"role": "user", "content": "test"}]
+
+        with pytest.raises(LLMCallError) as exc_info:
+            await fm.call_with_fallback(messages)
+
+        assert exc_info.value is auth_error
+        mock_fallback.complete.assert_not_called()
+
+    async def test_non_auth_llm_error_still_falls_back(
+        self, mock_primary, mock_fallback
+    ):
+        """回归护栏：非 auth 的 LLMCallError（如 500）保持 fallback 语义。"""
+        from octoagent.provider.provider_client import LLMCallError
+
+        mock_primary.complete.side_effect = LLMCallError(
+            "api_error", "Internal Server Error", retriable=True, status_code=500
+        )
+        fm = FallbackManager(primary=mock_primary, fallback=mock_fallback)
+        messages = [{"role": "user", "content": "test"}]
+
+        result = await fm.call_with_fallback(messages)
+
+        assert result.is_fallback is True
+        mock_fallback.complete.assert_called_once()

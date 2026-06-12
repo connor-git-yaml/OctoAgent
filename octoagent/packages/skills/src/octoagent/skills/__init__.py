@@ -1,6 +1,7 @@
 """OctoAgent Skills 包导出。"""
 
 from .exceptions import (
+    SkillAuthError,
     SkillError,
     SkillInputError,
     SkillLoopDetectedError,
@@ -59,6 +60,7 @@ from .runner import SkillRunner
 from .skill_models import SkillListItem, SkillMdEntry, SkillSource
 
 __all__ = [
+    "SkillAuthError",
     "SkillError",
     "SkillInputError",
     "SkillLoopDetectedError",

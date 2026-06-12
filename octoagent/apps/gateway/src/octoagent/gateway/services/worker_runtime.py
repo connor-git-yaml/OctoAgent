@@ -726,14 +726,46 @@ class WorkerRuntime:
                             status=ExecutionSessionState.FAILED,
                             message="worker execution failed",
                         )
+                    # 凭证失效（MODEL_CALL_FAILED.error_category == "auth_error"，
+                    # 覆盖 skill 路径 SkillAuthError 与直连路径 LLMCallError
+                    # 401/403 两条到达链）不可重试：重新授权前重派只会再次快速
+                    # 失败，operator inbox 不应展示重试入口。getattr 守卫兼容
+                    # 测试 duck-type mock；probe 是 best-effort——读事件失败
+                    # 不得让已 FAILED 的 task 掉进外层 except 变成
+                    # worker_runtime_exception。
+                    is_auth_failure = False
+                    try:
+                        failure_probe = getattr(
+                            task_service, "get_latest_model_call_failure", None
+                        )
+                        failure_payload = (
+                            await failure_probe(envelope.task_id)
+                            if failure_probe
+                            else None
+                        )
+                        is_auth_failure = (
+                            isinstance(failure_payload, dict)
+                            and failure_payload.get("error_category") == "auth_error"
+                        )
+                    except Exception as probe_error:
+                        log.warning(
+                            "worker_failure_cause_probe_failed",
+                            task_id=envelope.task_id,
+                            error_type=type(probe_error).__name__,
+                        )
                     return self._failure_result(
                         envelope=envelope,
                         worker_id=worker_id,
                         session=session,
-                        retryable=True,
+                        retryable=not is_auth_failure,
                         summary="worker_execution_terminal:FAILED",
                         error_type="WorkerExecutionFailed",
-                        error_message="task status=FAILED",
+                        error_message=(
+                            "task status=FAILED（provider 凭证已失效，"
+                            "重新授权前重试无效）"
+                            if is_auth_failure
+                            else "task status=FAILED"
+                        ),
                     )
 
             session.state = WorkerRuntimeState.FAILED

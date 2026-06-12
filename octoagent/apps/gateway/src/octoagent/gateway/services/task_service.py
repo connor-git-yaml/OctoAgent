@@ -75,6 +75,8 @@ from octoagent.memory import (
     MemoryPartition,
     init_memory_db,
 )
+from octoagent.provider import ProviderLLMCallError
+from octoagent.skills import SkillAuthError
 from octoagent.gateway.services.memory.memory_retrieval_profile import (
     apply_retrieval_profile_to_hook_options,
 )
@@ -2567,6 +2569,16 @@ class TaskService:
         # 保留错误类型和消息（供内部 freshness/orchestrator 判断），
         # 但脱敏可能泄露的凭证（api_key、token 等）。
         error_message = _sanitize_error_message(str(error))
+        # 结构化失败分类：凭证失效有两条到达路径——skill 路径抛 SkillAuthError、
+        # 直连路径（无 tool_selection → FallbackManager re-raise）抛
+        # LLMCallError(401/403)。统一标注 error_category，供 worker_runtime
+        # 判定 retryable（按 error_type 类名匹配会漏掉直连路径，Codex
+        # re-review MEDIUM）。
+        is_auth_failure = isinstance(error, SkillAuthError) or (
+            isinstance(error, ProviderLLMCallError)
+            and error.status_code in (401, 403)
+        )
+        error_category = "auth_error" if is_auth_failure else ""
         try:
             failed_event = await self._append_event_only_with_retry(
                 task_id=task_id,
@@ -2585,6 +2597,7 @@ class TaskService:
                         error_message=error_message,
                         duration_ms=0,
                         is_fallback=False,
+                        error_category=error_category,
                     ).model_dump(),
                     trace_id=trace_id,
                 ),
@@ -2597,10 +2610,38 @@ class TaskService:
                     task_id, TaskStatus.RUNNING, TaskStatus.FAILED, trace_id
                 )
             except TaskStatusConflictError:
-                log.warning(
-                    "skip_failure_transition_due_state_conflict",
-                    task_id=task_id,
-                )
+                # CAS RUNNING→FAILED 冲突 = task 已离开 RUNNING。按状态机
+                # FAILED 只能从 RUNNING 进入：终态（已取消/已完成）跳过是
+                # 正确行为；WAITING_INPUT / WAITING_APPROVAL / PAUSED 各有
+                # 自己的生命周期（resume / 审批超时 / 取消），不得强推
+                # FAILED（_force_mark_failed_without_event 的
+                # validate_transition 守卫同样会拒绝）。这里只区分日志级别：
+                # 非终态滞留属于异常路径，升级 error 让排查可见。
+                # re-read 自身的失败必须就地吞掉：若让它逃逸到外层 except，
+                # 会触发 _force_mark_failed_without_event——而冲突时 task
+                # 可能已合法 resume 回 RUNNING（如审批通过），强推 FAILED
+                # 等于无事件覆写一个活任务（Codex review MED-2）。
+                current_status = None
+                try:
+                    stale_task = await self._stores.task_store.get_task(task_id)
+                    current_status = stale_task.status if stale_task else None
+                except Exception as recheck_error:
+                    log.warning(
+                        "conflict_status_recheck_failed",
+                        task_id=task_id,
+                        error_type=type(recheck_error).__name__,
+                    )
+                if current_status is not None and current_status not in TERMINAL_STATES:
+                    log.error(
+                        "skip_failure_transition_task_left_nonterminal",
+                        task_id=task_id,
+                        current_status=current_status.value,
+                    )
+                else:
+                    log.warning(
+                        "skip_failure_transition_due_state_conflict",
+                        task_id=task_id,
+                    )
         except Exception as inner_e:
             log.error(
                 "failed_to_record_failure",
@@ -2694,6 +2735,18 @@ class TaskService:
         """读取当前任务累计生效的 trusted control metadata。"""
         events = await self._stores.event_store.get_events_for_task(task_id)
         return merge_control_metadata(events)
+
+    async def get_latest_model_call_failure(self, task_id: str) -> dict[str, Any] | None:
+        """读取最近一条 MODEL_CALL_FAILED 事件的 payload（无则 None）。
+
+        供 worker_runtime 等上游区分失败原因（如凭证失效 → retryable=False），
+        避免 operator inbox 对不可恢复失败展示无效的重试入口。
+        """
+        events = await self._stores.event_store.get_events_for_task(task_id)
+        for event in reversed(events):
+            if event.type == EventType.MODEL_CALL_FAILED:
+                return dict(event.payload)
+        return None
 
     async def get_latest_input_metadata(self, task_id: str) -> dict[str, str]:
         """读取最近一条 USER_MESSAGE 的 input metadata。"""

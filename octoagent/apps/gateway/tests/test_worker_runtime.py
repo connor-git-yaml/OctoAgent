@@ -162,6 +162,101 @@ class TestWorkerRuntime:
 
         await store_group.close()
 
+    async def test_auth_failure_marks_worker_result_not_retryable(
+        self, tmp_path: Path
+    ) -> None:
+        """凭证失效导致的 worker FAILED 必须 retryable=False。
+
+        2026-06-12 production OAuth 断链回归：重新授权前重派只会再次快速
+        失败，operator inbox 不应展示重试入口（Codex review MED-1）。
+        """
+        from octoagent.skills import SkillAuthError
+
+        store_group, sse_hub, _, envelope = await _create_task_with_envelope(
+            tmp_path, "f-credfail-worker-001"
+        )
+
+        class AuthBrokenLLMService:
+            async def call(self, prompt_or_messages, model_alias=None, **kwargs):
+                raise SkillAuthError(
+                    "provider 凭证已失效（HTTP 401），自动刷新失败，"
+                    "请重新授权后重试: refresh_token_reused"
+                )
+
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=AuthBrokenLLMService(),
+            config=WorkerRuntimeConfig(docker_mode="disabled"),
+        )
+        result = await runtime.run(envelope, worker_id="worker.test")
+
+        assert result.status == TaskStatus.FAILED
+        assert result.retryable is False
+        assert "凭证已失效" in (result.error_message or "")
+
+        await store_group.close()
+
+    async def test_direct_path_auth_failure_also_not_retryable(
+        self, tmp_path: Path
+    ) -> None:
+        """直连路径凭证失效（LLMCallError 401，无 tool_selection 时
+        FallbackManager re-raise）同样 retryable=False（Codex re-review MEDIUM）。
+        """
+        from octoagent.provider import ProviderLLMCallError
+
+        store_group, sse_hub, _, envelope = await _create_task_with_envelope(
+            tmp_path, "f-credfail-worker-003"
+        )
+
+        class DirectAuthBrokenLLMService:
+            async def call(self, prompt_or_messages, model_alias=None, **kwargs):
+                raise ProviderLLMCallError(
+                    "api_error",
+                    "HTTP 401: refresh_token_reused",
+                    retriable=True,
+                    status_code=401,
+                )
+
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=DirectAuthBrokenLLMService(),
+            config=WorkerRuntimeConfig(docker_mode="disabled"),
+        )
+        result = await runtime.run(envelope, worker_id="worker.test")
+
+        assert result.status == TaskStatus.FAILED
+        assert result.retryable is False
+        assert "凭证已失效" in (result.error_message or "")
+
+        await store_group.close()
+
+    async def test_generic_failure_keeps_worker_result_retryable(
+        self, tmp_path: Path
+    ) -> None:
+        """回归护栏：非 auth 的普通失败保持 retryable=True 原语义。"""
+        store_group, sse_hub, _, envelope = await _create_task_with_envelope(
+            tmp_path, "f-credfail-worker-002"
+        )
+
+        class GenericBrokenLLMService:
+            async def call(self, prompt_or_messages, model_alias=None, **kwargs):
+                raise RuntimeError("transient upstream error")
+
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            llm_service=GenericBrokenLLMService(),
+            config=WorkerRuntimeConfig(docker_mode="disabled"),
+        )
+        result = await runtime.run(envelope, worker_id="worker.test")
+
+        assert result.status == TaskStatus.FAILED
+        assert result.retryable is True
+
+        await store_group.close()
+
     async def test_cancel_signal_returns_cancelled_result(self, tmp_path: Path) -> None:
         store_group, sse_hub, service, envelope = await _create_task_with_envelope(
             tmp_path, "f009-runtime-004"

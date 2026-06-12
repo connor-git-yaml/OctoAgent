@@ -1203,3 +1203,108 @@ async def test_runner_no_progress_loop_detected_on_repeated_probe_pattern(
         f"no_progress 熔断应在 ~8 步内生效，实际消耗 {result.steps} 步。"
         f"如果接近 30，说明 no_progress 检测没起作用，只是 max_steps 硬兜底。"
     )
+
+
+# ═══════════════════════════════════════
+# 凭证失效（401/403）快速失败 —— 2026-06-12 production OAuth 断链事故回归
+# ═══════════════════════════════════════
+# 背景：openai-codex rotating refresh token 链断裂时，provider_client 内部
+# force_refresh 失败后 re-raise LLMCallError(api_error, status_code=401)。
+# 修复前 runner 把它当普通可重试 api_error 进 retry 循环（max_attempts 次
+# 失败 + backoff），叠加上层假成功转换后 task 卡 RUNNING 直到外部 timeout。
+# 修复后：401/403 不进重试循环，第一次失败立即 FAILED(AUTH_ERROR)。
+
+
+def _auth_call_error(status_code: int):
+    """构造与 provider_client._classify_provider_error 输出一致的 401/403 错误。"""
+    from octoagent.provider import ProviderLLMCallError
+
+    return ProviderLLMCallError(
+        "api_error",
+        f"HTTP {status_code}: refresh_token_reused",
+        retriable=True,  # 修复前的分类就是 retriable=True，runner 必须按 status_code 识别
+        status_code=status_code,
+    )
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+async def test_runner_auth_error_fails_fast_without_retry(
+    echo_manifest, execution_context, tool_broker, event_store, status_code
+) -> None:
+    """401/403 必须第一次失败就终止：不重试、不 backoff、category=AUTH_ERROR。"""
+    client = QueueModelClient(
+        [
+            _auth_call_error(status_code),
+            # 队列里再放一个成功输出：若 runner 误重试会消费它并"成功"，
+            # calls 断言与 status 断言都会失败。
+            SkillOutputEnvelope(content="should-not-be-reached", complete=True),
+        ]
+    )
+    runner = SkillRunner(
+        model_client=client,
+        tool_broker=tool_broker,
+        event_store=event_store,
+    )
+
+    result = await runner.run(
+        manifest=echo_manifest,
+        execution_context=execution_context,
+        skill_input=EchoInput(text="hello"),
+        prompt="echo",
+    )
+
+    assert result.status == SkillRunStatus.FAILED
+    assert result.error_category == ErrorCategory.AUTH_ERROR
+    assert client.calls == 1, (
+        f"凭证失效不可重试，model client 只允许被调用 1 次，实际 {client.calls} 次"
+    )
+    assert "凭证已失效" in (result.error_message or "")
+    assert str(status_code) in (result.error_message or "")
+    assert "重新授权" in (result.error_message or "")
+    event_types = [e.type.value for e in event_store.events]
+    assert "SKILL_FAILED" in event_types
+
+
+async def test_runner_non_auth_api_error_still_retries(
+    execution_context, tool_broker, event_store
+) -> None:
+    """回归护栏：非 auth 的 api_error（如 500）保持原有重试语义。"""
+    from octoagent.provider import ProviderLLMCallError
+    from octoagent.skills.models import RetryPolicy
+
+    from .conftest import EchoOutput
+
+    manifest = SkillManifest(
+        skill_id="demo.echo",
+        version="0.1.0",
+        input_model=EchoInput,
+        output_model=EchoOutput,
+        model_alias="main",
+        tools_allowed=["system.echo"],
+        # backoff_ms=0 让测试不真实 sleep；max_attempts 保持默认 3
+        retry_policy=RetryPolicy(max_attempts=3, backoff_ms=0),
+    )
+    errors = [
+        ProviderLLMCallError(
+            "api_error", "Internal Server Error", retriable=True, status_code=500
+        )
+        for _ in range(6)
+    ]
+    client = QueueModelClient(list(errors))
+    runner = SkillRunner(
+        model_client=client,
+        tool_broker=tool_broker,
+        event_store=event_store,
+    )
+
+    result = await runner.run(
+        manifest=manifest,
+        execution_context=execution_context,
+        skill_input=EchoInput(text="hello"),
+        prompt="echo",
+    )
+
+    assert result.status == SkillRunStatus.FAILED
+    assert result.error_category == ErrorCategory.REPEAT_ERROR
+    # retry_failures 达到 max_attempts+1（4 次失败）才终止——重试语义未被 401 修复破坏
+    assert client.calls == 4

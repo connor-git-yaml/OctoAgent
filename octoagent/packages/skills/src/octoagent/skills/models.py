@@ -38,6 +38,10 @@ class ErrorCategory(StrEnum):
     TOOL_CALL_LIMIT_EXCEEDED = "tool_call_limit_exceeded"
     BUDGET_EXCEEDED = "budget_exceeded"
     TIMEOUT_EXCEEDED = "timeout_exceeded"
+    # provider 凭证失效（401/403 且自动刷新失败）。上层（llm_service）据此
+    # 区分"不可恢复的基础设施错误"与普通执行失败：前者必须向上抛异常让
+    # task 进 FAILED 终态，不得转换成道歉文案的成功回复。
+    AUTH_ERROR = "auth_error"
 
 
 class SkillPermissionMode(StrEnum):

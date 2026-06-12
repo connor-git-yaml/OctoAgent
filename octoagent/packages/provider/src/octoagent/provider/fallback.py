@@ -9,6 +9,7 @@ import structlog
 
 from .exceptions import ProviderError
 from .models import ModelCallResult
+from .provider_client import LLMCallError
 
 log = structlog.get_logger()
 
@@ -70,6 +71,18 @@ class FallbackManager:
             return result
         except Exception as e:
             primary_error = e
+            if isinstance(e, LLMCallError) and e.status_code in (401, 403):
+                # 凭证失效（provider_client 内部已 force_refresh 失败）：
+                # fallback（Echo）无法恢复凭证，且 Echo 假成功会把事故掩盖成
+                # 正常回复——2026-06-12 production 实测这条路径让凭证断链的
+                # task 永远到不了 FAILED 终态。直接向上抛，由上层
+                # _handle_llm_failure 把 task 推进 FAILED。
+                log.warning(
+                    "primary_auth_error_skip_fallback",
+                    status_code=e.status_code,
+                    model_alias=model_alias,
+                )
+                raise
             log.warning(
                 "primary_failed_attempting_fallback",
                 error=str(e),

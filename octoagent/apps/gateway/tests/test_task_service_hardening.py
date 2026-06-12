@@ -295,3 +295,209 @@ class TestTaskServiceHardening:
         assert metadata["parent_work_id"] == "work-parent-1"
         assert "requested_worker_type" not in metadata
         assert "target_kind" not in metadata
+
+    # ──────────────────────────────────────────────────────────
+    # 凭证失效快速失败 —— 2026-06-12 production OAuth 断链事故回归
+    # ──────────────────────────────────────────────────────────
+
+    async def test_auth_failure_marks_task_failed_fast(self, service_with_store):
+        """凭证失效（SkillAuthError）→ task 快速 FAILED 终态，不卡 RUNNING。
+
+        修复前 llm_service 把凭证失效转成道歉文案的"成功"结果，
+        process_task_with_llm 永远收不到异常，task 到不了 FAILED。
+        """
+        from octoagent.skills import SkillAuthError
+
+        service, store_group = service_with_store
+        task_id, _ = await service.create_task(
+            NormalizedMessage(
+                text="auth-fail",
+                idempotency_key="auth-fail-001",
+            )
+        )
+
+        class AuthBrokenLLM:
+            async def call(self, *args, **kwargs):
+                raise SkillAuthError(
+                    "provider 凭证已失效（HTTP 401），自动刷新失败，"
+                    "请重新授权后重试: refresh_token_reused"
+                )
+
+        await service.process_task_with_llm(
+            task_id=task_id,
+            user_text="hello",
+            llm_service=AuthBrokenLLM(),
+        )
+
+        task = await store_group.task_store.get_task(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.FAILED
+
+        events = await store_group.event_store.get_events_for_task(task_id)
+        failed_events = [e for e in events if e.type == EventType.MODEL_CALL_FAILED]
+        assert len(failed_events) == 1
+        assert failed_events[0].payload["error_type"] == "SkillAuthError"
+        assert failed_events[0].payload["error_category"] == "auth_error"
+        assert "重新授权" in failed_events[0].payload["error_message"]
+
+    async def test_direct_path_llm_call_error_401_marks_auth_category(
+        self, service_with_store
+    ):
+        """直连路径（FallbackManager re-raise 的 LLMCallError 401）同样标注
+        error_category=auth_error（Codex re-review MEDIUM）。"""
+        from octoagent.provider import ProviderLLMCallError
+
+        service, store_group = service_with_store
+        task_id, _ = await service.create_task(
+            NormalizedMessage(
+                text="auth-fail-direct",
+                idempotency_key="auth-fail-direct-001",
+            )
+        )
+
+        class DirectAuthBrokenLLM:
+            async def call(self, *args, **kwargs):
+                raise ProviderLLMCallError(
+                    "api_error",
+                    "HTTP 401: refresh_token_reused",
+                    retriable=True,
+                    status_code=401,
+                )
+
+        await service.process_task_with_llm(
+            task_id=task_id,
+            user_text="hello",
+            llm_service=DirectAuthBrokenLLM(),
+        )
+
+        task = await store_group.task_store.get_task(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.FAILED
+
+        events = await store_group.event_store.get_events_for_task(task_id)
+        failed_events = [e for e in events if e.type == EventType.MODEL_CALL_FAILED]
+        assert len(failed_events) == 1
+        assert failed_events[0].payload["error_type"] == "LLMCallError"
+        assert failed_events[0].payload["error_category"] == "auth_error"
+
+    async def test_llm_failure_while_waiting_approval_keeps_state(
+        self, service_with_store
+    ):
+        """LLM 失败时 task 已进 WAITING_APPROVAL → 不得强推 FAILED。
+
+        状态机上 WAITING_APPROVAL → FAILED 不合法（审批有自己的
+        resume / 超时 / 取消生命周期）；_handle_llm_failure 的
+        TaskStatusConflictError 分支应保留现状并记录日志，
+        MODEL_CALL_FAILED 事件仍须落盘供审计。
+        """
+        service, store_group = service_with_store
+        task_id, _ = await service.create_task(
+            NormalizedMessage(
+                text="approval-conflict",
+                idempotency_key="approval-conflict-001",
+            )
+        )
+        await service._write_state_transition(
+            task_id,
+            TaskStatus.CREATED,
+            TaskStatus.RUNNING,
+            f"trace-{task_id}",
+        )
+        await service._write_state_transition(
+            task_id,
+            TaskStatus.RUNNING,
+            TaskStatus.WAITING_APPROVAL,
+            f"trace-{task_id}",
+        )
+
+        await service._handle_llm_failure(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            model_alias="main",
+            error=RuntimeError("boom-after-state-change"),
+        )
+
+        task = await store_group.task_store.get_task(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.WAITING_APPROVAL
+
+        events = await store_group.event_store.get_events_for_task(task_id)
+        failed_events = [e for e in events if e.type == EventType.MODEL_CALL_FAILED]
+        assert len(failed_events) == 1
+
+    async def test_conflict_recheck_failure_does_not_force_mark(
+        self, service_with_store, monkeypatch
+    ):
+        """冲突分支 re-read 自身失败不得触发 force_mark（Codex review MED-2）。
+
+        场景：CAS RUNNING→FAILED 冲突（task 在 WAITING_APPROVAL）后、
+        re-read 前任务被并发审批 resume 回 RUNNING，且 re-read 查询自身
+        抛异常。若让该异常逃逸到外层 except，会走
+        _force_mark_failed_without_event 把一个合法运行中的任务无事件
+        覆写成 FAILED。
+        """
+        service, store_group = service_with_store
+        task_id, _ = await service.create_task(
+            NormalizedMessage(
+                text="recheck-fail",
+                idempotency_key="recheck-fail-001",
+            )
+        )
+        await service._write_state_transition(
+            task_id, TaskStatus.CREATED, TaskStatus.RUNNING, f"trace-{task_id}"
+        )
+        await service._write_state_transition(
+            task_id,
+            TaskStatus.RUNNING,
+            TaskStatus.WAITING_APPROVAL,
+            f"trace-{task_id}",
+        )
+
+        real_get_task = store_group.task_store.get_task
+        state = {"raised": False}
+
+        async def racy_get_task(tid: str):
+            if not state["raised"]:
+                state["raised"] = True
+                # 模拟并发审批通过：任务 resume 回 RUNNING，随后 re-read 失败
+                task = await real_get_task(tid)
+                assert task is not None
+                await store_group.task_store.update_task_status(
+                    task_id=tid,
+                    status=TaskStatus.RUNNING.value,
+                    updated_at=datetime.now(UTC).isoformat(),
+                    latest_event_id=task.pointers.latest_event_id or "",
+                )
+                await store_group.conn.commit()
+                raise RuntimeError("simulated db hiccup during recheck")
+            return await real_get_task(tid)
+
+        monkeypatch.setattr(store_group.task_store, "get_task", racy_get_task)
+
+        force_mark_calls: list[str] = []
+        real_force_mark = service._force_mark_failed_without_event
+
+        async def tracked_force_mark(tid: str) -> None:
+            force_mark_calls.append(tid)
+            await real_force_mark(tid)
+
+        monkeypatch.setattr(
+            service, "_force_mark_failed_without_event", tracked_force_mark
+        )
+
+        await service._handle_llm_failure(
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            model_alias="main",
+            error=RuntimeError("boom-with-recheck-failure"),
+        )
+
+        # 主断言：re-read 失败不得逃逸到外层 except 触发 force_mark
+        assert force_mark_calls == []
+
+        task = await real_get_task(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.RUNNING, (
+            "re-read 失败不得触发 force_mark：合法 resume 的 RUNNING 任务"
+            f"被覆写为 {task.status}"
+        )

@@ -21,6 +21,14 @@ class SkillRepeatError(SkillError):
     """可重试的模型输出错误。"""
 
 
+class SkillAuthError(SkillError):
+    """Provider 凭证失效（HTTP 401/403 且自动刷新已失败），不可重试。
+
+    与 SkillRepeatError 的区别：凭证链断裂只能由用户重新授权解决，
+    任何层级的自动重试都只会反复打同一个失效凭证。
+    """
+
+
 class SkillValidationError(SkillError):
     """输出模型校验失败。"""
 

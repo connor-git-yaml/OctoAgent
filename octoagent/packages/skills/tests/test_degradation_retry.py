@@ -493,3 +493,203 @@ class TestFriendlyErrorMessages:
         )
         assert result is not None
         assert "超时" in result.content
+
+
+# ═══════════════════════════════════════
+# 凭证失效（AUTH_ERROR）向上传播 —— 2026-06-12 production OAuth 断链事故回归
+# ═══════════════════════════════════════
+# 修复前：FAILED skill run 一律转换成道歉文案的"成功" ModelCallResult，
+# 凭证断链被掩盖成正常回复，task 永远到不了 FAILED 终态。
+# 修复后：error_category == AUTH_ERROR 时 raise SkillAuthError，由
+# process_task_with_llm._handle_llm_failure 把 task 推进 FAILED。
+
+
+def _make_auth_failed_result() -> SkillRunResult:
+    """构建 runner 凭证失效终止后的 FAILED SkillRunResult。"""
+    return SkillRunResult(
+        status=SkillRunStatus.FAILED,
+        attempts=1,
+        steps=1,
+        duration_ms=600,
+        error_category=ErrorCategory.AUTH_ERROR,
+        error_message=(
+            "provider 凭证已失效（HTTP 401），自动刷新失败，"
+            "请重新授权后重试: HTTP 401: refresh_token_reused"
+        ),
+        usage={"steps": 1},
+        total_cost_usd=0.0,
+    )
+
+
+class TestAuthErrorPropagation:
+    @pytest.mark.asyncio
+    async def test_auth_error_raises_instead_of_apology(self) -> None:
+        """AUTH_ERROR 必须 raise SkillAuthError，不得返回道歉文案的成功结果。"""
+        from octoagent.gateway.services.llm_service import LLMService
+        from octoagent.skills.exceptions import SkillAuthError
+
+        call_count = 0
+
+        async def mock_run(**kw: Any) -> SkillRunResult:
+            nonlocal call_count
+            call_count += 1
+            return _make_auth_failed_result()
+
+        service = LLMService(skill_runner=MagicMock(run=mock_run))
+        with pytest.raises(SkillAuthError, match="凭证已失效"):
+            await service._try_call_with_tools(
+                prompt_or_messages="test",
+                model_alias="main",
+                task_id="t",
+                trace_id="t",
+                metadata=_make_metadata_with_tools(),
+                worker_capability="llm_generation",
+                tool_profile="standard",
+            )
+        assert call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_auth_error_raises_through_public_call(self) -> None:
+        """公开入口 call() 同样向上抛 —— 不得回落到 FallbackManager(echo)。"""
+        from octoagent.gateway.services.llm_service import LLMService
+        from octoagent.skills.exceptions import SkillAuthError
+
+        async def mock_run(**kw: Any) -> SkillRunResult:
+            return _make_auth_failed_result()
+
+        service = LLMService(skill_runner=MagicMock(run=mock_run))
+        with pytest.raises(SkillAuthError):
+            await service.call(
+                "test",
+                model_alias="main",
+                task_id="t",
+                trace_id="t",
+                metadata=_make_metadata_with_tools(),
+            )
+
+    @pytest.mark.asyncio
+    async def test_auth_error_skips_degraded_retry(self) -> None:
+        """凭证失效不触发降级重试（换模型打的还是同一个失效凭证链路）。"""
+        from octoagent.gateway.services.llm_service import LLMService
+        from octoagent.skills.exceptions import SkillAuthError
+
+        call_count = 0
+
+        async def mock_run(**kw: Any) -> SkillRunResult:
+            nonlocal call_count
+            call_count += 1
+            return _make_auth_failed_result()
+
+        service = LLMService(skill_runner=MagicMock(run=mock_run))
+        with patch(
+            "octoagent.gateway.services.llm_service.SkillManifest",
+            _manifest_with_fallback,
+        ):
+            with pytest.raises(SkillAuthError):
+                await service._try_call_with_tools(
+                    prompt_or_messages="test",
+                    model_alias="main",
+                    task_id="t",
+                    trace_id="t",
+                    metadata=_make_metadata_with_tools(),
+                    worker_capability="llm_generation",
+                    tool_profile="standard",
+                )
+        assert call_count == 1, "AUTH_ERROR 不得进入降级重试分支"
+
+    @pytest.mark.asyncio
+    async def test_degraded_retry_hits_auth_error_propagates(self) -> None:
+        """首次失败可降级（step_limit），降级重试中凭证失效也必须向上抛。"""
+        from octoagent.gateway.services.llm_service import LLMService
+        from octoagent.skills.exceptions import SkillAuthError
+
+        call_count = 0
+
+        async def mock_run(**kw: Any) -> SkillRunResult:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return _make_failed_result("step_limit_exceeded")
+            return _make_auth_failed_result()
+
+        service = LLMService(skill_runner=MagicMock(run=mock_run))
+        with patch(
+            "octoagent.gateway.services.llm_service.SkillManifest",
+            _manifest_with_fallback,
+        ):
+            with pytest.raises(SkillAuthError):
+                await service._try_call_with_tools(
+                    prompt_or_messages="test",
+                    model_alias="main",
+                    task_id="t",
+                    trace_id="t",
+                    metadata=_make_metadata_with_tools(),
+                    worker_capability="llm_generation",
+                    tool_profile="standard",
+                )
+        assert call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_directly_raised_auth_error_propagates(self) -> None:
+        """runner 直接抛 SkillAuthError 时不得被宽捕获吞成 None→Echo。
+
+        当前主路径 runner 以 FAILED(AUTH_ERROR) 返回而非抛出，此测试
+        钉住未来路径（Codex review LOW）。
+        """
+        from octoagent.gateway.services.llm_service import LLMService
+        from octoagent.skills.exceptions import SkillAuthError
+
+        async def mock_run(**kw: Any) -> SkillRunResult:
+            raise SkillAuthError("provider 凭证已失效（HTTP 401）")
+
+        service = LLMService(skill_runner=MagicMock(run=mock_run))
+        with pytest.raises(SkillAuthError):
+            await service._try_call_with_tools(
+                prompt_or_messages="test",
+                model_alias="main",
+                task_id="t",
+                trace_id="t",
+                metadata=_make_metadata_with_tools(),
+                worker_capability="llm_generation",
+                tool_profile="standard",
+            )
+
+    @pytest.mark.asyncio
+    async def test_auth_error_full_chain_real_runner(self) -> None:
+        """真 SkillRunner + 401 model client → call() 抛 SkillAuthError 且只调 1 次。
+
+        把 runner 快速失败与 llm_service 传播真实连起来（不 mock runner）。
+        """
+        from octoagent.gateway.services.llm_service import LLMService
+        from octoagent.provider import ProviderLLMCallError
+        from octoagent.skills.exceptions import SkillAuthError
+        from octoagent.skills.runner import SkillRunner
+
+        from .conftest import MockEventStore, MockToolBroker, QueueModelClient
+
+        client = QueueModelClient(
+            [
+                ProviderLLMCallError(
+                    "api_error",
+                    "HTTP 401: refresh_token_reused",
+                    retriable=True,
+                    status_code=401,
+                )
+            ]
+        )
+        runner = SkillRunner(
+            model_client=client,
+            tool_broker=MockToolBroker(),
+            event_store=MockEventStore(),
+        )
+        service = LLMService(skill_runner=runner)
+
+        with pytest.raises(SkillAuthError, match="凭证已失效"):
+            await service.call(
+                "hello",
+                model_alias="main",
+                task_id="task-auth-chain",
+                trace_id="trace-auth-chain",
+                metadata=_make_metadata_with_tools(),
+            )
+        assert client.calls == 1

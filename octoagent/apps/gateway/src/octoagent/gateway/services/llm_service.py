@@ -21,6 +21,8 @@ from octoagent.provider import (
     TokenUsage,
 )
 from octoagent.skills import (
+    ErrorCategory,
+    SkillAuthError,
     SkillDiscovery,
     SkillExecutionContext,
     SkillManifest,
@@ -447,6 +449,10 @@ class LLMService:
                 skill_input={"objective": prompt},
                 prompt=prompt,
             )
+        except SkillAuthError:
+            # 凭证失效必须向上传播（与下方 AUTH_ERROR 分支同语义）：
+            # 落进宽捕获会变成 return None → FallbackManager(Echo) 假成功。
+            raise
         except Exception:
             return None
 
@@ -474,6 +480,16 @@ class LLMService:
             # --- Feature 062: Error UX 友好中文提示模板 (T1.16) ---
             # 按 ErrorCategory 分类生成用户可读的错误提示
             if result.status == SkillRunStatus.FAILED:
+                # 凭证失效是基础设施级不可恢复错误：不得转换成道歉文案的
+                # "成功" ModelCallResult——那会让 task 以正常回复收场、掩盖
+                # 凭证断链（2026-06-12 production 实测表现为任务永远到不了
+                # FAILED 终态）。以异常向上传播，由 process_task_with_llm 的
+                # _handle_llm_failure 写 MODEL_CALL_FAILED 事件并把 task 推进
+                # FAILED。
+                if result.error_category == ErrorCategory.AUTH_ERROR:
+                    raise SkillAuthError(
+                        result.error_message or "provider 凭证已失效，请重新授权"
+                    )
                 error_msg = result.error_message or "执行过程中遇到问题"
                 category = result.error_category.value if result.error_category else "unknown"
                 usage = result.usage or {}
@@ -560,6 +576,13 @@ class LLMService:
                             skill_input={"objective": prompt},
                             prompt=prompt,
                         )
+                        # 降级重试期间凭证失效同样必须向上传播（见上方
+                        # AUTH_ERROR 注释），不能落进"返回原始错误"分支。
+                        if retry_result.error_category == ErrorCategory.AUTH_ERROR:
+                            raise SkillAuthError(
+                                retry_result.error_message
+                                or "provider 凭证已失效，请重新授权"
+                            )
                         if retry_result.status == SkillRunStatus.SUCCEEDED and retry_result.output:
                             r_meta = retry_result.output.metadata
                             r_usage = (
@@ -593,6 +616,8 @@ class LLMService:
                                 is_fallback=True,
                                 fallback_reason="degraded_retry",
                             )
+                    except SkillAuthError:
+                        raise
                     except Exception:
                         pass  # 降级重试失败，返回原始错误
 

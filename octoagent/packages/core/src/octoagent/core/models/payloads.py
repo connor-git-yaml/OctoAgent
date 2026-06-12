@@ -117,6 +117,11 @@ class ModelCallFailedPayload(BaseModel):
     model_name: str = Field(default="", description="尝试调用的模型名称")
     provider: str = Field(default="", description="尝试使用的 provider")
     is_fallback: bool = Field(default=False, description="失败时是否已在降级模式")
+    # 凭证断链修复（2026-06-12）：结构化失败分类，供 worker_runtime 等上游
+    # 判定可重试性——比按 error_type 类名字符串匹配稳定（异常类改名不会
+    # 静默失效）。"auth_error" = provider 凭证失效（401/403 且自动刷新失败），
+    # 不可重试；空字符串 = 未分类（历史事件 / 普通失败）。
+    error_category: str = Field(default="", description="失败分类（auth_error / 空）")
 
 
 class ContextCompactionCompletedPayload(BaseModel):
