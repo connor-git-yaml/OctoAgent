@@ -25,8 +25,6 @@ from octoagent.core.models import (
     A2AMessageItem,
     ActionRequestEnvelope,
     ActionResultEnvelope,
-    AgentProfile,
-    AgentProfileScope,
     AgentRuntime,
     AgentRuntimeItem,
     AgentRuntimeRole,
@@ -43,7 +41,6 @@ from octoagent.core.models import (
     ControlPlaneDocument,
     ControlPlaneTargetRef,
     MemoryNamespaceItem,
-    NormalizedMessage,
     Project,
     RecallFrameItem,
     SessionContextState,
@@ -55,11 +52,11 @@ from octoagent.core.models import (
     WorkerProfile,
     WorkerProfileStatus,
 )
-from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET, resolve_permission_preset
+from octoagent.core.models.agent_context import resolve_permission_preset
 from octoagent.provider.dx.backup_service import BackupService
 from ulid import ULID
 
-from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
+from ._base import ControlPlaneActionError, DomainServiceBase
 from .session_projection_helpers import SessionProjectionMixin, _AUDIT_TASK_ID
 from ..agent_context import build_projected_session_id
 from ..startup_bootstrap import (

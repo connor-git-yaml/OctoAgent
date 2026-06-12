@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import platform
-import webbrowser
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,9 +10,8 @@ from typing import TYPE_CHECKING, Any
 # F108a W5：httpx 仅作 patch 锚点保留——test_capability_pack_tools.py 经字符串路径
 # "octoagent.gateway.services.capability_pack.httpx.AsyncClient" 解析到 httpx 模块
 # 对象后全局 patch；主文件自身已无直接 httpx 引用（browser / web 簇已迁 mixin）。
-import httpx
+import httpx  # noqa: F401 -- patch 锚点：test_capability_pack_tools patch capability_pack.httpx.AsyncClient
 from octoagent.core.models import (
-    ActorType,
     BuiltinToolAvailabilityStatus,
     BundledCapabilityPack,
     BundledSkillDefinition,
@@ -23,23 +19,15 @@ from octoagent.core.models import (
     DelegationTargetKind,
     DynamicToolSelection,
     EffectiveToolUniverse,
-    Event,
-    EventCausality,
-    EventType,
     NormalizedMessage,
     OwnerProfile,
-    ProjectBindingType,
     RuntimeKind,
-    SubagentDelegation,
-    TurnExecutorKind,
     ToolAvailabilityExplanation,
     ToolIndexQuery,
     WorkerBootstrapFile,
     WorkerCapabilityProfile,
     WorkerProfileStatus,
-    WorkStatus,
 )
-from octoagent.core.models.payloads import UserMessagePayload
 from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
 from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 from octoagent.skills import SkillDiscovery
@@ -91,14 +79,13 @@ def _profile_allows(tool_profile: str, context_profile: str) -> bool:
 
 
 from .builtin_tools._browser_support import (
-    _BrowserLinkRef,
     _BrowserSessionState,
 )
 # F108a W5：5 个职责簇 mixin（browser / web / media / worker_plan / availability）。
 # _ssrf_request_hook 经 browser 模块单一定义后在此 re-export，保外部 import 路径不变
 # （e2e_live/test_e2e_ssrf_guard.py 等 from capability_pack import _ssrf_request_hook）。
 from .capability_pack_availability import ToolAvailabilityMixin
-from .capability_pack_browser import BrowserSessionMixin, _ssrf_request_hook
+from .capability_pack_browser import BrowserSessionMixin, _ssrf_request_hook  # noqa: F401 -- re-export：test_e2e_ssrf_guard 直接 from capability_pack import
 from .capability_pack_media import MediaInspectMixin
 from .capability_pack_web import WebSearchMixin
 from .capability_pack_worker_plan import WorkerPlanMixin
@@ -1073,8 +1060,7 @@ class CapabilityPackService(
         plan_id: str = "",
         extra_control_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        from datetime import UTC, datetime
-
+        
         if self._task_runner is None:
             raise RuntimeError("task runner is not bound for child task launch")
         # F098 Phase C: Worker→Worker A2A 解禁（H2 完整对等性）。

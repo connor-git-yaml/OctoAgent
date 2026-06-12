@@ -38,7 +38,6 @@ from octoagent.core.models import (
     CapabilityPackDocument,
     ControlPlaneCapability,
     ControlPlaneDegradedState,
-    ControlPlaneResourceRef,
     ControlPlaneSupportStatus,
     ControlPlaneTargetRef,
     NormalizedMessage,
