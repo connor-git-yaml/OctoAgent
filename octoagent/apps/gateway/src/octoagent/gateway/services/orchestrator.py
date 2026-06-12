@@ -338,8 +338,13 @@ class SingleWorkerRouter:
         )
 
 
-class LLMWorkerAdapter:
-    """默认 LLM worker 适配器。"""
+class WorkerRuntimeAdapter:
+    """默认 worker 调度适配器（WorkerRuntime 薄包装）。
+
+    F108a W2 C3（D11）：原名 LLMWorkerAdapter 误导——WorkerRuntime 不限于 LLM
+    生成，还涵盖 Docker 后端 / 工具执行 / 取消注册；capability 默认
+    "llm_generation" 但可配置。
+    """
 
     def __init__(
         self,
@@ -428,7 +433,7 @@ class OrchestratorService(A2ADispatchMixin):
             self._execution_console.bind_a2a_notifier(self)
 
         default_workers = [
-            LLMWorkerAdapter(
+            WorkerRuntimeAdapter(
                 store_group,
                 sse_hub,
                 llm_service,

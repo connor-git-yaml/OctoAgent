@@ -44,7 +44,7 @@
 │     TaskService         InlineReply            DispatchEnvelope      │
 │     .process_task        LLMService                   │              │
 │     _with_llm()              │                        ▼              │
-│         │                    │               LLMWorkerAdapter        │
+│         │                    │           WorkerRuntimeAdapter        │
 │         │                    │                .handle()              │
 │         ▼                    ▼                       │              │
 │    AgentContext         TaskService                   ▼              │
@@ -273,14 +273,14 @@ class OrchestratorService:
         self._policy_gate = OrchestratorPolicyGate(approval_manager)
         self._router = SingleWorkerRouter()
         self._delegation_plane = delegation_plane
-        self._workers = {"llm_generation": LLMWorkerAdapter(...)}
+        self._workers = {"llm_generation": WorkerRuntimeAdapter(...)}
 ```
 
 核心组件：
 - `_policy_gate`: 高风险 Gate（检查审批状态）
 - `_router`: 单 Worker 路由器（backup，通常不使用）
 - `_delegation_plane`: 统一委派平面
-- `_workers`: Worker 注册表（默认只有 `LLMWorkerAdapter`）
+- `_workers`: Worker 注册表（默认只有 `WorkerRuntimeAdapter`，F108a W2 前名 LLMWorkerAdapter）
 
 ### 3.2 OrchestratorPolicyGate
 

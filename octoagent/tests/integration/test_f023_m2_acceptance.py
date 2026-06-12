@@ -390,7 +390,7 @@ async def test_a2a_task_message_can_drive_worker_runtime_and_return_result(
         task_id, created = await task_service.create_task(message)
         assert created is True
 
-        from octoagent.gateway.services.orchestrator import LLMWorkerAdapter, SingleWorkerRouter
+        from octoagent.gateway.services.orchestrator import SingleWorkerRouter, WorkerRuntimeAdapter
 
         request = OrchestratorRequest(
             task_id=task_id,
@@ -401,7 +401,7 @@ async def test_a2a_task_message_can_drive_worker_runtime_and_return_result(
         task_message = build_task_message(envelope, context_id="f023-a2a")
         restored = dispatch_envelope_from_task_message(task_message)
 
-        worker = LLMWorkerAdapter(
+        worker = WorkerRuntimeAdapter(
             store_group,
             sse_hub,
             InstantLLMService(),
@@ -590,7 +590,7 @@ async def test_a2a_task_message_timeout_maps_to_error_and_failed_state(
         task_id, created = await task_service.create_task(message)
         assert created is True
 
-        from octoagent.gateway.services.orchestrator import LLMWorkerAdapter, SingleWorkerRouter
+        from octoagent.gateway.services.orchestrator import SingleWorkerRouter, WorkerRuntimeAdapter
 
         request = OrchestratorRequest(
             task_id=task_id,
@@ -601,7 +601,7 @@ async def test_a2a_task_message_timeout_maps_to_error_and_failed_state(
         task_message = build_task_message(envelope, context_id="f023-a2a-timeout")
         restored = dispatch_envelope_from_task_message(task_message)
 
-        worker = LLMWorkerAdapter(
+        worker = WorkerRuntimeAdapter(
             store_group,
             sse_hub,
             SlowLLMService(delay_s=0.3),
