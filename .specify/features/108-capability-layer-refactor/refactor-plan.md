@@ -42,7 +42,7 @@
 
 ### W2：coordinator 瘦身 + D11（预计 3 commits）
 - **C1** `_build_registry`（1335-1889，555 行纯声明）→ `action_registry.py`（自由函数 `build_action_registry()`）。**前置验证（O5）**：抽取前 grep 确认 1335-1889 体内零 `self.` 捕获（`definition()` 闭包已确认纯构造，但 555 行未全量验证）；若有 self 引用则参数化传入或降级为留主类。
-- **C2** Telegram 适配（248-358）→ `telegram_command_parser.py`（registry 查询经参数传入）；簇 M `_ensure_default_main_agent_bootstrap`（1061-1177）评估移 `startup_bootstrap` 域（若耦合面大则留，wave 内决策并记录）。
+- **C2** Telegram 适配（248-358）→ **实施形态：`telegram_commands.py` + `TelegramCommandMixin`**（W2 双评审 Opus O1 确认优于计划的"参数传入自由函数"——后者会破坏测试实例直调锚点 AC-2）；簇 M `_ensure_default_main_agent_bootstrap`（1061-1177）实测耦合面大（stores×9 + 事务），**留 coordinator**（计划授权路径，w2-ledger 记录）。
 - **C3** D11：`LLMWorkerAdapter` → `WorkerRuntimeAdapter`（orchestrator.py 2 处，零外部引用）。
 - 编排根 `execute_action`/`get_snapshot`/`_dispatch_*` 全留。coordinator 1889→~1100。
 
