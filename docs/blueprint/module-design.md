@@ -53,6 +53,7 @@ octoagent/
 - SQLite store（event-sourcing + projections）
 - 迁移与 schema version
 - 幂等键处理
+- behavior_workspace **package**（F108a W1：原 1741 行单文件拆 8 子模块 `_types/onboarding_state/budget/paths/skeleton/template/validate/resolver` + `write`（D12 两段式写核 prepare/commit）；`__init__` 全量 re-export 保 import 路径零变化）
 
 关键接口：
 - `TaskStore.create_task(...)`
@@ -206,6 +207,11 @@ config_schema:
 
 职责：工具扫描与 schema 反射、ToolIndex 构建(LanceDB)、ToolBroker(执行/超时/结果压缩)、check_permission(权限决策)、PathAccessPolicy(路径访问控制)、Core/Deferred 分层(ToolTier + tool_search)、ToolResult 结构化回灌。
 
+F108 D9 定调：ToolBroker 是**工具注册表 SoT + 单次执行编排**；`permission.py` 持
+`ApprovalOverrideCacheProtocol` + 参考内存实现 `_ApprovalOverrideMemoryCache`（F108b W6 自
+capability_pack 下沉，生产 TTL 实现在 packages/policy）。三层职责边界详见
+[codebase-architecture/harness-and-context.md](../codebase-architecture/harness-and-context.md) §2.8。
+
 ### 9.9 packages/memory
 
 职责：
@@ -267,6 +273,11 @@ config_schema:
 - **ApprovalGate**：session allowlist + SSE；F101 production 接入（escalate_permission 真闭环）
 - **DelegationManager**：`max_depth=2` / `max_concurrent=3`（F092 production 构造从 5+ 处收敛到 1 处）
 - **OctoHarness**（F087）：抽象 4 个 DI 钩子（`credential_store` / `secret_store` / `transport_factory` / `clock`），暴露给 e2e_live test suite
+
+F108 D9 定调：harness 是**纯装配层**（11 段 bootstrap 构造与注入，零业务逻辑）；结构不动
+（hermetic 测试逐段直调钉住，main.py 唯一生产 caller）。gateway services 巨型文件已由 F108a
+拆分（coordinator 1889→1213 + action_registry/telegram_commands；setup 2576→1520 三 mixin；
+worker 2101→1298 / session 1847→1503；capability_pack 2174→1523 五业务 mixin）。
 
 退役（F084 Phase 4）：BootstrapSession / BootstrapOrchestrator / UserMdRenderer / bootstrap_integrity / bootstrap_commands CLI（净删 ~2400 行 dead code）。重装路径：清 `~/.octoagent/data + behavior` + `octo update` 重启（bootstrap 完成由 USER.md 实质填充判定，不依赖任何旧表/状态机）。
 

@@ -136,6 +136,40 @@ F123 新增 `harness/url_safety.py` 作出站方向的统一安全控制（与 T
 - **已知 limitation**：DNS rebinding（TOCTOU）需连接级 IP pinning（pre-flight 无法根治，
   列 M6/M7 egress 域）；出站 web/browser tool 结果的**入站内容**扫描已由 F124 覆盖。
 
+### 2.8 工具三层职责边界与跨层契约（F108 D9 收口定调）
+
+F108 impact 分析（`.specify/features/108-capability-layer-refactor/`）实测三层 import 方向干净
+（broker 零对上依赖；capability_pack/harness 高→低），D9 的实质不是层次倒置而是
+capability_pack 超载——F108a W5 已把 browser/web 搜索/TTS/文件检视业务逻辑拆出治理层。
+定调后的职责边界：
+
+| 层 | 模块 | 职责 | 不做什么 |
+|----|------|------|---------|
+| **执行运行时** | `packages/tooling`（ToolBroker） | 单次工具调用编排（事件/权限/hook/超时/finalize）；**工具注册表 SoT**（register/discover/ToolMeta） | 不决定"哪些工具可用"；不含业务逻辑 |
+| **治理面** | `gateway/services/capability_pack.py`（+5 业务 mixin） | 工具选择/挂载编排（mount/defer/blocked 三态）、可用性裁决、pack **投影**（BundledCapabilityPack = registry 的二次表示）、ToolDeps 装配 | 不持有 registry SoT；业务逻辑在 mixin（出宿主） |
+| **装配层** | `gateway/harness/octo_harness.py` | 纯 wiring：11 段 bootstrap 构造与注入（broker→cap_pack→gate→executors） | 零业务逻辑；**结构不动**（hermetic 测试钉住 6 个 `_bootstrap_*` 符号 + main.py 唯一 caller） |
+
+跨层契约现状（有意设计，文档化防误判为债）：
+
+- **审批 override 缓存三层共享同一实例**：协议 `ApprovalOverrideCacheProtocol` 与参考内存实现
+  `_ApprovalOverrideMemoryCache`（无 TTL fallback）在 `tooling/permission.py`（F108b W6 自
+  capability_pack 下沉）；生产实例是 `policy.ApprovalOverrideCache`（TTL 版），由 harness 构造、
+  注入 broker 与 cap_pack——两实现语义不同（TTL），不是合并对象。
+- **截断双层**：通用大输出截断 = broker after-hook（`LargeOutputHandler`，harness 装配，
+  含 artifact 卸载）；browser/web 工具在 capability 层另有内容内自截（html 500k 硬截 /
+  `_truncate_text`）。统一策略 = 行为变更，刻意不在 F108 做。
+- **错误包装契约**：capability 层业务方法直接 raise（多种异常类型），由 `broker.execute`
+  except 兜底包装成 `ToolResult(is_error=True)`——隐式契约，新增工具沿用此约定。
+- **双 safety-scan 分工**：工具结果内容扫描在 broker（`ContentThreatScanProtocol` 注入，F124）；
+  出站 URL/SSRF 预检在 capability 层（`url_safety` + `_ssrf_request_hook`，F123）。语义不同非重复。
+
+设计原则（M6 调研采纳，作不变量约束而非待办）：
+
+- **prefix-cache 工具侧不变量**（Manus 输入）：工具集稳定排序 + 静态注入；可见性收敛到
+  Policy 决策（返回 policy-deny 而非删 schema）。禁照搬纯 logit_bias（三 transport 不统一）。
+- **决策环扩展缝** = broker 的 BeforeHook/AfterHook（az-1）：已是具名扩展点，
+  不照搬 Agent Zero 29 点全自动包裹（违 Constitution #9）。
+
 ## 3. Context 层组件
 
 ```
