@@ -65,7 +65,7 @@ from octoagent.gateway.services.memory.retrieval_platform_service import (
 )
 from ulid import ULID
 
-from ._base import ControlPlaneActionError, ControlPlaneContext
+from ._base import ControlPlaneActionError, ControlPlaneContext, ControlPlaneServiceRegistry
 
 from .action_registry import build_action_registry
 from .agent_service import AgentProfileDomainService
@@ -162,18 +162,18 @@ class ControlPlaneService(TelegramCommandMixin):
         )
         self._worker_service = WorkerProfileDomainService(self._ctx)
 
-        # 注册 service_registry 供跨 service 调用
-        self._ctx.service_registry = {
-            "agent": self._agent_service,
-            "automation": self._automation_service,
-            "import": self._import_service,
-            "mcp": self._mcp_service,
-            "memory": self._memory_service,
-            "session": self._session_service,
-            "setup": self._setup_service,
-            "work": self._work_service,
-            "worker": self._worker_service,
-        }
+        # 注册跨 service 调用注册表（F108b W7：构造期 typed 对象，缺字段即 TypeError）
+        self._ctx.services = ControlPlaneServiceRegistry(
+            agent=self._agent_service,
+            automation=self._automation_service,
+            import_=self._import_service,
+            mcp=self._mcp_service,
+            memory=self._memory_service,
+            session=self._session_service,
+            setup=self._setup_service,
+            work=self._work_service,
+            worker=self._worker_service,
+        )
 
         # 汇总 action 路由
         all_services = [
@@ -209,16 +209,16 @@ class ControlPlaneService(TelegramCommandMixin):
 
     def bind_automation_scheduler(self, scheduler: Any) -> None:
         self._automation_scheduler = scheduler
-        self._automation_service._automation_scheduler = scheduler
+        self._automation_service.bind_automation_scheduler(scheduler)
 
     def bind_proxy_manager(self, proxy_manager: Any | None) -> None:
         self._proxy_manager = proxy_manager
-        self._setup_service._proxy_manager = proxy_manager
-        self._mcp_service._proxy_manager = proxy_manager
+        self._setup_service.bind_proxy_manager(proxy_manager)
+        self._mcp_service.bind_proxy_manager(proxy_manager)
 
     def bind_mcp_installer(self, installer: Any) -> None:
         self._mcp_installer = installer
-        self._mcp_service._mcp_installer = installer
+        self._mcp_service.bind_mcp_installer(installer)
 
     # ------------------------------------------------------------------
     # Action Registry

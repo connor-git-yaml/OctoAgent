@@ -75,6 +75,10 @@ class SetupDomainService(
         self._telegram_state_store = telegram_state_store
         self._update_status_store = update_status_store
 
+    def bind_proxy_manager(self, proxy_manager: Any | None) -> None:
+        """startup 期延迟资源绑定（F108b W7：替代 coordinator 直捅私有属性）。"""
+        self._proxy_manager = proxy_manager
+
     # ══════════════════════════════════════════════════════════════
     #  Action / Document Routes
     # ══════════════════════════════════════════════════════════════
@@ -351,10 +355,10 @@ class SetupDomainService(
         project_selector = await self.get_project_selector()
         config = await self.get_config_schema()
         diagnostics = await self.get_diagnostics_summary()
-        agent_profiles = await self._get_service("agent").get_agent_profiles_document()
-        owner_profile = await self._get_service("agent").get_owner_profile_document()
+        agent_profiles = await self._agent_domain.get_agent_profiles_document()
+        owner_profile = await self._agent_domain.get_owner_profile_document()
         capability_pack = await self.get_capability_pack_document()
-        policy_profiles = await self._get_service("agent").get_policy_profiles_document()
+        policy_profiles = await self._agent_domain.get_policy_profiles_document()
         skill_governance = await self.get_skill_governance_document()
         secret_audit = await self._safe_secret_audit(
             selected_project.project_id if selected_project else None
@@ -828,7 +832,7 @@ class SetupDomainService(
                 )
             except Exception as exc:
                 validation_errors.append(str(exc))
-        agent_profiles = await self._get_service("agent").get_agent_profiles_document()
+        agent_profiles = await self._agent_domain.get_agent_profiles_document()
         active_agent_profile = self._resolve_active_agent_profile_payload(
             agent_profiles=agent_profiles,
             selected_project=selected_project,
@@ -936,7 +940,7 @@ class SetupDomainService(
         agent_request_payload: dict[str, Any] | None = None
         agent_profile_patch = draft.get("agent_profile", {})
         if isinstance(agent_profile_patch, dict) and agent_profile_patch:
-            agent_profiles = await self._get_service("agent").get_agent_profiles_document()
+            agent_profiles = await self._agent_domain.get_agent_profiles_document()
             active_agent_profile = self._resolve_active_agent_profile_payload(
                 agent_profiles=agent_profiles,
                 selected_project=selected_project,
@@ -986,7 +990,7 @@ class SetupDomainService(
                 data["saved_secrets"] = secret_result
 
         if policy_profile_id:
-            policy_result = await self._get_service("agent")._handle_policy_profile_select(
+            policy_result = await self._agent_domain._handle_policy_profile_select(
                 request.model_copy(
                     update={
                         "action_id": "policy_profile.select",
@@ -998,7 +1002,7 @@ class SetupDomainService(
             resource_refs.extend(policy_result.resource_refs)
 
         if agent_request_payload is not None:
-            agent_result = await self._get_service("agent")._handle_agent_profile_save(
+            agent_result = await self._agent_domain._handle_agent_profile_save(
                 request.model_copy(
                     update={
                         "action_id": "agent_profile.save",
@@ -1097,7 +1101,7 @@ class SetupDomainService(
                 },
             }
         )
-        oauth_result = await self._get_service("mcp")._handle_provider_oauth_openai_codex(
+        oauth_result = await self._mcp_domain._handle_provider_oauth_openai_codex(
             oauth_request
         )
         oauth_data: dict[str, Any] = dict(oauth_result.data) if oauth_result.data else {}

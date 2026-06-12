@@ -57,6 +57,14 @@ class McpDomainService(DomainServiceBase):
         self._mcp_installer = mcp_installer
         self._proxy_manager = proxy_manager
 
+    def bind_mcp_installer(self, installer: Any | None) -> None:
+        """startup 期延迟资源绑定（F108b W7：替代 coordinator 直捅私有属性）。"""
+        self._mcp_installer = installer
+
+    def bind_proxy_manager(self, proxy_manager: Any | None) -> None:
+        """startup 期延迟资源绑定（F108b W7）。"""
+        self._proxy_manager = proxy_manager
+
     # ── action / document routes ─────────────────────────────────
 
     def action_routes(self) -> dict[str, Any]:
@@ -492,7 +500,7 @@ class McpDomainService(DomainServiceBase):
         这里直接委托回 ctx.host（原 ControlPlaneService），
         因为 skill governance 生成逻辑横跨 capability pack / policy 等多个子系统。
         """
-        return await self._get_service("setup").get_skill_governance_document(
+        return await self._setup_domain.get_skill_governance_document(
             selected_project=selected_project,
         )
 

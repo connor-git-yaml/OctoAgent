@@ -9,9 +9,20 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import structlog
+
+if TYPE_CHECKING:
+    from .agent_service import AgentProfileDomainService
+    from .automation_service import AutomationDomainService
+    from .import_service import ImportDomainService
+    from .mcp_service import McpDomainService
+    from .memory_service import MemoryDomainService
+    from .session_service import SessionDomainService
+    from .setup_service import SetupDomainService
+    from .work_service import WorkDomainService
+    from .worker_service import WorkerProfileDomainService
 from octoagent.core.models import (
     ActionRequestEnvelope,
     ActionResultEnvelope,
@@ -34,13 +45,60 @@ class ControlPlaneActionError(RuntimeError):
         self.code = code
 
 
+class ControlPlaneServiceRegistry:
+    """跨 service 调用注册表（F108b W7 / F118 D8：字符串 dict → 构造期 typed 对象）。
+
+    coordinator 在全部 9 个 domain service 实例化后一次性构造注入——
+    缺任何一个字段在构造期即 TypeError（断链从运行期字符串查找前移到构造期）。
+    字段为 concrete service 类型（跨 service 存在私有方法调用，Protocol 收窄会断链）。
+    """
+
+    def __init__(
+        self,
+        *,
+        agent: AgentProfileDomainService,
+        automation: AutomationDomainService,
+        import_: ImportDomainService,
+        mcp: McpDomainService,
+        memory: MemoryDomainService,
+        session: SessionDomainService,
+        setup: SetupDomainService,
+        work: WorkDomainService,
+        worker: WorkerProfileDomainService,
+    ) -> None:
+        self.agent = agent
+        self.automation = automation
+        self.import_ = import_
+        self.mcp = mcp
+        self.memory = memory
+        self.session = session
+        self.setup = setup
+        self.work = work
+        self.worker = worker
+
+    def all_services(self) -> tuple[Any, ...]:
+        """全部 domain service（原 dict 插入序）——automation.create 的 action_id 存在性校验用。"""
+        return (
+            self.agent,
+            self.automation,
+            self.import_,
+            self.mcp,
+            self.memory,
+            self.session,
+            self.setup,
+            self.work,
+            self.worker,
+        )
+
+
 class ControlPlaneContext:
     """所有 domain service 共享的依赖上下文。
 
     封装原 ControlPlaneService.__init__ 中持有的各项依赖，
     domain service 通过 ctx 访问而不是各自持有重复引用。
 
-    service_registry: 延迟注册的 domain service 引用，用于跨 service 调用。
+    services: 跨 service 调用注册表（coordinator 构造后一次性注入，
+    F108b W7 起替代原 service_registry 字符串 dict）。
     """
 
     def __init__(
@@ -77,8 +135,8 @@ class ControlPlaneContext:
         self.policy_engine = policy_engine
         self.update_service = update_service
         self.automation_store = automation_store
-        # 跨 service 调用注册表（coordinator 构建后注入）
-        self.service_registry: dict[str, Any] = {}
+        # 跨 service 调用注册表（coordinator 构建后一次性注入）
+        self.services: ControlPlaneServiceRegistry | None = None
 
 
 class DomainServiceBase:
@@ -95,12 +153,27 @@ class DomainServiceBase:
         self._ctx = ctx
         self._stores = ctx.store_group
 
-    def _get_service(self, name: str) -> Any:
-        """从 service_registry 获取其他 domain service 实例。"""
-        svc = self._ctx.service_registry.get(name)
-        if svc is None:
+    def _require_services(self, name: str) -> ControlPlaneServiceRegistry:
+        """取注册表；未注入时错误语义与原 _get_service 字节级一致（含被查名字）。"""
+        services = self._ctx.services
+        if services is None:
             raise RuntimeError(f"service '{name}' 未在 service_registry 中注册")
-        return svc
+        return services
+
+    @property
+    def _agent_domain(self) -> AgentProfileDomainService:
+        """跨 service 调用：agent domain service（原 _get_service("agent")）。"""
+        return self._require_services("agent").agent
+
+    @property
+    def _mcp_domain(self) -> McpDomainService:
+        """跨 service 调用：mcp domain service（原 _get_service("mcp")）。"""
+        return self._require_services("mcp").mcp
+
+    @property
+    def _setup_domain(self) -> SetupDomainService:
+        """跨 service 调用：setup domain service（原 _get_service("setup")）。"""
+        return self._require_services("setup").setup
 
     def action_routes(self) -> dict[str, Any]:
         """子类实现：返回 {action_id: handler} 映射。"""

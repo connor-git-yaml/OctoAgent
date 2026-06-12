@@ -287,7 +287,8 @@ class AutomationDomainService(DomainServiceBase):
             )
         # action_id 存在性校验：汇总所有 domain service 的 action_routes + coordinator inline
         known_action_ids: set[str] = set()
-        for svc in self._ctx.service_registry.values():
+        _services = self._ctx.services
+        for svc in _services.all_services() if _services is not None else ():
             known_action_ids.update(svc.action_routes().keys())
         # coordinator 的 inline actions（未归属到任何 domain service 的简单处理器）
         known_action_ids.update({
