@@ -154,19 +154,6 @@ class AgentContextPromptAssemblyMixin:
                 "boundary_notes: "
                 f"{self._render_list(owner_profile.boundary_notes, max_chars=220)}"
             ),
-            # AmbientRuntime
-            (
-                "AmbientRuntime:\n"
-                f"current_datetime_local: {ambient_runtime['current_datetime_local']}\n"
-                f"current_date_local: {ambient_runtime['current_date_local']}\n"
-                f"current_time_local: {ambient_runtime['current_time_local']}\n"
-                f"current_weekday_local: {ambient_runtime['current_weekday_local']}\n"
-                f"timezone: {ambient_runtime['timezone']}\n"
-                f"utc_offset: {ambient_runtime['utc_offset']}\n"
-                f"locale: {ambient_runtime['locale']}\n"
-                f"surface: {ambient_runtime['surface']}\n"
-                f"source: {ambient_runtime['source']}"
-            ),
             # BehaviorSystem
             render_behavior_system_block(
                 agent_profile=agent_profile,
@@ -355,6 +342,22 @@ class AgentContextPromptAssemblyMixin:
         # InstructionOverlays（放在 History 中，属于历史上下文类信息）
         # 注意：AgentProfile.instruction_overlays 已在 Core block 中作为单行摘要注入，
         # OwnerOverlay 已在 Context block 中注入，此处无需重复。
+
+        # AmbientRuntime（F108b W8-C2 显式行为变更：自 Block 1 冻结前缀移到 Block 2 尾部。
+        # 秒级时间戳在 core 中段会让整个 system 前缀每秒失效（prefix-cache 命中归零）；
+        # 移到按需块尾部后 Block 1 + Block 2 前段全部可缓存。块内容字节不变，仅位置变。）
+        context_sections.append(
+            "AmbientRuntime:\n"
+            f"current_datetime_local: {ambient_runtime['current_datetime_local']}\n"
+            f"current_date_local: {ambient_runtime['current_date_local']}\n"
+            f"current_time_local: {ambient_runtime['current_time_local']}\n"
+            f"current_weekday_local: {ambient_runtime['current_weekday_local']}\n"
+            f"timezone: {ambient_runtime['timezone']}\n"
+            f"utc_offset: {ambient_runtime['utc_offset']}\n"
+            f"locale: {ambient_runtime['locale']}\n"
+            f"surface: {ambient_runtime['surface']}\n"
+            f"source: {ambient_runtime['source']}"
+        )
 
         # ── 组装最终 blocks ──────────────────────────
         blocks: list[dict[str, str]] = [
