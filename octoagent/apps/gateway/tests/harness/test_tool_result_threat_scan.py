@@ -220,10 +220,13 @@ class TestNoBypassContract:
     """
 
     # 已知 LLM-bound sink 文件 → 期望引用的 render helper（plan §6 函数级清单）
+    # F108b W8（Codex F1）：research handoff sink 自 F113 起实际在
+    # agent_context_prompt_assembly.py（agent_context.py 只剩 re-export）——
+    # 表项同步到真实 sink 文件 + marker 收紧为完整函数名，防 sink 再迁移时假绿。
     _SINKS = {
         "packages/skills/src/octoagent/skills/provider_model_client.py": "render_tool_result_for_llm",
         "apps/gateway/src/octoagent/gateway/services/session_memory_extractor.py": "render_persisted_tool_turn_for_llm",
-        "apps/gateway/src/octoagent/gateway/services/agent_context.py": "render_",
+        "apps/gateway/src/octoagent/gateway/services/agent_context_prompt_assembly.py": "render_tool_result_for_llm",
     }
 
     @staticmethod

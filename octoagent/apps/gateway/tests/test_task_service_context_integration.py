@@ -411,6 +411,13 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     assert "AmbientRuntime:" in joined
     assert "timezone: UTC" in joined
     assert "current_weekday_local:" in joined
+    # F108b W8-C2（Codex F2）：AmbientRuntime 已挪出 Block 1 冻结前缀——
+    # 首个 system block 不得含它；后续 block 必须完整保留（prefix-cache 行为变更锚）
+    _first_block = str(prompt[0].get("content", ""))
+    assert "AmbientRuntime:" not in _first_block
+    _later_joined = "\n".join(str(item.get("content", "")) for item in prompt[1:])
+    assert "AmbientRuntime:" in _later_joined
+    assert "current_datetime_local:" in _later_joined
     assert "之前已经确认 Alpha 的关键约束和当前里程碑" in joined
     assert "MemoryRuntime:" in joined
     assert "mode: hint_first" in joined
