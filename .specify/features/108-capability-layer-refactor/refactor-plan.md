@@ -48,7 +48,7 @@
 
 ### W3：setup_service 拆分（预计 3 commits）
 - **C1** F 簇 review/risk 引擎（1701-2150+2223-2292，~520 行）→ `setup_review.py` `SetupReviewMixin`。
-- **C2** E 簇 config/secret/env IO（~470 行）→ `setup_config_io.py` `SetupConfigIOMixin` + 4 个静态 → `setup_helpers.py`。
+- **C2** E 簇 config/secret/env IO（~470 行）→ `setup_config_io.py` `SetupConfigIOMixin`；**statics 随簇走/留主类（不建 setup_helpers.py）**——保调用点字节零变化（W3 实施决策，w3-ledger 偏离 #1）。
 - **C3** D 簇 skill selection（1311-1434）→ `setup_skill_selection.py` mixin。
 - 红线：`_cp_pkg` 间接引用（57/2383）不动；lazy import（2346/2457/2461）原位；编排根（`get_setup_governance_document`/`_handle_setup_apply`/`get_diagnostics_summary` 等）留主类。2576→~1300。
 
