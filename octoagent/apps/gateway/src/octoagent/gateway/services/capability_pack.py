@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import html
 import os
 import platform
-import re
-import shutil
 import webbrowser
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
-from urllib.parse import parse_qs, unquote, urlparse
 
+# F108a W5：httpx 仅作 patch 锚点保留——test_capability_pack_tools.py 经字符串路径
+# "octoagent.gateway.services.capability_pack.httpx.AsyncClient" 解析到 httpx 模块
+# 对象后全局 patch；主文件自身已无直接 httpx 引用（browser / web 簇已迁 mixin）。
 import httpx
 from octoagent.core.models import (
-    WORK_TERMINAL_STATUSES,
     ActorType,
     BuiltinToolAvailabilityStatus,
     BundledCapabilityPack,
@@ -42,7 +40,6 @@ from octoagent.core.models import (
     WorkStatus,
 )
 from octoagent.core.models.payloads import UserMessagePayload
-from octoagent.gateway.harness.url_safety import async_ensure_url_safe
 from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
 from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 from octoagent.skills import SkillDiscovery
@@ -55,7 +52,6 @@ from octoagent.tooling import (
 from octoagent.tooling.models import CoreToolSet, DeferredToolEntry
 
 from .tool_search_tool import create_tool_search_handler
-from pydantic import BaseModel, Field
 from ulid import ULID
 
 import structlog
@@ -70,35 +66,6 @@ if TYPE_CHECKING:
     from .mcp_registry import McpRegistryService
 
 
-async def _ssrf_request_hook(request: httpx.Request) -> None:
-    """httpx request event-hook：对每个出站请求（含每跳 302 重定向目标）重跑
-    SSRF 校验。命中即抛 UnsafeUrlError 中断本次请求，阻止公网 URL 经重定向绕进内网。
-    """
-    await async_ensure_url_safe(str(request.url))
-
-
-class _WorkerPlanAssignment(BaseModel):
-    objective: str = Field(min_length=1)
-    worker_type: str = Field(default="research")
-    target_kind: str = Field(default="subagent")
-    tool_profile: str = Field(default="minimal")
-    title: str = Field(default="")
-    reason: str = Field(default="")
-
-
-class _WorkerPlanProposal(BaseModel):
-    plan_id: str = Field(min_length=1)
-    work_id: str = Field(default="")
-    task_id: str = Field(default="")
-    proposal_kind: str = Field(default="split")
-    objective: str = Field(default="")
-    summary: str = Field(default="")
-    requires_user_confirmation: bool = True
-    assignments: list[_WorkerPlanAssignment] = Field(default_factory=list)
-    merge_candidate_ids: list[str] = Field(default_factory=list)
-    warnings: list[str] = Field(default_factory=list)
-
-
 @dataclass(slots=True)
 class _ResolvedWorkerBinding:
     profile_id: str
@@ -110,9 +77,6 @@ class _ResolvedWorkerBinding:
     selected_tools: list[str]
     source_kind: str
     profile_name: str
-
-
-_WORK_TERMINAL_VALUES = {s.value for s in WORK_TERMINAL_STATUSES}
 
 
 # ToolProfile 等级映射（minimal < standard < privileged）
@@ -129,10 +93,15 @@ def _profile_allows(tool_profile: str, context_profile: str) -> bool:
 from .builtin_tools._browser_support import (
     _BrowserLinkRef,
     _BrowserSessionState,
-    _BrowserSnapshot,
-    _HtmlSnapshotParser,
 )
-from .builtin_tools._deps import truncate_text as _truncate_text
+# F108a W5：5 个职责簇 mixin（browser / web / media / worker_plan / availability）。
+# _ssrf_request_hook 经 browser 模块单一定义后在此 re-export，保外部 import 路径不变
+# （e2e_live/test_e2e_ssrf_guard.py 等 from capability_pack import _ssrf_request_hook）。
+from .capability_pack_availability import ToolAvailabilityMixin
+from .capability_pack_browser import BrowserSessionMixin, _ssrf_request_hook
+from .capability_pack_media import MediaInspectMixin
+from .capability_pack_web import WebSearchMixin
+from .capability_pack_worker_plan import WorkerPlanMixin
 
 
 class _ApprovalOverrideMemoryCache:
@@ -185,7 +154,13 @@ class _ApprovalOverrideMemoryCache:
         return [tn for (rid, tn) in self._cache if rid == agent_runtime_id]
 
 
-class CapabilityPackService:
+class CapabilityPackService(
+    BrowserSessionMixin,
+    WebSearchMixin,
+    MediaInspectMixin,
+    WorkerPlanMixin,
+    ToolAvailabilityMixin,
+):
     """统一管理 bundled tools / skills / ToolIndex / worker bootstrap。"""
 
     def __init__(
@@ -906,146 +881,6 @@ class CapabilityPackService:
             },
         }
 
-    async def review_worker_plan(
-        self,
-        *,
-        work_id: str,
-        objective: str = "",
-    ) -> _WorkerPlanProposal:
-        if self._delegation_plane is None:
-            raise RuntimeError("delegation plane is not bound for worker review")
-        work = await self._stores.work_store.get_work(work_id)
-        if work is None:
-            raise RuntimeError(f"work not found: {work_id}")
-        task = await self._stores.task_store.get_task(work.task_id)
-        if task is None:
-            raise RuntimeError(f"task not found for work: {work.task_id}")
-        descendants = await self._delegation_plane.list_descendant_works(work_id)
-        proposal_objective = objective.strip() or work.title or task.title
-        fragments = self._split_worker_objectives(proposal_objective)
-        if not fragments:
-            fragments = [proposal_objective or "review current work and propose next action"]
-
-        active_descendants = [
-            item for item in descendants if item.status.value not in _WORK_TERMINAL_VALUES
-        ]
-        terminal_descendants = [
-            item for item in descendants if item.status.value in _WORK_TERMINAL_VALUES
-        ]
-        if (
-            descendants
-            and not objective.strip()
-            and terminal_descendants
-            and not active_descendants
-        ):
-            proposal_kind = "merge"
-        elif descendants and objective.strip():
-            proposal_kind = "repartition"
-        else:
-            proposal_kind = "split"
-
-        assignments = (
-            [
-                self._build_worker_assignment(item, index=index)
-                for index, item in enumerate(fragments, 1)
-            ]
-            if proposal_kind in {"split", "repartition"}
-            else []
-        )
-        warnings: list[str] = []
-        if proposal_kind == "merge" and active_descendants:
-            warnings.append("仍有 child works 在运行，当前不能直接 merge。")
-        if proposal_kind == "repartition" and active_descendants:
-            warnings.append("apply 时会先取消当前仍在运行的 child works，再按新计划重划分。")
-        if not descendants and proposal_kind == "merge":
-            warnings.append("当前 work 还没有 child works，merge 不会生效。")
-
-        summary = {
-            "merge": "建议合并已完成的 child works，并回收当前父 work。",
-            "repartition": "建议先收拢现有 child works，再按新计划重新划分 worker。",
-            "split": "建议按可执行子任务拆分给具体 worker，而不是让主 Agent 直接动手。",
-        }[proposal_kind]
-        return _WorkerPlanProposal(
-            plan_id=str(ULID()),
-            work_id=work.work_id,
-            task_id=work.task_id,
-            proposal_kind=proposal_kind,
-            objective=proposal_objective,
-            summary=summary,
-            assignments=assignments,
-            merge_candidate_ids=[item.work_id for item in terminal_descendants],
-            warnings=warnings,
-        )
-
-    async def apply_worker_plan(
-        self,
-        *,
-        plan: dict[str, Any] | _WorkerPlanProposal,
-        actor: str = "control_plane",
-    ) -> dict[str, Any]:
-        if self._delegation_plane is None:
-            raise RuntimeError("delegation plane is not bound for worker apply")
-        if self._task_runner is None:
-            raise RuntimeError("task runner is not bound for worker apply")
-        proposal = (
-            plan
-            if isinstance(plan, _WorkerPlanProposal)
-            else _WorkerPlanProposal.model_validate(plan)
-        )
-        work = await self._stores.work_store.get_work(proposal.work_id)
-        if work is None:
-            raise RuntimeError(f"work not found: {proposal.work_id}")
-        task = await self._stores.task_store.get_task(work.task_id)
-        if task is None:
-            raise RuntimeError(f"task not found for work: {work.task_id}")
-
-        descendants = await self._delegation_plane.list_descendant_works(work.work_id)
-        cancelled_work_ids: list[str] = []
-        if proposal.proposal_kind == "repartition":
-            for child in descendants:
-                if child.status.value in _WORK_TERMINAL_VALUES:
-                    continue
-                await self._task_runner.cancel_task(child.task_id)
-                await self._delegation_plane.cancel_work(
-                    child.work_id,
-                    reason=f"worker_review_repartition:{actor}",
-                )
-                cancelled_work_ids.append(child.work_id)
-        if proposal.proposal_kind == "merge":
-            merged = await self._delegation_plane.merge_work(
-                work.work_id,
-                summary=f"worker review approved by {actor}",
-            )
-            return {
-                "plan_id": proposal.plan_id,
-                "proposal_kind": proposal.proposal_kind,
-                "cancelled_work_ids": cancelled_work_ids,
-                "child_tasks": [],
-                "merged_work": None if merged is None else merged.model_dump(mode="json"),
-            }
-
-        child_tasks = [
-            await self._launch_child_task(
-                parent_task=task,
-                parent_work=work,
-                objective=item.objective,
-                worker_type=item.worker_type,
-                target_kind=item.target_kind,
-                tool_profile=item.tool_profile,
-                title=item.title,
-                spawned_by="worker_review_apply",
-                plan_id=proposal.plan_id,
-            )
-            for item in proposal.assignments
-        ]
-        return {
-            "plan_id": proposal.plan_id,
-            "proposal_kind": proposal.proposal_kind,
-            "cancelled_work_ids": cancelled_work_ids,
-            "child_tasks": child_tasks,
-            "merged_work": None,
-        }
-
     def build_skill_registry_document(self) -> list[BundledSkillDefinition]:
         if self._pack is None:
             return []
@@ -1223,39 +1058,6 @@ class CapabilityPackService:
         if tool_name in cls._profile_first_candidate_tool_names():
             return "profile_first_core"
         return "default_tool_group"
-
-    @staticmethod
-    def _split_worker_objectives(objective: str) -> list[str]:
-        normalized = objective.strip()
-        if not normalized:
-            return []
-        for token in ["\r\n", "；", ";", "。", "，然后", "然后", "并且", "接着", "再"]:
-            normalized = normalized.replace(token, "\n")
-        items = [item.strip(" -\t") for item in normalized.splitlines() if item.strip(" -\t")]
-        if len(items) > 1:
-            return items[:4]
-        return [normalized]
-
-    @staticmethod
-    def _effective_tool_profile_for_objective(*, objective: str) -> str:
-        del objective
-        return "standard"
-
-    def _build_worker_assignment(
-        self,
-        objective: str,
-        *,
-        index: int,
-    ) -> _WorkerPlanAssignment:
-        tool_profile = "standard"
-        return _WorkerPlanAssignment(
-            objective=objective,
-            worker_type="general",
-            target_kind=RuntimeKind.SUBAGENT.value,
-            tool_profile=tool_profile,
-            title=f"worker-{index}",
-            reason="子任务由 worker 处理。",
-        )
 
     async def _launch_child_task(
         self,
@@ -1719,456 +1521,3 @@ class CapabilityPackService:
         if project is None:
             project = await self._stores.project_store.get_default_project()
         return project, None
-
-    def _resolve_tool_availability(
-        self,
-        tool_name: str,
-    ) -> BuiltinToolAvailabilityStatus:
-        mcp_status = (
-            None if self._mcp_registry is None else self._mcp_registry.get_tool_status(tool_name)[0]
-        )
-        if mcp_status is not None:
-            return mcp_status
-        if tool_name == "subagents.spawn" and self._task_runner is None:
-            return BuiltinToolAvailabilityStatus.UNAVAILABLE
-        if tool_name in {"subagents.kill", "subagents.steer"} and self._task_runner is None:
-            return BuiltinToolAvailabilityStatus.UNAVAILABLE
-        if tool_name in {"subagents.list", "subagents.kill", "work.merge", "work.delete"} and (
-            self._delegation_plane is None
-        ):
-            return BuiltinToolAvailabilityStatus.UNAVAILABLE
-        if tool_name in {"sessions.list", "session.status"} and self._task_runner is None:
-            return BuiltinToolAvailabilityStatus.DEGRADED
-        if tool_name in {"browser.status", "browser.snapshot", "browser.act", "browser.close"} and (
-            not self._browser_sessions
-        ):
-            return BuiltinToolAvailabilityStatus.DEGRADED
-        if tool_name in {"mcp.install", "mcp.install_status", "mcp.uninstall"}:
-            if self._mcp_installer is None:
-                return BuiltinToolAvailabilityStatus.UNAVAILABLE
-            return BuiltinToolAvailabilityStatus.AVAILABLE
-        if tool_name in {"mcp.servers.list", "mcp.tools.list", "mcp.tools.refresh"}:
-            if self._mcp_registry is None:
-                return BuiltinToolAvailabilityStatus.UNAVAILABLE
-            if not self._mcp_registry.has_enabled_servers():
-                return BuiltinToolAvailabilityStatus.DEGRADED
-            if self._mcp_registry.last_config_error:
-                return BuiltinToolAvailabilityStatus.DEGRADED
-            return BuiltinToolAvailabilityStatus.AVAILABLE
-        if tool_name == "tts.speak" and not self._tts_binary():
-            return BuiltinToolAvailabilityStatus.INSTALL_REQUIRED
-        # F088 followup: graph_pipeline 依赖 GraphPipelineTool 实例（pipeline_registry
-        # 初始化失败 / startup 顺序异常时未绑定）。降级时不能挂载完整 schema 给 LLM，
-        # 否则 LLM 调用必然 rejected → 重试循环。
-        # _tool_deps._graph_pipeline_tool 由 main.py lifespan 在构造完 GraphPipelineTool
-        # 后注入；构造失败路径不注入，此处 None → UNAVAILABLE。
-        if tool_name == "graph_pipeline":
-            graph_tool = (
-                getattr(self._tool_deps, "_graph_pipeline_tool", None)
-                if self._tool_deps is not None
-                else None
-            )
-            if graph_tool is None:
-                return BuiltinToolAvailabilityStatus.UNAVAILABLE
-        return BuiltinToolAvailabilityStatus.AVAILABLE
-
-    def _resolve_tool_availability_reason(self, tool_name: str) -> str:
-        if self._mcp_registry is not None:
-            mcp_status, mcp_reason, _mcp_hint = self._mcp_registry.get_tool_status(tool_name)
-            if mcp_status is not None:
-                return mcp_reason
-        if tool_name == "subagents.spawn" and self._task_runner is None:
-            return "task_runner_unbound"
-        if tool_name in {"subagents.kill", "subagents.steer"} and self._task_runner is None:
-            return "task_runner_unbound"
-        if tool_name in {"subagents.list", "subagents.kill", "work.merge", "work.delete"} and (
-            self._delegation_plane is None
-        ):
-            return "delegation_plane_unbound"
-        if tool_name in {"sessions.list", "session.status"} and self._task_runner is None:
-            return "execution_runtime_unbound"
-        if tool_name in {"browser.status", "browser.snapshot", "browser.act", "browser.close"} and (
-            not self._browser_sessions
-        ):
-            return "browser_session_missing"
-        if tool_name in {"mcp.install", "mcp.install_status", "mcp.uninstall"}:
-            if self._mcp_installer is None:
-                return "mcp_installer_unbound"
-            return ""
-        if tool_name in {"mcp.servers.list", "mcp.tools.list", "mcp.tools.refresh"}:
-            if self._mcp_registry is None:
-                return "mcp_registry_unbound"
-            if self._mcp_registry.last_config_error:
-                return "mcp_config_invalid"
-            if not self._mcp_registry.has_enabled_servers():
-                return "mcp_server_unconfigured"
-            return ""
-        if tool_name == "tts.speak" and not self._tts_binary():
-            return "system_tts_binary_missing"
-        if tool_name == "graph_pipeline":
-            graph_tool = (
-                getattr(self._tool_deps, "_graph_pipeline_tool", None)
-                if self._tool_deps is not None
-                else None
-            )
-            if graph_tool is None:
-                return "graph_pipeline_tool_unbound"
-        return ""
-
-    def _resolve_tool_install_hint(self, tool_name: str) -> str:
-        if self._mcp_registry is not None:
-            mcp_status, _mcp_reason, mcp_hint = self._mcp_registry.get_tool_status(tool_name)
-            if mcp_status is not None:
-                return mcp_hint
-        if tool_name in {"mcp.install", "mcp.install_status", "mcp.uninstall"}:
-            if self._mcp_installer is None:
-                return "McpInstallerService 未绑定，检查 Gateway 初始化流程"
-            return ""
-        if tool_name in {"mcp.servers.list", "mcp.tools.list", "mcp.tools.refresh"}:
-            if self._mcp_registry is None:
-                return "绑定 McpRegistryService 后才能发现 MCP servers"
-            if self._mcp_registry.last_config_error:
-                return "修复 MCP 配置文件格式后再刷新工具"
-            if not self._mcp_registry.has_enabled_servers():
-                return (
-                    f"在 {self._mcp_registry.config_path} 配置 enabled 的 stdio MCP server 后再刷新"
-                )
-        if tool_name == "tts.speak" and not self._tts_binary():
-            return "安装 macOS say 或 Linux espeak 后再使用 tts.speak"
-        return ""
-
-    # F086 T2 删除：_resolve_tool_entrypoints thin proxy 已迁移为 inline helper
-    # 在 _build_capability_pack 内，避免 O(N²) 查找（每个 tool 单独遍历 registry）。
-    # F084 D1 根治后该函数仅是 ToolRegistry 的 thin wrapper，没有独立价值。
-
-    @staticmethod
-    def _parse_browser_snapshot(
-        base_url: str,
-        html: str,
-        *,
-        link_limit: int = 40,
-    ) -> _BrowserSnapshot:
-        parser = _HtmlSnapshotParser(base_url=base_url, link_limit=link_limit)
-        parser.feed(html)
-        parser.close()
-        return parser.snapshot()
-
-    async def _fetch_browser_page(
-        self,
-        url: str,
-        *,
-        timeout_seconds: float = 30.0,
-    ) -> _BrowserSessionState:
-        # F123：出站 URL SSRF 预检（初始 URL）+ redirect hook 逐跳重校验，
-        # 防止 LLM 诱导抓内网/云元数据，或公网 URL 经 302 绕进内网。
-        normalized_url = await async_ensure_url_safe(url)
-        async with httpx.AsyncClient(
-            timeout=max(0.1, timeout_seconds),
-            headers={"User-Agent": "OctoAgent Browser Tool/0.1"},
-            event_hooks={"request": [_ssrf_request_hook]},
-        ) as client:
-            response = await client.get(normalized_url, follow_redirects=True)
-        html = response.text[:500_000]  # 安全保底，LargeOutputHandler 按上下文比例统一管理
-        final_url = str(response.url)
-        snapshot = self._parse_browser_snapshot(final_url, html)
-        return _BrowserSessionState(
-            session_id="",
-            task_id="",
-            work_id="",
-            current_url=normalized_url,
-            final_url=final_url,
-            status_code=response.status_code,
-            content_type=response.headers.get("content-type", ""),
-            title=snapshot.title,
-            text_content=snapshot.text,
-            html_preview=html[:50_000],
-            body_length=len(response.text),
-            links=snapshot.links,
-        )
-
-    @staticmethod
-    def _browser_session_scope_key(context) -> str:
-        return context.work_id or context.task_id
-
-    @staticmethod
-    def _browser_session_id(context) -> str:
-        scope = context.work_id or context.task_id
-        return f"browser:{scope}"
-
-    def _get_browser_session(self, context) -> _BrowserSessionState | None:
-        return self._browser_sessions.get(self._browser_session_scope_key(context))
-
-    def _require_browser_session(self, context) -> _BrowserSessionState:
-        session = self._get_browser_session(context)
-        if session is None:
-            raise RuntimeError("browser session is not initialized; call browser.open first")
-        return session
-
-    async def _browser_open_session(
-        self,
-        context,
-        url: str,
-        *,
-        timeout_seconds: float = 30.0,
-    ) -> _BrowserSessionState:
-        fetched = await self._fetch_browser_page(url, timeout_seconds=timeout_seconds)
-        session = _BrowserSessionState(
-            session_id=self._browser_session_id(context),
-            task_id=context.task_id,
-            work_id=context.work_id,
-            current_url=url.strip(),
-            final_url=fetched.final_url,
-            status_code=fetched.status_code,
-            content_type=fetched.content_type,
-            title=fetched.title,
-            text_content=fetched.text_content,
-            html_preview=fetched.html_preview,
-            body_length=fetched.body_length,
-            links=fetched.links,
-        )
-        self._browser_sessions[self._browser_session_scope_key(context)] = session
-        return session
-
-    def _close_browser_session(self, context) -> bool:
-        return (
-            self._browser_sessions.pop(self._browser_session_scope_key(context), None) is not None
-        )
-
-    @staticmethod
-    def _browser_session_payload(
-        session: _BrowserSessionState,
-        *,
-        action: str,
-        max_chars: int = 100_000,
-        link_limit: int = 20,
-    ) -> dict[str, Any]:
-        effective_chars = max(100, min(max_chars, 500_000))
-        effective_links = max(1, min(link_limit, 20))
-        return {
-            "action": action,
-            "session_id": session.session_id,
-            "task_id": session.task_id,
-            "work_id": session.work_id,
-            "url": session.current_url,
-            "final_url": session.final_url,
-            "status_code": session.status_code,
-            "content_type": session.content_type,
-            "title": session.title,
-            "body_length": session.body_length,
-            "text_preview": _truncate_text(session.text_content, limit=effective_chars),
-            "links": [
-                {"ref": item.ref, "text": item.text, "url": item.url}
-                for item in session.links[:effective_links]
-            ],
-            "supported_actions": ["click", "navigate", "snapshot", "close"],
-        }
-
-    @staticmethod
-    def _tts_binary() -> str:
-        return shutil.which("say") or shutil.which("espeak") or ""
-
-    def _tts_command(self, *, text: str, voice: str = "") -> list[str]:
-        binary = self._tts_binary()
-        if not binary:
-            raise RuntimeError("system tts binary is unavailable")
-        if Path(binary).name == "say":
-            command = [binary]
-            if voice.strip():
-                command.extend(["-v", voice.strip()])
-            command.append(text)
-            return command
-        command = [binary]
-        if voice.strip():
-            command.extend(["-v", voice.strip()])
-        command.append(text)
-        return command
-
-    async def _search_web(
-        self,
-        *,
-        query: str,
-        limit: int,
-        timeout_seconds: float,
-    ) -> dict[str, Any]:
-        import httpx
-
-        search_query = query.strip()
-        if not search_query:
-            raise ValueError("query must not be empty")
-
-        effective_limit = max(1, min(limit, 10))
-        search_urls = (
-            "https://html.duckduckgo.com/html/",
-            "https://duckduckgo.com/html/",
-        )
-        last_error = ""
-        headers = {
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
-            )
-        }
-
-        # F123：搜索 host 虽固定（DuckDuckGo，非 LLM 可控），仍挂 redirect hook
-        # 逐跳重校验，保持单一硬化出站路径（defense-in-depth）。
-        async with httpx.AsyncClient(
-            timeout=max(0.1, timeout_seconds),
-            headers=headers,
-            event_hooks={"request": [_ssrf_request_hook]},
-        ) as client:
-            for search_url in search_urls:
-                try:
-                    response = await client.get(
-                        search_url,
-                        params={"q": search_query},
-                        follow_redirects=True,
-                    )
-                    response.raise_for_status()
-                except Exception as exc:
-                    last_error = f"{type(exc).__name__}: {exc}"
-                    continue
-
-                # Fail-fast：DuckDuckGo 触发反爬检测（CAPTCHA/anomaly 页）时
-                # HTML 没有任何搜索结果，所有 DDG 入口都被同一 IP 的 rate limit
-                # 覆盖，继续尝试其他 DDG URL 也是徒劳。立即抛出明确信号，让
-                # Agent 感知"被拦截"而非"真无结果"，切换到其他搜索通道
-                # （例如 MCP ask_model + perplexity/sonar-*）。
-                if self._is_ddg_anomaly_page(response.text):
-                    raise RuntimeError(
-                        "web search blocked by DuckDuckGo anomaly/captcha check; "
-                        "retry from a different IP or switch to another search channel "
-                        "(e.g. MCP ask_model with perplexity/sonar-*)"
-                    )
-
-                results = self._parse_duckduckgo_results(response.text, limit=effective_limit)
-                if not results:
-                    last_error = "no_search_results_parsed"
-                    continue
-                return {
-                    "query": search_query,
-                    "engine": "duckduckgo",
-                    "results": results,
-                    "result_count": len(results),
-                    "source_url": str(response.url),
-                }
-
-        raise RuntimeError(f"web search failed: {last_error or 'unknown_error'}")
-
-    @staticmethod
-    def _is_ddg_anomaly_page(payload: str) -> bool:
-        """检测 DuckDuckGo 反爬/CAPTCHA 拦截页。
-
-        DDG 在触发 bot 检测时会返回一个只含 `anomaly-modal__*` 样式组件的
-        简化页面（没有任何搜索结果 anchor）。静态标记稳定，命中后直接
-        fail-fast 比继续尝试其他 DDG 入口更实用。
-        """
-        return "anomaly-modal__" in payload
-
-    @classmethod
-    def _parse_duckduckgo_results(
-        cls,
-        payload: str,
-        *,
-        limit: int,
-    ) -> list[dict[str, str]]:
-        anchor_pattern = re.compile(
-            r"<a[^>]+class=[\"'][^\"']*(?:result__a|result-link)[^\"']*[\"'][^>]+"
-            r"href=[\"'](?P<href>[^\"']+)[\"'][^>]*>(?P<title>.*?)</a>",
-            re.IGNORECASE | re.DOTALL,
-        )
-        results: list[dict[str, str]] = []
-        seen_urls: set[str] = set()
-        for match in anchor_pattern.finditer(payload):
-            raw_url = html.unescape(match.group("href"))
-            url = cls._normalize_search_result_url(raw_url)
-            title = cls._strip_html_text(match.group("title"))
-            if not url or not title or url in seen_urls:
-                continue
-            seen_urls.add(url)
-            results.append({"title": title, "url": url})
-            if len(results) >= limit:
-                break
-        return results
-
-    @staticmethod
-    def _normalize_search_result_url(raw_url: str) -> str:
-        parsed = urlparse(raw_url)
-        if parsed.netloc.endswith("duckduckgo.com") and parsed.path.startswith("/l/"):
-            encoded = parse_qs(parsed.query).get("uddg", [])
-            if encoded:
-                return unquote(encoded[0])
-        return raw_url
-
-    @staticmethod
-    def _strip_html_text(payload: str) -> str:
-        text = re.sub(r"<[^>]+>", "", payload)
-        text = html.unescape(text)
-        return " ".join(text.split())
-
-    @staticmethod
-    def _inspect_pdf_file(path: Path) -> dict[str, Any]:
-        if not path.exists():
-            raise FileNotFoundError(path)
-        payload = path.read_bytes()
-        if not payload.startswith(b"%PDF-"):
-            raise RuntimeError("not a valid pdf header")
-        page_count = payload.count(b"/Type /Page")
-        return {
-            "path": str(path),
-            "size_bytes": len(payload),
-            "format": "pdf",
-            "page_count_estimate": max(page_count, 0),
-            "header": payload[:8].decode("latin-1", errors="ignore"),
-        }
-
-    @staticmethod
-    def _inspect_image_file(path: Path) -> dict[str, Any]:
-        if not path.exists():
-            raise FileNotFoundError(path)
-        payload = path.read_bytes()
-        size = len(payload)
-        if payload.startswith(b"\x89PNG\r\n\x1a\n") and size >= 24:
-            width = int.from_bytes(payload[16:20], "big")
-            height = int.from_bytes(payload[20:24], "big")
-            return {
-                "path": str(path),
-                "format": "png",
-                "width": width,
-                "height": height,
-                "size_bytes": size,
-            }
-        if payload.startswith(b"GIF87a") or payload.startswith(b"GIF89a"):
-            width = int.from_bytes(payload[6:8], "little")
-            height = int.from_bytes(payload[8:10], "little")
-            return {
-                "path": str(path),
-                "format": "gif",
-                "width": width,
-                "height": height,
-                "size_bytes": size,
-            }
-        if payload.startswith(b"\xff\xd8"):
-            offset = 2
-            while offset + 9 < size:
-                if payload[offset] != 0xFF:
-                    offset += 1
-                    continue
-                marker = payload[offset + 1]
-                if marker in {0xC0, 0xC1, 0xC2, 0xC3}:
-                    height = int.from_bytes(payload[offset + 5 : offset + 7], "big")
-                    width = int.from_bytes(payload[offset + 7 : offset + 9], "big")
-                    return {
-                        "path": str(path),
-                        "format": "jpeg",
-                        "width": width,
-                        "height": height,
-                        "size_bytes": size,
-                    }
-                if offset + 4 > size:
-                    break
-                segment_length = int.from_bytes(payload[offset + 2 : offset + 4], "big")
-                if segment_length <= 0:
-                    break
-                offset += 2 + segment_length
-            raise RuntimeError("jpeg dimensions not found")
-        raise RuntimeError("unsupported image format")
