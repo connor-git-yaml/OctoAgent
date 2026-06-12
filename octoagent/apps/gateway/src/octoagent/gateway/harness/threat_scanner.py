@@ -465,7 +465,8 @@ _THREAT_PATTERNS: list[ThreatPattern] = [
     _CTX_LEAK_001,
 ]
 
-assert len(_THREAT_PATTERNS) >= 15, "FR-3.2 要求至少 15 条 pattern"
+if len(_THREAT_PATTERNS) < 15:  # F108b W8：显式 raise 替代 assert（python -O 下 assert 被剥离）
+    raise AssertionError("FR-3.2 要求至少 15 条 pattern")
 
 
 # ---------------------------------------------------------------------------

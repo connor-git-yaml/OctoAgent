@@ -43,3 +43,9 @@ class ContentThreatScanService:
         与 baseline `threat_scan(content)` 行为字节级等价（默认 scope=MEMORY）。
         """
         return scan(content, ScanScope.MEMORY)
+
+
+# F108b W8（F124 遗留 LOW 闭环）：模块级默认实例。
+# service 无状态（见类 docstring），LLM-bound sink 复用此实例即可，
+# 不必每次调用现场构造（原 agent_context_prompt_assembly research handoff 的 smell）。
+DEFAULT_CONTENT_THREAT_SCAN_SERVICE = ContentThreatScanService()
