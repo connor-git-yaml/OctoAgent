@@ -27,8 +27,11 @@ ef1d7ba0 docs(F117): Wave 2 resume handoff（Wave 0+1 检查点）
    agent_service create（:632，改同 id 镜像非 `agent-profile-{id}` 前缀）+ resource_limits（:366）；
    GAP-A/B 加 is_worker_behavior_profile guard；migration UPDATE 补 name/model_alias/metadata；
    test helper 复制 wp.metadata + version + 加 worker-metadata 回归测试。**注意**：draft-save 同步镜像
-   走 surgical 直写（仿 archive-sync，避免 _sync 的 materialize 副作用）；MED-1「published-only binds
-   vs draft-immediately」需 intent 拍板。
+   走 surgical 直写（仿 archive-sync，避免 _sync 的 materialize 副作用）。
+   **✅ MED-1 已拍板（用户 2026-06-13）：保 baseline「草稿即时生效」**——未 publish 的编辑也立即影响运行时。
+   故所有 authoring 写路径（draft save / apply-without-publish / create / clone / extract / resource_limits）
+   **都必须同步镜像**，不采"仅发布态 binds"。验收：改草稿后不 publish，运行时 binding 立即反映新 tools/model_alias。
+   **本 fix 用户选 fresh session 做**（不在 read-switch 提交的超长 session 末尾仓促修）。
 2. **直接耦合 Wave 2c**（较大）：authoring 直写统一 agent_profiles 行（无镜像）+ 删镜像 builder + 全改名，一步到位。
 
 **Wave 2c**（authoring 改写 + 全 wire 改名）：worker_profile_ops→agent_profile_ops / worker_service authoring 直写统一表 + agent_profile_revisions；删两镜像 builder（worker_profile_ops:130 + entity_ensure:971）；`_coordinator.py:1010` 删 `agent-profile-{id}` 前缀。**wire 字符串留 Wave 3**：action_id `worker_profile.*`→`agent_profile.*`、resource_type、路由、WorkerProfilesDocument（与 FE 原子改，详 plan §5）。

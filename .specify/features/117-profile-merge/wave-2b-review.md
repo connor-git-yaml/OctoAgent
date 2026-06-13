@@ -21,7 +21,7 @@ read-switch 依赖一个**未声明的不变量**：「每个运行时可达的 
 |---|------|------|------|
 | **HIGH-1** | capability_pack:415 resolve_worker_binding（经 worker_service:1136 spawn_from_profile 允许 DRAFT）+ worker_profile_ops:786 `_save_worker_profile_draft` / agent_service:632 create | draft/created/cloned worker 无镜像 → builtin_fallback | `_save_worker_profile_draft` + create/clone/extract 路径建/同步同 id 镜像（携 9 字段 + metadata）|
 | **HIGH-2** | chat:247/256 + session_service:783 + session_projection_helpers:107 | 同根：无镜像 worker 在 4 个 presence-判别站误判（owner/model_alias/可用性/projection）| 同 HIGH-1 根修 |
-| **MED-1** | worker_service:731/910 update/apply-without-publish | 已发布 worker 改草稿不同步镜像 → 运行时读旧发布态 | 决策 intent：保 baseline 则 apply 路径同步镜像；若采"仅发布态 binds"则文档化 + 加回归测试 |
+| **MED-1** | worker_service:731/910 update/apply-without-publish | 已发布 worker 改草稿不同步镜像 → 运行时读旧发布态 | **✅ 拍板（用户 2026-06-13）：保 baseline「草稿即时生效」**——apply/update/draft 所有写路径同步镜像，未 publish 编辑也立即生效。不采"仅发布态 binds"。加回归测试：改草稿不 publish → binding 立即反映新 tools/model_alias |
 | **MED-2 (codex)** | dispatch_service:686 + entity_ensure:218 GAP-A/B | 无 `is_worker_behavior_profile` guard：worker_profile_id 若指向 main/subagent，新代码用其 name/summary 作 worker persona（旧 fallback）| 加 worker guard，不满足按旧行为 fallback |
 | **MED-2 (opus)** | agent_service:366 resource_limits | 写 worker_profiles.resource_limits 不同步镜像（latent，Wave 4 爆）| 同步镜像（仿 archive-sync）|
 | **MED-3** | migration_117:417（Codex HIGH-4）+ test helper（Opus MED-3）| migration 既有镜像 UPDATE 只刷 9 列不刷 name/model_alias/metadata；test helper 漏 wp.metadata + version → 掩盖 dropped-fallback 回归 | migration UPDATE 补 name/model_alias/tool_profile/metadata；helper 复制 wp.metadata（update-then-overlay 仿生产）+ version；加 worker-metadata 回归测试（capability_provider_selection / permission_preset）|
