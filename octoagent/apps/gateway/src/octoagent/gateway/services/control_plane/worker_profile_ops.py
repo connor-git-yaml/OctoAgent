@@ -812,6 +812,19 @@ class WorkerProfileOpsMixin:
                 archived_at=None,
             )
         )
+        # F117 Wave 2bc（镜像完整性，用户拍板"草稿即时生效"）：每次 draft 写入后刷新同 id
+        # 镜像（携全 9 字段 + metadata），让 read-switch 后 create/update/clone/extract 的未发布
+        # worker 也立即被运行时解析（baseline 等价）。走 _build + save（不 materialize 行为文件，
+        # 避免给草稿/频繁保存引入副作用；publish/bind 仍走 _sync 含 materialize）。
+        existing_mirror = await self._stores.agent_context_store.get_agent_profile(
+            saved.profile_id
+        )
+        mirror = self._build_agent_profile_from_worker_profile(
+            profile=saved,
+            revision=saved.active_revision or saved.draft_revision or 1,
+            existing=existing_mirror,
+        )
+        await self._stores.agent_context_store.save_agent_profile(mirror)
         await self._stores.conn.commit()
         return saved
 

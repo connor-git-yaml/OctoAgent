@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-import pytest
 from octoagent.core.models import (
     A2AConversation,
     A2AConversationStatus,
@@ -983,7 +981,8 @@ async def _save_worker_with_mirror(store, wp):
             status=wp.status, origin_kind=wp.origin_kind,
             draft_revision=wp.draft_revision, active_revision=wp.active_revision,
             archived_at=wp.archived_at,
-            metadata={"source_kind": "worker_profile_mirror", "source_worker_profile_id": wp.profile_id},
+            version=max(int(wp.active_revision or 0), int(wp.draft_revision or 0), 1),
+            metadata={**dict(wp.metadata), "source_kind": "worker_profile_mirror", "source_worker_profile_id": wp.profile_id},
         )
     )
     return wp

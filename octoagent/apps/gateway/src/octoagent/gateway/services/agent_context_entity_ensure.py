@@ -66,6 +66,7 @@ from .agent_context_helpers import (
     legacy_session_id_for_task,
     session_state_matches_scope,
 )
+from .agent_decision import is_worker_behavior_profile  # F117 Wave 2bc: GAP-B worker guard
 from .connection_metadata import (
     merge_control_metadata,
     resolve_delegation_target_profile_id,
@@ -215,24 +216,37 @@ class AgentContextEntityEnsureMixin:
         if not runtime_id:
             runtime_id = f"runtime-{ULID()}"
         # F117 Wave 2bc（GAP-B）：读统一行（worker 与 mirror 同 id），.name/.summary 由 Wave 0/1 携带。
-        worker_profile = (
+        # 加 is_worker_behavior_profile guard（同 GAP-A，防 worker_profile_id 误指 main/subagent）。
+        worker_profile_row = (
             await self._stores.agent_context_store.get_agent_profile(worker_profile_id)
             if worker_profile_id
+            else None
+        )
+        worker_profile = (
+            worker_profile_row
+            if worker_profile_row is not None and is_worker_behavior_profile(worker_profile_row)
             else None
         )
         if role is AgentRuntimeRole.MAIN:
             runtime_name = agent_profile.name
             persona_summary = agent_profile.persona_summary
         else:
+            # F117 Wave 2bc（re-review MED）：worker_profile（按 worker_profile_id 读）miss 时回退到
+            # 已解析的 agent_profile 镜像。create_worker_with_project 路径镜像 id 用 agent-profile-{id}
+            # 前缀，与 bare worker_profile_id 不一致致 bare 读 miss；agent_profile 已是该 worker 的镜像
+            # （携 worker name/summary），回退后 runtime name/persona 与 baseline 等价。
+            name_source = worker_profile
+            if name_source is None and is_worker_behavior_profile(agent_profile):
+                name_source = agent_profile
             worker_label = (
-                worker_profile.name
-                if worker_profile is not None
+                name_source.name
+                if name_source is not None
                 else worker_profile_id or worker_capability or "worker"
             )
             runtime_name = worker_label
             persona_summary = (
-                worker_profile.summary
-                if worker_profile is not None
+                name_source.summary
+                if name_source is not None
                 else f"{worker_label} internal worker runtime"
             )
         # F098 Phase F: subagent 路径在 metadata 加 subagent_delegation_id（audit 关联）

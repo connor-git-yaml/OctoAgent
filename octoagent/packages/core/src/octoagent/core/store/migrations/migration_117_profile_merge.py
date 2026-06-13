@@ -412,15 +412,44 @@ async def run_apply(
                     conn, "SELECT COUNT(*) FROM agent_profiles WHERE profile_id=?", (pid,)
                 )
                 if exists:
-                    # UPDATE 既有镜像行：填工具字段 + status/origin/revisions + kind=worker
+                    # UPDATE 既有镜像行：填工具字段 + status/origin/revisions + kind=worker。
+                    # F117 Wave 2bc（Codex HIGH-4）：一并刷新 name/scope/project_id/model_alias/
+                    # tool_profile/persona_summary——存量镜像可能 stale（旧代码改 worker 名/模型不同步
+                    # 镜像），而 resolve_worker_binding 现从镜像读这些字段。metadata：合并既有镜像
+                    # metadata（保 agent 侧 memory_recall 等）+ overlay worker metadata（capability_
+                    # provider_selection 等）+ 确保 source_kind 标记，闭合 dropped-fallback 缺口。
+                    cur = await conn.execute(
+                        "SELECT metadata FROM agent_profiles WHERE profile_id=?", (pid,)
+                    )
+                    row_meta = await cur.fetchone()
+                    try:
+                        existing_meta = json.loads(row_meta[0]) if row_meta and row_meta[0] else {}
+                    except (ValueError, TypeError):
+                        existing_meta = {}
+                    try:
+                        worker_meta = json.loads(wd.get("metadata") or "{}")
+                    except (ValueError, TypeError):
+                        worker_meta = {}
+                    merged_meta = {**existing_meta, **worker_meta}
+                    merged_meta.setdefault("source_kind", "worker_profile_mirror")
+                    merged_meta.setdefault("source_worker_profile_id", pid)
                     await conn.execute(
                         "UPDATE agent_profiles SET "
-                        " kind='worker', summary=?, default_tool_groups=?, selected_tools=?,"
+                        " kind='worker', name=?, scope=?, project_id=?, persona_summary=?,"
+                        " model_alias=?, tool_profile=?, metadata=?,"
+                        " summary=?, default_tool_groups=?, selected_tools=?,"
                         " runtime_kinds=?, status=?, origin_kind=?, draft_revision=?,"
                         " active_revision=?, archived_at=?, resource_limits=?,"
                         " version=MAX(version, ?) "
                         "WHERE profile_id=?",
                         (
+                            wd.get("name", pid),
+                            wd.get("scope", "project"),
+                            wd.get("project_id", ""),
+                            wd.get("summary", ""),
+                            wd.get("model_alias", "main"),
+                            wd.get("tool_profile", "minimal"),
+                            json.dumps(merged_meta, ensure_ascii=False),
                             wd.get("summary", ""),
                             wd.get("default_tool_groups", "[]"),
                             wd.get("selected_tools", "[]"),

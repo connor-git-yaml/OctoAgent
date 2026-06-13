@@ -50,6 +50,7 @@ from octoagent.protocol.models import A2AMessage
 from ulid import ULID
 
 from .agent_context import build_scope_aware_session_id
+from .agent_decision import is_worker_behavior_profile  # F117 Wave 2bc: GAP-A worker guard
 from .runtime_control import (
     RUNTIME_CONTEXT_JSON_KEY,
     RUNTIME_CONTEXT_KEY,
@@ -674,11 +675,17 @@ class A2ADispatchMixin:
             if agent_profile_id
             else None
         )
-        # F117 Wave 2bc（GAP-A）：读统一行（worker 与 mirror 同 id）。.name/.summary 由
-        # Wave 0/1 携带；用 .summary 作 persona（baseline 用 worker_profile.summary）。
-        worker_profile = (
+        # F117 Wave 2bc（GAP-A）：读统一行（worker 与 mirror 同 id），.name/.summary 由 Wave 0/1
+        # 携带；用 .summary 作 persona。加 is_worker_behavior_profile guard——baseline get_worker_profile
+        # 对 worker_profile_id 误指 main/subagent 返 None→fallback，新读返任意 profile，须 guard 保等价。
+        worker_profile_row = (
             await self._stores.agent_context_store.get_agent_profile(worker_profile_id)
             if worker_profile_id
+            else None
+        )
+        worker_profile = (
+            worker_profile_row
+            if worker_profile_row is not None and is_worker_behavior_profile(worker_profile_row)
             else None
         )
         if role is AgentRuntimeRole.MAIN:
@@ -687,14 +694,24 @@ class A2ADispatchMixin:
                 agent_profile.persona_summary if agent_profile is not None else "用户主会话协调者。"
             )
         else:
+            # F117 Wave 2bc（re-review MED）：worker_profile miss 时回退已解析的 agent_profile 镜像
+            # （create_worker_with_project 路径 mirror id=agent-profile-{id} 前缀与 bare worker_profile_id
+            # 不一致致 miss；agent_profile 已是该 worker 镜像，携 name/summary）。
+            name_source = worker_profile
+            if (
+                name_source is None
+                and agent_profile is not None
+                and is_worker_behavior_profile(agent_profile)
+            ):
+                name_source = agent_profile
             name = (
-                worker_profile.name
-                if worker_profile is not None
+                name_source.name
+                if name_source is not None
                 else f"{worker_capability or 'general'} worker"
             )
             persona_summary = (
-                worker_profile.summary
-                if worker_profile is not None
+                name_source.summary
+                if name_source is not None
                 else f"执行 {worker_capability or 'general'} delegation。"
             )
         runtime = AgentRuntime(

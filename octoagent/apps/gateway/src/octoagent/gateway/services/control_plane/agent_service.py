@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -628,7 +627,9 @@ class AgentProfileDomainService(DomainServiceBase):
         )
         await self._stores.agent_context_store.save_worker_profile(worker_profile)
 
-        # 从 WorkerProfile 同步生成 AgentProfile
+        # 从 WorkerProfile 同步生成 AgentProfile（完整镜像）
+        # F117 Wave 2bc（镜像完整性）：携全 9 字段 + source_kind 标记，让 read-switch 后此路径
+        # 创建的 worker 被 is_worker_behavior_profile 检出（兼容实例无 kind 列）且工具字段完整。
         agent_profile_id = f"agent-profile-{worker_profile_id}"
         agent_profile = AgentProfile(
             profile_id=agent_profile_id,
@@ -639,6 +640,18 @@ class AgentProfileDomainService(DomainServiceBase):
             persona_summary=project_goal,
             model_alias=model_alias,
             tool_profile=tool_profile,
+            summary=worker_profile.summary,
+            default_tool_groups=list(worker_profile.default_tool_groups),
+            selected_tools=list(worker_profile.selected_tools),
+            runtime_kinds=list(worker_profile.runtime_kinds),
+            status=worker_profile.status,
+            origin_kind=worker_profile.origin_kind,
+            draft_revision=worker_profile.draft_revision,
+            active_revision=worker_profile.active_revision,
+            metadata={
+                "source_kind": "worker_profile_mirror",
+                "source_worker_profile_id": worker_profile_id,
+            },
         )
         await self._stores.agent_context_store.save_agent_profile(agent_profile)
 

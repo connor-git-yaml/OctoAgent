@@ -780,7 +780,7 @@ async def test_prepare_dispatch_clears_resume_state_for_child_subagent(tmp_path:
 # ============================================================
 
 import pytest  # noqa: E402
-from octoagent.core.models import DelegationResult, WorkTransitionError
+from octoagent.core.models import WorkTransitionError
 
 
 async def test_mark_dispatched_rejects_terminal_work(tmp_path: Path) -> None:
@@ -838,7 +838,8 @@ async def _save_worker_with_mirror(store, wp):
             status=wp.status, origin_kind=wp.origin_kind,
             draft_revision=wp.draft_revision, active_revision=wp.active_revision,
             archived_at=wp.archived_at,
-            metadata={"source_kind": "worker_profile_mirror", "source_worker_profile_id": wp.profile_id},
+            version=max(int(wp.active_revision or 0), int(wp.draft_revision or 0), 1),
+            metadata={**dict(wp.metadata), "source_kind": "worker_profile_mirror", "source_worker_profile_id": wp.profile_id},
         )
     )
     return wp
