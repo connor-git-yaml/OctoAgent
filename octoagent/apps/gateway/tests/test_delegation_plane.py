@@ -7,18 +7,18 @@ from pathlib import Path
 
 from octoagent.core.models import (
     AgentProfile,
+    AgentProfileOriginKind,
     AgentProfileScope,
+    AgentProfileStatus,
     ContextFrame,
     NormalizedMessage,
     OrchestratorRequest,
     Project,
     ProjectSelectorState,
     SessionContextState,
-    WorkerProfile,
-    WorkerProfileOriginKind,
-    WorkerProfileStatus,
-    WorkStatus,
     TurnExecutorKind,
+    WorkerProfile,
+    WorkStatus,
 )
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.agent_context import build_scope_aware_session_id
@@ -196,8 +196,8 @@ async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_unive
         default_tool_groups=["network", "browser", "project"],
         selected_tools=["web.search"],
         runtime_kinds=["worker", "subagent"],
-        status=WorkerProfileStatus.ACTIVE,
-        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        status=AgentProfileStatus.ACTIVE,
+        origin_kind=AgentProfileOriginKind.CUSTOM,
         draft_revision=1,
         active_revision=1,
     )

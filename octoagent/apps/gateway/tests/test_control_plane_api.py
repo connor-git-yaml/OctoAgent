@@ -14,7 +14,9 @@ from octoagent.core.models import (
     A2AMessageDirection,
     A2AMessageRecord,
     AgentProfile,
+    AgentProfileOriginKind,
     AgentProfileScope,
+    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeRole,
     AgentSession,
@@ -42,9 +44,7 @@ from octoagent.core.models import (
     ToolIndexQuery,
     Work,
     WorkerProfile,
-    WorkerProfileOriginKind,
     WorkerProfileRevision,
-    WorkerProfileStatus,
     WorkKind,
     WorkStatus,
 )
@@ -52,6 +52,13 @@ from octoagent.gateway.services.agent_context import (
     build_projected_session_id,
     build_scope_aware_session_id,
 )
+from octoagent.gateway.services.config.config_schema import (
+    MemoryConfig,
+    ModelAlias,
+    OctoAgentConfig,
+    ProviderEntry,
+)
+from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
     EvidenceRef,
@@ -65,13 +72,6 @@ from octoagent.memory import (
 from octoagent.provider.auth.credentials import OAuthCredential
 from octoagent.provider.auth.environment import EnvironmentContext
 from octoagent.provider.auth.store import CredentialStore
-from octoagent.gateway.services.config.config_schema import (
-    MemoryConfig,
-    ModelAlias,
-    OctoAgentConfig,
-    ProviderEntry,
-)
-from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.provider.dx.project_selector import ProjectSelectorService
 from pydantic import SecretStr
 from ulid import ULID
@@ -3711,7 +3711,7 @@ class TestControlPlaneApi:
                 name="研究员小 A",
                 summary="direct research root",
                 model_alias="cheap",
-                status=WorkerProfileStatus.ACTIVE,
+                status=AgentProfileStatus.ACTIVE,
             )
         )
         await control_plane_app.state.store_group.conn.commit()
@@ -3755,7 +3755,7 @@ class TestControlPlaneApi:
                 name="研究员小 A",
                 summary="finance direct session",
                 model_alias="cheap",
-                status=WorkerProfileStatus.ACTIVE,
+                status=AgentProfileStatus.ACTIVE,
             )
         )
         await control_plane_app.state.store_group.conn.commit()
@@ -3877,7 +3877,7 @@ class TestControlPlaneApi:
                 name="OctoAgent",
                 summary="default project owner session",
                 model_alias="cheap",
-                status=WorkerProfileStatus.ACTIVE,
+                status=AgentProfileStatus.ACTIVE,
             )
         )
         await store_group.conn.commit()
@@ -3957,7 +3957,7 @@ class TestControlPlaneApi:
                 name="OctoAgent",
                 summary="default project owner session",
                 model_alias="cheap",
-                status=WorkerProfileStatus.ACTIVE,
+                status=AgentProfileStatus.ACTIVE,
             )
         )
         await store_group.conn.commit()
@@ -4024,7 +4024,7 @@ class TestControlPlaneApi:
                 name="研究员小 A",
                 summary="finance direct session",
                 model_alias="cheap",
-                status=WorkerProfileStatus.ACTIVE,
+                status=AgentProfileStatus.ACTIVE,
             )
         )
         await control_plane_app.state.store_group.conn.commit()
@@ -4104,7 +4104,7 @@ class TestControlPlaneApi:
                 name="研究员小 A",
                 summary="finance direct session",
                 model_alias="cheap",
-                status=WorkerProfileStatus.ACTIVE,
+                status=AgentProfileStatus.ACTIVE,
             )
         )
         await control_plane_app.state.store_group.conn.commit()
@@ -4176,7 +4176,7 @@ class TestControlPlaneApi:
                 name="金融研究员",
                 summary="delegated worker projection",
                 model_alias="cheap",
-                status=WorkerProfileStatus.ACTIVE,
+                status=AgentProfileStatus.ACTIVE,
             )
         )
 
@@ -4286,7 +4286,7 @@ class TestControlPlaneApi:
                 name="旧版金融研究员",
                 summary="legacy polluted worker profile",
                 model_alias="cheap",
-                status=WorkerProfileStatus.ACTIVE,
+                status=AgentProfileStatus.ACTIVE,
             )
         )
 
@@ -5386,8 +5386,8 @@ class TestControlPlaneApi:
             default_tool_groups=["project", "network"],
             selected_tools=["web.search"],
             runtime_kinds=["worker", "subagent"],
-            status=WorkerProfileStatus.ACTIVE,
-            origin_kind=WorkerProfileOriginKind.CUSTOM,
+            status=AgentProfileStatus.ACTIVE,
+            origin_kind=AgentProfileOriginKind.CUSTOM,
             draft_revision=1,
             active_revision=1,
         )
@@ -5486,7 +5486,7 @@ class TestControlPlaneApi:
 
         extracted = await store_group.agent_context_store.get_worker_profile(extracted_id)
         assert extracted is not None
-        assert extracted.origin_kind == WorkerProfileOriginKind.EXTRACTED
+        assert extracted.origin_kind == AgentProfileOriginKind.EXTRACTED
         assert extracted.selected_tools == ["web.search"]
         assert extracted.metadata["source_work_id"] == "work-runtime-profile"
 
@@ -5512,8 +5512,8 @@ class TestControlPlaneApi:
             default_tool_groups=["runtime", "project"],
             selected_tools=["runtime.inspect"],
             runtime_kinds=["worker", "acp_runtime"],
-            status=WorkerProfileStatus.ACTIVE,
-            origin_kind=WorkerProfileOriginKind.CUSTOM,
+            status=AgentProfileStatus.ACTIVE,
+            origin_kind=AgentProfileOriginKind.CUSTOM,
             draft_revision=1,
             active_revision=1,
         )
@@ -5695,8 +5695,8 @@ class TestControlPlaneApi:
             default_tool_groups=["filesystem", "project"],
             selected_tools=["filesystem.read_text"],
             runtime_kinds=["worker", "subagent"],
-            status=WorkerProfileStatus.ACTIVE,
-            origin_kind=WorkerProfileOriginKind.CUSTOM,
+            status=AgentProfileStatus.ACTIVE,
+            origin_kind=AgentProfileOriginKind.CUSTOM,
             draft_revision=1,
             active_revision=1,
         )

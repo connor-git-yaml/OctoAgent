@@ -29,8 +29,10 @@ from octoagent.core.models import (
     ActionResultEnvelope,
     AgentProfile,
     AgentProfileItem,
+    AgentProfileOriginKind,
     AgentProfileScope,
     AgentProfilesDocument,
+    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeRole,
     AgentRuntimeStatus,
@@ -46,11 +48,8 @@ from octoagent.core.models import (
     PolicyProfilesDocument,
     Project,
     WorkerProfile,
-    WorkerProfileOriginKind,
-    WorkerProfileStatus,
 )
 from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
-
 from octoagent.gateway.services.config.config_wizard import load_config
 from ulid import ULID
 
@@ -622,8 +621,8 @@ class AgentProfileDomainService(DomainServiceBase):
             summary=project_goal or f"{worker_name} Worker",
             model_alias=model_alias,
             tool_profile=tool_profile,
-            status=WorkerProfileStatus.ACTIVE,
-            origin_kind=WorkerProfileOriginKind.CUSTOM,
+            status=AgentProfileStatus.ACTIVE,
+            origin_kind=AgentProfileOriginKind.CUSTOM,
             created_at=now,
             updated_at=now,
         )

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from octoagent.core.models import WorkerProfile, WorkerProfileStatus
+from octoagent.core.models import AgentProfileStatus, WorkerProfile
 from octoagent.core.store import create_store_group
 from octoagent.core.store.conversation_binding_store import (
     SqliteConversationBindingStore,
@@ -232,7 +232,7 @@ async def test_direct_worker_session_not_bound(
             name="测试 worker",
             summary="direct session",
             model_alias="cheap",
-            status=WorkerProfileStatus.ACTIVE,
+            status=AgentProfileStatus.ACTIVE,
         )
     )
     await web_app.state.store_group.conn.commit()

@@ -26,16 +26,16 @@ from octoagent.core.behavior_workspace import (
 )
 from octoagent.core.models import (
     AgentProfile,
+    AgentProfileDynamicContext,
+    AgentProfileOriginKind,
     AgentProfileScope,
+    AgentProfileStatus,
     ControlPlaneCapability,
     ControlPlaneSupportStatus,
     DynamicToolSelection,
     Work,
     WorkerProfile,
-    WorkerProfileDynamicContext,
-    WorkerProfileOriginKind,
     WorkerProfileRevision,
-    WorkerProfileStatus,
 )
 from octoagent.gateway.services.config.config_wizard import load_config
 from ulid import ULID
@@ -206,7 +206,7 @@ class WorkerProfileOpsMixin:
         fallback_tools: list[str],
         fallback_project_id: str = "",
         fallback_workspace_id: str = "",
-    ) -> WorkerProfileDynamicContext:
+    ) -> AgentProfileDynamicContext:
         active_statuses = {
             "created",
             "assigned",
@@ -222,7 +222,7 @@ class WorkerProfileOpsMixin:
         selection = self._tool_selection_from_work(latest)
         active_works = [item for item in works if item.status.value in active_statuses]
         attention_works = [item for item in works if item.status.value in attention_statuses]
-        return WorkerProfileDynamicContext(
+        return AgentProfileDynamicContext(
             active_project_id=(
                 latest.project_id if latest is not None else fallback_project_id
             ),
@@ -266,7 +266,7 @@ class WorkerProfileOpsMixin:
 
     def _worker_profile_control_capabilities(
         self,
-        status: WorkerProfileStatus,
+        status: AgentProfileStatus,
         *,
         builtin: bool = False,
     ) -> list[ControlPlaneCapability]:
@@ -283,7 +283,7 @@ class WorkerProfileOpsMixin:
                     action_id="worker.spawn_from_profile",
                 ),
             ]
-        is_archived = status == WorkerProfileStatus.ARCHIVED
+        is_archived = status == AgentProfileStatus.ARCHIVED
         return [
             ControlPlaneCapability(
                 capability_id="worker_profile.review",
@@ -325,15 +325,15 @@ class WorkerProfileOpsMixin:
                 capability_id="worker_profile.bind_default",
                 label="设为聊天默认",
                 action_id="worker_profile.bind_default",
-                enabled=not is_archived and status == WorkerProfileStatus.ACTIVE,
+                enabled=not is_archived and status == AgentProfileStatus.ACTIVE,
                 support_status=(
                     ControlPlaneSupportStatus.SUPPORTED
-                    if (not is_archived and status == WorkerProfileStatus.ACTIVE)
+                    if (not is_archived and status == AgentProfileStatus.ACTIVE)
                     else ControlPlaneSupportStatus.DEGRADED
                 ),
                 reason=(
                     ""
-                    if (not is_archived and status == WorkerProfileStatus.ACTIVE)
+                    if (not is_archived and status == AgentProfileStatus.ACTIVE)
                     else "只有已发布且未归档的 Root Agent 才能绑定为当前聊天默认。"
                 ),
             ),
@@ -449,8 +449,8 @@ class WorkerProfileOpsMixin:
             selected_tools=[],
             runtime_kinds=[item.value for item in builtin.runtime_kinds],
             metadata={},
-            status=WorkerProfileStatus.ACTIVE,
-            origin_kind=WorkerProfileOriginKind.BUILTIN,
+            status=AgentProfileStatus.ACTIVE,
+            origin_kind=AgentProfileOriginKind.BUILTIN,
             draft_revision=1,
             active_revision=1,
         )
@@ -492,7 +492,7 @@ class WorkerProfileOpsMixin:
         existing: WorkerProfile | None = None,
         source_profile: WorkerProfile | None = None,
         selected_project: Any | None,
-        origin_kind: WorkerProfileOriginKind | None = None,
+        origin_kind: AgentProfileOriginKind | None = None,
     ) -> dict[str, Any]:
         capability_pack = await self._get_capability_pack_document()
         builtin_defaults = {
@@ -606,8 +606,8 @@ class WorkerProfileOpsMixin:
                     else (
                         source_profile.origin_kind.value
                         if source_profile is not None
-                        and source_profile.origin_kind != WorkerProfileOriginKind.BUILTIN
-                        else WorkerProfileOriginKind.CUSTOM.value
+                        and source_profile.origin_kind != AgentProfileOriginKind.BUILTIN
+                        else AgentProfileOriginKind.CUSTOM.value
                     )
                 )
             ),
@@ -667,7 +667,7 @@ class WorkerProfileOpsMixin:
                 warnings.append(
                     "当前 profile 的 tool_profile 高于当前 project policy，运行时可能被降级或要求审批。"
                 )
-        if existing is not None and existing.status == WorkerProfileStatus.ARCHIVED:
+        if existing is not None and existing.status == AgentProfileStatus.ARCHIVED:
             save_errors.append("归档后的 Root Agent 不能直接更新，请先 clone 一个新 profile。")
 
         snapshot_fields = (
@@ -751,7 +751,7 @@ class WorkerProfileOpsMixin:
         *,
         normalized_profile: Mapping[str, Any],
         existing: WorkerProfile | None,
-        origin_kind: WorkerProfileOriginKind | None = None,
+        origin_kind: AgentProfileOriginKind | None = None,
     ) -> WorkerProfile:
         now = datetime.now(tz=UTC)
         resolved_origin = (
@@ -760,21 +760,21 @@ class WorkerProfileOpsMixin:
             else (
                 existing.origin_kind
                 if existing is not None
-                else WorkerProfileOriginKind(
-                    str(normalized_profile.get("origin_kind", WorkerProfileOriginKind.CUSTOM.value))
+                else AgentProfileOriginKind(
+                    str(normalized_profile.get("origin_kind", AgentProfileOriginKind.CUSTOM.value))
                 )
             )
         )
         if existing is None:
-            status = WorkerProfileStatus.DRAFT
+            status = AgentProfileStatus.DRAFT
             draft_revision = 1
             active_revision = 0
             created_at = now
         else:
             status = (
-                WorkerProfileStatus.ACTIVE
-                if existing.active_revision > 0 and existing.status != WorkerProfileStatus.ARCHIVED
-                else WorkerProfileStatus.DRAFT
+                AgentProfileStatus.ACTIVE
+                if existing.active_revision > 0 and existing.status != AgentProfileStatus.ARCHIVED
+                else AgentProfileStatus.DRAFT
             )
             draft_revision = (
                 max(existing.draft_revision, existing.active_revision + 1)
@@ -831,7 +831,7 @@ class WorkerProfileOpsMixin:
             latest is not None
             and latest.snapshot_payload == snapshot_payload
             and latest.revision == profile.active_revision
-            and profile.status == WorkerProfileStatus.ACTIVE
+            and profile.status == AgentProfileStatus.ACTIVE
         ):
             return profile, latest, False
 
@@ -852,7 +852,7 @@ class WorkerProfileOpsMixin:
         updated = await self._stores.agent_context_store.save_worker_profile(
             profile.model_copy(
                 update={
-                    "status": WorkerProfileStatus.ACTIVE,
+                    "status": AgentProfileStatus.ACTIVE,
                     "active_revision": next_revision,
                     "draft_revision": next_revision,
                     "updated_at": datetime.now(tz=UTC),

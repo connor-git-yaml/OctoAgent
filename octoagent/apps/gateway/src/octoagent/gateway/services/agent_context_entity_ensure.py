@@ -25,6 +25,7 @@ from octoagent.core.models import (
     ActorType,
     AgentProfile,
     AgentProfileScope,
+    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeRole,
     AgentSession,
@@ -45,7 +46,6 @@ from octoagent.core.models import (
     SubagentDelegation,
     Task,
     TurnExecutorKind,
-    WorkerProfileStatus,
 )
 from octoagent.core.models.agent_context import (
     DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
@@ -940,7 +940,7 @@ class AgentContextEntityEnsureMixin:
         existing_profile: AgentProfile | None = None,
     ) -> AgentProfile | None:
         worker_profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
-        if worker_profile is None or worker_profile.status == WorkerProfileStatus.ARCHIVED:
+        if worker_profile is None or worker_profile.status == AgentProfileStatus.ARCHIVED:
             return None
         bootstrap_template_ids = build_behavior_bootstrap_template_ids(
             include_agent_private=True,

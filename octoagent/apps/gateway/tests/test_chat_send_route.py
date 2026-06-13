@@ -9,6 +9,7 @@ import octoagent.gateway.services.task_service as task_service_module
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from octoagent.core.models import (
+    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeRole,
     AgentSession,
@@ -17,16 +18,15 @@ from octoagent.core.models import (
     Project,
     SessionContextState,
     WorkerProfile,
-    WorkerProfileStatus,
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.agent_context import build_scope_aware_session_id
+from octoagent.gateway.services.control_plane.control_plane_state import ControlPlaneStateStore
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
-from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.task_runner import TaskRunner
-from octoagent.gateway.services.control_plane.control_plane_state import ControlPlaneStateStore
+from octoagent.gateway.services.task_service import TaskService
 
 
 @pytest_asyncio.fixture
@@ -87,7 +87,7 @@ class TestChatSendRoute:
                 name="研究员小 A",
                 summary="finance direct session",
                 model_alias="cheap",
-                status=WorkerProfileStatus.ACTIVE,
+                status=AgentProfileStatus.ACTIVE,
             )
         )
         await test_app.state.store_group.conn.commit()
@@ -360,7 +360,7 @@ class TestChatSendRoute:
                 name="旧版研究员",
                 summary="legacy polluted worker owner",
                 model_alias="cheap",
-                status=WorkerProfileStatus.ACTIVE,
+                status=AgentProfileStatus.ACTIVE,
             )
         )
 

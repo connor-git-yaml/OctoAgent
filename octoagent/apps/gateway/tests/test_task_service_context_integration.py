@@ -7,10 +7,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import MethodType
 
+import pytest
 from octoagent.core.models import (
     ActorType,
     AgentProfile,
+    AgentProfileOriginKind,
     AgentProfileScope,
+    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeRole,
     AgentSession,
@@ -29,8 +32,6 @@ from octoagent.core.models import (
     RuntimeControlContext,
     SessionContextState,
     WorkerProfile,
-    WorkerProfileOriginKind,
-    WorkerProfileStatus,
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
@@ -63,8 +64,6 @@ from octoagent.memory import (
     MemoryService,
 )
 from octoagent.provider.models import ModelCallResult, TokenUsage
-
-import pytest
 
 
 @pytest.fixture(autouse=True)
@@ -284,8 +283,8 @@ async def test_agent_context_backfills_bootstrap_templates_and_routes(
             name="Research Root Agent",
             summary="负责研究与外部资料核实。",
             tool_profile="standard",
-            status=WorkerProfileStatus.ACTIVE,
-            origin_kind=WorkerProfileOriginKind.BUILTIN,
+            status=AgentProfileStatus.ACTIVE,
+            origin_kind=AgentProfileOriginKind.BUILTIN,
             active_revision=1,
         )
     )
@@ -1062,8 +1061,8 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         default_tool_groups=["network"],
         selected_tools=["web.search"],
         runtime_kinds=["worker"],
-        status=WorkerProfileStatus.ACTIVE,
-        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        status=AgentProfileStatus.ACTIVE,
+        origin_kind=AgentProfileOriginKind.CUSTOM,
         draft_revision=1,
         active_revision=1,
     )
@@ -1283,8 +1282,8 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         default_tool_groups=["network"],
         selected_tools=["web.search"],
         runtime_kinds=["worker"],
-        status=WorkerProfileStatus.ACTIVE,
-        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        status=AgentProfileStatus.ACTIVE,
+        origin_kind=AgentProfileOriginKind.CUSTOM,
         draft_revision=1,
         active_revision=1,
     )
@@ -1463,8 +1462,8 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         default_tool_groups=["network"],
         selected_tools=["web.search"],
         runtime_kinds=["worker"],
-        status=WorkerProfileStatus.ACTIVE,
-        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        status=AgentProfileStatus.ACTIVE,
+        origin_kind=AgentProfileOriginKind.CUSTOM,
         draft_revision=1,
         active_revision=1,
     )
@@ -1632,8 +1631,8 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
         default_tool_groups=["network"],
         selected_tools=["web.search"],
         runtime_kinds=["worker"],
-        status=WorkerProfileStatus.ACTIVE,
-        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        status=AgentProfileStatus.ACTIVE,
+        origin_kind=AgentProfileOriginKind.CUSTOM,
         draft_revision=1,
         active_revision=1,
     )
@@ -1783,8 +1782,8 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         default_tool_groups=["network"],
         selected_tools=["web.search"],
         runtime_kinds=["worker"],
-        status=WorkerProfileStatus.ACTIVE,
-        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        status=AgentProfileStatus.ACTIVE,
+        origin_kind=AgentProfileOriginKind.CUSTOM,
         draft_revision=1,
         active_revision=1,
     )
@@ -3053,8 +3052,8 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
         model_alias="main",
         tool_profile="standard",
         runtime_kinds=["worker"],
-        status=WorkerProfileStatus.ACTIVE,
-        origin_kind=WorkerProfileOriginKind.BUILTIN,
+        status=AgentProfileStatus.ACTIVE,
+        origin_kind=AgentProfileOriginKind.BUILTIN,
         active_revision=1,
     )
     await store_group.agent_context_store.save_worker_profile(worker_profile)
@@ -3215,8 +3214,8 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
             name="Mig Worker",
             summary="",
             tool_profile="standard",
-            status=WorkerProfileStatus.ACTIVE,
-            origin_kind=WorkerProfileOriginKind.BUILTIN,
+            status=AgentProfileStatus.ACTIVE,
+            origin_kind=AgentProfileOriginKind.BUILTIN,
             active_revision=1,
         )
     )
@@ -3357,8 +3356,8 @@ async def test_f094_d2_worker_default_memory_recall_matches_baseline(
                 name="F094 D2 Worker",
                 summary="F094 行为零变更测试。",
                 tool_profile="standard",
-                status=WorkerProfileStatus.ACTIVE,
-                origin_kind=WorkerProfileOriginKind.BUILTIN,
+                status=AgentProfileStatus.ACTIVE,
+                origin_kind=AgentProfileOriginKind.BUILTIN,
                 active_revision=1,
             )
         )
@@ -3389,12 +3388,11 @@ async def test_f094_d4_immutable_defaults_constant_cannot_be_mutated(
     是 MappingProxyType 只读 mapping——直接 mutate 必须抛 TypeError。
 
     既验证防止未来污染，又锁住 module-level 不变性。"""
+    # 直接 mutate 必须 raise（MappingProxyType 不允许 setitem）
+    import pytest as _pytest
     from octoagent.core.models.agent_context import (
         DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
     )
-
-    # 直接 mutate 必须 raise（MappingProxyType 不允许 setitem）
-    import pytest as _pytest
 
     with _pytest.raises(TypeError):
         DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES["scope_limit"] = 999  # type: ignore[index]
@@ -3426,8 +3424,8 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
                 name="F094 D5 Edge Worker",
                 summary="edge case 测试。",
                 tool_profile="standard",
-                status=WorkerProfileStatus.ACTIVE,
-                origin_kind=WorkerProfileOriginKind.BUILTIN,
+                status=AgentProfileStatus.ACTIVE,
+                origin_kind=AgentProfileOriginKind.BUILTIN,
                 active_revision=1,
             )
         )
@@ -3527,8 +3525,8 @@ async def test_f094_d5_existing_profile_overrides_module_defaults(
                 name="F094 D5 Worker",
                 summary="F094 merge order 测试。",
                 tool_profile="standard",
-                status=WorkerProfileStatus.ACTIVE,
-                origin_kind=WorkerProfileOriginKind.BUILTIN,
+                status=AgentProfileStatus.ACTIVE,
+                origin_kind=AgentProfileOriginKind.BUILTIN,
                 active_revision=1,
             )
         )

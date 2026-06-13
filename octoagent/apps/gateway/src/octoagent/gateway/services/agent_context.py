@@ -10,30 +10,25 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-from octoagent.core.models.agent_context import (
-    DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
-    resolve_permission_preset,
-)
-from octoagent.core.models.payloads import (
-    MemoryRecallCompletedPayload,
-)
 from octoagent.core.behavior_workspace import (
+    BehaviorLoadProfile,
     build_behavior_bootstrap_template_ids,
     load_onboarding_state,
     resolve_behavior_workspace,
 )
 from octoagent.core.models import (
+    ActorType,
     AgentProfile,
-    AgentSessionStatus,
-    BehaviorPack,
     AgentProfileScope,
+    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeRole,
     AgentSession,
     AgentSessionKind,
+    AgentSessionStatus,
     AgentSessionTurn,
     AgentSessionTurnKind,
-    ActorType,
+    BehaviorPack,
     ContextFrame,
     ContextRequestKind,
     ContextResolveRequest,
@@ -45,7 +40,6 @@ from octoagent.core.models import (
     MemoryNamespace,
     MemoryNamespaceKind,
     MemoryRetrievalProfile,
-    is_private_namespace,
     OwnerOverlayScope,
     OwnerProfile,
     OwnerProfileOverlay,
@@ -60,12 +54,21 @@ from octoagent.core.models import (
     Task,
     TurnExecutorKind,
     WorkerProfile,
-    WorkerProfileStatus,
+    is_private_namespace,
+)
+from octoagent.core.models.agent_context import (
+    DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
+    resolve_permission_preset,
 )
 from octoagent.core.models.payloads import (
     ControlMetadataUpdatedPayload,
+    MemoryRecallCompletedPayload,
     UserMessagePayload,
 )
+from octoagent.gateway.services.memory.memory_retrieval_profile import (
+    apply_retrieval_profile_to_hook_options,
+)
+from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 from octoagent.memory import (
     EvidenceRef,
     MemoryMaintenanceCommand,
@@ -78,17 +81,111 @@ from octoagent.memory import (
     init_memory_db,
 )
 from octoagent.memory.partition_inference import infer_memory_partition
-from octoagent.gateway.services.memory.memory_retrieval_profile import (
-    apply_retrieval_profile_to_hook_options,
+from octoagent.tooling.security_render import (  # F124 D2
+    render_persisted_tool_turn_for_llm,
+    render_tool_result_for_llm,
 )
-from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
 from ulid import ULID
 
 from .agent_context_entity_ensure import AgentContextEntityEnsureMixin
-from .agent_context_memory_services import AgentContextMemoryServiceMixin
+
+# F113：module-level 定义已移至 agent_context_helpers，此处 re-export 保持既有 import
+# 路径不变（含 orchestrator 引用的 _dynamic_transcript_limit 等私有名）。redundant-alias
+# 形式（X as X）向 ruff/类型检查器声明显式 re-export。
+from .agent_context_helpers import (
+    _MEMORY_BINDING_TYPES as _MEMORY_BINDING_TYPES,
+)
+from .agent_context_helpers import (
+    _SESSION_TRANSCRIPT_LIMIT_DEFAULT as _SESSION_TRANSCRIPT_LIMIT_DEFAULT,
+)
+from .agent_context_helpers import (
+    _SESSION_TRANSCRIPT_LIMIT_MAX as _SESSION_TRANSCRIPT_LIMIT_MAX,
+)
+from .agent_context_helpers import (
+    _SESSION_TRANSCRIPT_LIMIT_MIN as _SESSION_TRANSCRIPT_LIMIT_MIN,
+)
+from .agent_context_helpers import (
+    _WEEKDAY_NAMES_EN as _WEEKDAY_NAMES_EN,
+)
+from .agent_context_helpers import (
+    _WEEKDAY_NAMES_ZH as _WEEKDAY_NAMES_ZH,
+)
+from .agent_context_helpers import (
+    RecallPlanningContext as RecallPlanningContext,
+)
+from .agent_context_helpers import (
+    ResolvedContextBundle as ResolvedContextBundle,
+)
+from .agent_context_helpers import (
+    SessionReplayProjection as SessionReplayProjection,
+)
+from .agent_context_helpers import (
+    SystemPromptContext as SystemPromptContext,
+)
+from .agent_context_helpers import (
+    _bounded_int as _bounded_int,
+)
+from .agent_context_helpers import (
+    _dynamic_transcript_limit as _dynamic_transcript_limit,
+)
+from .agent_context_helpers import (
+    _memory_recall_planner_enabled as _memory_recall_planner_enabled,
+)
+from .agent_context_helpers import (
+    _memory_recall_preferences as _memory_recall_preferences,
+)
+from .agent_context_helpers import (
+    _parse_scope_id as _parse_scope_id,
+)
+from .agent_context_helpers import (
+    _resolve_memory_prefetch_mode as _resolve_memory_prefetch_mode,
+)
+from .agent_context_helpers import (
+    build_agent_runtime_id as build_agent_runtime_id,
+)
+from .agent_context_helpers import (
+    build_agent_session_id as build_agent_session_id,
+)
+from .agent_context_helpers import (
+    build_ambient_runtime_facts as build_ambient_runtime_facts,
+)
+from .agent_context_helpers import (
+    build_default_memory_recall_hook_options as build_default_memory_recall_hook_options,
+)
+from .agent_context_helpers import (
+    build_memory_namespace_id as build_memory_namespace_id,
+)
+from .agent_context_helpers import (
+    build_private_memory_scope_ids as build_private_memory_scope_ids,
+)
+from .agent_context_helpers import (
+    build_projected_session_id as build_projected_session_id,
+)
+from .agent_context_helpers import (
+    build_scope_aware_session_id as build_scope_aware_session_id,
+)
+from .agent_context_helpers import (
+    effective_memory_access_policy as effective_memory_access_policy,
+)
+from .agent_context_helpers import (
+    legacy_session_id_for_task as legacy_session_id_for_task,
+)
+from .agent_context_helpers import (
+    memory_recall_max_hits as memory_recall_max_hits,
+)
+from .agent_context_helpers import (
+    memory_recall_per_scope_limit as memory_recall_per_scope_limit,
+)
+from .agent_context_helpers import (
+    memory_recall_scope_limit as memory_recall_scope_limit,
+)
+from .agent_context_helpers import (
+    session_state_matches_scope as session_state_matches_scope,
+)
 from .agent_context_memory_recall import AgentContextMemoryRecallMixin
-from .agent_context_session_replay import AgentContextSessionReplayMixin
+from .agent_context_memory_services import AgentContextMemoryServiceMixin
 from .agent_context_prompt_assembly import AgentContextPromptAssemblyMixin
+from .agent_context_session_replay import AgentContextSessionReplayMixin
 from .agent_context_turn_writer import AgentContextTurnWriterMixin
 from .agent_decision import (
     build_behavior_tool_guide_block,
@@ -99,11 +196,6 @@ from .agent_decision import (
     render_behavior_system_block,
     render_runtime_hint_block,
     resolve_behavior_pack,
-)
-from octoagent.core.behavior_workspace import BehaviorLoadProfile
-from octoagent.tooling.security_render import (  # F124 D2
-    render_persisted_tool_turn_for_llm,
-    render_tool_result_for_llm,
 )
 from .connection_metadata import (
     merge_control_metadata,
@@ -118,42 +210,6 @@ from .context_compaction import (
     ContextCompactionConfig,
     estimate_messages_tokens,
     truncate_chars,
-)
-
-# F113：module-level 定义已移至 agent_context_helpers，此处 re-export 保持既有 import
-# 路径不变（含 orchestrator 引用的 _dynamic_transcript_limit 等私有名）。redundant-alias
-# 形式（X as X）向 ruff/类型检查器声明显式 re-export。
-from .agent_context_helpers import (
-    _MEMORY_BINDING_TYPES as _MEMORY_BINDING_TYPES,
-    _WEEKDAY_NAMES_ZH as _WEEKDAY_NAMES_ZH,
-    _WEEKDAY_NAMES_EN as _WEEKDAY_NAMES_EN,
-    SystemPromptContext as SystemPromptContext,
-    _SESSION_TRANSCRIPT_LIMIT_DEFAULT as _SESSION_TRANSCRIPT_LIMIT_DEFAULT,
-    _SESSION_TRANSCRIPT_LIMIT_MAX as _SESSION_TRANSCRIPT_LIMIT_MAX,
-    _SESSION_TRANSCRIPT_LIMIT_MIN as _SESSION_TRANSCRIPT_LIMIT_MIN,
-    _dynamic_transcript_limit as _dynamic_transcript_limit,
-    _memory_recall_preferences as _memory_recall_preferences,
-    _memory_recall_planner_enabled as _memory_recall_planner_enabled,
-    _resolve_memory_prefetch_mode as _resolve_memory_prefetch_mode,
-    _bounded_int as _bounded_int,
-    build_ambient_runtime_facts as build_ambient_runtime_facts,
-    effective_memory_access_policy as effective_memory_access_policy,
-    build_default_memory_recall_hook_options as build_default_memory_recall_hook_options,
-    memory_recall_scope_limit as memory_recall_scope_limit,
-    memory_recall_per_scope_limit as memory_recall_per_scope_limit,
-    memory_recall_max_hits as memory_recall_max_hits,
-    legacy_session_id_for_task as legacy_session_id_for_task,
-    build_projected_session_id as build_projected_session_id,
-    build_scope_aware_session_id as build_scope_aware_session_id,
-    _parse_scope_id as _parse_scope_id,
-    build_agent_runtime_id as build_agent_runtime_id,
-    build_agent_session_id as build_agent_session_id,
-    build_memory_namespace_id as build_memory_namespace_id,
-    build_private_memory_scope_ids as build_private_memory_scope_ids,
-    session_state_matches_scope as session_state_matches_scope,
-    ResolvedContextBundle as ResolvedContextBundle,
-    RecallPlanningContext as RecallPlanningContext,
-    SessionReplayProjection as SessionReplayProjection,
 )
 
 log = structlog.get_logger()

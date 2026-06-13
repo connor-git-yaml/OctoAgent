@@ -8,7 +8,9 @@ from pathlib import Path
 import pytest
 from octoagent.core.models import (
     AgentProfile,
+    AgentProfileOriginKind,
     AgentProfileScope,
+    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeRole,
     AgentRuntimeStatus,
@@ -23,9 +25,7 @@ from octoagent.core.models import (
     RecallFrame,
     SessionContextState,
     WorkerProfile,
-    WorkerProfileOriginKind,
     WorkerProfileRevision,
-    WorkerProfileStatus,
 )
 from octoagent.core.store import create_store_group
 
@@ -285,8 +285,8 @@ async def test_worker_profile_and_revision_roundtrip(tmp_path: Path) -> None:
         default_tool_groups=["project", "filesystem"],
         selected_tools=["filesystem.read"],
         runtime_kinds=["worker", "acp_runtime"],
-        status=WorkerProfileStatus.ACTIVE,
-        origin_kind=WorkerProfileOriginKind.CUSTOM,
+        status=AgentProfileStatus.ACTIVE,
+        origin_kind=AgentProfileOriginKind.CUSTOM,
         draft_revision=1,
         active_revision=1,
     )
@@ -315,7 +315,7 @@ async def test_worker_profile_and_revision_roundtrip(tmp_path: Path) -> None:
     assert stored_profile is not None
     assert stored_profile.name == "NAS Root Agent"
     assert stored_profile.selected_tools == ["filesystem.read"]
-    assert stored_profile.origin_kind == WorkerProfileOriginKind.CUSTOM
+    assert stored_profile.origin_kind == AgentProfileOriginKind.CUSTOM
     assert len(stored_revisions) == 1
     assert stored_revisions[0].change_summary == "首次发布"
     assert stored_revisions[0].snapshot_payload["selected_tools"] == ["filesystem.read"]

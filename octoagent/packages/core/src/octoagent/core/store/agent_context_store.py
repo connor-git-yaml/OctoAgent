@@ -10,6 +10,9 @@ import aiosqlite
 
 from ..models.agent_context import (
     AgentProfile,
+    AgentProfileOriginKind,
+    AgentProfileRevision,
+    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeRole,
     AgentRuntimeStatus,
@@ -26,9 +29,7 @@ from ..models.agent_context import (
     RecallFrame,
     SessionContextState,
     WorkerProfile,
-    WorkerProfileOriginKind,
     WorkerProfileRevision,
-    WorkerProfileStatus,
     normalize_runtime_role,
     normalize_session_kind,
 )
@@ -268,6 +269,55 @@ class SqliteAgentContextStore:
             (profile_id,),
         )
         return [self._row_to_worker_profile_revision(row) for row in rows]
+
+    # F117 Wave 2a：统一 agent_profile_revisions 读写（取代 worker_profile_revisions）。
+    # 与 save/list_worker_profile_revision 同形，表 → agent_profile_revisions，模型 →
+    # AgentProfileRevision。authoring（Wave 2bc）publish 路径切换到这两个方法。
+    # worker_profile_revisions 方法 + 表在 Wave 4 删除。
+    async def save_agent_profile_revision(
+        self,
+        revision: AgentProfileRevision,
+    ) -> AgentProfileRevision:
+        await self._conn.execute(
+            """
+            INSERT INTO agent_profile_revisions (
+                revision_id, profile_id, revision, change_summary,
+                snapshot_payload, created_by, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(revision_id) DO UPDATE SET
+                profile_id = excluded.profile_id,
+                revision = excluded.revision,
+                change_summary = excluded.change_summary,
+                snapshot_payload = excluded.snapshot_payload,
+                created_by = excluded.created_by,
+                created_at = excluded.created_at
+            """,
+            (
+                revision.revision_id,
+                revision.profile_id,
+                revision.revision,
+                revision.change_summary,
+                self._dump(revision.snapshot_payload),
+                revision.created_by,
+                revision.created_at.isoformat(),
+            ),
+        )
+        return revision
+
+    async def list_agent_profile_revisions(
+        self,
+        profile_id: str,
+    ) -> list[AgentProfileRevision]:
+        rows = await self._fetchall(
+            """
+            SELECT * FROM agent_profile_revisions
+            WHERE profile_id = ?
+            ORDER BY revision DESC, created_at DESC
+            """,
+            (profile_id,),
+        )
+        return [self._row_to_agent_profile_revision(row) for row in rows]
 
     async def save_owner_profile(self, profile: OwnerProfile) -> OwnerProfile:
         # Feature 082 P0：新增 last_synced_from_profile_at 字段（P2 ProfileGenerator 回填用）
@@ -1392,17 +1442,17 @@ class SqliteAgentContextStore:
         # 用 `"col" in row.keys()` 缺列回退默认值（与 permission_preset/role_card 同模式）。
         cols = row.keys()
         try:
-            status_value = WorkerProfileStatus(row["status"]) if "status" in cols and row["status"] else WorkerProfileStatus.ACTIVE
+            status_value = AgentProfileStatus(row["status"]) if "status" in cols and row["status"] else AgentProfileStatus.ACTIVE
         except ValueError:
-            status_value = WorkerProfileStatus.ACTIVE
+            status_value = AgentProfileStatus.ACTIVE
         try:
             origin_value = (
-                WorkerProfileOriginKind(row["origin_kind"])
+                AgentProfileOriginKind(row["origin_kind"])
                 if "origin_kind" in cols and row["origin_kind"]
-                else WorkerProfileOriginKind.CUSTOM
+                else AgentProfileOriginKind.CUSTOM
             )
         except ValueError:
-            origin_value = WorkerProfileOriginKind.CUSTOM
+            origin_value = AgentProfileOriginKind.CUSTOM
         archived_raw = row["archived_at"] if "archived_at" in cols else None
         return AgentProfile(
             profile_id=row["profile_id"],
@@ -1448,8 +1498,8 @@ class SqliteAgentContextStore:
             selected_tools=cls._load(row["selected_tools"], []),
             runtime_kinds=cls._load(row["runtime_kinds"], []),
             metadata=cls._load(row["metadata"], {}),
-            status=WorkerProfileStatus(row["status"]),
-            origin_kind=WorkerProfileOriginKind(row["origin_kind"]),
+            status=AgentProfileStatus(row["status"]),
+            origin_kind=AgentProfileOriginKind(row["origin_kind"]),
             draft_revision=row["draft_revision"],
             active_revision=row["active_revision"],
             created_at=datetime.fromisoformat(row["created_at"]),
@@ -1465,6 +1515,22 @@ class SqliteAgentContextStore:
         row: aiosqlite.Row,
     ) -> WorkerProfileRevision:
         return WorkerProfileRevision(
+            revision_id=row["revision_id"],
+            profile_id=row["profile_id"],
+            revision=row["revision"],
+            change_summary=row["change_summary"],
+            snapshot_payload=cls._load(row["snapshot_payload"], {}),
+            created_by=row["created_by"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+        )
+
+    @classmethod
+    def _row_to_agent_profile_revision(
+        cls,
+        row: aiosqlite.Row,
+    ) -> AgentProfileRevision:
+        # F117 Wave 2a：agent_profile_revisions 行 → AgentProfileRevision（同 worker 形）
+        return AgentProfileRevision(
             revision_id=row["revision_id"],
             profile_id=row["profile_id"],
             revision=row["revision"],

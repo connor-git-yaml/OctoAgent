@@ -25,6 +25,7 @@ from octoagent.core.models import (
     A2AMessageItem,
     ActionRequestEnvelope,
     ActionResultEnvelope,
+    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeItem,
     AgentRuntimeRole,
@@ -50,20 +51,19 @@ from octoagent.core.models import (
     TurnExecutorKind,
     Work,
     WorkerProfile,
-    WorkerProfileStatus,
 )
 from octoagent.core.models.agent_context import resolve_permission_preset
 from octoagent.provider.dx.backup_service import BackupService
 from ulid import ULID
 
-from ._base import ControlPlaneActionError, DomainServiceBase
-from .session_projection_helpers import SessionProjectionMixin, _AUDIT_TASK_ID
 from ..agent_context import build_projected_session_id
 from ..startup_bootstrap import (
-    ensure_main_runtime_and_session,
     ensure_default_project_agent_profile,
+    ensure_main_runtime_and_session,
 )
 from ..task_service import TaskService
+from ._base import ControlPlaneActionError, DomainServiceBase
+from .session_projection_helpers import _AUDIT_TASK_ID, SessionProjectionMixin
 
 log = structlog.get_logger()
 
@@ -781,7 +781,7 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
         profile_id: str,
     ) -> WorkerProfile | None:
         profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
-        if profile is None or profile.status == WorkerProfileStatus.ARCHIVED:
+        if profile is None or profile.status == AgentProfileStatus.ARCHIVED:
             return None
         return profile
 

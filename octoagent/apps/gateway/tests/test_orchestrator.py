@@ -7,10 +7,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-
 from octoagent.core.models import (
     A2AConversation,
     A2AConversationStatus,
+    AgentProfileOriginKind,
+    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeRole,
     AgentRuntimeStatus,
@@ -25,8 +26,6 @@ from octoagent.core.models import (
     SessionContextState,
     TaskStatus,
     WorkerProfile,
-    WorkerProfileOriginKind,
-    WorkerProfileStatus,
     WorkerResult,
 )
 from octoagent.core.models.message import NormalizedMessage
@@ -301,8 +300,8 @@ class TestOrchestrator:
                 default_tool_groups=["project", "filesystem", "terminal"],
                 selected_tools=["filesystem.list_dir", "filesystem.read_text"],
                 runtime_kinds=["worker", "subagent"],
-                status=WorkerProfileStatus.ACTIVE,
-                origin_kind=WorkerProfileOriginKind.CUSTOM,
+                status=AgentProfileStatus.ACTIVE,
+                origin_kind=AgentProfileOriginKind.CUSTOM,
                 draft_revision=1,
                 active_revision=1,
             )
@@ -374,8 +373,8 @@ class TestOrchestrator:
                 default_tool_groups=["project", "filesystem", "terminal"],
                 selected_tools=["filesystem.list_dir", "filesystem.read_text"],
                 runtime_kinds=["worker", "subagent"],
-                status=WorkerProfileStatus.ACTIVE,
-                origin_kind=WorkerProfileOriginKind.CUSTOM,
+                status=AgentProfileStatus.ACTIVE,
+                origin_kind=AgentProfileOriginKind.CUSTOM,
                 draft_revision=1,
                 active_revision=1,
             )

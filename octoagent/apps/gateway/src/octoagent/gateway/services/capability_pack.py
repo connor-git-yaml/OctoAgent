@@ -11,7 +11,9 @@ from typing import TYPE_CHECKING, Any
 # "octoagent.gateway.services.capability_pack.httpx.AsyncClient" 解析到 httpx 模块
 # 对象后全局 patch；主文件自身已无直接 httpx 引用（browser / web 簇已迁 mixin）。
 import httpx  # noqa: F401 -- patch 锚点：test_capability_pack_tools patch capability_pack.httpx.AsyncClient
+import structlog
 from octoagent.core.models import (
+    AgentProfileStatus,
     BuiltinToolAvailabilityStatus,
     BundledCapabilityPack,
     BundledSkillDefinition,
@@ -26,7 +28,6 @@ from octoagent.core.models import (
     ToolIndexQuery,
     WorkerBootstrapFile,
     WorkerCapabilityProfile,
-    WorkerProfileStatus,
 )
 from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
 from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
@@ -36,17 +37,16 @@ from octoagent.tooling import (
     ToolIndex,
     reflect_tool_schema,
 )
+
+# Feature 070: 权限 Hook 已移除，权限检查内联到 ToolBroker.execute()
+from octoagent.tooling.models import CoreToolSet, DeferredToolEntry
 from octoagent.tooling.permission import (
     ApprovalOverrideCacheProtocol,
     _ApprovalOverrideMemoryCache,
 )
-# Feature 070: 权限 Hook 已移除，权限检查内联到 ToolBroker.execute()
-from octoagent.tooling.models import CoreToolSet, DeferredToolEntry
-
-from .tool_search_tool import create_tool_search_handler
 from ulid import ULID
 
-import structlog
+from .tool_search_tool import create_tool_search_handler
 
 _log = structlog.get_logger()
 
@@ -85,11 +85,15 @@ def _profile_allows(tool_profile: str, context_profile: str) -> bool:
 from .builtin_tools._browser_support import (
     _BrowserSessionState,
 )
+
 # F108a W5：5 个职责簇 mixin（browser / web / media / worker_plan / availability）。
 # _ssrf_request_hook 经 browser 模块单一定义后在此 re-export，保外部 import 路径不变
 # （e2e_live/test_e2e_ssrf_guard.py 等 from capability_pack import _ssrf_request_hook）。
 from .capability_pack_availability import ToolAvailabilityMixin
-from .capability_pack_browser import BrowserSessionMixin, _ssrf_request_hook  # noqa: F401 -- re-export：test_e2e_ssrf_guard 直接 from capability_pack import
+from .capability_pack_browser import (  # noqa: F401 -- re-export：test_e2e_ssrf_guard 直接 from capability_pack import
+    BrowserSessionMixin,
+    _ssrf_request_hook,
+)
 from .capability_pack_media import MediaInspectMixin
 from .capability_pack_web import WebSearchMixin
 from .capability_pack_worker_plan import WorkerPlanMixin
@@ -410,7 +414,7 @@ class CapabilityPackService(
             stored_profile = await self._stores.agent_context_store.get_worker_profile(
                 normalized_profile_id
             )
-            if stored_profile is not None and stored_profile.status != WorkerProfileStatus.ARCHIVED:
+            if stored_profile is not None and stored_profile.status != AgentProfileStatus.ARCHIVED:
                 worker_type = "general"
                 builtin_profile = self.get_worker_profile("general")
                 return _ResolvedWorkerBinding(
@@ -467,7 +471,7 @@ class CapabilityPackService(
         if builtin_worker_type is not None:
             return builtin_worker_type
         stored_profile = await self._stores.agent_context_store.get_worker_profile(normalized)
-        if stored_profile is None or stored_profile.status == WorkerProfileStatus.ARCHIVED:
+        if stored_profile is None or stored_profile.status == AgentProfileStatus.ARCHIVED:
             return None
         return "general"
 

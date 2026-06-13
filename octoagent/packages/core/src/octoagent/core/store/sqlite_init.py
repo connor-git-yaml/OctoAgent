@@ -448,6 +448,24 @@ CREATE TABLE IF NOT EXISTS worker_profile_revisions (
 );
 """
 
+# F117 Wave 2a：统一 agent_profile 的 revision 历史表（取代 worker_profile_revisions）。
+# 与 migration_117 apply 建表字节一致；FK → agent_profiles。WorkerProfileRevision 表/类
+# 在 Wave 4 删除，迁移把 worker_profile_revisions 行 re-key 进此表。
+_AGENT_PROFILE_REVISIONS_DDL = """
+CREATE TABLE IF NOT EXISTS agent_profile_revisions (
+    revision_id             TEXT PRIMARY KEY,
+    profile_id              TEXT NOT NULL,
+    revision                INTEGER NOT NULL,
+    change_summary          TEXT NOT NULL DEFAULT '',
+    snapshot_payload        TEXT NOT NULL DEFAULT '{}',
+    created_by              TEXT NOT NULL DEFAULT '',
+    created_at              TEXT NOT NULL,
+
+    FOREIGN KEY (profile_id) REFERENCES agent_profiles(profile_id),
+    UNIQUE(profile_id, revision)
+);
+"""
+
 # F104 文件工作台 v0.1：artifact 版本历史表（append-only，仅 versionable=True 写入）
 _ARTIFACT_VERSIONS_DDL = """
 CREATE TABLE IF NOT EXISTS artifact_versions (
@@ -1023,6 +1041,11 @@ _AGENT_CONTEXT_INDEXES = [
     (
         "CREATE INDEX IF NOT EXISTS idx_worker_profile_revisions_profile_created "
         "ON worker_profile_revisions(profile_id, revision DESC, created_at DESC);"
+    ),
+    (
+        # F117 Wave 2a：agent_profile_revisions 索引（克隆 worker_profile_revisions 模式）
+        "CREATE INDEX IF NOT EXISTS idx_agent_profile_revisions_profile_created "
+        "ON agent_profile_revisions(profile_id, revision DESC, created_at DESC);"
     ),
     (
         "CREATE INDEX IF NOT EXISTS idx_owner_profile_overlays_scope "
@@ -1785,6 +1808,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_AGENT_PROFILES_DDL)
     await conn.execute(_WORKER_PROFILES_DDL)
     await conn.execute(_WORKER_PROFILE_REVISIONS_DDL)
+    await conn.execute(_AGENT_PROFILE_REVISIONS_DDL)
     await conn.execute(_ARTIFACT_VERSIONS_DDL)
     await conn.execute(_OWNER_PROFILES_DDL)
     await conn.execute(_OWNER_PROFILE_OVERLAYS_DDL)

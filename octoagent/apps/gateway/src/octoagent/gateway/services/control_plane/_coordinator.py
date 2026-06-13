@@ -57,16 +57,15 @@ from octoagent.core.models.task import RequesterInfo
 from octoagent.core.store import StoreGroup
 from octoagent.gateway.services.control_plane.automation_store import AutomationStore
 from octoagent.gateway.services.control_plane.control_plane_state import ControlPlaneStateStore
-from octoagent.provider.dx.import_workbench_service import ImportWorkbenchService
 from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
 from octoagent.gateway.services.memory.retrieval_platform_service import (
     RetrievalPlatformError,
     RetrievalPlatformService,
 )
+from octoagent.provider.dx.import_workbench_service import ImportWorkbenchService
 from ulid import ULID
 
 from ._base import ControlPlaneActionError, ControlPlaneContext, ControlPlaneServiceRegistry
-
 from .action_registry import build_action_registry
 from .agent_service import AgentProfileDomainService
 from .automation_service import AutomationDomainService
@@ -945,9 +944,9 @@ class ControlPlaneService(TelegramCommandMixin):
     async def _ensure_default_main_agent_bootstrap(self) -> None:
         """确保默认 Project 有主 Agent + 直接会话（仅缺失时创建）。"""
         from octoagent.core.models.agent_context import (
+            AgentProfileOriginKind,
+            AgentProfileStatus,
             WorkerProfile,
-            WorkerProfileOriginKind,
-            WorkerProfileStatus,
         )
 
         project = await self._stores.project_store.get_default_project()
@@ -976,8 +975,8 @@ class ControlPlaneService(TelegramCommandMixin):
                 summary="",
                 model_alias="main",
                 tool_profile="standard",
-                status=WorkerProfileStatus.ACTIVE,
-                origin_kind=WorkerProfileOriginKind.CUSTOM,
+                status=AgentProfileStatus.ACTIVE,
+                origin_kind=AgentProfileOriginKind.CUSTOM,
                 created_at=now,
                 updated_at=now,
             )

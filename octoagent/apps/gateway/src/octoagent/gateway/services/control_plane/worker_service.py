@@ -34,7 +34,13 @@ from octoagent.core.models import (
     ActionRequestEnvelope,
     ActionResultEnvelope,
     AgentProfile,
+    AgentProfileOriginKind,
+    AgentProfileRevisionItem,
+    AgentProfileRevisionsDocument,
     AgentProfileScope,
+    AgentProfileStaticConfig,
+    AgentProfileStatus,
+    AgentProfileViewItem,
     CapabilityPackDocument,
     ControlPlaneCapability,
     ControlPlaneDegradedState,
@@ -44,13 +50,7 @@ from octoagent.core.models import (
     TurnExecutorKind,
     Work,
     WorkerProfile,
-    WorkerProfileOriginKind,
-    WorkerProfileRevisionItem,
-    WorkerProfileRevisionsDocument,
     WorkerProfilesDocument,
-    WorkerProfileStaticConfig,
-    WorkerProfileStatus,
-    WorkerProfileViewItem,
 )
 from ulid import ULID
 
@@ -128,7 +128,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         _bs_project_name = selected_project.name if selected_project is not None else ""
         _bs_project_slug = selected_project.slug if selected_project is not None else ""
 
-        items: list[WorkerProfileViewItem] = []
+        items: list[AgentProfileViewItem] = []
         for profile in stored_profiles:
             matched_works = sorted(
                 works_by_profile_id.get(profile.profile_id, []),
@@ -137,7 +137,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             )
             latest = matched_works[0] if matched_works else None
             warnings: list[str] = []
-            if profile.status == WorkerProfileStatus.ARCHIVED:
+            if profile.status == AgentProfileStatus.ARCHIVED:
                 warnings.append("当前 profile 已归档，只保留审计、复制和历史追溯。")
             elif profile.active_revision == 0:
                 warnings.append("当前 profile 还是草稿，还没有已发布 revision。")
@@ -169,7 +169,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             )
 
             items.append(
-                WorkerProfileViewItem(
+                AgentProfileViewItem(
                     profile_id=profile.profile_id,
                     name=profile.name,
                     scope=profile.scope.value,
@@ -187,13 +187,13 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                             profile.active_revision or profile.draft_revision,
                         )
                     ),
-                    editable=profile.origin_kind != WorkerProfileOriginKind.BUILTIN,
+                    editable=profile.origin_kind != AgentProfileOriginKind.BUILTIN,
                     summary=profile.summary
                     or self._worker_profile_summary(
                         list(profile.default_tool_groups),
                         list(profile.default_tool_groups),
                     ),
-                    static_config=WorkerProfileStaticConfig(
+                    static_config=AgentProfileStaticConfig(
                         summary=profile.summary,
                         model_alias=profile.model_alias,
                         tool_profile=profile.tool_profile,
@@ -256,20 +256,20 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             )
 
             items.append(
-                WorkerProfileViewItem(
+                AgentProfileViewItem(
                     profile_id=f"singleton:{worker_type}",
                     name=self._worker_profile_label(worker_type),
                     scope="system",
                     project_id="",
                     mode="singleton",
-                    origin_kind=WorkerProfileOriginKind.BUILTIN,
-                    status=WorkerProfileStatus.ACTIVE,
+                    origin_kind=AgentProfileOriginKind.BUILTIN,
+                    status=AgentProfileStatus.ACTIVE,
                     active_revision=1,
                     draft_revision=1,
                     effective_snapshot_id=self._worker_snapshot_id(f"singleton:{worker_type}", 1),
                     editable=False,
                     summary=summary,
-                    static_config=WorkerProfileStaticConfig(
+                    static_config=AgentProfileStaticConfig(
                         summary=summary,
                         model_alias=profile.default_model_alias,
                         tool_profile=profile.default_tool_profile,
@@ -290,7 +290,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                     behavior_system=builtin_behavior_sys,
                     warnings=[] if builtin_latest is not None else ["当前还没有运行中的 work。"],
                     capabilities=self._worker_profile_control_capabilities(
-                        WorkerProfileStatus.ACTIVE,
+                        AgentProfileStatus.ACTIVE,
                         builtin=True,
                     ),
                 )
@@ -340,24 +340,24 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                     [
                         item
                         for item in items
-                        if item.origin_kind == WorkerProfileOriginKind.BUILTIN
+                        if item.origin_kind == AgentProfileOriginKind.BUILTIN
                     ]
                 ),
                 "custom_count": len(
                     [
                         item
                         for item in items
-                        if item.origin_kind != WorkerProfileOriginKind.BUILTIN
+                        if item.origin_kind != AgentProfileOriginKind.BUILTIN
                     ]
                 ),
                 "published_count": len(
-                    [item for item in items if item.status == WorkerProfileStatus.ACTIVE]
+                    [item for item in items if item.status == AgentProfileStatus.ACTIVE]
                 ),
                 "draft_count": len(
-                    [item for item in items if item.status == WorkerProfileStatus.DRAFT]
+                    [item for item in items if item.status == AgentProfileStatus.DRAFT]
                 ),
                 "archived_count": len(
-                    [item for item in items if item.status == WorkerProfileStatus.ARCHIVED]
+                    [item for item in items if item.status == AgentProfileStatus.ARCHIVED]
                 ),
                 "active_count": len(
                     [item for item in items if item.dynamic_context.active_work_count > 0]
@@ -389,10 +389,10 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
     async def get_worker_profile_revisions_document(
         self,
         profile_id: str,
-    ) -> WorkerProfileRevisionsDocument:
+    ) -> AgentProfileRevisionsDocument:
         _, selected_project, _, _ = await self._resolve_selection()
         stored_profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
-        items: list[WorkerProfileRevisionItem] = []
+        items: list[AgentProfileRevisionItem] = []
         warnings: list[str] = []
 
         if stored_profile is not None:
@@ -410,7 +410,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 profile_id
             )
             items = [
-                WorkerProfileRevisionItem(
+                AgentProfileRevisionItem(
                     revision_id=item.revision_id,
                     profile_id=item.profile_id,
                     revision=item.revision,
@@ -440,7 +440,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                     builtin.default_tool_groups,
                 )
                 items = [
-                    WorkerProfileRevisionItem(
+                    AgentProfileRevisionItem(
                         revision_id=self._worker_snapshot_id(profile_id, 1),
                         profile_id=profile_id,
                         revision=1,
@@ -464,7 +464,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         else:
             warnings.append("当前找不到对应的 Root Agent profile。")
 
-        return WorkerProfileRevisionsDocument(
+        return AgentProfileRevisionsDocument(
             resource_id=f"worker-profile-revisions:{profile_id}",
             profile_id=profile_id,
             revisions=items,
@@ -626,7 +626,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 existing = await self._get_worker_profile_in_scope(profile_id)
             except ControlPlaneActionError:
                 existing = None
-            if existing is not None and existing.origin_kind != WorkerProfileOriginKind.BUILTIN:
+            if existing is not None and existing.origin_kind != AgentProfileOriginKind.BUILTIN:
                 mode = "update"
 
         review = await self._review_worker_profile_draft(
@@ -636,7 +636,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             source_profile=source_profile,
             selected_project=selected_project,
             origin_kind=(
-                WorkerProfileOriginKind.CLONED if mode == "clone" else None
+                AgentProfileOriginKind.CLONED if mode == "clone" else None
             ),
         )
         target_profile_id = str(review["profile"].get("profile_id", "")).strip()
@@ -684,7 +684,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             raw=raw,
             mode="create",
             selected_project=selected_project,
-            origin_kind=WorkerProfileOriginKind.CUSTOM,
+            origin_kind=AgentProfileOriginKind.CUSTOM,
         )
         if not bool(review.get("can_save")):
             message = "；".join(review.get("save_errors", [])) or "Root Agent 草稿不能保存。"
@@ -692,7 +692,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         saved = await self._save_worker_profile_draft(
             normalized_profile=review["profile"],
             existing=None,
-            origin_kind=WorkerProfileOriginKind.CUSTOM,
+            origin_kind=AgentProfileOriginKind.CUSTOM,
         )
         # 为新 Agent 创建 agent-private 行为文件
         materialize_agent_behavior_files(
@@ -738,7 +738,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         if not profile_id:
             raise ControlPlaneActionError("WORKER_PROFILE_REQUIRED", "profile_id 不能为空。")
         existing = await self._get_worker_profile_in_scope(profile_id)
-        if existing.origin_kind == WorkerProfileOriginKind.BUILTIN:
+        if existing.origin_kind == AgentProfileOriginKind.BUILTIN:
             raise ControlPlaneActionError(
                 "WORKER_PROFILE_BUILTIN_READONLY",
                 "内建 archetype 不能直接修改，请先 clone 一个新的 Root Agent。",
@@ -802,14 +802,14 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         if name := self._param_str(request.params, "name"):
             raw["name"] = name
         raw["profile_id"] = ""
-        raw["origin_kind"] = WorkerProfileOriginKind.CLONED.value
+        raw["origin_kind"] = AgentProfileOriginKind.CLONED.value
         _, selected_project, _, _ = await self._resolve_selection()
         review = await self._review_worker_profile_draft(
             raw=raw,
             mode="clone",
             source_profile=source_profile,
             selected_project=selected_project,
-            origin_kind=WorkerProfileOriginKind.CLONED,
+            origin_kind=AgentProfileOriginKind.CLONED,
         )
         if not bool(review.get("can_save")):
             message = "；".join(review.get("save_errors", [])) or "克隆后的 Root Agent 草稿不能保存。"
@@ -817,7 +817,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         saved = await self._save_worker_profile_draft(
             normalized_profile=review["profile"],
             existing=None,
-            origin_kind=WorkerProfileOriginKind.CLONED,
+            origin_kind=AgentProfileOriginKind.CLONED,
         )
         return self._completed_result(
             request=request,
@@ -853,7 +853,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         if not profile_id:
             raise ControlPlaneActionError("WORKER_PROFILE_REQUIRED", "profile_id 不能为空。")
         existing = await self._get_worker_profile_in_scope(profile_id)
-        if existing.origin_kind == WorkerProfileOriginKind.BUILTIN:
+        if existing.origin_kind == AgentProfileOriginKind.BUILTIN:
             raise ControlPlaneActionError(
                 "WORKER_PROFILE_BUILTIN_READONLY",
                 "内建 archetype 不能归档。",
@@ -861,7 +861,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         archived = await self._stores.agent_context_store.save_worker_profile(
             existing.model_copy(
                 update={
-                    "status": WorkerProfileStatus.ARCHIVED,
+                    "status": AgentProfileStatus.ARCHIVED,
                     "archived_at": datetime.now(tz=UTC),
                     "updated_at": datetime.now(tz=UTC),
                 }
@@ -905,7 +905,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         if profile_id:
             existing = await self._stores.agent_context_store.get_worker_profile(profile_id)
             if existing is not None:
-                if existing.origin_kind == WorkerProfileOriginKind.BUILTIN:
+                if existing.origin_kind == AgentProfileOriginKind.BUILTIN:
                     raise ControlPlaneActionError(
                         "WORKER_PROFILE_BUILTIN_READONLY",
                         "内建 archetype 不能直接 apply，请先 clone 一个新的 Root Agent。",
@@ -1005,7 +1005,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         if not profile_id:
             raise ControlPlaneActionError("WORKER_PROFILE_REQUIRED", "profile_id 不能为空。")
         existing = await self._get_worker_profile_in_scope(profile_id)
-        if existing.origin_kind == WorkerProfileOriginKind.BUILTIN:
+        if existing.origin_kind == AgentProfileOriginKind.BUILTIN:
             raise ControlPlaneActionError(
                 "WORKER_PROFILE_BUILTIN_READONLY",
                 "内建 archetype 不能直接发布 revision。",
@@ -1081,12 +1081,12 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         if not profile_id:
             raise ControlPlaneActionError("WORKER_PROFILE_REQUIRED", "profile_id 不能为空。")
         existing = await self._get_worker_profile_in_scope(profile_id)
-        if existing.origin_kind == WorkerProfileOriginKind.BUILTIN:
+        if existing.origin_kind == AgentProfileOriginKind.BUILTIN:
             raise ControlPlaneActionError(
                 "WORKER_PROFILE_BIND_UNSUPPORTED",
                 "当前只支持把已发布的自定义 Root Agent 绑定为聊天默认。",
             )
-        if existing.status != WorkerProfileStatus.ACTIVE:
+        if existing.status != AgentProfileStatus.ACTIVE:
             raise ControlPlaneActionError(
                 "WORKER_PROFILE_NOT_PUBLISHED",
                 "请先发布 revision，再绑定为默认聊天 Agent。",
@@ -1126,7 +1126,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         if not profile_id:
             raise ControlPlaneActionError("WORKER_PROFILE_REQUIRED", "profile_id 不能为空。")
         profile = await self._get_worker_profile_in_scope(profile_id)
-        if profile.status == WorkerProfileStatus.ARCHIVED:
+        if profile.status == AgentProfileStatus.ARCHIVED:
             raise ControlPlaneActionError(
                 "WORKER_PROFILE_ARCHIVED",
                 "归档后的 Root Agent 不能再启动新任务。",
@@ -1230,7 +1230,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             raw=raw,
             mode="extract",
             selected_project=selected_project,
-            origin_kind=WorkerProfileOriginKind.EXTRACTED,
+            origin_kind=AgentProfileOriginKind.EXTRACTED,
         )
         if not bool(review.get("can_save")):
             message = "；".join(review.get("save_errors", [])) or "提炼后的 Root Agent 草稿不能保存。"
@@ -1238,7 +1238,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         saved = await self._save_worker_profile_draft(
             normalized_profile=review["profile"],
             existing=None,
-            origin_kind=WorkerProfileOriginKind.EXTRACTED,
+            origin_kind=AgentProfileOriginKind.EXTRACTED,
         )
         return self._completed_result(
             request=request,

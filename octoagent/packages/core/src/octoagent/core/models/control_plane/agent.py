@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from ..agent_context import WorkerProfileOriginKind, WorkerProfileStatus
+from ..agent_context import AgentProfileOriginKind, AgentProfileStatus
 from ..capability import BundledCapabilityPack, ToolAvailabilityExplanation
 from ._base import ControlPlaneCapability, ControlPlaneDocument
 
@@ -36,7 +36,7 @@ class AgentProfilesDocument(ControlPlaneDocument):
     profiles: list[AgentProfileItem] = Field(default_factory=list)
 
 
-class WorkerProfileStaticConfig(BaseModel):
+class AgentProfileStaticConfig(BaseModel):
     summary: str = Field(default="")
     model_alias: str = Field(default="main")
     tool_profile: str = Field(default="minimal")
@@ -48,7 +48,7 @@ class WorkerProfileStaticConfig(BaseModel):
     resource_limits: dict[str, Any] = Field(default_factory=dict, description="资源限制覆盖")
 
 
-class WorkerProfileDynamicContext(BaseModel):
+class AgentProfileDynamicContext(BaseModel):
     active_project_id: str = Field(default="")
     active_work_count: int = Field(default=0, ge=0)
     running_work_count: int = Field(default=0, ge=0)
@@ -67,22 +67,22 @@ class WorkerProfileDynamicContext(BaseModel):
     updated_at: datetime | None = None
 
 
-class WorkerProfileViewItem(BaseModel):
+class AgentProfileViewItem(BaseModel):
     profile_id: str = Field(min_length=1)
     name: str = Field(min_length=1)
     scope: str = Field(default="system")
     project_id: str = Field(default="")
     mode: str = Field(default="singleton")
-    origin_kind: WorkerProfileOriginKind = WorkerProfileOriginKind.BUILTIN
-    status: WorkerProfileStatus = WorkerProfileStatus.ACTIVE
+    origin_kind: AgentProfileOriginKind = AgentProfileOriginKind.BUILTIN
+    status: AgentProfileStatus = AgentProfileStatus.ACTIVE
     active_revision: int = Field(default=0, ge=0)
     draft_revision: int = Field(default=0, ge=0)
     effective_snapshot_id: str = Field(default="")
     editable: bool = False
     summary: str = Field(default="")
-    static_config: WorkerProfileStaticConfig = Field(default_factory=WorkerProfileStaticConfig)
-    dynamic_context: WorkerProfileDynamicContext = Field(
-        default_factory=WorkerProfileDynamicContext
+    static_config: AgentProfileStaticConfig = Field(default_factory=AgentProfileStaticConfig)
+    dynamic_context: AgentProfileDynamicContext = Field(
+        default_factory=AgentProfileDynamicContext
     )
     is_default_for_project: bool = Field(default=False)
     behavior_system: dict[str, Any] = Field(default_factory=dict)
@@ -94,11 +94,11 @@ class WorkerProfilesDocument(ControlPlaneDocument):
     resource_type: str = "worker_profiles"
     resource_id: str = "worker-profiles:overview"
     active_project_id: str = Field(default="")
-    profiles: list[WorkerProfileViewItem] = Field(default_factory=list)
+    profiles: list[AgentProfileViewItem] = Field(default_factory=list)
     summary: dict[str, Any] = Field(default_factory=dict)
 
 
-class WorkerProfileRevisionItem(BaseModel):
+class AgentProfileRevisionItem(BaseModel):
     revision_id: str = Field(min_length=1)
     profile_id: str = Field(min_length=1)
     revision: int = Field(ge=1)
@@ -108,11 +108,11 @@ class WorkerProfileRevisionItem(BaseModel):
     snapshot_payload: dict[str, Any] = Field(default_factory=dict)
 
 
-class WorkerProfileRevisionsDocument(ControlPlaneDocument):
+class AgentProfileRevisionsDocument(ControlPlaneDocument):
     resource_type: str = "worker_profile_revisions"
     resource_id: str = "worker-profile-revisions:overview"
     profile_id: str = Field(default="")
-    revisions: list[WorkerProfileRevisionItem] = Field(default_factory=list)
+    revisions: list[AgentProfileRevisionItem] = Field(default_factory=list)
     summary: dict[str, Any] = Field(default_factory=dict)
 
 

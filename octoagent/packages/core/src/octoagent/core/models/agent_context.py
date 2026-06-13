@@ -8,7 +8,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 # Feature 090 D2: 显式化 worker kind，消除 _is_worker_behavior_profile 的 metadata 探测
 # - "main": 主 Agent（默认）
 # - "worker": 来自 WorkerProfile 的镜像 Agent
@@ -77,13 +76,13 @@ class AgentProfileScope(StrEnum):
     PROJECT = "project"
 
 
-class WorkerProfileStatus(StrEnum):
+class AgentProfileStatus(StrEnum):
     DRAFT = "draft"
     ACTIVE = "active"
     ARCHIVED = "archived"
 
 
-class WorkerProfileOriginKind(StrEnum):
+class AgentProfileOriginKind(StrEnum):
     BUILTIN = "builtin"
     CUSTOM = "custom"
     CLONED = "cloned"
@@ -225,8 +224,8 @@ class AgentProfile(BaseModel):
     default_tool_groups: list[str] = Field(default_factory=list)
     selected_tools: list[str] = Field(default_factory=list)
     runtime_kinds: list[str] = Field(default_factory=list)
-    status: WorkerProfileStatus = WorkerProfileStatus.ACTIVE
-    origin_kind: WorkerProfileOriginKind = WorkerProfileOriginKind.CUSTOM
+    status: AgentProfileStatus = AgentProfileStatus.ACTIVE
+    origin_kind: AgentProfileOriginKind = AgentProfileOriginKind.CUSTOM
     draft_revision: int = Field(default=0, ge=0)
     active_revision: int = Field(default=0, ge=0)
     archived_at: datetime | None = None
@@ -250,8 +249,8 @@ class WorkerProfile(BaseModel):
     runtime_kinds: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     resource_limits: dict[str, Any] = Field(default_factory=dict, description="资源限制覆盖")
-    status: WorkerProfileStatus = WorkerProfileStatus.DRAFT
-    origin_kind: WorkerProfileOriginKind = WorkerProfileOriginKind.CUSTOM
+    status: AgentProfileStatus = AgentProfileStatus.DRAFT
+    origin_kind: AgentProfileOriginKind = AgentProfileOriginKind.CUSTOM
     draft_revision: int = Field(default=0, ge=0)
     active_revision: int = Field(default=0, ge=0)
     created_at: datetime = Field(default_factory=_utc_now)
@@ -261,6 +260,22 @@ class WorkerProfile(BaseModel):
 
 class WorkerProfileRevision(BaseModel):
     """Root Agent 已发布 revision。"""
+
+    revision_id: str = Field(min_length=1)
+    profile_id: str = Field(min_length=1)
+    revision: int = Field(ge=1)
+    change_summary: str = Field(default="")
+    snapshot_payload: dict[str, Any] = Field(default_factory=dict)
+    created_by: str = Field(default="")
+    created_at: datetime = Field(default_factory=_utc_now)
+
+
+class AgentProfileRevision(BaseModel):
+    """统一 Agent profile 的已发布 revision（F117 取代 WorkerProfileRevision）。
+
+    F117 Wave 2a：与 WorkerProfileRevision 同形，挂 agent_profile_revisions 表。
+    WorkerProfileRevision 类 + worker_profile_revisions 表在 Wave 4 删除。
+    """
 
     revision_id: str = Field(min_length=1)
     profile_id: str = Field(min_length=1)
