@@ -124,23 +124,32 @@ CREATE UNIQUE INDEX idx_agent_runtimes_active_worker_unique
 - `_build_agent_profile_from_worker_profile`（worker_profile_ops.py:130）+ `_ensure_agent_profile_from_worker_profile`（entity_ensure.py:971）：复制 9 字段进统一行（summary/default_tool_groups/selected_tools/runtime_kinds/status/origin_kind/draft_revision/active_revision/archived_at）。无运行时消费方读这些字段 → 零变更。
 - backfill：materialize-on-read 每次 dispatch 重写镜像，自然回填；存量行由 migration_117 apply 统一。
 
-### Wave 2 — 耦合读+写切换 + 镜像塌缩 + authoring 改写 + 命名（最高风险）
-> **强制 gate（Wave 1 评审 MEDIUM-1）：archive→统一行 sync**。baseline archive 路径
-> （worker_service.py:848）只更 worker_profiles 不刷镜像 → 镜像 status 陈旧（恒 active）。
-> Wave 2 切读路径读 mirror status/archived_at **前**，必须让 archive 直写统一 agent_profiles
-> 行 status=ARCHIVED（authoring 改写自然闭合：统一行即权威）。验收：archived worker 端到端断言 status 正确。
-- **(read switch)** `capability_pack._resolve_worker_binding`（:410）读 agent_profiles(kind=worker) 工具字段（用 `is_worker_behavior_profile` dual judgment 兼容 schema-lag）；`chat.py`（:256/:271）model_alias + executor-kind 读统一行。
-- **(write switch + authoring)** `worker_profile_ops.py`→`agent_profile_ops.py` / `worker_service.py` authoring 走统一 agent_profiles + 新 `agent_profile_revisions`（store 加 `save/list_agent_profile_revisions`）；revision publish 切换。
-- **(mirror 塌缩)** 删两个镜像 builder（authoring 直写统一表后冗余）；镜像消费方（agent_decision:123 / resolver:683 / paths:40）判据收敛；`_coordinator.py` 删 `agent-profile-{id}` 前缀 + reverse replace；stale-mirror 写路径（worker_service archive 等）直写统一行。
-- **(命名)** action_id `worker_profile.*`→`agent_profile.*`；视图族 `WorkerProfileViewItem`/`WorkerProfilesDocument`/`WorkerProfileRevisionItem` → `AgentProfile*`（resource_type/id 同步）；枚举 `WorkerProfileStatus`→`AgentProfileStatus` / `WorkerProfileOriginKind`→`AgentProfileOriginKind`；`routes/control_plane.py` `worker-profiles`/`worker-profile-revisions` → `agent-profiles`/`agent-profile-revisions`。
+### Wave 2 — 内部符号合并切换（最高风险，wire 留 Wave 3）
+> Understand workflow 7-agent 地图 + 完整性 critic 定调（详 [wave-2-map.md](./wave-2-map.md)）。**关键裁定**：
+> ① wire 字符串（action_id / resource_type / 路由 / WorkerProfilesDocument 类）**留 Wave 3 与 FE 原子改**
+> （避免 backend↔FE wire 失配 + WorkerProfilesDocument↔AgentProfilesDocument 碰撞与 wire 同改）；
+> ② works 改名 + AgentRuntime.worker_profile_id 塌缩 **留 Wave 4**（持久化列删，与 migration apply 同步，
+> 拆 HAZARD-4：migration_117 works rename 只在 Wave 4 apply，Wave 2 不碰 works）。Wave 2 只动内部 Python 符号 + 逻辑。
+
+#### Wave 2a — store 地基（加性/rename，green standalone）
+- store 加 `save_agent_profile_revision` / `list_agent_profile_revisions` / `_row_to_agent_profile_revision`（克隆 worker_* 实现，表→agent_profile_revisions）。
+- sqlite_init 加 `_AGENT_PROFILE_REVISIONS_DDL` + 索引（与 migration_117 字节一致）——**HAZARD-2**：fresh test DB 走 sqlite_init 非 migration，缺表会 fail。
+- 枚举 rename `WorkerProfileStatus`→`AgentProfileStatus` / `WorkerProfileOriginKind`→`AgentProfileOriginKind`（定义 agent_context.py:80/86 + 12 消费文件 + 测试）。StrEnum value 不变 → 零 DB/wire 影响。
+- 视图类 rename 5 个无碰撞类（StaticConfig/DynamicContext/ViewItem/RevisionItem/RevisionsDocument）。**WorkerProfilesDocument 留 Wave 3**（与既有 AgentProfilesDocument 碰撞，随 wire 一起改）。
+
+#### Wave 2bc — 耦合写+读切换 + 镜像塌缩（原子提交，HAZARD-3）
+> archive 写切换与所有读切换必须同 commit：否则 archived worker 读陈旧 status=active 仍可派发。
+- **(write+authoring)** worker_profile_ops `_save_worker_profile_draft`/`_publish_worker_profile_revision` 写统一表 + agent_profile_revisions；**删** 两镜像 builder（`_build_agent_profile_from_worker_profile` + `_sync_worker_profile_agent_profile` + entity_ensure:942 `_ensure_agent_profile_from_worker_profile`）；ops helper 返回 **AgentProfile**；`_get_worker_profile_in_scope` 加 kind-guard（非 worker→NOT_FOUND）。
+- **(archive 写切换)** worker_service `_handle_worker_profile_archive`（:861）写 `save_agent_profile` status=ARCHIVED（闭合 archive-sync gate）；删 3 处 `_sync` + 152 mirror call。
+- **(read switch)** capability_pack `resolve_worker_binding`（:410，worker 分支映射 9 字段 / 非 worker 分支保 builtin，`is_worker_behavior_profile` 判别，**`source_kind='worker_profile'` 字面保留**）+ `resolve_worker_type_for_profile`（:469 加 not-worker guard，删 :1207 fallback）；chat.py 三处（:245/:256/:271，import is_worker_behavior_profile）；session_service（:783/:513）。
+- **(GAP，critic 抓出必含)** dispatch_service:686（GAP-A 热路径）/ entity_ensure:218（GAP-B 独立 reader）/ session_projection_helpers:95/107（GAP-C）/ agent_service:368/380（GAP-D，保 no-op 等价）。
+- **(coordinator)** agent_service create（:615-675）收敛单 save_agent_profile；_coordinator default-main（:970-997）删 reverse-replace（:1010），**保 worker_profile_id 可派生**（HAZARD-5，= agent_profile_id；列塌缩留 Wave 4）。
 - 此后 worker_profiles 表运行时死（不读不写），待 Wave 4 物理删。
 
-### Wave 3 — FE 全改名
-- `types/index.ts`：`WorkerProfileItem`→`AgentProfileItem`（与既有 AgentProfileItem 协调，避免重名冲突——可能合并为 kind 判别的单类型）等 8 类型；`AgentRuntimeItem.worker_profile_id`→`agent_profile_id`；`WorkProjectionItem.requested_worker_profile_id`→`requested_agent_profile_id`。
-- `api/client.ts`：`fetchWorkerProfileRevisions`→`fetchAgentProfileRevisions`，端点 `worker-profile-revisions`→`agent-profile-revisions`。
-- `controlPlane.ts`：资源 manifest key `worker_profiles`→`agent_profiles`，路由 map 同步。
-- 组件：`agentManagementData.ts` / `AgentCenter.tsx` / `ChatWorkbench.tsx` / `WorkbenchLayout.tsx` / `SettingsResourceLimitsSection.tsx` / `SettingsPage.tsx`：`snapshot.resources.worker_profiles`→`agent_profiles`，action_id `worker_profile.*`→`agent_profile.*`，`result.data.worker_profile_id`→`agent_profile_id`。
-- FE 7 测试 fixture 同步。
+### Wave 3 — FE 全改名 + wire 字符串（原子）
+- **wire（从 Wave 2 移入）**：action_id `worker_profile.*`→`agent_profile.*`（action_registry + worker_service dispatch keys + 硬编码字面）；resource_type `worker_profiles`→`agent_profiles` + `WorkerProfilesDocument`→`AgentProfilesDocument`（解决与既有同名碰撞）；路由 `worker-profiles`/`worker-profile-revisions`→`agent-profiles`/`agent-profile-revisions`；backend wire 测试同步。
+- `types/index.ts`：`WorkerProfileItem`→`AgentProfileItem` 等 8 类型；`AgentRuntimeItem.worker_profile_id`→`agent_profile_id`；`WorkProjectionItem.requested_worker_profile_id`→`requested_agent_profile_id`。
+- `api/client.ts` `fetchWorkerProfileRevisions`→`fetchAgentProfileRevisions` + 端点；`controlPlane.ts` manifest key + 路由 map；组件 6 个 + FE 7 测试 fixture。
 
 ### Wave 4 — 物理删除 + dedup 塌缩 + 真迁移 + 测试 bulk + docs
 - **删类/表/store 方法**：`WorkerProfile` / `WorkerProfileRevision` 类（agent_context.py）；`worker_profiles` / `worker_profile_revisions` 表 DDL（sqlite_init.py）；store `save/get/list_worker_profile*` + `_row_to_worker_profile*` 方法；`models/__init__` re-export。
