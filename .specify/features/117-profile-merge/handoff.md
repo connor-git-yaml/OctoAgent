@@ -1,30 +1,38 @@
-# F117 Handoff — Wave 2 resume 指南
+# F117 Handoff — Wave 2bc resume 指南
 
-> 状态：**Wave 0+1 完成并 committed，暂停在干净检查点**（用户 2026-06-13 拍板）。Wave 2-4 待续。
+> 状态：**Wave 0/1/2a 完成 committed；Wave 2b read-switch 已 committed 但⚠半成品（BLOCKED）**。
 > 分支 `feature/117-profile-merge`（**未 push**），worktree `.claude/worktrees/F117-profile-merge`，基于 origin/master `7199f468`。
 
-## 已完成（5 commits）
+## 已完成（9 commits）
 ```
-0746e6f0 docs(F117): Wave 1 评审 + plan §5 分波对齐
-240dde98 refactor(F117): Wave 1 镜像 populate
-23082fad refactor(F117): Wave 0 AgentProfile 吸收 9 worker 字段
-8e8d8a4b feat(F117): migration_117（dry-run/apply 副本验证）
-4a164fc9 docs(F117): 影响分析 + 迁移设计 + Wave 0 评审
+67201a40 refactor(F117): Wave 2b read-switch ⚠半成品 — BLOCKED on 镜像完整性（双评审）
+450299b3 refactor(F117): Wave 2a — agent_profile_revisions store 地基 + 枚举/视图类改名
+689732d5 docs(F117): Wave 2 详尽变更地图（7-agent workflow + critic）+ plan §5 子波细化
+ef1d7ba0 docs(F117): Wave 2 resume handoff（Wave 0+1 检查点）
+0746e6f0 / 240dde98 / 23082fad / 8e8d8a4b / 4a164fc9 = Wave 0/1 + migration + 影响分析
 ```
-- **Phase 1-2 + 双 Gate**：A1 彻底物理合并 + 本次全改名（用户拍板）。migration_117 在真实例两副本验证（幂等 + 零数据丢失），**真实例未动**。
-- **Wave 0**（加性）：`AgentProfile` +9 worker 字段 + store save/hydrate + sqlite_init DDL/ALTER。
-- **Wave 1**（populate）：两镜像 builder 复制 9 字段进统一行。
-- 两波均 **0 regression（4135=baseline）+ e2e_smoke 8/8 + 评审 0 HIGH**。
+- **Phase 1-2 + 双 Gate**：A1 彻底物理合并 + 全改名（拍板）。migration_117 副本验证（幂等 + 零数据丢失），真实例未动。
+- **Wave 0/1**（加性）：AgentProfile +9 字段 + 镜像 populate。**Wave 2a**：agent_profile_revisions store 地基 + 枚举/视图类改名。均 0 regression（4135）。
+- **Wave 2b read-switch（⚠ 半成品）**：7 站运行时读切到统一镜像 + archive-sync。4135=baseline + e2e 8/8，但**双评审 panel 抓出系统性不变量缺口**（详 [wave-2b-review.md](./wave-2b-review.md)）。
 
-## 下一步：Wave 2（最高风险，耦合切换）
-详见 [refactor-plan.md](./refactor-plan.md) §5 Wave 2。核心：
-1. **archive-sync gate（先做，Wave 1 评审 MEDIUM-1）**：baseline `worker_service.py:848 _handle_worker_profile_archive` 只更 worker_profiles 不刷镜像 → 镜像 status 陈旧。Wave 2 读 mirror status **前**必须让 archive 写统一行 status=ARCHIVED（authoring 改写自然闭合）。验收：archived worker 端到端断言 status。
-2. **read switch**：`capability_pack._resolve_worker_binding`（:410）+ `chat.py`（:256/:271 _resolve_profile_model_alias / _resolve_owner_turn_executor_kind）改读 agent_profiles(kind=worker)。worker 检测用 `is_worker_behavior_profile`（agent_decision.py:112，dual judgment kind OR metadata，**兼容实例无 kind 列**）。
-3. **write switch + authoring**：`worker_profile_ops.py`(43 占)→`agent_profile_ops.py` / `worker_service.py`(51 占) authoring 直写统一表 + 新 `agent_profile_revisions`（store 加 `save/list_agent_profile_revisions`）。
-4. **mirror 塌缩**：删两 builder（`worker_profile_ops.py:130` + `entity_ensure.py:971`）；消费方判据收敛；`_coordinator.py:1010` 删 `agent-profile-{id}` 前缀+reverse replace。
-5. **命名**：action_id `worker_profile.*`→`agent_profile.*`（action_registry.py:329-385）；视图族 6 类（control_plane/agent.py:39-116）→`AgentProfile*`；枚举 `WorkerProfileStatus`→`AgentProfileStatus`/`WorkerProfileOriginKind`→`AgentProfileOriginKind`；路由（routes/control_plane.py:44/51）`worker-profiles`→`agent-profiles`。
+## ⚠ 下一步：Wave 2bc 必须闭合镜像完整性（read-switch 当前不安全）
+> **核心教训**：2b/2c 拆分（read-switch 先于 authoring write-switch）漏耦合。read-switch 依赖
+> 「每个运行时可达 worker 都有当前+完整镜像」，但镜像只在 publish/bind 建 → draft/created/cloned
+> 未发布 worker 无镜像 → read-switch 退化（builtin_fallback / session 误判，HIGH×2）。测试全绿仅因
+> test helper 无条件预建镜像（且漏 wp.metadata）。**必须先闭合再继续**。
 
-**Wave 3** FE 全改名（9 src + 7 test，types/index.ts 等）。**Wave 4** 删类/删表 + AgentRuntime.worker_profile_id 塌缩(dedup) + works 改名 + migration_117 CLI 注册 + 残留扫描 0 + docs + completion-report。
+修复方向（[wave-2b-review.md](./wave-2b-review.md) 末有完整 finding 表 + fix 计划）二选一：
+1. **镜像完整性**（较小，过渡）：所有 authoring 写路径同步同 id 镜像（携 9 字段 + metadata）——
+   `_save_worker_profile_draft`（worker_profile_ops:786，覆盖 create/update/clone/extract）+
+   agent_service create（:632，改同 id 镜像非 `agent-profile-{id}` 前缀）+ resource_limits（:366）；
+   GAP-A/B 加 is_worker_behavior_profile guard；migration UPDATE 补 name/model_alias/metadata；
+   test helper 复制 wp.metadata + version + 加 worker-metadata 回归测试。**注意**：draft-save 同步镜像
+   走 surgical 直写（仿 archive-sync，避免 _sync 的 materialize 副作用）；MED-1「published-only binds
+   vs draft-immediately」需 intent 拍板。
+2. **直接耦合 Wave 2c**（较大）：authoring 直写统一 agent_profiles 行（无镜像）+ 删镜像 builder + 全改名，一步到位。
+
+**Wave 2c**（authoring 改写 + 全 wire 改名）：worker_profile_ops→agent_profile_ops / worker_service authoring 直写统一表 + agent_profile_revisions；删两镜像 builder（worker_profile_ops:130 + entity_ensure:971）；`_coordinator.py:1010` 删 `agent-profile-{id}` 前缀。**wire 字符串留 Wave 3**：action_id `worker_profile.*`→`agent_profile.*`、resource_type、路由、WorkerProfilesDocument（与 FE 原子改，详 plan §5）。
+**Wave 3** FE 全改名 + wire 字符串。**Wave 4** 删类/删表 + AgentRuntime.worker_profile_id 塌缩(dedup) + works 改名 + migration CLI + 残留扫描 + completion-report。
 
 ## 关键 gotcha（resume 必读）
 - **schema-lag**：托管实例 `agent_profiles` **无 kind 列**（落后 F090 ALTER），worker 镜像仅靠 `metadata.source_kind='worker_profile_mirror'`。所有 worker 检测走 dual judgment，迁移/store PRAGMA 驱动。
