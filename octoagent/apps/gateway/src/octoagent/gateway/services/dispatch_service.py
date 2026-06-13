@@ -17,27 +17,23 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from octoagent.core.models.agent_context import resolve_permission_preset
 from octoagent.core.models import (
     A2AConversation,
     A2AConversationStatus,
     A2AMessageAuditPayload,
     A2AMessageDirection,
     A2AMessageRecord,
-    ActorType,
     AgentRuntime,
     AgentRuntimeRole,
     AgentSession,
     AgentSessionKind,
-    DelegationTargetKind,
     DispatchEnvelope,
-    Event,
-    EventCausality,
     EventType,
     TaskStatus,
-    TurnExecutorKind,
     WorkerResult,
 )
+from octoagent.core.models.agent_context import resolve_permission_preset
+
 # F099 Phase C: source_kinds 常量导入（_resolve_a2a_source_role 扩展）
 from octoagent.core.models.source_kinds import (
     KNOWN_SOURCE_RUNTIME_KINDS,
@@ -45,19 +41,15 @@ from octoagent.core.models.source_kinds import (
     SOURCE_RUNTIME_KIND_USER_CHANNEL,
 )
 from octoagent.protocol import (
-    build_cancel_message,
     build_error_message,
-    build_heartbeat_message,
     build_result_message,
     build_task_message,
-    build_update_message,
     dispatch_envelope_from_task_message,
 )
 from octoagent.protocol.models import A2AMessage
 from ulid import ULID
 
 from .agent_context import build_scope_aware_session_id
-from .connection_metadata import resolve_delegation_target_profile_id
 from .runtime_control import (
     RUNTIME_CONTEXT_JSON_KEY,
     RUNTIME_CONTEXT_KEY,
@@ -682,8 +674,10 @@ class A2ADispatchMixin:
             if agent_profile_id
             else None
         )
+        # F117 Wave 2bc（GAP-A）：读统一行（worker 与 mirror 同 id）。.name/.summary 由
+        # Wave 0/1 携带；用 .summary 作 persona（baseline 用 worker_profile.summary）。
         worker_profile = (
-            await self._stores.agent_context_store.get_worker_profile(worker_profile_id)
+            await self._stores.agent_context_store.get_agent_profile(worker_profile_id)
             if worker_profile_id
             else None
         )

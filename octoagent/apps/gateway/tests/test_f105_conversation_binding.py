@@ -225,7 +225,7 @@ async def test_direct_worker_session_not_bound(
     web_client: AsyncClient, web_app
 ) -> None:
     """CODEX-H4：用户显式选 worker 直聊的会话不写 binding（H1 不被污染）。"""
-    await web_app.state.store_group.agent_context_store.save_worker_profile(
+    await _save_worker_with_mirror(web_app.state.store_group.agent_context_store, 
         WorkerProfile(
             profile_id="worker-profile-f105",
             project_id="",
@@ -279,3 +279,24 @@ async def test_h1_all_rows_remain_main_agent(tmp_path: Path) -> None:
     assert len(rows) == 2
     assert all(row.agent_profile_id == "" for row in rows)
     await store_group.close()
+# ── F117 Wave 2bc 测试辅助（worker + 镜像）──────────────────────────────
+# Wave 2bc read-switch 后运行时统一读 agent_profiles(kind=worker) 镜像；生产中镜像
+# 由 publish/_sync/materialize-on-read 总会创建。裸 save_worker_profile 的测试须显式
+# 建镜像反映生产状态。WorkerProfile 类/表 Wave 4 删除时本 helper 一并移除。
+async def _save_worker_with_mirror(store, wp):
+    from octoagent.core.models import AgentProfile
+    await store.save_worker_profile(wp)
+    await store.save_agent_profile(
+        AgentProfile(
+            profile_id=wp.profile_id, scope=wp.scope, project_id=wp.project_id,
+            name=wp.name, kind="worker", persona_summary=wp.summary,
+            model_alias=wp.model_alias, tool_profile=wp.tool_profile, summary=wp.summary,
+            default_tool_groups=list(wp.default_tool_groups),
+            selected_tools=list(wp.selected_tools), runtime_kinds=list(wp.runtime_kinds),
+            status=wp.status, origin_kind=wp.origin_kind,
+            draft_revision=wp.draft_revision, active_revision=wp.active_revision,
+            archived_at=wp.archived_at,
+            metadata={"source_kind": "worker_profile_mirror", "source_worker_profile_id": wp.profile_id},
+        )
+    )
+    return wp

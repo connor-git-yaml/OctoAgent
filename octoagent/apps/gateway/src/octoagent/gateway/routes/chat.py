@@ -22,8 +22,9 @@ from octoagent.core.models import (
     RuntimeControlContext,
     TurnExecutorKind,
 )
-from octoagent.policy.models import ChatSendRequest, ChatSendResponse
+from octoagent.gateway.services.agent_decision import is_worker_behavior_profile
 from octoagent.gateway.services.control_plane.control_plane_state import ControlPlaneStateStore
+from octoagent.policy.models import ChatSendRequest, ChatSendResponse
 
 from ..deps import get_store_group
 from ..services.connection_metadata import (
@@ -242,7 +243,9 @@ async def _resolve_session_owner_profile_id(store_group, task_id: str) -> str:
         legacy_owner = str(control.get("agent_profile_id", "")).strip()
         if not legacy_owner:
             continue
-        if await store_group.agent_context_store.get_worker_profile(legacy_owner):
+        # F117 Wave 2bc：读统一行 + is_worker_behavior_profile 判别（baseline 用 worker_profile 存在=worker）
+        anchored_agent_profile = await store_group.agent_context_store.get_agent_profile(legacy_owner)
+        if anchored_agent_profile is not None and is_worker_behavior_profile(anchored_agent_profile):
             continue
         return legacy_owner
     return anchored_owner_profile_id
@@ -253,10 +256,7 @@ async def _resolve_profile_model_alias(store_group, profile_id: str) -> str:
     if not resolved_profile_id:
         return ""
 
-    worker_profile = await store_group.agent_context_store.get_worker_profile(resolved_profile_id)
-    if worker_profile is not None:
-        return str(worker_profile.model_alias or "").strip()
-
+    # F117 Wave 2bc：单读统一行（model_alias 是共享字段，镜像携 worker 的 model_alias）
     agent_profile = await store_group.agent_context_store.get_agent_profile(resolved_profile_id)
     if agent_profile is not None:
         return str(agent_profile.model_alias or "").strip()
@@ -268,10 +268,12 @@ async def _resolve_owner_turn_executor_kind(store_group, profile_id: str) -> Tur
     resolved_profile_id = str(profile_id or "").strip()
     if not resolved_profile_id:
         return TurnExecutorKind.SELF
-    worker_profile = await store_group.agent_context_store.get_worker_profile(
+    # F117 Wave 2bc：读统一行 + is_worker_behavior_profile 判别（baseline 用 worker_profile 存在=worker；
+    # get_agent_profile 还会返回 main/subagent，必须 is_worker_behavior_profile guard 排除→SELF）
+    agent_profile = await store_group.agent_context_store.get_agent_profile(
         resolved_profile_id
     )
-    if worker_profile is not None:
+    if agent_profile is not None and is_worker_behavior_profile(agent_profile):
         return TurnExecutorKind.WORKER
     return TurnExecutorKind.SELF
 

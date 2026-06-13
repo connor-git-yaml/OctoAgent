@@ -305,7 +305,7 @@ class TestOrchestrator:
                 draft_revision=1,
                 active_revision=1,
             )
-            await store_group.agent_context_store.save_worker_profile(worker_profile)
+            await _save_worker_with_mirror(store_group.agent_context_store, worker_profile)
 
             msg = NormalizedMessage(
                 text="请总结当前项目 README 的一句话定位。",
@@ -378,7 +378,7 @@ class TestOrchestrator:
                 draft_revision=1,
                 active_revision=1,
             )
-            await store_group.agent_context_store.save_worker_profile(worker_profile)
+            await _save_worker_with_mirror(store_group.agent_context_store, worker_profile)
 
             msg = NormalizedMessage(
                 text="请读取当前 worker 的 execution context。",
@@ -966,3 +966,24 @@ class TestOrchestrator:
         finally:
             await store_group.close()
 
+# ── F117 Wave 2bc 测试辅助（worker + 镜像）──────────────────────────────
+# Wave 2bc read-switch 后运行时统一读 agent_profiles(kind=worker) 镜像；生产中镜像
+# 由 publish/_sync/materialize-on-read 总会创建。裸 save_worker_profile 的测试须显式
+# 建镜像反映生产状态。WorkerProfile 类/表 Wave 4 删除时本 helper 一并移除。
+async def _save_worker_with_mirror(store, wp):
+    from octoagent.core.models import AgentProfile
+    await store.save_worker_profile(wp)
+    await store.save_agent_profile(
+        AgentProfile(
+            profile_id=wp.profile_id, scope=wp.scope, project_id=wp.project_id,
+            name=wp.name, kind="worker", persona_summary=wp.summary,
+            model_alias=wp.model_alias, tool_profile=wp.tool_profile, summary=wp.summary,
+            default_tool_groups=list(wp.default_tool_groups),
+            selected_tools=list(wp.selected_tools), runtime_kinds=list(wp.runtime_kinds),
+            status=wp.status, origin_kind=wp.origin_kind,
+            draft_revision=wp.draft_revision, active_revision=wp.active_revision,
+            archived_at=wp.archived_at,
+            metadata={"source_kind": "worker_profile_mirror", "source_worker_profile_id": wp.profile_id},
+        )
+    )
+    return wp

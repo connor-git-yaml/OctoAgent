@@ -214,8 +214,9 @@ class AgentContextEntityEnsureMixin:
                 runtime_id = existing.agent_runtime_id
         if not runtime_id:
             runtime_id = f"runtime-{ULID()}"
+        # F117 Wave 2bc（GAP-B）：读统一行（worker 与 mirror 同 id），.name/.summary 由 Wave 0/1 携带。
         worker_profile = (
-            await self._stores.agent_context_store.get_worker_profile(worker_profile_id)
+            await self._stores.agent_context_store.get_agent_profile(worker_profile_id)
             if worker_profile_id
             else None
         )

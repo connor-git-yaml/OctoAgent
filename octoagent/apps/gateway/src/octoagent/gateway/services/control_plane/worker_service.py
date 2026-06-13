@@ -867,6 +867,21 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 }
             )
         )
+        # F117 Wave 2bc（archive-sync gate，Wave 1 评审 MEDIUM-1）：archive 后同步镜像
+        # status=ARCHIVED——否则 read-switch 后 capability_pack/chat/session 读 mirror.status
+        # 仍见旧 active，archived worker 仍可派发。直接改镜像 status（不走 _sync 全量重建 +
+        # materialize 行为文件，避免给 archived worker 创建行为文件的多余副作用）。
+        mirror = await self._stores.agent_context_store.get_agent_profile(archived.profile_id)
+        if mirror is not None:
+            await self._stores.agent_context_store.save_agent_profile(
+                mirror.model_copy(
+                    update={
+                        "status": AgentProfileStatus.ARCHIVED,
+                        "archived_at": archived.archived_at,
+                        "updated_at": archived.updated_at,
+                    }
+                )
+            )
         await self._stores.conn.commit()
         return self._completed_result(
             request=request,

@@ -30,6 +30,7 @@ from octoagent.core.models import (
 )
 
 from ..agent_context import build_scope_aware_session_id
+from ..agent_decision import is_worker_behavior_profile  # F117 Wave 2bc: worker 镜像判别
 from ..connection_metadata import (
     merge_control_metadata,
     resolve_explicit_delegation_target_profile_id,
@@ -92,9 +93,7 @@ class SessionProjectionMixin:
         resolved = str(profile_id or "").strip()
         if not resolved:
             return ""
-        worker_profile = await self._stores.agent_context_store.get_worker_profile(resolved)
-        if worker_profile is not None:
-            return worker_profile.name or ""
+        # F117 Wave 2bc（GAP-C）：单读统一行（name 共享字段）
         agent_profile = await self._stores.agent_context_store.get_agent_profile(resolved)
         if agent_profile is not None:
             return agent_profile.name or ""
@@ -104,8 +103,10 @@ class SessionProjectionMixin:
         resolved_profile_id = str(profile_id or "").strip()
         if not resolved_profile_id:
             return False
-        profile = await self._stores.agent_context_store.get_worker_profile(resolved_profile_id)
-        return profile is not None
+        # F117 Wave 2bc（GAP-C）：读统一行 + is_worker_behavior_profile（baseline 用 worker_profile 存在=worker）。
+        # 误判会污染 session owner/delegation 解析（critic 标注），故 guard 必须排除 main/subagent。
+        agent_profile = await self._stores.agent_context_store.get_agent_profile(resolved_profile_id)
+        return agent_profile is not None and is_worker_behavior_profile(agent_profile)
 
     async def _resolve_session_projection_semantics(
         self,

@@ -3704,7 +3704,7 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
     ) -> None:
         profile_id = "worker-profile-direct-research"
-        await control_plane_app.state.store_group.agent_context_store.save_worker_profile(
+        await _save_worker_with_mirror(control_plane_app.state.store_group.agent_context_store, 
             WorkerProfile(
                 profile_id=profile_id,
                 project_id="",
@@ -3748,7 +3748,7 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
     ) -> None:
         profile_id = "worker-profile-fin-direct"
-        await control_plane_app.state.store_group.agent_context_store.save_worker_profile(
+        await _save_worker_with_mirror(control_plane_app.state.store_group.agent_context_store, 
             WorkerProfile(
                 profile_id=profile_id,
                 project_id="",
@@ -3869,7 +3869,7 @@ class TestControlPlaneApi:
         )
 
         profile_id = "worker-profile-project-default-octoagent"
-        await store_group.agent_context_store.save_worker_profile(
+        await _save_worker_with_mirror(store_group.agent_context_store, 
             WorkerProfile(
                 profile_id=profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -3949,7 +3949,7 @@ class TestControlPlaneApi:
         )
 
         profile_id = "worker-profile-project-default-octoagent"
-        await store_group.agent_context_store.save_worker_profile(
+        await _save_worker_with_mirror(store_group.agent_context_store, 
             WorkerProfile(
                 profile_id=profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -4016,7 +4016,7 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
     ) -> None:
         profile_id = "worker-profile-finance-anchor"
-        await control_plane_app.state.store_group.agent_context_store.save_worker_profile(
+        await _save_worker_with_mirror(control_plane_app.state.store_group.agent_context_store, 
             WorkerProfile(
                 profile_id=profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -4096,7 +4096,7 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
     ) -> None:
         profile_id = "worker-profile-finance-continue"
-        await control_plane_app.state.store_group.agent_context_store.save_worker_profile(
+        await _save_worker_with_mirror(control_plane_app.state.store_group.agent_context_store, 
             WorkerProfile(
                 profile_id=profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -4168,7 +4168,7 @@ class TestControlPlaneApi:
         assert project is not None
 
         worker_profile_id = "worker-profile-finance-delegated"
-        await store_group.agent_context_store.save_worker_profile(
+        await _save_worker_with_mirror(store_group.agent_context_store, 
             WorkerProfile(
                 profile_id=worker_profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -4278,7 +4278,7 @@ class TestControlPlaneApi:
         assert project is not None
 
         worker_profile_id = "worker-profile-legacy-finance"
-        await store_group.agent_context_store.save_worker_profile(
+        await _save_worker_with_mirror(store_group.agent_context_store, 
             WorkerProfile(
                 profile_id=worker_profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -5391,7 +5391,7 @@ class TestControlPlaneApi:
             draft_revision=1,
             active_revision=1,
         )
-        await store_group.agent_context_store.save_worker_profile(profile)
+        await _save_worker_with_mirror(store_group.agent_context_store, profile)
         await store_group.agent_context_store.save_worker_profile_revision(
             WorkerProfileRevision(
                 revision_id="worker-snapshot:worker-profile-runtime-alpha:1",
@@ -5517,7 +5517,7 @@ class TestControlPlaneApi:
             draft_revision=1,
             active_revision=1,
         )
-        await store_group.agent_context_store.save_worker_profile(profile)
+        await _save_worker_with_mirror(store_group.agent_context_store, profile)
         await store_group.agent_context_store.save_worker_profile_revision(
             WorkerProfileRevision(
                 revision_id="worker-snapshot:worker-profile-root-agent-project:1",
@@ -5700,7 +5700,7 @@ class TestControlPlaneApi:
             draft_revision=1,
             active_revision=1,
         )
-        await store_group.agent_context_store.save_worker_profile(profile)
+        await _save_worker_with_mirror(store_group.agent_context_store, profile)
 
         task_id = await _create_task(
             control_plane_app,
@@ -5788,3 +5788,24 @@ class TestF096RecallFramesEndpoint:
         payload = resp.json()
         assert payload["limit"] == 10
         assert payload["offset"] == 5
+# ── F117 Wave 2bc 测试辅助（worker + 镜像）──────────────────────────────
+# Wave 2bc read-switch 后运行时统一读 agent_profiles(kind=worker) 镜像；生产中镜像
+# 由 publish/_sync/materialize-on-read 总会创建。裸 save_worker_profile 的测试须显式
+# 建镜像反映生产状态。WorkerProfile 类/表 Wave 4 删除时本 helper 一并移除。
+async def _save_worker_with_mirror(store, wp):
+    from octoagent.core.models import AgentProfile
+    await store.save_worker_profile(wp)
+    await store.save_agent_profile(
+        AgentProfile(
+            profile_id=wp.profile_id, scope=wp.scope, project_id=wp.project_id,
+            name=wp.name, kind="worker", persona_summary=wp.summary,
+            model_alias=wp.model_alias, tool_profile=wp.tool_profile, summary=wp.summary,
+            default_tool_groups=list(wp.default_tool_groups),
+            selected_tools=list(wp.selected_tools), runtime_kinds=list(wp.runtime_kinds),
+            status=wp.status, origin_kind=wp.origin_kind,
+            draft_revision=wp.draft_revision, active_revision=wp.active_revision,
+            archived_at=wp.archived_at,
+            metadata={"source_kind": "worker_profile_mirror", "source_worker_profile_id": wp.profile_id},
+        )
+    )
+    return wp

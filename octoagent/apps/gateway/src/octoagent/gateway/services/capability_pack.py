@@ -51,6 +51,7 @@ from .tool_search_tool import create_tool_search_handler
 _log = structlog.get_logger()
 
 from .agent_context import build_ambient_runtime_facts
+from .agent_decision import is_worker_behavior_profile  # F117 Wave 2bc: worker 镜像判别
 from .execution_context import get_current_execution_context
 
 if TYPE_CHECKING:
@@ -411,30 +412,35 @@ class CapabilityPackService(
                     source_kind="builtin_singleton",
                     profile_name="Root Agent",
                 )
-            stored_profile = await self._stores.agent_context_store.get_worker_profile(
-                normalized_profile_id
-            )
-            if stored_profile is not None and stored_profile.status != AgentProfileStatus.ARCHIVED:
-                worker_type = "general"
-                builtin_profile = self.get_worker_profile("general")
-                return _ResolvedWorkerBinding(
-                    profile_id=stored_profile.profile_id,
-                    profile_revision=(
-                        stored_profile.active_revision or stored_profile.draft_revision or 1
-                    ),
-                    worker_type=worker_type,
-                    model_alias=stored_profile.model_alias or "main",
-                    tool_profile=stored_profile.tool_profile or builtin_profile.default_tool_profile,
-                    default_tool_groups=list(
-                        stored_profile.default_tool_groups or builtin_profile.default_tool_groups
-                    ),
-                    selected_tools=list(stored_profile.selected_tools),
-                    source_kind="worker_profile",
-                    profile_name=stored_profile.name,
-                )
+            # F117 Wave 2bc：单读统一 agent_profiles 行。worker 镜像（kind=worker /
+            # metadata source_kind）走 worker 分支映射 9 字段（Wave 0 吸收 + Wave 1 populate
+            # 后统一行携带）；非 worker（main/subagent）走 builtin fallback 分支。两分支字段
+            # 映射与 baseline 逐字段等价；source_kind 字面（'worker_profile'/'agent_profile'）
+            # 保留为下游 binding 身份判据。
             agent_profile = await self._stores.agent_context_store.get_agent_profile(
                 normalized_profile_id
             )
+            if (
+                agent_profile is not None
+                and is_worker_behavior_profile(agent_profile)
+                and agent_profile.status != AgentProfileStatus.ARCHIVED
+            ):
+                builtin_profile = self.get_worker_profile("general")
+                return _ResolvedWorkerBinding(
+                    profile_id=agent_profile.profile_id,
+                    profile_revision=(
+                        agent_profile.active_revision or agent_profile.draft_revision or 1
+                    ),
+                    worker_type="general",
+                    model_alias=agent_profile.model_alias or "main",
+                    tool_profile=agent_profile.tool_profile or builtin_profile.default_tool_profile,
+                    default_tool_groups=list(
+                        agent_profile.default_tool_groups or builtin_profile.default_tool_groups
+                    ),
+                    selected_tools=list(agent_profile.selected_tools),
+                    source_kind="worker_profile",
+                    profile_name=agent_profile.name,
+                )
             if agent_profile is not None:
                 builtin_profile = self.get_worker_profile(fallback_worker_type)
                 return _ResolvedWorkerBinding(
@@ -470,8 +476,14 @@ class CapabilityPackService(
         builtin_worker_type = self._builtin_worker_type_from_profile_id(normalized)
         if builtin_worker_type is not None:
             return builtin_worker_type
-        stored_profile = await self._stores.agent_context_store.get_worker_profile(normalized)
-        if stored_profile is None or stored_profile.status == AgentProfileStatus.ARCHIVED:
+        # F117 Wave 2bc：读统一行。not-worker guard 必需——baseline get_worker_profile
+        # 只返回 worker 行，故非 worker 的 agent_profile 必须排除，保持"仅 worker 返回 type"契约。
+        agent_profile = await self._stores.agent_context_store.get_agent_profile(normalized)
+        if (
+            agent_profile is None
+            or not is_worker_behavior_profile(agent_profile)
+            or agent_profile.status == AgentProfileStatus.ARCHIVED
+        ):
             return None
         return "general"
 
@@ -1201,18 +1213,13 @@ class CapabilityPackService(
         if not normalized_profile_id:
             return set(), set()
 
+        # F117 Wave 2bc：统一行权威，删除 worker_profile metadata fallback（镜像已携 metadata）。
         metadata: dict[str, Any] = {}
         agent_profile = await self._stores.agent_context_store.get_agent_profile(
             normalized_profile_id
         )
         if agent_profile is not None and isinstance(agent_profile.metadata, dict):
             metadata = dict(agent_profile.metadata)
-        else:
-            worker_profile = await self._stores.agent_context_store.get_worker_profile(
-                normalized_profile_id
-            )
-            if worker_profile is not None and isinstance(worker_profile.metadata, dict):
-                metadata = dict(worker_profile.metadata)
 
         raw_selection = metadata.get("capability_provider_selection")
         if not isinstance(raw_selection, Mapping):

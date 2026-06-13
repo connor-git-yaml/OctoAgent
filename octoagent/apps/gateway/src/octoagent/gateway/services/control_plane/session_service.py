@@ -25,6 +25,7 @@ from octoagent.core.models import (
     A2AMessageItem,
     ActionRequestEnvelope,
     ActionResultEnvelope,
+    AgentProfile,
     AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeItem,
@@ -50,13 +51,13 @@ from octoagent.core.models import (
     Task,
     TurnExecutorKind,
     Work,
-    WorkerProfile,
 )
 from octoagent.core.models.agent_context import resolve_permission_preset
 from octoagent.provider.dx.backup_service import BackupService
 from ulid import ULID
 
 from ..agent_context import build_projected_session_id
+from ..agent_decision import is_worker_behavior_profile  # F117 Wave 2bc: worker 镜像判别
 from ..startup_bootstrap import (
     ensure_default_project_agent_profile,
     ensure_main_runtime_and_session,
@@ -509,12 +510,15 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
                 and not delegation_target_profile_id
                 and session_owner_profile_id
             ):
-                owner_worker_profile = (
-                    await self._stores.agent_context_store.get_worker_profile(
+                # F117 Wave 2bc：读统一行 + is_worker_behavior_profile（baseline 用 worker_profile 存在=worker）
+                owner_agent_profile = (
+                    await self._stores.agent_context_store.get_agent_profile(
                         session_owner_profile_id
                     )
                 )
-                if owner_worker_profile is not None:
+                if owner_agent_profile is not None and is_worker_behavior_profile(
+                    owner_agent_profile
+                ):
                     turn_executor_kind = TurnExecutorKind.WORKER.value
             session_owner_name = await self._resolve_profile_display_name(
                 session_owner_profile_id
@@ -779,9 +783,15 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
     async def _resolve_direct_session_worker_profile(
         self,
         profile_id: str,
-    ) -> WorkerProfile | None:
-        profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
-        if profile is None or profile.status == AgentProfileStatus.ARCHIVED:
+    ) -> AgentProfile | None:
+        # F117 Wave 2bc：读统一行 + is_worker_behavior_profile guard（baseline get_worker_profile
+        # 只返回 worker 行；callers 仅用 truthiness + status）。方法名留 Wave 4 收口。
+        profile = await self._stores.agent_context_store.get_agent_profile(profile_id)
+        if (
+            profile is None
+            or not is_worker_behavior_profile(profile)
+            or profile.status == AgentProfileStatus.ARCHIVED
+        ):
             return None
         return profile
 
