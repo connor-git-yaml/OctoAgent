@@ -981,6 +981,17 @@ class AgentContextEntityEnsureMixin:
             kind="worker",
             model_alias=worker_profile.model_alias or "main",
             tool_profile=worker_profile.tool_profile or "standard",
+            # F117 Wave 1（populate）：复制 worker 静态配置 9 字段进统一行（read-path
+            # 切换前置条件——capability_pack 将改读这些字段而非直读 worker_profiles）。
+            summary=worker_profile.summary,
+            default_tool_groups=list(worker_profile.default_tool_groups),
+            selected_tools=list(worker_profile.selected_tools),
+            runtime_kinds=list(worker_profile.runtime_kinds),
+            status=worker_profile.status,
+            origin_kind=worker_profile.origin_kind,
+            draft_revision=worker_profile.draft_revision,
+            active_revision=worker_profile.active_revision,
+            archived_at=worker_profile.archived_at,
             policy_refs=[],
             context_budget_policy=context_budget_policy,
             metadata={

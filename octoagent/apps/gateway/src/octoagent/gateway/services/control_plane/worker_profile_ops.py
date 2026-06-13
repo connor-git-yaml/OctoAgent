@@ -137,6 +137,18 @@ class WorkerProfileOpsMixin:
             model_alias=profile.model_alias,
             tool_profile=profile.tool_profile,
             metadata=metadata,
+            # F117 Wave 1（populate）：把 worker 静态配置 9 字段复制进统一行，让
+            # agent_profiles(kind=worker) 行成为运行时工具/状态的权威来源（read-path
+            # 切换前置条件）。profile 是 WorkerProfile，字段直取源值。
+            summary=profile.summary,
+            default_tool_groups=list(profile.default_tool_groups),
+            selected_tools=list(profile.selected_tools),
+            runtime_kinds=list(profile.runtime_kinds),
+            status=profile.status,
+            origin_kind=profile.origin_kind,
+            draft_revision=profile.draft_revision,
+            active_revision=profile.active_revision,
+            archived_at=profile.archived_at,
             version=max(existing.version if existing is not None else 1, revision or 1),
             created_at=existing.created_at if existing is not None else profile.created_at,
             updated_at=datetime.now(tz=UTC),
