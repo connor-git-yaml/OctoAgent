@@ -1,21 +1,27 @@
-# F117 Handoff — Wave 2bc resume 指南
+# F117 Handoff — Wave 2c resume 指南
 
-> 状态：**Wave 0/1/2a 完成 committed；Wave 2b read-switch 已 committed 但⚠半成品（BLOCKED）**。
+> 状态：**Wave 0/1/2a/2b/2bc 完成 committed；read-switch 安全（BLOCK 已解）**。下一步 Wave 2c（authoring 改写）。
 > 分支 `feature/117-profile-merge`（**未 push**），worktree `.claude/worktrees/F117-profile-merge`，基于 origin/master `7199f468`。
 
-## 已完成（9 commits）
+## 已完成（13 commits）
 ```
-67201a40 refactor(F117): Wave 2b read-switch ⚠半成品 — BLOCKED on 镜像完整性（双评审）
-450299b3 refactor(F117): Wave 2a — agent_profile_revisions store 地基 + 枚举/视图类改名
-689732d5 docs(F117): Wave 2 详尽变更地图（7-agent workflow + critic）+ plan §5 子波细化
-ef1d7ba0 docs(F117): Wave 2 resume handoff（Wave 0+1 检查点）
-0746e6f0 / 240dde98 / 23082fad / 8e8d8a4b / 4a164fc9 = Wave 0/1 + migration + 影响分析
+71c0a044 docs(F117): Wave 2bc 再评审记录
+0f7a4b99 refactor(F117): Wave 2bc 镜像完整性 — read-switch 解 BLOCK（草稿即时生效）
+67201a40 refactor(F117): Wave 2b read-switch（半成品→2bc 已闭合）
+450299b3 refactor(F117): Wave 2a — store 地基 + 枚举/视图类改名
+... Wave 0/1 + migration + 影响分析 + 地图/评审 docs
 ```
 - **Phase 1-2 + 双 Gate**：A1 彻底物理合并 + 全改名（拍板）。migration_117 副本验证（幂等 + 零数据丢失），真实例未动。
-- **Wave 0/1**（加性）：AgentProfile +9 字段 + 镜像 populate。**Wave 2a**：agent_profile_revisions store 地基 + 枚举/视图类改名。均 0 regression（4135）。
-- **Wave 2b read-switch（⚠ 半成品）**：7 站运行时读切到统一镜像 + archive-sync。4135=baseline + e2e 8/8，但**双评审 panel 抓出系统性不变量缺口**（详 [wave-2b-review.md](./wave-2b-review.md)）。
+- **Wave 0/1/2a**（加性/rename）：AgentProfile +9 字段 + 镜像 populate + agent_profile_revisions store 地基 + 枚举/视图类改名。0 regression（4135）。
+- **Wave 2b+2bc（read-switch 安全）**：7 站运行时读切到统一镜像 + archive-sync（2b）；镜像完整性闭合——所有 authoring 写路径同步同 id 镜像 + GAP 回退 + migration 字段补全 + faithful test helper（2bc，草稿即时生效）。**双评审 + 再评审 panel：0 HIGH**（Codex 再评审 FAIL 是幻觉，deterministic grep 推翻；Opus 权威逐路径 CLOSED + 1 MEDIUM 已修）。4137 passed + e2e 8/8。详 [wave-2b-review.md](./wave-2b-review.md) + [wave-2bc-review.md](./wave-2bc-review.md)。
 
-## ⚠ 下一步：Wave 2bc 必须闭合镜像完整性（read-switch 当前不安全）
+## 下一步：Wave 2c（authoring 改写 + 镜像塌缩，read-switch 已安全）
+> read-switch 已读统一镜像；Wave 2c 让 authoring **直写统一 agent_profiles 行**（无镜像）+ 删镜像 builder，
+> 塌缩"worker_profiles 写 + 镜像同步"双写为单写。此后 worker_profiles 表运行时死，待 Wave 4 删。
+> 注：Wave 2bc 加的 `_save_worker_profile_draft` 镜像刷新 / agent_service 镜像 enrich 是过渡，Wave 2c 一并移除。
+> 详见 [refactor-plan.md](./refactor-plan.md) §5 Wave 2c。
+
+### （历史）Wave 2bc 修复方向（已完成，留档）
 > **核心教训**：2b/2c 拆分（read-switch 先于 authoring write-switch）漏耦合。read-switch 依赖
 > 「每个运行时可达 worker 都有当前+完整镜像」，但镜像只在 publish/bind 建 → draft/created/cloned
 > 未发布 worker 无镜像 → read-switch 退化（builtin_fallback / session 误判，HIGH×2）。测试全绿仅因
