@@ -47,9 +47,13 @@ class SqliteAgentContextStore:
                 profile_id, scope, project_id, name, kind, persona_summary,
                 instruction_overlays, model_alias, tool_profile, policy_refs,
                 memory_access_policy, context_budget_policy, bootstrap_template_ids,
-                metadata, version, created_at, updated_at
+                metadata, version,
+                summary, default_tool_groups, selected_tools, runtime_kinds,
+                status, origin_kind, draft_revision, active_revision, archived_at,
+                created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(profile_id) DO UPDATE SET
                 scope = excluded.scope,
                 project_id = excluded.project_id,
@@ -65,6 +69,15 @@ class SqliteAgentContextStore:
                 bootstrap_template_ids = excluded.bootstrap_template_ids,
                 metadata = excluded.metadata,
                 version = excluded.version,
+                summary = excluded.summary,
+                default_tool_groups = excluded.default_tool_groups,
+                selected_tools = excluded.selected_tools,
+                runtime_kinds = excluded.runtime_kinds,
+                status = excluded.status,
+                origin_kind = excluded.origin_kind,
+                draft_revision = excluded.draft_revision,
+                active_revision = excluded.active_revision,
+                archived_at = excluded.archived_at,
                 updated_at = excluded.updated_at
             """,
             (
@@ -83,6 +96,18 @@ class SqliteAgentContextStore:
                 self._dump(profile.bootstrap_template_ids),
                 self._dump(profile.metadata),
                 profile.version,
+                # F117 D2（Wave 0）：吸收的 9 个 worker 字段
+                # 注：resource_limits 是 F117 范围外的既有死列（agent+worker 两侧 store 都不持久化），
+                # 不在本波 fold-in，避免引入未请求的管理面行为变更（保持 baseline 等价）。
+                profile.summary,
+                self._dump(profile.default_tool_groups),
+                self._dump(profile.selected_tools),
+                self._dump(profile.runtime_kinds),
+                profile.status.value,
+                profile.origin_kind.value,
+                profile.draft_revision,
+                profile.active_revision,
+                profile.archived_at.isoformat() if profile.archived_at else None,
                 profile.created_at.isoformat(),
                 profile.updated_at.isoformat(),
             ),
@@ -1362,6 +1387,23 @@ class SqliteAgentContextStore:
             kind_value = "main"
         if kind_value not in ("main", "worker", "subagent"):
             kind_value = "main"
+        # F117 D2（Wave 0）：吸收的 9 个 worker 字段 + resource_limits 防御性 hydrate。
+        # 托管实例 schema 在 ALTER 跑前可能缺这些列（同 kind 列的 try/KeyError 兜底先例），
+        # 用 `"col" in row.keys()` 缺列回退默认值（与 permission_preset/role_card 同模式）。
+        cols = row.keys()
+        try:
+            status_value = WorkerProfileStatus(row["status"]) if "status" in cols and row["status"] else WorkerProfileStatus.ACTIVE
+        except ValueError:
+            status_value = WorkerProfileStatus.ACTIVE
+        try:
+            origin_value = (
+                WorkerProfileOriginKind(row["origin_kind"])
+                if "origin_kind" in cols and row["origin_kind"]
+                else WorkerProfileOriginKind.CUSTOM
+            )
+        except ValueError:
+            origin_value = WorkerProfileOriginKind.CUSTOM
+        archived_raw = row["archived_at"] if "archived_at" in cols else None
         return AgentProfile(
             profile_id=row["profile_id"],
             scope=row["scope"],
@@ -1377,7 +1419,17 @@ class SqliteAgentContextStore:
             context_budget_policy=cls._load(row["context_budget_policy"], {}),
             bootstrap_template_ids=cls._load(row["bootstrap_template_ids"], []),
             metadata=cls._load(row["metadata"], {}),
+            # resource_limits 保持 baseline：F117 范围外的既有死列，store 不 hydrate（恒 {}）。
             version=row["version"],
+            summary=row["summary"] if "summary" in cols else "",
+            default_tool_groups=cls._load(row["default_tool_groups"], []) if "default_tool_groups" in cols else [],
+            selected_tools=cls._load(row["selected_tools"], []) if "selected_tools" in cols else [],
+            runtime_kinds=cls._load(row["runtime_kinds"], []) if "runtime_kinds" in cols else [],
+            status=status_value,
+            origin_kind=origin_value,
+            draft_revision=row["draft_revision"] if "draft_revision" in cols else 0,
+            active_revision=row["active_revision"] if "active_revision" in cols else 0,
+            archived_at=datetime.fromisoformat(archived_raw) if archived_raw else None,
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
         )

@@ -215,6 +215,21 @@ class AgentProfile(BaseModel):
     bootstrap_template_ids: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     resource_limits: dict[str, Any] = Field(default_factory=dict, description="资源限制覆盖")
+    # F117 D2（Wave 0）：吸收 WorkerProfile 编辑/设计期字段——kind=worker 行携带，
+    # main/subagent 留默认。这些字段是运行时工具解析（default_tool_groups/selected_tools/
+    # runtime_kinds）+ 编辑生命周期（status/origin_kind/draft_revision/active_revision/
+    # archived_at）+ worker 自述（summary）的权威来源。WorkerProfile 类/表在 Wave 4 删除，
+    # 运行时改读统一 agent_profiles(kind=worker) 行。
+    # 注：status 默认 ACTIVE（main/subagent 语义恒 active）；worker 草稿创建路径显式置 DRAFT。
+    summary: str = Field(default="")
+    default_tool_groups: list[str] = Field(default_factory=list)
+    selected_tools: list[str] = Field(default_factory=list)
+    runtime_kinds: list[str] = Field(default_factory=list)
+    status: WorkerProfileStatus = WorkerProfileStatus.ACTIVE
+    origin_kind: WorkerProfileOriginKind = WorkerProfileOriginKind.CUSTOM
+    draft_revision: int = Field(default=0, ge=0)
+    active_revision: int = Field(default=0, ge=0)
+    archived_at: datetime | None = None
     version: int = Field(default=1, ge=1)
     created_at: datetime = Field(default_factory=_utc_now)
     updated_at: datetime = Field(default_factory=_utc_now)

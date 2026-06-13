@@ -395,6 +395,16 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
     bootstrap_template_ids  TEXT NOT NULL DEFAULT '[]',
     metadata                TEXT NOT NULL DEFAULT '{}',
     version                 INTEGER NOT NULL DEFAULT 1,
+    -- F117 D2（Wave 0）：吸收自 worker_profiles 的 9 个字段（kind=worker 行携带）
+    summary                 TEXT NOT NULL DEFAULT '',
+    default_tool_groups     TEXT NOT NULL DEFAULT '[]',
+    selected_tools          TEXT NOT NULL DEFAULT '[]',
+    runtime_kinds           TEXT NOT NULL DEFAULT '[]',
+    status                  TEXT NOT NULL DEFAULT 'active',
+    origin_kind             TEXT NOT NULL DEFAULT 'custom',
+    draft_revision          INTEGER NOT NULL DEFAULT 0,
+    active_revision         INTEGER NOT NULL DEFAULT 0,
+    archived_at             TEXT,
     created_at              TEXT NOT NULL,
     updated_at              TEXT NOT NULL
 );
@@ -1223,6 +1233,27 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
         await conn.execute(
             "ALTER TABLE agent_profiles ADD COLUMN resource_limits TEXT NOT NULL DEFAULT '{}'"
         )
+
+    # F117 D2（Wave 0）：agent_profiles 吸收 worker_profiles 的 9 个字段。
+    # 存量库（schema 落后于 F090/F117）通过此处幂等 ALTER 补列；migration_117 apply
+    # 也会自包含补这些列。run-time _row_to_agent_profile 对缺列防御性回退默认值。
+    _F117_AGENT_PROFILE_COLUMNS = (
+        ("summary", "TEXT NOT NULL DEFAULT ''"),
+        ("default_tool_groups", "TEXT NOT NULL DEFAULT '[]'"),
+        ("selected_tools", "TEXT NOT NULL DEFAULT '[]'"),
+        ("runtime_kinds", "TEXT NOT NULL DEFAULT '[]'"),
+        ("status", "TEXT NOT NULL DEFAULT 'active'"),
+        ("origin_kind", "TEXT NOT NULL DEFAULT 'custom'"),
+        ("draft_revision", "INTEGER NOT NULL DEFAULT 0"),
+        ("active_revision", "INTEGER NOT NULL DEFAULT 0"),
+        ("archived_at", "TEXT"),
+    )
+    if agent_profile_columns:
+        for _f117_col, _f117_decl in _F117_AGENT_PROFILE_COLUMNS:
+            if _f117_col not in agent_profile_columns:
+                await conn.execute(
+                    f"ALTER TABLE agent_profiles ADD COLUMN {_f117_col} {_f117_decl}"
+                )
 
     worker_profile_columns = await _table_columns(conn, "worker_profiles")
     if worker_profile_columns and "resource_limits" not in worker_profile_columns:
