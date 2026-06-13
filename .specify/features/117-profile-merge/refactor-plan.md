@@ -107,34 +107,33 @@ CREATE UNIQUE INDEX idx_agent_runtimes_active_worker_unique
 
 > 方法论（F108/F113 验证）：字节级 + 方法级对账；禁 `ruff I001 --fix` 搬运；helpers 抽叶子破环；测试直调私有方法→mixin 继承不能改自由函数。每 wave Codex + Opus 双评审，分歧人裁，0 HIGH 残留。
 
-### Wave 0 — 模型 + store 地基
-- `agent_context.py`：`AgentProfile` 吸收 9 字段（worker-only，default 兼容 main/subagent）；**删** `WorkerProfile` / `WorkerProfileRevision` 类；`AgentRuntime` 删 `worker_profile_id` 字段。保留 `WorkerProfileStatus` / `WorkerProfileOriginKind` 枚举（语义仍用，挂 AgentProfile.status/origin_kind）。
-- `agent_context_store.py`：`_row_to_agent_profile` 吸收 9 列 + 补 resource_limits hydrate；`save_agent_profile` 写 9 列 + resource_limits；新增 `agent_profile_revisions` 的 save/list；**删** `_row_to_worker_profile` / `save_worker_profile` / `get_worker_profile` / `list_worker_profiles` / `_row_to_worker_profile_revision` / `save_worker_profile_revision` / `list_worker_profile_revisions`（或改名为 agent_profile_* 等价）；`_row_to_agent_runtime` / `save_agent_runtime` 去 worker_profile_id。
-- `sqlite_init.py`：agent_profiles DDL +9 列；新 agent_profile_revisions DDL；删 worker_profiles / worker_profile_revisions DDL；agent_runtimes 去 worker_profile_id + dedup 索引改 key；works 列改名 + 索引；startup dedup 逻辑（:1426-1602）改 agent_profile_id。
-- `models/__init__.py` re-export 同步。
-- **测试**：`packages/core/tests/test_agent_context_store.py` 改 mixin 直调（worker→agent_profile API）。
+> **决策（Wave 1 实施期细化）：add-before-remove + read/write 耦合切换**。删 WorkerProfile 是"移除老"，
+> 必须在"新就位"之后——Wave 0/1 加性建好统一行，Wave 2 耦合切读+写，Wave 4 才物理删。
+> read-switch 与 write-switch（authoring）必须**同波**：authoring 改写统一表后 worker_profiles 不再被写，
+> 若读路径仍读 worker_profiles 会丢新建 worker → 两者分波切换会开镜像-lag 窗口，违反零变更。
 
-### Wave 1 — 镜像塌缩 + 运行时读路径 + dedup
-> **强制不变量（Wave 0 评审 MEDIUM-2）：populate-then-switch**。先让镜像 builder 把 9 个 worker 字段
-> 复制进统一行（+ 已写镜像行 backfill），**再**切运行时读路径——否则切换瞬间 worker 丢工具集。
-> 验收：切读路径前，镜像行 tool 字段与 worker_profiles 源逐字段一致。
-- **(populate)** `_build_agent_profile_from_worker_profile`（worker_profile_ops.py:130）+ `_ensure_agent_profile_from_worker_profile`（entity_ensure.py:971）镜像 builder：补全 9 字段复制（summary/default_tool_groups/selected_tools/runtime_kinds/status/origin_kind/draft_revision/active_revision/archived_at）。**Wave 1 不删 builder**——它在 Wave 2 authoring 改写为直写统一表后才冗余删除。
-- **(backfill)** 已写镜像行用 worker_profiles 源重新 sync 一遍（或 migration_117 apply 时统一）。
-- **(switch)** `capability_pack._resolve_worker_binding`（:410）：读 agent_profiles(kind=worker) 工具字段（不再 worker_profiles fallback 二段）。
-- `chat.py`（:256/:271）：model_alias + executor-kind 路由读统一行（kind=worker 存在性=路由信号）。
-- `agent_context_entity_ensure._ensure_agent_runtime`（:249）/ `dispatch_service._ensure_agent_runtime`（:706）：去 worker_profile_id；dedup 走 agent_profile_id。
-- `find_active_runtime`（agent_context_store.py:485-492）：去 role 分支，统一 key agent_profile_id（或保留 role 分支但 worker 也 key agent_profile_id）。
-- 镜像消费方（agent_decision.py:123 / resolver.py:683 / paths.py:40）：`source_kind=="worker_profile_mirror"` / `source_worker_profile_id` 判据 → 改 `kind=="worker"` 单判据（metadata fallback 删）。
-- stale-mirror 写路径（worker_service archive / agent_service resource_limits）：直写统一行。
-- `_coordinator.py`：删 `agent-profile-{id}` 前缀生成 + reverse replace。
+### Wave 0 — AgentProfile 加性吸收 9 字段（✅ 完成，commit 23082fad）
+- `agent_context.py`：`AgentProfile` +9 worker 字段（default 兼容 main/subagent）。**WorkerProfile 类本波不动**。
+- `agent_context_store.py`：`save_agent_profile` / `_row_to_agent_profile` 持久化 + 防御性 hydrate 9 字段（缺列回退默认，处理实例 schema-lag）。
+- `sqlite_init.py`：agent_profiles DDL +9 列 + 幂等 ALTER（存量库补列）。
+- **撤回**：resource_limits（F117 范围外既有死列）不 fold-in（评审 MEDIUM-1）。
+- 回归 4135 = baseline + e2e_smoke 8/8。
 
-### Wave 2 — control_plane authoring 域改写 + action 重命名
-- `worker_profile_ops.py` → 改名/合入 `agent_profile_ops.py`：CRUD/publish/clone/archive 走统一表；revision publish → agent_profile_revisions。
-- `worker_service.py` → `agent_profile_service.py`（或合入 agent_service）：action_id `worker_profile.*`→`agent_profile.*`；视图构建走统一表。
-- `control_plane/agent.py` 视图族：`WorkerProfileViewItem`/`WorkerProfilesDocument`/`WorkerProfileRevisionItem` 等 → `AgentProfile*` 视图（resource_type `worker_profiles`→`agent_profiles`，resource_id 同步）。
-- `action_registry.py`：`worker_profile.*` 定义改名 `agent_profile.*`。
-- `routes/control_plane.py`：`worker-profiles` / `worker-profile-revisions` 资源路由 → `agent-profiles` / `agent-profile-revisions`。
-- `session_service.py` / `agent_service.py` / `_coordinator.py`：构造/读取改统一 API。
+### Wave 1 — 镜像 populate（✅ 本波）
+> 不变量 populate-then-switch（评审 MEDIUM-2）：先让镜像行携全 9 字段，**再**（Wave 2）切读路径。本波仅 populate，加性。
+- `_build_agent_profile_from_worker_profile`（worker_profile_ops.py:130）+ `_ensure_agent_profile_from_worker_profile`（entity_ensure.py:971）：复制 9 字段进统一行（summary/default_tool_groups/selected_tools/runtime_kinds/status/origin_kind/draft_revision/active_revision/archived_at）。无运行时消费方读这些字段 → 零变更。
+- backfill：materialize-on-read 每次 dispatch 重写镜像，自然回填；存量行由 migration_117 apply 统一。
+
+### Wave 2 — 耦合读+写切换 + 镜像塌缩 + authoring 改写 + 命名（最高风险）
+> **强制 gate（Wave 1 评审 MEDIUM-1）：archive→统一行 sync**。baseline archive 路径
+> （worker_service.py:848）只更 worker_profiles 不刷镜像 → 镜像 status 陈旧（恒 active）。
+> Wave 2 切读路径读 mirror status/archived_at **前**，必须让 archive 直写统一 agent_profiles
+> 行 status=ARCHIVED（authoring 改写自然闭合：统一行即权威）。验收：archived worker 端到端断言 status 正确。
+- **(read switch)** `capability_pack._resolve_worker_binding`（:410）读 agent_profiles(kind=worker) 工具字段（用 `is_worker_behavior_profile` dual judgment 兼容 schema-lag）；`chat.py`（:256/:271）model_alias + executor-kind 读统一行。
+- **(write switch + authoring)** `worker_profile_ops.py`→`agent_profile_ops.py` / `worker_service.py` authoring 走统一 agent_profiles + 新 `agent_profile_revisions`（store 加 `save/list_agent_profile_revisions`）；revision publish 切换。
+- **(mirror 塌缩)** 删两个镜像 builder（authoring 直写统一表后冗余）；镜像消费方（agent_decision:123 / resolver:683 / paths:40）判据收敛；`_coordinator.py` 删 `agent-profile-{id}` 前缀 + reverse replace；stale-mirror 写路径（worker_service archive 等）直写统一行。
+- **(命名)** action_id `worker_profile.*`→`agent_profile.*`；视图族 `WorkerProfileViewItem`/`WorkerProfilesDocument`/`WorkerProfileRevisionItem` → `AgentProfile*`（resource_type/id 同步）；枚举 `WorkerProfileStatus`→`AgentProfileStatus` / `WorkerProfileOriginKind`→`AgentProfileOriginKind`；`routes/control_plane.py` `worker-profiles`/`worker-profile-revisions` → `agent-profiles`/`agent-profile-revisions`。
+- 此后 worker_profiles 表运行时死（不读不写），待 Wave 4 物理删。
 
 ### Wave 3 — FE 全改名
 - `types/index.ts`：`WorkerProfileItem`→`AgentProfileItem`（与既有 AgentProfileItem 协调，避免重名冲突——可能合并为 kind 判别的单类型）等 8 类型；`AgentRuntimeItem.worker_profile_id`→`agent_profile_id`；`WorkProjectionItem.requested_worker_profile_id`→`requested_agent_profile_id`。
@@ -143,11 +142,15 @@ CREATE UNIQUE INDEX idx_agent_runtimes_active_worker_unique
 - 组件：`agentManagementData.ts` / `AgentCenter.tsx` / `ChatWorkbench.tsx` / `WorkbenchLayout.tsx` / `SettingsResourceLimitsSection.tsx` / `SettingsPage.tsx`：`snapshot.resources.worker_profiles`→`agent_profiles`，action_id `worker_profile.*`→`agent_profile.*`，`result.data.worker_profile_id`→`agent_profile_id`。
 - FE 7 测试 fixture 同步。
 
-### Wave 4 — 真迁移 + 后端测试 bulk + docs
-- `migration_117` CLI 注册 + 测试（test_migration_117 dry-run/apply/rollback/idempotency，clone test_migration_094）。
+### Wave 4 — 物理删除 + dedup 塌缩 + 真迁移 + 测试 bulk + docs
+- **删类/表/store 方法**：`WorkerProfile` / `WorkerProfileRevision` 类（agent_context.py）；`worker_profiles` / `worker_profile_revisions` 表 DDL（sqlite_init.py）；store `save/get/list_worker_profile*` + `_row_to_worker_profile*` 方法；`models/__init__` re-export。
+- **dedup 塌缩**：`AgentRuntime.worker_profile_id` 字段 + `agent_runtimes.worker_profile_id` 列 + dedup 唯一索引（:925）改 key `agent_profile_id`；`find_active_runtime`（:485-492）去 role 分支；startup dedup（:1426-1602）改 agent_profile_id；`_row_to_agent_runtime`/`save_agent_runtime` 去 worker_profile_id。
+- **works 改名**：`requested_worker_profile_id`→`requested_agent_profile_id`（+ version + 索引）。
+- `migration_117` CLI 注册 + 测试（test_migration_117 dry-run/apply/rollback/idempotency，clone test_migration_094）；列序对齐 save_agent_profile（评审跨文件 note）。
 - 后端 7 测试文件 worker_profile→agent_profile 符号/fixture 更新。
-- living-docs 漂移闸：`docs/codebase-architecture/module-design.md`（如有 profile 模型描述）+ 数据模型文档 + `docs/blueprint/` 相关章节同步（D2 关闭标记）。
+- 残留扫描 0（§6）+ living-docs 漂移闸：`docs/codebase-architecture/module-design.md` + 数据模型文档 + `docs/blueprint/` 章节同步（D2 关闭标记）。
 - completion-report.md + handoff.md。
+- **真实例迁移**：用户确认 + 备份后跑 `migrate-117 --apply`（单独门禁）。
 
 ---
 
