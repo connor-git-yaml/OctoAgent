@@ -52,7 +52,7 @@ from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
 from octoagent.gateway.services.config.config_wizard import load_config
 from ulid import ULID
 
-from ..agent_decision import build_behavior_system_summary
+from ..agent_decision import build_behavior_system_summary, is_worker_behavior_profile
 from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
 
 log = structlog.get_logger()
@@ -363,23 +363,30 @@ class AgentProfileDomainService(DomainServiceBase):
         target_label = ""
 
         if target_type == "worker_profile":
-            existing_wp = await self._stores.agent_context_store.get_worker_profile(profile_id)
-            if existing_wp is None:
+            # F117 Wave 2c-2c：worker profile 持久化为统一 agent_profiles 镜像（停写 worker_profiles）。
+            # 读切镜像（含 agent-profile-{id} 前缀 fallback + worker guard）找到 worker → 200，回写镜像
+            # （不复活 worker_profiles）。resource_limits 是两表死列（不持久化），行为同 else agent 分支。
+            existing_mirror = await self._stores.agent_context_store.get_agent_profile(profile_id)
+            if existing_mirror is None and not profile_id.startswith("agent-profile-"):
+                existing_mirror = await self._stores.agent_context_store.get_agent_profile(
+                    f"agent-profile-{profile_id}"
+                )
+            if existing_mirror is None or not is_worker_behavior_profile(existing_mirror):
                 raise ControlPlaneActionError(
                     "WORKER_PROFILE_NOT_FOUND",
                     f"找不到 worker profile: {profile_id}",
                 )
-            updated_wp = existing_wp.model_copy(
+            updated_mirror = existing_mirror.model_copy(
                 update={
                     "resource_limits": sanitized,
                     "updated_at": datetime.now(tz=UTC),
                 }
             )
-            await self._stores.agent_context_store.save_worker_profile(updated_wp)
+            await self._stores.agent_context_store.save_agent_profile(updated_mirror)
             resource_refs = [
                 self._resource_ref("worker_profiles", "worker-profiles:overview"),
             ]
-            target_label = existing_wp.name
+            target_label = existing_mirror.name
         else:
             existing_agent = await self._stores.agent_context_store.get_agent_profile(
                 profile_id
