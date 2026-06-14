@@ -1,24 +1,41 @@
-# F117 Handoff — Wave 2c-2 resume 指南
+# F117 Handoff — Wave 2c-2b resume 指南
 
-> 状态：**Wave 0/1/2a/2b/2bc 完成；read-switch 安全。Wave 2c-1（规范化 builder）完成。下一步 2c-2/2c-3（authoring 直写，高风险）**。
-> 分支 `feature/117-profile-merge`（15 commits，**未 push**），worktree `.claude/worktrees/F117-profile-merge`，基于 origin/master `7199f468`。
+> 状态：**Wave 0/1/2a/2b/2bc + 2c-1 + 2c-2a 完成；authoring 持久化 runtime 镜像已统一 canonical builder（完整镜像）。下一步 2c-2b 翻转 materialize-on-read（高风险，invariant-dense）**。
+> 分支 `feature/117-profile-merge`（17 commits，**未 push**），worktree `.claude/worktrees/F117-profile-merge`，基于 origin/master `7199f468`。
 
-## 已完成（15 commits）
+## 已完成（17 commits）
 ```
+75e3013d refactor(F117): Wave 2c-2a authoring 持久化镜像统一 canonical builder（行为零变更）
 b315b7dc refactor(F117): Wave 2c-1 规范化 worker 镜像 builder（行为零变更基础）
 71c0a044 / 0f7a4b99 / 67201a40 = Wave 2b+2bc read-switch 安全 + 再评审
 450299b3 = Wave 2a store 地基 + 枚举/视图改名 ... Wave 0/1 + migration + docs
 ```
 - **Phase 1-2 + 双 Gate**：A1 + 全改名（拍板）。migration_117 副本验证，真实例未动。
-- **Wave 0/1/2a/2b/2bc（read-switch 安全）**：吸收 9 字段 + populate + revision store 地基 + 枚举/视图改名 + 7 站运行时读切统一镜像 + 镜像完整性闭合（草稿即时生效）。**双评审+再评审 0 HIGH**。4137 passed + e2e 8/8。
-- **Wave 2c-1**（b315b7dc）：抽 `build_worker_agent_profile`（agent_context_helpers）——规范化完整 worker 镜像 builder（9 字段 + instruction_overlays + memory_recall + bootstrap + source_kind），entity_ensure 委托之（逐字段等价）。4137=baseline。
+- **Wave 0/1/2a/2b/2bc + 2c-1**：吸收 9 字段 + populate + revision store 地基 + 枚举/视图改名 + 7 站运行时读切统一镜像 + 镜像完整性闭合 + 抽 canonical `build_worker_agent_profile`（entity_ensure 委托）。
+- **Wave 2c-2a**（75e3013d）：authoring **两条持久化 runtime 镜像路径**（`_sync_worker_profile_agent_profile` + `_save_worker_profile_draft` draft-refresh）从旧 incomplete builder 切到 canonical `build_worker_agent_profile`。镜像此后含运行时读的 instruction_overlays + memory_recall ≡ materialize-on-read 输出。slug 保 name-based；溯源 key 收敛 source_worker_profile_id；_sync 删 revision 形参。**范围收窄**：worker_service:152 瞬态文档镜像不动（喂 build_behavior_system_summary 读 bootstrap_template_ids，canonical 改文档输出）；旧 `_build_agent_profile_from_worker_profile` 仅 152 用本波保留。4137=baseline + e2e 8/8。
 
-## 下一步：Wave 2c-2/2c-3（authoring 直写统一表 + 删 materialize-on-read，高风险）
-> **2c-1 已就位 canonical builder**（`build_worker_agent_profile`）。详见 [wave-2c-plan.md](./wave-2c-plan.md)（recon + Option B 子波分解）。
-> **关键约束（recon）**：运行时只读 worker 行的 `instruction_overlays` + `context_budget_policy.memory_recall`——canonical builder 已含；其余 agent-only 字段 vestigial。
-> - **2c-2**（高风险核心）：authoring（worker_profile_ops/_save_worker_profile_draft + _publish + worker_service archive + agent_service create/resource_limits + _coordinator）改 build AgentProfile via `build_worker_agent_profile` → save_agent_profile；**删 save_worker_profile 调用** + Wave2bc 过渡 sync（draft-refresh/archive-sync）；authoring 读 get/list_worker_profile → get_agent_profile/list_agent_profiles(kind=worker)；WorkerProfile 构造(~5)→AgentProfile。
-> - **2c-3**：删 materialize-on-read（entity_ensure:951，行已完整）+ `_sync_worker_profile_agent_profile`/`_build_agent_profile_from_worker_profile`（冗余）；revision → agent_profile_revisions（ops:838/854 + worker_service:409）。
-> **每子波 0 regression（4137）+ e2e + Codex+Opus 双评审 + deterministic 打底（W2bc Codex 幻觉教训）。** WorkerProfile 类删除 + worker_profile.* wire 改名留 W3/W4。
+## ⚠ 下一步：Wave 2c-2b 翻转 materialize-on-read（高风险，invariant-dense）
+> **核心序列修正（2c-2a 实读得出）**：`_ensure_agent_profile_from_worker_profile`（entity_ensure:950）是
+> **always-overwrite-from-worker_profiles**，`_resolve_agent_profile`（:839）**优先**返回重建镜像（:850-855）。
+> 故必须先翻转它为 **create-if-absent**（信任 authoring 保鲜的完整镜像），才能停 worker_profiles 写
+> （否则陈旧 worker_profiles 每 dispatch 覆盖）。**plan 原 2c-2-before-2c-3 顺序已废**。详 wave-2c-plan.md §序列修正。
+
+**2c-2b 改法**（`_resolve_agent_profile`）：worker 镜像存在且 `is_worker_behavior_profile(existing)` → 直接 return
+existing（不重建）；缺失才 fallback `_ensure_agent_profile_from_worker_profile`。**等价性依赖"镜像永远 current"
+不变量**（== rebuild 输出）。
+
+**⚠ 翻转前必须逐站验证的 save_worker_profile 镜像同步缺口**（否则陈旧镜像被 trust，W2bc masking 重演）：
+| save_worker_profile 站 | 当前镜像同步 | 翻转前需处理 |
+|---|---|---|
+| worker_profile_ops:786 draft + worker_service publish/bind | ✅ 2c-2a canonical sync | 已 current |
+| worker_service:861 archive | ✅ archive-sync（surgical status）| 验证 status 外字段是否需补 |
+| **agent_service:378 resource_limits** | ❌ 无 sync | resource_limits **不在镜像**（canonical 不含）→ 仅 `updated_at` 漂移；翻转后 trust 会留旧 updated_at（rebuild 会刷新）。判定：updated_at 是否运行时读？否→benign，可不补；是→补 sync |
+| **agent_service:628 create / :685** | ❓ 未核（W2bc 记录称 create 已改同 id）| **必读确认**是否 canonical 同 id sync |
+| **_coordinator:983/986 主 Agent** | ⚠ **id 分歧**：worker_profile=wpid，agent_profile=`agent-profile-{wpid}`（前缀，非同 id）| 这是**主 Agent 非 worker 镜像**：materialize 对 wpid 重建（canonical profile_id=wpid），但运行时请求的是 `agent-profile-{wpid}`（project.default_agent_profile_id）→ get_worker_profile(prefixed)=None→不重建→直接用该 agent_profile。**核对其 kind**（若非 worker→is_worker_behavior_profile=False→2c-2b 翻转不影响它，安全）。W2bc lesson #3 的 id 约定收口在此 |
+
+**2c-2c**（翻转后）：authoring 删 `save_worker_profile`（保留 in-memory WorkerProfile DTO 经 builder→save_agent_profile）；worker_profiles 运行时无读者→停写安全。
+**2c-3**：删 materialize-on-read + 旧 builder（worker_service:152 文档路径同步迁移到 canonical 或保留瞬态）+ `_sync_worker_profile_agent_profile`；authoring 读 get/list_worker_profile→get_agent_profile/list_agent_profiles(kind=worker)；revision→agent_profile_revisions（ops:838/854 + worker_service:409）。
+> **每子波 0 regression（4137）+ e2e + Codex+Opus 双评审 + deterministic 打底。** 2c-2 cluster（2c-2a/b/c）建议整体跑一次双评审（coupled 单元）。WorkerProfile 类删 + worker_profile.* wire 改名留 W3/W4。
 
 ### （历史）Wave 2bc 修复方向（已完成，留档）
 > **核心教训**：2b/2c 拆分（read-switch 先于 authoring write-switch）漏耦合。read-switch 依赖
