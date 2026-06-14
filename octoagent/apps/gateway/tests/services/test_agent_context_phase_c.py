@@ -256,7 +256,7 @@ async def test_resolve_context_bundle_worker_does_not_short_circuit(tmp_path: Pa
 
 
 async def test_resolve_agent_profile_trusts_existing_worker_mirror(tmp_path: Path) -> None:
-    """F117 Wave 2c-2b：_resolve_agent_profile 信任已存在的 worker 镜像，不再从 worker_profiles 重建。
+    """F117 Wave 2c-2b：_resolve_agent_profile 信任完整 worker 镜像，不从 worker_profiles 重建。
 
     构造 worker_profile 与同 id 镜像**故意分歧**（镜像 tools ≠ worker_profile tools）的状态，
     断言 resolve 返回**镜像**的 tools——证明运行时读统一 agent_profiles(kind=worker) 行、与
@@ -283,7 +283,8 @@ async def test_resolve_agent_profile_trusts_existing_worker_mirror(tmp_path: Pat
             selected_tools=["worker.tool"],
         )
     )
-    # 同 id 镜像：tools 故意分歧（["mirror.tool"]），模拟"运行时权威源是镜像"
+    # 同 id **完整** canonical 镜像（instruction_overlays 非空）：tools 故意与 worker 分歧，
+    # 模拟"运行时权威源是镜像"。完整性是 flip 信任的前提（Codex [2] 防御）。
     await store_group.agent_context_store.save_agent_profile(
         AgentProfile(
             profile_id=profile_id,
@@ -291,6 +292,7 @@ async def test_resolve_agent_profile_trusts_existing_worker_mirror(tmp_path: Pat
             project_id="proj-c-001",
             name="Drift Worker",
             kind="worker",
+            instruction_overlays=["镜像 overlay（完整性标记）"],
             selected_tools=["mirror.tool"],
             metadata={
                 "source_kind": "worker_profile_mirror",
@@ -304,8 +306,61 @@ async def test_resolve_agent_profile_trusts_existing_worker_mirror(tmp_path: Pat
         project=None,
         requested_profile_id=profile_id,
     )
-    # 翻转后信任镜像 → mirror.tool；翻转前会重建 → worker.tool
+    # 翻转后信任完整镜像 → mirror.tool；翻转前会重建 → worker.tool
     assert resolved.selected_tools == ["mirror.tool"]
+    await store_group.close()
+
+
+async def test_resolve_agent_profile_rebuilds_incomplete_worker_mirror(tmp_path: Path) -> None:
+    """F117 Wave 2c-2b（Codex 双评审 [2] 防御）：残缺 worker 镜像（instruction_overlays 空）被重建。
+
+    模拟 W4 migration INSERT / 历史 inline 写的残缺 bare-wpid 镜像——flip 不盲信，fall through
+    重建成 canonical（含 instruction_overlays），保留 materialize-on-read 对残缺镜像的 self-heal，
+    使 W4 migration 即使写残缺行也不退化（不依赖 migration 自身修正）。
+    """
+    from octoagent.core.models import WorkerProfile
+    from octoagent.core.store import create_store_group
+
+    store_group = await create_store_group(
+        db_path=str(tmp_path / "phase-2c2b-incomplete.db"),
+        artifacts_dir=str(tmp_path / "artifacts"),
+    )
+    service = AgentContextService(store_group, project_root=tmp_path)
+
+    profile_id = "worker-profile-2c2b-incomplete"
+    await store_group.agent_context_store.save_worker_profile(
+        WorkerProfile(
+            profile_id=profile_id,
+            scope=AgentProfileScope.PROJECT,
+            project_id="proj-c-001",
+            name="Incomplete Worker",
+            selected_tools=["worker.tool"],
+        )
+    )
+    # 残缺镜像：kind=worker 但 instruction_overlays 空（模拟 migration INSERT 默认 / 历史 inline）
+    await store_group.agent_context_store.save_agent_profile(
+        AgentProfile(
+            profile_id=profile_id,
+            scope=AgentProfileScope.PROJECT,
+            project_id="proj-c-001",
+            name="Incomplete Worker",
+            kind="worker",
+            selected_tools=["stale.tool"],
+            metadata={
+                "source_kind": "worker_profile_mirror",
+                "source_worker_profile_id": profile_id,
+            },
+        )
+    )
+    await store_group.conn.commit()
+
+    resolved, _degraded = await service._resolve_agent_profile(
+        project=None,
+        requested_profile_id=profile_id,
+    )
+    # 残缺 → fall through 重建成 canonical：instruction_overlays 非空 + tools 来自 worker_profile
+    assert resolved.instruction_overlays
+    assert resolved.selected_tools == ["worker.tool"]
     await store_group.close()
 
 

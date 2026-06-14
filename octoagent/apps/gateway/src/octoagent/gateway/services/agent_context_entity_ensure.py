@@ -848,12 +848,22 @@ class AgentContextEntityEnsureMixin:
                 requested_profile_id
             )
             # F117 Wave 2c-2b：materialize-on-read 从 always-rebuild 翻转为 create-if-absent。
-            # 已存在 worker 镜像由 authoring 写路径（2c-2a canonical sync + archive-sync）保持
-            # current（builder existing-merge 幂等 → existing == 重建输出），直接信任，不再每
+            # 已存在的**完整** worker 镜像由 authoring 写路径（2c-2a canonical sync + archive-sync）
+            # 保持 current（builder existing-merge 幂等 → existing == 重建输出），直接信任，不再每
             # dispatch 从 worker_profiles 重建覆盖——停 worker_profiles 写（2c-2c）的前提。
             # 等价：worker_profile 缺失/archived 时原 _ensure 返 None 本就 return existing（重建
             # no-op，含 agent-profile-{id} 前缀镜像）；缺镜像才 fallback 重建（首次 dispatch）。
-            if existing is not None and is_worker_behavior_profile(existing):
+            # Codex 双评审 [2] 防御（不盲信"所有镜像都完整"）：只信任**完整** canonical 镜像
+            # （instruction_overlays 非空——canonical 恒置 WORKER_INSTRUCTION_OVERLAYS，残缺源
+            # [W4 migration INSERT 默认 / 历史 inline] 恒空）；残缺镜像 fall through 重建，保留
+            # materialize-on-read 对残缺镜像的 self-heal。当前态无 bare-wpid 残缺镜像 → 行为等价
+            # （前缀残缺镜像重建 no-op 后仍 return existing，同 baseline）；W4 migration 残缺行 →
+            # 自动重建成 canonical（不依赖 migration 自身修正）。
+            if (
+                existing is not None
+                and is_worker_behavior_profile(existing)
+                and existing.instruction_overlays
+            ):
                 return existing, degraded_reasons
             mirrored = await self._ensure_agent_profile_from_worker_profile(
                 requested_profile_id,
