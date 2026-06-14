@@ -150,6 +150,7 @@ def build_worker_agent_profile(
     *,
     existing_profile: AgentProfile | None = None,
     profile_id: str | None = None,
+    include_user_metadata: bool = False,
 ) -> AgentProfile:
     """F117 Wave 2c：从 WorkerProfile 构造**完整**的 agent_profiles(kind=worker) 行。
 
@@ -206,6 +207,11 @@ def build_worker_agent_profile(
         context_budget_policy=context_budget_policy,
         metadata={
             **(dict(existing_profile.metadata) if existing_profile is not None else {}),
+            # F117 Wave 2c-2c：include_user_metadata=True 并入 worker_profile.metadata user key
+            # （如 extract source_work_id）——authoring 停写 worker_profiles 后镜像成唯一源须携之；
+            # source_* 标记 key 覆盖在后。materialize-on-read 默认 False 保 baseline 不携（reverse-
+            # converter 读时剥 source_* 还原 user metadata，round-trip 守恒）。
+            **(dict(worker_profile.metadata) if include_user_metadata else {}),
             "source_worker_profile_id": worker_profile.profile_id,
             "source_worker_profile_revision": (
                 worker_profile.active_revision or worker_profile.draft_revision or 0

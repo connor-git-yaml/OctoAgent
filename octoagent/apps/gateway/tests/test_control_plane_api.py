@@ -5492,7 +5492,10 @@ class TestControlPlaneApi:
         extract_payload = extract_resp.json()["result"]["data"]
         extracted_id = extract_payload["profile_id"]
 
-        extracted = await store_group.agent_context_store.get_worker_profile(extracted_id)
+        # F117 Wave 2c-2c：authoring 停写 worker_profiles，profile 持久化为统一 agent_profiles
+        # (kind=worker) 镜像；read 改 get_agent_profile。user metadata（source_work_id）经
+        # include_user_metadata 携入镜像（reverse-converter 读时剥离 source_* 还原）。
+        extracted = await store_group.agent_context_store.get_agent_profile(extracted_id)
         assert extracted is not None
         assert extracted.origin_kind == AgentProfileOriginKind.EXTRACTED
         assert extracted.selected_tools == ["web.search"]

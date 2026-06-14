@@ -54,7 +54,8 @@ from octoagent.core.models import (
 )
 from ulid import ULID
 
-from ..agent_decision import build_behavior_system_summary
+from ..agent_context_helpers import build_worker_dto_from_agent_profile
+from ..agent_decision import build_behavior_system_summary, is_worker_behavior_profile
 from ..task_service import TaskService
 from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
 from .worker_profile_ops import WorkerProfileOpsMixin
@@ -101,10 +102,23 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
     async def get_worker_profiles_document(self) -> WorkerProfilesDocument:
         _, selected_project, _, _ = await self._resolve_selection()
         capability_pack = await self._get_capability_pack_document()
-        # 全局加载所有 worker profiles，不按项目过滤——Agents 管理页面需要看到全部
-        stored_profiles = await self._stores.agent_context_store.list_worker_profiles(
-            include_archived=True,
-        )
+        # F117 Wave 2c-2c：listing 读统一 agent_profiles(kind=worker) → 反构 WorkerProfile DTO（下游
+        # 循环零改动）。全局不过滤项目（管理页看全部）。dedup：同一逻辑 worker 的 bare-wpid
+        # 与 `agent-profile-{wpid}` 前缀镜像（agent_service/_coordinator 程序化创建）合一，优先 bare id
+        # （W4 id 收口前过渡）。include_archived 隐含（agent_profiles 含 status=ARCHIVED 行）。
+        all_agent_profiles = await self._stores.agent_context_store.list_agent_profiles()
+        worker_mirrors_by_logical_id: dict[str, AgentProfile] = {}
+        for mirror in all_agent_profiles:
+            if not is_worker_behavior_profile(mirror):
+                continue
+            logical_id = mirror.profile_id.removeprefix("agent-profile-")
+            existing = worker_mirrors_by_logical_id.get(logical_id)
+            if existing is None or mirror.profile_id == logical_id:
+                worker_mirrors_by_logical_id[logical_id] = mirror
+        stored_profiles = [
+            build_worker_dto_from_agent_profile(mirror)
+            for mirror in worker_mirrors_by_logical_id.values()
+        ]
         project_works: list[Work] = []
         if self._ctx.delegation_plane_service is not None:
             project_works = await self._ctx.delegation_plane_service.list_works()
@@ -406,7 +420,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                     "WORKER_PROFILE_NOT_IN_SCOPE",
                     "当前 project 不能查看这个 Root Agent profile。",
                 )
-            revisions = await self._stores.agent_context_store.list_worker_profile_revisions(
+            revisions = await self._stores.agent_context_store.list_agent_profile_revisions(
                 profile_id
             )
             items = [
@@ -858,14 +872,13 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 "WORKER_PROFILE_BUILTIN_READONLY",
                 "内建 archetype 不能归档。",
             )
-        archived = await self._stores.agent_context_store.save_worker_profile(
-            existing.model_copy(
-                update={
-                    "status": AgentProfileStatus.ARCHIVED,
-                    "archived_at": datetime.now(tz=UTC),
-                    "updated_at": datetime.now(tz=UTC),
-                }
-            )
+        # F117 Wave 2c-2c-W：停写 worker_profiles——in-memory model_copy；镜像 status 由下方 archive-sync 写。
+        archived = existing.model_copy(
+            update={
+                "status": AgentProfileStatus.ARCHIVED,
+                "archived_at": datetime.now(tz=UTC),
+                "updated_at": datetime.now(tz=UTC),
+            }
         )
         # F117 Wave 2bc（archive-sync gate，Wave 1 评审 MEDIUM-1）：archive 后同步镜像
         # status=ARCHIVED——否则 read-switch 后 capability_pack/chat/session 读 mirror.status

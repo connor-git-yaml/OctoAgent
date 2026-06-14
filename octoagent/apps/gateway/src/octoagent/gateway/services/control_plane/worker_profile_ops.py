@@ -28,6 +28,7 @@ from octoagent.core.models import (
     AgentProfile,
     AgentProfileDynamicContext,
     AgentProfileOriginKind,
+    AgentProfileRevision,
     AgentProfileScope,
     AgentProfileStatus,
     ControlPlaneCapability,
@@ -35,7 +36,6 @@ from octoagent.core.models import (
     DynamicToolSelection,
     Work,
     WorkerProfile,
-    WorkerProfileRevision,
 )
 from octoagent.gateway.services.agent_context_helpers import (
     build_worker_agent_profile,
@@ -170,7 +170,9 @@ class WorkerProfileOpsMixin:
         # （instruction_overlays=[] / 无 memory_recall），让 materialize-on-read 对已持久化
         # worker 变为冗余（2c-2 下一步据此把 materialize-on-read 改 create-if-absent）。
         existing = await self._stores.agent_context_store.get_agent_profile(profile.profile_id)
-        mirrored = build_worker_agent_profile(profile, existing_profile=existing)
+        mirrored = build_worker_agent_profile(
+            profile, existing_profile=existing, include_user_metadata=True
+        )
         await self._stores.agent_context_store.save_agent_profile(mirrored)
         # 同步时确保 agent-private 行为文件存在。slug 直接 name-based（canonical 镜像不带
         # behavior_agent_slug metadata），与 baseline resolve_behavior_agent_slug(old_mirror)
@@ -807,34 +809,34 @@ class WorkerProfileOpsMixin:
             )
             active_revision = existing.active_revision
             created_at = existing.created_at
-        saved = await self._stores.agent_context_store.save_worker_profile(
-            WorkerProfile(
-                profile_id=str(normalized_profile.get("profile_id", "")),
-                scope=AgentProfileScope(str(normalized_profile.get("scope", "project"))),
-                project_id=str(normalized_profile.get("project_id", "")),
-                name=str(normalized_profile.get("name", "")),
-                summary=str(normalized_profile.get("summary", "")),
-                model_alias=str(normalized_profile.get("model_alias", "main")),
-                tool_profile=str(normalized_profile.get("tool_profile", "minimal")),
-                default_tool_groups=self._normalize_string_list(
-                    normalized_profile.get("default_tool_groups")
-                ),
-                selected_tools=self._normalize_string_list(
-                    normalized_profile.get("selected_tools")
-                ),
-                runtime_kinds=self._normalize_string_list(
-                    normalized_profile.get("runtime_kinds")
-                ),
-                metadata=self._normalize_dict(normalized_profile.get("metadata")),
-                resource_limits=self._normalize_dict(normalized_profile.get("resource_limits")),
-                status=status,
-                origin_kind=resolved_origin,
-                draft_revision=draft_revision,
-                active_revision=active_revision,
-                created_at=created_at,
-                updated_at=now,
-                archived_at=None,
-            )
+        # F117 Wave 2c-2c-W：停写 worker_profiles——in-memory WorkerProfile DTO 承载 status/revision
+        # 派生，持久化只走下面的 canonical 镜像（agent_profiles 单写，Option B）。
+        saved = WorkerProfile(
+            profile_id=str(normalized_profile.get("profile_id", "")),
+            scope=AgentProfileScope(str(normalized_profile.get("scope", "project"))),
+            project_id=str(normalized_profile.get("project_id", "")),
+            name=str(normalized_profile.get("name", "")),
+            summary=str(normalized_profile.get("summary", "")),
+            model_alias=str(normalized_profile.get("model_alias", "main")),
+            tool_profile=str(normalized_profile.get("tool_profile", "minimal")),
+            default_tool_groups=self._normalize_string_list(
+                normalized_profile.get("default_tool_groups")
+            ),
+            selected_tools=self._normalize_string_list(
+                normalized_profile.get("selected_tools")
+            ),
+            runtime_kinds=self._normalize_string_list(
+                normalized_profile.get("runtime_kinds")
+            ),
+            metadata=self._normalize_dict(normalized_profile.get("metadata")),
+            resource_limits=self._normalize_dict(normalized_profile.get("resource_limits")),
+            status=status,
+            origin_kind=resolved_origin,
+            draft_revision=draft_revision,
+            active_revision=active_revision,
+            created_at=created_at,
+            updated_at=now,
+            archived_at=None,
         )
         # F117 Wave 2bc（镜像完整性，用户拍板"草稿即时生效"）：每次 draft 写入后刷新同 id
         # 镜像（携全 9 字段 + metadata），让 read-switch 后 create/update/clone/extract 的未发布
@@ -845,7 +847,9 @@ class WorkerProfileOpsMixin:
         )
         # F117 Wave 2c-2a：draft 镜像同走 canonical builder（完整 worker 行，instruction_overlays
         # + memory_recall 即时生效，与 publish/bind 同步路径一致）。
-        mirror = build_worker_agent_profile(saved, existing_profile=existing_mirror)
+        mirror = build_worker_agent_profile(
+            saved, existing_profile=existing_mirror, include_user_metadata=True
+        )
         await self._stores.agent_context_store.save_agent_profile(mirror)
         await self._stores.conn.commit()
         return saved
@@ -856,8 +860,8 @@ class WorkerProfileOpsMixin:
         profile: WorkerProfile,
         change_summary: str,
         actor: str,
-    ) -> tuple[WorkerProfile, WorkerProfileRevision, bool]:
-        revisions = await self._stores.agent_context_store.list_worker_profile_revisions(
+    ) -> tuple[WorkerProfile, AgentProfileRevision, bool]:
+        revisions = await self._stores.agent_context_store.list_agent_profile_revisions(
             profile.profile_id
         )
         snapshot_payload = self._worker_profile_snapshot_payload(profile)
@@ -873,8 +877,10 @@ class WorkerProfileOpsMixin:
         next_revision = profile.draft_revision or profile.active_revision or 1
         if next_revision <= profile.active_revision:
             next_revision = profile.active_revision + 1
-        revision = await self._stores.agent_context_store.save_worker_profile_revision(
-            WorkerProfileRevision(
+        # F117 Wave 2c-2c-W：revision 写统一 agent_profile_revisions（FK→agent_profiles，与停写
+        # worker_profiles 一致；worker_profile_revisions FK→worker_profiles 会因停写违约 500）。
+        revision = await self._stores.agent_context_store.save_agent_profile_revision(
+            AgentProfileRevision(
                 revision_id=self._worker_snapshot_id(profile.profile_id, next_revision),
                 profile_id=profile.profile_id,
                 revision=next_revision,
@@ -884,16 +890,16 @@ class WorkerProfileOpsMixin:
                 created_at=datetime.now(tz=UTC),
             )
         )
-        updated = await self._stores.agent_context_store.save_worker_profile(
-            profile.model_copy(
-                update={
-                    "status": AgentProfileStatus.ACTIVE,
-                    "active_revision": next_revision,
-                    "draft_revision": next_revision,
-                    "updated_at": datetime.now(tz=UTC),
-                    "archived_at": None,
-                }
-            )
+        # F117 Wave 2c-2c-W：停写 worker_profiles——in-memory model_copy；镜像由调用方 handler 的
+        # _sync_worker_profile_agent_profile 写。删 _publish 内部 commit → revision + 镜像 + bind 由
+        # handler 单事务原子提交（根除 Codex 双评审 [3] commit-between 陈旧镜像窗口）。
+        updated = profile.model_copy(
+            update={
+                "status": AgentProfileStatus.ACTIVE,
+                "active_revision": next_revision,
+                "draft_revision": next_revision,
+                "updated_at": datetime.now(tz=UTC),
+                "archived_at": None,
+            }
         )
-        await self._stores.conn.commit()
         return updated, revision, True
