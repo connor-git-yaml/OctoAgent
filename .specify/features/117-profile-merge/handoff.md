@@ -1,25 +1,24 @@
-# F117 Handoff — Wave 2c resume 指南
+# F117 Handoff — Wave 2c-2 resume 指南
 
-> 状态：**Wave 0/1/2a/2b/2bc 完成 committed；read-switch 安全（BLOCK 已解）**。下一步 Wave 2c（authoring 改写）。
-> 分支 `feature/117-profile-merge`（**未 push**），worktree `.claude/worktrees/F117-profile-merge`，基于 origin/master `7199f468`。
+> 状态：**Wave 0/1/2a/2b/2bc 完成；read-switch 安全。Wave 2c-1（规范化 builder）完成。下一步 2c-2/2c-3（authoring 直写，高风险）**。
+> 分支 `feature/117-profile-merge`（15 commits，**未 push**），worktree `.claude/worktrees/F117-profile-merge`，基于 origin/master `7199f468`。
 
-## 已完成（13 commits）
+## 已完成（15 commits）
 ```
-71c0a044 docs(F117): Wave 2bc 再评审记录
-0f7a4b99 refactor(F117): Wave 2bc 镜像完整性 — read-switch 解 BLOCK（草稿即时生效）
-67201a40 refactor(F117): Wave 2b read-switch（半成品→2bc 已闭合）
-450299b3 refactor(F117): Wave 2a — store 地基 + 枚举/视图类改名
-... Wave 0/1 + migration + 影响分析 + 地图/评审 docs
+b315b7dc refactor(F117): Wave 2c-1 规范化 worker 镜像 builder（行为零变更基础）
+71c0a044 / 0f7a4b99 / 67201a40 = Wave 2b+2bc read-switch 安全 + 再评审
+450299b3 = Wave 2a store 地基 + 枚举/视图改名 ... Wave 0/1 + migration + docs
 ```
-- **Phase 1-2 + 双 Gate**：A1 彻底物理合并 + 全改名（拍板）。migration_117 副本验证（幂等 + 零数据丢失），真实例未动。
-- **Wave 0/1/2a**（加性/rename）：AgentProfile +9 字段 + 镜像 populate + agent_profile_revisions store 地基 + 枚举/视图类改名。0 regression（4135）。
-- **Wave 2b+2bc（read-switch 安全）**：7 站运行时读切到统一镜像 + archive-sync（2b）；镜像完整性闭合——所有 authoring 写路径同步同 id 镜像 + GAP 回退 + migration 字段补全 + faithful test helper（2bc，草稿即时生效）。**双评审 + 再评审 panel：0 HIGH**（Codex 再评审 FAIL 是幻觉，deterministic grep 推翻；Opus 权威逐路径 CLOSED + 1 MEDIUM 已修）。4137 passed + e2e 8/8。详 [wave-2b-review.md](./wave-2b-review.md) + [wave-2bc-review.md](./wave-2bc-review.md)。
+- **Phase 1-2 + 双 Gate**：A1 + 全改名（拍板）。migration_117 副本验证，真实例未动。
+- **Wave 0/1/2a/2b/2bc（read-switch 安全）**：吸收 9 字段 + populate + revision store 地基 + 枚举/视图改名 + 7 站运行时读切统一镜像 + 镜像完整性闭合（草稿即时生效）。**双评审+再评审 0 HIGH**。4137 passed + e2e 8/8。
+- **Wave 2c-1**（b315b7dc）：抽 `build_worker_agent_profile`（agent_context_helpers）——规范化完整 worker 镜像 builder（9 字段 + instruction_overlays + memory_recall + bootstrap + source_kind），entity_ensure 委托之（逐字段等价）。4137=baseline。
 
-## 下一步：Wave 2c（authoring 改写 + 镜像塌缩，read-switch 已安全）
-> read-switch 已读统一镜像；Wave 2c 让 authoring **直写统一 agent_profiles 行**（无镜像）+ 删镜像 builder，
-> 塌缩"worker_profiles 写 + 镜像同步"双写为单写。此后 worker_profiles 表运行时死，待 Wave 4 删。
-> 注：Wave 2bc 加的 `_save_worker_profile_draft` 镜像刷新 / agent_service 镜像 enrich 是过渡，Wave 2c 一并移除。
-> 详见 [refactor-plan.md](./refactor-plan.md) §5 Wave 2c。
+## 下一步：Wave 2c-2/2c-3（authoring 直写统一表 + 删 materialize-on-read，高风险）
+> **2c-1 已就位 canonical builder**（`build_worker_agent_profile`）。详见 [wave-2c-plan.md](./wave-2c-plan.md)（recon + Option B 子波分解）。
+> **关键约束（recon）**：运行时只读 worker 行的 `instruction_overlays` + `context_budget_policy.memory_recall`——canonical builder 已含；其余 agent-only 字段 vestigial。
+> - **2c-2**（高风险核心）：authoring（worker_profile_ops/_save_worker_profile_draft + _publish + worker_service archive + agent_service create/resource_limits + _coordinator）改 build AgentProfile via `build_worker_agent_profile` → save_agent_profile；**删 save_worker_profile 调用** + Wave2bc 过渡 sync（draft-refresh/archive-sync）；authoring 读 get/list_worker_profile → get_agent_profile/list_agent_profiles(kind=worker)；WorkerProfile 构造(~5)→AgentProfile。
+> - **2c-3**：删 materialize-on-read（entity_ensure:951，行已完整）+ `_sync_worker_profile_agent_profile`/`_build_agent_profile_from_worker_profile`（冗余）；revision → agent_profile_revisions（ops:838/854 + worker_service:409）。
+> **每子波 0 regression（4137）+ e2e + Codex+Opus 双评审 + deterministic 打底（W2bc Codex 幻觉教训）。** WorkerProfile 类删除 + worker_profile.* wire 改名留 W3/W4。
 
 ### （历史）Wave 2bc 修复方向（已完成，留档）
 > **核心教训**：2b/2c 拆分（read-switch 先于 authoring write-switch）漏耦合。read-switch 依赖
