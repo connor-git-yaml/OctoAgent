@@ -48,7 +48,6 @@ from octoagent.core.models import (
     TurnExecutorKind,
 )
 from octoagent.core.models.agent_context import (
-    DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
     resolve_permission_preset,
 )
 from octoagent.core.models.payloads import (
@@ -59,10 +58,10 @@ from ulid import ULID
 # 路径不变（含 orchestrator 引用的 _dynamic_transcript_limit 等私有名）。redundant-alias
 # 形式（X as X）向 ruff/类型检查器声明显式 re-export。
 from .agent_context_helpers import (
-    _memory_recall_preferences,
     build_memory_namespace_id,
     build_private_memory_scope_ids,
     build_scope_aware_session_id,
+    build_worker_agent_profile,
     legacy_session_id_for_task,
     session_state_matches_scope,
 )
@@ -957,73 +956,10 @@ class AgentContextEntityEnsureMixin:
         worker_profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
         if worker_profile is None or worker_profile.status == AgentProfileStatus.ARCHIVED:
             return None
-        bootstrap_template_ids = build_behavior_bootstrap_template_ids(
-            include_agent_private=True,
-            include_project_shared=bool(worker_profile.project_id),
-            include_project_agent=bool(worker_profile.project_id),
-        )
-        # F094 D2: 默认值改读 module-level 常量 DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES
-        # （core/models/agent_context.py 单一 SoT）；保留 baseline merge 顺序
-        # `{**defaults, **existing}`：existing profile override defaults（Codex
-        # spec LOW-7 闭环）。worker_profile 不再用作 defaults gate（baseline 仅
-        # 当 worker_profile is None 时返回空字典；F094 直接用 module 常量）。
-        merged_memory_recall = {
-            **DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
-            **(
-                dict(_memory_recall_preferences(existing_profile))
-                if existing_profile is not None
-                else {}
-            ),
-        }
-        context_budget_policy = (
-            {
-                **dict(existing_profile.context_budget_policy),
-                "memory_recall": merged_memory_recall,
-            }
-            if existing_profile is not None
-            else {"memory_recall": merged_memory_recall}
-        )
-        profile = AgentProfile(
-            profile_id=worker_profile.profile_id,
-            scope=worker_profile.scope,
-            project_id=worker_profile.project_id,
-            name=worker_profile.name,
-            persona_summary="",
-            instruction_overlays=[
-                "优先遵守当前 Root Agent 的静态配置、工具边界和 project 约束。",
-                "在工具不足或 connector 未就绪时，明确说明原因与下一步。",
-            ],
-            kind="worker",
-            model_alias=worker_profile.model_alias or "main",
-            tool_profile=worker_profile.tool_profile or "standard",
-            # F117 Wave 1（populate）：复制 worker 静态配置 9 字段进统一行（read-path
-            # 切换前置条件——capability_pack 将改读这些字段而非直读 worker_profiles）。
-            summary=worker_profile.summary,
-            default_tool_groups=list(worker_profile.default_tool_groups),
-            selected_tools=list(worker_profile.selected_tools),
-            runtime_kinds=list(worker_profile.runtime_kinds),
-            status=worker_profile.status,
-            origin_kind=worker_profile.origin_kind,
-            draft_revision=worker_profile.draft_revision,
-            active_revision=worker_profile.active_revision,
-            archived_at=worker_profile.archived_at,
-            policy_refs=[],
-            context_budget_policy=context_budget_policy,
-            metadata={
-                **(dict(existing_profile.metadata) if existing_profile is not None else {}),
-                "source_worker_profile_id": worker_profile.profile_id,
-                "source_worker_profile_revision": (
-                    worker_profile.active_revision or worker_profile.draft_revision or 0
-                ),
-                "source_kind": "worker_profile_mirror",
-                "memory_recall_default_mode": str(
-                    merged_memory_recall.get("prefetch_mode", "")
-                ).strip(),
-            },
-            bootstrap_template_ids=bootstrap_template_ids,
-            version=max(worker_profile.active_revision or worker_profile.draft_revision, 1),
-            created_at=worker_profile.created_at,
-            updated_at=worker_profile.updated_at,
+        # F117 Wave 2c-1：委托规范化 builder（构造逐字段等价，抽到 agent_context_helpers
+        # 供 authoring 直写 Wave 2c-2 共用）。
+        profile = build_worker_agent_profile(
+            worker_profile, existing_profile=existing_profile
         )
         await self._stores.agent_context_store.save_agent_profile(profile)
         return profile

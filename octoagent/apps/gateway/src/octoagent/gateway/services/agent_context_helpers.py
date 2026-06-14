@@ -32,7 +32,10 @@ from octoagent.core.models import (
     RuntimeControlContext,
     SessionContextState,
     Task,
+    WorkerProfile,
 )
+from octoagent.core.behavior_workspace import build_behavior_bootstrap_template_ids
+from octoagent.core.models.agent_context import DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES
 from octoagent.memory import (
     MemoryAccessPolicy,
     MemoryRecallHit,
@@ -133,6 +136,90 @@ def _memory_recall_preferences(agent_profile: AgentProfile | None) -> dict[str, 
 # DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES module-level 常量，单一 SoT）。
 # 唯一调用点 `_ensure_agent_profile_from_worker_profile` 已改用 import 常量；
 # merge 顺序 `{**defaults, **existing}` 保持 baseline 一致。
+
+
+# F117 Wave 2c：worker 镜像统一 instruction overlays（原 entity_ensure 内联 2 串）。
+WORKER_INSTRUCTION_OVERLAYS = [
+    "优先遵守当前 Root Agent 的静态配置、工具边界和 project 约束。",
+    "在工具不足或 connector 未就绪时，明确说明原因与下一步。",
+]
+
+
+def build_worker_agent_profile(
+    worker_profile: WorkerProfile,
+    *,
+    existing_profile: AgentProfile | None = None,
+    profile_id: str | None = None,
+) -> AgentProfile:
+    """F117 Wave 2c：从 WorkerProfile 构造**完整**的 agent_profiles(kind=worker) 行。
+
+    规范化单一 builder——统一原 entity_ensure._ensure_agent_profile_from_worker_profile
+    与 worker_profile_ops._build_agent_profile_from_worker_profile。产出运行时所需全部字段：
+    9 个 worker 静态字段 + **运行时读的 instruction_overlays + context_budget_policy.memory_recall**
+    + bootstrap_template_ids + source_kind 标记。authoring 直写（Wave 2c-2）与 materialize-on-read
+    共用此 builder，行为与 baseline materialize-on-read 等价（字段逐项对账 entity_ensure:986-1027）。
+
+    ``existing_profile`` 用于 memory_recall / context_budget_policy / metadata 的 baseline merge
+    （existing 覆盖 default）；``profile_id`` 覆盖镜像 id（agent_service create 的 agent-profile-{id} 前缀路径）。
+    """
+    bootstrap_template_ids = build_behavior_bootstrap_template_ids(
+        include_agent_private=True,
+        include_project_shared=bool(worker_profile.project_id),
+        include_project_agent=bool(worker_profile.project_id),
+    )
+    merged_memory_recall = {
+        **DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
+        **(
+            dict(_memory_recall_preferences(existing_profile))
+            if existing_profile is not None
+            else {}
+        ),
+    }
+    context_budget_policy = (
+        {
+            **dict(existing_profile.context_budget_policy),
+            "memory_recall": merged_memory_recall,
+        }
+        if existing_profile is not None
+        else {"memory_recall": merged_memory_recall}
+    )
+    return AgentProfile(
+        profile_id=profile_id or worker_profile.profile_id,
+        scope=worker_profile.scope,
+        project_id=worker_profile.project_id,
+        name=worker_profile.name,
+        persona_summary="",
+        instruction_overlays=list(WORKER_INSTRUCTION_OVERLAYS),
+        kind="worker",
+        model_alias=worker_profile.model_alias or "main",
+        tool_profile=worker_profile.tool_profile or "standard",
+        summary=worker_profile.summary,
+        default_tool_groups=list(worker_profile.default_tool_groups),
+        selected_tools=list(worker_profile.selected_tools),
+        runtime_kinds=list(worker_profile.runtime_kinds),
+        status=worker_profile.status,
+        origin_kind=worker_profile.origin_kind,
+        draft_revision=worker_profile.draft_revision,
+        active_revision=worker_profile.active_revision,
+        archived_at=worker_profile.archived_at,
+        policy_refs=[],
+        context_budget_policy=context_budget_policy,
+        metadata={
+            **(dict(existing_profile.metadata) if existing_profile is not None else {}),
+            "source_worker_profile_id": worker_profile.profile_id,
+            "source_worker_profile_revision": (
+                worker_profile.active_revision or worker_profile.draft_revision or 0
+            ),
+            "source_kind": "worker_profile_mirror",
+            "memory_recall_default_mode": str(
+                merged_memory_recall.get("prefetch_mode", "")
+            ).strip(),
+        },
+        bootstrap_template_ids=bootstrap_template_ids,
+        version=max(worker_profile.active_revision or worker_profile.draft_revision, 1),
+        created_at=worker_profile.created_at,
+        updated_at=worker_profile.updated_at,
+    )
 
 
 def _memory_recall_planner_enabled(agent_profile: AgentProfile | None) -> bool:
