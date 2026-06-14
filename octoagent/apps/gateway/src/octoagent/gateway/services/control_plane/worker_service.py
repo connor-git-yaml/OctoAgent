@@ -530,11 +530,11 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         if not resolved.exists():
             # 文件不存在时 fallback 到默认模板
             try:
-                content, exists, budget_chars = read_behavior_file_content(
+                content, _exists, budget_chars = read_behavior_file_content(
                     self._ctx.project_root, file_path,
                 )
             except Exception:
-                content, exists, budget_chars = "", False, 0
+                content, _exists, budget_chars = "", False, 0
             return self._completed_result(
                 request=request,
                 code="BEHAVIOR_FILE_READ",
