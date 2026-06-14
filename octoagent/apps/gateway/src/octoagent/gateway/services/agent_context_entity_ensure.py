@@ -847,6 +847,14 @@ class AgentContextEntityEnsureMixin:
             existing = await self._stores.agent_context_store.get_agent_profile(
                 requested_profile_id
             )
+            # F117 Wave 2c-2b：materialize-on-read 从 always-rebuild 翻转为 create-if-absent。
+            # 已存在 worker 镜像由 authoring 写路径（2c-2a canonical sync + archive-sync）保持
+            # current（builder existing-merge 幂等 → existing == 重建输出），直接信任，不再每
+            # dispatch 从 worker_profiles 重建覆盖——停 worker_profiles 写（2c-2c）的前提。
+            # 等价：worker_profile 缺失/archived 时原 _ensure 返 None 本就 return existing（重建
+            # no-op，含 agent-profile-{id} 前缀镜像）；缺镜像才 fallback 重建（首次 dispatch）。
+            if existing is not None and is_worker_behavior_profile(existing):
+                return existing, degraded_reasons
             mirrored = await self._ensure_agent_profile_from_worker_profile(
                 requested_profile_id,
                 existing_profile=existing,
