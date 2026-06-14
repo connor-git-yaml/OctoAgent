@@ -222,6 +222,58 @@ def build_worker_agent_profile(
     )
 
 
+# F117 Wave 2c-2c：canonical mirror 写入的 source_* 标记 key（build_worker_agent_profile +
+# 历史 inline builder）。reverse-converter 剥离它们，使反构 WorkerProfile DTO 的 metadata 与
+# baseline worker_profile.metadata 等价（baseline 不含 mirror 标记；实践 worker metadata 恒空）。
+_MIRROR_MARKER_METADATA_KEYS = frozenset(
+    {
+        "source_kind",
+        "source_worker_profile_id",
+        "source_worker_profile_revision",
+        "memory_recall_default_mode",
+        "behavior_agent_slug",
+        "worker_profile_id",
+        "worker_profile_revision",
+        "worker_profile_status",
+    }
+)
+
+
+def build_worker_dto_from_agent_profile(agent_profile: AgentProfile) -> WorkerProfile:
+    """F117 Wave 2c-2c：从统一 agent_profiles(kind=worker) 行反构 WorkerProfile in-memory DTO。
+
+    让 authoring 逻辑（按 WorkerProfile 工作）在读切统一行后**零改动**——避免读切返回 AgentProfile
+    触发的类型 cascade 铺满 authoring 层。剥离 canonical mirror 的 source_* 标记 key → metadata 与
+    baseline worker_profile.metadata 等价。**过渡 shim**：W4 删 WorkerProfile 类后随之删（是
+    build_worker_agent_profile 的逆；resource_limits 是死列，取 WorkerProfile 默认 {}）。
+    """
+    user_metadata = {
+        key: value
+        for key, value in agent_profile.metadata.items()
+        if key not in _MIRROR_MARKER_METADATA_KEYS
+    }
+    return WorkerProfile(
+        profile_id=agent_profile.profile_id,
+        scope=agent_profile.scope,
+        project_id=agent_profile.project_id,
+        name=agent_profile.name,
+        summary=agent_profile.summary,
+        model_alias=agent_profile.model_alias,
+        tool_profile=agent_profile.tool_profile,
+        default_tool_groups=list(agent_profile.default_tool_groups),
+        selected_tools=list(agent_profile.selected_tools),
+        runtime_kinds=list(agent_profile.runtime_kinds),
+        metadata=user_metadata,
+        status=agent_profile.status,
+        origin_kind=agent_profile.origin_kind,
+        draft_revision=agent_profile.draft_revision,
+        active_revision=agent_profile.active_revision,
+        created_at=agent_profile.created_at,
+        updated_at=agent_profile.updated_at,
+        archived_at=agent_profile.archived_at,
+    )
+
+
 def _memory_recall_planner_enabled(agent_profile: AgentProfile | None) -> bool:
     prefs = _memory_recall_preferences(agent_profile)
     raw = prefs.get("planner_enabled", False)

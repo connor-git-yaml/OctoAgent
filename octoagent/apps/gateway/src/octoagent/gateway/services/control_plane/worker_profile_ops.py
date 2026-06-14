@@ -37,7 +37,11 @@ from octoagent.core.models import (
     WorkerProfile,
     WorkerProfileRevision,
 )
-from octoagent.gateway.services.agent_context_helpers import build_worker_agent_profile
+from octoagent.gateway.services.agent_context_helpers import (
+    build_worker_agent_profile,
+    build_worker_dto_from_agent_profile,
+)
+from octoagent.gateway.services.agent_decision import is_worker_behavior_profile
 from octoagent.gateway.services.config.config_wizard import load_config
 from ulid import ULID
 
@@ -414,7 +418,7 @@ class WorkerProfileOpsMixin:
         candidate = f"worker-profile-{scope_prefix}-{seed}"
         if existing_profile_id and existing_profile_id == candidate:
             return candidate
-        existing = await self._stores.agent_context_store.get_worker_profile(candidate)
+        existing = await self._get_worker_profile_via_mirror(candidate)
         if existing is None or existing.profile_id == existing_profile_id:
             return candidate
         return f"{candidate}-{str(ULID()).lower()[-6:]}"
@@ -458,6 +462,23 @@ class WorkerProfileOpsMixin:
             active_revision=1,
         )
 
+    async def _get_worker_profile_via_mirror(self, profile_id: str) -> WorkerProfile | None:
+        """F117 Wave 2c-2c：authoring 读统一 agent_profiles(kind=worker) 镜像 → 反构 WorkerProfile DTO。
+
+        镜像由 authoring 写路径（2c-2a sync）保持 current。(a) 非 worker 行视为不存在
+        （保 baseline"只有 worker"语义）；(b) bare-wpid miss → fallback `agent-profile-{id}` 前缀
+        镜像（agent_service/_coordinator 程序化创建 id 约定，W4 收口前过渡）。reverse-converter 反构
+        WorkerProfile DTO 使下游 authoring 逻辑零改动（避 AgentProfile 类型 cascade）。
+        """
+        mirror = await self._stores.agent_context_store.get_agent_profile(profile_id)
+        if mirror is None and not profile_id.startswith("agent-profile-"):
+            mirror = await self._stores.agent_context_store.get_agent_profile(
+                f"agent-profile-{profile_id}"
+            )
+        if mirror is None or not is_worker_behavior_profile(mirror):
+            return None
+        return build_worker_dto_from_agent_profile(mirror)
+
     async def _get_worker_profile_in_scope(
         self,
         profile_id: str,
@@ -466,7 +487,7 @@ class WorkerProfileOpsMixin:
         builtin = await self._resolve_builtin_worker_source(profile_id)
         if builtin is not None:
             return builtin
-        profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
+        profile = await self._get_worker_profile_via_mirror(profile_id)
         if profile is None:
             raise ControlPlaneActionError("WORKER_PROFILE_NOT_FOUND", "Root Agent profile 不存在")
         if (

@@ -391,7 +391,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         profile_id: str,
     ) -> AgentProfileRevisionsDocument:
         _, selected_project, _, _ = await self._resolve_selection()
-        stored_profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
+        stored_profile = await self._get_worker_profile_via_mirror(profile_id)
         items: list[AgentProfileRevisionItem] = []
         warnings: list[str] = []
 
@@ -673,7 +673,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         raw = draft if isinstance(draft, Mapping) else request.params
         profile_id = self._param_str(raw, "profile_id")
         if profile_id:
-            existing = await self._stores.agent_context_store.get_worker_profile(profile_id)
+            existing = await self._get_worker_profile_via_mirror(profile_id)
             if existing is not None:
                 raise ControlPlaneActionError(
                     "WORKER_PROFILE_ALREADY_EXISTS",
@@ -918,7 +918,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         existing: WorkerProfile | None = None
         mode = "create"
         if profile_id:
-            existing = await self._stores.agent_context_store.get_worker_profile(profile_id)
+            existing = await self._get_worker_profile_via_mirror(profile_id)
             if existing is not None:
                 if existing.origin_kind == AgentProfileOriginKind.BUILTIN:
                     raise ControlPlaneActionError(
