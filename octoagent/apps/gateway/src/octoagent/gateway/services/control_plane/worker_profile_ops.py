@@ -22,7 +22,7 @@ from typing import Any
 
 from octoagent.core.behavior_workspace import (
     materialize_agent_behavior_files,
-    resolve_behavior_agent_slug,
+    normalize_behavior_agent_slug,
 )
 from octoagent.core.models import (
     AgentProfile,
@@ -37,6 +37,7 @@ from octoagent.core.models import (
     WorkerProfile,
     WorkerProfileRevision,
 )
+from octoagent.gateway.services.agent_context_helpers import build_worker_agent_profile
 from octoagent.gateway.services.config.config_wizard import load_config
 from ulid import ULID
 
@@ -157,18 +158,20 @@ class WorkerProfileOpsMixin:
     async def _sync_worker_profile_agent_profile(
         self,
         profile: WorkerProfile,
-        *,
-        revision: int,
     ) -> AgentProfile:
+        # F117 Wave 2c-2a：authoring 持久化镜像统一走 canonical builder
+        # （build_worker_agent_profile），产出**完整** worker 行——含运行时读的
+        # instruction_overlays + context_budget_policy.memory_recall，与 materialize-on-read
+        # 逐字段等价。消除原 _build_agent_profile_from_worker_profile 的 incomplete 镜像
+        # （instruction_overlays=[] / 无 memory_recall），让 materialize-on-read 对已持久化
+        # worker 变为冗余（2c-2 下一步据此把 materialize-on-read 改 create-if-absent）。
         existing = await self._stores.agent_context_store.get_agent_profile(profile.profile_id)
-        mirrored = self._build_agent_profile_from_worker_profile(
-            profile=profile,
-            revision=revision,
-            existing=existing,
-        )
+        mirrored = build_worker_agent_profile(profile, existing_profile=existing)
         await self._stores.agent_context_store.save_agent_profile(mirrored)
-        # 同步时确保 agent-private 行为文件存在
-        _slug = resolve_behavior_agent_slug(mirrored)
+        # 同步时确保 agent-private 行为文件存在。slug 直接 name-based（canonical 镜像不带
+        # behavior_agent_slug metadata），与 baseline resolve_behavior_agent_slug(old_mirror)
+        # 候选 #1 结果一致（normalize 幂等）。
+        _slug = normalize_behavior_agent_slug(profile.name or profile.profile_id)
         materialize_agent_behavior_files(
             self._ctx.project_root,
             agent_slug=_slug,
@@ -819,11 +822,9 @@ class WorkerProfileOpsMixin:
         existing_mirror = await self._stores.agent_context_store.get_agent_profile(
             saved.profile_id
         )
-        mirror = self._build_agent_profile_from_worker_profile(
-            profile=saved,
-            revision=saved.active_revision or saved.draft_revision or 1,
-            existing=existing_mirror,
-        )
+        # F117 Wave 2c-2a：draft 镜像同走 canonical builder（完整 worker 行，instruction_overlays
+        # + memory_recall 即时生效，与 publish/bind 同步路径一致）。
+        mirror = build_worker_agent_profile(saved, existing_profile=existing_mirror)
         await self._stores.agent_context_store.save_agent_profile(mirror)
         await self._stores.conn.commit()
         return saved

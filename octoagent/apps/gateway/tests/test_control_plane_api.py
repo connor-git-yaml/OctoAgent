@@ -5194,7 +5194,16 @@ class TestControlPlaneApi:
             profile_id
         )
         assert mirrored is not None
-        assert mirrored.metadata["worker_profile_id"] == profile_id
+        # F117 Wave 2c-2a：authoring 镜像统一走 canonical builder，溯源 key 收敛为
+        # source_worker_profile_id（运行时唯一消费的 key；旧 worker_profile_id 无生产消费者，
+        # 且 materialize-on-read 每次 dispatch 本就用 canonical 覆盖成该 key）。
+        assert mirrored.metadata["source_worker_profile_id"] == profile_id
+        # 镜像完整性（2c-2a 核心不变量）：authoring 发布路径直写 canonical builder → 镜像即含
+        # 运行时读的 instruction_overlays + context_budget_policy.memory_recall（旧 incomplete
+        # builder 二者皆缺，靠 materialize-on-read 每 dispatch 补；2c-2a 后 authoring 写全，
+        # 为后续删 materialize-on-read 铺路）。
+        assert mirrored.instruction_overlays
+        assert mirrored.context_budget_policy.get("memory_recall")
 
         revisions_resp = await control_plane_client.get(
             f"/api/control/resources/worker-profile-revisions/{profile_id}"

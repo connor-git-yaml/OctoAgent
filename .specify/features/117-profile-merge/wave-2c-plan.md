@@ -40,3 +40,38 @@
 - 每子波 0 regression（4137 baseline）+ e2e_smoke。
 - 高风险（authoring 域 + 删 materialize-on-read）→ Codex+Opus 双评审 + deterministic 打底（W2bc Codex 幻觉教训）。
 - WorkerProfile 类本波仍在（store get/save_worker_profile + 测试引用）；类删除 + 剩余改名留 W4。worker_profile.* wire 改名留 W3。
+
+## ⚠ 2c-2 实施期序列修正（实读代码后推翻初版 plan 的 2c-2-before-2c-3 顺序）
+
+> 实读 `_resolve_agent_profile` + `_ensure_agent_profile_from_worker_profile`（entity_ensure:839/950）后发现
+> **materialize-on-read 是 always-overwrite-from-worker_profiles**，且 `_resolve_agent_profile` **优先**返回
+> 重建镜像（行 850-855）。即每次 dispatch 都从 worker_profiles 重建并覆盖 agent_profiles(kind=worker)。
+> **后果**：若先停 worker_profiles 写（plan 原 2c-2），materialize-on-read 会用陈旧 worker_profiles
+> 每 dispatch 覆盖掉 authoring 刚写的 agent_profiles → 回归。**故 plan 的 2c-2-before-2c-3 顺序不安全**。
+
+**修正后的安全序列**（read/write 耦合切换，承袭 W2bc 教训）：
+1. **2c-2a 统一 builder（✅ 完成）**：authoring 持久化镜像（`_sync` + draft-refresh）改走 canonical
+   `build_worker_agent_profile`，产出**完整** worker 行（旧 `_build_agent_profile_from_worker_profile`
+   的 incomplete 镜像 instruction_overlays=[]/无 memory_recall 消除）。此后 authoring 镜像 ≡
+   materialize-on-read 输出 → materialize-on-read 对**已持久化** worker 变冗余。
+2. **2c-2b 翻转 materialize-on-read 为 create-if-absent**：`_resolve_agent_profile` 优先信任已存在的
+   完整 agent_profile（authoring 保鲜），仅在镜像缺失时才从 worker_profiles 重建。此后 worker_profiles
+   不再每 dispatch 覆盖镜像。
+3. **2c-2c 停 worker_profiles 写**：authoring 写路径删 `save_worker_profile`（保留 in-memory WorkerProfile
+   DTO 经 builder → save_agent_profile）；此时 worker_profiles 运行时无读者，停写安全。
+4. **2c-3 删 materialize-on-read + 旧 builder + mirror-sync；authoring 读切 get_agent_profile；revision
+   → agent_profile_revisions**。
+
+### 2c-2a 实施记录（narrowed）
+- **范围收窄**：只改两条**持久化 runtime 镜像**路径（worker_profile_ops `_sync_worker_profile_agent_profile`
+  + `_save_worker_profile_draft` draft-refresh）。**故意不动** worker_service:152 的**瞬态文档镜像**
+  （喂 `build_behavior_system_summary`，读 `bootstrap_template_ids`——canonical 会改文档输出，display-risk
+  不并入地基步）→ 旧 `_build_agent_profile_from_worker_profile` 本波保留（仅 152 用）。
+- **slug 保 baseline**：canonical 镜像不带 `behavior_agent_slug`，故 materialize 行为文件时直接
+  `normalize_behavior_agent_slug(name or profile_id)`（= 旧 resolve 候选 #1，normalize 幂等）。
+- **metadata key 收敛**：镜像溯源 key `worker_profile_id`→`source_worker_profile_id`（运行时唯一消费 key；
+  旧 key 在 agent_profile.metadata 上**0 生产消费者**，dispatch_service:158 读的是 runtime_metadata）。
+  唯一断言旧 key 的 test_control_plane_api:5197 已更新 + 加镜像完整性断言（instruction_overlays + memory_recall）。
+- **deterministic 打底抓到 1 bug**：ruff F821——误删 bind-default 的 `revision` 赋值（它在 result data 用），
+  已恢复。证 LLM judge 前先跑 ruff/类型的价值（W2bc 幻觉教训延续）。
+- 回归：焦点集 255 passed；full 待跑（期望 4137）。

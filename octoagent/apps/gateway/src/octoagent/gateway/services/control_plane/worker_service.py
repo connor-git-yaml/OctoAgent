@@ -960,10 +960,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 ),
                 actor=request.actor.actor_id,
             )
-            await self._sync_worker_profile_agent_profile(
-                published,
-                revision=revision.revision,
-            )
+            await self._sync_worker_profile_agent_profile(published)
             bound_as_default = False
             should_bind_default = (
                 self._param_bool(request.params, "set_as_default")
@@ -1043,10 +1040,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             ),
             actor=request.actor.actor_id,
         )
-        await self._sync_worker_profile_agent_profile(
-            published,
-            revision=revision.revision,
-        )
+        await self._sync_worker_profile_agent_profile(published)
         _, selected_project, _, _ = await self._resolve_selection()
         should_bind_default = (
             self._param_bool(request.params, "set_as_default")
@@ -1107,7 +1101,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 "请先发布 revision，再绑定为默认聊天 Agent。",
             )
         revision = existing.active_revision or existing.draft_revision or 1
-        await self._sync_worker_profile_agent_profile(existing, revision=revision)
+        await self._sync_worker_profile_agent_profile(existing)
         bound = await self._bind_worker_profile_as_default(profile=existing)
         await self._stores.conn.commit()
         return self._completed_result(
