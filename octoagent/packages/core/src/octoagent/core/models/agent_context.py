@@ -193,7 +193,8 @@ class AgentProfile(BaseModel):
 
     Feature 090 D2: 新增 ``kind`` 字段显式标记 Agent 类型，消除
     ``_is_worker_behavior_profile`` 通过 metadata 字符串探测的隐式判断。
-    完全合并 WorkerProfile→AgentProfile 留给 M6 F107 Capability Layer Refactor。
+    F117 D2（W4-3）：WorkerProfile / WorkerProfileRevision 类已物理删除，worker 配置
+    全部并入本类（kind=worker 行携带 worker 静态字段 + 编辑生命周期字段）。
     """
 
     profile_id: str = Field(min_length=1)

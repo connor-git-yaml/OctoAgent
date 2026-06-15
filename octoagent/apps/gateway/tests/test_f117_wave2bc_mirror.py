@@ -97,3 +97,72 @@ async def test_worker_mirror_resolves_tool_universe_with_9_fields(tmp_path: Path
     assert "web.search" in binding.selected_tools
     assert "network" in binding.default_tool_groups
     await store_group.close()
+
+
+def test_w43_snapshot_markers_excluded_idempotent_across_revisions() -> None:
+    """F117 W4-3（Codex HIGH 回归）：snapshot 视角剥除持久化派生标记，使同一逻辑配置在不同
+    revision 下产生**相同**的 snapshot metadata——保 publish 幂等（不因 version 相关的
+    source_worker_profile_revision 随版本变化误判产生 spurious revision）。镜像本身仍保留 marker。
+    """
+    from octoagent.gateway.services.agent_context_helpers import (
+        build_worker_agent_profile,
+        strip_mirror_markers,
+    )
+
+    base = AgentProfile(
+        profile_id="worker-profile-idem",
+        kind="worker",
+        scope=AgentProfileScope.PROJECT,
+        project_id="project-default",
+        name="Idem Worker",
+        selected_tools=["web.search"],
+        metadata={"source_work_id": "work-123"},  # 真实用户 metadata
+    )
+    rev1 = build_worker_agent_profile(
+        base.model_copy(update={"active_revision": 1, "draft_revision": 1}),
+        include_user_metadata=True,
+    )
+    rev2 = build_worker_agent_profile(
+        base.model_copy(update={"active_revision": 2, "draft_revision": 2}),
+        include_user_metadata=True,
+    )
+    # 镜像本身保留 marker（运行时检测/迁移锚），source_worker_profile_revision 随版本不同
+    assert rev1.metadata["source_worker_profile_revision"] == 1
+    assert rev2.metadata["source_worker_profile_revision"] == 2
+    assert rev1.metadata["source_kind"] == "worker_profile_mirror"
+    # snapshot 视角（剥 marker）两版**相等** → 幂等守恒；用户 metadata 原样保留
+    snap1 = strip_mirror_markers(rev1.metadata)
+    snap2 = strip_mirror_markers(rev2.metadata)
+    assert snap1 == snap2
+    assert snap1 == {"source_work_id": "work-123"}
+
+
+def test_w43_clone_does_not_inherit_legacy_marker() -> None:
+    """F117 W4-3（Codex MED 回归）：从携 legacy behavior_agent_slug 的历史镜像 clone 时，build
+    写入端剥除旧标记 → 新 profile 不继承源 slug（避免新旧 worker 共享 behavior 文件）。用户 metadata 保留。
+    """
+    from octoagent.gateway.services.agent_context_helpers import build_worker_agent_profile
+
+    legacy_source = AgentProfile(
+        profile_id="worker-profile-legacy-src",
+        kind="worker",
+        scope=AgentProfileScope.PROJECT,
+        project_id="project-default",
+        name="Legacy Source",
+        metadata={
+            "source_kind": "worker_profile_mirror",
+            "source_worker_profile_id": "worker-profile-legacy-src",
+            "behavior_agent_slug": "legacy-source-slug",  # 历史 inline builder 残留标记
+            "source_work_id": "work-legacy",  # 真实用户 metadata
+        },
+    )
+    clone = build_worker_agent_profile(
+        legacy_source.model_copy(update={"profile_id": "worker-profile-clone"}),
+        include_user_metadata=True,
+    )
+    # 旧 slug 标记被剥除，不继承（resolve_behavior_agent_slug 候选 #1 不再命中源 slug）
+    assert "behavior_agent_slug" not in clone.metadata
+    # source_worker_profile_id 新鲜派生指向 clone 自身
+    assert clone.metadata["source_worker_profile_id"] == "worker-profile-clone"
+    # 用户非标记 metadata 保留
+    assert clone.metadata["source_work_id"] == "work-legacy"

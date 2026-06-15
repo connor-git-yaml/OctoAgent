@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -144,6 +145,45 @@ WORKER_INSTRUCTION_OVERLAYS = [
 ]
 
 
+# F117 W4-3 review（Codex HIGH/MED 闭环）：canonical worker 镜像的"持久化派生标记" key。
+# 这些 key 由 build_worker_agent_profile 在写入时**新鲜派生**（如 source_worker_profile_revision
+# 随 revision 变化），不是用户配置。须在两处**收口**，否则会泄漏出镜像引发缺陷：
+#   (a) build 写入时从被拷贝的 metadata 中剥除——保证镜像 marker 永远新鲜，
+#       不会把源 profile 的旧标记（尤其历史 behavior_agent_slug）带进 clone（Codex MED）；
+#   (b) revision snapshot_payload 中剥除——snapshot 捕获**逻辑配置**而非持久化标记，
+#       否则 version 相关的 source_worker_profile_revision 落后一版会破坏 publish 幂等（Codex HIGH）。
+# 注意：这**不是** L-1 的"读路径剥离"——运行时读到的镜像/工作对象保留全部 metadata（含 marker），
+# L-1（用户 metadata key 撞 marker 名被静默剥）依旧结构性解决。含历史 inline builder 写过的 4 个
+# legacy key（behavior_agent_slug/worker_profile_id/worker_profile_revision/worker_profile_status），
+# 防御 schema-lag 实例的旧镜像在 clone/迁移前残留。
+_CANONICAL_MIRROR_MARKER_KEYS = frozenset(
+    {
+        "source_kind",
+        "source_worker_profile_id",
+        "source_worker_profile_revision",
+        "memory_recall_default_mode",
+        "behavior_agent_slug",
+        "worker_profile_id",
+        "worker_profile_revision",
+        "worker_profile_status",
+    }
+)
+
+
+def strip_mirror_markers(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    """剥除 canonical 镜像的持久化派生标记，返回纯用户 metadata（见 _CANONICAL_MIRROR_MARKER_KEYS）。
+
+    仅用于 build 的拷贝端 + revision snapshot——不在运行时读路径调用（L-1 保持解决）。
+    """
+    if not metadata:
+        return {}
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key not in _CANONICAL_MIRROR_MARKER_KEYS
+    }
+
+
 def build_worker_agent_profile(
     worker_profile: AgentProfile,
     *,
@@ -206,13 +246,15 @@ def build_worker_agent_profile(
         policy_refs=[],
         context_budget_policy=context_budget_policy,
         metadata={
-            **(dict(existing_profile.metadata) if existing_profile is not None else {}),
-            # F117 Wave 2c-2c：include_user_metadata=True 并入 worker_profile.metadata user key
-            # （如 extract source_work_id）——authoring 停写 worker_profiles 后镜像成唯一源须携之；
-            # source_* 标记 key 覆盖在后。materialize-on-read 路径默认 False。W4-3：authoring
-            # 直接在统一 AgentProfile 上工作（不再 round-trip WorkerProfile DTO），source_* 标记
-            # 常驻 metadata 不再被剥（schema-lag 检测 + migration 锚，W4-7 迁移后移除）。
-            **(dict(worker_profile.metadata) if include_user_metadata else {}),
+            # 拷贝端剥除持久化标记（strip_mirror_markers）：marker 一律在下方**新鲜派生**，
+            # existing/worker_profile 携带的旧标记（含 legacy behavior_agent_slug）不被继承——
+            # 防 clone 历史镜像把源 slug 带进新 profile（Codex MED）。用户非标记 metadata 保留。
+            **strip_mirror_markers(
+                existing_profile.metadata if existing_profile is not None else {}
+            ),
+            # F117 Wave 2c-2c：include_user_metadata=True 并入 worker_profile 的 user metadata
+            # （如 extract source_work_id）——authoring 停写 worker_profiles 后镜像成唯一源须携之。
+            **(strip_mirror_markers(worker_profile.metadata) if include_user_metadata else {}),
             "source_worker_profile_id": worker_profile.profile_id,
             "source_worker_profile_revision": (
                 worker_profile.active_revision or worker_profile.draft_revision or 0

@@ -38,6 +38,7 @@ from octoagent.core.models import (
 )
 from octoagent.gateway.services.agent_context_helpers import (
     build_worker_agent_profile,
+    strip_mirror_markers,
 )
 from octoagent.gateway.services.agent_decision import is_worker_behavior_profile
 from octoagent.gateway.services.config.config_wizard import load_config
@@ -714,7 +715,10 @@ class WorkerProfileOpsMixin:
             "default_tool_groups": list(profile.default_tool_groups),
             "selected_tools": list(profile.selected_tools),
             "runtime_kinds": list(profile.runtime_kinds),
-            "metadata": dict(profile.metadata),
+            # snapshot 捕获**逻辑配置**——剥除持久化派生标记（strip_mirror_markers），否则
+            # version 相关的 source_worker_profile_revision 落后一版会破坏 publish 幂等（Codex HIGH）。
+            # 等价 baseline（reverse-converter 时代 snapshot.metadata 即为纯用户 metadata）。
+            "metadata": strip_mirror_markers(profile.metadata),
             "resource_limits": dict(profile.resource_limits),
             "origin_kind": profile.origin_kind.value,
         }
