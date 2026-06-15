@@ -1,7 +1,10 @@
 # F117 Handoff — Wave W3/W4 resume 指南
 
-> 状态：**…2c-2b + 2c-2c（R 读切 reverse-converter + W authoring 停写 worker_profiles）完成；R+W cluster 双评审收敛 0 HIGH（M-1 已修，partial-stop 显式归 W4）。下一步 W3（FE 全改名 + wire）+ W4（migration + 删 materialize-on-read + 删类表 + AgentRuntime 塌缩 + agent_service/_coordinator id-收口 + completion）**。
-> 分支 `feature/117-profile-merge`（25 commits，**未 push**），worktree `.claude/worktrees/F117-profile-merge`，基于 origin/master `7199f468`。
+> 状态：**W0–W4a（存储合并机制 + authoring 停写 + materialize-on-read flip + W4a 停程序化 worker_profiles 写）全部完成并经 Codex+Opus 双评审，已 ff push 到 origin/master `9002fb81`（用户 2026-06-15 拍板）。** 剩 **W4 物理删除 + 真迁移**（删 materialize-on-read + WorkerProfile 类型 cascade + 删表/store 方法 + AgentRuntime.worker_profile_id 塌缩 + works 改名 + migration 收尾 + 真实例迁移）+ **W3 面合并（独立 UI Feature，用户已定后做）**。
+> 分支 `feature/117-profile-merge`（27 commits == origin/master `9002fb81`），worktree `.claude/worktrees/F117-profile-merge`。**下一波从更新后的 master 起新 worktree。**
+
+## ✅ W4a（9002fb81，已合入 master）——停程序化 worker_profiles 写
+> agent_service `_handle_agent_create_worker_with_project` + `_coordinator._ensure_default_main_agent_bootstrap` 删 `save_worker_profile`（worker_profile 仅 in-memory DTO 构建镜像）。此后 **production 零 `save_worker_profile` 调用**（grep 实证）——worker_profiles 表完全冻结。FK 安全：唯一引用 worker_profiles 的 FK 是 `worker_profile_revisions.profile_id`（2c-2c-W 已切 agent_profile_revisions）；`agent_runtimes.worker_profile_id` 无 FK。4139=baseline 0 regression + e2e 8/8。**剩 id-收口 第二半**（bare-canonical 镜像 + project.default=bare + 删前缀 shim）归 W4 主体。
 
 ## 已完成（21 commits）
 ```
