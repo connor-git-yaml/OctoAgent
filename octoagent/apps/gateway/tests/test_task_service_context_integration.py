@@ -44,6 +44,7 @@ from octoagent.gateway.services.agent_context import (
     build_projected_session_id,
     build_scope_aware_session_id,
 )
+from octoagent.gateway.services.agent_context_helpers import build_worker_agent_profile
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
@@ -299,7 +300,13 @@ async def test_agent_context_backfills_bootstrap_templates_and_routes(
         owner_profile=owner_profile,
         project=project,
     )
-    mirrored = await service._ensure_agent_profile_from_worker_profile("singleton:research")
+    # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（与原 _ensure 等价：读
+    # worker_profile → build_worker_agent_profile）。W4-4 删 worker store 方法后这些测试改构造 DTO。
+    _worker_research = await store_group.agent_context_store.get_worker_profile(
+        "singleton:research"
+    )
+    assert _worker_research is not None
+    mirrored = build_worker_agent_profile(_worker_research)
 
     assert owner_overlay is not None
     assert mirrored is not None
@@ -1067,6 +1074,11 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         active_revision=1,
     )
     await store_group.agent_context_store.save_worker_profile(worker_profile)
+    # F117 Wave 4：materialize-on-read 已删——预建完整 canonical 镜像（生产由 create/authoring
+    # 路径写，此处仿之）。否则 dispatch 解析不到 worker 镜像会落到 main profile。
+    await store_group.agent_context_store.save_agent_profile(
+        build_worker_agent_profile(worker_profile)
+    )
     await store_group.conn.commit()
 
     memory_calls: list[dict[str, object]] = []
@@ -1288,6 +1300,11 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         active_revision=1,
     )
     await store_group.agent_context_store.save_worker_profile(worker_profile)
+    # F117 Wave 4：materialize-on-read 已删——预建完整 canonical 镜像（生产由 create/authoring
+    # 路径写，此处仿之）。否则 dispatch 解析不到 worker 镜像会落到 main profile。
+    await store_group.agent_context_store.save_agent_profile(
+        build_worker_agent_profile(worker_profile)
+    )
     await store_group.conn.commit()
 
     memory_calls: list[dict[str, object]] = []
@@ -3361,11 +3378,13 @@ async def test_f094_d2_worker_default_memory_recall_matches_baseline(
                 active_revision=1,
             )
         )
-        service = AgentContextService(store_group, project_root=tmp_path)
         # 无 existing_profile：merged_memory_recall = defaults 全部
-        mirrored = await service._ensure_agent_profile_from_worker_profile(
+        # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（等价）。
+        _worker_d2 = await store_group.agent_context_store.get_worker_profile(
             "singleton:f094-d2"
         )
+        assert _worker_d2 is not None
+        mirrored = build_worker_agent_profile(_worker_d2)
         assert mirrored is not None
         memory_recall = mirrored.context_budget_policy.get("memory_recall", {})
 
@@ -3429,8 +3448,6 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
                 active_revision=1,
             )
         )
-        service = AgentContextService(store_group, project_root=tmp_path)
-
         baseline_defaults = {
             "prefetch_mode": "hint_first",
             "planner_enabled": True,
@@ -3448,9 +3465,13 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
             persona_summary="",
             context_budget_policy={"memory_recall": {}},
         )
-        mirrored_empty = await service._ensure_agent_profile_from_worker_profile(
-            "singleton:f094-d5-edge",
-            existing_profile=existing_empty,
+        # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（等价）。
+        _worker_edge = await store_group.agent_context_store.get_worker_profile(
+            "singleton:f094-d5-edge"
+        )
+        assert _worker_edge is not None
+        mirrored_empty = build_worker_agent_profile(
+            _worker_edge, existing_profile=existing_empty
         )
         assert mirrored_empty is not None
         assert mirrored_empty.context_budget_policy["memory_recall"] == baseline_defaults
@@ -3471,9 +3492,8 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
             persona_summary="",
             context_budget_policy={"memory_recall": full_override},
         )
-        mirrored_full = await service._ensure_agent_profile_from_worker_profile(
-            "singleton:f094-d5-edge",
-            existing_profile=existing_full,
+        mirrored_full = build_worker_agent_profile(
+            _worker_edge, existing_profile=existing_full
         )
         assert mirrored_full is not None
         assert mirrored_full.context_budget_policy["memory_recall"] == full_override
@@ -3488,9 +3508,8 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
             persona_summary="",
             context_budget_policy={"memory_recall": "not_a_dict"},
         )
-        mirrored_bad = await service._ensure_agent_profile_from_worker_profile(
-            "singleton:f094-d5-edge",
-            existing_profile=existing_bad,
+        mirrored_bad = build_worker_agent_profile(
+            _worker_edge, existing_profile=existing_bad
         )
         assert mirrored_bad is not None
         assert mirrored_bad.context_budget_policy["memory_recall"] == baseline_defaults
@@ -3530,7 +3549,6 @@ async def test_f094_d5_existing_profile_overrides_module_defaults(
                 active_revision=1,
             )
         )
-        service = AgentContextService(store_group, project_root=tmp_path)
         # 构造 existing AgentProfile 含 partial memory_recall override
         existing = AgentProfile(
             profile_id="agent-profile-f094-d5-existing",
@@ -3542,10 +3560,12 @@ async def test_f094_d5_existing_profile_overrides_module_defaults(
                 "memory_recall": {"scope_limit": 10},  # 仅 override scope_limit
             },
         )
-        mirrored = await service._ensure_agent_profile_from_worker_profile(
-            "singleton:f094-d5",
-            existing_profile=existing,
+        # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（等价）。
+        _worker_d5 = await store_group.agent_context_store.get_worker_profile(
+            "singleton:f094-d5"
         )
+        assert _worker_d5 is not None
+        mirrored = build_worker_agent_profile(_worker_d5, existing_profile=existing)
         assert mirrored is not None
         memory_recall = mirrored.context_budget_policy.get("memory_recall", {})
 

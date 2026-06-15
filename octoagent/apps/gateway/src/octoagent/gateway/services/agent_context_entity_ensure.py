@@ -25,7 +25,6 @@ from octoagent.core.models import (
     ActorType,
     AgentProfile,
     AgentProfileScope,
-    AgentProfileStatus,
     AgentRuntime,
     AgentRuntimeRole,
     AgentSession,
@@ -61,7 +60,6 @@ from .agent_context_helpers import (
     build_memory_namespace_id,
     build_private_memory_scope_ids,
     build_scope_aware_session_id,
-    build_worker_agent_profile,
     legacy_session_id_for_task,
     session_state_matches_scope,
 )
@@ -847,30 +845,10 @@ class AgentContextEntityEnsureMixin:
             existing = await self._stores.agent_context_store.get_agent_profile(
                 requested_profile_id
             )
-            # F117 Wave 2c-2b：materialize-on-read 从 always-rebuild 翻转为 create-if-absent。
-            # 已存在的**完整** worker 镜像由 authoring 写路径（2c-2a canonical sync + archive-sync）
-            # 保持 current（builder existing-merge 幂等 → existing == 重建输出），直接信任，不再每
-            # dispatch 从 worker_profiles 重建覆盖——停 worker_profiles 写（2c-2c）的前提。
-            # 等价：worker_profile 缺失/archived 时原 _ensure 返 None 本就 return existing（重建
-            # no-op，含 agent-profile-{id} 前缀镜像）；缺镜像才 fallback 重建（首次 dispatch）。
-            # Codex 双评审 [2] 防御（不盲信"所有镜像都完整"）：只信任**完整** canonical 镜像
-            # （instruction_overlays 非空——canonical 恒置 WORKER_INSTRUCTION_OVERLAYS，残缺源
-            # [W4 migration INSERT 默认 / 历史 inline] 恒空）；残缺镜像 fall through 重建，保留
-            # materialize-on-read 对残缺镜像的 self-heal。当前态无 bare-wpid 残缺镜像 → 行为等价
-            # （前缀残缺镜像重建 no-op 后仍 return existing，同 baseline）；W4 migration 残缺行 →
-            # 自动重建成 canonical（不依赖 migration 自身修正）。
-            if (
-                existing is not None
-                and is_worker_behavior_profile(existing)
-                and existing.instruction_overlays
-            ):
-                return existing, degraded_reasons
-            mirrored = await self._ensure_agent_profile_from_worker_profile(
-                requested_profile_id,
-                existing_profile=existing,
-            )
-            if mirrored is not None:
-                return mirrored, degraded_reasons
+            # F117 Wave 4：删 materialize-on-read——worker 镜像由 authoring 写路径（2c-2c canonical
+            # sync + archive-sync）保持完整 current，dispatch 直接信任，不再从 worker_profiles 重建。
+            # 存量残缺/缺失镜像由 migration_117 reconcile 为 canonical（W4-7），不依赖 dispatch 自愈
+            # （baseline 已停 worker_profiles 写，2c-2b flip 后完整镜像本就直接 return）。
             if existing is not None:
                 return existing, degraded_reasons
             degraded_reasons.append("runtime_agent_profile_missing")
@@ -897,11 +875,8 @@ class AgentContextEntityEnsureMixin:
                     )
                     await self._stores.agent_context_store.save_agent_profile(existing)
                 return existing
-            mirrored = await self._ensure_agent_profile_from_worker_profile(
-                project.default_agent_profile_id
-            )
-            if mirrored is not None:
-                return mirrored
+            # F117 Wave 4：删 materialize-on-read fallback——project.default 缺失镜像不再从
+            # worker_profiles 重建，落到下方 fresh main profile 创建（存量由 migration_117 reconcile）。
 
         if project is None:
             profile_id = "agent-profile-system-default"
@@ -962,24 +937,6 @@ class AgentContextEntityEnsureMixin:
                 }
             )
         )
-        return profile
-
-
-    async def _ensure_agent_profile_from_worker_profile(
-        self,
-        profile_id: str,
-        *,
-        existing_profile: AgentProfile | None = None,
-    ) -> AgentProfile | None:
-        worker_profile = await self._stores.agent_context_store.get_worker_profile(profile_id)
-        if worker_profile is None or worker_profile.status == AgentProfileStatus.ARCHIVED:
-            return None
-        # F117 Wave 2c-1：委托规范化 builder（构造逐字段等价，抽到 agent_context_helpers
-        # 供 authoring 直写 Wave 2c-2 共用）。
-        profile = build_worker_agent_profile(
-            worker_profile, existing_profile=existing_profile
-        )
-        await self._stores.agent_context_store.save_agent_profile(profile)
         return profile
 
 

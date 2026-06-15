@@ -311,23 +311,23 @@ async def test_resolve_agent_profile_trusts_existing_worker_mirror(tmp_path: Pat
     await store_group.close()
 
 
-async def test_resolve_agent_profile_rebuilds_incomplete_worker_mirror(tmp_path: Path) -> None:
-    """F117 Wave 2c-2b（Codex 双评审 [2] 防御）：残缺 worker 镜像（instruction_overlays 空）被重建。
-
-    模拟 W4 migration INSERT / 历史 inline 写的残缺 bare-wpid 镜像——flip 不盲信，fall through
-    重建成 canonical（含 instruction_overlays），保留 materialize-on-read 对残缺镜像的 self-heal，
-    使 W4 migration 即使写残缺行也不退化（不依赖 migration 自身修正）。
+async def test_resolve_agent_profile_trusts_stored_mirror_without_rebuild(tmp_path: Path) -> None:
+    """F117 Wave 4：删 materialize-on-read——_resolve_agent_profile 直接信任存储的 worker 镜像，
+    不再从 worker_profiles 重建。残缺镜像（instruction_overlays 空）按现状返回，dispatch 不自愈；
+    存量残缺行由 migration_117 reconcile 为 canonical（W4-7），不依赖运行时（生产 create/authoring
+    路径恒写完整 canonical 镜像，残缺行不再产生）。
     """
     from octoagent.core.models import WorkerProfile
     from octoagent.core.store import create_store_group
 
     store_group = await create_store_group(
-        db_path=str(tmp_path / "phase-2c2b-incomplete.db"),
+        db_path=str(tmp_path / "phase-w4-trust.db"),
         artifacts_dir=str(tmp_path / "artifacts"),
     )
     service = AgentContextService(store_group, project_root=tmp_path)
 
-    profile_id = "worker-profile-2c2b-incomplete"
+    profile_id = "worker-profile-w4-trust"
+    # worker_profiles 行存在但 W4-2 后不再被 dispatch 读（保留以证不会被重建覆盖镜像）
     await store_group.agent_context_store.save_worker_profile(
         WorkerProfile(
             profile_id=profile_id,
@@ -337,7 +337,7 @@ async def test_resolve_agent_profile_rebuilds_incomplete_worker_mirror(tmp_path:
             selected_tools=["worker.tool"],
         )
     )
-    # 残缺镜像：kind=worker 但 instruction_overlays 空（模拟 migration INSERT 默认 / 历史 inline）
+    # 残缺镜像：kind=worker 但 instruction_overlays 空 + selected_tools 陈旧
     await store_group.agent_context_store.save_agent_profile(
         AgentProfile(
             profile_id=profile_id,
@@ -358,9 +358,10 @@ async def test_resolve_agent_profile_rebuilds_incomplete_worker_mirror(tmp_path:
         project=None,
         requested_profile_id=profile_id,
     )
-    # 残缺 → fall through 重建成 canonical：instruction_overlays 非空 + tools 来自 worker_profile
-    assert resolved.instruction_overlays
-    assert resolved.selected_tools == ["worker.tool"]
+    # W4-2：直接信任存储镜像，不重建——instruction_overlays 仍空，selected_tools 仍 stale
+    # （worker_profiles 行不被读）。
+    assert resolved.instruction_overlays == []
+    assert resolved.selected_tools == ["stale.tool"]
     await store_group.close()
 
 
