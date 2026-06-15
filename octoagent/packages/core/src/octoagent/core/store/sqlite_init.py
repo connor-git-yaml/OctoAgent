@@ -410,47 +410,10 @@ CREATE TABLE IF NOT EXISTS agent_profiles (
 );
 """
 
-_WORKER_PROFILES_DDL = """
-CREATE TABLE IF NOT EXISTS worker_profiles (
-    profile_id              TEXT PRIMARY KEY,
-    scope                   TEXT NOT NULL DEFAULT 'project',
-    project_id              TEXT NOT NULL DEFAULT '',
-    name                    TEXT NOT NULL,
-    summary                 TEXT NOT NULL DEFAULT '',
-    model_alias             TEXT NOT NULL DEFAULT 'main',
-    tool_profile            TEXT NOT NULL DEFAULT 'minimal',
-    default_tool_groups     TEXT NOT NULL DEFAULT '[]',
-    selected_tools          TEXT NOT NULL DEFAULT '[]',
-    runtime_kinds           TEXT NOT NULL DEFAULT '[]',
-    metadata                TEXT NOT NULL DEFAULT '{}',
-    status                  TEXT NOT NULL DEFAULT 'draft',
-    origin_kind             TEXT NOT NULL DEFAULT 'custom',
-    draft_revision          INTEGER NOT NULL DEFAULT 0,
-    active_revision         INTEGER NOT NULL DEFAULT 0,
-    created_at              TEXT NOT NULL,
-    updated_at              TEXT NOT NULL,
-    archived_at             TEXT
-);
-"""
-
-_WORKER_PROFILE_REVISIONS_DDL = """
-CREATE TABLE IF NOT EXISTS worker_profile_revisions (
-    revision_id             TEXT PRIMARY KEY,
-    profile_id              TEXT NOT NULL,
-    revision                INTEGER NOT NULL,
-    change_summary          TEXT NOT NULL DEFAULT '',
-    snapshot_payload        TEXT NOT NULL DEFAULT '{}',
-    created_by              TEXT NOT NULL DEFAULT '',
-    created_at              TEXT NOT NULL,
-
-    FOREIGN KEY (profile_id) REFERENCES worker_profiles(profile_id),
-    UNIQUE(profile_id, revision)
-);
-"""
-
 # F117 Wave 2a：统一 agent_profile 的 revision 历史表（取代 worker_profile_revisions）。
-# 与 migration_117 apply 建表字节一致；FK → agent_profiles。WorkerProfileRevision 表/类
-# 在 Wave 4 删除，迁移把 worker_profile_revisions 行 re-key 进此表。
+# 与 migration_117 apply 建表字节一致；FK → agent_profiles。W4-3 删 WorkerProfile/
+# WorkerProfileRevision 类，W4-4 删 worker_profiles/worker_profile_revisions 表 DDL；存量实例
+# 的旧表由 migration_117（W4-7 用户拍板后跑）DROP，迁移把旧 revision 行 re-key 进本表。
 _AGENT_PROFILE_REVISIONS_DDL = """
 CREATE TABLE IF NOT EXISTS agent_profile_revisions (
     revision_id             TEXT PRIMARY KEY,
@@ -1035,15 +998,8 @@ _AGENT_CONTEXT_INDEXES = [
         "WHERE archived_at IS NULL;"
     ),
     (
-        "CREATE INDEX IF NOT EXISTS idx_worker_profiles_scope_project "
-        "ON worker_profiles(scope, project_id, status, updated_at DESC);"
-    ),
-    (
-        "CREATE INDEX IF NOT EXISTS idx_worker_profile_revisions_profile_created "
-        "ON worker_profile_revisions(profile_id, revision DESC, created_at DESC);"
-    ),
-    (
-        # F117 Wave 2a：agent_profile_revisions 索引（克隆 worker_profile_revisions 模式）
+        # F117 Wave 2a：agent_profile_revisions 索引（W4-4 删 worker_profiles/
+        # worker_profile_revisions 表 + 其索引；统一表索引保留）
         "CREATE INDEX IF NOT EXISTS idx_agent_profile_revisions_profile_created "
         "ON agent_profile_revisions(profile_id, revision DESC, created_at DESC);"
     ),
@@ -1277,12 +1233,6 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
                 await conn.execute(
                     f"ALTER TABLE agent_profiles ADD COLUMN {_f117_col} {_f117_decl}"
                 )
-
-    worker_profile_columns = await _table_columns(conn, "worker_profiles")
-    if worker_profile_columns and "resource_limits" not in worker_profile_columns:
-        await conn.execute(
-            "ALTER TABLE worker_profiles ADD COLUMN resource_limits TEXT NOT NULL DEFAULT '{}'"
-        )
 
     # Feature 061: agent_runtimes 新增 permission_preset 和 role_card 列
     agent_runtime_columns = await _table_columns(conn, "agent_runtimes")
@@ -1806,8 +1756,6 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_PROJECT_MIGRATION_RUNS_DDL)
     await conn.execute(_WORKS_DDL)
     await conn.execute(_AGENT_PROFILES_DDL)
-    await conn.execute(_WORKER_PROFILES_DDL)
-    await conn.execute(_WORKER_PROFILE_REVISIONS_DDL)
     await conn.execute(_AGENT_PROFILE_REVISIONS_DDL)
     await conn.execute(_ARTIFACT_VERSIONS_DDL)
     await conn.execute(_OWNER_PROFILES_DDL)
