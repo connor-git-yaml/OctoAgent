@@ -154,8 +154,9 @@ def build_worker_agent_profile(
 ) -> AgentProfile:
     """F117 Wave 2c：从 WorkerProfile 构造**完整**的 agent_profiles(kind=worker) 行。
 
-    规范化单一 builder——统一原 entity_ensure._ensure_agent_profile_from_worker_profile
-    与 worker_profile_ops._build_agent_profile_from_worker_profile。产出运行时所需全部字段：
+    规范化单一 builder——W4-2a/W4-2b 前 entity_ensure（materialize-on-read）与
+    worker_profile_ops（listing 文档展示）各有一份 incomplete builder，现均已删除，
+    worker 镜像构造全部收敛到此唯一 SoT。产出运行时所需全部字段：
     9 个 worker 静态字段 + **运行时读的 instruction_overlays + context_budget_policy.memory_recall**
     + bootstrap_template_ids + source_kind 标记。authoring 直写（Wave 2c-2）与 materialize-on-read
     共用此 builder，行为与 baseline materialize-on-read 等价（字段逐项对账 entity_ensure:986-1027）。

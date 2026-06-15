@@ -5,7 +5,7 @@
 - _handle_worker_profile_review / create / update / clone / archive / apply / publish / bind_default
 - _handle_worker_spawn_from_profile / _handle_worker_extract_profile_from_runtime
 - _handle_behavior_read_file / _handle_behavior_write_file
-- _build_agent_profile_from_worker_profile / _sync_worker_profile_agent_profile
+- _sync_worker_profile_agent_profile
 - _bind_worker_profile_as_default / _build_worker_dynamic_context / _worker_snapshot_id
 - _get_worker_profile_in_scope / _resolve_builtin_worker_source / _review_worker_profile_draft
 - _save_worker_profile_draft / _publish_worker_profile_revision
@@ -54,7 +54,10 @@ from octoagent.core.models import (
 )
 from ulid import ULID
 
-from ..agent_context_helpers import build_worker_dto_from_agent_profile
+from ..agent_context_helpers import (
+    build_worker_agent_profile,
+    build_worker_dto_from_agent_profile,
+)
 from ..agent_decision import build_behavior_system_summary, is_worker_behavior_profile
 from ..task_service import TaskService
 from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
@@ -155,11 +158,12 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             if latest is None:
                 warnings.append("当前还没有绑定到这个 profile 的运行中 work。")
 
-            # 为自定义 worker profile 构建 behavior_system
-            agent_profile_mirror = self._build_agent_profile_from_worker_profile(
-                profile=profile,
-                revision=profile.active_revision or profile.draft_revision,
-            )
+            # 为自定义 worker profile 构建 behavior_system。喂 canonical builder
+            # （build_worker_agent_profile）——运行时镜像 SoT，与 authoring 持久化写 +
+            # 已删的 materialize-on-read 同一 builder。展示的 slug / bootstrap_template_ids /
+            # behavior_system 因此与运行时实际解析一致（旧 incomplete builder 产 name-based
+            # slug + 空 bootstrap_template_ids，与运行时持久化镜像漂移）。
+            agent_profile_mirror = build_worker_agent_profile(profile)
             # 确保 agent-private 行为文件存在（lazy materialization）
             _agent_slug = resolve_behavior_agent_slug(agent_profile_mirror)
             materialize_agent_behavior_files(

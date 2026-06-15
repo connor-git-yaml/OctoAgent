@@ -111,64 +111,16 @@ class WorkerProfileOpsMixin:
         except Exception:
             return None
 
-    def _build_agent_profile_from_worker_profile(
-        self,
-        *,
-        profile: WorkerProfile,
-        revision: int,
-        existing: AgentProfile | None = None,
-    ) -> AgentProfile:
-        metadata = dict(existing.metadata) if existing is not None else {}
-        metadata.update(dict(profile.metadata))
-        from octoagent.core.behavior_workspace import normalize_behavior_agent_slug
-        metadata.update(
-            {
-                "source_kind": "worker_profile_mirror",
-                "behavior_agent_slug": normalize_behavior_agent_slug(
-                    profile.name or profile.profile_id
-                ),
-                "worker_profile_id": profile.profile_id,
-                "worker_profile_revision": revision,
-                "worker_profile_status": profile.status.value,
-            }
-        )
-        return AgentProfile(
-            profile_id=profile.profile_id,
-            scope=profile.scope,
-            project_id=profile.project_id,
-            name=profile.name,
-            kind="worker",
-            persona_summary=profile.summary,
-            model_alias=profile.model_alias,
-            tool_profile=profile.tool_profile,
-            metadata=metadata,
-            # F117 Wave 1（populate）：把 worker 静态配置 9 字段复制进统一行，让
-            # agent_profiles(kind=worker) 行成为运行时工具/状态的权威来源（read-path
-            # 切换前置条件）。profile 是 WorkerProfile，字段直取源值。
-            summary=profile.summary,
-            default_tool_groups=list(profile.default_tool_groups),
-            selected_tools=list(profile.selected_tools),
-            runtime_kinds=list(profile.runtime_kinds),
-            status=profile.status,
-            origin_kind=profile.origin_kind,
-            draft_revision=profile.draft_revision,
-            active_revision=profile.active_revision,
-            archived_at=profile.archived_at,
-            version=max(existing.version if existing is not None else 1, revision or 1),
-            created_at=existing.created_at if existing is not None else profile.created_at,
-            updated_at=datetime.now(tz=UTC),
-        )
-
     async def _sync_worker_profile_agent_profile(
         self,
         profile: WorkerProfile,
     ) -> AgentProfile:
         # F117 Wave 2c-2a：authoring 持久化镜像统一走 canonical builder
         # （build_worker_agent_profile），产出**完整** worker 行——含运行时读的
-        # instruction_overlays + context_budget_policy.memory_recall，与 materialize-on-read
-        # 逐字段等价。消除原 _build_agent_profile_from_worker_profile 的 incomplete 镜像
-        # （instruction_overlays=[] / 无 memory_recall），让 materialize-on-read 对已持久化
-        # worker 变为冗余（2c-2 下一步据此把 materialize-on-read 改 create-if-absent）。
+        # instruction_overlays + context_budget_policy.memory_recall。W4-2a 已删
+        # materialize-on-read（运行时读路径直接信任此持久化镜像）；W4-2b 已删旧
+        # incomplete builder（instruction_overlays=[] / 无 memory_recall）→ canonical
+        # builder 成为 worker 镜像的唯一 SoT（authoring 写 + listing 文档展示共用）。
         existing = await self._stores.agent_context_store.get_agent_profile(profile.profile_id)
         mirrored = build_worker_agent_profile(
             profile, existing_profile=existing, include_user_metadata=True
