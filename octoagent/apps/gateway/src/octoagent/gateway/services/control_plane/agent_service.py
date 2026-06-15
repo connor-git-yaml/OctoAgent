@@ -632,7 +632,9 @@ class AgentProfileDomainService(DomainServiceBase):
             created_at=now,
             updated_at=now,
         )
-        await self._stores.agent_context_store.save_worker_profile(worker_profile)
+        # F117 Wave 4：停写 worker_profiles——worker_profile 仅作 in-memory DTO（构建下方镜像 +
+        # AgentRuntime.worker_profile_id）；该 worker_profiles 行从不被读（authoring 读镜像 / 运行时读
+        # project.default 前缀镜像 / agent_runtimes.worker_profile_id 无 FK），删 save 行为零变更。
 
         # 从 WorkerProfile 同步生成 AgentProfile（完整镜像）
         # F117 Wave 2bc（镜像完整性）：携全 9 字段 + source_kind 标记，让 read-switch 后此路径
@@ -687,9 +689,8 @@ class AgentProfileDomainService(DomainServiceBase):
         )
         await self._stores.project_store.create_project(project)
 
-        # 回填 WorkerProfile 的 project_id
+        # 回填 project_id（worker_profile 仅 in-memory，不再持久化；只回填并保存镜像）
         worker_profile.project_id = project_id
-        await self._stores.agent_context_store.save_worker_profile(worker_profile)
         agent_profile.project_id = project_id
         await self._stores.agent_context_store.save_agent_profile(agent_profile)
 

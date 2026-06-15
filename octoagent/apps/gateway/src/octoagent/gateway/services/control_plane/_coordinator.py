@@ -980,9 +980,8 @@ class ControlPlaneService(TelegramCommandMixin):
                 created_at=now,
                 updated_at=now,
             )
-            await self._stores.agent_context_store.save_worker_profile(worker_profile)
-            dirty = True
-
+            # F117 Wave 4：停写 worker_profiles——主 Agent（kind=main）不需 worker_profiles 行；
+            # worker_profile 仅 in-memory DTO 构建下方 main agent_profile。该行从不被读，删 save 零变更。
             agent_profile_id = f"agent-profile-{worker_profile_id}"
             agent_profile = AgentProfile(
                 profile_id=agent_profile_id,
