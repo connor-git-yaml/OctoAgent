@@ -46,7 +46,6 @@ from octoagent.core.models import (
     PolicyProfileItem,
     PolicyProfilesDocument,
     Project,
-    WorkerProfile,
 )
 from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
 from octoagent.gateway.services.config.config_wizard import load_config
@@ -334,7 +333,7 @@ class AgentProfileDomainService(DomainServiceBase):
 
         支持两种 target_type:
           - "agent_profile": 更新 AgentProfile.resource_limits
-          - "worker_profile": 更新 WorkerProfile.resource_limits
+          - "worker_profile": 更新 worker profile（agent_profiles kind=worker）的 resource_limits
         """
         raw = request.params
         target_type = self._param_str(raw, "target_type", default="agent_profile")
@@ -615,10 +614,11 @@ class AgentProfileDomainService(DomainServiceBase):
 
         now = datetime.now(tz=UTC)
 
-        # 创建 WorkerProfile
+        # 创建 worker AgentProfile（kind=worker）的 in-memory 工作对象（W4-3：不再 WorkerProfile）
         worker_profile_id = f"worker-profile-{str(ULID())}"
-        worker_profile = WorkerProfile(
+        worker_profile = AgentProfile(
             profile_id=worker_profile_id,
+            kind="worker",
             scope=AgentProfileScope.PROJECT,
             project_id="",  # 后面回填
             name=worker_name,

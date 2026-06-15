@@ -234,47 +234,12 @@ class AgentProfile(BaseModel):
     updated_at: datetime = Field(default_factory=_utc_now)
 
 
-class WorkerProfile(BaseModel):
-    """Root Agent 的正式静态配置对象。"""
-
-    profile_id: str = Field(min_length=1)
-    scope: AgentProfileScope = AgentProfileScope.PROJECT
-    project_id: str = Field(default="")
-    name: str = Field(min_length=1)
-    summary: str = Field(default="")
-    model_alias: str = Field(default="main")
-    tool_profile: str = Field(default="minimal")
-    default_tool_groups: list[str] = Field(default_factory=list)
-    selected_tools: list[str] = Field(default_factory=list)
-    runtime_kinds: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    resource_limits: dict[str, Any] = Field(default_factory=dict, description="资源限制覆盖")
-    status: AgentProfileStatus = AgentProfileStatus.DRAFT
-    origin_kind: AgentProfileOriginKind = AgentProfileOriginKind.CUSTOM
-    draft_revision: int = Field(default=0, ge=0)
-    active_revision: int = Field(default=0, ge=0)
-    created_at: datetime = Field(default_factory=_utc_now)
-    updated_at: datetime = Field(default_factory=_utc_now)
-    archived_at: datetime | None = None
-
-
-class WorkerProfileRevision(BaseModel):
-    """Root Agent 已发布 revision。"""
-
-    revision_id: str = Field(min_length=1)
-    profile_id: str = Field(min_length=1)
-    revision: int = Field(ge=1)
-    change_summary: str = Field(default="")
-    snapshot_payload: dict[str, Any] = Field(default_factory=dict)
-    created_by: str = Field(default="")
-    created_at: datetime = Field(default_factory=_utc_now)
-
-
 class AgentProfileRevision(BaseModel):
-    """统一 Agent profile 的已发布 revision（F117 取代 WorkerProfileRevision）。
+    """统一 Agent profile 的已发布 revision（F117 D2：worker/agent profile 已合并）。
 
-    F117 Wave 2a：与 WorkerProfileRevision 同形，挂 agent_profile_revisions 表。
-    WorkerProfileRevision 类 + worker_profile_revisions 表在 Wave 4 删除。
+    F117 Wave 4-3：WorkerProfile / WorkerProfileRevision 类已物理删除，worker 配置
+    全部并入 AgentProfile（kind=worker）；revision 统一挂 agent_profile_revisions 表。
+    worker_profiles / worker_profile_revisions 旧表的物理 DROP 在 W4-4/W4-7 迁移完成。
     """
 
     revision_id: str = Field(min_length=1)

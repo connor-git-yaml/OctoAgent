@@ -49,15 +49,10 @@ from octoagent.core.models import (
     NormalizedMessage,
     TurnExecutorKind,
     Work,
-    WorkerProfile,
     WorkerProfilesDocument,
 )
 from ulid import ULID
 
-from ..agent_context_helpers import (
-    build_worker_agent_profile,
-    build_worker_dto_from_agent_profile,
-)
 from ..agent_decision import build_behavior_system_summary, is_worker_behavior_profile
 from ..task_service import TaskService
 from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
@@ -105,13 +100,13 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
     async def get_worker_profiles_document(self) -> WorkerProfilesDocument:
         _, selected_project, _, _ = await self._resolve_selection()
         capability_pack = await self._get_capability_pack_document()
-        # F117 Wave 2c-2c：listing 读统一 agent_profiles(kind=worker) → 反构 WorkerProfile DTO（下游
-        # 循环零改动）。全局不过滤项目（管理页看全部）。W4 id-收口后镜像统一 bare id
-        # （agent_service/_coordinator 程序化创建已收口）→ 删 `agent-profile-{wpid}` 前缀 dedup，
-        # profile_id 是 PK 天然去重。include_archived 隐含（agent_profiles 含 status=ARCHIVED 行）。
+        # F117：listing 读统一 agent_profiles(kind=worker) 行（worker 镜像即权威 profile）。
+        # 全局不过滤项目（管理页看全部）。W4-1 id-收口后镜像统一 bare id（agent_service/
+        # _coordinator 程序化创建已收口），profile_id 是 PK 天然去重。include_archived 隐含
+        # （agent_profiles 含 status=ARCHIVED 行）。W4-3：直接用 AgentProfile（不再反构 DTO）。
         all_agent_profiles = await self._stores.agent_context_store.list_agent_profiles()
         stored_profiles = [
-            build_worker_dto_from_agent_profile(mirror)
+            mirror
             for mirror in all_agent_profiles
             if is_worker_behavior_profile(mirror)
         ]
@@ -158,12 +153,10 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             if latest is None:
                 warnings.append("当前还没有绑定到这个 profile 的运行中 work。")
 
-            # 为自定义 worker profile 构建 behavior_system。喂 canonical builder
-            # （build_worker_agent_profile）——运行时镜像 SoT，与 authoring 持久化写 +
-            # 已删的 materialize-on-read 同一 builder。展示的 slug / bootstrap_template_ids /
-            # behavior_system 因此与运行时实际解析一致（旧 incomplete builder 产 name-based
-            # slug + 空 bootstrap_template_ids，与运行时持久化镜像漂移）。
-            agent_profile_mirror = build_worker_agent_profile(profile)
+            # 为自定义 worker profile 构建 behavior_system。W4-3：profile 即统一 agent_profiles
+            # (kind=worker) 镜像（运行时 SoT）→ 直接使用，展示的 slug / bootstrap_template_ids /
+            # behavior_system 与运行时实际解析一致（不再经任何 incomplete builder 重建）。
+            agent_profile_mirror = profile
             # 确保 agent-private 行为文件存在（lazy materialization）
             _agent_slug = resolve_behavior_agent_slug(agent_profile_mirror)
             materialize_agent_behavior_files(
@@ -329,8 +322,8 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             (item for item in items if item.profile_id == default_profile_id),
             None,
         )
-        # default_profile_id 可能指向 AgentProfile（不在 WorkerProfiles 列表中）。
-        # 当 WorkerProfile 查不到时，额外查 AgentProfile 以获取正确名称（Bug 075）。
+        # default_profile_id 可能指向主 Agent profile（不在 worker 列表 items 中）。
+        # 当 worker 列表查不到时，额外查 agent_profiles 取正确名称（Bug 075）。
         default_profile_name = default_profile.name if default_profile is not None else ""
         default_profile_scope = default_profile.scope if default_profile is not None else ""
         if not default_profile_name and default_profile_id:
@@ -624,8 +617,8 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         raw = draft if isinstance(draft, Mapping) else request.params
         _, selected_project, _, _ = await self._resolve_selection()
 
-        source_profile: WorkerProfile | None = None
-        existing: WorkerProfile | None = None
+        source_profile: AgentProfile | None = None
+        existing: AgentProfile | None = None
         mode = "create"
         profile_id = self._param_str(raw, "profile_id")
         source_profile_id = self._param_str(raw, "source_profile_id")
@@ -925,7 +918,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         raw = draft if isinstance(draft, Mapping) else request.params
         publish = self._param_bool(request.params, "publish")
         profile_id = self._param_str(raw, "profile_id")
-        existing: WorkerProfile | None = None
+        existing: AgentProfile | None = None
         mode = "create"
         if profile_id:
             existing = await self._get_worker_profile_via_mirror(profile_id)

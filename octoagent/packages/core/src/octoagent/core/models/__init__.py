@@ -38,8 +38,6 @@ from .agent_context import (
     OwnerProfileOverlay,
     RecallFrame,
     SessionContextState,
-    WorkerProfile,
-    WorkerProfileRevision,
     is_private_namespace,
 )
 from .artifact import Artifact, ArtifactPart
@@ -485,8 +483,6 @@ __all__ = [
     "A2AMessageRecord",
     "AgentProfileStatus",
     "AgentProfileOriginKind",
-    "WorkerProfile",
-    "WorkerProfileRevision",
     "OwnerProfile",
     "OwnerProfileOverlay",
     "MemoryNamespace",

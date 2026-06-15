@@ -256,14 +256,12 @@ async def test_resolve_context_bundle_worker_does_not_short_circuit(tmp_path: Pa
 
 
 async def test_resolve_agent_profile_trusts_existing_worker_mirror(tmp_path: Path) -> None:
-    """F117 Wave 2c-2b：_resolve_agent_profile 信任完整 worker 镜像，不从 worker_profiles 重建。
+    """F117：_resolve_agent_profile 直接信任存储的完整 worker 镜像（agent_profiles kind=worker）。
 
-    构造 worker_profile 与同 id 镜像**故意分歧**（镜像 tools ≠ worker_profile tools）的状态，
-    断言 resolve 返回**镜像**的 tools——证明运行时读统一 agent_profiles(kind=worker) 行、与
-    worker_profiles 解耦（停写 worker_profiles + 删 materialize-on-read 的前提，W4 worker_profiles
-    删除后此行为是唯一正确语义）。翻转前此场景会重建覆盖成 worker_profile 的 tools。
+    W4-3：WorkerProfile 类 / worker_profiles 写入已删——运行时只读统一 agent_profiles(kind=worker)
+    行。本测试播种完整镜像（instruction_overlays 非空作完整性标记 + source_* 标记）并断言 resolve
+    返回镜像 tools，证明 resolve 直接信任存储镜像、不做任何重建/回退。
     """
-    from octoagent.core.models import WorkerProfile
     from octoagent.core.store import create_store_group
 
     store_group = await create_store_group(
@@ -273,18 +271,8 @@ async def test_resolve_agent_profile_trusts_existing_worker_mirror(tmp_path: Pat
     service = AgentContextService(store_group, project_root=tmp_path)
 
     profile_id = "worker-profile-2c2b-drift"
-    # worker_profiles 行：重建会用它的 tools（["worker.tool"]）
-    await store_group.agent_context_store.save_worker_profile(
-        WorkerProfile(
-            profile_id=profile_id,
-            scope=AgentProfileScope.PROJECT,
-            project_id="proj-c-001",
-            name="Drift Worker",
-            selected_tools=["worker.tool"],
-        )
-    )
-    # 同 id **完整** canonical 镜像（instruction_overlays 非空）：tools 故意与 worker 分歧，
-    # 模拟"运行时权威源是镜像"。完整性是 flip 信任的前提（Codex [2] 防御）。
+    # 同 id **完整** canonical 镜像（instruction_overlays 非空）：运行时权威源即镜像。
+    # 完整性是信任的前提（Codex [2] 防御）。
     await store_group.agent_context_store.save_agent_profile(
         AgentProfile(
             profile_id=profile_id,
@@ -317,7 +305,6 @@ async def test_resolve_agent_profile_trusts_stored_mirror_without_rebuild(tmp_pa
     存量残缺行由 migration_117 reconcile 为 canonical（W4-7），不依赖运行时（生产 create/authoring
     路径恒写完整 canonical 镜像，残缺行不再产生）。
     """
-    from octoagent.core.models import WorkerProfile
     from octoagent.core.store import create_store_group
 
     store_group = await create_store_group(
@@ -327,17 +314,8 @@ async def test_resolve_agent_profile_trusts_stored_mirror_without_rebuild(tmp_pa
     service = AgentContextService(store_group, project_root=tmp_path)
 
     profile_id = "worker-profile-w4-trust"
-    # worker_profiles 行存在但 W4-2 后不再被 dispatch 读（保留以证不会被重建覆盖镜像）
-    await store_group.agent_context_store.save_worker_profile(
-        WorkerProfile(
-            profile_id=profile_id,
-            scope=AgentProfileScope.PROJECT,
-            project_id="proj-c-001",
-            name="Incomplete Worker",
-            selected_tools=["worker.tool"],
-        )
-    )
-    # 残缺镜像：kind=worker 但 instruction_overlays 空 + selected_tools 陈旧
+    # 残缺镜像：kind=worker 但 instruction_overlays 空 + selected_tools 陈旧（W4-3：
+    # worker_profiles 写入已删，运行时只读此镜像、不重建——残缺即按现状返回）
     await store_group.agent_context_store.save_agent_profile(
         AgentProfile(
             profile_id=profile_id,
@@ -358,8 +336,7 @@ async def test_resolve_agent_profile_trusts_stored_mirror_without_rebuild(tmp_pa
         project=None,
         requested_profile_id=profile_id,
     )
-    # W4-2：直接信任存储镜像，不重建——instruction_overlays 仍空，selected_tools 仍 stale
-    # （worker_profiles 行不被读）。
+    # W4-3：直接信任存储镜像，不重建——instruction_overlays 仍空，selected_tools 仍 stale。
     assert resolved.instruction_overlays == []
     assert resolved.selected_tools == ["stale.tool"]
     await store_group.close()

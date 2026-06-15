@@ -32,7 +32,6 @@ from octoagent.core.models import (
     RuntimeControlContext,
     SessionContextState,
     Task,
-    WorkerProfile,
 )
 from octoagent.core.behavior_workspace import build_behavior_bootstrap_template_ids
 from octoagent.core.models.agent_context import DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES
@@ -146,23 +145,23 @@ WORKER_INSTRUCTION_OVERLAYS = [
 
 
 def build_worker_agent_profile(
-    worker_profile: WorkerProfile,
+    worker_profile: AgentProfile,
     *,
     existing_profile: AgentProfile | None = None,
     profile_id: str | None = None,
     include_user_metadata: bool = False,
 ) -> AgentProfile:
-    """F117 Wave 2c：从 WorkerProfile 构造**完整**的 agent_profiles(kind=worker) 行。
+    """F117 D2：把 worker 配置规范化为**完整**的 agent_profiles(kind=worker) 行（唯一 SoT）。
 
-    规范化单一 builder——W4-2a/W4-2b 前 entity_ensure（materialize-on-read）与
-    worker_profile_ops（listing 文档展示）各有一份 incomplete builder，现均已删除，
-    worker 镜像构造全部收敛到此唯一 SoT。产出运行时所需全部字段：
+    W4-3：``worker_profile`` 入参由旧 WorkerProfile 改为统一 AgentProfile——既可是 authoring/
+    runtime 读到的现存 worker 镜像（再规范化幂等），也可是 create/draft 路径新构造的 raw worker
+    AgentProfile（仅 9 个静态字段，本函数补齐运行时字段）。产出运行时所需全部字段：
     9 个 worker 静态字段 + **运行时读的 instruction_overlays + context_budget_policy.memory_recall**
-    + bootstrap_template_ids + source_kind 标记。authoring 直写（Wave 2c-2）与 materialize-on-read
-    共用此 builder，行为与 baseline materialize-on-read 等价（字段逐项对账 entity_ensure:986-1027）。
+    + bootstrap_template_ids + source_* 标记。W4-2a 前 materialize-on-read 与历史 inline builder 已删，
+    构造全部收敛于此（行为与 baseline materialize-on-read 等价）。
 
     ``existing_profile`` 用于 memory_recall / context_budget_policy / metadata 的 baseline merge
-    （existing 覆盖 default）；``profile_id`` 覆盖镜像 id（agent_service create 的 agent-profile-{id} 前缀路径）。
+    （existing 覆盖 default）；``profile_id`` 覆盖镜像 id。
     """
     bootstrap_template_ids = build_behavior_bootstrap_template_ids(
         include_agent_private=True,
@@ -210,8 +209,9 @@ def build_worker_agent_profile(
             **(dict(existing_profile.metadata) if existing_profile is not None else {}),
             # F117 Wave 2c-2c：include_user_metadata=True 并入 worker_profile.metadata user key
             # （如 extract source_work_id）——authoring 停写 worker_profiles 后镜像成唯一源须携之；
-            # source_* 标记 key 覆盖在后。materialize-on-read 默认 False 保 baseline 不携（reverse-
-            # converter 读时剥 source_* 还原 user metadata，round-trip 守恒）。
+            # source_* 标记 key 覆盖在后。materialize-on-read 路径默认 False。W4-3：authoring
+            # 直接在统一 AgentProfile 上工作（不再 round-trip WorkerProfile DTO），source_* 标记
+            # 常驻 metadata 不再被剥（schema-lag 检测 + migration 锚，W4-7 迁移后移除）。
             **(dict(worker_profile.metadata) if include_user_metadata else {}),
             "source_worker_profile_id": worker_profile.profile_id,
             "source_worker_profile_revision": (
@@ -226,58 +226,6 @@ def build_worker_agent_profile(
         version=max(worker_profile.active_revision or worker_profile.draft_revision, 1),
         created_at=worker_profile.created_at,
         updated_at=worker_profile.updated_at,
-    )
-
-
-# F117 Wave 2c-2c：canonical mirror 写入的 source_* 标记 key（build_worker_agent_profile +
-# 历史 inline builder）。reverse-converter 剥离它们，使反构 WorkerProfile DTO 的 metadata 与
-# baseline worker_profile.metadata 等价（baseline 不含 mirror 标记；实践 worker metadata 恒空）。
-_MIRROR_MARKER_METADATA_KEYS = frozenset(
-    {
-        "source_kind",
-        "source_worker_profile_id",
-        "source_worker_profile_revision",
-        "memory_recall_default_mode",
-        "behavior_agent_slug",
-        "worker_profile_id",
-        "worker_profile_revision",
-        "worker_profile_status",
-    }
-)
-
-
-def build_worker_dto_from_agent_profile(agent_profile: AgentProfile) -> WorkerProfile:
-    """F117 Wave 2c-2c：从统一 agent_profiles(kind=worker) 行反构 WorkerProfile in-memory DTO。
-
-    让 authoring 逻辑（按 WorkerProfile 工作）在读切统一行后**零改动**——避免读切返回 AgentProfile
-    触发的类型 cascade 铺满 authoring 层。剥离 canonical mirror 的 source_* 标记 key → metadata 与
-    baseline worker_profile.metadata 等价。**过渡 shim**：W4 删 WorkerProfile 类后随之删（是
-    build_worker_agent_profile 的逆；resource_limits 是死列，取 WorkerProfile 默认 {}）。
-    """
-    user_metadata = {
-        key: value
-        for key, value in agent_profile.metadata.items()
-        if key not in _MIRROR_MARKER_METADATA_KEYS
-    }
-    return WorkerProfile(
-        profile_id=agent_profile.profile_id,
-        scope=agent_profile.scope,
-        project_id=agent_profile.project_id,
-        name=agent_profile.name,
-        summary=agent_profile.summary,
-        model_alias=agent_profile.model_alias,
-        tool_profile=agent_profile.tool_profile,
-        default_tool_groups=list(agent_profile.default_tool_groups),
-        selected_tools=list(agent_profile.selected_tools),
-        runtime_kinds=list(agent_profile.runtime_kinds),
-        metadata=user_metadata,
-        status=agent_profile.status,
-        origin_kind=agent_profile.origin_kind,
-        draft_revision=agent_profile.draft_revision,
-        active_revision=agent_profile.active_revision,
-        created_at=agent_profile.created_at,
-        updated_at=agent_profile.updated_at,
-        archived_at=agent_profile.archived_at,
     )
 
 

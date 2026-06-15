@@ -31,7 +31,6 @@ from octoagent.core.models import (
     ProjectSelectorState,
     RuntimeControlContext,
     SessionContextState,
-    WorkerProfile,
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
@@ -276,9 +275,10 @@ async def test_agent_context_backfills_bootstrap_templates_and_routes(
         str(tmp_path / "artifacts"),
     )
     await _seed_project_context(store_group)
-    await store_group.agent_context_store.save_worker_profile(
-        WorkerProfile(
+    await store_group.agent_context_store.save_agent_profile(
+        AgentProfile(
             profile_id="singleton:research",
+            kind="worker",
             scope=AgentProfileScope.PROJECT,
             project_id="project-alpha",
             name="Research Root Agent",
@@ -302,7 +302,7 @@ async def test_agent_context_backfills_bootstrap_templates_and_routes(
     )
     # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（与原 _ensure 等价：读
     # worker_profile → build_worker_agent_profile）。W4-4 删 worker store 方法后这些测试改构造 DTO。
-    _worker_research = await store_group.agent_context_store.get_worker_profile(
+    _worker_research = await store_group.agent_context_store.get_agent_profile(
         "singleton:research"
     )
     assert _worker_research is not None
@@ -1057,8 +1057,9 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         str(tmp_path / "artifacts"),
     )
     await _seed_project_context(store_group)
-    worker_profile = WorkerProfile(
+    worker_profile = AgentProfile(
         profile_id="worker-profile-alpha-research",
+        kind="worker",
         scope=AgentProfileScope.PROJECT,
         project_id="project-alpha",
         name="Alpha Research Worker",
@@ -1073,7 +1074,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         draft_revision=1,
         active_revision=1,
     )
-    await store_group.agent_context_store.save_worker_profile(worker_profile)
+    await store_group.agent_context_store.save_agent_profile(worker_profile)
     # F117 Wave 4：materialize-on-read 已删——预建完整 canonical 镜像（生产由 create/authoring
     # 路径写，此处仿之）。否则 dispatch 解析不到 worker 镜像会落到 main profile。
     await store_group.agent_context_store.save_agent_profile(
@@ -1283,8 +1284,9 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         str(tmp_path / "artifacts"),
     )
     await _seed_project_context(store_group)
-    worker_profile = WorkerProfile(
+    worker_profile = AgentProfile(
         profile_id="worker-profile-alpha-research",
+        kind="worker",
         scope=AgentProfileScope.PROJECT,
         project_id="project-alpha",
         name="Alpha Research Worker",
@@ -1299,7 +1301,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         draft_revision=1,
         active_revision=1,
     )
-    await store_group.agent_context_store.save_worker_profile(worker_profile)
+    await store_group.agent_context_store.save_agent_profile(worker_profile)
     # F117 Wave 4：materialize-on-read 已删——预建完整 canonical 镜像（生产由 create/authoring
     # 路径写，此处仿之）。否则 dispatch 解析不到 worker 镜像会落到 main profile。
     await store_group.agent_context_store.save_agent_profile(
@@ -1468,8 +1470,9 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         str(tmp_path / "artifacts"),
     )
     await _seed_project_context(store_group)
-    worker_profile = WorkerProfile(
+    worker_profile = AgentProfile(
         profile_id="worker-profile-alpha-research",
+        kind="worker",
         scope=AgentProfileScope.PROJECT,
         project_id="project-alpha",
         name="Alpha Research Worker",
@@ -1484,7 +1487,7 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         draft_revision=1,
         active_revision=1,
     )
-    await store_group.agent_context_store.save_worker_profile(worker_profile)
+    await store_group.agent_context_store.save_agent_profile(worker_profile)
     await store_group.agent_context_store.save_agent_profile(
         AgentProfile(
             profile_id=worker_profile.profile_id,
@@ -1637,8 +1640,9 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
         str(tmp_path / "artifacts"),
     )
     await _seed_project_context(store_group)
-    worker_profile = WorkerProfile(
+    worker_profile = AgentProfile(
         profile_id="worker-profile-alpha-research",
+        kind="worker",
         scope=AgentProfileScope.PROJECT,
         project_id="project-alpha",
         name="Alpha Research Worker",
@@ -1653,7 +1657,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
         draft_revision=1,
         active_revision=1,
     )
-    await store_group.agent_context_store.save_worker_profile(worker_profile)
+    await store_group.agent_context_store.save_agent_profile(worker_profile)
     await store_group.conn.commit()
 
     worker_runtime_id = build_agent_runtime_id(
@@ -1788,8 +1792,9 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         str(tmp_path / "artifacts"),
     )
     await _seed_project_context(store_group)
-    worker_profile = WorkerProfile(
+    worker_profile = AgentProfile(
         profile_id="worker-profile-alpha-research",
+        kind="worker",
         scope=AgentProfileScope.PROJECT,
         project_id="project-alpha",
         name="Alpha Research Worker",
@@ -1804,7 +1809,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         draft_revision=1,
         active_revision=1,
     )
-    await store_group.agent_context_store.save_worker_profile(worker_profile)
+    await store_group.agent_context_store.save_agent_profile(worker_profile)
     await store_group.conn.commit()
 
     worker_runtime_id = build_agent_runtime_id(
@@ -3060,8 +3065,9 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
     )
     await _seed_project_context(store_group)
 
-    worker_profile = WorkerProfile(
+    worker_profile = AgentProfile(
         profile_id="worker-profile-alpha-direct",
+        kind="worker",
         scope=AgentProfileScope.PROJECT,
         project_id="project-alpha",
         name="Alpha Direct Worker",
@@ -3073,7 +3079,7 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
         origin_kind=AgentProfileOriginKind.BUILTIN,
         active_revision=1,
     )
-    await store_group.agent_context_store.save_worker_profile(worker_profile)
+    await store_group.agent_context_store.save_agent_profile(worker_profile)
 
     # 模拟 Path A：预写 ULID runtime + session + session_state
     path_a_thread = "thread-path-a"
@@ -3223,9 +3229,10 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
     # 准备 worker_profile 和 project 的最小依赖
     project = Project(project_id="project-mig", slug="mig", name="Mig Project")
     await store_group.project_store.save_project(project)
-    await store_group.agent_context_store.save_worker_profile(
-        WorkerProfile(
+    await store_group.agent_context_store.save_agent_profile(
+        AgentProfile(
             profile_id="worker-profile-mig",
+            kind="worker",
             scope=AgentProfileScope.PROJECT,
             project_id=project.project_id,
             name="Mig Worker",
@@ -3365,9 +3372,10 @@ async def test_f094_d2_worker_default_memory_recall_matches_baseline(
     )
     try:
         await _seed_project_context(store_group)
-        await store_group.agent_context_store.save_worker_profile(
-            WorkerProfile(
+        await store_group.agent_context_store.save_agent_profile(
+            AgentProfile(
                 profile_id="singleton:f094-d2",
+                kind="worker",
                 scope=AgentProfileScope.PROJECT,
                 project_id="project-alpha",
                 name="F094 D2 Worker",
@@ -3380,7 +3388,7 @@ async def test_f094_d2_worker_default_memory_recall_matches_baseline(
         )
         # 无 existing_profile：merged_memory_recall = defaults 全部
         # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（等价）。
-        _worker_d2 = await store_group.agent_context_store.get_worker_profile(
+        _worker_d2 = await store_group.agent_context_store.get_agent_profile(
             "singleton:f094-d2"
         )
         assert _worker_d2 is not None
@@ -3435,9 +3443,10 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
     )
     try:
         await _seed_project_context(store_group)
-        await store_group.agent_context_store.save_worker_profile(
-            WorkerProfile(
+        await store_group.agent_context_store.save_agent_profile(
+            AgentProfile(
                 profile_id="singleton:f094-d5-edge",
+                kind="worker",
                 scope=AgentProfileScope.PROJECT,
                 project_id="project-alpha",
                 name="F094 D5 Edge Worker",
@@ -3466,7 +3475,7 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
             context_budget_policy={"memory_recall": {}},
         )
         # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（等价）。
-        _worker_edge = await store_group.agent_context_store.get_worker_profile(
+        _worker_edge = await store_group.agent_context_store.get_agent_profile(
             "singleton:f094-d5-edge"
         )
         assert _worker_edge is not None
@@ -3536,9 +3545,10 @@ async def test_f094_d5_existing_profile_overrides_module_defaults(
     )
     try:
         await _seed_project_context(store_group)
-        await store_group.agent_context_store.save_worker_profile(
-            WorkerProfile(
+        await store_group.agent_context_store.save_agent_profile(
+            AgentProfile(
                 profile_id="singleton:f094-d5",
+                kind="worker",
                 scope=AgentProfileScope.PROJECT,
                 project_id="project-alpha",
                 name="F094 D5 Worker",
@@ -3561,7 +3571,7 @@ async def test_f094_d5_existing_profile_overrides_module_defaults(
             },
         )
         # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（等价）。
-        _worker_d5 = await store_group.agent_context_store.get_worker_profile(
+        _worker_d5 = await store_group.agent_context_store.get_agent_profile(
             "singleton:f094-d5"
         )
         assert _worker_d5 is not None

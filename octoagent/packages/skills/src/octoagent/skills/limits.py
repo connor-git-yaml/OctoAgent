@@ -1,7 +1,7 @@
 """资源限制合并与默认值。
 
 Feature 062: 支持多层优先级覆盖的 UsageLimits 合并逻辑。
-合并优先级: SKILL.md > WorkerProfile > AgentProfile > 全局默认（环境变量 > 代码硬编码）
+合并优先级: SKILL.md > Agent profile（含 worker，kind=worker）> 全局默认（环境变量 > 代码硬编码）
 
 注意: Agent-type 预设矩阵已移除（不再区分 main/worker/worker_coding 等类型）。
 所有 Agent 共享同一个全局默认配置，通过 Profile 或 SKILL.md 自定义覆盖。
@@ -36,7 +36,7 @@ _ENV_FIELD_MAP: dict[str, tuple[str, type]] = {
 # 时会陷入"connectivity test"等无意义循环消耗 token + duration（实测有过 6.8min
 # 跑 29 轮 ask_model 都是 "Reply with exactly: OK" 的案例）。
 # 30 是经验值：足够覆盖中等复杂度多步任务，又能在 Agent 走偏时及时熔断。
-# 用户可以通过 OCTOAGENT_DEFAULT_MAX_STEPS / WorkerProfile.resource_limits /
+# 用户可以通过 OCTOAGENT_DEFAULT_MAX_STEPS / AgentProfile.resource_limits /
 # SKILL.md resource_limits 任一层覆盖。
 _RUNTIME_FALLBACK_MAX_STEPS = 30
 
@@ -97,7 +97,7 @@ def merge_usage_limits(base: UsageLimits, *overrides: dict[str, Any]) -> UsageLi
     Args:
         base: 基础 UsageLimits（如从 get_global_defaults() 获取的）
         *overrides: 一个或多个覆盖 dict（如来自 AgentProfile.resource_limits、
-                    WorkerProfile.resource_limits、SkillMdEntry.resource_limits）
+                    SkillMdEntry.resource_limits）
 
     Returns:
         合并后的 UsageLimits 实例。

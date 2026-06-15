@@ -53,7 +53,6 @@ from octoagent.core.models import (
     SubagentDelegation,
     Task,
     TurnExecutorKind,
-    WorkerProfile,
     is_private_namespace,
 )
 from octoagent.core.models.agent_context import (

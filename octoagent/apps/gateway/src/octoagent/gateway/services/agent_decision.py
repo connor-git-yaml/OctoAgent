@@ -110,11 +110,11 @@ def behavior_pack_cache_size() -> int:
 
 
 def is_worker_behavior_profile(agent_profile: AgentProfile) -> bool:
-    """判断 AgentProfile 是否为 worker 镜像（来自 WorkerProfile）。
+    """判断 AgentProfile 是否为 worker（kind=worker 行）。
 
     Feature 090 D2: 优先读 ``agent_profile.kind == "worker"``（显式标记）；
-    metadata 探测保留为兼容历史数据的 fallback。F107 完全合并 WorkerProfile
-    后可移除 fallback 路径。
+    metadata 探测（source_kind / source_worker_profile_id）保留为 schema-lag 实例
+    （agent_profiles 无 kind 列）的 fallback，F117 W4-7 真迁移补 kind 列后可移除。
     """
     if agent_profile.kind == "worker":
         return True

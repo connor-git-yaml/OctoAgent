@@ -9,6 +9,7 @@ import pytest
 from octoagent.core.models import (
     AgentProfile,
     AgentProfileOriginKind,
+    AgentProfileRevision,
     AgentProfileScope,
     AgentProfileStatus,
     AgentRuntime,
@@ -24,8 +25,6 @@ from octoagent.core.models import (
     OwnerProfileOverlay,
     RecallFrame,
     SessionContextState,
-    WorkerProfile,
-    WorkerProfileRevision,
 )
 from octoagent.core.store import create_store_group
 
@@ -269,13 +268,16 @@ async def test_agent_runtime_namespace_and_recall_roundtrip(tmp_path: Path) -> N
     await store_group.close()
 
 
-async def test_worker_profile_and_revision_roundtrip(tmp_path: Path) -> None:
+async def test_worker_agent_profile_and_revision_roundtrip(tmp_path: Path) -> None:
+    # F117 D2：WorkerProfile/WorkerProfileRevision 已合并入 AgentProfile(kind=worker) +
+    # agent_profile_revisions——本测试改测统一表的 worker 行 + revision roundtrip。
     store_group = await create_store_group(
         str(tmp_path / "worker-profile.db"),
         str(tmp_path / "artifacts"),
     )
-    profile = WorkerProfile(
+    profile = AgentProfile(
         profile_id="worker-profile-alpha",
+        kind="worker",
         scope=AgentProfileScope.PROJECT,
         project_id="project-alpha",
         name="NAS Root Agent",
@@ -290,7 +292,7 @@ async def test_worker_profile_and_revision_roundtrip(tmp_path: Path) -> None:
         draft_revision=1,
         active_revision=1,
     )
-    revision = WorkerProfileRevision(
+    revision = AgentProfileRevision(
         revision_id="worker-snapshot:worker-profile-alpha:1",
         profile_id=profile.profile_id,
         revision=1,
@@ -303,16 +305,17 @@ async def test_worker_profile_and_revision_roundtrip(tmp_path: Path) -> None:
         created_by="tests",
     )
 
-    await store_group.agent_context_store.save_worker_profile(profile)
-    await store_group.agent_context_store.save_worker_profile_revision(revision)
+    await store_group.agent_context_store.save_agent_profile(profile)
+    await store_group.agent_context_store.save_agent_profile_revision(revision)
     await store_group.conn.commit()
 
-    stored_profile = await store_group.agent_context_store.get_worker_profile(profile.profile_id)
-    stored_revisions = await store_group.agent_context_store.list_worker_profile_revisions(
+    stored_profile = await store_group.agent_context_store.get_agent_profile(profile.profile_id)
+    stored_revisions = await store_group.agent_context_store.list_agent_profile_revisions(
         profile.profile_id
     )
 
     assert stored_profile is not None
+    assert stored_profile.kind == "worker"
     assert stored_profile.name == "NAS Root Agent"
     assert stored_profile.selected_tools == ["filesystem.read"]
     assert stored_profile.origin_kind == AgentProfileOriginKind.CUSTOM

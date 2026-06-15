@@ -103,7 +103,7 @@ class TestMergeUsageLimits:
         assert merged.max_steps is None
 
     def test_full_override_chain(self) -> None:
-        """模拟完整优先级链：global_defaults -> AgentProfile -> WorkerProfile -> SKILL.md"""
+        """模拟完整优先级链：global_defaults -> 基础 profile 覆盖 -> 更具体 profile 覆盖 -> SKILL.md"""
         base = get_global_defaults()
         agent_rl = {"max_budget_usd": 0.80}
         worker_rl = {"max_steps": 50, "max_budget_usd": 1.00}

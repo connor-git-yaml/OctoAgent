@@ -35,11 +35,9 @@ from octoagent.core.models import (
     ControlPlaneSupportStatus,
     DynamicToolSelection,
     Work,
-    WorkerProfile,
 )
 from octoagent.gateway.services.agent_context_helpers import (
     build_worker_agent_profile,
-    build_worker_dto_from_agent_profile,
 )
 from octoagent.gateway.services.agent_decision import is_worker_behavior_profile
 from octoagent.gateway.services.config.config_wizard import load_config
@@ -113,7 +111,7 @@ class WorkerProfileOpsMixin:
 
     async def _sync_worker_profile_agent_profile(
         self,
-        profile: WorkerProfile,
+        profile: AgentProfile,
     ) -> AgentProfile:
         # F117 Wave 2c-2a：authoring 持久化镜像统一走 canonical builder
         # （build_worker_agent_profile），产出**完整** worker 行——含运行时读的
@@ -141,7 +139,7 @@ class WorkerProfileOpsMixin:
     async def _bind_worker_profile_as_default(
         self,
         *,
-        profile: WorkerProfile,
+        profile: AgentProfile,
     ) -> bool:
         if profile.scope != AgentProfileScope.PROJECT or not profile.project_id:
             return False
@@ -380,7 +378,7 @@ class WorkerProfileOpsMixin:
     async def _resolve_builtin_worker_source(
         self,
         profile_id: str,
-    ) -> WorkerProfile | None:
+    ) -> AgentProfile | None:
         if not profile_id.startswith("singleton:"):
             return None
         worker_type = profile_id.split(":", 1)[1]
@@ -395,8 +393,9 @@ class WorkerProfileOpsMixin:
         )
         if builtin is None:
             return None
-        return WorkerProfile(
+        return AgentProfile(
             profile_id=profile_id,
+            kind="worker",
             scope=AgentProfileScope.SYSTEM,
             project_id="",
             name=self._worker_profile_label(worker_type),
@@ -416,23 +415,23 @@ class WorkerProfileOpsMixin:
             active_revision=1,
         )
 
-    async def _get_worker_profile_via_mirror(self, profile_id: str) -> WorkerProfile | None:
-        """F117 Wave 2c-2c：authoring 读统一 agent_profiles(kind=worker) 镜像 → 反构 WorkerProfile DTO。
+    async def _get_worker_profile_via_mirror(self, profile_id: str) -> AgentProfile | None:
+        """F117：authoring 读统一 agent_profiles(kind=worker) 行（worker 镜像即权威 profile）。
 
-        镜像由 authoring 写路径（2c-2a sync）保持 current。非 worker 行视为不存在
-        （保 baseline"只有 worker"语义）。W4 id-收口后镜像统一 bare id（agent_service/_coordinator
-        程序化创建已收口）→ 删 `agent-profile-{id}` 前缀 fallback。reverse-converter 反构
-        WorkerProfile DTO 使下游 authoring 逻辑零改动（避 AgentProfile 类型 cascade）。
+        镜像由 authoring 写路径（_sync / _save_draft）保持 current。非 worker 行视为不存在
+        （保 baseline"只有 worker"语义）。W4-1 id-收口后镜像统一 bare id（agent_service/
+        _coordinator 程序化创建已收口）。W4-3：直接返回统一 AgentProfile——authoring 不再
+        round-trip 旧 DTO 类型（类型 cascade 已收口），source_* 标记常驻 metadata。
         """
         mirror = await self._stores.agent_context_store.get_agent_profile(profile_id)
         if mirror is None or not is_worker_behavior_profile(mirror):
             return None
-        return build_worker_dto_from_agent_profile(mirror)
+        return mirror
 
     async def _get_worker_profile_in_scope(
         self,
         profile_id: str,
-    ) -> WorkerProfile:
+    ) -> AgentProfile:
         _, selected_project, _, _ = await self._resolve_selection()
         builtin = await self._resolve_builtin_worker_source(profile_id)
         if builtin is not None:
@@ -463,8 +462,8 @@ class WorkerProfileOpsMixin:
         *,
         raw: Mapping[str, Any],
         mode: str,
-        existing: WorkerProfile | None = None,
-        source_profile: WorkerProfile | None = None,
+        existing: AgentProfile | None = None,
+        source_profile: AgentProfile | None = None,
         selected_project: Any | None,
         origin_kind: AgentProfileOriginKind | None = None,
     ) -> dict[str, Any]:
@@ -703,7 +702,7 @@ class WorkerProfileOpsMixin:
             },
         }
 
-    def _worker_profile_snapshot_payload(self, profile: WorkerProfile) -> dict[str, Any]:
+    def _worker_profile_snapshot_payload(self, profile: AgentProfile) -> dict[str, Any]:
         return {
             "profile_id": profile.profile_id,
             "scope": profile.scope.value,
@@ -724,9 +723,9 @@ class WorkerProfileOpsMixin:
         self,
         *,
         normalized_profile: Mapping[str, Any],
-        existing: WorkerProfile | None,
+        existing: AgentProfile | None,
         origin_kind: AgentProfileOriginKind | None = None,
-    ) -> WorkerProfile:
+    ) -> AgentProfile:
         now = datetime.now(tz=UTC)
         resolved_origin = (
             origin_kind
@@ -757,10 +756,11 @@ class WorkerProfileOpsMixin:
             )
             active_revision = existing.active_revision
             created_at = existing.created_at
-        # F117 Wave 2c-2c-W：停写 worker_profiles——in-memory WorkerProfile DTO 承载 status/revision
-        # 派生，持久化只走下面的 canonical 镜像（agent_profiles 单写，Option B）。
-        saved = WorkerProfile(
+        # F117 Wave 4-3：停写 worker_profiles——构造 in-memory worker AgentProfile 承载 status/
+        # revision 派生，再经 canonical builder 规范化为持久化镜像（agent_profiles 单写，Option B）。
+        working = AgentProfile(
             profile_id=str(normalized_profile.get("profile_id", "")),
+            kind="worker",
             scope=AgentProfileScope(str(normalized_profile.get("scope", "project"))),
             project_id=str(normalized_profile.get("project_id", "")),
             name=str(normalized_profile.get("name", "")),
@@ -786,29 +786,29 @@ class WorkerProfileOpsMixin:
             updated_at=now,
             archived_at=None,
         )
-        # F117 Wave 2bc（镜像完整性，用户拍板"草稿即时生效"）：每次 draft 写入后刷新同 id
-        # 镜像（携全 9 字段 + metadata），让 read-switch 后 create/update/clone/extract 的未发布
-        # worker 也立即被运行时解析（baseline 等价）。走 _build + save（不 materialize 行为文件，
-        # 避免给草稿/频繁保存引入副作用；publish/bind 仍走 _sync 含 materialize）。
+        # canonical builder 补齐运行时字段（instruction_overlays + memory_recall +
+        # bootstrap_template_ids + source_* 标记），与 publish/bind 的 _sync 路径同 builder。
+        # 草稿写入即刷新同 id 镜像（用户拍板"草稿即时生效"，read-switch 后未发布 worker 也立即
+        # 被运行时解析）；不 materialize 行为文件（避免给频繁保存引入副作用，publish/bind 走 _sync 含 materialize）。
         existing_mirror = await self._stores.agent_context_store.get_agent_profile(
-            saved.profile_id
+            working.profile_id
         )
-        # F117 Wave 2c-2a：draft 镜像同走 canonical builder（完整 worker 行，instruction_overlays
-        # + memory_recall 即时生效，与 publish/bind 同步路径一致）。
         mirror = build_worker_agent_profile(
-            saved, existing_profile=existing_mirror, include_user_metadata=True
+            working, existing_profile=existing_mirror, include_user_metadata=True
         )
         await self._stores.agent_context_store.save_agent_profile(mirror)
         await self._stores.conn.commit()
-        return saved
+        # 返回镜像本身（含 source_* 标记），与读路径 _get_worker_profile_via_mirror 形状一致——
+        # apply+publish（喂 saved）与独立 publish（喂读到的 existing）的 snapshot_payload 守恒。
+        return mirror
 
     async def _publish_worker_profile_revision(
         self,
         *,
-        profile: WorkerProfile,
+        profile: AgentProfile,
         change_summary: str,
         actor: str,
-    ) -> tuple[WorkerProfile, AgentProfileRevision, bool]:
+    ) -> tuple[AgentProfile, AgentProfileRevision, bool]:
         revisions = await self._stores.agent_context_store.list_agent_profile_revisions(
             profile.profile_id
         )

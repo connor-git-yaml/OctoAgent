@@ -669,12 +669,12 @@ def resolve_behavior_workspace(
 
 
 def _is_worker_behavior_profile(agent_profile: AgentProfile) -> bool:
-    """判断 AgentProfile 是否为 worker 镜像（来自 WorkerProfile）。
+    """判断 AgentProfile 是否为 worker（kind=worker 行）。
 
     Feature 090 D2: 优先读 ``agent_profile.kind == "worker"``（显式标记）；
-    metadata 探测保留为兼容历史数据的 fallback——尚未填充 kind 字段的旧
-    AgentProfile 仍可正确识别为 worker。F107 完全合并 WorkerProfile 后
-    可移除 fallback 路径。
+    metadata 探测保留为 schema-lag 实例的 fallback——尚未填充 kind 字段的旧
+    AgentProfile（agent_profiles 无 kind 列）仍可正确识别为 worker。
+    F117 W4-7 真迁移补 kind 列后可移除 fallback 路径。
     """
     if agent_profile.kind == "worker":
         return True
