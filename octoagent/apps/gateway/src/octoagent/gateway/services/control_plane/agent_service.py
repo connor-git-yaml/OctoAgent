@@ -52,6 +52,7 @@ from octoagent.core.models.agent_context import DEFAULT_PERMISSION_PRESET
 from octoagent.gateway.services.config.config_wizard import load_config
 from ulid import ULID
 
+from ..agent_context_helpers import build_worker_agent_profile
 from ..agent_decision import build_behavior_system_summary, is_worker_behavior_profile
 from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
 
@@ -364,13 +365,10 @@ class AgentProfileDomainService(DomainServiceBase):
 
         if target_type == "worker_profile":
             # F117 Wave 2c-2c：worker profile 持久化为统一 agent_profiles 镜像（停写 worker_profiles）。
-            # 读切镜像（含 agent-profile-{id} 前缀 fallback + worker guard）找到 worker → 200，回写镜像
-            # （不复活 worker_profiles）。resource_limits 是两表死列（不持久化），行为同 else agent 分支。
+            # 读切镜像（bare id + worker guard）→ 200，回写镜像（不复活 worker_profiles）。
+            # W4 id-收口：镜像统一 bare id（程序化创建已收口）→ 删前缀 fallback。
+            # resource_limits 是两表死列（不持久化），行为同 else agent 分支。
             existing_mirror = await self._stores.agent_context_store.get_agent_profile(profile_id)
-            if existing_mirror is None and not profile_id.startswith("agent-profile-"):
-                existing_mirror = await self._stores.agent_context_store.get_agent_profile(
-                    f"agent-profile-{profile_id}"
-                )
             if existing_mirror is None or not is_worker_behavior_profile(existing_mirror):
                 raise ControlPlaneActionError(
                     "WORKER_PROFILE_NOT_FOUND",
@@ -632,36 +630,14 @@ class AgentProfileDomainService(DomainServiceBase):
             created_at=now,
             updated_at=now,
         )
-        # F117 Wave 4：停写 worker_profiles——worker_profile 仅作 in-memory DTO（构建下方镜像 +
-        # AgentRuntime.worker_profile_id）；该 worker_profiles 行从不被读（authoring 读镜像 / 运行时读
-        # project.default 前缀镜像 / agent_runtimes.worker_profile_id 无 FK），删 save 行为零变更。
-
-        # 从 WorkerProfile 同步生成 AgentProfile（完整镜像）
-        # F117 Wave 2bc（镜像完整性）：携全 9 字段 + source_kind 标记，让 read-switch 后此路径
-        # 创建的 worker 被 is_worker_behavior_profile 检出（兼容实例无 kind 列）且工具字段完整。
-        agent_profile_id = f"agent-profile-{worker_profile_id}"
-        agent_profile = AgentProfile(
-            profile_id=agent_profile_id,
-            scope=AgentProfileScope.PROJECT,
-            project_id="",
-            name=worker_name,
-            kind="worker",
-            persona_summary=project_goal,
-            model_alias=model_alias,
-            tool_profile=tool_profile,
-            summary=worker_profile.summary,
-            default_tool_groups=list(worker_profile.default_tool_groups),
-            selected_tools=list(worker_profile.selected_tools),
-            runtime_kinds=list(worker_profile.runtime_kinds),
-            status=worker_profile.status,
-            origin_kind=worker_profile.origin_kind,
-            draft_revision=worker_profile.draft_revision,
-            active_revision=worker_profile.active_revision,
-            metadata={
-                "source_kind": "worker_profile_mirror",
-                "source_worker_profile_id": worker_profile_id,
-            },
-        )
+        # F117 Wave 4 id-收口：bare canonical 镜像（profile_id = bare worker_profile_id，去
+        # agent-profile-{id} 前缀）。worker_profile 仅 in-memory DTO（W4a 已停写 worker_profiles）。
+        # 此前镜像 incomplete（仅 9 字段无 overlays）→ 首次 dispatch 经 2c-2b flip 完整性 guard
+        # 触发 rebuild 补全；本波收敛为 create-time complete（build_worker_agent_profile ≡
+        # materialize-on-read 输出），运行时输出等价。FK 安全：镜像先存（project_id=""）再随
+        # project 回填 rebuild（bootstrap_template_ids 依赖 project_id），与 baseline 双 save 同构。
+        agent_profile_id = worker_profile_id
+        agent_profile = build_worker_agent_profile(worker_profile)
         await self._stores.agent_context_store.save_agent_profile(agent_profile)
 
         # 创建 Project
@@ -689,9 +665,9 @@ class AgentProfileDomainService(DomainServiceBase):
         )
         await self._stores.project_store.create_project(project)
 
-        # 回填 project_id（worker_profile 仅 in-memory，不再持久化；只回填并保存镜像）
+        # 回填 project_id 后 rebuild canonical 镜像（project_id 影响 bootstrap_template_ids）
         worker_profile.project_id = project_id
-        agent_profile.project_id = project_id
+        agent_profile = build_worker_agent_profile(worker_profile)
         await self._stores.agent_context_store.save_agent_profile(agent_profile)
 
         # 创建行为文件骨架

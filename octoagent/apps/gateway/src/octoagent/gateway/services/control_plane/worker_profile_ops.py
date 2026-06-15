@@ -467,16 +467,12 @@ class WorkerProfileOpsMixin:
     async def _get_worker_profile_via_mirror(self, profile_id: str) -> WorkerProfile | None:
         """F117 Wave 2c-2c：authoring 读统一 agent_profiles(kind=worker) 镜像 → 反构 WorkerProfile DTO。
 
-        镜像由 authoring 写路径（2c-2a sync）保持 current。(a) 非 worker 行视为不存在
-        （保 baseline"只有 worker"语义）；(b) bare-wpid miss → fallback `agent-profile-{id}` 前缀
-        镜像（agent_service/_coordinator 程序化创建 id 约定，W4 收口前过渡）。reverse-converter 反构
+        镜像由 authoring 写路径（2c-2a sync）保持 current。非 worker 行视为不存在
+        （保 baseline"只有 worker"语义）。W4 id-收口后镜像统一 bare id（agent_service/_coordinator
+        程序化创建已收口）→ 删 `agent-profile-{id}` 前缀 fallback。reverse-converter 反构
         WorkerProfile DTO 使下游 authoring 逻辑零改动（避 AgentProfile 类型 cascade）。
         """
         mirror = await self._stores.agent_context_store.get_agent_profile(profile_id)
-        if mirror is None and not profile_id.startswith("agent-profile-"):
-            mirror = await self._stores.agent_context_store.get_agent_profile(
-                f"agent-profile-{profile_id}"
-            )
         if mirror is None or not is_worker_behavior_profile(mirror):
             return None
         return build_worker_dto_from_agent_profile(mirror)

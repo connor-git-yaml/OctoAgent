@@ -943,19 +943,12 @@ class ControlPlaneService(TelegramCommandMixin):
 
     async def _ensure_default_main_agent_bootstrap(self) -> None:
         """确保默认 Project 有主 Agent + 直接会话（仅缺失时创建）。"""
-        from octoagent.core.models.agent_context import (
-            AgentProfileOriginKind,
-            AgentProfileStatus,
-            WorkerProfile,
-        )
-
         project = await self._stores.project_store.get_default_project()
         if project is None:
             return
 
         now = datetime.now(tz=UTC)
         agent_profile_id = project.default_agent_profile_id
-        worker_profile_id = ""
         dirty = False
 
         if agent_profile_id:
@@ -966,31 +959,19 @@ class ControlPlaneService(TelegramCommandMixin):
                 agent_profile_id = ""
 
         if not agent_profile_id:
-            worker_profile_id = f"worker-profile-{str(ULID())}"
-            worker_profile = WorkerProfile(
-                profile_id=worker_profile_id,
-                scope=AgentProfileScope.PROJECT,
-                project_id=project.project_id,
-                name=f"{project.name} 主 Agent",
-                summary="",
-                model_alias="main",
-                tool_profile="standard",
-                status=AgentProfileStatus.ACTIVE,
-                origin_kind=AgentProfileOriginKind.CUSTOM,
-                created_at=now,
-                updated_at=now,
-            )
-            # F117 Wave 4：停写 worker_profiles——主 Agent（kind=main）不需 worker_profiles 行；
-            # worker_profile 仅 in-memory DTO 构建下方 main agent_profile。该行从不被读，删 save 零变更。
-            agent_profile_id = f"agent-profile-{worker_profile_id}"
+            # F117 Wave 4 id-收口：主 Agent（kind=main 默认）写干净 bare agent_profile——去
+            # agent-profile-{worker-profile-{id}} 双前缀 + 去 worker_profiles 行 + reverse-replace。
+            # 主 Agent 非 worker，不需 worker_profiles 行/镜像。仅 fresh 默认 project bootstrap 触发
+            # （幂等：已有 default_agent_profile_id 即跳过）→ 存量实例不受影响。
+            agent_profile_id = f"agent-profile-{str(ULID())}"
             agent_profile = AgentProfile(
                 profile_id=agent_profile_id,
                 scope=AgentProfileScope.PROJECT,
                 project_id=project.project_id,
-                name=worker_profile.name,
+                name=f"{project.name} 主 Agent",
                 persona_summary="",
-                model_alias=worker_profile.model_alias,
-                tool_profile=worker_profile.tool_profile,
+                model_alias="main",
+                tool_profile="standard",
             )
             await self._stores.agent_context_store.save_agent_profile(agent_profile)
             dirty = True
@@ -1003,9 +984,6 @@ class ControlPlaneService(TelegramCommandMixin):
             )
             await self._stores.project_store.save_project(project)
             dirty = True
-
-        if agent_profile_id.startswith("agent-profile-"):
-            worker_profile_id = agent_profile_id.replace("agent-profile-", "", 1)
 
         runtimes = await self._stores.agent_context_store.list_agent_runtimes(
             project_id=project.project_id,
@@ -1021,7 +999,7 @@ class ControlPlaneService(TelegramCommandMixin):
                 project_id=project.project_id,
                 workspace_id="",
                 agent_profile_id=agent_profile_id,
-                worker_profile_id=worker_profile_id,
+                worker_profile_id="",
                 role=AgentRuntimeRole.MAIN,
                 name=project.name,
                 persona_summary="",

@@ -103,21 +103,14 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         _, selected_project, _, _ = await self._resolve_selection()
         capability_pack = await self._get_capability_pack_document()
         # F117 Wave 2c-2c：listing 读统一 agent_profiles(kind=worker) → 反构 WorkerProfile DTO（下游
-        # 循环零改动）。全局不过滤项目（管理页看全部）。dedup：同一逻辑 worker 的 bare-wpid
-        # 与 `agent-profile-{wpid}` 前缀镜像（agent_service/_coordinator 程序化创建）合一，优先 bare id
-        # （W4 id 收口前过渡）。include_archived 隐含（agent_profiles 含 status=ARCHIVED 行）。
+        # 循环零改动）。全局不过滤项目（管理页看全部）。W4 id-收口后镜像统一 bare id
+        # （agent_service/_coordinator 程序化创建已收口）→ 删 `agent-profile-{wpid}` 前缀 dedup，
+        # profile_id 是 PK 天然去重。include_archived 隐含（agent_profiles 含 status=ARCHIVED 行）。
         all_agent_profiles = await self._stores.agent_context_store.list_agent_profiles()
-        worker_mirrors_by_logical_id: dict[str, AgentProfile] = {}
-        for mirror in all_agent_profiles:
-            if not is_worker_behavior_profile(mirror):
-                continue
-            logical_id = mirror.profile_id.removeprefix("agent-profile-")
-            existing = worker_mirrors_by_logical_id.get(logical_id)
-            if existing is None or mirror.profile_id == logical_id:
-                worker_mirrors_by_logical_id[logical_id] = mirror
         stored_profiles = [
             build_worker_dto_from_agent_profile(mirror)
-            for mirror in worker_mirrors_by_logical_id.values()
+            for mirror in all_agent_profiles
+            if is_worker_behavior_profile(mirror)
         ]
         project_works: list[Work] = []
         if self._ctx.delegation_plane_service is not None:
