@@ -4,8 +4,10 @@
 
 把 ``worker_profiles`` + ``worker_profile_revisions`` 两表的数据合并进统一的
 ``agent_profiles``（kind=worker 行携带工具字段）+ 新 ``agent_profile_revisions``，
-塌缩 ``agent_runtimes.worker_profile_id``，重命名 ``works.requested_worker_profile_id``，
-最后 DROP 两张旧表。
+塌缩 ``agent_runtimes.worker_profile_id``，最后 DROP 两张旧表。
+
+W4-6（``works.requested_worker_profile_id`` 改名）按用户拍板**推迟**并入 W3 FE 改名——
+本迁移不动 ``works`` 列。
 
 ⚠ **不可逆**：apply 会 DROP ``worker_profiles`` / ``worker_profile_revisions`` 与
 ``agent_runtimes.worker_profile_id`` 列。``run_rollback`` 仅释放幂等键（删 audit 行），
@@ -250,14 +252,7 @@ async def run_dry_run(db_path: str) -> dict[str, object]:
             else 0
         )
 
-        works_cols = await _table_columns(conn, "works") if await _table_exists(conn, "works") else set()
-        works_total = await _scalar(conn, "SELECT COUNT(*) FROM works") if works_cols else 0
-        works_with_req = (
-            await _scalar(conn, "SELECT COUNT(*) FROM works WHERE requested_worker_profile_id!=''")
-            if "requested_worker_profile_id" in works_cols
-            else 0
-        )
-
+        # W4-6 推迟：本迁移不动 works.requested_worker_profile_id，故 dry-run 不报 works 计划。
         prefix_ids = {apid for apid, _ in prefix_mirrors}
         projects_prefix_refs = (
             await _scalar(
@@ -290,8 +285,6 @@ async def run_dry_run(db_path: str) -> dict[str, object]:
                     "agent_runtimes_with_worker_profile_id": runtimes_with_wpid,
                     "orphan_worker_runtimes_to_backfill_agent_profile_id": orphan_worker_runtimes,
                     "mismatched_worker_runtimes_to_reconcile_id": mismatch_worker_runtimes,
-                    "works_total_rows": works_total,
-                    "works_rows_with_requested_worker_profile_id": works_with_req,
                     "projects_referencing_prefix_mirror": projects_prefix_refs,
                 },
                 "conflicts": {
@@ -545,23 +538,9 @@ async def run_apply(
                     "AND agent_profile_id!='' AND agent_runtime_id NOT LIKE 'subagent-%'"
                 )
 
-            # 6. works：rename 列
-            works_cols = await _table_columns(conn, "works")
-            if "requested_worker_profile_id" in works_cols:
-                await conn.execute("DROP INDEX IF EXISTS idx_works_requested_worker_profile")
-                await conn.execute(
-                    "ALTER TABLE works RENAME COLUMN requested_worker_profile_id "
-                    "TO requested_agent_profile_id"
-                )
-                if "requested_worker_profile_version" in works_cols:
-                    await conn.execute(
-                        "ALTER TABLE works RENAME COLUMN requested_worker_profile_version "
-                        "TO requested_agent_profile_version"
-                    )
-                await conn.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_works_requested_agent_profile "
-                    "ON works(requested_agent_profile_id, requested_agent_profile_version)"
-                )
+            # 6. works 列改名（requested_worker_profile_id→requested_agent_profile_id）：
+            #    用户拍板**推迟**并入 W3 FE 改名（纯命名收敛 + 持久化 metadata key replay 风险 +
+            #    与 W3 WorkProjectionItem 重叠）。本迁移不动 works 列——代码侧 W4-6 同步推迟。
 
             # 7. DROP 旧表 + 旧索引
             await conn.execute("DROP INDEX IF EXISTS idx_worker_profiles_scope_project")

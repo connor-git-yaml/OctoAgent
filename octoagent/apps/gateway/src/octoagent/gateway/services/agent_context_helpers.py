@@ -134,7 +134,7 @@ def _memory_recall_preferences(agent_profile: AgentProfile | None) -> dict[str, 
 # F094 D3: 私有硬编码 worker memory recall 默认值函数已删除（5 个 key 迁移到
 # packages/core/src/octoagent/core/models/agent_context.py 的
 # DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES module-level 常量，单一 SoT）。
-# 唯一调用点 `_ensure_agent_profile_from_worker_profile` 已改用 import 常量；
+# 现唯一消费方是 build_worker_agent_profile（W4-2a 删 materialize-on-read 后收敛）；
 # merge 顺序 `{**defaults, **existing}` 保持 baseline 一致。
 
 

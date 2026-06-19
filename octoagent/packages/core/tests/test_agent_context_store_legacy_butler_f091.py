@@ -38,10 +38,10 @@ async def _insert_legacy_butler_runtime_row(
     await conn.execute(
         """
         INSERT INTO agent_runtimes (
-            agent_runtime_id, project_id, agent_profile_id, worker_profile_id,
+            agent_runtime_id, project_id, agent_profile_id,
             role, name, persona_summary, status, permission_preset, role_card,
             metadata, created_at, updated_at, archived_at
-        ) VALUES (?, ?, ?, '', 'butler', ?, ?, 'active', 'normal', '', '{}', ?, ?, NULL)
+        ) VALUES (?, ?, ?, 'butler', ?, ?, 'active', 'normal', '', '{}', ?, ?, NULL)
         """,
         (
             agent_runtime_id,
@@ -153,10 +153,10 @@ async def test_canonical_main_role_unaffected(tmp_path: Path) -> None:
     await store_group.conn.execute(
         """
         INSERT INTO agent_runtimes (
-            agent_runtime_id, project_id, agent_profile_id, worker_profile_id,
+            agent_runtime_id, project_id, agent_profile_id,
             role, name, persona_summary, status, permission_preset, role_card,
             metadata, created_at, updated_at, archived_at
-        ) VALUES ('agent-runtime-canonical', 'project-canonical', 'agent-profile-canonical', '',
+        ) VALUES ('agent-runtime-canonical', 'project-canonical', 'agent-profile-canonical',
             'main', 'Canonical Main', 'canonical persona', 'active', 'normal', '', '{}', ?, ?, NULL)
         """,
         (now, now),
