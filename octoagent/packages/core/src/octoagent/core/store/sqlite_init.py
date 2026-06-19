@@ -1337,7 +1337,8 @@ async def _merge_composite_agent_identity_rows(conn: aiosqlite.Connection) -> No
 
     执行流程（整体在 FK 临时关闭 + 单事务下完成）：
     1. 扫 composite runtime（`agent_runtime_id LIKE 'role:%'`）。
-    2. 按 (project_id, role, worker_profile_id / agent_profile_id) 找 canonical ULID。
+    2. 按 (project_id, role, agent_profile_id) 找 canonical ULID（F117 W4-5：worker 与
+       非 worker 统一按 agent_profile_id 匹配，worker 的 agent_profile_id==旧 worker_profile_id bare）。
        - 有 canonical：把所有外键列从 composite 改指向 canonical，删 composite。
        - 无 canonical：就地 rename 到 `runtime-{ULID}`（同步 UPDATE 所有外键列）。
     3. 对 agent_sessions 同样处理（`agent_session_id LIKE 'runtime:%'`），
@@ -1352,6 +1353,7 @@ async def _merge_composite_agent_identity_rows(conn: aiosqlite.Connection) -> No
     if fk_was_on:
         await conn.execute("PRAGMA foreign_keys = OFF")
     try:
+        await _backfill_worker_runtime_agent_profile_id(conn)
         await _merge_composite_runtimes(conn)
         await _merge_composite_sessions(conn)
         await _archive_extra_active_rows(conn)
@@ -1420,6 +1422,26 @@ async def _archive_duplicate_memory_namespaces(conn: aiosqlite.Connection) -> No
           )
         """,
         (now_iso, now_iso),
+    )
+
+
+async def _backfill_worker_runtime_agent_profile_id(conn: aiosqlite.Connection) -> None:
+    """F117 W4-5 过渡桥接：存量实例在 migration_117 跑之前，agent_runtimes 仍有 worker_profile_id 列。
+
+    W4-5 起 worker runtime 只按 agent_profile_id 标识，但存量"孤儿"worker 行可能
+    agent_profile_id='' + worker_profile_id 非空——对新的 find_active_runtime / dedup /
+    readers / _merge_composite_runtimes 不可见，会在"已部署新代码但 migration 未跑"的窗口里
+    产生重复 active runtime（并使 migration 建 agent_profile_id 唯一索引时撞重失败）。
+    本步在启动 dedup/merge **之前**把这些行的 agent_profile_id 从 worker_profile_id 回填
+    （与 migration step 5 孤儿 backfill 同规则；W4-1 后 worker 的 agent_profile_id==worker_profile_id），
+    让后续 merge/dedup/readers 立即按 agent_profile_id 正确生效。
+    migration DROP worker_profile_id 列后本步是 no-op（列不存在直接返回）；fresh DB 同理无此列。
+    """
+    if "worker_profile_id" not in await _table_columns(conn, "agent_runtimes"):
+        return
+    await conn.execute(
+        "UPDATE agent_runtimes SET agent_profile_id = worker_profile_id "
+        "WHERE role = 'worker' AND agent_profile_id = '' AND worker_profile_id != ''"
     )
 
 

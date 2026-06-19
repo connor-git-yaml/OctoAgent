@@ -527,6 +527,31 @@ async def run_apply(
                     "WHERE role='worker' AND worker_profile_id!='' "
                     "AND agent_profile_id!=worker_profile_id"
                 )
+                # F117 W4-7 双评审（Codex HIGH 防御）：建唯一索引前先 dedup——同 (project,
+                # agent_profile_id) 的多条 active worker runtime（可能由"已部署 W4-5 代码但本迁移
+                # 未跑"的窗口产生）保留最新一条、其余 archive，避免 CREATE UNIQUE INDEX 撞重失败
+                # （与 init_db._archive_extra_active_rows worker 分支同规则）。启动 backfill 通常已
+                # 闭合窗口，本步为 migration 自足性兜底。
+                _dedup_now = datetime.now(tz=UTC).isoformat()
+                await conn.execute(
+                    """
+                    UPDATE agent_runtimes
+                    SET status='archived', archived_at=?, updated_at=?
+                    WHERE status='active' AND role='worker' AND agent_profile_id!=''
+                      AND agent_runtime_id NOT LIKE 'subagent-%'
+                      AND agent_runtime_id NOT IN (
+                          SELECT agent_runtime_id FROM (
+                              SELECT agent_runtime_id, ROW_NUMBER() OVER (
+                                  PARTITION BY project_id, agent_profile_id
+                                  ORDER BY updated_at DESC, created_at DESC
+                              ) AS rn FROM agent_runtimes
+                              WHERE status='active' AND role='worker' AND agent_profile_id!=''
+                                AND agent_runtime_id NOT LIKE 'subagent-%'
+                          ) WHERE rn=1
+                      )
+                    """,
+                    (_dedup_now, _dedup_now),
+                )
                 await conn.execute(
                     "DROP INDEX IF EXISTS idx_agent_runtimes_active_worker_unique"
                 )

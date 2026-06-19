@@ -40,7 +40,22 @@
   - dry-run：1 worker merge / 1 revision rekey / **1 orphan backfill** / column collapse / **无 works 改名**。
   - apply：succeeded（worker_profiles + worker_profile_revisions DROP / kind 列 ALTER+回填 / worker_profile_id 列 DROP / 孤儿 backfill 后 0 残留 / works 列保留 / 1 audit 行）。
   - apply again：idempotent（skipped）。
-- W4-5/W4-7 ★双评审：见 [本波双评审]（待补）。
+- **W4-5+W4-7 ★双评审闭环**（Codex 对抗 + Opus spec-对齐，审 `8f18ca58..HEAD`）：
+  - **Codex 2 HIGH / 1 MED**（全部"已部署 W4-5 代码但 migration 未跑"的过渡窗口）：
+    - HIGH：存量孤儿 worker runtime（agent_profile_id='' + worker_profile_id 非空）对新
+      find_active/dedup 不可见 → 窗口内可能产生重复 active runtime + 使 migration 建唯一索引撞重失败；
+      `_merge_composite_runtimes` 对 legacy composite 行 loose (project,role) fallback。
+    - MED：窗口内孤儿 runtime 的 owner 只在 worker_profile_id，readers 返回空 owner。
+    - **裁定·修复**：① 启动桥接 `_backfill_worker_runtime_agent_profile_id`（init_db 在 dedup/merge
+      **前**，列存在时把 worker 行 agent_profile_id 从 worker_profile_id 回填）→ 一条 UPDATE 闭合孤儿/
+      composite/reader 三处；migration DROP 列后 / fresh DB 自动 no-op。② migration 建唯一索引前加
+      dedup（自足性兜底）。**实例副本验证**：真孤儿 backfill 1→0；migration apply+幂等+post-state 正确。
+  - **Opus 0 HIGH / 1 MED / 2 LOW**（verdict ALIGNED，独立复跑 4141 passed）：
+    - MED：第 6 处漏改 `AgentRuntime(worker_profile_id=)`（test_task_service:3098，extra=ignore 静默丢弃→孤儿测试数据）→ **改 agent_profile_id**（completion-report 原"5 处"更正为 6 处）。
+    - LOW：sqlite_init:1340 docstring 残留 worker_profile_id → 修；dual-review "待补" 流程项 → 本节即闭合。
+  - **panel 价值**：Codex（对抗）证明 W4 原"过渡期 code-level dedup 兜底"对孤儿**不成立**（孤儿
+    agent_profile_id='' 对 dedup 不可见）→ 启动 backfill 让该兜底真正成立；Opus（spec-对齐）抓到
+    Codex 漏的第 6 处静默丢弃构造。**0 HIGH 残留**。
 
 ## 五、残留扫描（§6）
 

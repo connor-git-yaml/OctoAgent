@@ -3095,7 +3095,7 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
         AgentRuntime(
             agent_runtime_id=path_a_runtime_id,
             project_id="project-alpha",
-            worker_profile_id=worker_profile.profile_id,
+            agent_profile_id=worker_profile.profile_id,
             role=AgentRuntimeRole.WORKER,
             name=worker_profile.name,
         )
