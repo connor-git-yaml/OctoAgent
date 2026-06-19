@@ -309,8 +309,9 @@ class AgentRuntime(BaseModel):
 
     agent_runtime_id: str = Field(min_length=1)
     project_id: str = Field(default="")
+    # F117 W4-5：worker_profile_id 字段塌缩——worker runtime 直接用 agent_profile_id
+    # 标识（W4-1 收口后 worker 的 agent_profile_id == 旧 worker_profile_id bare）。
     agent_profile_id: str = Field(default="")
-    worker_profile_id: str = Field(default="")
     role: AgentRuntimeRole = AgentRuntimeRole.MAIN
     name: str = Field(default="")
     persona_summary: str = Field(default="")

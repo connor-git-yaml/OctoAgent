@@ -341,7 +341,7 @@ async def test_find_active_runtime_selects_active_ulid_and_skips_closed(
     active_runtime = AgentRuntime(
         agent_runtime_id="runtime-01TESTACTIVE",
         project_id="project-alpha",
-        worker_profile_id="worker-profile-a",
+        agent_profile_id="worker-profile-a",
         role=AgentRuntimeRole.WORKER,
         name="Active Worker",
         status=AgentRuntimeStatus.ACTIVE,
@@ -349,7 +349,7 @@ async def test_find_active_runtime_selects_active_ulid_and_skips_closed(
     closed_runtime = AgentRuntime(
         agent_runtime_id="runtime-01TESTCLOSED",
         project_id="project-alpha",
-        worker_profile_id="worker-profile-a",
+        agent_profile_id="worker-profile-a",
         role=AgentRuntimeRole.WORKER,
         name="Closed Worker",
         status=AgentRuntimeStatus.ARCHIVED,
@@ -357,7 +357,7 @@ async def test_find_active_runtime_selects_active_ulid_and_skips_closed(
     other_project_runtime = AgentRuntime(
         agent_runtime_id="runtime-01TESTOTHER",
         project_id="project-beta",
-        worker_profile_id="worker-profile-a",
+        agent_profile_id="worker-profile-a",
         role=AgentRuntimeRole.WORKER,
         name="Other Project",
         status=AgentRuntimeStatus.ACTIVE,
@@ -370,7 +370,7 @@ async def test_find_active_runtime_selects_active_ulid_and_skips_closed(
     hit = await store_group.agent_context_store.find_active_runtime(
         project_id="project-alpha",
         role=AgentRuntimeRole.WORKER,
-        worker_profile_id="worker-profile-a",
+        agent_profile_id="worker-profile-a",
     )
     assert hit is not None
     assert hit.agent_runtime_id == "runtime-01TESTACTIVE"
@@ -378,7 +378,7 @@ async def test_find_active_runtime_selects_active_ulid_and_skips_closed(
     miss = await store_group.agent_context_store.find_active_runtime(
         project_id="project-alpha",
         role=AgentRuntimeRole.WORKER,
-        worker_profile_id="worker-profile-unknown",
+        agent_profile_id="worker-profile-unknown",
     )
     assert miss is None
 

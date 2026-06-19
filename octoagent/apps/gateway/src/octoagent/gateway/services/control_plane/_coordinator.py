@@ -999,7 +999,6 @@ class ControlPlaneService(TelegramCommandMixin):
                 project_id=project.project_id,
                 workspace_id="",
                 agent_profile_id=agent_profile_id,
-                worker_profile_id="",
                 role=AgentRuntimeRole.MAIN,
                 name=project.name,
                 persona_summary="",

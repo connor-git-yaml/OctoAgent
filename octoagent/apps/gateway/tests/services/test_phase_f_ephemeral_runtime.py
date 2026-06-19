@@ -101,7 +101,6 @@ async def _save_caller_worker_runtime(store_group, *, profile_id: str) -> AgentR
         agent_runtime_id="runtime-caller-worker-active",
         project_id=_PROJECT_ID,
         agent_profile_id=profile_id,
-        worker_profile_id="",  # 关键：empty profile_id（subagent 也是空，复用条件）
         role=AgentRuntimeRole.WORKER,
         name="caller_worker",
         status=AgentRuntimeStatus.ACTIVE,

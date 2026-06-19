@@ -219,9 +219,7 @@ async def _resolve_session_owner_profile_id(store_group, task_id: str) -> str:
             )
             if runtime is None:
                 continue
-            profile_id = str(
-                runtime.worker_profile_id or runtime.agent_profile_id or ""
-            ).strip()
+            profile_id = str(runtime.agent_profile_id or "").strip()
             if not profile_id:
                 continue
             if session.kind is AgentSessionKind.DIRECT_WORKER:
@@ -366,7 +364,7 @@ async def _resolve_session_owner_profile_id_from_session_ref(
         runtime = await store_group.agent_context_store.get_agent_runtime(session.agent_runtime_id)
         if runtime is None:
             continue
-        profile_id = str(runtime.agent_profile_id or runtime.worker_profile_id or "").strip()
+        profile_id = str(runtime.agent_profile_id or "").strip()
         if profile_id:
             return profile_id
     return ""

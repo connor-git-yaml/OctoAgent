@@ -3800,7 +3800,7 @@ class TestControlPlaneApi:
         )
         assert runtime is not None
         assert runtime.role is AgentRuntimeRole.WORKER
-        assert runtime.worker_profile_id == profile_id
+        assert runtime.agent_profile_id == profile_id
 
         sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
         assert sessions_resp.status_code == 200

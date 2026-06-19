@@ -347,7 +347,7 @@ class TestOrchestrator:
             )
             assert runtime is not None
             assert runtime.role is AgentRuntimeRole.WORKER
-            assert runtime.worker_profile_id == worker_profile.profile_id
+            assert runtime.agent_profile_id == worker_profile.profile_id
         finally:
             await store_group.close()
 

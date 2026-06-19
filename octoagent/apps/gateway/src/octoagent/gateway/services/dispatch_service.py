@@ -664,7 +664,6 @@ class A2ADispatchMixin:
             existing = await self._stores.agent_context_store.find_active_runtime(
                 project_id=project_id,
                 role=role,
-                worker_profile_id=worker_profile_id,
                 agent_profile_id=agent_profile_id,
             )
         if existing is not None:
@@ -718,7 +717,6 @@ class A2ADispatchMixin:
             agent_runtime_id=runtime_id,
             project_id=project_id,
             agent_profile_id=agent_profile_id,
-            worker_profile_id=worker_profile_id,
             role=role,
             name=name,
             persona_summary=persona_summary,
@@ -734,7 +732,6 @@ class A2ADispatchMixin:
             refreshed = await self._stores.agent_context_store.find_active_runtime(
                 project_id=project_id,
                 role=role,
-                worker_profile_id=worker_profile_id,
                 agent_profile_id=agent_profile_id,
             )
             if refreshed is not None:

@@ -690,7 +690,6 @@ class AgentProfileDomainService(DomainServiceBase):
             project_id=project_id,
             workspace_id="",
             agent_profile_id=agent_profile_id,
-            worker_profile_id=worker_profile_id,
             role=AgentRuntimeRole.WORKER,
             name=worker_name,
             persona_summary=project_goal,

@@ -1211,7 +1211,6 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
     assert runtime is not None
     assert runtime.role is AgentRuntimeRole.WORKER
     assert runtime.agent_profile_id == worker_profile.profile_id
-    assert runtime.worker_profile_id == worker_profile.profile_id
 
     agent_session = await store_group.agent_context_store.get_agent_session(frame.agent_session_id)
     assert agent_session is not None
@@ -3263,7 +3262,7 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
         AgentRuntime(
             agent_runtime_id=canonical_runtime_id,
             project_id=project.project_id,
-            worker_profile_id="worker-profile-mig",
+            agent_profile_id="worker-profile-mig",
             role=AgentRuntimeRole.WORKER,
             name="canonical",
         )
@@ -3272,7 +3271,7 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
         AgentRuntime(
             agent_runtime_id=composite_runtime_id,
             project_id=project.project_id,
-            worker_profile_id="worker-profile-mig",
+            agent_profile_id="worker-profile-mig",
             role=AgentRuntimeRole.WORKER,
             name="composite-leftover",
         )
@@ -3314,7 +3313,7 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
         AgentRuntime(
             agent_runtime_id=orphan_composite_runtime_id,
             project_id=project.project_id,
-            worker_profile_id="worker-profile-orphan",
+            agent_profile_id="worker-profile-orphan",
             role=AgentRuntimeRole.WORKER,
             name="orphan",
         )

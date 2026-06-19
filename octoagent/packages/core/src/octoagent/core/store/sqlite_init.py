@@ -529,7 +529,6 @@ CREATE TABLE IF NOT EXISTS agent_runtimes (
     agent_runtime_id   TEXT PRIMARY KEY,
     project_id         TEXT NOT NULL DEFAULT '',
     agent_profile_id   TEXT NOT NULL DEFAULT '',
-    worker_profile_id  TEXT NOT NULL DEFAULT '',
     role               TEXT NOT NULL DEFAULT 'main',
     name               TEXT NOT NULL DEFAULT '',
     persona_summary    TEXT NOT NULL DEFAULT '',
@@ -906,17 +905,18 @@ _AGENT_CONTEXT_INDEXES = [
         "CREATE INDEX IF NOT EXISTS idx_agent_runtimes_role_project "
         "ON agent_runtimes(role, project_id, updated_at DESC);"
     ),
-    # 逻辑身份单写约束（防并发 race 双写）：同一 (project, role, profile) 在 active
-    # 状态下只能有一条 runtime row。worker 按 worker_profile_id 区分，main 按
-    # agent_profile_id 区分；profile_id 为空时不参与（兼容历史脏数据）。
-    # 排除 `subagent-%` 前缀：历史上预留给 subagent runtime 命名空间，避免与 worker
-    # 唯一约束冲突；当前生产路径（task_runner）不再创建 subagent- 前缀的 runtime，
-    # 但保留 schema 约束以兼容历史数据。
+    # 逻辑身份单写约束（防并发 race 双写）：同一 (project, role, agent_profile_id) 在 active
+    # 状态下只能有一条 runtime row。worker 与 main 均按 agent_profile_id 区分（F117 W4-5：
+    # worker 的 agent_profile_id == 旧 worker_profile_id bare，W4-1 收口）；id 为空时不参与
+    # （兼容历史脏数据）。排除 `subagent-%` 前缀：历史上预留给 subagent runtime 命名空间，
+    # 避免与 worker 唯一约束冲突；当前生产路径（task_runner）不再创建 subagent- 前缀的 runtime，
+    # 但保留 schema 约束以兼容历史数据。worker/main 两条 partial index 仅 role 不同。
+    # 存量实例旧 worker 索引（按 worker_profile_id）由 migration_117（W4-7）DROP + 重建。
     (
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runtimes_active_worker_unique "
-        "ON agent_runtimes(project_id, worker_profile_id) "
+        "ON agent_runtimes(project_id, agent_profile_id) "
         "WHERE status = 'active' AND role = 'worker' "
-        "AND worker_profile_id != '' AND agent_runtime_id NOT LIKE 'subagent-%';"
+        "AND agent_profile_id != '' AND agent_runtime_id NOT LIKE 'subagent-%';"
     ),
     (
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_runtimes_active_main_unique "
@@ -1427,30 +1427,31 @@ async def _archive_extra_active_rows(conn: aiosqlite.Connection) -> None:
     """对违反单写约束的历史脏数据做 archive，让 partial unique index 能创建。
 
     保留每组最新一条 active：
-    - agent_runtimes by (project_id, role='worker', worker_profile_id)
+    - agent_runtimes by (project_id, role='worker', agent_profile_id)  # F117 W4-5
     - agent_runtimes by (project_id, role='main', agent_profile_id)
     - agent_sessions by (project_id, kind='direct_worker')
     """
     now_iso = datetime.now(UTC).isoformat()
-    # 排除 subagent runtime：与 parent 同 worker_profile_id 是合法的，不参与单写约束。
+    # 排除 subagent runtime：与 parent 同 agent_profile_id 是合法的，不参与单写约束。
+    # F117 W4-5：worker 单写约束改按 agent_profile_id（与 rekey 后的 worker 唯一索引一致）。
     await conn.execute(
         """
         UPDATE agent_runtimes
         SET status = 'archived', archived_at = ?, updated_at = ?
         WHERE status = 'active'
           AND role = 'worker'
-          AND worker_profile_id != ''
+          AND agent_profile_id != ''
           AND agent_runtime_id NOT LIKE 'subagent-%'
           AND agent_runtime_id NOT IN (
               SELECT agent_runtime_id FROM (
                   SELECT agent_runtime_id,
                          ROW_NUMBER() OVER (
-                             PARTITION BY project_id, worker_profile_id
+                             PARTITION BY project_id, agent_profile_id
                              ORDER BY updated_at DESC, created_at DESC
                          ) AS rn
                   FROM agent_runtimes
                   WHERE status = 'active' AND role = 'worker'
-                    AND worker_profile_id != ''
+                    AND agent_profile_id != ''
                     AND agent_runtime_id NOT LIKE 'subagent-%'
               ) WHERE rn = 1
           )
@@ -1580,32 +1581,20 @@ async def _merge_composite_runtimes(conn: aiosqlite.Connection) -> None:
     rows = await _fetchall(
         conn,
         """
-        SELECT agent_runtime_id, project_id, role,
-               agent_profile_id, worker_profile_id
+        SELECT agent_runtime_id, project_id, role, agent_profile_id
         FROM agent_runtimes
         WHERE agent_runtime_id LIKE ?
         """,
         (_COMPOSITE_RUNTIME_ID_PATTERN,),
     )
-    for composite_id, project_id, role, agent_profile_id, worker_profile_id in rows:
+    for composite_id, project_id, role, agent_profile_id in rows:
         composite_id = str(composite_id)
         role = str(role or "").strip() or "main"
         project_id = str(project_id or "")
         agent_profile_id = str(agent_profile_id or "")
-        worker_profile_id = str(worker_profile_id or "")
-        # 找 canonical ULID runtime
-        if role == "worker" and worker_profile_id:
-            canonical_row = await _fetchall(
-                conn,
-                """
-                SELECT agent_runtime_id FROM agent_runtimes
-                WHERE agent_runtime_id LIKE 'runtime-%'
-                  AND project_id = ? AND role = ? AND worker_profile_id = ?
-                ORDER BY updated_at DESC, created_at DESC LIMIT 1
-                """,
-                (project_id, role, worker_profile_id),
-            )
-        elif role != "worker" and agent_profile_id:
+        # 找 canonical ULID runtime。F117 W4-5：worker 与非 worker 统一按 agent_profile_id 匹配
+        # （worker 的 agent_profile_id == 旧 worker_profile_id bare，W4-1 收口）。
+        if agent_profile_id:
             canonical_row = await _fetchall(
                 conn,
                 """

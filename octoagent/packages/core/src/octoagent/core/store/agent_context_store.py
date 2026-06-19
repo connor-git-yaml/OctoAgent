@@ -343,15 +343,14 @@ class SqliteAgentContextStore:
             """
             INSERT INTO agent_runtimes (
                 agent_runtime_id, project_id, agent_profile_id,
-                worker_profile_id, role, name, persona_summary, status,
+                role, name, persona_summary, status,
                 permission_preset, role_card,
                 metadata, created_at, updated_at, archived_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(agent_runtime_id) DO UPDATE SET
                 project_id = excluded.project_id,
                 agent_profile_id = excluded.agent_profile_id,
-                worker_profile_id = excluded.worker_profile_id,
                 role = excluded.role,
                 name = excluded.name,
                 persona_summary = excluded.persona_summary,
@@ -366,7 +365,6 @@ class SqliteAgentContextStore:
                 runtime.agent_runtime_id,
                 runtime.project_id,
                 runtime.agent_profile_id,
-                runtime.worker_profile_id,
                 runtime.role.value,
                 runtime.name,
                 runtime.persona_summary,
@@ -418,24 +416,20 @@ class SqliteAgentContextStore:
         *,
         project_id: str,
         role: AgentRuntimeRole,
-        worker_profile_id: str = "",
         agent_profile_id: str = "",
     ) -> AgentRuntime | None:
-        """按 (project, role, worker/agent profile) 查找最新活跃 Runtime。
+        """按 (project, role, agent_profile) 查找最新活跃 Runtime。
 
         用于消除 composite-key fallback：Path B 在 request 没带 agent_runtime_id
         时走这里反查 Path A 已创建的 ULID runtime，而不是再建一条 composite row。
+        F117 W4-5：worker 与 main 统一按 agent_profile_id 反查（worker 的 agent_profile_id
+        == 旧 worker_profile_id bare，W4-1 收口）——去掉 role 分支。
         """
         clauses = ["project_id = ?", "role = ?", "status = 'active'"]
         args: list[object] = [project_id, role.value]
-        if role is AgentRuntimeRole.WORKER:
-            if worker_profile_id:
-                clauses.append("worker_profile_id = ?")
-                args.append(worker_profile_id)
-        else:
-            if agent_profile_id:
-                clauses.append("agent_profile_id = ?")
-                args.append(agent_profile_id)
+        if agent_profile_id:
+            clauses.append("agent_profile_id = ?")
+            args.append(agent_profile_id)
         where = " AND ".join(clauses)
         row = await self._fetchone(
             f"""
@@ -1377,7 +1371,8 @@ class SqliteAgentContextStore:
             agent_runtime_id=row["agent_runtime_id"],
             project_id=row["project_id"],
             agent_profile_id=row["agent_profile_id"],
-            worker_profile_id=row["worker_profile_id"],
+            # F117 W4-5：worker_profile_id 字段已塌缩——不再从 row 读（fresh DB 无此列；
+            # 存量实例列残留至 migration_117 DROP，SELECT * 返回但此处忽略）。
             # F091 Final Codex HIGH 闭环：用 normalize 兜底处理 legacy "butler" 数据
             # （F091 Phase B 删除启动 migration 后，跳版本升级 / Docker volume / backup 恢复
             # 等场景下旧 butler 行不会再被自动迁移；store 层兜底保证读取不报 ValueError）

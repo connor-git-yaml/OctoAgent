@@ -262,7 +262,12 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
                 role=item.role.value,
                 project_id=item.project_id,
                 agent_profile_id=item.agent_profile_id,
-                worker_profile_id=item.worker_profile_id,
+                # F117 W4-5：AgentRuntime.worker_profile_id 已塌缩。AgentRuntimeItem.worker_profile_id
+                # 是 FE DTO 字段（W3 改名 agent_profile_id），此处值守恒填充：worker 行取
+                # agent_profile_id（== 旧 worker_profile_id bare），非 worker 行保持空（同 baseline）。
+                worker_profile_id=(
+                    item.agent_profile_id if item.role is AgentRuntimeRole.WORKER else ""
+                ),
                 name=item.name,
                 persona_summary=item.persona_summary,
                 status=item.status.value,
@@ -466,7 +471,7 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
                     )
                     if runtime is not None:
                         session_runtime_owner_profile_id = str(
-                            runtime.worker_profile_id or runtime.agent_profile_id or ""
+                            runtime.agent_profile_id or ""
                         ).strip()
             execution_summary: dict[str, Any] = {}
             latest_metadata = await self._extract_latest_user_metadata(latest.task_id)
@@ -607,7 +612,7 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
                 agent_sess.agent_runtime_id
             )
             if runtime is not None:
-                agent_profile_id = runtime.worker_profile_id or runtime.agent_profile_id
+                agent_profile_id = runtime.agent_profile_id
             owner_name = await self._resolve_profile_display_name(agent_profile_id)
             session_items.append(
                 SessionProjectionItem(
@@ -1011,7 +1016,7 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
                 existing_owner_profile_id = ""
                 if existing_runtime is not None:
                     existing_owner_profile_id = str(
-                        existing_runtime.worker_profile_id or existing_runtime.agent_profile_id or ""
+                        existing_runtime.agent_profile_id or ""
                     ).strip()
                 return self._completed_result(
                     request=request,
@@ -1071,7 +1076,10 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
         new_runtime = AgentRuntime(
             agent_runtime_id=f"runtime-{str(ULID())}",
             project_id=project_id,
-            worker_profile_id=worker_profile_id,
+            # F117 W4-5：worker runtime 直接用 agent_profile_id 标识（== 旧 worker_profile_id bare，
+            # W4-1 收口）。baseline 此处只设 worker_profile_id 不设 agent_profile_id（孤儿来源）→
+            # 收口为设 agent_profile_id，dedup/find_active/readers 全部按 agent_profile_id 等价生效。
+            agent_profile_id=worker_profile_id,
             role=AgentRuntimeRole.WORKER,
             name=matched_profile.name,
             persona_summary=matched_profile.summary,
