@@ -358,9 +358,9 @@ CREATE TABLE IF NOT EXISTS works (
     delegation_target_profile_id TEXT NOT NULL DEFAULT '',
     turn_executor_kind      TEXT NOT NULL DEFAULT 'worker',
     agent_profile_id        TEXT NOT NULL DEFAULT '',
-    requested_worker_profile_id TEXT NOT NULL DEFAULT '',
-    requested_worker_profile_version INTEGER NOT NULL DEFAULT 0,
-    effective_worker_snapshot_id TEXT NOT NULL DEFAULT '',
+    requested_agent_profile_id TEXT NOT NULL DEFAULT '',
+    requested_agent_profile_version INTEGER NOT NULL DEFAULT 0,
+    effective_profile_snapshot_id TEXT NOT NULL DEFAULT '',
     context_frame_id        TEXT NOT NULL DEFAULT '',
     tool_selection_id       TEXT NOT NULL DEFAULT '',
     selected_tools          TEXT NOT NULL DEFAULT '[]',
@@ -877,9 +877,12 @@ _WORK_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_works_status_updated ON works(status, updated_at DESC);",
     "CREATE INDEX IF NOT EXISTS idx_works_parent_work ON works(parent_work_id, created_at DESC);",
     "CREATE INDEX IF NOT EXISTS idx_works_agent_profile ON works(agent_profile_id);",
+    # F117 W3：索引随列改名收敛。老实例 RENAME COLUMN 后老名索引列引用已自动更新，
+    # 但索引名仍是 worker-命名 → DROP 老名 + CREATE 新名（幂等，索引为派生物可安全重建）。
+    "DROP INDEX IF EXISTS idx_works_requested_worker_profile;",
     (
-        "CREATE INDEX IF NOT EXISTS idx_works_requested_worker_profile "
-        "ON works(requested_worker_profile_id, requested_worker_profile_version);"
+        "CREATE INDEX IF NOT EXISTS idx_works_requested_agent_profile "
+        "ON works(requested_agent_profile_id, requested_agent_profile_version);"
     ),
     "CREATE INDEX IF NOT EXISTS idx_works_context_frame ON works(context_frame_id);",
     (
@@ -1085,6 +1088,28 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
         )
 
     work_columns = await _table_columns(conn, "works")
+    # F117 W3：works 三列 worker→agent 命名收敛——数据保全防御 RENAME。
+    # 必须在下方 ADD-if-missing 前执行并刷新 work_columns，否则老实例会被误判缺新列 →
+    # ADD 出空列、老列数据成孤儿（数据丢失）。覆盖四态幂等：
+    #   - 新库：CREATE 已建新名（仅新列）→ 跳过；
+    #   - 老实例（仅老列）：RENAME COLUMN 改名保留数据；
+    #   - 已迁移（仅新列）：跳过；
+    #   - 坏半迁移态（老+新列同存，Codex review MED）：UPDATE 把老列数据 backfill 进新列
+    #     （老列为 RENAME 前权威源）再 DROP 老列，防老列数据成孤儿。
+    for _old_col, _new_col in (
+        ("requested_worker_profile_id", "requested_agent_profile_id"),
+        ("requested_worker_profile_version", "requested_agent_profile_version"),
+        ("effective_worker_snapshot_id", "effective_profile_snapshot_id"),
+    ):
+        if not work_columns or _old_col not in work_columns:
+            continue
+        if _new_col not in work_columns:
+            await conn.execute(f"ALTER TABLE works RENAME COLUMN {_old_col} TO {_new_col}")
+        else:
+            # 坏半迁移态：老列权威数据覆盖新列（RENAME 语义等价 new==old），再删老列。
+            await conn.execute(f"UPDATE works SET {_new_col} = {_old_col}")
+            await conn.execute(f"ALTER TABLE works DROP COLUMN {_old_col}")
+        work_columns = await _table_columns(conn, "works")
     if work_columns and "agent_profile_id" not in work_columns:
         await conn.execute(
             "ALTER TABLE works ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''"
@@ -1106,18 +1131,18 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
         await conn.execute(
             "ALTER TABLE works ADD COLUMN turn_executor_kind TEXT NOT NULL DEFAULT 'worker'"
         )
-    if work_columns and "requested_worker_profile_id" not in work_columns:
+    if work_columns and "requested_agent_profile_id" not in work_columns:
         await conn.execute(
-            "ALTER TABLE works ADD COLUMN requested_worker_profile_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE works ADD COLUMN requested_agent_profile_id TEXT NOT NULL DEFAULT ''"
         )
-    if work_columns and "requested_worker_profile_version" not in work_columns:
+    if work_columns and "requested_agent_profile_version" not in work_columns:
         await conn.execute(
             "ALTER TABLE works "
-            "ADD COLUMN requested_worker_profile_version INTEGER NOT NULL DEFAULT 0"
+            "ADD COLUMN requested_agent_profile_version INTEGER NOT NULL DEFAULT 0"
         )
-    if work_columns and "effective_worker_snapshot_id" not in work_columns:
+    if work_columns and "effective_profile_snapshot_id" not in work_columns:
         await conn.execute(
-            "ALTER TABLE works ADD COLUMN effective_worker_snapshot_id TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE works ADD COLUMN effective_profile_snapshot_id TEXT NOT NULL DEFAULT ''"
         )
     if work_columns and "context_frame_id" not in work_columns:
         await conn.execute(

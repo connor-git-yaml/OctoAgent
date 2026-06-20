@@ -6,8 +6,8 @@
 ``agent_profiles``（kind=worker 行携带工具字段）+ 新 ``agent_profile_revisions``，
 塌缩 ``agent_runtimes.worker_profile_id``，最后 DROP 两张旧表。
 
-W4-6（``works.requested_worker_profile_id`` 改名）按用户拍板**推迟**并入 W3 FE 改名——
-本迁移不动 ``works`` 列。
+W4-6（``works`` 三列 worker→agent 改名）已在 W3 落地——由 ``sqlite_init`` 开机时的
+数据保全防御 ``RENAME COLUMN`` 完成（非门禁、自动、保留数据），**本迁移不动 ``works`` 列**。
 
 ⚠ **不可逆**：apply 会 DROP ``worker_profiles`` / ``worker_profile_revisions`` 与
 ``agent_runtimes.worker_profile_id`` 列。``run_rollback`` 仅释放幂等键（删 audit 行），
@@ -252,7 +252,7 @@ async def run_dry_run(db_path: str) -> dict[str, object]:
             else 0
         )
 
-        # W4-6 推迟：本迁移不动 works.requested_worker_profile_id，故 dry-run 不报 works 计划。
+        # W4-6 已在 W3 由 sqlite_init 防御 RENAME 完成：本迁移不动 works 列，故 dry-run 不报 works 计划。
         prefix_ids = {apid for apid, _ in prefix_mirrors}
         projects_prefix_refs = (
             await _scalar(
@@ -563,9 +563,9 @@ async def run_apply(
                     "AND agent_profile_id!='' AND agent_runtime_id NOT LIKE 'subagent-%'"
                 )
 
-            # 6. works 列改名（requested_worker_profile_id→requested_agent_profile_id）：
-            #    用户拍板**推迟**并入 W3 FE 改名（纯命名收敛 + 持久化 metadata key replay 风险 +
-            #    与 W3 WorkProjectionItem 重叠）。本迁移不动 works 列——代码侧 W4-6 同步推迟。
+            # 6. works 三列改名（requested_worker_profile_id→requested_agent_profile_id 等）：
+            #    已在 W3 由 sqlite_init 开机防御 RENAME COLUMN 完成（数据保全、非门禁）。
+            #    本迁移不动 works 列——列改名是良性数据保全 op，不绑死本不可逆迁移门禁。
 
             # 7. DROP 旧表 + 旧索引
             await conn.execute("DROP INDEX IF EXISTS idx_worker_profiles_scope_project")

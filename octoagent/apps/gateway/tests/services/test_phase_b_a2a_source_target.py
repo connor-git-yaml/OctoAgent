@@ -7,7 +7,7 @@
   - AC-B1-S3: A2AConversation 字段反映真实 source（间接通过 source 派生 验证）
   - AC-B1-S4: source 派生 fallback：metadata 缺失优雅降级（不 raise）
 - B-2 target profile 解析（Codex review P2 闭环）：
-  - AC-B2-T1: requested_worker_profile_id 直接 lookup
+  - AC-B2-T1: requested_agent_profile_id 直接 lookup
   - AC-B2-T2: worker_capability 派生（通过 _delegation_plane.capability_pack）
   - AC-B2-T3: fail-loud fallback：lookup/capability resolve 失败时不静默吞 except
   - target_profile_id != source_profile_id（独立加载验证）
@@ -208,7 +208,7 @@ def test_resolve_a2a_source_role_target_turn_executor_kind_does_not_pollute_sour
 
 @pytest.mark.asyncio
 async def test_resolve_target_agent_profile_explicit_id_lookup_success(tmp_path: Path):
-    """AC-B2-T1: requested_worker_profile_id 直接 lookup → 返回独立 profile。"""
+    """AC-B2-T1: requested_agent_profile_id 直接 lookup → 返回独立 profile。"""
     store_group = await create_store_group(
         str(tmp_path / "b-1.db"), str(tmp_path / "art")
     )
@@ -230,7 +230,7 @@ async def test_resolve_target_agent_profile_explicit_id_lookup_success(tmp_path:
     await store_group.agent_context_store.save_agent_profile(target_profile)
 
     result_profile_id = await svc._resolve_target_agent_profile(
-        requested_worker_profile_id="profile-target-explicit",
+        requested_agent_profile_id="profile-target-explicit",
         worker_capability="",
         fallback_source_profile_id="profile-source-fallback",
     )
@@ -268,7 +268,7 @@ async def test_resolve_target_agent_profile_capability_via_capability_pack(tmp_p
     svc = _make_orchestrator(store_group=store_group, delegation_plane=delegation_plane)
 
     result_profile_id = await svc._resolve_target_agent_profile(
-        requested_worker_profile_id="",  # 无 explicit id
+        requested_agent_profile_id="",  # 无 explicit id
         worker_capability="code",
         fallback_source_profile_id="profile-source-fallback",
     )
@@ -287,7 +287,7 @@ async def test_resolve_target_agent_profile_capability_via_capability_pack(tmp_p
 async def test_resolve_target_agent_profile_explicit_id_via_resolve_worker_binding(
     tmp_path: Path,
 ):
-    """AC-B2-T1: explicit requested_worker_profile_id 通过 resolve_worker_binding 解析。"""
+    """AC-B2-T1: explicit requested_agent_profile_id 通过 resolve_worker_binding 解析。"""
     from dataclasses import dataclass
 
     store_group = await create_store_group(
@@ -308,7 +308,7 @@ async def test_resolve_target_agent_profile_explicit_id_via_resolve_worker_bindi
     svc = _make_orchestrator(store_group=store_group, delegation_plane=delegation_plane)
 
     result_profile_id = await svc._resolve_target_agent_profile(
-        requested_worker_profile_id="profile-target-explicit",
+        requested_agent_profile_id="profile-target-explicit",
         worker_capability="research",
         fallback_source_profile_id="profile-source-fallback",
     )
@@ -342,7 +342,7 @@ async def test_resolve_target_agent_profile_fallback_to_source_when_all_fail(
     svc = _make_orchestrator(store_group=store_group, delegation_plane=delegation_plane)
 
     result_profile_id = await svc._resolve_target_agent_profile(
-        requested_worker_profile_id="",
+        requested_agent_profile_id="",
         worker_capability="unknown_capability",
         fallback_source_profile_id="profile-source-fallback",
     )
@@ -365,7 +365,7 @@ async def test_resolve_target_agent_profile_no_delegation_plane_falls_back(
     svc = _make_orchestrator(store_group=store_group, delegation_plane=None)
 
     result_profile_id = await svc._resolve_target_agent_profile(
-        requested_worker_profile_id="",
+        requested_agent_profile_id="",
         worker_capability="code",
         fallback_source_profile_id="profile-source-fallback",
     )
@@ -400,7 +400,7 @@ async def test_target_profile_independent_from_source_profile(tmp_path: Path):
     svc = _make_orchestrator(store_group=store_group)
 
     target_id = await svc._resolve_target_agent_profile(
-        requested_worker_profile_id="profile-receiver-worker",
+        requested_agent_profile_id="profile-receiver-worker",
         worker_capability="",
         fallback_source_profile_id="profile-caller-main",  # source 是主 Agent
     )

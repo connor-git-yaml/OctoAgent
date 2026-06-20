@@ -112,7 +112,7 @@ class AgentContextEntityEnsureMixin:
 
     @staticmethod
     def _resolve_agent_runtime_role(request: ContextResolveRequest) -> AgentRuntimeRole:
-        requested_worker_profile_id = resolve_delegation_target_profile_id(
+        requested_agent_profile_id = resolve_delegation_target_profile_id(
             request.delegation_metadata
         )
         turn_executor_kind = resolve_turn_executor_kind(request.runtime_metadata) or (
@@ -122,7 +122,7 @@ class AgentContextEntityEnsureMixin:
             request.request_kind is ContextRequestKind.WORKER
             or request.request_kind is ContextRequestKind.WORK
             or request.work_id
-            or requested_worker_profile_id
+            or requested_agent_profile_id
             or turn_executor_kind in {TurnExecutorKind.WORKER, TurnExecutorKind.SUBAGENT}
         ):
             return AgentRuntimeRole.WORKER

@@ -210,9 +210,9 @@ class WorkDomainService(DomainServiceBase):
                 session_owner_profile_id=work.session_owner_profile_id,
                 turn_executor_kind=work.turn_executor_kind.value,
                 delegation_target_profile_id=work.delegation_target_profile_id,
-                requested_worker_profile_id=work.requested_worker_profile_id,
-                requested_worker_profile_version=work.requested_worker_profile_version,
-                effective_worker_snapshot_id=work.effective_worker_snapshot_id,
+                requested_agent_profile_id=work.requested_agent_profile_id,
+                requested_agent_profile_version=work.requested_agent_profile_version,
+                effective_profile_snapshot_id=work.effective_profile_snapshot_id,
                 tool_resolution_mode=(
                     selection.resolution_mode
                     if selection is not None
@@ -234,9 +234,9 @@ class WorkDomainService(DomainServiceBase):
                     "requested_target_kind": str(work.metadata.get("requested_target_kind", "")),
                     "requested_worker_type": str(work.metadata.get("requested_worker_type", "")),
                     "requested_tool_profile": str(work.metadata.get("requested_tool_profile", "")),
-                    "requested_worker_profile_id": work.requested_worker_profile_id,
-                    "requested_worker_profile_version": work.requested_worker_profile_version,
-                    "effective_worker_snapshot_id": work.effective_worker_snapshot_id,
+                    "requested_agent_profile_id": work.requested_agent_profile_id,
+                    "requested_agent_profile_version": work.requested_agent_profile_version,
+                    "effective_profile_snapshot_id": work.effective_profile_snapshot_id,
                     "a2a_conversation_id": str(work.metadata.get("a2a_conversation_id", "")),
                     "main_agent_session_id": str(
                         work.metadata.get("source_agent_session_id", "")

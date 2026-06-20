@@ -117,8 +117,8 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         works_by_profile_id: dict[str, list[Work]] = defaultdict(list)
         legacy_works_by_type: dict[str, list[Work]] = defaultdict(list)
         for work in project_works:
-            if work.requested_worker_profile_id:
-                works_by_profile_id[work.requested_worker_profile_id].append(work)
+            if work.requested_agent_profile_id:
+                works_by_profile_id[work.requested_agent_profile_id].append(work)
                 continue
             if (
                 work.turn_executor_kind is TurnExecutorKind.WORKER
@@ -184,7 +184,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                     active_revision=profile.active_revision,
                     draft_revision=profile.draft_revision,
                     effective_snapshot_id=(
-                        latest.effective_worker_snapshot_id
+                        latest.effective_profile_snapshot_id
                         if latest is not None
                         else self._worker_snapshot_id(
                             profile.profile_id,
@@ -1164,9 +1164,9 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             text=objective,
             idempotency_key=f"spawn:{profile.profile_id}:{objective}:{ULID()}",
             control_metadata={
-                "requested_worker_profile_id": profile.profile_id,
-                "requested_worker_profile_version": requested_revision,
-                "effective_worker_snapshot_id": self._worker_snapshot_id(
+                "requested_agent_profile_id": profile.profile_id,
+                "requested_agent_profile_version": requested_revision,
+                "effective_profile_snapshot_id": self._worker_snapshot_id(
                     profile.profile_id,
                     requested_revision,
                 ),
@@ -1193,7 +1193,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 "task_id": task_id,
                 "created": created,
                 "profile_id": profile.profile_id,
-                "requested_worker_profile_version": requested_revision,
+                "requested_agent_profile_version": requested_revision,
             },
             resource_refs=[
                 self._resource_ref("session_projection", "sessions:overview"),
@@ -1233,7 +1233,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             "metadata": {
                 "source_work_id": work.work_id,
                 "source_task_id": work.task_id,
-                "source_snapshot_id": work.effective_worker_snapshot_id,
+                "source_snapshot_id": work.effective_profile_snapshot_id,
             },
             "profile_id": "",
             "project_id": work.project_id or (selected_project.project_id if selected_project is not None else ""),

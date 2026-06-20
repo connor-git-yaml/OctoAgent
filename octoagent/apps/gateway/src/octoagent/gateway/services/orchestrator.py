@@ -178,7 +178,7 @@ class _RecentWorkerLaneCandidate:
     """主 Agent 最近可复用的 specialist worker lane。"""
 
     worker_type: str
-    requested_worker_profile_id: str
+    requested_agent_profile_id: str
     topic: str
     summary: str
     source_task_id: str
@@ -718,7 +718,7 @@ class OrchestratorService(A2ADispatchMixin):
                         **metadata,
                         "requested_worker_type": canonical_worker_type,
                         **(
-                            {"requested_worker_profile_id": requested_profile_id}
+                            {"requested_agent_profile_id": requested_profile_id}
                             if requested_profile_id
                             else {}
                         ),
@@ -751,7 +751,7 @@ class OrchestratorService(A2ADispatchMixin):
                 "metadata": {
                     **metadata,
                     "requested_worker_type": resolved_worker_type,
-                    "requested_worker_profile_id": requested_profile_id,
+                    "requested_agent_profile_id": requested_profile_id,
                     "requested_worker_type_source": "delegation_target_profile_id",
                 }
             }
@@ -971,7 +971,12 @@ class OrchestratorService(A2ADispatchMixin):
         requested_worker_type = str(metadata.get("requested_worker_type", "")).strip().lower()
         if requested_worker_type:
             return requested_worker_type
-        for key in ("delegation_target_profile_id", "requested_worker_profile_id"):
+        # F117 W3：含老 key 兜底——raw 老事件 metadata（未经 normalize alias）的 singleton lane 解析。
+        for key in (
+            "delegation_target_profile_id",
+            "requested_agent_profile_id",
+            "requested_worker_profile_id",
+        ):
             profile_id = str(metadata.get(key, "")).strip().lower()
             if not profile_id.startswith("singleton:"):
                 continue
@@ -1346,7 +1351,7 @@ class OrchestratorService(A2ADispatchMixin):
             "tool_selection": (
                 selection.model_dump(mode="json") if selection is not None else {}
             ),
-            "requested_worker_profile_id": "",
+            "requested_agent_profile_id": "",
             "delegation_target_profile_id": "",
         }
         execution_context = await self._register_owner_self_execution_session(
@@ -1541,7 +1546,7 @@ class OrchestratorService(A2ADispatchMixin):
                 recent_worker_lane.worker_type if recent_worker_lane is not None else ""
             ),
             recent_worker_lane_profile_id=(
-                recent_worker_lane.requested_worker_profile_id
+                recent_worker_lane.requested_agent_profile_id
                 if recent_worker_lane is not None
                 else ""
             ),
@@ -1575,7 +1580,7 @@ class OrchestratorService(A2ADispatchMixin):
             for work in works:
                 if work.selected_worker_type == "general":
                     continue
-                requested_profile_id = str(work.requested_worker_profile_id or "").strip()
+                requested_profile_id = str(work.requested_agent_profile_id or "").strip()
                 topic = (
                     str(work.metadata.get("delegate_continuity_topic", "")).strip()
                     or str(work.metadata.get("agent_decision_category", "")).strip()
@@ -1589,7 +1594,7 @@ class OrchestratorService(A2ADispatchMixin):
                 )
                 candidate = _RecentWorkerLaneCandidate(
                     worker_type=work.selected_worker_type,
-                    requested_worker_profile_id=requested_profile_id,
+                    requested_agent_profile_id=requested_profile_id,
                     topic=topic,
                     summary=summary,
                     source_task_id=work.task_id,
@@ -1737,7 +1742,7 @@ class OrchestratorService(A2ADispatchMixin):
         decision: AgentDecision,
         worker_type: str,
         continuity_topic: str,
-        requested_worker_profile_id: str,
+        requested_agent_profile_id: str,
         recent_lane: _RecentWorkerLaneCandidate | None,
     ) -> str:
         recent_conversation = await self._build_main_recent_conversation_block(
@@ -1747,9 +1752,9 @@ class OrchestratorService(A2ADispatchMixin):
         continuity_lines: list[str] = []
         if continuity_topic:
             continuity_lines.append(f"- continuity_topic: {continuity_topic}")
-        if requested_worker_profile_id:
+        if requested_agent_profile_id:
             continuity_lines.append(
-                f"- preferred_worker_profile_id: {requested_worker_profile_id}"
+                f"- preferred_worker_profile_id: {requested_agent_profile_id}"
             )
         if recent_lane is not None and recent_lane.worker_type == worker_type:
             continuity_lines.append(

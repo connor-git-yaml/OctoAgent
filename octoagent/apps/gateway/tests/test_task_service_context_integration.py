@@ -1087,7 +1087,6 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         role=AgentRuntimeRole.WORKER,
         project_id="project-alpha",
         agent_profile_id=worker_profile.profile_id,
-        worker_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
     )
     worker_agent_session_id = build_agent_session_id(
@@ -1182,7 +1181,7 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         runtime_context=runtime_context,
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
-            "requested_worker_profile_id": worker_profile.profile_id,
+            "requested_agent_profile_id": worker_profile.profile_id,
             "parent_agent_session_id": "main-session-alpha",
             "work_id": "work-alpha-1",
         },
@@ -1313,7 +1312,6 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         role=AgentRuntimeRole.WORKER,
         project_id="project-alpha",
         agent_profile_id=worker_profile.profile_id,
-        worker_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
     )
     worker_agent_session_id = build_agent_session_id(
@@ -1425,7 +1423,7 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         runtime_context=runtime_context,
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
-            "requested_worker_profile_id": worker_profile.profile_id,
+            "requested_agent_profile_id": worker_profile.profile_id,
             "parent_agent_session_id": "main-session-alpha",
             "work_id": "work-alpha-2",
         },
@@ -1510,7 +1508,6 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         role=AgentRuntimeRole.WORKER,
         project_id="project-alpha",
         agent_profile_id=worker_profile.profile_id,
-        worker_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
     )
     worker_agent_session_id = build_agent_session_id(
@@ -1606,7 +1603,7 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         runtime_context=runtime_context,
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
-            "requested_worker_profile_id": worker_profile.profile_id,
+            "requested_agent_profile_id": worker_profile.profile_id,
             "parent_agent_session_id": "main-session-alpha",
             "work_id": "work-alpha-2",
         },
@@ -1663,7 +1660,6 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
         role=AgentRuntimeRole.WORKER,
         project_id="project-alpha",
         agent_profile_id=worker_profile.profile_id,
-        worker_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
     )
     service = TaskService(store_group, SSEHub())
@@ -1711,7 +1707,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
             runtime_context=runtime_context,
             dispatch_metadata={
                 **(await service.get_latest_user_metadata(task_id)),
-                "requested_worker_profile_id": worker_profile.profile_id,
+                "requested_agent_profile_id": worker_profile.profile_id,
                 "parent_agent_session_id": "main-session-alpha",
                 "work_id": work_id,
             },
@@ -1815,7 +1811,6 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         role=AgentRuntimeRole.WORKER,
         project_id="project-alpha",
         agent_profile_id=worker_profile.profile_id,
-        worker_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
     )
     service = TaskService(store_group, SSEHub())
@@ -1952,7 +1947,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
             runtime_context=runtime_context,
             dispatch_metadata={
                 **(await service.get_latest_user_metadata(task_id)),
-                "requested_worker_profile_id": worker_profile.profile_id,
+                "requested_agent_profile_id": worker_profile.profile_id,
                 "parent_agent_session_id": "main-session-alpha",
                 "work_id": work_id,
             },
@@ -2093,7 +2088,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         },
         control_metadata={
             "agent_profile_id": "agent-profile-alpha",
-            "requested_worker_profile_id": "agent-profile-alpha",
+            "requested_agent_profile_id": "agent-profile-alpha",
             "target_kind": "worker",
         },
         idempotency_key="f043-context-sanitize-001",
@@ -3135,7 +3130,7 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
             control_metadata={
                 "session_owner_profile_id": worker_profile.profile_id,
                 "agent_profile_id": worker_profile.profile_id,
-                "requested_worker_profile_id": worker_profile.profile_id,
+                "requested_agent_profile_id": worker_profile.profile_id,
                 "project_id": "project-alpha",
                 "thread_id": path_a_thread,
                 "session_id": path_a_projected_session_id,

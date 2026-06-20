@@ -899,12 +899,14 @@ class AgentContextService(
             runtime_context.model_dump(mode="json") if runtime_context is not None else {}
         )
         runtime_extra = runtime_context.metadata if runtime_context is not None else {}
-        requested_worker_profile_id = resolve_delegation_target_profile_id(dispatch_metadata)
+        # F117 W3：此局部变量承载「委托目标 profile」，与下方「session owner」语义不同，必须
+        # 独立命名——塌缩为 requested_agent_profile_id 会被 owner 链覆盖 + override 退化成死代码。
+        requested_delegation_target_id = resolve_delegation_target_profile_id(dispatch_metadata)
         turn_executor_kind = (
             runtime_context.turn_executor_kind if runtime_context is not None else None
         ) or resolve_turn_executor_kind(dispatch_metadata)
         is_worker_request = bool(
-            requested_worker_profile_id
+            requested_delegation_target_id
             or str(runtime_extra.get("parent_agent_session_id", "")).strip()
             or str(dispatch_metadata.get("parent_agent_session_id", "")).strip()
             or str(dispatch_metadata.get("target_agent_session_id", "")).strip()
@@ -933,8 +935,8 @@ class AgentContextService(
             or resolve_session_owner_profile_id(dispatch_metadata)
             or None
         )
-        if is_worker_request and requested_worker_profile_id:
-            requested_agent_profile_id = requested_worker_profile_id
+        if is_worker_request and requested_delegation_target_id:
+            requested_agent_profile_id = requested_delegation_target_id
         return ContextResolveRequest(
             request_id=str(ULID()),
             request_kind=request_kind,

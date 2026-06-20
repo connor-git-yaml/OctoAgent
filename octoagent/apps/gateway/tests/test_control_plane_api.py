@@ -4074,7 +4074,7 @@ class TestControlPlaneApi:
         assert metadata["agent_profile_id"] == profile_id
         assert metadata["session_id"] == projected_session_id
         assert metadata["thread_id"] == thread_id
-        assert not metadata.get("requested_worker_profile_id")
+        assert not metadata.get("requested_agent_profile_id")
 
         sessions_resp = await control_plane_client.get("/api/control/resources/sessions")
         assert sessions_resp.status_code == 200
@@ -4154,7 +4154,7 @@ class TestControlPlaneApi:
         latest_metadata = user_events[-1].payload["control_metadata"]
         assert latest_metadata["session_owner_profile_id"] == profile_id
         assert latest_metadata["agent_profile_id"] == profile_id
-        assert not latest_metadata.get("requested_worker_profile_id")
+        assert not latest_metadata.get("requested_agent_profile_id")
 
     async def test_session_projection_reports_delegated_worker_execution(
         self,
@@ -4247,7 +4247,7 @@ class TestControlPlaneApi:
                 delegation_target_profile_id=worker_profile_id,
                 turn_executor_kind="worker",
                 agent_profile_id="agent-profile-default",
-                requested_worker_profile_id=worker_profile_id,
+                requested_agent_profile_id=worker_profile_id,
             )
         )
         await store_group.conn.commit()
@@ -5434,14 +5434,14 @@ class TestControlPlaneApi:
         assert spawn_resp.status_code == 200
         spawn_payload = spawn_resp.json()["result"]["data"]
         task_id = spawn_payload["task_id"]
-        assert spawn_payload["requested_worker_profile_version"] == 1
+        assert spawn_payload["requested_agent_profile_version"] == 1
 
         events = await store_group.event_store.get_events_for_task(task_id)
         user_event = next(item for item in events if item.type.value == "USER_MESSAGE")
-        assert user_event.payload["control_metadata"]["requested_worker_profile_id"] == (
+        assert user_event.payload["control_metadata"]["requested_agent_profile_id"] == (
             profile.profile_id
         )
-        assert user_event.payload["control_metadata"]["effective_worker_snapshot_id"] == (
+        assert user_event.payload["control_metadata"]["effective_profile_snapshot_id"] == (
             "worker-snapshot:worker-profile-runtime-alpha:1"
         )
 
@@ -5462,9 +5462,9 @@ class TestControlPlaneApi:
                 selected_worker_type="research",
                 project_id=project.project_id,
     
-                requested_worker_profile_id=profile.profile_id,
-                requested_worker_profile_version=1,
-                effective_worker_snapshot_id="worker-snapshot:worker-profile-runtime-alpha:1",
+                requested_agent_profile_id=profile.profile_id,
+                requested_agent_profile_version=1,
+                effective_profile_snapshot_id="worker-snapshot:worker-profile-runtime-alpha:1",
                 selected_tools=["web.search"],
                 metadata={"requested_tool_profile": "minimal"},
             )
@@ -5567,9 +5567,9 @@ class TestControlPlaneApi:
                 selected_worker_type="ops",
                 project_id=project.project_id,
     
-                requested_worker_profile_id=profile.profile_id,
-                requested_worker_profile_version=1,
-                effective_worker_snapshot_id="worker-snapshot:worker-profile-root-agent-project:1",
+                requested_agent_profile_id=profile.profile_id,
+                requested_agent_profile_version=1,
+                effective_profile_snapshot_id="worker-snapshot:worker-profile-root-agent-project:1",
                 selected_tools=["runtime.inspect"],
                 created_at=running_ts,
                 updated_at=running_ts,
@@ -5612,9 +5612,9 @@ class TestControlPlaneApi:
                 selected_worker_type="ops",
                 project_id=project.project_id,
     
-                requested_worker_profile_id=profile.profile_id,
-                requested_worker_profile_version=1,
-                effective_worker_snapshot_id="worker-snapshot:worker-profile-root-agent-project:1",
+                requested_agent_profile_id=profile.profile_id,
+                requested_agent_profile_version=1,
+                effective_profile_snapshot_id="worker-snapshot:worker-profile-root-agent-project:1",
                 selected_tools=["runtime.inspect"],
                 created_at=failed_ts,
                 updated_at=failed_ts,
@@ -5733,7 +5733,7 @@ class TestControlPlaneApi:
                 delegation_target_profile_id="",
                 turn_executor_kind="worker",
                 agent_profile_id=profile.profile_id,
-                requested_worker_profile_id="",
+                requested_agent_profile_id="",
                 selected_tools=["filesystem.read_text"],
             )
         )

@@ -156,17 +156,17 @@ class DelegationPlaneService:
         requested_worker_type = self._coerce_worker_type(
             str(request.metadata.get("requested_worker_type", "")).strip()
         )
-        requested_worker_profile_id = resolve_delegation_target_profile_id(
+        requested_agent_profile_id = resolve_delegation_target_profile_id(
             request.metadata
         )
         try:
-            requested_worker_profile_version = int(
-                str(request.metadata.get("requested_worker_profile_version", "0") or "0")
+            requested_agent_profile_version = int(
+                str(request.metadata.get("requested_agent_profile_version", "0") or "0")
             )
         except ValueError:
-            requested_worker_profile_version = 0
-        effective_worker_snapshot_id = str(
-            request.metadata.get("effective_worker_snapshot_id", "")
+            requested_agent_profile_version = 0
+        effective_profile_snapshot_id = str(
+            request.metadata.get("effective_profile_snapshot_id", "")
         ).strip()
         initial_target_kind = (
             DelegationTargetKind(requested_target_kind)
@@ -179,7 +179,7 @@ class DelegationPlaneService:
                 request.worker_capability,
                 requested_target_kind,
                 explicit_worker_type=requested_worker_type is not None,
-                requested_worker_profile_id=requested_worker_profile_id,
+                requested_agent_profile_id=requested_agent_profile_id,
             )
             if requested_worker_type is not None or requested_target_kind
             else ""
@@ -200,7 +200,7 @@ class DelegationPlaneService:
             pipeline_run_id="",
             session_owner_profile_id=session_owner_profile_id,
             inherited_context_owner_profile_id=inherited_agent_profile_id,
-            delegation_target_profile_id=requested_worker_profile_id,
+            delegation_target_profile_id=requested_agent_profile_id,
             turn_executor_kind=self._turn_executor_kind_for_target_kind(initial_target_kind),
             agent_profile_id=session_owner_profile_id,
             context_frame_id=context_frame_id,
@@ -223,22 +223,22 @@ class DelegationPlaneService:
             project_id=project.project_id if project is not None else "",
             session_owner_profile_id=session_owner_profile_id,
             inherited_context_owner_profile_id=inherited_agent_profile_id,
-            delegation_target_profile_id=requested_worker_profile_id,
+            delegation_target_profile_id=requested_agent_profile_id,
             turn_executor_kind=self._turn_executor_kind_for_target_kind(initial_target_kind),
             agent_profile_id=session_owner_profile_id,
-            requested_worker_profile_id=requested_worker_profile_id,
-            requested_worker_profile_version=requested_worker_profile_version,
-            effective_worker_snapshot_id=effective_worker_snapshot_id,
+            requested_agent_profile_id=requested_agent_profile_id,
+            requested_agent_profile_version=requested_agent_profile_version,
+            effective_profile_snapshot_id=effective_profile_snapshot_id,
             context_frame_id=context_frame_id,
             metadata={
                 "session_owner_profile_id": session_owner_profile_id,
                 "inherited_context_owner_profile_id": inherited_agent_profile_id,
-                "delegation_target_profile_id": requested_worker_profile_id,
+                "delegation_target_profile_id": requested_agent_profile_id,
                 "requested_target_kind": requested_target_kind,
                 "requested_worker_type": requested_worker_type or "",
-                "requested_worker_profile_id": requested_worker_profile_id,
-                "requested_worker_profile_version": requested_worker_profile_version,
-                "effective_worker_snapshot_id": effective_worker_snapshot_id,
+                "requested_agent_profile_id": requested_agent_profile_id,
+                "requested_agent_profile_version": requested_agent_profile_version,
+                "effective_profile_snapshot_id": effective_profile_snapshot_id,
                 "requested_tool_profile": request.tool_profile,
                 "parent_task_id": str(request.metadata.get("parent_task_id", "")),
                 "resume_from_node": delegated_resume_from_node,
@@ -254,7 +254,7 @@ class DelegationPlaneService:
                     "tool_profile": request.tool_profile,
                     "session_owner_profile_id": session_owner_profile_id,
                     "agent_profile_id": session_owner_profile_id,
-                    "delegation_target_profile_id": requested_worker_profile_id,
+                    "delegation_target_profile_id": requested_agent_profile_id,
                     "context_frame_id": context_frame_id,
                     "runtime_context": runtime_context.model_dump(mode="json"),
                     "metadata": dict(request.metadata),
@@ -283,7 +283,7 @@ class DelegationPlaneService:
                 "tool_profile": request.tool_profile,
                 "session_owner_profile_id": session_owner_profile_id,
                 "agent_profile_id": session_owner_profile_id,
-                "delegation_target_profile_id": requested_worker_profile_id,
+                "delegation_target_profile_id": requested_agent_profile_id,
                 "context_frame_id": context_frame_id,
                 "runtime_context": runtime_context.model_dump(mode="json"),
                 "metadata": dict(request.metadata),
@@ -315,7 +315,7 @@ class DelegationPlaneService:
                 "route_reason": str(pipeline_run.state_snapshot.get("route_reason", "")),
                 "session_owner_profile_id": session_owner_profile_id,
                 "inherited_context_owner_profile_id": inherited_agent_profile_id,
-                "delegation_target_profile_id": requested_worker_profile_id,
+                "delegation_target_profile_id": requested_agent_profile_id,
                 "turn_executor_kind": self._turn_executor_kind_for_target_kind(
                     final_target_kind
                 ),
@@ -342,10 +342,10 @@ class DelegationPlaneService:
                 # Tool universe resolution must not overwrite the explicit
                 # delegation target; otherwise owner/session semantics collapse
                 # back into "route everything to worker profile".
-                "delegation_target_profile_id": requested_worker_profile_id,
-                "requested_worker_profile_id": requested_worker_profile_id,
-                "requested_worker_profile_version": requested_worker_profile_version,
-                "effective_worker_snapshot_id": effective_worker_snapshot_id,
+                "delegation_target_profile_id": requested_agent_profile_id,
+                "requested_agent_profile_id": requested_agent_profile_id,
+                "requested_agent_profile_version": requested_agent_profile_version,
+                "effective_profile_snapshot_id": effective_profile_snapshot_id,
                 "pipeline_run_id": pipeline_run.run_id,
                 "turn_executor_kind": self._turn_executor_kind_for_target_kind(
                     final_target_kind
@@ -441,9 +441,9 @@ class DelegationPlaneService:
                 "agent_profile_id": updated_work.agent_profile_id,
                 "delegation_target_profile_id": updated_work.delegation_target_profile_id,
                 "turn_executor_kind": updated_work.turn_executor_kind.value,
-                "requested_worker_profile_id": updated_work.requested_worker_profile_id,
-                "requested_worker_profile_version": updated_work.requested_worker_profile_version,
-                "effective_worker_snapshot_id": updated_work.effective_worker_snapshot_id,
+                "requested_agent_profile_id": updated_work.requested_agent_profile_id,
+                "requested_agent_profile_version": updated_work.requested_agent_profile_version,
+                "effective_profile_snapshot_id": updated_work.effective_profile_snapshot_id,
                 "context_frame_id": updated_work.context_frame_id,
                 "runtime_context_json": encode_runtime_context(resolved_runtime_context),
             },
@@ -813,9 +813,9 @@ class DelegationPlaneService:
             "agent_profile_id": work.agent_profile_id,
             "delegation_target_profile_id": work.delegation_target_profile_id,
             "turn_executor_kind": work.turn_executor_kind.value,
-            "requested_worker_profile_id": work.requested_worker_profile_id,
-            "requested_worker_profile_version": work.requested_worker_profile_version,
-            "effective_worker_snapshot_id": work.effective_worker_snapshot_id,
+            "requested_agent_profile_id": work.requested_agent_profile_id,
+            "requested_agent_profile_version": work.requested_agent_profile_version,
+            "effective_profile_snapshot_id": work.effective_profile_snapshot_id,
             "context_frame_id": work.context_frame_id,
             "runtime_context_json": encode_runtime_context(runtime_context),
         }
@@ -1214,13 +1214,13 @@ class DelegationPlaneService:
         requested = str(state.get("requested_capability", "")).strip()
         metadata = state.get("metadata", {})
         requested_target = str(metadata.get("target_kind", "")).strip()
-        requested_worker_profile_id = resolve_delegation_target_profile_id(metadata)
+        requested_agent_profile_id = resolve_delegation_target_profile_id(metadata)
         requested_worker_type = self._coerce_worker_type(
             str(metadata.get("requested_worker_type", "")).strip()
         )
-        if requested_worker_type is None and requested_worker_profile_id:
+        if requested_worker_type is None and requested_agent_profile_id:
             requested_worker_type = await self._capability_pack.resolve_worker_type_for_profile(
-                requested_worker_profile_id
+                requested_agent_profile_id
             )
         worker_type = requested_worker_type or self._select_worker_type(
             requested,
@@ -1232,7 +1232,7 @@ class DelegationPlaneService:
             requested,
             requested_target,
             explicit_worker_type=requested_worker_type is not None,
-            requested_worker_profile_id=requested_worker_profile_id,
+            requested_agent_profile_id=requested_agent_profile_id,
         )
         return PipelineNodeOutcome(
             summary=route_reason,
@@ -1262,9 +1262,9 @@ class DelegationPlaneService:
     async def _handle_tool_index_select(self, *, run, node, state):
         worker_type = str(state.get("selected_worker_type", "general"))
         metadata = state.get("metadata", {})
-        requested_worker_profile_id = resolve_delegation_target_profile_id(metadata)
+        requested_agent_profile_id = resolve_delegation_target_profile_id(metadata)
         requested_profile_id = (
-            requested_worker_profile_id or resolve_session_owner_profile_id(metadata)
+            requested_agent_profile_id or resolve_session_owner_profile_id(metadata)
         )
         selection = await self._capability_pack.resolve_profile_first_tools(
             ToolIndexQuery(
@@ -1359,13 +1359,13 @@ class DelegationPlaneService:
         requested_target: str,
         *,
         explicit_worker_type: bool = False,
-        requested_worker_profile_id: str = "",
+        requested_agent_profile_id: str = "",
     ) -> str:
         parts = [f"worker_type={worker_type}"]
         if explicit_worker_type:
             parts.append("worker_type_source=explicit")
-        if requested_worker_profile_id:
-            parts.append(f"profile={requested_worker_profile_id}")
+        if requested_agent_profile_id:
+            parts.append(f"profile={requested_agent_profile_id}")
         if requested_capability:
             parts.append(f"requested_capability={requested_capability}")
         if requested_target:

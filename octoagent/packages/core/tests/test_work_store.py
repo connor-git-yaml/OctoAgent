@@ -62,9 +62,9 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
         delegation_target_profile_id="worker-profile-alpha",
         turn_executor_kind=TurnExecutorKind.SUBAGENT,
         agent_profile_id="agent-profile-child",
-        requested_worker_profile_id="worker-profile-alpha",
-        requested_worker_profile_version=2,
-        effective_worker_snapshot_id="worker-snapshot:worker-profile-alpha:2",
+        requested_agent_profile_id="worker-profile-alpha",
+        requested_agent_profile_version=2,
+        effective_profile_snapshot_id="worker-snapshot:worker-profile-alpha:2",
         selected_worker_type="research",
         selected_tools=["web.search"],
         context_frame_id="context-frame-child",
@@ -85,9 +85,9 @@ async def test_work_store_roundtrip_and_filters(tmp_path: Path) -> None:
     assert stored.turn_executor_kind == TurnExecutorKind.SUBAGENT
     assert stored.agent_profile_id == "agent-profile-child"
     assert stored.context_frame_id == "context-frame-child"
-    assert stored.requested_worker_profile_id == "worker-profile-alpha"
-    assert stored.requested_worker_profile_version == 2
-    assert stored.effective_worker_snapshot_id == "worker-snapshot:worker-profile-alpha:2"
+    assert stored.requested_agent_profile_id == "worker-profile-alpha"
+    assert stored.requested_agent_profile_version == 2
+    assert stored.effective_profile_snapshot_id == "worker-snapshot:worker-profile-alpha:2"
     assert stored.selected_tools == ["web.search"]
 
     by_task = await store_group.work_store.list_works(task_id="task-1")

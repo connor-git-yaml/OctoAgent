@@ -74,7 +74,7 @@ async def test_phase_i_target_worker_profile_runtime_alignment(tmp_path: Path):
 
     # F098 Phase B-2: target profile 独立解析
     resolved_profile_id = await svc._resolve_target_agent_profile(
-        requested_worker_profile_id="profile-target-research-worker",
+        requested_agent_profile_id="profile-target-research-worker",
         worker_capability="",
         fallback_source_profile_id="profile-source-main",
     )

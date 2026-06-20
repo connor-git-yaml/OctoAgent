@@ -221,14 +221,14 @@ async def test_prepare_dispatch_uses_requested_root_agent_profile_for_tool_unive
     )
 
     assert plan.work.delegation_target_profile_id == profile.profile_id
-    assert plan.work.requested_worker_profile_id == profile.profile_id
+    assert plan.work.requested_agent_profile_id == profile.profile_id
     assert plan.work.selected_worker_type == "general"
     assert plan.tool_selection.resolution_mode == "profile_first_core"
     assert plan.tool_selection.effective_tool_universe is not None
     assert plan.tool_selection.effective_tool_universe.profile_id == profile.profile_id
     assert "web.search" in plan.tool_selection.selected_tools
     assert plan.dispatch_envelope is not None
-    assert plan.dispatch_envelope.metadata["requested_worker_profile_id"] == profile.profile_id
+    assert plan.dispatch_envelope.metadata["requested_agent_profile_id"] == profile.profile_id
 
     await store_group.close()
 
@@ -301,7 +301,7 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
 
     assert plan.work.session_owner_profile_id == agent_profile.profile_id
     assert plan.work.agent_profile_id == agent_profile.profile_id
-    assert plan.work.requested_worker_profile_id == ""
+    assert plan.work.requested_agent_profile_id == ""
     assert plan.work.delegation_target_profile_id == ""
     assert plan.work.selected_worker_type == "ops"
     assert plan.tool_selection.effective_tool_universe is not None
@@ -341,14 +341,14 @@ async def test_prepare_dispatch_does_not_promote_session_owner_to_delegation_tar
     assert plan.work.session_owner_profile_id == "worker-profile-finance-root"
     assert plan.work.agent_profile_id == "worker-profile-finance-root"
     assert plan.work.delegation_target_profile_id == ""
-    assert plan.work.requested_worker_profile_id == ""
+    assert plan.work.requested_agent_profile_id == ""
     assert plan.work.turn_executor_kind == TurnExecutorKind.WORKER
     assert plan.dispatch_envelope is not None
     assert plan.dispatch_envelope.metadata["session_owner_profile_id"] == (
         "worker-profile-finance-root"
     )
     assert not plan.dispatch_envelope.metadata.get("delegation_target_profile_id")
-    assert not plan.dispatch_envelope.metadata.get("requested_worker_profile_id")
+    assert not plan.dispatch_envelope.metadata.get("requested_agent_profile_id")
 
     await store_group.close()
 
@@ -371,17 +371,17 @@ async def test_prepare_dispatch_preserves_typed_metadata_in_dispatch_envelope(
             user_text="请走一遍 typed metadata 路由",
             worker_capability="llm_generation",
             metadata={
-                "requested_worker_profile_version": 7,
+                "requested_agent_profile_version": 7,
                 "target_kind": "worker",
             },
         )
     )
 
     assert plan.dispatch_envelope is not None
-    assert isinstance(plan.dispatch_envelope.metadata["requested_worker_profile_version"], int)
+    assert isinstance(plan.dispatch_envelope.metadata["requested_agent_profile_version"], int)
     assert (
-        plan.dispatch_envelope.metadata["requested_worker_profile_version"]
-        == plan.work.requested_worker_profile_version
+        plan.dispatch_envelope.metadata["requested_agent_profile_version"]
+        == plan.work.requested_agent_profile_version
     )
     assert isinstance(plan.dispatch_envelope.metadata["selected_tools"], list)
     assert plan.dispatch_envelope.metadata["target_kind"] == "worker"

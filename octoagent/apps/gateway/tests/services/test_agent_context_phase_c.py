@@ -439,3 +439,97 @@ def test_main_kind_falls_through_to_full():
         )
     )
     assert load_profile == BehaviorLoadProfile.FULL, "main kind 应走 FULL"
+
+
+# ---------------------------------------------------------------------------
+# F117 W3 回归：_build_context_request 委托目标 override（防双变量塌缩）
+# ---------------------------------------------------------------------------
+
+
+def _make_w3_task(task_id: str):
+    from datetime import UTC, datetime
+
+    from octoagent.core.models import Task
+    from octoagent.core.models.task import RequesterInfo
+
+    _now = datetime(2026, 6, 20, 12, 0, 0, tzinfo=UTC)
+    return Task(
+        task_id=task_id,
+        created_at=_now,
+        updated_at=_now,
+        title="w3 regression",
+        requester=RequesterInfo(channel="chat", sender_id="user-w3"),
+    )
+
+
+@pytest.mark.asyncio
+async def test_build_context_request_worker_uses_delegation_target_over_session_owner(
+    tmp_path: Path,
+):
+    """F117 W3 防回归：worker 请求且 delegation_target ≠ session_owner 时，
+    ContextResolveRequest.agent_profile_id 必须取**委托目标**（不是 session owner）。
+
+    背景：W3 改名曾把「委托目标」局部变量塌缩成与「session owner」同名 → 被 owner 链
+    无条件覆盖 + override 退化成自赋值死代码 → worker turn 加载错误 profile（行为非零变更）。
+    全量套件未覆盖该分叉场景，此测试钉住 baseline override 语义（delegation target 胜出）。
+    """
+    from octoagent.core.models import ContextRequestKind, TurnExecutorKind
+    from octoagent.core.models.orchestrator import RuntimeControlContext
+    from octoagent.core.store import create_store_group
+
+    store_group = await create_store_group(
+        db_path=str(tmp_path / "w3-build-context-request.db"),
+        artifacts_dir=str(tmp_path / "artifacts"),
+    )
+    service = AgentContextService(store_group, project_root=tmp_path)
+
+    task = _make_w3_task("task-w3-override-001")
+    runtime_context = RuntimeControlContext(
+        task_id=task.task_id,
+        session_owner_profile_id="agent-profile-MAIN-owner",
+        turn_executor_kind=TurnExecutorKind.WORKER,
+    )
+    # 委托目标经 dispatch_metadata 显式注入，与 session owner 分叉。
+    dispatch_metadata = {"delegation_target_profile_id": "agent-profile-WORKER-target"}
+
+    request = service._build_context_request(
+        task=task,
+        trigger_text="hi",
+        dispatch_metadata=dispatch_metadata,
+        worker_capability=None,
+        runtime_context=runtime_context,
+    )
+
+    assert request.agent_profile_id == "agent-profile-WORKER-target"
+    assert request.request_kind == ContextRequestKind.WORKER
+
+
+@pytest.mark.asyncio
+async def test_build_context_request_chat_uses_session_owner(tmp_path: Path):
+    """F117 W3 守恒：非 worker（无委托目标/信号）→ agent_profile_id 取 session owner。"""
+    from octoagent.core.models import ContextRequestKind
+    from octoagent.core.models.orchestrator import RuntimeControlContext
+    from octoagent.core.store import create_store_group
+
+    store_group = await create_store_group(
+        db_path=str(tmp_path / "w3-build-context-request-chat.db"),
+        artifacts_dir=str(tmp_path / "artifacts"),
+    )
+    service = AgentContextService(store_group, project_root=tmp_path)
+
+    task = _make_w3_task("task-w3-chat-001")
+    runtime_context = RuntimeControlContext(
+        task_id=task.task_id,
+        session_owner_profile_id="agent-profile-MAIN-owner",
+    )
+
+    request = service._build_context_request(
+        task=task,
+        trigger_text="hi",
+        dispatch_metadata={},
+        worker_capability=None,
+        runtime_context=runtime_context,
+    )
+
+    assert request.agent_profile_id == "agent-profile-MAIN-owner"
+    assert request.request_kind == ContextRequestKind.CHAT

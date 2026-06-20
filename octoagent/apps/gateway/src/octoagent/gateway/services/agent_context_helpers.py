@@ -493,13 +493,15 @@ def build_agent_runtime_id(
     role: AgentRuntimeRole,
     project_id: str,
     agent_profile_id: str,
-    worker_profile_id: str,
     worker_capability: str,
 ) -> str:
     parts = [f"role:{role.value}", f"project:{project_id or 'default'}"]
     if role is AgentRuntimeRole.WORKER:
-        if worker_profile_id:
-            parts.append(f"worker_profile:{worker_profile_id}")
+        # F117 W3：worker 的 profile 即 agent_profile（W4-5 塌缩 worker_profile_id），
+        # 故合并旧 worker_profile_id 形参入 agent_profile_id。保留 ``worker_profile:``
+        # ID-scheme 前缀字面以维持已持久化 runtime_id 的连续性 / dedup（不改产出 ID 值）。
+        if agent_profile_id:
+            parts.append(f"worker_profile:{agent_profile_id}")
         else:
             parts.append(f"worker_capability:{worker_capability or 'general'}")
     else:

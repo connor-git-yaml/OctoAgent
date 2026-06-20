@@ -132,8 +132,8 @@ class A2ADispatchMixin:
             str(envelope.metadata.get("source_agent_session_id", "")),
             str(envelope.metadata.get("agent_session_id", "")),
         )
-        requested_worker_profile_id = str(
-            envelope.metadata.get("requested_worker_profile_id", "")
+        requested_agent_profile_id = str(
+            envelope.metadata.get("requested_agent_profile_id", "")
         ).strip()
         worker_capability_hint = self._first_non_empty(
             str(envelope.metadata.get("selected_worker_type", "")),
@@ -168,7 +168,7 @@ class A2ADispatchMixin:
             role=source_role,
             project_id=project_id,
             agent_profile_id=source_agent_profile_id,
-            worker_profile_id=source_worker_profile_id,
+            worker_behavior_profile_id=source_worker_profile_id,
             worker_capability=source_worker_capability,
         )
         legacy_session_id = self._first_non_empty(
@@ -202,7 +202,7 @@ class A2ADispatchMixin:
         # 不再复用 source profile（baseline bug）。通过 _delegation_plane.capability_pack
         # 解析（orchestrator 不直接持 capability_pack 引用）；fallback fail-loud。
         target_agent_profile_id = await self._resolve_target_agent_profile(
-            requested_worker_profile_id=requested_worker_profile_id,
+            requested_agent_profile_id=requested_agent_profile_id,
             worker_capability=worker_capability_hint,
             fallback_source_profile_id=source_agent_profile_id,
             task_id=envelope.task_id,
@@ -213,7 +213,7 @@ class A2ADispatchMixin:
             role=AgentRuntimeRole.WORKER,
             project_id=project_id,
             agent_profile_id=target_agent_profile_id,
-            worker_profile_id=requested_worker_profile_id,
+            worker_behavior_profile_id=requested_agent_profile_id,
             worker_capability=worker_capability_hint,
         )
         conversation_id = self._first_non_empty(
@@ -271,7 +271,7 @@ class A2ADispatchMixin:
             "agent_session_id": target_session.agent_session_id,
             "parent_agent_session_id": source_session.agent_session_id,
             "context_frame_id": context_frame_id,
-            "requested_worker_profile_id": requested_worker_profile_id,
+            "requested_agent_profile_id": requested_agent_profile_id,
         }
         updated_runtime_context = (
             runtime_context.model_copy(
@@ -327,7 +327,7 @@ class A2ADispatchMixin:
                     **conversation.metadata,
                     "worker_capability": envelope.worker_capability,
                     "worker_id": worker_id,
-                    "requested_worker_profile_id": requested_worker_profile_id,
+                    "requested_agent_profile_id": requested_agent_profile_id,
                 },
                 "updated_at": datetime.now(UTC),
                 "completed_at": None,
@@ -653,7 +653,7 @@ class A2ADispatchMixin:
         role: AgentRuntimeRole,
         project_id: str,
         agent_profile_id: str,
-        worker_profile_id: str,
+        worker_behavior_profile_id: str,
         worker_capability: str,
     ) -> AgentRuntime:
         runtime_id = agent_runtime_id.strip()
@@ -676,10 +676,10 @@ class A2ADispatchMixin:
         )
         # F117 Wave 2bc（GAP-A）：读统一行（worker 与 mirror 同 id），.name/.summary 由 Wave 0/1
         # 携带；用 .summary 作 persona。加 is_worker_behavior_profile guard——baseline get_worker_profile
-        # 对 worker_profile_id 误指 main/subagent 返 None→fallback，新读返任意 profile，须 guard 保等价。
+        # 对该 profile id 误指 main/subagent 返 None→fallback，新读返任意 profile，须 guard 保等价。
         worker_profile_row = (
-            await self._stores.agent_context_store.get_agent_profile(worker_profile_id)
-            if worker_profile_id
+            await self._stores.agent_context_store.get_agent_profile(worker_behavior_profile_id)
+            if worker_behavior_profile_id
             else None
         )
         worker_profile = (
@@ -937,7 +937,7 @@ class A2ADispatchMixin:
     async def _resolve_target_agent_profile(
         self,
         *,
-        requested_worker_profile_id: str,
+        requested_agent_profile_id: str,
         worker_capability: str,
         fallback_source_profile_id: str,
         task_id: str = "",
@@ -957,7 +957,7 @@ class A2ADispatchMixin:
         解析路径（fail-loud）：
         - 路径 1: 通过 capability_pack.resolve_worker_binding(requested_profile_id=...,
           fallback_worker_type=worker_capability) 解析 target Worker profile
-        - 路径 2: requested_worker_profile_id 直接 store lookup（fallback 兜底）
+        - 路径 2: requested_agent_profile_id 直接 store lookup（fallback 兜底）
         - 路径 3: fallback 到 source profile（warning log + 测试 fail-loud）
 
         返回 target Worker 的 profile_id。
@@ -974,7 +974,7 @@ class A2ADispatchMixin:
             if resolve_worker_binding is not None:
                 try:
                     binding = await resolve_worker_binding(
-                        requested_profile_id=requested_worker_profile_id or "",
+                        requested_profile_id=requested_agent_profile_id or "",
                         fallback_worker_type=worker_capability or "general",
                     )
                     # binding.source_kind 区分：'builtin_singleton' / 'worker_profile' /
@@ -999,7 +999,7 @@ class A2ADispatchMixin:
                                 level="warning",
                                 key="a2a_target_profile_resolve_worker_binding_failed",
                                 payload={
-                                    "requested_worker_profile_id": requested_worker_profile_id,
+                                    "requested_agent_profile_id": requested_agent_profile_id,
                                     "worker_capability": worker_capability,
                                     "error": str(exc),
                                 },
@@ -1007,7 +1007,7 @@ class A2ADispatchMixin:
                         except Exception:
                             log.warning(
                                 "a2a_target_profile_resolve_worker_binding_failed",
-                                requested_worker_profile_id=requested_worker_profile_id,
+                                requested_agent_profile_id=requested_agent_profile_id,
                                 worker_capability=worker_capability,
                                 error=str(exc),
                             )
@@ -1015,27 +1015,27 @@ class A2ADispatchMixin:
                         # 无 task_id 上下文 → fallback 仅 structlog（向后兼容旧 caller）
                         log.warning(
                             "a2a_target_profile_resolve_worker_binding_failed",
-                            requested_worker_profile_id=requested_worker_profile_id,
+                            requested_agent_profile_id=requested_agent_profile_id,
                             worker_capability=worker_capability,
                             error=str(exc),
                         )
 
         # 路径 2: 直接 store lookup（fallback 兜底，用于 capability_pack 不可用场景）
-        if requested_worker_profile_id:
+        if requested_agent_profile_id:
             profile = await self._stores.agent_context_store.get_agent_profile(
-                requested_worker_profile_id,
+                requested_agent_profile_id,
             )
             if profile is not None:
                 return profile.profile_id
             log.warning(
                 "a2a_target_profile_explicit_id_not_found",
-                requested_worker_profile_id=requested_worker_profile_id,
+                requested_agent_profile_id=requested_agent_profile_id,
             )
 
         # 路径 3: fallback (warning log)
         log.warning(
             "a2a_target_profile_fallback_to_source",
-            requested_worker_profile_id=requested_worker_profile_id,
+            requested_agent_profile_id=requested_agent_profile_id,
             worker_capability=worker_capability,
             fallback_source_profile_id=fallback_source_profile_id,
         )

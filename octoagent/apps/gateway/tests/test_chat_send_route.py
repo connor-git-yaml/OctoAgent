@@ -137,7 +137,7 @@ class TestChatSendRoute:
         metadata = user_events[-1]["payload"]["control_metadata"]
         assert metadata["session_owner_profile_id"] == "worker-profile-chat-alpha"
         assert metadata["agent_profile_id"] == "worker-profile-chat-alpha"
-        assert not metadata.get("requested_worker_profile_id")
+        assert not metadata.get("requested_agent_profile_id")
 
     async def test_new_chat_consumes_pending_session_project_snapshot(
         self,
@@ -189,7 +189,7 @@ class TestChatSendRoute:
         assert metadata["project_id"] == project.project_id
         assert metadata["session_owner_profile_id"] == "singleton:research"
         assert metadata["agent_profile_id"] == "singleton:research"
-        assert not metadata.get("requested_worker_profile_id")
+        assert not metadata.get("requested_agent_profile_id")
 
     async def test_new_chat_accepts_explicit_session_and_thread_seed(
         self,
@@ -266,7 +266,7 @@ class TestChatSendRoute:
         latest_metadata = user_events[-1]["payload"]["control_metadata"]
         assert latest_metadata["session_owner_profile_id"] == "singleton:research"
         assert latest_metadata["agent_profile_id"] == "singleton:research"
-        assert not latest_metadata.get("requested_worker_profile_id")
+        assert not latest_metadata.get("requested_agent_profile_id")
 
     async def test_task_detail_prefers_projected_session_alias(
         self,
@@ -438,7 +438,7 @@ class TestChatSendRoute:
         latest_metadata = user_events[-1]["payload"]["control_metadata"]
         assert latest_metadata["session_owner_profile_id"] == "agent-profile-default"
         assert latest_metadata["agent_profile_id"] == "agent-profile-default"
-        assert not latest_metadata.get("requested_worker_profile_id")
+        assert not latest_metadata.get("requested_agent_profile_id")
 
     async def test_continue_chat_appends_user_message_and_requeues(
         self, client: AsyncClient

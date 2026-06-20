@@ -124,13 +124,13 @@ class SessionProjectionMixin:
             (latest_metadata or {}).get("agent_profile_id", "")
             or (latest_work.agent_profile_id if latest_work is not None else "")
         ).strip()
-        legacy_requested_worker_profile_id = str(
-            (latest_metadata or {}).get("requested_worker_profile_id", "")
-            or (latest_work.requested_worker_profile_id if latest_work is not None else "")
+        legacy_requested_agent_profile_id = str(
+            (latest_metadata or {}).get("requested_agent_profile_id", "")
+            or (latest_work.requested_agent_profile_id if latest_work is not None else "")
         ).strip()
         legacy_agent_is_worker = await self._is_worker_profile_id(legacy_agent_profile_id)
         legacy_requested_is_worker = await self._is_worker_profile_id(
-            legacy_requested_worker_profile_id
+            legacy_requested_agent_profile_id
         )
 
         session_owner_profile_id = (
@@ -149,7 +149,7 @@ class SessionProjectionMixin:
 
         if (
             not delegation_target_profile_id
-            and legacy_requested_worker_profile_id
+            and legacy_requested_agent_profile_id
             and legacy_requested_is_worker
         ):
             if normalized_runtime_kind in {
@@ -162,19 +162,19 @@ class SessionProjectionMixin:
                     DelegationTargetKind.SUBAGENT,
                 }
             ):
-                delegation_target_profile_id = legacy_requested_worker_profile_id
+                delegation_target_profile_id = legacy_requested_agent_profile_id
 
         if not session_owner_profile_id:
             if normalized_runtime_kind == AgentSessionKind.DIRECT_WORKER.value:
                 session_owner_profile_id = (
                     fallback_owner_profile_id
                     or legacy_agent_profile_id
-                    or legacy_requested_worker_profile_id
+                    or legacy_requested_agent_profile_id
                 )
             elif legacy_agent_profile_id and not legacy_agent_is_worker:
                 session_owner_profile_id = legacy_agent_profile_id
-            elif legacy_requested_worker_profile_id and not legacy_requested_is_worker:
-                session_owner_profile_id = legacy_requested_worker_profile_id
+            elif legacy_requested_agent_profile_id and not legacy_requested_is_worker:
+                session_owner_profile_id = legacy_requested_agent_profile_id
 
         turn_executor_kind = self._normalize_turn_executor_kind(
             resolve_turn_executor_kind(latest_metadata)

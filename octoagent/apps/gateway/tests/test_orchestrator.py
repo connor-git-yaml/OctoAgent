@@ -852,7 +852,7 @@ class TestOrchestrator:
         finally:
             await store_group.close()
 
-    async def test_single_loop_executor_supports_requested_worker_profile_id(
+    async def test_single_loop_executor_supports_requested_agent_profile_id(
         self,
         tmp_path: Path,
     ) -> None:
@@ -873,7 +873,7 @@ class TestOrchestrator:
             result = await orchestrator.dispatch(
                 task_id=task_id,
                 user_text=msg.text,
-                metadata={"requested_worker_profile_id": "singleton:research"},
+                metadata={"requested_agent_profile_id": "singleton:research"},
             )
             assert result.status == TaskStatus.SUCCEEDED
             assert result.worker_id == "worker.llm.default"
@@ -889,7 +889,7 @@ class TestOrchestrator:
                 assert runtime_context.delegation_mode == "main_inline"
             assert metadata["selected_worker_type"] == "research"
             assert metadata["requested_worker_type"] == "research"
-            assert metadata["requested_worker_profile_id"] == "singleton:research"
+            assert metadata["requested_agent_profile_id"] == "singleton:research"
             assert metadata["requested_worker_type_source"] == "delegation_target_profile_id"
             assert "decision_phase" not in metadata
         finally:

@@ -807,7 +807,6 @@ export interface AgentRuntimeItem {
   project_id: string;
   workspace_id?: string;
   agent_profile_id: string;
-  worker_profile_id: string;
   worker_capability: string;
   status: string;
   updated_at: string | null;
@@ -1203,9 +1202,9 @@ export interface WorkProjectionItem {
   session_owner_profile_id?: string;
   turn_executor_kind?: string;
   delegation_target_profile_id?: string;
-  requested_worker_profile_id: string;
-  requested_worker_profile_version: number;
-  effective_worker_snapshot_id: string;
+  requested_agent_profile_id: string;
+  requested_agent_profile_version: number;
+  effective_profile_snapshot_id: string;
   tool_resolution_mode?: string;
   mounted_tools?: ToolAvailabilityExplanation[];
   blocked_tools?: ToolAvailabilityExplanation[];

@@ -99,7 +99,6 @@ class AgentRuntimeItem(BaseModel):
     role: str = Field(default="")
     project_id: str = Field(default="")
     agent_profile_id: str = Field(default="")
-    worker_profile_id: str = Field(default="")
     name: str = Field(default="")
     persona_summary: str = Field(default="")
     status: str = Field(default="active")

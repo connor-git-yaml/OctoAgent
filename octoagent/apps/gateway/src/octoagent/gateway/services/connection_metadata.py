@@ -10,11 +10,11 @@ from octoagent.core.models import Event, EventType, TurnExecutorKind
 TURN_SCOPED_CONTROL_KEYS = frozenset(
     {
         "agent_profile_id",
-        "requested_worker_profile_id",
+        "requested_agent_profile_id",
         "delegation_target_profile_id",
         "turn_executor_kind",
-        "requested_worker_profile_version",
-        "effective_worker_snapshot_id",
+        "requested_agent_profile_version",
+        "effective_profile_snapshot_id",
         "tool_profile",
         "requested_worker_type",
         "target_kind",
@@ -70,7 +70,7 @@ PROMPT_SAFE_CONTROL_KEYS = frozenset(
     {
         "agent_profile_id",
         "session_owner_profile_id",
-        "requested_worker_profile_id",
+        "requested_agent_profile_id",
         "delegation_target_profile_id",
         "turn_executor_kind",
         "requested_worker_type",
@@ -85,6 +85,18 @@ PROMPT_SAFE_CONTROL_KEYS = frozenset(
         "route_reason",
     }
 )
+
+
+# F117 W3：worker→agent 命名收敛兼容映射。已落库（append-only event_store）的
+# control_metadata 仍可能携老 key（升级前持久化的 USER_MESSAGE / CONTROL_METADATA_UPDATED）。
+# normalize 时把老 key alias 成新 canonical 名 → 老事件经 merge_control_metadata replay
+# 时仍按新名出栈，读端只认新名即可（白名单只收新名）。事件 append-only 不可改写，
+# 故走读端 alias 而非迁移。真实例升级 + 老 in-flight task 全 drain 后可删本 map（独立清理）。
+_LEGACY_CONTROL_KEY_ALIASES = {
+    "requested_worker_profile_id": "requested_agent_profile_id",
+    "requested_worker_profile_version": "requested_agent_profile_version",
+    "effective_worker_snapshot_id": "effective_profile_snapshot_id",
+}
 
 
 def normalize_input_metadata(raw: Mapping[str, Any] | None) -> dict[str, str]:
@@ -109,12 +121,14 @@ def normalize_control_metadata(raw: Mapping[str, Any] | None) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
     for key, value in raw.items():
         name = str(key).strip()
+        # F117 W3：老持久化事件的 worker-命名 key alias 成新 canonical 名（replay 兼容）。
+        name = _LEGACY_CONTROL_KEY_ALIASES.get(name, name)
         if not name or name not in CONTROL_METADATA_KEYS:
             continue
         if value is None:
             normalized[name] = None
             continue
-        if name == "requested_worker_profile_version":
+        if name == "requested_agent_profile_version":
             if isinstance(value, bool):
                 normalized[name] = int(value)
                 continue
@@ -260,6 +274,8 @@ def resolve_delegation_target_profile_id(metadata: Mapping[str, Any] | None) -> 
         return ""
     return (
         resolve_explicit_delegation_target_profile_id(metadata)
+        or str(metadata.get("requested_agent_profile_id", "")).strip()
+        # F117 W3：防御性双读——兜底任何绕过 normalize（未 alias）的 raw 老事件 metadata。
         or str(metadata.get("requested_worker_profile_id", "")).strip()
     )
 

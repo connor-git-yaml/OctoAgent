@@ -262,12 +262,8 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
                 role=item.role.value,
                 project_id=item.project_id,
                 agent_profile_id=item.agent_profile_id,
-                # F117 W4-5：AgentRuntime.worker_profile_id 已塌缩。AgentRuntimeItem.worker_profile_id
-                # 是 FE DTO 字段（W3 改名 agent_profile_id），此处值守恒填充：worker 行取
-                # agent_profile_id（== 旧 worker_profile_id bare），非 worker 行保持空（同 baseline）。
-                worker_profile_id=(
-                    item.agent_profile_id if item.role is AgentRuntimeRole.WORKER else ""
-                ),
+                # F117 W3：删冗余 AgentRuntimeItem.worker_profile_id（W4-5 起即恒等于
+                # worker 行的 agent_profile_id、非 worker 行为空，无生产 FE 消费）→ 合并入 agent_profile_id。
                 name=item.name,
                 persona_summary=item.persona_summary,
                 status=item.status.value,
