@@ -412,6 +412,8 @@ class ToolBroker:
                         error=reason,
                         duration=duration,
                         tool_name=tool_name,
+                        # F126 项1：透传字段级结构化校验错误（None 表示非 schema 预校验拒绝）
+                        validation_errors=hook_result.validation_errors,
                     ), context)
                 if hook_result.modified_args is not None:
                     current_args = hook_result.modified_args

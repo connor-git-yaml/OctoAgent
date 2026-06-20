@@ -12,6 +12,7 @@ F085 T6：原 gateway/tools/ 目录（仅 user_profile_tools / delegate_task_too
 """
 
 from . import (
+    artifact_tools,  # F126 项3
     ask_back_tools,
     browser_tools,
     config_tools,
@@ -57,6 +58,8 @@ async def register_all(broker, deps: ToolDeps) -> None:
     await graph_pipeline_tool.register(broker, deps)
     # F099 Phase B: 三工具（ask_back / request_input / escalate_permission）
     await ask_back_tools.register(broker, deps)
+    # F126 项3: artifact read-back 工具
+    await artifact_tools.register(broker, deps)
 
 
 def list_for_entrypoint(entrypoint: str) -> list:

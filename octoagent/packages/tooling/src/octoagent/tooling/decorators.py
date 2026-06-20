@@ -29,6 +29,7 @@ def tool_contract(
     output_truncate_threshold: int | None = None,
     path_escalation: bool = False,
     produces_write: bool = False,
+    skip_arg_validation: bool = False,
 ) -> Any:
     """工具契约声明装饰器 -- 对齐 spec FR-001/002
 
@@ -66,6 +67,7 @@ def tool_contract(
             "timeout_seconds": timeout_seconds,
             "output_truncate_threshold": output_truncate_threshold,
             "path_escalation": path_escalation,
+            "skip_arg_validation": skip_arg_validation,  # F126 项1: 执行前校验豁免
         }
         return func
 

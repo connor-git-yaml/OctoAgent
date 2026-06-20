@@ -145,7 +145,9 @@ class LargeOutputHandler:
     - 阈值按上下文窗口的 50% 动态计算（而非硬编码 500 字符）
     - Head + Tail 智能截断（保留头部上下文 + 尾部错误/总结）
     - 截断标记引导 LLM 用 offset/limit 重读
-    - ArtifactStore 仅用于审计存档，不作为 LLM 恢复完整内容的途径
+    - F126 项3 起：ArtifactStore 既是审计存档，**也是 LLM 恢复完整内容的途径**——
+      被卸载的内容可由 LLM 通过 `artifact.read_content(artifact_ref, offset?, limit?)`
+      工具读回（task 隔离 + 中央权限）。此前"仅审计、不供 LLM 恢复"的约束已被 F126 显式推翻。
 
     降级策略：ArtifactStore 不可用时仍执行截断（FR-018）。
     """

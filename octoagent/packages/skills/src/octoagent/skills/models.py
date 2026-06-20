@@ -378,6 +378,14 @@ class ToolFeedbackMessage(BaseModel):
             "渲染层（_append_feedback_to_history 等）据此从 finding 派生 [security-warning]，不改 output/error。"
         ),
     )
+    # F126 项1：执行前 schema 预校验的字段级结构化错误（loc/msg/type）
+    validation_errors: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "F126 项1：从 ToolResult 透传的执行前 schema 校验错误（默认 None，向后兼容）。"
+            "渲染层据此把 Field required / 期望 type / loc 路径以结构化形式回灌 LLM 做精确修正。"
+        ),
+    )
 
 
 class SkillRunResult(BaseModel):

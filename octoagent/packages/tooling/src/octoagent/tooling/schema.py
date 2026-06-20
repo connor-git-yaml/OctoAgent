@@ -131,6 +131,7 @@ def reflect_tool_schema(func: Callable[..., Any]) -> ToolMeta:
         manifest_ref=tool_meta_dict.get("manifest_ref", ""),
         metadata=tool_meta_dict.get("metadata", {}),
         tier=tool_meta_dict.get("tier", ToolTier.DEFERRED),
+        skip_arg_validation=tool_meta_dict.get("skip_arg_validation", False),  # F126 项1
     )
 
 

@@ -181,6 +181,14 @@ class ToolMeta(BaseModel):
         default=False,
         description="访问 workspace 外路径时是否升级为 IRREVERSIBLE（filesystem 类工具设为 True）",
     )
+    # F126 项1: 执行前 schema 校验逐工具豁免（C1 决议）
+    skip_arg_validation: bool = Field(
+        default=False,
+        description=(
+            "F126 项1：True 则跳过 SchemaValidationHook 的执行前 args 预校验。"
+            "用于工具体内自做 coerce / 默认值填充 / 复杂 validate 的工具，避免宽松预校验误拒。"
+        ),
+    )
 
 
 class ToolSecurityFinding(BaseModel):
@@ -229,6 +237,14 @@ class ToolResult(BaseModel):
     security_findings: list[ToolSecurityFinding] = Field(
         default_factory=list,
         description="F124 T010：威胁检测命中（默认空，向后兼容）。检测层挂载，不改 output/error。",
+    )
+    # F126 项1: 执行前 schema 预校验失败的字段级错误（默认 None，向后兼容）
+    validation_errors: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "F126 项1：执行前 schema 预校验失败的结构化字段错误（loc/msg/type）。"
+            "仅 SchemaValidationHook 拒绝路径有值；runner 据此回灌字段级 retry feedback。"
+        ),
     )
 
 
@@ -298,6 +314,14 @@ class BeforeHookResult(BaseModel):
     modified_args: dict[str, Any] | None = Field(
         default=None,
         description="修改后的参数（None 表示不修改）",
+    )
+    # F126 项1: 结构化校验错误（字段级 loc/msg/type），仅 proceed=False 且来自 schema 预校验时有值
+    validation_errors: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "F126 项1：执行前 schema 预校验失败的字段级错误列表（每项含 loc/msg/type）。"
+            "由 SchemaValidationHook 产出，经 ToolResult 透传给 runner 回灌结构化 retry feedback。"
+        ),
     )
 
 

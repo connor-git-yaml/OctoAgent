@@ -54,6 +54,27 @@ def _from_fn_name(fn_name: str) -> str:
     return fn_name.replace("__", ".")
 
 
+def _render_validation_errors(
+    error: str | None, validation_errors: list[dict[str, Any]]
+) -> str:
+    """F126 项1：把字段级结构化校验错误渲染为 LLM 可精确修正的文本。
+
+    输出形如：
+        ERROR: 参数校验失败（tool）：path: Field required
+        校验错误（字段级）：
+        - loc=path | type=missing | msg=Field required
+    """
+    lines = [f"ERROR: {error}" if error else "ERROR: 参数校验失败"]
+    if validation_errors:
+        lines.append("校验错误（字段级）：")
+        for item in validation_errors:
+            loc = ".".join(str(x) for x in (item.get("loc") or []))
+            lines.append(
+                f"- loc={loc} | type={item.get('type', '')} | msg={item.get('msg', '')}"
+            )
+    return "\n".join(lines)
+
+
 class ProviderModelClient:
     """基于 ProviderRouter 的 SkillRunner 模型客户端。
 
@@ -177,6 +198,10 @@ class ProviderModelClient:
                 call_id = fb.tool_call_id or ""
                 if call_id and call_id in already_emitted_call_ids:
                     continue
+                # F126 项1：错误回灌时附字段级结构化校验错误（loc/type/msg），便于 LLM 精确修正
+                error_text = f"ERROR: {fb.error}"
+                if fb.is_error and fb.validation_errors:
+                    error_text = _render_validation_errors(fb.error, fb.validation_errors)
                 if call_id:
                     history.append(
                         {
@@ -184,7 +209,7 @@ class ProviderModelClient:
                             "tool_call_id": call_id,
                             # F124 T021：finding 派生 [security-warning] 前缀，不改 fb.output/error
                             "content": render_tool_result_for_llm(
-                                fb.output if not fb.is_error else f"ERROR: {fb.error}",
+                                fb.output if not fb.is_error else error_text,
                                 fb.security_findings,
                             ),
                         }
@@ -192,7 +217,10 @@ class ProviderModelClient:
                     already_emitted_call_ids.add(call_id)
                 else:
                     label = "执行出错" if fb.is_error else "执行结果"
-                    body = fb.error if fb.is_error else fb.output
+                    if fb.is_error and fb.validation_errors:
+                        body = _render_validation_errors(fb.error, fb.validation_errors)
+                    else:
+                        body = fb.error if fb.is_error else fb.output
                     body = body or "（空输出）"
                     # F124 T021：finding 派生 [security-warning] 前缀，不改 fb.output/error
                     body = render_tool_result_for_llm(body, fb.security_findings)

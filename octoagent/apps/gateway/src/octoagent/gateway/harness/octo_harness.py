@@ -446,7 +446,11 @@ class OctoHarness:
             ApprovalOverrideCache,
             ApprovalOverrideRepository,
         )
-        from octoagent.tooling import LargeOutputHandler, ToolBroker
+        from octoagent.tooling import (
+            LargeOutputHandler,
+            SchemaValidationHook,  # F126 项1
+            ToolBroker,
+        )
 
         from ..services.content_threat_scan import ContentThreatScanService
 
@@ -632,6 +636,9 @@ class OctoHarness:
             approval_manager=approval_manager,
             content_scanner=ContentThreatScanService(),  # F124 T015：tool 结果 CONTEXT 检测/标注
         )
+        # F126 项1：执行前 schema 宽松预校验（fail-closed via proceed=False），
+        # 失败回灌字段级结构化 retry feedback；priority=900 靠后执行，校验最终将传给 handler 的 args。
+        tool_broker.add_hook(SchemaValidationHook())
         tool_broker.add_hook(
             LargeOutputHandler(
                 artifact_store=store_group.artifact_store,

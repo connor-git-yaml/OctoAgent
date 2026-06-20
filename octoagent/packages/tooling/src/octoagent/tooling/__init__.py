@@ -60,6 +60,7 @@ from .sanitizer import sanitize_for_event
 
 # Schema Reflection
 from .schema import reflect_tool_schema
+from .schema_validation_hook import SchemaValidationHook  # F126 项1
 from .tool_index import InMemoryToolIndexBackend, LanceDBToolIndexBackend, ToolIndex
 
 __all__ = [
@@ -93,6 +94,7 @@ __all__ = [
     # Hook 实现
     "EventGenerationHook",
     "LargeOutputHandler",
+    "SchemaValidationHook",  # F126 项1
     # 脱敏
     "sanitize_for_event",
     "ToolIndex",

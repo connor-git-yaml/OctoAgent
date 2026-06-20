@@ -88,16 +88,28 @@ class ArtifactStore(Protocol):
         """存储 Artifact（元数据 + 可选内容）"""
         ...
 
-    async def get_artifact(self, artifact_id: str) -> Artifact | None:
-        """根据 artifact_id 查询 Artifact 元数据"""
+    async def get_artifact(
+        self, artifact_id: str, *, task: str | None = None
+    ) -> Artifact | None:
+        """根据 artifact_id 查询 Artifact 元数据。
+
+        F126 项3：``task`` 为纵深防御过滤（默认 None = 内部信任调用、不过滤，
+        保所有既有 caller 零变更）；非 None 时附加 ``AND task_id = task`` 物理隔离，
+        跨 task 查询返回 None（read-back 工具传入，防越权读其它 task 的 artifact）。
+        """
         ...
 
     async def list_artifacts_for_task(self, task_id: str) -> list[Artifact]:
         """查询指定任务的所有 Artifact"""
         ...
 
-    async def get_artifact_content(self, artifact_id: str) -> bytes | None:
-        """获取 Artifact 内容（inline 直接返回 + 文件路径读取）"""
+    async def get_artifact_content(
+        self, artifact_id: str, *, task: str | None = None
+    ) -> bytes | None:
+        """获取 Artifact 内容（inline 直接返回 + 文件路径读取）。
+
+        F126 项3：``task`` 语义同 ``get_artifact``（None = 不过滤，纵深防御第二道）。
+        """
         ...
 
 

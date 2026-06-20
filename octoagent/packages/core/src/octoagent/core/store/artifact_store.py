@@ -382,12 +382,24 @@ class SqliteArtifactStore:
                 error_type=type(emit_exc).__name__,
             )
 
-    async def get_artifact(self, artifact_id: str) -> Artifact | None:
-        """根据 artifact_id 查询 Artifact 元数据"""
-        cursor = await self._conn.execute(
-            "SELECT * FROM artifacts WHERE artifact_id = ?",
-            (artifact_id,),
-        )
+    async def get_artifact(
+        self, artifact_id: str, *, task: str | None = None
+    ) -> Artifact | None:
+        """根据 artifact_id 查询 Artifact 元数据。
+
+        F126 项3：``task=None`` 时按 id 查（内部信任调用，零变更）；``task`` 非 None 时
+        SQL 层附加 ``AND task_id = ?`` 物理隔离（纵深防御，跨 task 查询返回 None）。
+        """
+        if task is None:
+            cursor = await self._conn.execute(
+                "SELECT * FROM artifacts WHERE artifact_id = ?",
+                (artifact_id,),
+            )
+        else:
+            cursor = await self._conn.execute(
+                "SELECT * FROM artifacts WHERE artifact_id = ? AND task_id = ?",
+                (artifact_id, task),
+            )
         row = await cursor.fetchone()
         if row is None:
             return None
@@ -402,13 +414,17 @@ class SqliteArtifactStore:
         rows = await cursor.fetchall()
         return [self._row_to_artifact(row) for row in rows]
 
-    async def get_artifact_content(self, artifact_id: str) -> bytes | None:
+    async def get_artifact_content(
+        self, artifact_id: str, *, task: str | None = None
+    ) -> bytes | None:
         """获取 Artifact 内容
 
         - inline 内容：从 parts.content 返回
         - 文件内容：从 storage_ref 路径读取
+
+        F126 项3：``task`` 透传给 ``get_artifact`` 做 task 隔离（None = 不过滤）。
         """
-        artifact = await self.get_artifact(artifact_id)
+        artifact = await self.get_artifact(artifact_id, task=task)
         if artifact is None:
             return None
 

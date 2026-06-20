@@ -212,6 +212,7 @@ class EventType(StrEnum):
     MEMORY_ENTRY_REMOVED = "MEMORY_ENTRY_REMOVED"            # user_profile.update remove 成功
     MEMORY_ENTRY_BLOCKED = "MEMORY_ENTRY_BLOCKED"            # ThreatScanner 拦截写入
     TOOL_RESULT_THREAT_FLAGGED = "TOOL_RESULT_THREAT_FLAGGED"  # F124: tool 结果命中威胁（标注非拦截，区别于 MEMORY_ENTRY_BLOCKED）
+    PER_TURN_BUDGET_EXCEEDED = "PER_TURN_BUDGET_EXCEEDED"    # F126 项3: 单轮 tool 输出加总超 per-turn 预算（观测/告警）
     OBSERVATION_OBSERVED = "OBSERVATION_OBSERVED"            # user_profile.observe 写入 candidates
     OBSERVATION_STAGE_COMPLETED = "OBSERVATION_STAGE_COMPLETED"  # Observation Routine 单阶段完成
     OBSERVATION_PROMOTED = "OBSERVATION_PROMOTED"            # 候选被用户接受并写入 USER.md

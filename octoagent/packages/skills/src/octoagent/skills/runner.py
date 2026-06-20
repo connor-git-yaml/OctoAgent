@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import time
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -637,6 +638,11 @@ class SkillRunner:
         for key in call_keys:
             if key in results_map:
                 ordered_results.append(results_map[key])
+
+        # F126 项3: per-turn 跨工具聚合预算（warn-only 最小版，C3 决议的降级形态）。
+        # 聚合卸载与 项2 tail eviction（history 层）治理同一压力源、共享占位语义，
+        # 故"自动卸载超额"推迟到 项2 落地一并做；本版仅 emit 告警事件（Constitution #2 可观测）。
+        await self._maybe_emit_per_turn_budget(execution_context, ordered_results)
         return ordered_results
 
     async def _execute_single_tool(
@@ -722,6 +728,7 @@ class SkillRunner:
             parts=parts,
             tool_call_id=tool_call_id,
             security_findings=tool_result.security_findings,  # F124 T021：透传威胁 finding
+            validation_errors=getattr(tool_result, "validation_errors", None),  # F126 项1
         )
 
     @staticmethod
@@ -819,6 +826,49 @@ class SkillRunner:
         await self._call_hook("skill_end", manifest, execution_context, result)
         self._try_clear_history(history_key)
         return result
+
+    # F126 项3: per-turn 预算默认 8000 token（≈ 单轮 tool 输出加总），env 可覆盖；
+    # 用 chars/4 近似 token（无 tokenizer 依赖，runner 层轻量启发式）。
+    # 已知偏差：CJK 文本 1 字符≈1 token，chars/4 会低估 ~4×（中文场景告警偏晚触发）；
+    # warn-only 最小版下仅影响告警时机、不丢数据，可接受。项2 接聚合卸载时若需精确再换 tokenizer。
+    _DEFAULT_PER_TURN_BUDGET_TOKENS = 8000
+    _CHARS_PER_TOKEN = 4
+
+    @classmethod
+    def _per_turn_budget_tokens(cls) -> int:
+        raw = os.environ.get("OCTOAGENT_PER_TURN_TOOL_OUTPUT_BUDGET", "")
+        if raw.strip().isdigit():
+            return max(1, int(raw.strip()))
+        return cls._DEFAULT_PER_TURN_BUDGET_TOKENS
+
+    async def _maybe_emit_per_turn_budget(
+        self,
+        execution_context: SkillExecutionContext,
+        results: list[ToolFeedbackMessage],
+    ) -> None:
+        """单轮所有 tool 输出加总超 per-turn 预算 → emit PER_TURN_BUDGET_EXCEEDED（告警）。
+
+        warn-only：不改写 results（自动聚合卸载推迟到 项2 tail eviction 一并做，
+        统一占位语义避免双重截断，SD-4/FR-3.5）。
+        """
+        if not results:
+            return
+        total_chars = sum(len(r.output or "") for r in results)
+        approx_tokens = total_chars // self._CHARS_PER_TOKEN
+        budget_tokens = self._per_turn_budget_tokens()
+        if approx_tokens <= budget_tokens:
+            return
+        await self._emit_event(
+            execution_context=execution_context,
+            event_type=EventType.PER_TURN_BUDGET_EXCEEDED,
+            payload={
+                "tool_count": len(results),
+                "total_chars": total_chars,
+                "approx_tokens": approx_tokens,
+                "budget_tokens": budget_tokens,
+                "action": "warn",  # 最小版仅告警；项2 落地后扩展为聚合卸载
+            },
+        )
 
     async def _emit_event(
         self,
