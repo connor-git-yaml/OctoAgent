@@ -48,3 +48,13 @@
 [13:56:36] 评审修复: skip_arg_validation decorator+reflection接通(Codex) + read-back空task守卫/弱断言收紧/CJK注记/broker e2e(Opus L1-L4); M1工具层比对归档(store SQL即权威比对点) + M2 harness-and-context.md已同步
 [13:56:36] 最终全量回归: 4071 passed (=baseline 4047 +24 F126新测试) / 0 regression / e2e_smoke 8/8
 [13:56:36] STATUS: 项1+项3 完成+双评审; 项2 tail eviction BLOCKED on KV-cache实测硬门(等用户 live key); 不push等拍板
+[13:58:56] 本地提交 7973baf7（未 push，等用户拍板）。项1+项3 闭环；项2 等用户 live key 跑 T120 KV-cache 实测硬门
+[16:37:41] T120 KV-cache 实测(用户选①): chat transport 实测 PASS(DeepSeek 真数据 R1-R4) — 改写旧消息其前前缀保活/其后失效一次, 确定性占位 R4 回升95.5% 单调收敛, token -56%. 反证 C4 占位冻结必要性
+[16:37:41] transport 覆盖缺口: OPENAI_API_KEY 实为JWT(api.openai.com 401), 无 ANTHROPIC key → responses/anthropic 仅文档语义推断未实测. GATE 决议回用户(选项A实测1/3+文档2/3 vs 选项B补key 3/3)
+[17:34:52] T120 补测(用户给 SiliconFlow/Gemini/OpenRouter key): OpenRouter→Claude 区域封锁403 / Gemini cached_tokens恒0(shim不透传) / 无native OpenAI+Anthropic key → 3/3 native实测结构性不可行. 最好2/3(DeepSeek chat ✅ + codex-OAuth responses 需用户OK ToS灰区一次性). anthropic引擎用户渠道完全摸不到. 安全:用户明文贴3 key,提醒轮换
+[17:40:44] T120 responses 实测(codex OAuth, 用户拍板): cached_tokens 可观测 + 折叠版 R4 79% 命中 → cache-compatible PASS. 插桩已 git checkout 还原(0残留)
+[17:40:44] AC-GATE-1 判 PASS: chat(DeepSeek)实测 + responses(codex)实测 2/3 + anthropic 文档机制(结构不可达). 解锁 项2
+[17:40:44] phase 项2 tail eviction: STARTED (落 _maybe_compact_history)
+[18:00:17] 项2 实现完成: _maybe_compact_history 确定性tail eviction + _fold_meta sidecar + TOOL_RESULT_EVICTED + octo_harness wiring. 7测试 passed / 全量4078 / e2e_smoke 8/8
+[18:00:17] 项2 双评审: Opus 0H/2M/3L + Codex 1H/3M. 分歧人裁: Codex resume HIGH 降MED(采纳Opus: 内存态baseline行为非项2回归, 修AC-2.3措辞). Codex 3MED全闭环(normalize_ref占位边界/token估算纳tool_calls/原始→折叠前标签). 0 HIGH残留
+[18:04:04] F126 三项全完成: 2 commits 本地未push(7973baf7 项1+项3 / ff5da64e 项2). 最终回归 4079 passed(+32新测试) 0 regression / e2e_smoke 8/8 / 双评审 0 HIGH. 等用户拍板 push

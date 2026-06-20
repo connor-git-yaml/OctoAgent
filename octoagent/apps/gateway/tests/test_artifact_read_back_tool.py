@@ -124,6 +124,29 @@ async def test_no_task_context_rejected():
             await handler(artifact_ref="art-1")
 
 
+async def test_read_back_accepts_full_fold_placeholder():
+    """LLM 直接把 项2 折叠占位整串传入也能解析出裸 ref（Codex MED 闭环）。"""
+    from octoagent.gateway.services.builtin_tools.artifact_tools import _normalize_ref
+
+    assert _normalize_ref("art-1") == "art-1"
+    assert _normalize_ref("artifact:art-1") == "art-1"
+    assert _normalize_ref("[已折叠，见 artifact:art-1（工具 telemetry，折叠前 18000 字节）]") == "art-1"
+    assert _normalize_ref("artifact:art-1 trailing") == "art-1"
+
+    store = _StubArtifactStore()
+    store.put("art-1", _TASK_A, _CONTENT)
+    handler = await _registered_handler(store)
+    import json
+    with bind_execution_context(SimpleNamespace(task_id=_TASK_A)):
+        out = json.loads(
+            await handler(
+                artifact_ref="[已折叠，见 artifact:art-1（工具 telemetry，折叠前 18000 字节）]"
+            )
+        )
+    assert out["artifact_ref"] == "art-1"
+    assert out["total_bytes"] == len(_CONTENT)
+
+
 async def test_read_back_through_broker_execute():
     """e2e：经 broker.execute（中央权限 + contextvar 绑定）read-back 成功。"""
     import json

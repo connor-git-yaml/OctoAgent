@@ -33,11 +33,26 @@ _TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
 
 
 def _normalize_ref(artifact_ref: str) -> str:
-    """容忍 LLM 传入占位里的 `artifact:<id>` 形态，归一为裸 artifact_id。"""
+    """归一为裸 artifact_id，容忍 LLM 直接传入折叠占位串。
+
+    支持形态：
+    - 裸 id：`01ABC...`
+    - `artifact:<id>` 前缀
+    - 完整折叠占位 `[已折叠，见 artifact:<id>（工具 X，原始 N 字节）]`
+      —— 取 `artifact:` 后、遇空白 / 中英文括号 / `]` 即截断（F126 项2 占位边界）。
+    """
     ref = artifact_ref.strip()
-    if ref.startswith("artifact:"):
-        ref = ref[len("artifact:"):].strip()
-    return ref
+    marker = "artifact:"
+    idx = ref.find(marker)
+    if idx != -1:
+        ref = ref[idx + len(marker):]
+    # 截到第一个边界字符（空白 / （ / ( / ] / ，）为止 = 裸 id
+    boundary = len(ref)
+    for ch in (" ", "\t", "\n", "（", "(", "]", "，", ","):
+        pos = ref.find(ch)
+        if pos != -1:
+            boundary = min(boundary, pos)
+    return ref[:boundary].strip()
 
 
 async def register(broker: Any, deps: ToolDeps) -> None:

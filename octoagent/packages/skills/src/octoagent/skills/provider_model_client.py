@@ -94,16 +94,24 @@ class ProviderModelClient:
     _MAX_HISTORY_ENTRIES = 1024
     _HISTORY_IDLE_EVICT_SECONDS = 30 * 60
 
+    # F126 项2: tail eviction 占位前缀（确定性检测"已折叠"，避免二次改写）
+    _EVICTION_PLACEHOLDER_PREFIX = "[已折叠，见 artifact:"
+
     def __init__(
         self,
         *,
         provider_router: ProviderRouter,
         tool_broker: Any | None = None,
+        event_store: Any | None = None,
     ) -> None:
         self._router = provider_router
         self._tool_broker = tool_broker
+        self._event_store = event_store  # F126 项2: emit TOOL_RESULT_EVICTED
         self._histories: OrderedDict[str, list[dict[str, Any]]] = OrderedDict()
         self._last_access: dict[str, float] = {}
+        # F126 项2: key → tool_call_id → {artifact_ref, tool_name}，供 tail eviction
+        # 构造确定性占位（仅记录有 artifact_ref=可 read-back 恢复的 tool 结果）。
+        self._fold_meta: dict[str, dict[str, dict[str, str]]] = {}
 
     async def close(self) -> None:
         """关闭底层 router 持有的 http_client。"""
@@ -116,6 +124,7 @@ class ProviderModelClient:
         """
         self._histories.pop(key, None)
         self._last_access.pop(key, None)
+        self._fold_meta.pop(key, None)  # F126 项2
         # task scope 在 router 内也用同一个 key（task_id:trace_id），一并清理
         self._router.invalidate_task(key)
 
@@ -292,6 +301,51 @@ class ProviderModelClient:
 
     # ──────────────── compaction ────────────────
 
+    def _record_fold_meta(
+        self, key: str, feedback: list[ToolFeedbackMessage]
+    ) -> None:
+        """F126 项2：记录有 artifact_ref（可 read-back 恢复）的 tool 结果的折叠元数据。
+
+        仅记录 TOOL_RESULT 且有 artifact_ref 的 fb——这些是被 LargeOutputHandler
+        卸载为 artifact 的大输出，折叠后能经 artifact.read_content 读回（SD-2 闭环）。
+        """
+        meta = self._fold_meta.setdefault(key, {})
+        for fb in feedback:
+            if fb.kind != FeedbackKind.TOOL_RESULT:
+                continue
+            if not fb.artifact_ref or not fb.tool_call_id:
+                continue
+            meta[fb.tool_call_id] = {
+                "artifact_ref": fb.artifact_ref,
+                "tool_name": fb.tool_name,
+            }
+
+    @staticmethod
+    def _estimate_history_tokens(history: list[dict[str, Any]]) -> int:
+        """chars/4 近似 token（与 runner per-turn 预算同启发式，无 tokenizer 依赖）。
+
+        纳入 content + assistant tool_calls 的 arguments（各 transport 都会序列化发送，
+        大参数 tool call 不计会低估 → 折叠偏晚，评审 Codex MED 闭环）。CJK 低估约 4×，
+        仅影响折叠触发时机；真溢出仍由 runner context_overflow 兜底。
+        """
+        total = 0
+        for msg in history:
+            content = msg.get("content")
+            if isinstance(content, str):
+                total += len(content)
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function") if isinstance(tc, dict) else None
+                if isinstance(fn, dict):
+                    args = fn.get("arguments")
+                    if isinstance(args, str):
+                        total += len(args)
+        return total // 4
+
+    def _is_folded(self, content: Any) -> bool:
+        return isinstance(content, str) and content.startswith(
+            self._EVICTION_PLACEHOLDER_PREFIX
+        )
+
     async def _maybe_compact_history(
         self,
         manifest: SkillManifest,
@@ -300,6 +354,13 @@ class ProviderModelClient:
         key: str,
         step: int,
     ) -> None:
+        """F126 项2：tool_call_id 确定性 tail eviction。
+
+        上下文接近预算时，把**最旧**的、已卸载为 artifact 的 tool 结果折叠成确定性
+        占位（指向 artifact，可经 read-back 恢复）。占位一旦写入即冻结（下轮检测到
+        已折叠形态则跳过），位置不动、只改 role:tool 消息 content，不碰 system /
+        assistant / user 消息——保证前缀单调收敛（KV-cache 实测验证，见 kv-cache-probe.md）。
+        """
         threshold_ratio = manifest.compaction_threshold_ratio
         if threshold_ratio >= 1.0:
             return
@@ -308,18 +369,71 @@ class ProviderModelClient:
             or manifest.resource_limits.get("max_tokens", 0)
             or 128000
         )
-        # Phase 4 整理：compactor 应该也走 ProviderRouter 而不是 LiteLLM Proxy；
-        # 当前先保留旧 ContextCompactor（用 router 的 http_client + 一个常用 alias）
-        # 直到 P4 退役。这里直接 import 不实例化 LiteLLM 相关：
-        # ContextCompactor 仅持有 http_client 和 LiteLLM proxy_url，本 phase 维持
-        # 兼容；P4 退役 LiteLLM Proxy 时会同步替换 ContextCompactor。
-        # → 简化方案：本 phase 不做 compaction（threshold 默认 1.0 不触发）
-        log.debug(
-            "provider_model_client_compaction_skipped_phase3",
-            key=key,
-            step=step,
-            note="Phase 4 替换 ContextCompactor 为基于 ProviderRouter",
-        )
+        budget_tokens = int(threshold_ratio * max_context_tokens)
+        if self._estimate_history_tokens(history) <= budget_tokens:
+            return
+
+        fold_meta = self._fold_meta.get(key, {})
+        evicted: list[dict[str, Any]] = []
+        # 从最旧（前部）向后扫，优先折叠旧 tool 结果，直到回到预算内或无可折叠
+        for msg in history:
+            if self._estimate_history_tokens(history) <= budget_tokens:
+                break
+            if msg.get("role") != "tool":
+                continue
+            content = msg.get("content")
+            if not isinstance(content, str) or self._is_folded(content):
+                continue
+            call_id = str(msg.get("tool_call_id", "")).strip()
+            meta = fold_meta.get(call_id)
+            if not meta:
+                # 无 artifact_ref = 不可 read-back 恢复 → 不折叠（避免信息单向丢失）
+                continue
+            # 诚实标注：N = 折叠时刻 history content 的字节数（可能是 LargeOutputHandler
+            # 截断后的 preview，非 artifact 完整大小）。标"折叠前"而非"原始"避免误导
+            # LLM 对 artifact 真实数据量的判断（评审 Codex MED 闭环）。
+            folded_bytes = len(content.encode("utf-8"))
+            placeholder = (
+                f"{self._EVICTION_PLACEHOLDER_PREFIX}{meta['artifact_ref']}"
+                f"（工具 {meta['tool_name']}，折叠前 {folded_bytes} 字节）]"
+            )
+            msg["content"] = placeholder  # 原地改写、位置不动、内容确定性冻结
+            evicted.append(
+                {
+                    "tool_call_id": call_id,
+                    "artifact_ref": meta["artifact_ref"],
+                    "tool_name": meta["tool_name"],
+                    "folded_bytes": folded_bytes,
+                    "placeholder_bytes": len(placeholder.encode("utf-8")),
+                }
+            )
+
+        if evicted:
+            await self._emit_evicted(key, step, evicted)
+
+    async def _emit_evicted(
+        self, key: str, step: int, evicted: list[dict[str, Any]]
+    ) -> None:
+        """emit TOOL_RESULT_EVICTED（Constitution #2；event_store 缺失时降级 log）。"""
+        if self._event_store is None:
+            log.info("tool_result_evicted_no_event_store", key=key, count=len(evicted))
+            return
+        from octoagent.core.event_helpers import emit_task_event
+        from octoagent.core.models.enums import ActorType, EventType
+
+        task_id, _, trace_id = key.partition(":")  # key = f"{task_id}:{trace_id}"
+        for item in evicted:
+            try:
+                await emit_task_event(
+                    self._event_store,
+                    task_id=task_id,
+                    event_type=EventType.TOOL_RESULT_EVICTED,
+                    payload={**item, "step": step},
+                    actor=ActorType.WORKER,
+                    trace_id=trace_id,
+                )
+            except Exception:
+                log.warning("tool_result_evicted_emit_failed", exc_info=True)
 
     # ──────────────── 主编排 ────────────────
 
@@ -425,6 +539,7 @@ class ProviderModelClient:
         history = self._histories[key]
         if step > 1 and feedback:
             self._append_feedback_to_history(history, feedback)
+            self._record_fold_meta(key, feedback)  # F126 项2
 
         await self._maybe_compact_history(manifest, history, key=key, step=step)
 

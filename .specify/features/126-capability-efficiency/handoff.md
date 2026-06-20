@@ -1,7 +1,14 @@
-# F126 Handoff — 项2 tail eviction（KV-cache 实测硬门后续）
+# F126 Handoff — 3 项全完成 + 后续（anthropic 实测补齐）
 
-> 状态：项1 + 项3 已实现 + 双评审 + 0 regression（4071 passed），未 push。
-> 项2 tail eviction **BLOCKED 于决策 B 的 KV-cache 实测硬门（T120 / AC-GATE-1）**——用户已拍板由其提供 live provider key 跑真实测。本文件供恢复 项2 时用。
+> 状态：**项1 + 项2 + 项3 全部实现 + 双评审 0 HIGH + 0 regression（4078 passed）**，未 push 等用户拍板。
+> 项1+项3 已提交 7973baf7；项2 在 KV-cache 实测硬门（T120）PASS 后实现（chat/DeepSeek + responses/codex 实测 cache-compatible，anthropic 文档机制，见 kv-cache-probe.md）。
+
+## 唯一未尽项：anthropic transport 实测（结构性不可达，非阻塞）
+
+用户无 native Anthropic API key（仅订阅 OAuth）+ OpenRouter 对其区域封锁 Claude → anthropic transport 的 KV-cache **无法实测**。已按通用 prefix-cache 机制 + 官方文档语义视同符合（GATE PASS 由用户拍板 2/3 实测 + 1/3 文档解锁）。
+- 将来用户有 native Anthropic key 时：`ANTHROPIC_API_KEY` 写 `~/.octoagent/.env`，跑 `python .specify/features/126-capability-efficiency/probe/kv_cache_probe.py anthropic`（探针 anthropic 路径已写好待命，Messages API + cache_control + 读 cache_read_input_tokens）。
+
+## 以下为 项2 实现存档（已完成，供理解/回溯）
 
 ## 恢复前置（用户提供 live key 后第一步 = T120 硬门）
 

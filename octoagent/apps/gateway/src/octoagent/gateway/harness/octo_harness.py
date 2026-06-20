@@ -1005,6 +1005,7 @@ class OctoHarness:
                 model_client=ProviderModelClient(
                     provider_router=app.state.provider_router,
                     tool_broker=tool_broker,
+                    event_store=store_group.event_store,  # F126 项2: TOOL_RESULT_EVICTED
                 ),
                 tool_broker=tool_broker,
                 event_store=store_group.event_store,

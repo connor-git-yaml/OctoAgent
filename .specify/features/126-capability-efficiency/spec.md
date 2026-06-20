@@ -152,8 +152,9 @@ F126 把 F108 在 M6 竞品源码深读阶段沉淀的 **3 项 capability/contex
   - test: `octoagent/packages/skills/tests/test_provider_model_client_tail_eviction.py::test_deterministic_frozen_placeholder`
 - **AC-2.2（P1，对应 FR-2.3）** — eviction 只折叠旧 tool 结果，不改写中段非折叠内容、不触及 system 折叠假设。
   - test: `octoagent/packages/skills/tests/test_provider_model_client_tail_eviction.py::test_no_mid_history_rewrite`
-- **AC-2.3（P1，对应 FR-2.4）** — eviction 后 history 进 checkpoint 并 resume，tool_call/tool_result 配对不错位、无 `conversation_state_lost`。
+- **AC-2.3（P1，对应 FR-2.4）** — eviction 改写后的 in-memory history，tool_call/tool_result 配对不错位（折叠只改 role:tool content、不动 tool_call_id、不删消息）。
   - test: `octoagent/packages/skills/tests/test_provider_model_client_tail_eviction.py::test_resume_pairing_intact`
+  - **【实现澄清，双评审人裁】**：`provider_model_client._histories` 是**进程内内存态**（baseline 既有，非项2 引入），从不写 checkpoint；进程重启后 `step>1` 本就 raise `conversation_state_lost`（baseline 行为，项2 折叠**不引入 resume 回归**）。故 AC-2.3 实际保证 = "内存内折叠保持 tool_call/tool_result 配对完整"，**非** checkpoint 跨进程往返（该往返架构里从未存在）。gateway 侧 resume 由 AgentSession turn 重建，tool 结果不在其序列（§8 out-of-scope），不含折叠占位。Codex 将此判 HIGH（按 AC 字面无持久化），主节点采纳 Opus 论证降为 MED+文档修正：实现安全、无 resume 回归，修 AC 措辞即可。
 
 ### 项 3
 
