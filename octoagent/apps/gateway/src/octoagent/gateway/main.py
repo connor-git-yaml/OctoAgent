@@ -40,6 +40,7 @@ from .middleware.trace_mw import TraceMiddleware
 from .routes import (
     approvals,
     auth_callback,
+    behavior_versions,
     cancel,
     chat,
     control_plane,
@@ -351,6 +352,9 @@ def create_app() -> FastAPI:
     # 统一挂载，不带 protected——平台自鉴权，spec v0.2 D1/D2/FR-A3）。
     app.include_router(tasks.router, tags=["tasks"], dependencies=protected)
     app.include_router(files.router, tags=["files"], dependencies=protected)
+    app.include_router(
+        behavior_versions.router, tags=["behavior-versions"], dependencies=protected
+    )
     app.include_router(cancel.router, tags=["cancel"], dependencies=protected)
     app.include_router(execution.router, tags=["execution"], dependencies=protected)
     app.include_router(stream.router, tags=["stream"], dependencies=protected)
