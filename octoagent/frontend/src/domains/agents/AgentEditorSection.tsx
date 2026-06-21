@@ -1,4 +1,12 @@
+import { useState } from "react";
 import type { AgentEditorDraft, AgentEditorReview, ApprovalOverrideDisplay, BehaviorFileInfo } from "./agentManagementData";
+import BehaviorVersionHistory from "./BehaviorVersionHistory";
+
+/** 从 behavior 文件路径提取 agent_slug（behavior/agents/{slug}/...，AGENT_PRIVATE 文件版本 key 用） */
+function deriveAgentSlug(path: string | undefined): string {
+  const m = path?.match(/behavior\/agents\/([^/]+)\//);
+  return m?.[1] ?? "";
+}
 
 /** 行为文件描述（固定 3 个 Agent 私有文件） */
 const BEHAVIOR_FILE_META: Record<string, { title: string; description: string }> = {
@@ -64,6 +72,12 @@ export default function AgentEditorSection({
   const effectiveModelAliasOptions = modelAliasMissingFromOptions
     ? [draft.modelAlias, ...modelAliasOptions]
     : modelAliasOptions;
+
+  // F107 W1-D：当前查看版本历史的 behavior 文件（null = 未打开）
+  const [historyFile, setHistoryFile] = useState<{
+    fileId: string;
+    agentSlug: string;
+  } | null>(null);
 
   return (
     <section className="wb-panel wb-agent-editor-shell">
@@ -189,6 +203,42 @@ export default function AgentEditorSection({
           </div>
         </div>
       </div>
+
+      {/* F107 W1-D：behavior 文件版本历史入口（additive，不动上方编辑卡片，0 regression） */}
+      {!isCreate && (
+        <div className="wb-field">
+          <span>版本历史</span>
+          <div className="wb-agent-check-grid">
+            {(["IDENTITY.md", "SOUL.md", "HEARTBEAT.md"] as const).map((fileId) => {
+              const fileInfo = behaviorFiles.find((f) => f.file_id === fileId);
+              return (
+                <button
+                  key={fileId}
+                  type="button"
+                  className="wb-chip"
+                  disabled={!fileInfo?.exists_on_disk}
+                  onClick={() =>
+                    setHistoryFile({
+                      fileId,
+                      agentSlug: deriveAgentSlug(fileInfo?.path),
+                    })
+                  }
+                >
+                  {fileId} 历史
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+      {historyFile && (
+        <BehaviorVersionHistory
+          fileId={historyFile.fileId}
+          scope="agent_private"
+          agentSlug={historyFile.agentSlug}
+          onClose={() => setHistoryFile(null)}
+        />
+      )}
 
       {/* 已授权工具 —— 仅已保存的 Agent 才显示 */}
       {!isCreate && (

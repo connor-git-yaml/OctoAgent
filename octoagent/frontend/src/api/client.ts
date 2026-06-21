@@ -444,6 +444,51 @@ export async function fetchLogicalFileVersions(
   );
 }
 
+// ---------------------------------------------------------------------------
+// F107 behavior 版本历史 -- Agent 中心 behavior 文件版本时间线 + 任意两版 diff
+// ---------------------------------------------------------------------------
+
+export interface BehaviorVersionFileItem {
+  scope: string;
+  agent_slug: string;
+  project_slug: string;
+  file_id: string;
+  version_count: number;
+}
+
+export interface BehaviorVersionMetaItem {
+  version_no: number;
+  ts: string;
+  size: number;
+  hash: string;
+}
+
+/** behavior 版本 key（与后端 behavior_version_key_for 同语义，无关字段可省略） */
+export interface BehaviorVersionKeyParams {
+  file_id: string;
+  scope?: string;
+  agent_slug?: string;
+  project_slug?: string;
+}
+
+/** GET /api/behavior-versions/versions -- 版本元信息时间线 */
+export async function fetchBehaviorVersions(
+  params: BehaviorVersionKeyParams
+): Promise<{ versions: BehaviorVersionMetaItem[] }> {
+  return apiFetch(
+    `/api/behavior-versions/versions${buildQueryString({ ...params })}`
+  );
+}
+
+/** GET /api/behavior-versions/diff -- 任意两版（缺省最新两版）diff */
+export async function fetchBehaviorVersionDiff(
+  params: BehaviorVersionKeyParams & { version_a?: number; version_b?: number }
+): Promise<DiffResponse> {
+  return apiFetch(
+    `/api/behavior-versions/diff${buildQueryString({ ...params })}`
+  );
+}
+
 export async function attachExecutionInput(
   taskId: string,
   body: {
