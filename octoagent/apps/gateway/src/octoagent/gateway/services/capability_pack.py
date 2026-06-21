@@ -204,6 +204,11 @@ class CapabilityPackService(
             self._tool_deps._approval_gate = approval_gate
 
     @property
+    def workspace_git_store(self) -> Any:
+        """F107 W2：startup() 后暴露 WorkspaceGitStore（API 路由 + RollbackService 共用单实例）。"""
+        return getattr(self, "_workspace_git_store", None)
+
+    @property
     def mcp_registry(self) -> McpRegistryService | None:
         return self._mcp_registry
 
@@ -848,11 +853,13 @@ class CapabilityPackService(
         from .builtin_tools import ToolDeps, register_all
         from .workspace_git import WorkspaceGitStore
 
-        # F107 W2：workspace git store（file-mutating 工具写前快照）。store_dir 在 data/ 下，
-        # 与 deny-list（path_policy data/）一致；git 缺失则 store.available=False，工具静默跳过。
-        workspace_git = WorkspaceGitStore(
+        # F107 W2：workspace git store。写前快照 + API 浏览 + 回滚**共用单实例**（避免多实例
+        # 同 GIT_INDEX_FILE 竞态）。git 缺失则 available=False 静默跳过；经 workspace_git_store
+        # 属性暴露给 harness（构造 API 路由 + RollbackService）。
+        self._workspace_git_store = WorkspaceGitStore(
             self._project_root / "data" / "workspace-git-store"
         )
+        workspace_git = self._workspace_git_store
 
         deps = ToolDeps(
             project_root=self._project_root,

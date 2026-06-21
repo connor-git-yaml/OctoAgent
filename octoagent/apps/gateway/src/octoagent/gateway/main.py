@@ -58,6 +58,7 @@ from .routes import (
     stream,
     tasks,
     watchdog,
+    workspace_git,
 )
 from .services.agent_session_turn_hook import AgentSessionTurnHook
 from .services.auth_refresh import build_auth_refresh_callback
@@ -354,6 +355,9 @@ def create_app() -> FastAPI:
     app.include_router(files.router, tags=["files"], dependencies=protected)
     app.include_router(
         behavior_versions.router, tags=["behavior-versions"], dependencies=protected
+    )
+    app.include_router(
+        workspace_git.router, tags=["workspace-git"], dependencies=protected
     )
     app.include_router(cancel.router, tags=["cancel"], dependencies=protected)
     app.include_router(execution.router, tags=["execution"], dependencies=protected)

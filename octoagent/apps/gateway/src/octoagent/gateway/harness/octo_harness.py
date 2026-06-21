@@ -1032,6 +1032,30 @@ class OctoHarness:
         if _tool_deps is not None and hasattr(snapshot_store, "load_snapshot"):
             _tool_deps._snapshot_store = snapshot_store
 
+        # F107 W2：workspace git store（API 路由）+ durable RollbackService（启动 rehydrate）
+        app.state.workspace_git_store = (
+            app.state.capability_pack_service.workspace_git_store
+        )
+        from octoagent.gateway.services.workspace_rollback import (
+            WorkspaceRollbackService,
+        )
+
+        app.state.workspace_rollback_service = WorkspaceRollbackService(
+            self._store_group.conn, app.state.workspace_git_store
+        )
+        # #1 durability：重跑 crash 在 approved→executed 间的回滚（幂等）；pending 等用户经
+        # 显式 approve 端点决策。git 不可用则跳过（降级）。
+        _wg = app.state.workspace_git_store
+        if _wg is not None and getattr(_wg, "available", False):
+            try:
+                _rb_state = await app.state.workspace_rollback_service.rehydrate()
+                for _req in _rb_state.get("approved", []):
+                    await app.state.workspace_rollback_service.approve_and_execute(
+                        _req.request_id
+                    )
+            except Exception:
+                _log.warning("workspace_rollback_rehydrate_failed")
+
         # F101 Phase B HIGH-01 v3：同步注入 ApprovalManager 到 ToolDeps
         # escalate_permission_handler 需要在 request_approval 后同步注册到 ApprovalManager，
         # 让 Web/Telegram 双 resolve 路径能找到该 approval_id（按 handle_id 为 approval_id）。
