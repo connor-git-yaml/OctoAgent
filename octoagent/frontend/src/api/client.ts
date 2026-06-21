@@ -489,6 +489,123 @@ export async function fetchBehaviorVersionDiff(
   );
 }
 
+// ---------------------------------------------------------------------------
+// F107 W2：workspace 真 git 浏览 + 回滚（Files Tab workspace 视图）
+// ---------------------------------------------------------------------------
+
+export interface WorkspaceCommit {
+  commit: string;
+  short: string;
+  ts: string;
+  summary: string;
+  files_changed: number;
+  insertions: number;
+  deletions: number;
+}
+
+export interface WorkspaceFileChange {
+  path: string;
+  status: string;
+}
+
+export interface WorkspaceBlameLine {
+  line_no: number;
+  content: string;
+  commit: string;
+  short: string;
+  ts: string;
+  summary: string;
+}
+
+/** GET /api/workspace-git/history -- 提交历史（available=false → git 不可用降级） */
+export async function fetchWorkspaceHistory(
+  projectSlug: string,
+  limit = 50
+): Promise<{ available: boolean; commits: WorkspaceCommit[] }> {
+  return apiFetch(
+    `/api/workspace-git/history${buildQueryString({
+      project_slug: projectSlug,
+      limit,
+    })}`
+  );
+}
+
+/** GET /api/workspace-git/commit -- 单提交涉及的文件清单 */
+export async function fetchWorkspaceCommitFiles(
+  projectSlug: string,
+  commit: string
+): Promise<{ files: WorkspaceFileChange[] }> {
+  return apiFetch(
+    `/api/workspace-git/commit${buildQueryString({
+      project_slug: projectSlug,
+      commit,
+    })}`
+  );
+}
+
+/** GET /api/workspace-git/blame -- 逐行"谁改的" */
+export async function fetchWorkspaceBlame(
+  projectSlug: string,
+  commit: string,
+  path: string
+): Promise<{ lines: WorkspaceBlameLine[] }> {
+  return apiFetch(
+    `/api/workspace-git/blame${buildQueryString({
+      project_slug: projectSlug,
+      commit,
+      path,
+    })}`
+  );
+}
+
+/** GET /api/workspace-git/diff -- 两提交某文件 diff（commit_b 省略 → 首版） */
+export async function fetchWorkspaceDiff(params: {
+  project_slug: string;
+  commit_a: string;
+  path: string;
+  commit_b?: string;
+}): Promise<DiffResponse> {
+  return apiFetch(`/api/workspace-git/diff${buildQueryString({ ...params })}`);
+}
+
+/** POST /api/workspace-git/rollback -- 回滚 proposal（Two-Phase 第一步） */
+export async function proposeWorkspaceRollback(body: {
+  project_slug: string;
+  target_commit: string;
+  paths?: string[];
+}): Promise<{ request_id: string; status: string; files_count: number }> {
+  const resp = await apiRequest("/api/workspace-git/rollback", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  if (!resp.ok) throw await buildApiError(resp, await resp.json().catch(() => null));
+  return resp.json();
+}
+
+/** POST /api/workspace-git/rollback/{id}/approve -- 执行回滚（Two-Phase 第二步） */
+export async function approveWorkspaceRollback(
+  requestId: string
+): Promise<{ request_id: string; status: string; detail: string }> {
+  const resp = await apiRequest(
+    `/api/workspace-git/rollback/${encodeURIComponent(requestId)}/approve`,
+    { method: "POST" }
+  );
+  if (!resp.ok) throw await buildApiError(resp, await resp.json().catch(() => null));
+  return resp.json();
+}
+
+/** POST /api/workspace-git/rollback/{id}/reject -- 取消回滚 */
+export async function rejectWorkspaceRollback(
+  requestId: string
+): Promise<{ request_id: string; status: string }> {
+  const resp = await apiRequest(
+    `/api/workspace-git/rollback/${encodeURIComponent(requestId)}/reject`,
+    { method: "POST" }
+  );
+  if (!resp.ok) throw await buildApiError(resp, await resp.json().catch(() => null));
+  return resp.json();
+}
+
 export async function attachExecutionInput(
   taskId: string,
   body: {

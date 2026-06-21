@@ -21,6 +21,7 @@ import {
   type CSSProperties,
 } from "react";
 import { DiffBody } from "../components/diff/DiffBody";
+import WorkspaceGitView from "./WorkspaceGitView";
 import {
   fetchFileTasks,
   fetchLogicalFileDiff,
@@ -39,6 +40,8 @@ type ViewLevel = "tasks" | "files" | "diff";
 export default function FilesCenter() {
   // 当前导航层级
   const [level, setLevel] = useState<ViewLevel>("tasks");
+  // F107 W2：任务产物版本 vs 工作区 git 版本 切换（默认任务产物 = 既有行为）
+  const [mode, setMode] = useState<"artifacts" | "workspace">("artifacts");
 
   // 一级：任务列表
   const [tasks, setTasks] = useState<FileTaskItem[]>([]);
@@ -190,6 +193,33 @@ export default function FilesCenter() {
         </div>
       </section>
 
+      {/* F107 W2：切换 任务产物版本 / 工作区 git 版本 */}
+      <div
+        className="wb-agent-check-grid"
+        style={{ marginBottom: "var(--space-md)" }}
+      >
+        <button
+          type="button"
+          className="wb-chip"
+          aria-pressed={mode === "artifacts"}
+          onClick={() => setMode("artifacts")}
+        >
+          任务产物
+        </button>
+        <button
+          type="button"
+          className="wb-chip"
+          aria-pressed={mode === "workspace"}
+          onClick={() => setMode("workspace")}
+        >
+          工作区版本
+        </button>
+      </div>
+
+      {mode === "workspace" ? (
+        <WorkspaceGitView projectSlug="default" />
+      ) : (
+        <>
       <FilesBreadcrumb
         level={level}
         taskTitle={selectedTask?.title ?? null}
@@ -225,6 +255,8 @@ export default function FilesCenter() {
           loading={diffLoading}
           error={diffError}
         />
+      )}
+        </>
       )}
     </div>
   );
