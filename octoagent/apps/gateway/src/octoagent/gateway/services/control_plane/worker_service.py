@@ -582,6 +582,14 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 f"预算 {budget_result['budget_chars']}），请精简后重试",
             )
 
+        # F107 W1：写盘前读旧内容作版本 baseline（record-after + 首版 baseline）
+        from octoagent.gateway.services.behavior_versioning import (
+            read_disk_content,
+            record_behavior_version,
+        )
+
+        old_content = read_disk_content(resolved)
+
         try:
             commit_behavior_file_write(pending, content)
         except Exception as exc:
@@ -597,6 +605,19 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             file_id=file_id,
             resolved_path=str(resolved),
             chars_written=len(content),
+        )
+
+        # F107 W1：record-after 版本记录（best-effort，不阻断写）。control_plane UI 写常无 task
+        # 上下文 → 事件按需跳过，版本仍记录（durable 版本是主，事件是补充审计）。
+        await record_behavior_version(
+            stores=self._stores,
+            file_id=file_id,
+            agent_slug=agent_slug,
+            project_slug=project_slug,
+            new_content=content,
+            old_content=old_content,
+            task_id="",
+            source="control_plane",
         )
 
         return self._completed_result(

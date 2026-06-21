@@ -234,6 +234,17 @@ class ArtifactVersionAppendFailedPayload(BaseModel):
     attempt: int = Field(default=0, description="失败时已尝试的 SAVEPOINT 重试次数")
 
 
+class BehaviorVersionRecordedPayload(BaseModel):
+    """BEHAVIOR_VERSION_RECORDED 事件 payload（F107 W1 behavior 版本审计）"""
+
+    scope: str = Field(description="behavior scope（system_shared/agent_private/project_shared）")
+    agent_slug: str = Field(default="", description="AGENT scope 的 agent slug，否则 ''")
+    project_slug: str = Field(default="", description="PROJECT scope 的 project slug，否则 ''")
+    file_id: str = Field(description="behavior 文件标识，如 USER.md")
+    version_no: int = Field(description="记录的版本号")
+    source: str = Field(default="", description="写入来源（llm_tool / control_plane）")
+
+
 class ErrorPayload(BaseModel):
     """ERROR 事件 payload"""
 

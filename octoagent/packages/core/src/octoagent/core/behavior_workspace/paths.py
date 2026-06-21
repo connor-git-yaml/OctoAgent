@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ..models.agent_context import AgentProfile
 from ..models.behavior import BehaviorWorkspaceScope
+from ..models.behavior_version import BehaviorFileKey
 from ._types import (
     _SLUG_RE,
     AGENT_PRIVATE_BEHAVIOR_FILE_IDS,
@@ -203,3 +204,42 @@ def resolve_write_path_by_file_id(
         f"未知的 file_id: {file_id!r}，"
         f"已知列表: {known_file_ids}"
     )
+
+
+def behavior_version_key_for(
+    file_id: str,
+    *,
+    agent_slug: str = "",
+    project_slug: str = "",
+) -> BehaviorFileKey:
+    """派生 behavior 版本 key（F107 W1）。
+
+    与 ``resolve_write_path_by_file_id`` **同 scope 路由**，并按 scope **归零无关字段**——
+    保证同一物理文件映射到唯一 key（Codex MED-4：避免按盘上路径反推 scope 的脆弱性 +
+    避免同文件因 agent_slug/project_slug 噪声裂成多 key）：
+    - SHARED → SYSTEM_SHARED，agent_slug/project_slug 均 ''（全局唯一文件）
+    - PROJECT_SHARED → 仅 project_slug 生效，agent_slug ''
+    - AGENT_PRIVATE → 仅 agent_slug 生效，project_slug ''
+    """
+    if file_id in SHARED_BEHAVIOR_FILE_IDS:
+        return BehaviorFileKey(
+            scope=BehaviorWorkspaceScope.SYSTEM_SHARED.value, file_id=file_id
+        )
+    if file_id in PROJECT_SHARED_BEHAVIOR_FILE_IDS:
+        return BehaviorFileKey(
+            scope=BehaviorWorkspaceScope.PROJECT_SHARED.value,
+            project_slug=project_slug,
+            file_id=file_id,
+        )
+    if file_id in AGENT_PRIVATE_BEHAVIOR_FILE_IDS:
+        return BehaviorFileKey(
+            scope=BehaviorWorkspaceScope.AGENT_PRIVATE.value,
+            agent_slug=agent_slug,
+            file_id=file_id,
+        )
+    known_file_ids = (
+        SHARED_BEHAVIOR_FILE_IDS
+        + PROJECT_SHARED_BEHAVIOR_FILE_IDS
+        + AGENT_PRIVATE_BEHAVIOR_FILE_IDS
+    )
+    raise ValueError(f"未知的 file_id: {file_id!r}，已知列表: {known_file_ids}")

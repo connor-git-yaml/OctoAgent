@@ -268,6 +268,14 @@ async def register(broker, deps: ToolDeps) -> None:
                 proposal=True,
             )
 
+        # F107 W1：写盘前读旧内容作版本 baseline（record-after + 首版 baseline，FR-W1-2b）
+        from octoagent.gateway.services.behavior_versioning import (
+            read_disk_content,
+            record_behavior_version,
+        )
+
+        old_content = read_disk_content(resolved)
+
         # 实际写入磁盘（confirmed=true 时直接信任 Agent 传入的 content）
         try:
             commit_behavior_file_write(pending, content)
@@ -289,6 +297,18 @@ async def register(broker, deps: ToolDeps) -> None:
             file_id=file_id,
             chars_written=len(content),
             resolved_path=str(resolved),
+        )
+
+        # F107 W1：record-after 版本记录 + BEHAVIOR_VERSION_RECORDED 审计（best-effort，不阻断写）
+        await record_behavior_version(
+            stores=deps.stores,
+            file_id=file_id,
+            agent_slug=agent_slug,
+            project_slug=project_slug,
+            new_content=content,
+            old_content=old_content,
+            task_id=getattr(ctx, "task_id", "") or "",
+            source="llm_tool",
         )
 
         # Feature 063 T1.4: 路径 A — 检测 BOOTSTRAP.md 的 <!-- COMPLETED --> 标记
