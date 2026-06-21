@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import structlog
-from octoagent.core.behavior_workspace import behavior_version_key_for
+from octoagent.core.behavior_workspace import behavior_version_key_from_path
 from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event
 from octoagent.core.models.payloads import BehaviorVersionRecordedPayload
@@ -39,25 +39,27 @@ def read_disk_content(path: Any) -> str | None:
 async def record_behavior_version(
     *,
     stores: Any,
-    file_id: str,
-    agent_slug: str,
-    project_slug: str,
+    project_root: Any,
+    resolved_path: Any,
     new_content: str,
     old_content: str | None,
     task_id: str = "",
     source: str = "",
 ) -> None:
-    """写盘成功后记录 behavior 版本 + emit 审计事件（best-effort，绝不抛）。"""
+    """写盘成功后记录 behavior 版本 + emit 审计事件（best-effort，绝不抛）。
+
+    版本 key 从**实际 resolved 磁盘路径**派生（Opus H1 修正）——保证写 key 与前端读 key
+    （同从 `behavior/agents/<slug>/` 路径段派生）逐字一致，AGENT_PRIVATE 历史对自定义 Worker 命中。
+    """
     store = getattr(stores, "behavior_version_store", None)
     if store is None:
         return
     try:
-        key = behavior_version_key_for(
-            file_id, agent_slug=agent_slug, project_slug=project_slug
-        )
-    except ValueError:
-        # 未知 file_id：写盘已成功说明 file_id 合法，理论不到此；保险静默跳过。
+        key = behavior_version_key_from_path(project_root, resolved_path)
+    except (ValueError, OSError):
+        # 路径不在 project_root 下 / 解析失败：写盘已成功，版本记录是 best-effort，静默跳过。
         return
+    file_id = key.file_id
     try:
         version_no = await store.record_version(
             key, new_content, baseline_content=old_content

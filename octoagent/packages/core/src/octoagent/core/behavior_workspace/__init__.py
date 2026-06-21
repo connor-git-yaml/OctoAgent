@@ -69,6 +69,7 @@ from .paths import (
     project_secret_bindings_path,
     project_workspace_dir,
     behavior_version_key_for,
+    behavior_version_key_from_path,
     resolve_behavior_agent_slug,
     resolve_write_path_by_file_id,
 )

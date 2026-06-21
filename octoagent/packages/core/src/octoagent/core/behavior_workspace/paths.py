@@ -206,6 +206,63 @@ def resolve_write_path_by_file_id(
     )
 
 
+def behavior_version_key_from_path(
+    project_root: Path,
+    resolved_path: Path,
+) -> BehaviorFileKey:
+    """从 behavior 文件的**实际 resolved 磁盘路径**派生版本 key（F107 W1，Opus H1 修正）。
+
+    版本 key 的权威来源是文件**真实落盘的 `behavior/agents/<slug>/` 等路径段**，而非 runtime
+    上下文里的 raw agent_profile_id（`_extract_agent_slug` 给的值会被 `behavior_agent_dir` 二次
+    slugify，与磁盘目录名不一致）。前端读侧也从同一路径结构（`deriveAgentSlug` 取 `behavior/
+    agents/<slug>/` 段）派生 → 写 key（本函数）与读 key（`behavior_version_key_for(file_id,
+    agent_slug=<同段>)`）逐字一致，AGENT_PRIVATE 版本历史对自定义 Worker 也能命中。
+
+    支持 4 scope（与 resolve_write_path_by_file_id 的落盘结构对称）：
+    - ``behavior/system/<file>`` → SYSTEM_SHARED
+    - ``behavior/agents/<slug>/<file>`` → AGENT_PRIVATE（agent_slug=<slug>）
+    - ``projects/<proj>/behavior/agents/<slug>/<file>`` → PROJECT_AGENT
+    - ``projects/<proj>/behavior/<file>`` → PROJECT_SHARED（project_slug=<proj>）
+    """
+    rel = resolved_path.resolve().relative_to(project_root.resolve())
+    parts = rel.parts
+    file_id = parts[-1] if parts else ""
+    # behavior/agents/<slug>/<file>
+    if len(parts) >= 4 and parts[0] == "behavior" and parts[1] == "agents":
+        return BehaviorFileKey(
+            scope=BehaviorWorkspaceScope.AGENT_PRIVATE.value,
+            agent_slug=parts[2],
+            file_id=file_id,
+        )
+    # behavior/system/<file>
+    if len(parts) >= 3 and parts[0] == "behavior" and parts[1] == "system":
+        return BehaviorFileKey(
+            scope=BehaviorWorkspaceScope.SYSTEM_SHARED.value, file_id=file_id
+        )
+    # projects/<proj>/behavior/agents/<slug>/<file>
+    if (
+        len(parts) >= 6
+        and parts[0] == "projects"
+        and parts[2] == "behavior"
+        and parts[3] == "agents"
+    ):
+        return BehaviorFileKey(
+            scope=BehaviorWorkspaceScope.PROJECT_AGENT.value,
+            project_slug=parts[1],
+            agent_slug=parts[4],
+            file_id=file_id,
+        )
+    # projects/<proj>/behavior/<file>
+    if len(parts) >= 4 and parts[0] == "projects" and parts[2] == "behavior":
+        return BehaviorFileKey(
+            scope=BehaviorWorkspaceScope.PROJECT_SHARED.value,
+            project_slug=parts[1],
+            file_id=file_id,
+        )
+    # 兜底：按 file_id 路由（与 behavior_version_key_for 一致）
+    return behavior_version_key_for(file_id)
+
+
 def behavior_version_key_for(
     file_id: str,
     *,

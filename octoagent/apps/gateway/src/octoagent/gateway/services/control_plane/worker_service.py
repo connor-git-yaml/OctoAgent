@@ -612,9 +612,8 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         # 上下文 → 事件按需跳过，版本仍记录（durable 版本是主，事件是补充审计）。
         await record_behavior_version(
             stores=self._stores,
-            file_id=file_id,
-            agent_slug=agent_slug,
-            project_slug=project_slug,
+            project_root=self._ctx.project_root,
+            resolved_path=resolved,
             new_content=content,
             old_content=old_content,
             task_id="",
@@ -719,14 +718,19 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
 
         await record_behavior_version(
             stores=self._stores,
-            file_id=file_id,
-            agent_slug=agent_slug,
-            project_slug=project_slug,
+            project_root=self._ctx.project_root,
+            resolved_path=pending.resolved,
             new_content=target_content,
             old_content=old_content,
             task_id="",
             source="restore",
         )
+        # F107 Opus M1：恢复写盘后失效 behavior pack 缓存，让运行中 agent 立即用上恢复内容
+        from octoagent.gateway.services.agent_decision import (
+            invalidate_behavior_pack_cache,
+        )
+
+        invalidate_behavior_pack_cache(project_root=self._ctx.project_root)
         return self._completed_result(
             request=request,
             code="BEHAVIOR_RESTORED",

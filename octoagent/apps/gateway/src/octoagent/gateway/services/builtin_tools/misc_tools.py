@@ -302,9 +302,8 @@ async def register(broker, deps: ToolDeps) -> None:
         # F107 W1：record-after 版本记录 + BEHAVIOR_VERSION_RECORDED 审计（best-effort，不阻断写）
         await record_behavior_version(
             stores=deps.stores,
-            file_id=file_id,
-            agent_slug=agent_slug,
-            project_slug=project_slug,
+            project_root=deps.project_root,
+            resolved_path=resolved,
             new_content=content,
             old_content=old_content,
             task_id=getattr(ctx, "task_id", "") or "",

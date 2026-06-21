@@ -90,7 +90,12 @@ class SqliteBehaviorVersionStore:
                 )
                 row = await cur.fetchone()
                 has_any = (int(row[0]) > 0) if row else False
-                if not has_any and baseline_content is not None:
+                # 首版 baseline 捕获；baseline 与新内容相同则跳过（避免重复 v1==v2，Opus L2）
+                if (
+                    not has_any
+                    and baseline_content is not None
+                    and baseline_content != content
+                ):
                     await self._insert_version(key, baseline_content)
                 last_no = await self._insert_version(key, content)
                 await self._versionable_conn.commit()
