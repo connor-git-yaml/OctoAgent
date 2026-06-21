@@ -60,6 +60,7 @@ _OCTOAGENT_PATH_ENVS: tuple[str, ...] = (
     "OCTOAGENT_DB_PATH",
     "OCTOAGENT_ARTIFACTS_DIR",
     "OCTOAGENT_PROJECT_ROOT",
+    "OCTOAGENT_PLUGINS_DIR",  # F106：plugin 装载目录隔离
 )
 
 # 单场景 timeout（s）；超时 → SIGALRM → TimeoutError → pytest fail
@@ -99,6 +100,7 @@ def _hermetic_environment(
     monkeypatch.setenv("OCTOAGENT_DB_PATH", str(e2e_root / "data" / "octoagent.db"))
     monkeypatch.setenv("OCTOAGENT_ARTIFACTS_DIR", str(e2e_root / "artifacts"))
     monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(e2e_root))
+    monkeypatch.setenv("OCTOAGENT_PLUGINS_DIR", str(e2e_root / "plugins"))  # F106 隔离宿主 plugin
 
     # 3. PYTHONHASHSEED=0（决定性 hash，避免 dict 顺序漂移污染断言）
     monkeypatch.setenv("PYTHONHASHSEED", "0")

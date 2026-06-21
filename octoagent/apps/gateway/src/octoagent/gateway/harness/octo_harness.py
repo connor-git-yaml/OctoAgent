@@ -128,16 +128,19 @@ class OctoHarness:
         llm_adapter: MessageAdapter | None = None,
         mcp_servers_dir: Path | None = None,
         data_dir: Path | None = None,
+        plugins_dir: Path | None = None,
     ) -> None:
         # F087 P2 T-P2-8：4 个 DI 全部接入，fail-fast 全部移除。
         # 任一 override 全 None 时 byte-for-byte 等价（生产路径行为不变）。
         # e2e 注入时彻底隔离宿主 ~/.octoagent。Codex P1 high finding 闭环。
+        # F106：plugins_dir DI（None=生产 ~/.octoagent/plugins，非 None=hermetic tmp 隔离）。
 
         self._project_root = project_root
         self._credential_store_override = credential_store
         self._llm_adapter_override = llm_adapter
         self._mcp_servers_dir = mcp_servers_dir
         self._data_dir = data_dir
+        self._plugins_dir = plugins_dir
 
         # bootstrap 期间填充，commit_to_app 时统一搬到 app.state
         self._state: dict[str, Any] = {}
@@ -171,6 +174,7 @@ class OctoHarness:
         await self._bootstrap_runtime_services(app)
         await self._bootstrap_llm(app)
         await self._bootstrap_capability_pack(app)
+        await self._bootstrap_user_plugins(app)  # F106 段 7.5：在 SkillDiscovery 构造后、executors 前
         await self._bootstrap_mcp(app)
         await self._bootstrap_executors(app)
         await self._bootstrap_optional_routines(app)
@@ -823,6 +827,67 @@ class OctoHarness:
         except Exception as exc:
             _log.warning("pipeline_registry_init_skipped", error=str(exc))
             app.state.pipeline_registry = None
+
+    async def _bootstrap_user_plugins(self, app: FastAPI) -> None:
+        """F106 段 7.5：发现 + 注册用户 plugin（declarative + 已审批 code）。
+
+        在 _bootstrap_capability_pack（SkillDiscovery 构造）之后、_bootstrap_mcp/executors 之前。
+        整段 try/except 降级——plugin 子系统不可用 MUST NOT 拖垮 gateway（#6 / FR-10.2）。
+        """
+        import os
+
+        from .. import main as _main_module
+
+        try:
+            from ..services.content_threat_scan import ContentThreatScanService
+            from ..services.plugin_registry import PluginRegistry
+            from .tool_registry import get_registry
+
+            # plugins_dir 解析：DI（e2e hermetic）> OCTOAGENT_PLUGINS_DIR env（full-lifespan 隔离）
+            # > 宿主 ~/.octoagent/plugins（生产）。对齐 data_dir/mcp_servers_dir DI+env 范式。
+            if self._plugins_dir is not None:
+                plugins_dir = self._plugins_dir
+            else:
+                _env_plugins = os.environ.get("OCTOAGENT_PLUGINS_DIR")
+                plugins_dir = (
+                    Path(_env_plugins)
+                    if _env_plugins
+                    else Path.home() / ".octoagent" / "plugins"
+                )
+            skill_discovery = getattr(app.state, "skill_discovery", None)
+            if skill_discovery is None:
+                _main_module.log.warning("plugin_registry_skipped_no_skill_discovery")
+                app.state.plugin_registry = None
+                return
+
+            store_group = self._store_group
+            _event_store = (
+                store_group.event_store
+                if store_group is not None and hasattr(store_group, "event_store")
+                else None
+            )
+            _task_store = (
+                store_group.task_store
+                if store_group is not None and hasattr(store_group, "task_store")
+                else None
+            )
+            plugin_registry = PluginRegistry(
+                plugins_dir=plugins_dir,
+                skill_discovery=skill_discovery,
+                content_scanner=ContentThreatScanService(),
+                tool_registry=get_registry(),
+                event_store=_event_store,
+                task_store=_task_store,
+            )
+            await plugin_registry.discover_and_register()
+            app.state.plugin_registry = plugin_registry
+            _main_module.log.info(
+                "plugin_registry_ready", counts=plugin_registry._counts()
+            )
+        except Exception:
+            # Constitution #6：plugin 子系统不可用不阻塞 gateway 启动
+            _main_module.log.exception("plugin_registry_bootstrap_failed")
+            app.state.plugin_registry = None
 
     async def _bootstrap_mcp(self, app: FastAPI) -> None:
         """对应 lifespan ``_bootstrap_mcp`` marker 段（行 559-589）。

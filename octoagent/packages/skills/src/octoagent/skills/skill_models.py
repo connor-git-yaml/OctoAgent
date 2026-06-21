@@ -22,6 +22,7 @@ class SkillSource(StrEnum):
     BUILTIN = "builtin"    # 代码仓库 skills/ 目录
     USER = "user"          # ~/.octoagent/skills/ 目录
     PROJECT = "project"    # {project_root}/skills/ 目录
+    PLUGIN = "plugin"      # F106：~/.octoagent/plugins/<name>/skills/ 目录（最低优先级，不覆盖其他源）
 
 
 # Skill 名称合法性正则：小写字母、数字、连字符，不能以连字符开头/结尾，不能包含连续连字符
@@ -43,6 +44,9 @@ class SkillMdEntry(BaseModel):
     trigger_patterns: list[str] = Field(default_factory=list, description="触发模式列表")
     tools_required: list[str] = Field(default_factory=list, description="依赖的工具列表")
     source: SkillSource = Field(default=SkillSource.BUILTIN, description="来源分类")
+    provenance: str | None = Field(
+        default=None, description="F106：plugin 来源 skill 的 plugin name（非 plugin 为 None）"
+    )
     source_path: str = Field(default="", description="SKILL.md 文件的绝对路径")
     content: str = Field(default="", description="Markdown body（仅 load 时填充）")
     raw_frontmatter: dict[str, Any] = Field(

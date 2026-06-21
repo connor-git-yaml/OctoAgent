@@ -258,6 +258,20 @@ class EventType(StrEnum):
     ROUTINE_FAILED = "ROUTINE_FAILED"
     ROUTINE_SKIPPED = "ROUTINE_SKIPPED"
 
+    # F106 User Plugin Loader — 插件装载审计事件链。
+    # PLUGIN_LOADED：plugin 成功注册（payload: name/version/state/capability/source）。
+    # PLUGIN_REJECTED：plugin 装载被拒（payload: name/reason[PluginRejectedReason]），单 plugin 隔离降级。
+    # PLUGIN_TOGGLED：plugin enable/disable 切换（payload: name/enabled）。
+    # PLUGIN_REMOVED：plugin 卸载删除（payload: name）。
+    # PLUGIN_APPROVED：code-capable plugin 用户审批通过（payload: name/code_hash），Phase B 代码执行授权点。
+    # PLUGIN_CODE_CHANGED：已审批 code plugin 的 code_hash 变更 → 转 pending_approval（payload: name），Phase C watchdog/git。
+    PLUGIN_LOADED = "PLUGIN_LOADED"
+    PLUGIN_REJECTED = "PLUGIN_REJECTED"
+    PLUGIN_TOGGLED = "PLUGIN_TOGGLED"
+    PLUGIN_REMOVED = "PLUGIN_REMOVED"
+    PLUGIN_APPROVED = "PLUGIN_APPROVED"
+    PLUGIN_CODE_CHANGED = "PLUGIN_CODE_CHANGED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

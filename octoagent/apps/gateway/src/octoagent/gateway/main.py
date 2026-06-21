@@ -52,6 +52,7 @@ from .routes import (
     operator_inbox,
     ops,
     pipelines,
+    plugins,
     skills,
     stream,
     tasks,
@@ -362,6 +363,7 @@ def create_app() -> FastAPI:
     app.include_router(chat.router, tags=["chat"], dependencies=protected)
     app.include_router(control_plane.router, tags=["control-plane"], dependencies=protected)
     app.include_router(skills.router, dependencies=protected)
+    app.include_router(plugins.router, dependencies=protected)
     # F084 Phase 3 T050-T051：Memory Candidates + Snapshots API
     app.include_router(memory_candidates.router, tags=["memory"], dependencies=protected)
     # F101 Phase C v2 H-4：Web Notification list/dismiss API

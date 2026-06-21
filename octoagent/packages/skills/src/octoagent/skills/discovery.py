@@ -131,6 +131,12 @@ class SkillDiscovery:
         self._project_dir = project_dir
         # 内存缓存：name -> SkillMdEntry
         self._cache: dict[str, SkillMdEntry] = {}
+        # F106：plugin 来源 skill 目录 [(plugin_name, skills_root)]。
+        # PLUGIN 源**最低优先级 + reject-on-collision**：plugin skill 名与
+        # builtin/user/project（或先注册 plugin）冲突 → 跳过该 skill（不覆盖，防劫持）。
+        self._plugin_skill_dirs: list[tuple[str, Path]] = []
+        # 最近一次 scan 中被冲突拒绝的 plugin skill：[(plugin_name, skill_name)]，供 PluginRegistry 审计。
+        self._plugin_skill_rejections: list[tuple[str, str]] = []
 
     @property
     def builtin_dir(self) -> Path | None:
@@ -179,6 +185,14 @@ class SkillDiscovery:
             total_found += found
             total_skipped += skipped
 
+        # F106：plugin 源**最后**扫描 + reject-on-collision（名已存在则跳过不覆盖）。
+        # 此时 builtin/user/project 已全部入缓存，plugin skill 撞名即被拒（防劫持内置 skill 名）。
+        self._plugin_skill_rejections = []
+        for plugin_name, skills_root in self._plugin_skill_dirs:
+            found, skipped = self._scan_plugin_directory(plugin_name, skills_root)
+            total_found += found
+            total_skipped += skipped
+
         # 原子替换完成（self._cache 已指向 new_cache）
 
         elapsed_ms = (time.monotonic() - start) * 1000
@@ -220,6 +234,19 @@ class SkillDiscovery:
             最新的 SkillMdEntry 列表
         """
         return self.scan()
+
+    def set_plugin_skill_dirs(self, dirs: list[tuple[str, Path]]) -> None:
+        """F106：设置 plugin 来源 skill 目录 [(plugin_name, skills_root)]，下次 scan 生效。
+
+        plugin 源最低优先级 + reject-on-collision（见 __init__ 注释）。
+        """
+        self._plugin_skill_dirs = list(dirs)
+
+    def pop_plugin_skill_rejections(self) -> list[tuple[str, str]]:
+        """F106：取出并清空最近一次 scan 中被冲突拒绝的 plugin skill（供 PluginRegistry 审计）。"""
+        rejections = self._plugin_skill_rejections
+        self._plugin_skill_rejections = []
+        return rejections
 
     # ============================================================
     # 内部方法
@@ -278,6 +305,64 @@ class SkillDiscovery:
             self._cache[entry.name] = entry
             found += 1
 
+        return found, skipped
+
+    def _scan_plugin_directory(
+        self, plugin_name: str, skills_root: Path
+    ) -> tuple[int, int]:
+        """扫描单个 plugin 的 skills/ 目录，reject-on-collision 加入缓存（F106）。
+
+        与 _scan_directory 的关键区别：名已存在（任何源，含先注册 plugin）→
+        **拒该 plugin skill 不覆盖**（防 plugin 劫持内置 skill 名），并记入
+        self._plugin_skill_rejections 供审计。
+
+        Args:
+            plugin_name: plugin 名（写入 entry.provenance）。
+            skills_root: plugin 的 skills/ 根目录（含 <skill>/SKILL.md 子目录）。
+
+        Returns:
+            (found, skipped)
+        """
+        if not skills_root.is_dir():
+            return 0, 0
+        try:
+            subdirs = sorted(skills_root.iterdir())
+        except OSError as exc:
+            logger.warning(
+                "plugin_skill_scan_dir_error",
+                plugin=plugin_name,
+                dir_path=str(skills_root),
+                error=str(exc),
+            )
+            return 0, 0
+
+        found = 0
+        skipped = 0
+        for subdir in subdirs:
+            if not subdir.is_dir():
+                continue
+            skill_md = subdir / "SKILL.md"
+            if not skill_md.is_file():
+                continue
+            entry = self._parse_skill_file(skill_md, SkillSource.PLUGIN)
+            if entry is None:
+                skipped += 1
+                continue
+            # reject-on-collision：名已被占用（builtin/user/project 或先注册 plugin）→ 拒
+            existing = self._cache.get(entry.name)
+            if existing is not None:
+                self._plugin_skill_rejections.append((plugin_name, entry.name))
+                logger.info(
+                    "plugin_skill_name_collision",
+                    plugin=plugin_name,
+                    skill_name=entry.name,
+                    existing_source=str(existing.source),
+                )
+                skipped += 1
+                continue
+            entry.provenance = plugin_name
+            self._cache[entry.name] = entry
+            found += 1
         return found, skipped
 
     def _parse_skill_file(
