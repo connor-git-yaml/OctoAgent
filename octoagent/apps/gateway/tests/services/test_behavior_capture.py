@@ -16,7 +16,6 @@ from octoagent.core.models import RequesterInfo, Task
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.behavior_versioning import record_behavior_version
 
-
 # ---- key 派生（MED-4） ----
 
 def test_key_routing_system_shared():

@@ -7,9 +7,9 @@
   任何版本）且 ``old_content`` 非空（写盘前旧盘内容）则先记 baseline 再记新内容。
 - **best-effort，不阻断写**：写盘已成功，版本记录是 observability（#8）；记录/事件失败仅 structlog
   降级，不向调用方抛（写本身已 durable）。
-- **EventStore 审计（#2 / Codex MED-C）**：emit ``BEHAVIOR_VERSION_RECORDED``。Event 模型要求 task_id；
+- **EventStore 审计（#2 / Codex MED-C）**：emit ``BEHAVIOR_VERSION_RECORDED``。Event 要求 task_id；
   无 task 上下文（如部分 control_plane 写）则跳过事件但版本仍记录。
-- **key 派生在调用方**（scope/slug 已知，Codex MED-4）：``behavior_version_key_for`` 按 scope 归零无关字段。
+- **key 派生在调用方**（scope/slug 已知，Codex MED-4）：``behavior_version_key_for`` 按 scope 归零。
 """
 
 from __future__ import annotations

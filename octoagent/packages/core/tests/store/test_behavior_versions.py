@@ -3,7 +3,7 @@
 覆盖：
 - record-after 版本号单调唯一 / 首版 baseline 捕获 / 任意两版 / 当前版+上一版 / 列文件。
 - 未注入隔离连接时 record raise（不静默污染主连接）。
-- 共用写锁：behavior ∥ artifact versionable 写并发不触发 "transaction within transaction"（FR-W1-2c）。
+- 共用写锁：behavior ∥ artifact 并发写不触发 "transaction within transaction"（FR-W1-2c）。
 - 默认路径 0 regression（不 record 时版本表 0 行）。
 """
 
@@ -25,8 +25,16 @@ from octoagent.core.store.sqlite_init import init_db
 from octoagent.core.store.task_store import SqliteTaskStore
 
 
-def _key(file_id: str = "USER.md", *, scope: str = "system_shared", agent: str = "", project: str = "") -> BehaviorFileKey:
-    return BehaviorFileKey(scope=scope, agent_slug=agent, project_slug=project, file_id=file_id)
+def _key(
+    file_id: str = "USER.md",
+    *,
+    scope: str = "system_shared",
+    agent: str = "",
+    project: str = "",
+) -> BehaviorFileKey:
+    return BehaviorFileKey(
+        scope=scope, agent_slug=agent, project_slug=project, file_id=file_id
+    )
 
 
 @pytest_asyncio.fixture

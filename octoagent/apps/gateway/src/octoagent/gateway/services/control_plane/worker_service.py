@@ -85,6 +85,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             "worker.extract_profile_from_runtime": self._handle_worker_extract_profile_from_runtime,
             "behavior.read_file": self._handle_behavior_read_file,
             "behavior.write_file": self._handle_behavior_write_file,
+            "behavior.restore_version": self._handle_behavior_restore_version,
         }
 
     def document_routes(self) -> dict[str, Any]:
@@ -628,6 +629,109 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             resource_refs=[
                 self._resource_ref("agent_profiles", "agent:profiles"),
             ],
+        )
+
+    async def _handle_behavior_restore_version(
+        self, request: ActionRequestEnvelope
+    ) -> ActionResultEnvelope:
+        """F107 W1-C：恢复 behavior 文件到某一历史版本（SD-6）。
+
+        Two-Phase（REVIEW_REQUIRED 风格）：confirmed=false → 返回 proposal（不写盘）；
+        confirmed=true → 走现有 commit_behavior_file_write 写入，并由 record_behavior_version
+        自动记为**新版本**（append-only，不改写历史；恢复本身也产生一条新版）。
+        """
+        from octoagent.core.behavior_workspace import behavior_version_key_for
+        from octoagent.gateway.services.behavior_versioning import (
+            read_disk_content,
+            record_behavior_version,
+        )
+
+        file_id = str(request.params.get("file_id", "")).strip()
+        if not file_id:
+            raise ControlPlaneActionError("MISSING_PARAM", "file_id 不能为空")
+        raw_version = request.params.get("target_version")
+        try:
+            target_version = int(raw_version)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            raise ControlPlaneActionError(
+                "INVALID_PARAM", "target_version 必须是整数版本号"
+            ) from None
+        confirmed = bool(request.params.get("confirmed", False))
+        agent_slug = str(request.params.get("agent_slug", "main")).strip()
+        project_slug = str(request.params.get("project_slug", "default")).strip()
+
+        try:
+            key = behavior_version_key_for(
+                file_id, agent_slug=agent_slug, project_slug=project_slug
+            )
+        except ValueError as exc:
+            raise ControlPlaneActionError("INVALID_FILE_ID", str(exc)) from exc
+
+        version = await self._stores.behavior_version_store.get_version_content(
+            key, target_version
+        )
+        if version is None or version.content is None:
+            raise ControlPlaneActionError(
+                "VERSION_NOT_FOUND", f"版本 {target_version} 不存在或内容不可用"
+            )
+        target_content = version.content
+
+        # Phase Plan：proposal（confirmed=false）→ 不写盘，要求用户确认（SD-6 守 #4/#7）
+        if not confirmed:
+            return self._completed_result(
+                request=request,
+                code="BEHAVIOR_RESTORE_PROPOSAL",
+                message=(
+                    f"将把 {file_id} 恢复到版本 {target_version}，"
+                    f"确认后写入并记为新版本"
+                ),
+                data={
+                    "file_id": file_id,
+                    "target_version": target_version,
+                    "proposal": True,
+                    "preview": target_content[:200],
+                },
+            )
+
+        # Phase Execute：confirmed=true → 写盘 + record-after 记新版
+        try:
+            pending = prepare_behavior_file_write(
+                self._ctx.project_root,
+                file_id,
+                target_content,
+                agent_slug=agent_slug,
+                project_slug=project_slug,
+            )
+        except ValueError as exc:
+            raise ControlPlaneActionError("INVALID_FILE_ID", str(exc)) from exc
+        if not pending.budget["within_budget"]:
+            raise ControlPlaneActionError(
+                "BUDGET_EXCEEDED",
+                f"恢复内容超出字符预算 {pending.budget['exceeded_by']} 字符",
+            )
+        old_content = read_disk_content(pending.resolved)
+        try:
+            commit_behavior_file_write(pending, target_content)
+        except Exception as exc:
+            raise ControlPlaneActionError(
+                "FILE_WRITE_ERROR", f"恢复写入失败: {exc}"
+            ) from exc
+
+        await record_behavior_version(
+            stores=self._stores,
+            file_id=file_id,
+            agent_slug=agent_slug,
+            project_slug=project_slug,
+            new_content=target_content,
+            old_content=old_content,
+            task_id="",
+            source="restore",
+        )
+        return self._completed_result(
+            request=request,
+            code="BEHAVIOR_RESTORED",
+            message=f"已恢复 {file_id} 到版本 {target_version}（记为新版本）",
+            data={"file_id": file_id, "restored_from_version": target_version},
         )
 
     async def _handle_worker_profile_review(

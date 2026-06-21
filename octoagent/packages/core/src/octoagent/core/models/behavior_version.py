@@ -1,9 +1,9 @@
 """F107 文件工作台 v0.2 W1 -- behavior_versions 历史表返回契约模型。
 
-behavior 文件（USER.md/IDENTITY.md/SOUL.md 等）版本历史（append-only，record-after + 首版 baseline）。
+behavior 文件（USER.md/IDENTITY.md 等）版本历史（append-only，record-after + 首版 baseline）。
 与 F104 artifact_versions **同存储/隔离模式**（versionable_conn + 共用写锁 + SAVEPOINT 重试），
 但 **key 不同**：`(scope, agent_slug, project_slug, file_id)` 而非 `(task_id, logical_file_id)`——
-是 sibling 而非 mirror（Codex MED-4）。behavior 文件均为小 md → 恒 inline（无 storage_ref/oversize 分支）。
+是 sibling 而非 mirror（Codex MED-4）。behavior 均小 md → 恒 inline（无 storage_ref/oversize）。
 """
 
 from __future__ import annotations
@@ -42,7 +42,8 @@ class BehaviorVersionContent(BaseModel):
     version_no: int = Field(description="版本号")
     content: str | None = Field(default=None, description="UTF-8 内容；缺失版本为 None")
     availability: str = Field(
-        default="available", description="内容可用性（behavior 恒 available；缺失版本由调用方判 None）"
+        default="available",
+        description="内容可用性（behavior 恒 available；缺失版本由调用方判 None）",
     )
     size: int = Field(default=0, description="内容大小（字节）")
     hash: str = Field(default="", description="SHA-256 哈希")
