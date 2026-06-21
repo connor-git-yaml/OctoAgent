@@ -458,6 +458,31 @@ _ARTIFACT_VERSIONS_INDEXES = [
     "ON artifact_versions(task_id);",
 ]
 
+# F107 文件工作台 v0.2 W1：behavior 文件版本历史表（append-only，record-after + 首版 baseline）。
+# 与 artifact_versions 同存储/隔离模式但 key 不同（scope 维度，非 task）；behavior 恒小 md → 恒 inline。
+_BEHAVIOR_VERSIONS_DDL = """
+CREATE TABLE IF NOT EXISTS behavior_versions (
+    version_id        TEXT PRIMARY KEY,
+    scope             TEXT NOT NULL,
+    agent_slug        TEXT NOT NULL DEFAULT '',
+    project_slug      TEXT NOT NULL DEFAULT '',
+    file_id           TEXT NOT NULL,
+    version_no        INTEGER NOT NULL,
+    ts                TEXT NOT NULL,
+    content           TEXT NOT NULL,
+    size              INTEGER NOT NULL DEFAULT 0,
+    hash              TEXT NOT NULL DEFAULT '',
+
+    UNIQUE(scope, agent_slug, project_slug, file_id, version_no)
+);
+"""
+
+_BEHAVIOR_VERSIONS_INDEXES = [
+    # 按 behavior 逻辑文件 key 取版本列表 + 取 MAX(version_no)（W1 时间线 / 任意两版 diff）
+    "CREATE INDEX IF NOT EXISTS idx_behavior_versions_logical "
+    "ON behavior_versions(scope, agent_slug, project_slug, file_id, version_no DESC);",
+]
+
 _OWNER_PROFILES_DDL = """
 CREATE TABLE IF NOT EXISTS owner_profiles (
     owner_profile_id              TEXT PRIMARY KEY,
@@ -1794,6 +1819,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_AGENT_PROFILES_DDL)
     await conn.execute(_AGENT_PROFILE_REVISIONS_DDL)
     await conn.execute(_ARTIFACT_VERSIONS_DDL)
+    await conn.execute(_BEHAVIOR_VERSIONS_DDL)
     await conn.execute(_OWNER_PROFILES_DDL)
     await conn.execute(_OWNER_PROFILE_OVERLAYS_DDL)
     # F084 Phase 4 T068：不再 CREATE bootstrap_sessions（已退役，_migrate_legacy_tables 会 DROP 旧表）
@@ -1824,6 +1850,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _EVENTS_INDEXES
         + _ARTIFACTS_INDEXES
         + _ARTIFACT_VERSIONS_INDEXES
+        + _BEHAVIOR_VERSIONS_INDEXES
         + _TASK_JOBS_INDEXES
         + _CHECKPOINTS_INDEXES
         + _SIDE_EFFECT_LEDGER_INDEXES

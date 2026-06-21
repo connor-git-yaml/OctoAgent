@@ -3,6 +3,7 @@
 提供工厂函数创建共享数据库连接的 Store 实例组。
 """
 
+import asyncio
 import contextlib
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from .a2a_store import SqliteA2AStore
 from .connection import apply_write_connection_pragmas
 from .agent_context_store import SqliteAgentContextStore
 from .artifact_store import SqliteArtifactStore
+from .behavior_version_store import SqliteBehaviorVersionStore
 from .checkpoint_store import SqliteCheckpointStore
 from .conversation_binding_store import SqliteConversationBindingStore
 from .event_store import SqliteEventStore
@@ -45,6 +47,10 @@ class StoreGroup:
         # 默认 None（不触发 versionable 写的旧测试直接构造路径）退化到主连接 conn；生产
         # create_store_group 始终注入真实独立连接。
         self.versionable_conn = versionable_conn if versionable_conn is not None else conn
+        # F107 FR-W1-2c：versionable 写共享单一锁——artifact_store 与 behavior_version_store
+        # 都在同一 versionable_conn 上 BEGIN IMMEDIATE，必须共用锁串行化，否则两把独立锁
+        # 并发各自 BEGIN IMMEDIATE 触发 "transaction within transaction"。
+        self._versionable_write_lock = asyncio.Lock()
         self.task_store = SqliteTaskStore(conn)
         self.event_store = SqliteEventStore(conn)
         # F104：注入 event_store 到 artifact_store，使 versionable append 失败时可
@@ -55,6 +61,13 @@ class StoreGroup:
             artifacts_dir,
             versionable_conn=versionable_conn,
             event_store=self.event_store,
+            write_lock=self._versionable_write_lock,
+        )
+        # F107 W1：behavior 文件版本历史（与 artifact_store 共用 versionable_conn + 写锁）。
+        self.behavior_version_store = SqliteBehaviorVersionStore(
+            conn,
+            versionable_conn=versionable_conn,
+            write_lock=self._versionable_write_lock,
         )
         self.task_job_store = SqliteTaskJobStore(conn)
         self.checkpoint_store = SqliteCheckpointStore(conn)
@@ -132,6 +145,7 @@ __all__ = [
     "SqliteNotificationStore",
     "SqliteConversationBindingStore",
     "SqliteArtifactStore",
+    "SqliteBehaviorVersionStore",
     "SqliteCheckpointStore",
     "SqliteSideEffectLedgerStore",
     "SqliteProjectStore",

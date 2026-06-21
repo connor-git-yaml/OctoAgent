@@ -71,6 +71,7 @@ class SqliteArtifactStore:
         *,
         versionable_conn: aiosqlite.Connection | None = None,
         event_store: "SqliteEventStore | None" = None,
+        write_lock: asyncio.Lock | None = None,
     ) -> None:
         self._conn = conn
         self._artifacts_dir = artifacts_dir
@@ -88,8 +89,10 @@ class SqliteArtifactStore:
         )
         # F104：注入的 event_store 用于 versionable append 失败时 emit durable 事件
         self._event_store = event_store
-        # F104：串行化 versionable 写事务（aiosqlite 单连接不能并发事务），防同连接交错
-        self._write_lock = asyncio.Lock()
+        # F104：串行化 versionable 写事务（aiosqlite 单连接不能并发事务），防同连接交错。
+        # F107 FR-W1-2c：StoreGroup 注入共享锁，与 behavior_version_store 共用单一锁——同一
+        # versionable_conn 上两把独立锁各 BEGIN IMMEDIATE 会 "transaction within transaction"。
+        self._write_lock = write_lock if write_lock is not None else asyncio.Lock()
 
     def _process_content(
         self, artifact: Artifact, content: bytes | None, *, exclusive: bool = False
