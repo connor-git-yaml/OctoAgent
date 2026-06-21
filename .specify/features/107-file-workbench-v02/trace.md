@@ -46,6 +46,21 @@
 - **多 provider panel 实证价值**：Codex 抓到 Opus 漏的基础设施错配（ApprovalGate 无 callback+无 durable / skills/runner.py / terminal.exec / path_policy blacklist）——证明重大架构变更必须双 provider。
 - **总计** Opus 2H+4M+4L + Codex 2H+3M+1L = 0 HIGH 残留。spec 全部固化闭环。
 
-## spec commit — 进行中
-- 本地 commit spec（不 push，等用户拍板，CLAUDE.local.md §Spawned Task）。
-- 下一步：plan + tasks → implement W1（behavior 版本，复用 F104 低风险先落）→ 每 wave 末 Codex per-Phase review → W2（workspace git）→ verify → completion-report/handoff/living-docs。
+## spec/plan/tasks commit — ✅
+- spec `c031f477` + plan/tasks `32e6f61f`（本地，不 push 等拍板）。
+
+## W1 实施（behavior 版本历史 + 恢复）— 后端 ✅ / 前端待续
+- **W1-A** `f52185b2`：behavior_versions 表 + store（record-after + 首版 baseline）+ 共享写锁（Codex MED-5）。10 测试 + 59 store 回归 0 reg。
+- **W1-B** `a84f8c00`：capture 接两调用方（misc_tools + control_plane，scope-aware key MED-4）+ BEHAVIOR_VERSION_RECORDED 事件（#2）。8 测试 + 101 behavior 回归 0 reg。
+- **W1-C** `62b400fb`：behavior.restore_version action（Two-Phase proposal→confirm→record 新版，SD-6 守 #4/#7）。4 测试 + 143 control_plane 回归 0 reg。
+- **W1-D 后端** `3288490a`：3 读 API（files/versions/diff，front-door protected，主响应 0 技术字段 SC-004，任意两版 FR-S-2）。5 API 测 + ruff clean。
+- **W1 后端累计**：~27 新测试，0 regression，ruff clean，e2e_smoke 8/8（每 commit）。
+
+### 实施关键经验沉淀
+- **测试运行**：`uv run --no-sync` 在并发 worktree 环境会卡环境解析（实测 >270s 假 hang）→ 改 **`.venv/bin/python -m pytest` + PYTHONPATH 锁 worktree**（0.3s 真跑）。
+- **stale 进程污染**：机器有 F098/F096 等老 worktree 的僵死 pytest/uv 进程，加剧 uv 解析卡顿。
+
+## 待续（W1 前端 + W1-E + W2）
+- **W1-D 前端**：DiffView 抽取（FR-S-1，抽前补 F104 快照守卫 LOW-8）+ Agent 中心版本历史时间线 + 恢复按钮 + tsc/vitest。
+- **W1-E**：Codex per-wave review（全 W1）+ 全量回归 + commit。
+- **W2**（workspace 真 git 浏览+回滚）：最大最高风险 wave，独立焦点实施。
