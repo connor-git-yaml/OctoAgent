@@ -483,6 +483,28 @@ _BEHAVIOR_VERSIONS_INDEXES = [
     "ON behavior_versions(scope, agent_slug, project_slug, file_id, version_no DESC);",
 ]
 
+# F107 W2-C：workspace 回滚请求（durable，#1 / Codex C-HIGH-A）。
+# 回滚审批 ApprovalGate 仅在内存（_pending_handles）→ 进程重启丢失待批回滚；本表持久化
+# 请求 + 状态，启动 rehydrate pending/approved-未执行（仅文件态回滚，SD-10）。
+_WORKSPACE_ROLLBACK_REQUESTS_DDL = """
+CREATE TABLE IF NOT EXISTS workspace_rollback_requests (
+    request_id        TEXT PRIMARY KEY,
+    project_slug      TEXT NOT NULL,
+    worktree          TEXT NOT NULL,
+    target_commit     TEXT NOT NULL,
+    paths             TEXT NOT NULL DEFAULT '[]',
+    status            TEXT NOT NULL DEFAULT 'pending',
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
+    detail            TEXT NOT NULL DEFAULT ''
+);
+"""
+
+_WORKSPACE_ROLLBACK_REQUESTS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_workspace_rollback_status "
+    "ON workspace_rollback_requests(status);",
+]
+
 _OWNER_PROFILES_DDL = """
 CREATE TABLE IF NOT EXISTS owner_profiles (
     owner_profile_id              TEXT PRIMARY KEY,
@@ -1820,6 +1842,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_AGENT_PROFILE_REVISIONS_DDL)
     await conn.execute(_ARTIFACT_VERSIONS_DDL)
     await conn.execute(_BEHAVIOR_VERSIONS_DDL)
+    await conn.execute(_WORKSPACE_ROLLBACK_REQUESTS_DDL)
     await conn.execute(_OWNER_PROFILES_DDL)
     await conn.execute(_OWNER_PROFILE_OVERLAYS_DDL)
     # F084 Phase 4 T068：不再 CREATE bootstrap_sessions（已退役，_migrate_legacy_tables 会 DROP 旧表）
@@ -1851,6 +1874,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _ARTIFACTS_INDEXES
         + _ARTIFACT_VERSIONS_INDEXES
         + _BEHAVIOR_VERSIONS_INDEXES
+        + _WORKSPACE_ROLLBACK_REQUESTS_INDEXES
         + _TASK_JOBS_INDEXES
         + _CHECKPOINTS_INDEXES
         + _SIDE_EFFECT_LEDGER_INDEXES

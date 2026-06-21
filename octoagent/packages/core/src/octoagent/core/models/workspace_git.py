@@ -38,3 +38,20 @@ class WorkspaceBlameLine(BaseModel):
     short: str = Field(description="短 hash")
     ts: str = Field(description="该 commit 时间")
     summary: str = Field(default="", description="该 commit 平实说明")
+
+
+class WorkspaceRollbackRequest(BaseModel):
+    """W2-C：durable 回滚请求（#1 restart-survive，Codex C-HIGH-A）。"""
+
+    request_id: str = Field(description="请求 ID（ULID）")
+    project_slug: str = Field(description="目标 project slug")
+    worktree: str = Field(description="工作树绝对路径")
+    target_commit: str = Field(description="回滚目标 commit")
+    paths: list[str] = Field(default_factory=list, description="回滚的文件路径（空=整树）")
+    status: str = Field(
+        default="pending",
+        description="pending|approved|rejected|executed|failed|expired",
+    )
+    created_at: str = Field(default="")
+    updated_at: str = Field(default="")
+    detail: str = Field(default="", description="失败/过期等附加说明")
