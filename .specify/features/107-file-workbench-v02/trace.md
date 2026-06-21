@@ -68,15 +68,17 @@
   - deferred 已知限制：Codex MED#2 并发同文件写竞态 / MED#7 control_plane+restore 无事件（data durable）/ L1 Two-Phase 前端自带确认 / L3 降级分支冗余。
 - **全量后端回归 3983 passed 0 failed**（vs ~3899 baseline）。**W1 全完成（后端+前端+UI+双评审 0 HIGH）。**
 
-## W2 实施（workspace 真 git 浏览 + 回滚）— W2-A ✅ / W2-B~E 待续
-- **W2-A 底座 ✅** `816aa34a`：WorkspaceGitStore（subprocess 外部 store + 每 workspace GIT_DIR/WORK_TREE/INDEX_FILE 重定向，用户目录无 .git + plumbing 快照 + CAS + 降级 + deny-list secrets + 注入防御 + log/blame/diff/checkout）。10 测试全过（含 SC-10 secrets 排除 / 并发 CAS / 降级）。
-  - 模型 WorkspaceCommit/FileChange/BlameLine（core/models/workspace_git.py）。
+## W2 实施（workspace 真 git 浏览 + 回滚）— ✅ 全完成
+- **W2-A 底座 ✅** `816aa34a` + `8c8acbad`：WorkspaceGitStore（subprocess 外部 store + 每 workspace GIT_DIR/WORK_TREE/INDEX_FILE 重定向，用户目录无 .git + plumbing 快照 + CAS + 降级 + deny-list secrets + 注入防御 + log/blame/diff/checkout）。10 测试全过（含 SC-10 secrets 排除 / 并发 CAS / 降级）。模型 WorkspaceCommit/FileChange/BlameLine。
+- **W2-B 快照触发 ✅** `2ec310e0`：**spec 偏离（已归档）**——原 plan 的 broker BeforeHook + per-loop_step 因 ExecutionContext 缺 project_root/loop_step + 多层 threading（worker_runtime→llm_service→SkillExecutionContext→runner）过度侵入 → 改 **file-mutating 工具内写前快照**（filesystem.write_text + terminal.exec，worktree 已就地解析；git no-op 去重抵消粗粒度）。terminal.exec scrub GIT_*（Codex MED-D 纵深）。3 集成测。
+- **W2-C 回滚 ✅** `9af8e528`：durable `workspace_rollback_requests` 表（6 态）+ WorkspaceRollbackService（pre-snapshot→checkout→post-snapshot，仅文件态 SD-10）+ 启动 rehydrate（#1，Codex C-HIGH-A）。6 测试。
+- **W2-D 后端+前端 ✅** `8508949e`+`3bdba861`：**spec 偏离（已归档）**——SD-10 原 ApprovalGate SSE 卡 → 改 **REST Two-Phase**（POST /rollback propose + /rollback/{id}/approve execute + reject），与 W1-C 同范式（durable 请求 + 显式 approve 满足 Two-Phase + #1 + #4/#7）。route history/commit/blame/diff + harness 接线（共用单 store 实例 + RollbackService + 启动 rehydrate）+ main 注册。前端 WorkspaceGitView（历史→改了哪些文件→DiffBody→谁改的→恢复 Two-Phase）+ FilesCenter additive 模式切换。5 API 测 + 3 组件测。
+- **W2-E 双评审 ✅** `eff0b1cd`：Codex 2H+2M+1L / Opus 1H+3M+3L。
+  - **HIGH 修复**：① [Codex H1] commit 未限定 workspace → `_commit_in_workspace`（merge-base --is-ancestor）守卫 show/blame/diff/checkout；② [Codex H2 + Opus H1/M1] 浏览/回滚 worktree 解析与工具写快照不一致 + slug path traversal → API `_worktree` 改用 `project_root_dir`（同归一化，消解 `../`）+ 前端不再写死 default、经新 `/projects` 端点列出有历史项目下拉选最近。
+  - **MED 修复**：[Codex M1] 并发 approve 重复执行 → CAS 占用；[Opus M2] diff oversize/binary 不内联（200KB + NUL 探测）。
+  - **归档（见 completion-report §已知 limitations）**：[Codex M2] 写后状态未快照 / [Opus M3+L1] #2 事件矩阵 + files-only 分歧 surfacing（沿用 W1 事件推迟，durable 表为审计）/ [Codex L1] deny-list 与 path_policy 双维护。
+  - **0 HIGH 残留**。+3 backend 测 +1 frontend 测。
+- **W2 累计**：6 commit，后端 4011→（W2-E）全量回归见 completion-report，前端 174 passed（11 fail=master 既有债）。
 
-### W2-B~E 待续（继续实施的精确接线图）
-- **W2-B 快照触发 hook**（最不确定，spec 已标 plan-stage 实测）：
-  - 挂点 = broker BeforeHook（`packages/tooling/.../broker.py` 的 `_before_hooks` + `add_hook`，模板 = F126 `SchemaValidationHook`）。新建 `WorkspaceSnapshotHook(BeforeHook)`：file-mutating（`ToolMeta.produces_write` 或 `terminal.exec`）+ per-loop_step 去重 → `store.snapshot(worktree, reason)`。
-  - **多层 threading（W2-B 难点）**：`ExecutionContext`（`packages/tooling/.../models.py:283`）缺 project_root + loop_step；需加 2 additive 字段，从 `session.loop_step`（worker_runtime:594）→ llm_service SkillExecutionContext（:429，**llm_service 无 self._project_root，需补**）→ runner tool_context（:665 copy）→ hook 读。或借 SkillExecutionContext.metadata dict 透传（但 ExecutionContext 无 metadata 字段）。
-  - terminal.exec scrub GIT_*（Codex MED-D 防御纵深，os.environ 已不污染故可选）。
-- **W2-C 回滚**：durable `workspace_rollback_requests` 表 + store + 启动 rehydrate（#1，Codex C-HIGH-A）；rollback action 经 ApprovalGate 异步（202+回调，不阻塞 HTTP）+ pre-rollback 快照 + `store.checkout_paths` + 记新 commit；仅文件态。
-- **W2-D**：`routes/workspace_git.py`（history/commit/blame/diff/rollback，front-door）+ 前端 Files Tab workspace 视图（复用 DiffBody）。
-- **W2-E**：Codex+Opus per-wave 双评审 + 全量回归 + completion-report/handoff/living-docs。
+## Feature 收尾 — completion-report + handoff + living-docs ✅
+- 见 `completion-report.md`（Phase 实际 vs 计划 + 双评审闭环表 + 已知 limitations + living-docs drift）+ `handoff.md`。
