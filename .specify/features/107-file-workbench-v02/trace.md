@@ -60,7 +60,14 @@
 - **测试运行**：`uv run --no-sync` 在并发 worktree 环境会卡环境解析（实测 >270s 假 hang）→ 改 **`.venv/bin/python -m pytest` + PYTHONPATH 锁 worktree**（0.3s 真跑）。
 - **stale 进程污染**：机器有 F098/F096 等老 worktree 的僵死 pytest/uv 进程，加剧 uv 解析卡顿。
 
-## 待续（W1 前端 + W1-E + W2）
-- **W1-D 前端**：DiffView 抽取（FR-S-1，抽前补 F104 快照守卫 LOW-8）+ Agent 中心版本历史时间线 + 恢复按钮 + tsc/vitest。
-- **W1-E**：Codex per-wave review（全 W1）+ 全量回归 + commit。
-- **W2**（workspace 真 git 浏览+回滚）：最大最高风险 wave，独立焦点实施。
+## W1 前端 + W1-E — ✅ 完成
+- **W1-D 前端** `2e012471`：DiffView 抽取（FR-S-1，FilesCenter 15 守卫测试全过=零变更）+ api/client behavior 版本函数 + BehaviorVersionHistory.tsx（时间线+任意两版 diff+恢复 Two-Phase）+ AgentEditorSection additive 入口。4 新组件测 + tsc clean + 0 新前端 regression（11 failed=master 既有债）。
+- **W1-E 双评审** `7799fe2f`：Opus 1H+1M+3L / Codex 4M。
+  - **H1（HIGH）修复**：AGENT_PRIVATE 历史对自定义 Worker 空白 → behavior_version_key_from_path 从实际 resolved 路径派生写 key，与前端读 key 逐字一致。
+  - M1（MED）：恢复后失效 behavior pack 缓存。L2（LOW）：跳过重复 baseline。
+  - deferred 已知限制：Codex MED#2 并发同文件写竞态 / MED#7 control_plane+restore 无事件（data durable）/ L1 Two-Phase 前端自带确认 / L3 降级分支冗余。
+- **全量后端回归 3983 passed 0 failed**（vs ~3899 baseline）。**W1 全完成（后端+前端+UI+双评审 0 HIGH）。**
+
+## W2 实施（workspace 真 git 浏览 + 回滚）— 进行中
+- 最大最高风险 wave：subprocess 外部 store git + per-loop_step 快照挂 broker + durable 回滚 + 降级 + CAS。
+- W2-A 底座 → W2-B 触发 hook → W2-C 回滚 → W2-D API+前端 → W2-E review。
