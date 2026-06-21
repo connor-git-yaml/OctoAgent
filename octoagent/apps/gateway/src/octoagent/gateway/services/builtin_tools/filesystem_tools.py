@@ -149,6 +149,12 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         dirs_created = create_dirs and not target.parent.exists()
         if create_dirs:
             target.parent.mkdir(parents=True, exist_ok=True)
+        # F107 W2：写盘前对 project 工作树拍 git 快照（best-effort；store 自处理 git 缺失/失败/
+        # deny-list/无变更跳过，绝不阻断写）。snapshot-before 语义 = Hermes 蓝本。
+        if deps.workspace_git is not None:
+            await deps.workspace_git.snapshot(
+                instance_root, "before filesystem.write_text"
+            )
         target.write_text(content, encoding="utf-8")
         relative = str(target.relative_to(instance_root))
         bytes_written = len(content.encode("utf-8"))

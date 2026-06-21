@@ -846,6 +846,13 @@ class CapabilityPackService(
     async def _register_builtin_tools(self) -> None:
         """注册所有内置工具 — 委派给 builtin_tools 子包。"""
         from .builtin_tools import ToolDeps, register_all
+        from .workspace_git import WorkspaceGitStore
+
+        # F107 W2：workspace git store（file-mutating 工具写前快照）。store_dir 在 data/ 下，
+        # 与 deny-list（path_policy data/）一致；git 缺失则 store.available=False，工具静默跳过。
+        workspace_git = WorkspaceGitStore(
+            self._project_root / "data" / "workspace-git-store"
+        )
 
         deps = ToolDeps(
             project_root=self._project_root,
@@ -864,6 +871,7 @@ class CapabilityPackService(
             # F099 Codex Final F2 修复：注入 ApprovalGate 到 ToolDeps
             # 通过 bind_approval_gate() 在 startup() 之前设置 self._approval_gate
             _approval_gate=self._approval_gate,
+            _workspace_git=workspace_git,
         )
         self._tool_deps = deps
         await register_all(self._tool_broker, deps)

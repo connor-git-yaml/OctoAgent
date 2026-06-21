@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from typing import Any
 
-from pydantic import BaseModel
-
-from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
 from octoagent.gateway.harness.tool_registry import ToolEntry
 from octoagent.gateway.harness.tool_registry import register as _registry_register
+from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from pydantic import BaseModel
 
-from ._deps import ToolDeps, resolve_instance_root, resolve_and_check_path, truncate_text
+from ._deps import ToolDeps, resolve_and_check_path, resolve_instance_root, truncate_text
 
 # 各工具 entrypoints 声明（Feature 084 D1 根治）
 _TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
@@ -61,24 +61,38 @@ async def register(broker: Any, deps: ToolDeps) -> None:
         except ValueError:
             cwd_label = str(working_dir)
 
+        # F107 W2：执行命令前对 project 工作树拍 git 快照（best-effort，store 自处理一切失败）。
+        # terminal 命令可能改文件 → snapshot-before 捕获改前状态（git 无变更则不产 commit）。
+        if deps.workspace_git is not None:
+            await deps.workspace_git.snapshot(instance_root, "before terminal.exec")
+
+        # F107 W2（Codex MED-D 防御纵深）：scrub git 重定向变量，防用户 git 命令误打 shadow store。
+        # WorkspaceGitStore 用 per-subprocess env 不污染 os.environ，故正常 os.environ 本无这些；
+        # 此处显式剥离作构造性保证（PATH 等其它环境照常继承）。
+        _scrubbed_env = {
+            k: v
+            for k, v in os.environ.items()
+            if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")
+        }
         # 使用 asyncio subprocess 避免阻塞事件循环
         proc = await asyncio.create_subprocess_exec(
             "/bin/sh", "-lc", command,
             cwd=str(working_dir),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_scrubbed_env,
         )
         timed_out = False
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(), timeout=bounded_timeout,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # 超时后先尝试 terminate，给 2s 优雅退出，不行再 kill
             proc.terminate()
             try:
                 await asyncio.wait_for(proc.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 await proc.wait()
             stdout_bytes = b""

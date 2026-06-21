@@ -65,6 +65,12 @@ class ToolDeps:
     _approval_gate: Any = None  # F099 Phase B: ApprovalGate 实例（worker.escalate_permission 使用）
     _approval_manager: Any = None  # F101 Phase B HIGH-01 v3: ApprovalManager 实例（escalate_permission 注册用）
     _notification_service: Any = None  # F101 Phase C T-C-07: NotificationService 实例（WAITING_APPROVAL 通知用）
+    _workspace_git: Any = None  # F107 W2: WorkspaceGitStore（file-mutating 工具写前快照）
+
+    @property
+    def workspace_git(self):
+        """F107 W2：workspace git store（可选；未绑定/不可用 → None，调用方 best-effort）。"""
+        return self._workspace_git
 
     @property
     def task_runner(self):
