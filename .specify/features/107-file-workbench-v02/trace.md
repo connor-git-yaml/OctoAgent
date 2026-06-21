@@ -68,6 +68,15 @@
   - deferred 已知限制：Codex MED#2 并发同文件写竞态 / MED#7 control_plane+restore 无事件（data durable）/ L1 Two-Phase 前端自带确认 / L3 降级分支冗余。
 - **全量后端回归 3983 passed 0 failed**（vs ~3899 baseline）。**W1 全完成（后端+前端+UI+双评审 0 HIGH）。**
 
-## W2 实施（workspace 真 git 浏览 + 回滚）— 进行中
-- 最大最高风险 wave：subprocess 外部 store git + per-loop_step 快照挂 broker + durable 回滚 + 降级 + CAS。
-- W2-A 底座 → W2-B 触发 hook → W2-C 回滚 → W2-D API+前端 → W2-E review。
+## W2 实施（workspace 真 git 浏览 + 回滚）— W2-A ✅ / W2-B~E 待续
+- **W2-A 底座 ✅** `816aa34a`：WorkspaceGitStore（subprocess 外部 store + 每 workspace GIT_DIR/WORK_TREE/INDEX_FILE 重定向，用户目录无 .git + plumbing 快照 + CAS + 降级 + deny-list secrets + 注入防御 + log/blame/diff/checkout）。10 测试全过（含 SC-10 secrets 排除 / 并发 CAS / 降级）。
+  - 模型 WorkspaceCommit/FileChange/BlameLine（core/models/workspace_git.py）。
+
+### W2-B~E 待续（继续实施的精确接线图）
+- **W2-B 快照触发 hook**（最不确定，spec 已标 plan-stage 实测）：
+  - 挂点 = broker BeforeHook（`packages/tooling/.../broker.py` 的 `_before_hooks` + `add_hook`，模板 = F126 `SchemaValidationHook`）。新建 `WorkspaceSnapshotHook(BeforeHook)`：file-mutating（`ToolMeta.produces_write` 或 `terminal.exec`）+ per-loop_step 去重 → `store.snapshot(worktree, reason)`。
+  - **多层 threading（W2-B 难点）**：`ExecutionContext`（`packages/tooling/.../models.py:283`）缺 project_root + loop_step；需加 2 additive 字段，从 `session.loop_step`（worker_runtime:594）→ llm_service SkillExecutionContext（:429，**llm_service 无 self._project_root，需补**）→ runner tool_context（:665 copy）→ hook 读。或借 SkillExecutionContext.metadata dict 透传（但 ExecutionContext 无 metadata 字段）。
+  - terminal.exec scrub GIT_*（Codex MED-D 防御纵深，os.environ 已不污染故可选）。
+- **W2-C 回滚**：durable `workspace_rollback_requests` 表 + store + 启动 rehydrate（#1，Codex C-HIGH-A）；rollback action 经 ApprovalGate 异步（202+回调，不阻塞 HTTP）+ pre-rollback 快照 + `store.checkout_paths` + 记新 commit；仅文件态。
+- **W2-D**：`routes/workspace_git.py`（history/commit/blame/diff/rollback，front-door）+ 前端 Files Tab workspace 视图（复用 DiffBody）。
+- **W2-E**：Codex+Opus per-wave 双评审 + 全量回归 + completion-report/handoff/living-docs。

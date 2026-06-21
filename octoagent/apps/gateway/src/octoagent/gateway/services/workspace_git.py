@@ -4,8 +4,8 @@ Hermes 蓝本：共享 bare store + 每 workspace 独立 `GIT_DIR`/`GIT_WORK_TRE
 重定向（**仅 per-subprocess env，绝不写 os.environ**，Codex MED-D）→ 用户 `projects/{slug}/`
 目录无 `.git`。plumbing-only（add → write-tree → commit-tree → update-ref），绕 HEAD/用户分支。
 
-- **降级（#6 构造性，SD-5）**：`shutil.which("git")` 探测；不可用 → available=False，方法返回空/None，
-  快照静默跳过，绝不抛、绝不阻塞主流程。
+- **降级（#6 构造性，SD-5）**：`shutil.which("git")` 探测；不可用 → available=False，
+  方法返回空/None，快照静默跳过，绝不抛、绝不阻塞主流程。
 - **deny-list（#5 / Codex HIGH-B，SD-3）**：从 path_policy `_BLACKLIST_*` 同源 + 结构性 behavior/
   artifacts/secret-bindings 写进 store `info/exclude`，`git add -A` 尊重 → secrets 永不进 index。
 - **并发安全（Codex MED-E）**：per-workspace async 锁 + `update-ref <new> <old>` CAS + 冲突重试。
