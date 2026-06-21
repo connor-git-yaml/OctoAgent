@@ -4,6 +4,9 @@
  * 平实 UX（SD-8）：版本历史 / 改了哪些文件 / 谁改的 / 恢复到此版本；commit hash 归 Advanced。
  * 复用共享 DiffBody（FR-S-1）。回滚 Two-Phase（propose→确认→approve，SD-10 仅文件态）。
  * git 不可用 → available=false 友好占位（#6 降级）。
+ *
+ * 项目解析（Opus W2-H1 修复）：不再写死 "default"——经 /projects 列出有历史的项目，下拉切换，
+ * 默认选最近提交的项目；slug 即工具写快照的归一化目录名，与后端 _worktree 同款解析一致。
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -13,10 +16,12 @@ import {
   fetchWorkspaceCommitFiles,
   fetchWorkspaceDiff,
   fetchWorkspaceHistory,
+  fetchWorkspaceProjects,
   proposeWorkspaceRollback,
   type WorkspaceBlameLine,
   type WorkspaceCommit,
   type WorkspaceFileChange,
+  type WorkspaceProjectItem,
 } from "../api/client";
 import { DiffBody } from "../components/diff/DiffBody";
 import type { DiffResponse } from "../types";
@@ -34,26 +39,57 @@ function fmtTs(iso: string): string {
   }
 }
 
-export default function WorkspaceGitView(props: { projectSlug: string }) {
-  const { projectSlug } = props;
-  const [commits, setCommits] = useState<WorkspaceCommit[]>([]);
+export default function WorkspaceGitView(props: { projectSlug?: string }) {
+  const [projects, setProjects] = useState<WorkspaceProjectItem[]>([]);
+  const [activeSlug, setActiveSlug] = useState<string | null>(
+    props.projectSlug ?? null,
+  );
+  const [resolving, setResolving] = useState(props.projectSlug == null);
   const [available, setAvailable] = useState(true);
+  const [commits, setCommits] = useState<WorkspaceCommit[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [files, setFiles] = useState<WorkspaceFileChange[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [diff, setDiff] = useState<DiffResponse | null>(null);
   const [blame, setBlame] = useState<WorkspaceBlameLine[] | null>(null);
-  const [rollback, setRollback] = useState<{ commit: string; requestId?: string } | null>(
-    null,
-  );
+  const [rollback, setRollback] = useState<{ commit: string } | null>(null);
   const [rollbackMsg, setRollbackMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // 无显式 prop → 解析有历史的项目列表，默认选第一个（最近提交）
+  useEffect(() => {
+    if (props.projectSlug != null) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const resp = await fetchWorkspaceProjects();
+        if (cancelled) return;
+        setAvailable(resp.available);
+        setProjects(resp.projects);
+        setActiveSlug(resp.projects[0]?.slug ?? null);
+      } catch {
+        if (!cancelled) setProjects([]);
+      } finally {
+        if (!cancelled) setResolving(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [props.projectSlug]);
+
   const loadHistory = useCallback(async () => {
+    if (activeSlug == null) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
+    setSelectedIdx(null);
+    setSelectedFile(null);
+    setDiff(null);
     try {
-      const resp = await fetchWorkspaceHistory(projectSlug);
+      const resp = await fetchWorkspaceHistory(activeSlug);
       setAvailable(resp.available);
       setCommits(resp.commits);
     } catch {
@@ -61,29 +97,30 @@ export default function WorkspaceGitView(props: { projectSlug: string }) {
     } finally {
       setLoading(false);
     }
-  }, [projectSlug]);
+  }, [activeSlug]);
 
   useEffect(() => {
     void loadHistory();
   }, [loadHistory]);
 
   const openCommit = async (idx: number) => {
+    if (activeSlug == null) return;
     setSelectedIdx(idx);
     setSelectedFile(null);
     setDiff(null);
     setBlame(null);
-    const resp = await fetchWorkspaceCommitFiles(projectSlug, commits[idx].commit);
+    const resp = await fetchWorkspaceCommitFiles(activeSlug, commits[idx].commit);
     setFiles(resp.files);
   };
 
   const openFile = async (path: string) => {
-    if (selectedIdx === null) return;
+    if (selectedIdx === null || activeSlug == null) return;
     setSelectedFile(path);
     setBlame(null);
     const commitA = commits[selectedIdx].commit;
     const commitB = commits[selectedIdx + 1]?.commit; // 次新（父）作上一版
     const d = await fetchWorkspaceDiff({
-      project_slug: projectSlug,
+      project_slug: activeSlug,
       commit_a: commitA,
       commit_b: commitB,
       path,
@@ -92,9 +129,9 @@ export default function WorkspaceGitView(props: { projectSlug: string }) {
   };
 
   const showBlame = async () => {
-    if (selectedIdx === null || selectedFile === null) return;
+    if (selectedIdx === null || selectedFile === null || activeSlug == null) return;
     const resp = await fetchWorkspaceBlame(
-      projectSlug,
+      activeSlug,
       commits[selectedIdx].commit,
       selectedFile,
     );
@@ -102,12 +139,12 @@ export default function WorkspaceGitView(props: { projectSlug: string }) {
   };
 
   const confirmRollback = async () => {
-    if (rollback === null) return;
+    if (rollback === null || activeSlug == null) return;
     setBusy(true);
     setRollbackMsg(null);
     try {
       const proposal = await proposeWorkspaceRollback({
-        project_slug: projectSlug,
+        project_slug: activeSlug,
         target_commit: rollback.commit,
       });
       const result = await approveWorkspaceRollback(proposal.request_id);
@@ -123,7 +160,7 @@ export default function WorkspaceGitView(props: { projectSlug: string }) {
     }
   };
 
-  if (loading) {
+  if (resolving || loading) {
     return (
       <div className="wb-note">
         <span>正在加载工作区版本历史…</span>
@@ -138,7 +175,7 @@ export default function WorkspaceGitView(props: { projectSlug: string }) {
       </div>
     );
   }
-  if (commits.length === 0) {
+  if (activeSlug == null || (commits.length === 0 && projects.length === 0)) {
     return (
       <div className="wb-empty-state">
         <strong>暂无工作区版本历史</strong>
@@ -152,37 +189,57 @@ export default function WorkspaceGitView(props: { projectSlug: string }) {
       <div className="wb-panel-head">
         <div>
           <p className="wb-card-label">工作区版本历史</p>
-          <h3>{projectSlug}</h3>
+          {projects.length > 1 ? (
+            <select
+              aria-label="选择项目"
+              value={activeSlug}
+              onChange={(e) => setActiveSlug(e.target.value)}
+            >
+              {projects.map((p) => (
+                <option key={p.slug} value={p.slug}>
+                  {p.name}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <h3>{projects[0]?.name ?? activeSlug}</h3>
+          )}
         </div>
       </div>
 
-      <div className="wb-note-stack">
-        {commits.map((c, idx) => (
-          <div key={c.commit} className="wb-agent-tool-row">
-            <button
-              type="button"
-              className="wb-chip"
-              style={{ textAlign: "left", flex: 1 }}
-              onClick={() => openCommit(idx)}
-            >
-              <strong>{c.summary || "（无说明）"}</strong>
-              <small style={{ display: "block", color: "var(--cp-muted)" }}>
-                {fmtTs(c.ts)} · <span title={c.commit}>{c.short}</span>
-              </small>
-            </button>
-            <button
-              type="button"
-              className="wb-chip"
-              onClick={() => {
-                setRollback({ commit: c.commit });
-                setRollbackMsg(null);
-              }}
-            >
-              恢复到此版本
-            </button>
-          </div>
-        ))}
-      </div>
+      {commits.length === 0 ? (
+        <div className="wb-note">
+          <span>此项目暂无历史版本。</span>
+        </div>
+      ) : (
+        <div className="wb-note-stack">
+          {commits.map((c, idx) => (
+            <div key={c.commit} className="wb-agent-tool-row">
+              <button
+                type="button"
+                className="wb-chip"
+                style={{ textAlign: "left", flex: 1 }}
+                onClick={() => openCommit(idx)}
+              >
+                <strong>{c.summary || "（无说明）"}</strong>
+                <small style={{ display: "block", color: "var(--cp-muted)" }}>
+                  {fmtTs(c.ts)} · <span title={c.commit}>{c.short}</span>
+                </small>
+              </button>
+              <button
+                type="button"
+                className="wb-chip"
+                onClick={() => {
+                  setRollback({ commit: c.commit });
+                  setRollbackMsg(null);
+                }}
+              >
+                恢复到此版本
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {selectedIdx !== null && (
         <div className="wb-card">
@@ -206,7 +263,7 @@ export default function WorkspaceGitView(props: { projectSlug: string }) {
         </div>
       )}
 
-      {selectedFile !== null && diff !== null && diff.current && (
+      {selectedFile !== null && diff !== null && (
         <div className="wb-card">
           <div className="wb-panel-head">
             <p className="wb-card-label">{selectedFile}</p>
@@ -214,7 +271,13 @@ export default function WorkspaceGitView(props: { projectSlug: string }) {
               谁改的
             </button>
           </div>
-          <DiffBody diff={diff} />
+          {diff.binary ? (
+            <span>（二进制文件，不显示内容）</span>
+          ) : diff.oversize ? (
+            <span>（文件较大，不在此处显示内容）</span>
+          ) : (
+            <DiffBody diff={diff} />
+          )}
           {blame !== null && (
             <details open>
               <summary>逐行修改记录</summary>

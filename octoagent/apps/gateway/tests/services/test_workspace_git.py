@@ -147,6 +147,27 @@ async def test_injection_defense(store_env):
 
 
 @pytest.mark.asyncio
+async def test_commit_scoped_to_workspace(store_env, tmp_path):
+    """Codex W2-HIGH-1：跨 workspace 的 commit hash 不可达 → show/blame/diff/checkout 拒绝。"""
+    store, tree_a, _ = store_env
+    _write(tree_a, "workspace/a.txt", "A\n")
+    ca = await store.snapshot(tree_a, "A snap")
+    # 第二个 workspace（不同 worktree → 不同 ref）
+    tree_b = tmp_path / "projects" / "other"
+    _write(tree_b, "workspace/b.txt", "B\n")
+    cb = await store.snapshot(tree_b, "B snap")
+    assert ca and cb and ca != cb
+    # 用 A 的 commit 查 B 的 workspace → 不可达 → 拒绝（防跨 workspace 泄露 / 误 checkout）
+    assert await store.show_files(tree_b, ca) == []
+    assert await store.blame(tree_b, ca, "workspace/b.txt") == []
+    assert await store.file_diff(tree_b, ca, None, "workspace/b.txt") == (None, None)
+    assert await store.checkout_paths(tree_b, ca, ["workspace/b.txt"]) is False
+    # B 自己的 commit 仍可用（健全性，未误伤合法路径）
+    assert await store.show_files(tree_b, cb)
+    assert (tree_b / "workspace" / "b.txt").read_text() == "B\n"
+
+
+@pytest.mark.asyncio
 async def test_concurrent_snapshots_no_loss(store_env):
     """Codex MED-E：同 workspace 并发快照（CAS + per-workspace 锁）不丢 commit / 不腐化。"""
     store, tree, _ = store_env

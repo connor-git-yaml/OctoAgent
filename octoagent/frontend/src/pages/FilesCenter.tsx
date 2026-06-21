@@ -217,7 +217,7 @@ export default function FilesCenter() {
       </div>
 
       {mode === "workspace" ? (
-        <WorkspaceGitView projectSlug="default" />
+        <WorkspaceGitView />
       ) : (
         <>
       <FilesBreadcrumb

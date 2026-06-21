@@ -26,8 +26,21 @@ from pydantic import BaseModel
 
 router = APIRouter()
 
+_DIFF_SIDE_MAX_CHARS = 200_000  # diff 单侧内联上限（M2 防大文件撑爆响应）
+
 
 # ---- 响应模型 ----
+
+
+class WorkspaceProjectItem(BaseModel):
+    slug: str
+    name: str
+    last_commit_ts: str = ""
+
+
+class WorkspaceProjectsResponse(BaseModel):
+    available: bool
+    projects: list[WorkspaceProjectItem]
 
 
 class WorkspaceHistoryResponse(BaseModel):
@@ -89,11 +102,42 @@ def _rollback_service(request: Request):
 
 
 def _worktree(request: Request, project_slug: str) -> Path:
+    # 与工具写快照同款 slug 归一化（project_root_dir → _normalize_project_slug）：解决浏览/回滚
+    # worktree 与快照 worktree 不一致（Opus H1/M1）+ slug path traversal（`../` 被 slugify 消解，
+    # Codex W2-HIGH-2）。project_root_dir == resolve_instance_root 内部用的同一函数。
+    from octoagent.core.behavior_workspace import project_root_dir
+
     project_root = Path(request.app.state.project_root)
-    return project_root / "projects" / (project_slug or "_default")
+    return project_root_dir(project_root, project_slug or "default")
 
 
 # ---- 浏览 endpoints ----
+
+
+@router.get("/api/workspace-git/projects", response_model=WorkspaceProjectsResponse)
+async def workspace_projects(request: Request) -> WorkspaceProjectsResponse:
+    """列出有 workspace 版本历史的项目（前端下拉源，解决"只看 default" Opus H1）。
+
+    枚举 projects/* 目录（目录名即归一化 slug），有 ref 历史的纳入，按最近提交排序。
+    """
+    store = _store(request)
+    if store is None or not store.available:
+        return WorkspaceProjectsResponse(available=False, projects=[])
+    projects_dir = Path(request.app.state.project_root) / "projects"
+    items: list[WorkspaceProjectItem] = []
+    if projects_dir.is_dir():
+        for d in sorted(projects_dir.iterdir()):
+            if not d.is_dir():
+                continue
+            commits = await store.log(d, limit=1)
+            if commits:
+                items.append(
+                    WorkspaceProjectItem(
+                        slug=d.name, name=d.name, last_commit_ts=commits[0].ts
+                    )
+                )
+    items.sort(key=lambda i: i.last_commit_ts, reverse=True)
+    return WorkspaceProjectsResponse(available=True, projects=items)
 
 
 @router.get("/api/workspace-git/history", response_model=WorkspaceHistoryResponse)
@@ -152,11 +196,22 @@ async def workspace_diff(
     )
 
     def _side(c: str | None) -> DiffSide | None:
+        # M2（Opus）：二进制 / 超大文件不内联进响应，防撑爆 JSON + 浏览器。
         if c is None:
             return None
+        if "\x00" in c:
+            return DiffSide(content=None, availability="binary", oversize=False)
+        if len(c) > _DIFF_SIDE_MAX_CHARS:
+            return DiffSide(content=None, availability="oversize", oversize=True)
         return DiffSide(content=c, availability="available", oversize=False)
 
-    return WorkspaceDiffResponse(current=_side(current), previous=_side(previous))
+    cur, prev = _side(current), _side(previous)
+    return WorkspaceDiffResponse(
+        current=cur,
+        previous=prev,
+        binary=any(s is not None and s.availability == "binary" for s in (cur, prev)),
+        oversize=any(s is not None and s.oversize for s in (cur, prev)),
+    )
 
 
 # ---- 回滚 endpoints（REST Two-Phase） ----

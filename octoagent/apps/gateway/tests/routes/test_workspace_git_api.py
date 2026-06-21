@@ -64,6 +64,14 @@ class TestWorkspaceGitApi:
         summaries = [c["summary"] for c in data["commits"]]
         assert "before write 2" in summaries and "before write 1" in summaries
 
+    async def test_projects_lists_history(self, wg_client, wg_app):
+        # Opus W2-H1：/projects 列出有历史的项目（前端下拉源，不写死 default）
+        resp = await wg_client.get("/api/workspace-git/projects")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["available"] is True
+        assert "demo" in [p["slug"] for p in data["projects"]]
+
     async def test_diff(self, wg_client, wg_app):
         c1, c2, _ = wg_app.state._test_commits
         resp = await wg_client.get(

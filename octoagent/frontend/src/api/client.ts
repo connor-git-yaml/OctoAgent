@@ -517,6 +517,20 @@ export interface WorkspaceBlameLine {
   summary: string;
 }
 
+export interface WorkspaceProjectItem {
+  slug: string;
+  name: string;
+  last_commit_ts: string;
+}
+
+/** GET /api/workspace-git/projects -- 有版本历史的项目（前端下拉源，解决"只看 default"） */
+export async function fetchWorkspaceProjects(): Promise<{
+  available: boolean;
+  projects: WorkspaceProjectItem[];
+}> {
+  return apiFetch("/api/workspace-git/projects");
+}
+
 /** GET /api/workspace-git/history -- 提交历史（available=false → git 不可用降级） */
 export async function fetchWorkspaceHistory(
   projectSlug: string,

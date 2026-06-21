@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import WorkspaceGitView from "./WorkspaceGitView";
 
 vi.mock("../api/client", () => ({
+  fetchWorkspaceProjects: vi.fn(),
   fetchWorkspaceHistory: vi.fn(),
   fetchWorkspaceCommitFiles: vi.fn(),
   fetchWorkspaceBlame: vi.fn(),
@@ -17,9 +18,11 @@ import {
   fetchWorkspaceCommitFiles,
   fetchWorkspaceDiff,
   fetchWorkspaceHistory,
+  fetchWorkspaceProjects,
   proposeWorkspaceRollback,
 } from "../api/client";
 
+const projectsMock = vi.mocked(fetchWorkspaceProjects);
 const historyMock = vi.mocked(fetchWorkspaceHistory);
 const filesMock = vi.mocked(fetchWorkspaceCommitFiles);
 const diffMock = vi.mocked(fetchWorkspaceDiff);
@@ -28,6 +31,13 @@ const approveMock = vi.mocked(approveWorkspaceRollback);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  projectsMock.mockResolvedValue({
+    available: true,
+    projects: [
+      { slug: "my-research", name: "my-research", last_commit_ts: "2026-06-22T10:00:00Z" },
+      { slug: "default", name: "default", last_commit_ts: "2026-06-20T10:00:00Z" },
+    ],
+  });
   historyMock.mockResolvedValue({
     available: true,
     commits: [
@@ -75,6 +85,18 @@ describe("WorkspaceGitView", () => {
     );
     await user.click(screen.getByText(/workspace\/main\.py · modified/));
     await waitFor(() => expect(diffMock).toHaveBeenCalled());
+  });
+
+  it("无 prop → 解析项目列表 + 默认选最近项目（Opus H1：不写死 default）", async () => {
+    render(<WorkspaceGitView />);
+    // 默认应查询最近提交的项目 my-research，而非写死的 "default"
+    await waitFor(() => expect(projectsMock).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(historyMock).toHaveBeenCalledWith("my-research"),
+    );
+    await waitFor(() =>
+      expect(screen.getByText("before write 2")).toBeInTheDocument(),
+    );
   });
 
   it("git 不可用 → 友好占位（#6 降级）", async () => {

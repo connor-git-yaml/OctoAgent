@@ -115,9 +115,18 @@ class WorkspaceRollbackService:
         幂等安全：重入（crash 后 rehydrate 重跑）对同 commit checkout 是 no-op，快照 git 去重。
         """
         req = await self.get_request(request_id)
-        if req is None or req.status in _TERMINAL_STATUS:
+        if req is None:
             return False
-        await self._set_status(request_id, "approved")
+        # CAS 原子占用 pending/approved → executing，防并发 approve 重复执行（Codex W2-MED-1）。
+        # rowcount!=1 表示已被占用/终态 → 不重入。
+        cur = await self._conn.execute(
+            "UPDATE workspace_rollback_requests SET status='executing', updated_at=? "
+            "WHERE request_id=? AND status IN ('pending','approved')",
+            (datetime.now(UTC).isoformat(), request_id),
+        )
+        await self._conn.commit()
+        if cur.rowcount != 1:
+            return False
         worktree = Path(req.worktree)
         short = req.target_commit[:8]
         try:

@@ -155,6 +155,16 @@ class WorkspaceGitStore:
         tip = out.strip()
         return tip if rc == 0 and tip else None
 
+    async def _commit_in_workspace(
+        self, env: dict[str, str], h: str, commit: str
+    ) -> bool:
+        """commit 必须可从本 workspace 的 ref 到达（Codex W2-HIGH-1：防跨 workspace commit
+        hash 泄露内容 / 误 checkout）。merge-base --is-ancestor <commit> <ref> rc=0 即可达。"""
+        rc, _, _ = await self._git_run(
+            env, "merge-base", "--is-ancestor", commit, self._ref(h)
+        )
+        return rc == 0
+
     async def _drop_oversize(self, env: dict[str, str], worktree: Path) -> None:
         """add 后把 > 阈值的大文件从 index 踢出（Hermes 式，避免 git 吞媒体/二进制）。"""
         rc, out, _ = await self._git_run(env, "ls-files", "--cached", "-z")
@@ -284,7 +294,10 @@ class WorkspaceGitStore:
         if not self._available or not is_valid_commit_hash(commit):
             return []
         worktree = Path(worktree)
-        env = self._env(worktree, self._hash16(worktree))
+        h = self._hash16(worktree)
+        env = self._env(worktree, h)
+        if not await self._commit_in_workspace(env, h, commit):
+            return []
         rc, out, _ = await self._git_run(
             env, "show", "--name-status", "--format=", "-z", commit
         )
@@ -325,7 +338,10 @@ class WorkspaceGitStore:
         rel = self._safe_rel(worktree, file_path)
         if rel is None:
             return []
-        env = self._env(worktree, self._hash16(worktree))
+        h = self._hash16(worktree)
+        env = self._env(worktree, h)
+        if not await self._commit_in_workspace(env, h, commit):
+            return []
         rc, out, _ = await self._git_run(
             env, "blame", "--line-porcelain", commit, "--", rel
         )
@@ -375,10 +391,17 @@ class WorkspaceGitStore:
         rel = self._safe_rel(worktree, file_path)
         if rel is None:
             return (None, None)
-        env = self._env(worktree, self._hash16(worktree))
+        h = self._hash16(worktree)
+        env = self._env(worktree, h)
+        if not await self._commit_in_workspace(env, h, commit_a):
+            return (None, None)
         current = await self._file_at(env, commit_a, rel)
         previous = None
-        if commit_b is not None and is_valid_commit_hash(commit_b):
+        if (
+            commit_b is not None
+            and is_valid_commit_hash(commit_b)
+            and await self._commit_in_workspace(env, h, commit_b)
+        ):
             previous = await self._file_at(env, commit_b, rel)
         return (current, previous)
 
@@ -402,6 +425,8 @@ class WorkspaceGitStore:
         worktree = Path(worktree)
         h = self._hash16(worktree)
         env = self._env(worktree, h)
+        if not await self._commit_in_workspace(env, h, commit):
+            return False
         rels: list[str] = []
         if paths:
             for p in paths:

@@ -6,6 +6,7 @@ rehydrate（pending+approved）/ terminal 状态防重入。
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import aiosqlite
@@ -120,6 +121,30 @@ async def test_terminal_status_guards_reexec(rb_env):
     # 已 executed → 不可重入
     assert await svc.approve_and_execute(req.request_id) is False
     assert await svc.reject(req.request_id) is False
+
+
+@pytest.mark.asyncio
+async def test_concurrent_approve_cas_single_exec(rb_env):
+    """Codex W2-MED-1：并发 approve 经 CAS 占用 → 只执行一次（另一个被拒）。"""
+    svc, git, worktree = rb_env
+    _write(worktree, "workspace/m.py", "good\n")
+    c1 = await git.snapshot(worktree, "good")
+    _write(worktree, "workspace/m.py", "bad\n")
+    await git.snapshot(worktree, "bad")
+    req = await svc.create_request(
+        project_slug="demo",
+        worktree=worktree,
+        target_commit=c1,
+        paths=["workspace/m.py"],
+    )
+    results = await asyncio.gather(
+        svc.approve_and_execute(req.request_id),
+        svc.approve_and_execute(req.request_id),
+    )
+    assert sorted(results) == [False, True]  # 恰一个 CAS 成功
+    loaded = await svc.get_request(req.request_id)
+    assert loaded.status == "executed"
+    assert (worktree / "workspace" / "m.py").read_text() == "good\n"
 
 
 @pytest.mark.asyncio
