@@ -115,6 +115,18 @@ async def test_delete_404(api) -> None:
     assert (await client.request("DELETE", "/api/plugins/ghost")).status_code == 404
 
 
+async def test_install_banned_url_400(api) -> None:
+    client, _reg, _pd = api
+    r = await client.post("/api/plugins/install", json={"repo_url": "file:///etc/passwd"})
+    assert r.status_code == 400  # GitError（禁 file://）→ 400
+
+
+async def test_update_non_git_400(api) -> None:
+    client, _reg, _pd = api
+    # 'decl' 是本地（非 git）plugin → update 拒
+    assert (await client.post("/api/plugins/decl/update")).status_code == 400
+
+
 async def test_registry_unavailable_503() -> None:
     app = FastAPI()
     app.include_router(plugins_routes.router)

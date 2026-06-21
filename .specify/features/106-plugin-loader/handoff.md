@@ -1,21 +1,16 @@
-# F106 Handoff —— Phase C + 余项 + 扩展点
+# F106 Handoff —— 余项 + 扩展点
 
-> Phase A + B 核心已交付（completion-report.md）。本文交接后续会话需做的 + 扩展点。
+> Phase A + B + C 全交付（completion-report.md）。本文交接剩余 follow-up + 扩展点。
 
-## §1 Phase C（watchdog + git，下一会话，独立 dual-review 0 HIGH）
+## §1 Phase C ✅ 已完成（本会话）
 
-**watchdog（FR-6，DP-6）**：
-- 加 `watchdog` pyproject 依赖 + 后台 `Observer` 监听 `plugins_dir` + debounce。
-- declarative 变更 → 自动 `registry.refresh()`；**code/code_hash 变更 → 转 pending_approval**（reconcile 已有逻辑：`_unload_all_code` + hash 不匹配 → pending；watchdog 只需触发 refresh，换码闭合已在 Phase B 实现）。
-- emit `PLUGIN_CODE_CHANGED`（EventType 已定义）。
-- **race 闭合已在 Phase B 基础具备**：reconcile 在 `asyncio.Lock` 下 unload-then-rebuild。watchdog 须经同一 registry 锁触发 refresh（observer 线程 → asyncio loop 桥接，如 `loop.call_soon_threadsafe` + `asyncio.run_coroutine_threadsafe(registry.refresh())`）。
-- 防 reload loop：忽略 loader 自身写 + plugin 自写循环 + 每窗口最大事件数。
-- hermetic：observer 经 DI flag 关（e2e tmp plugins_dir）。shutdown 停 observer（`PluginRegistry.shutdown` 已 unload code；加 observer.stop）。
+watchdog 热重载（`plugin_watcher.py`，lazy import + 降级）+ git 安装/更新（`plugin_git.py`，H8 硬化）+ `PLUGIN_CODE_CHANGED` + `POST /install`/`/update` 全交付。红队实证抓出并修复 **H-1 symlink RCE**（latent 自 Phase A+B）。
 
-**git（FR-7，DP-7，**含 spec-review H8 硬化，缺失即 RCE**）**：
-- `POST /api/plugins/install {repo_url}` + `POST /{name}/update`，`asyncio.create_subprocess_exec`（不引 GitPython）。
-- **硬化 MUST**（对齐 mcp_installer 范式）：①scheme allowlist `https://`/`git@host:`，**禁 `ext::`/`fd::`/`file://`**（ext:: = clone 即 RCE）+ `--` 终止符；②`-c protocol.ext.allow=never -c core.hooksPath=/dev/null -c core.fsmonitor=false` + scrub env；③clone temp → 校验（无 symlink-`.git`、不逃逸）→ move（`_ensure_within` + kebab name，不 clone-over-existing）。
-- clone 的 code plugin 默认 `pending_approval`；update 改 code_hash → re-approval（reconcile 已自动）。provenance 从实际 `.git` 读（非 manifest）。
+**Phase C nice-to-have（归档，v0.1 可接受，未来顺手）**：
+- N1：`registry.update()` 持锁跨 `git pull`（网络）阻塞其他 registry op——单用户可接受；优化 = pull 进 temp worktree 外锁、swap 内锁。
+- N2：`git_install` temp dir 用 `tempfile.mkdtemp(prefix=".tmp-")`（dot-prefix）显式靠 iter 的 dot-filter，而非"manifest 在 temp 深一层"的隐式不被 reconcile 拾取。
+- N5：watcher `_refresh_inflight` 跳过的 coalesced 事件不 re-arm——末尾事件可能漏到下次 fs 事件；优化 = skip 时置 dirty flag + finally re-arm。
+- 测试 gap：git_install 真实 local-remote clone happy-path（现仅 monkeypatch 编排 + update 真实 pull 覆盖共享 `_run_git`/`_check_tree_safe`）；树内 symlink-escape（现仅 symlink-.git + validate_no_symlinks 全拒覆盖）；update→re-approval 整链（现 halves 各测）。
 
 ## §2 behavior overlay 余项（FR-3.5/US4，Phase A.5）
 

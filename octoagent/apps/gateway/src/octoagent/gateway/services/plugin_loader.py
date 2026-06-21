@@ -137,6 +137,13 @@ def _import_module(
     mod_rel: str,
     loaded: LoadedPluginCode,
 ):
+    # 拒模块路径含 symlink（文件本身或中间目录）——code 模块须 plugin 树内真实文件
+    # （review H-1 defense：symlink resolve 后执行的字节可能 ≠ 审批 hash）。
+    cur = plugin_dir / mod_rel
+    while cur != plugin_dir and cur.parent != cur:
+        if cur.is_symlink():
+            raise PluginLoadError(f"模块路径含 symlink（拒）: {mod_rel}")
+        cur = cur.parent
     mod_path = (plugin_dir / mod_rel).resolve()
     if mod_path != resolved_root and resolved_root not in mod_path.parents:
         raise PluginLoadError(f"模块逃逸 plugin 目录: {mod_rel}")

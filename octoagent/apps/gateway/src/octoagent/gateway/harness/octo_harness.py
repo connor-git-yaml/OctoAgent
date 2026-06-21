@@ -221,6 +221,17 @@ class OctoHarness:
         if hasattr(app.state, "watchdog_scheduler") and app.state.watchdog_scheduler:
             app.state.watchdog_scheduler.shutdown(wait=False)
             _log.info("watchdog_scheduler_stopped")
+        # F106：停 plugin watcher（observer）+ 卸载已加载 plugin 代码（on_unload hook）
+        if getattr(app.state, "plugin_watcher", None) is not None:
+            try:
+                app.state.plugin_watcher.stop()
+            except Exception:
+                _log.warning("plugin_watcher_stop_failed", exc_info=True)
+        if getattr(app.state, "plugin_registry", None) is not None:
+            try:
+                await app.state.plugin_registry.shutdown()
+            except Exception:
+                _log.warning("plugin_registry_shutdown_failed", exc_info=True)
         if hasattr(app.state, "daily_routine_service") and app.state.daily_routine_service:
             try:
                 await app.state.daily_routine_service.shutdown()
@@ -834,6 +845,7 @@ class OctoHarness:
         在 _bootstrap_capability_pack（SkillDiscovery 构造）之后、_bootstrap_mcp/executors 之前。
         整段 try/except 降级——plugin 子系统不可用 MUST NOT 拖垮 gateway（#6 / FR-10.2）。
         """
+        import asyncio
         import os
 
         from .. import main as _main_module
@@ -884,6 +896,19 @@ class OctoHarness:
             _main_module.log.info(
                 "plugin_registry_ready", counts=plugin_registry._counts()
             )
+
+            # F106 Phase C：watchdog 热重载（lazy import + 降级；observer 失败不拖垮，FR-6.4）
+            app.state.plugin_watcher = None
+            try:
+                from ..services.plugin_watcher import PluginWatcher
+
+                _watcher = PluginWatcher(
+                    plugins_dir, plugin_registry, asyncio.get_running_loop()
+                )
+                if _watcher.start():
+                    app.state.plugin_watcher = _watcher
+            except Exception:
+                _main_module.log.warning("plugin_watcher_bootstrap_failed", exc_info=True)
         except Exception:
             # Constitution #6：plugin 子系统不可用不阻塞 gateway 启动
             _main_module.log.exception("plugin_registry_bootstrap_failed")

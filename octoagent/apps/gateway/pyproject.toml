@@ -16,6 +16,9 @@ dependencies = [
     # F105 v0.2（FR-C6）：Discord Interactions Ed25519 验签——锁内已有
     # （传递依赖 46.0.5），显式声明防传递链断裂破坏生产验签路径
     "cryptography>=43,<47",
+    # F106 Phase C：plugin 目录热重载 observer。lazy import + 优雅降级——
+    # 未装时 watcher 禁用（手动 refresh 仍可，FR-6.4），不阻塞 gateway。
+    "watchdog>=4.0,<7.0",
 ]
 
 [tool.uv.sources]

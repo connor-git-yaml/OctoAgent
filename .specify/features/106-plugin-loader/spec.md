@@ -475,9 +475,11 @@ plugin 含 `tools.py`（注册新工具）+ `provides.tools`。
 
 **spec review round-1（双 panel：安全红队 + Constitution/arch，code-grounded）**：9 HIGH + 9 MED + 数 LOW，**全闭环**（详 [spec-review-r1.md](./spec-review-r1.md)）。关键：H1/H2 `scan_and_register` 执行代码+忽略 registry 参数→DP-3 专用 path；H4 `scan_memory` API 纠正；H5/M6 honesty（进程内无容纳）→§0.3；H6 整树 hash；H8 git 硬化；H9 race 闭合；分阶段 §13。
 
-**实施 review（Phase A+B，双 panel：安全红队 + correctness，code-grounded）**：**0 HIGH**——信任模型 gate 被代码强制（未审批不 import airtight / 整树 hash / reconcile unload-then-rebuild 闭合换码）。MED-1（全局 register 篡改）+ M1（hooks）+ N1（失败审批 re-exec）+ N2（toggle 语义）**全修**；LOW-1/2/3 归档。0-regression 4098 passed。详 completion-report.md §3。
+**实施 review（Phase A+B，双 panel：安全红队 + correctness，code-grounded）**：**0 HIGH**——信任模型 gate 被代码强制（未审批不 import airtight / 整树 hash / reconcile unload-then-rebuild 闭合换码）。MED-1（全局 register 篡改）+ M1（hooks）+ N1（失败审批 re-exec）+ N2（toggle 语义）**全修**；LOW-1/2/3 归档。0-regression 4098 passed。
 
-> Codex CLI OAuth 本会话不可用 → 由两独立对抗 agent panel 替代（F103c 先例）。Phase C（watchdog/git）后续会话独立 dual-review 0 HIGH。
+**实施 review（Phase C watchdog+git，双 panel）**：红队实证抓出 **H-1（symlink 换码绕 code_hash 重审，latent 自 Phase A+B）→ 已修**（`validate_no_symlinks` 拒 + iter 跳 symlink 目录 + code_hash fold + loader 拒 symlink 模块）；L-1（watcher post-stop race）→ 已修（`_stopped` guard）；git 硬化/H9 watcher TOCTOU 实测 closed。N1/N2/N5 + 测试 gap 归档 handoff。0-regression 4130 passed。详 completion-report.md §3。
+
+> Codex CLI OAuth 本会话不可用 → 由两独立对抗 agent panel 替代（F103c 先例）。合入前强烈建议另跑 Codex 复核（尤其 H-1 这类 latent 缝）。
 
 ---
 
@@ -501,4 +503,4 @@ plugin 含 `tools.py`（注册新工具）+ `provides.tools`。
 - **Phase C — watchdog + git（建于 B 的 code-hash）**
   watchdog observer（declarative 自动 + code 变更→pending_approval + race 闭合，DP-6）+ git 硬化 install/update（DP-7）+ `PLUGIN_CODE_CHANGED` + shutdown teardown。闭 SC-003/008/009。
 
-**本会话计划**：实施 **Phase A**（安全切片，可独立合入），产出 plan + tasks（覆盖 A/B/C），GATE_TASKS 向用户呈现整体 + Phase A 实施结果 + B/C 排程建议。B/C 后续会话（各自 dual-review 0 HIGH）。
+**实施实况**：GATE_TASKS 用户拍板"本会话做 Phase A + B"，实施后用户"继续 Phase C" → **A + B + C 全本会话完成**。各阶段双 panel review 0 HIGH（Phase C 红队抓修 H-1 symlink RCE）。0-regression 4130 passed。仅 behavior overlay（FR-3.5）+ channel-as-plugin 扩展点推迟。

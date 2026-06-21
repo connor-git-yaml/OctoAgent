@@ -45,11 +45,31 @@ def iter_plugin_dirs(plugins_dir: Path) -> list[Path]:
         log.warning("plugin_discovery_dir_error", plugins_dir=str(plugins_dir), error=str(exc))
         return []
     for d in children:
-        if not d.is_dir() or d.name.startswith("."):
+        # 跳过 symlink 目录（防 plugin 目录指向树外，review H-1）
+        if not d.is_dir() or d.is_symlink() or d.name.startswith("."):
             continue
         if (d / PLUGIN_MANIFEST_FILE).is_file():
             out.append(d)
     return out
+
+
+def validate_no_symlinks(plugin_dir: Path) -> None:
+    """拒绝含任何 symlink 的 plugin（review H-1）。
+
+    plugin 无合法 symlink 需求；symlink 会在 code_hash（跳过 symlink）与 loader（resolve 跟随）
+    之间制造"审批 hash ≠ 执行字节"的缝 → 审批后换 symlink 目标 = 静默 RCE。v0.1 一律拒。
+
+    Raises:
+        PluginValidationError(PATH_ESCAPE): 树内含 symlink。
+    """
+    try:
+        for f in plugin_dir.rglob("*"):
+            if f.is_symlink():
+                raise PluginValidationError(
+                    PluginRejectedReason.PATH_ESCAPE, f"plugin 含 symlink（拒）: {f.name}"
+                )
+    except OSError as exc:
+        raise PluginValidationError(PluginRejectedReason.PATH_ESCAPE, str(exc)) from exc
 
 
 def load_manifest(plugin_dir: Path) -> PluginManifest:

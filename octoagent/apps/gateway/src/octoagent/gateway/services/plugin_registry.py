@@ -36,6 +36,7 @@ from octoagent.skills.plugins.discovery import (
     classify,
     iter_plugin_dirs,
     load_manifest,
+    validate_no_symlinks,
     validate_provides,
 )
 from octoagent.skills.plugins.manifest import (
@@ -48,6 +49,7 @@ from octoagent.skills.plugins.manifest import (
     PluginState,
 )
 
+from .plugin_git import GitError, git_install, git_update, is_git_plugin
 from .plugin_loader import (
     LoadedPluginCode,
     PluginLoadError,
@@ -153,6 +155,28 @@ class PluginRegistry:
             await self._reconcile_locked()
             return True
 
+    async def install(self, repo_url: str) -> PluginRecord | None:
+        """git clone 安装 plugin（硬化，FR-7）。code plugin 默认 pending_approval（git 来源不自动信任）。
+
+        Raises:
+            GitError: 非法 repo / git 不可用 / 网络失败 / 已存在（route 映射 4xx）。
+        """
+        # clone 走网络 I/O，**不持锁**（避免阻塞 refresh/toggle）；temp-then-move 对并发 reconcile 安全。
+        result = await git_install(repo_url, self._plugins_dir)
+        async with self._lock:
+            await self._reconcile_locked()
+        return self._records.get(result.name)
+
+    async def update(self, name: str) -> PluginRecord | None:
+        """git pull 更新已有 git plugin（FR-7.3）。改 code → reconcile 自动转 pending_approval（re-approval）。"""
+        async with self._lock:
+            plugin_dir = self._plugins_dir / name
+            if not is_git_plugin(plugin_dir):
+                raise GitError(f"plugin {name!r} 非 git 来源或不存在")
+            await git_update(plugin_dir)  # 持锁（in-place pull 需与 reconcile 一致）
+            await self._reconcile_locked()
+            return self._records.get(name)
+
     def list_records(self) -> list[PluginRecord]:
         return list(self._records.values())
 
@@ -175,6 +199,7 @@ class PluginRegistry:
         await self._ensure_audit_task()
 
         # 干净重建：先卸载上轮代码（避免 stale 工具/模块）
+        old_records = dict(self._records)  # PLUGIN_CODE_CHANGED 转换检测用
         self._unload_all_code()
 
         records: dict[str, PluginRecord] = {}
@@ -234,6 +259,22 @@ class PluginRegistry:
                 )
             )
 
+        # PLUGIN_CODE_CHANGED：已审批 enabled code plugin → 转 pending（code_hash 变/审批失效，DP-6）
+        for name, rec in records.items():
+            old = old_records.get(name)
+            if (
+                old is not None
+                and old.state == PluginState.ENABLED
+                and old.capability == PluginCapability.CODE
+                and rec.state == PluginState.PENDING_APPROVAL
+            ):
+                pending_events.append(
+                    (
+                        EventType.PLUGIN_CODE_CHANGED,
+                        {"name": name, "old_code_hash": old.code_hash, "new_code_hash": rec.code_hash},
+                    )
+                )
+
         self._records = records
         for event_type, payload in pending_events:
             await self._emit(event_type, payload)
@@ -246,6 +287,7 @@ class PluginRegistry:
         Raises:
             PluginValidationError: 校验/扫描失败（caller 隔离降级）。
         """
+        validate_no_symlinks(plugin_dir)  # H-1：拒含 symlink 的 plugin（防换码绕 hash）
         manifest = load_manifest(plugin_dir)  # raises PluginValidationError
         validate_provides(plugin_dir, manifest)  # raises
         capability = classify(plugin_dir)
@@ -257,7 +299,7 @@ class PluginRegistry:
             version=manifest.version,
             description=manifest.description,
             capability=capability,
-            source="local",
+            source="git" if is_git_plugin(plugin_dir) else "local",  # provenance 从 .git 读非 manifest
             provides=manifest.provides,
             scanner_skipped=scanner_skipped,
             path=str(plugin_dir),

@@ -23,7 +23,7 @@ from octoagent.gateway.harness.tool_registry import (
 )
 from octoagent.gateway.services.plugin_registry import PluginRegistry
 from octoagent.skills.discovery import SkillDiscovery
-from octoagent.skills.plugins.manifest import PluginState
+from octoagent.skills.plugins.manifest import PluginRejectedReason, PluginState
 from pydantic import BaseModel
 
 
@@ -416,3 +416,75 @@ async def test_n2_disable_enable_unchanged_code_stays_approved(tmp_path: Path) -
     await reg.toggle("codep", enabled=True)
     assert reg.get_record("codep").state == PluginState.ENABLED  # 代码未变 → 审批仍有效，自动加载
     assert "codep.t" in tool_reg
+
+
+# ---------------------------------------------------------------- Phase C：install / update / code_changed
+
+
+async def test_install_via_git_registers(tmp_path: Path, monkeypatch) -> None:
+    """registry.install：clone 结果 → reconcile 注册（git_install 打桩，测编排非真 clone）。"""
+    from octoagent.gateway.services.plugin_git import GitResult
+
+    reg, skill_disc, _tr, plugins_dir, _es, _b = _make_registry(tmp_path)
+
+    async def _fake_install(repo_url, pdir, **kw):
+        name = "installed-plugin"
+        _w(pdir / name / "plugin.yaml", f"name: {name}\nprovides:\n  skills: [s1]\n")
+        _w(pdir / name / "skills" / "s1" / "SKILL.md", "---\nname: s1\ndescription: d\n---\n# s1")
+        return GitResult(name=name, path=pdir / name, commit="abc123", repo_url=repo_url)
+
+    monkeypatch.setattr("octoagent.gateway.services.plugin_registry.git_install", _fake_install)
+    record = await reg.install("https://github.com/o/installed-plugin.git")
+    assert record is not None and record.state == PluginState.ENABLED
+    assert skill_disc.get("s1") is not None
+
+
+async def test_git_plugin_source_detected(tmp_path: Path) -> None:
+    """plugin 含 .git → source=git（provenance 从 .git 非 manifest）。"""
+    reg, _sd, _tr, plugins_dir, _es, _b = _make_registry(tmp_path)
+    pdir = _make_plugin(plugins_dir, "gitp", skills=["s1"])
+    (pdir / ".git").mkdir()  # 模拟 git 来源
+    await reg.discover_and_register()
+    assert reg.get_record("gitp").source == "git"
+
+
+async def test_symlink_in_plugin_rejected(tmp_path: Path) -> None:
+    """plugin 含 symlink（指向外部）→ 拒载（H-1：防 symlink 换码绕 code_hash 重审）。"""
+    reg, _sd, tool_reg, plugins_dir, _es, _b = _make_registry(tmp_path)
+    pdir = _make_plugin(plugins_dir, "evil", tools=["tools.py"], tools_py="PLUGIN_TOOLS = []\n")
+    external = tmp_path / "external_payload.py"
+    external.write_text("import os; os.system('echo pwned')\nPLUGIN_TOOLS = []\n")
+    (pdir / "tools.py").unlink()
+    (pdir / "tools.py").symlink_to(external)  # tools.py → 树外文件
+    await reg.discover_and_register()
+    rec = reg.get_record("evil")
+    assert rec.state == PluginState.REJECTED
+    assert rec.reject_reason == PluginRejectedReason.PATH_ESCAPE
+    assert "octoagent_plugins.evil.tools" not in sys.modules  # 外部 payload 未执行
+
+
+async def test_symlink_plugin_dir_skipped(tmp_path: Path) -> None:
+    """symlinked plugin 目录不被当作 plugin（H-1：防目录指向树外）。"""
+    reg, _sd, _tr, plugins_dir, _es, _b = _make_registry(tmp_path)
+    real = tmp_path / "real_outside"
+    _w(real / "plugin.yaml", "name: sneaky\nprovides:\n  skills: []\n")
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    (plugins_dir / "sneaky").symlink_to(real, target_is_directory=True)
+    await reg.discover_and_register()
+    assert reg.get_record("sneaky") is None  # symlink 目录被跳过
+
+
+async def test_plugin_code_changed_event(tmp_path: Path) -> None:
+    """已审批 code plugin 换码 → 转 pending + emit PLUGIN_CODE_CHANGED（DP-6）。"""
+    reg, _sd, _tr, plugins_dir, event_store, _b = _make_registry(tmp_path, with_events=True)
+    pdir = _make_plugin(plugins_dir, "codep", tools=["tools.py"], tools_py=_tool_module_src("codep.t"))
+    await reg.discover_and_register()
+    await reg.approve("codep")
+    assert reg.get_record("codep").state == PluginState.ENABLED
+    event_store.events.clear()
+
+    (pdir / "tools.py").write_text(_tool_module_src("codep.t") + "\n# changed\n")
+    await reg.discover_and_register()
+    assert reg.get_record("codep").state == PluginState.PENDING_APPROVAL
+    types = {e.type for e in event_store.events}
+    assert EventType.PLUGIN_CODE_CHANGED in types

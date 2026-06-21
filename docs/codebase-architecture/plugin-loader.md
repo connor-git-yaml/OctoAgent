@@ -2,8 +2,8 @@
 
 > 用户/社区插件装载子系统。把自定义 **skill + behavior pack + 新工具/hooks** 装进 `~/.octoagent/plugins/`，
 > 主 Agent 自动发现并可用。在 SkillDiscovery + 中央 ToolRegistry + ApprovalGate 之上升级，非从零。
-> 状态：**Phase A（declarative spine）+ Phase B（code 执行安全核心）已实现**；Phase C（watchdog/git）+
-> behavior overlay 推迟（见 `.specify/features/106-plugin-loader/handoff.md`）。
+> 状态：**Phase A（declarative spine）+ Phase B（code 执行安全核心）+ Phase C（watchdog 热重载 + git 安装/更新）
+> 已实现**；behavior overlay（FR-3.5）+ channel-as-plugin 扩展点推迟（见 `.specify/features/106-plugin-loader/handoff.md`）。
 
 ## 1. 两类 plugin + 信任模型
 
@@ -40,8 +40,10 @@
 | `packages/skills/.../plugins/code_hash.py` | 整树 code_hash（全文件排序 path+content，排除 .git/__pycache__/marker）|
 | `packages/skills/.../plugins/approval.py` | `.approved` marker 读写（code_hash 绑定，跨重启）|
 | `apps/gateway/.../services/plugin_registry.py` | **编排器**：discover→威胁扫描→注册→toggle/approve/refresh/remove，asyncio.Lock 串行 + 单 plugin 隔离降级 + 审计事件 |
-| `apps/gateway/.../services/plugin_loader.py` | **code 专用 importlib path**（非 scan_and_register）：namespaced 模块 + staging 冲突预检 + 事务回滚 + MED-1 全局 register 篡改检测 + hooks lifecycle |
-| `apps/gateway/.../routes/plugins.py` | `/api/plugins` REST（list/get/toggle/approve/delete/refresh，front-door protected）|
+| `apps/gateway/.../services/plugin_loader.py` | **code 专用 importlib path**（非 scan_and_register）：namespaced 模块 + staging 冲突预检 + 事务回滚 + MED-1 全局 register 篡改检测 + symlink 模块拒 + hooks lifecycle |
+| `apps/gateway/.../services/plugin_watcher.py` | **watchdog 热重载**（Phase C）：lazy import + 降级；observer 线程 → asyncio loop 桥接（refresh 走 registry lock）；debounce + ignore + `_stopped`/`_refresh_inflight` |
+| `apps/gateway/.../services/plugin_git.py` | **git 安装/更新硬化**（Phase C，H8）：repo_url scheme allowlist（禁 `ext::`/`fd::`/`file://`）+ `-c protocol.ext.allow=never -c core.hooksPath=/dev/null` + scrub env + temp-then-move + tree-safe |
+| `apps/gateway/.../routes/plugins.py` | `/api/plugins` REST（list/get/toggle/approve/delete/refresh/install/`{name}`/update，front-door protected）|
 
 ## 4. 装配（bootstrap 段 7.5）
 
@@ -57,6 +59,9 @@
 4. **MED-1**：plugin import 期直接调全局 `register()` 篡改 → loader 快照 diff 检测 → 还原 + 拒载。
 5. **隔离降级**：单 plugin 任一步失败 → try/except + `PLUGIN_REJECTED(reason)` + 继续，不拖垮 bootstrap。
 6. **声明式制品威胁扫描**：manifest+SKILL.md+KNOWLEDGE.md 过 `scan_memory`；blocked→拒，scanner-raise→fail-open，oversize-degraded→拒。**代码 .py 不扫**（靠审批+provenance，不制造假信心）。
+7. **symlink 一律拒（H-1）**：plugin 含任何 symlink → 拒载（`validate_no_symlinks`）+ 跳过 symlinked plugin 目录。防 symlink 在 code_hash（跳过）与 loader（resolve 跟随）间制造"审批 hash ≠ 执行字节"的换码 RCE 缝。code_hash fold symlink + loader 拒 symlink 模块为 defense-in-depth。
+8. **git 硬化（Phase C，H8）**：`validate_repo_url` 禁 `ext::`/`fd::`/`file://`/`-`（`ext::` = clone 即 RCE）；git 跑 `-c protocol.ext.allow=never -c core.hooksPath=/dev/null` + scrub env；temp-then-move + tree-safe（symlink-.git/逃逸拒）。
+9. **watchdog 换码闭合（Phase C）**：code 变更不在 watcher 重造逻辑——watcher 仅触发 `registry.refresh()`，复用 Phase B 的 reconcile（hash 不匹配 → pending_approval，旧工具 deregister，新码不自动执行）。observer 失败/无 watchdog → 降级（手动 refresh 仍可）。
 
 ## 6. 审计事件
 

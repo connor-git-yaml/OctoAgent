@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from octoagent.gateway.services.plugin_git import GitError
 from octoagent.skills.plugins.manifest import PluginRecord
 
 router = APIRouter(prefix="/api/plugins", tags=["plugins"])
@@ -43,6 +44,10 @@ class PluginRefreshResponse(BaseModel):
     rejected: int
     pending: int
     total: int
+
+
+class PluginInstallRequest(BaseModel):
+    repo_url: str
 
 
 def _registry(request: Request) -> Any:
@@ -106,3 +111,29 @@ async def refresh_plugins(request: Request) -> PluginRefreshResponse:
     reg = _registry(request)
     counts = await reg.refresh()
     return PluginRefreshResponse(**counts)
+
+
+@router.post("/install", status_code=201, response_model=PluginRecord)
+async def install_plugin(body: PluginInstallRequest, request: Request) -> PluginRecord:
+    """git clone 安装 plugin（硬化）。code plugin 默认 pending_approval。"""
+    reg = _registry(request)
+    try:
+        record = await reg.install(body.repo_url)
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=500, detail="安装后未找到 plugin 记录")
+    return record
+
+
+@router.post("/{name}/update", response_model=PluginRecord)
+async def update_plugin(name: str, request: Request) -> PluginRecord:
+    """git pull 更新 git plugin。改 code → 自动转 pending_approval（re-approval）。"""
+    reg = _registry(request)
+    try:
+        record = await reg.update(name)
+    except GitError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail=f"plugin 不存在: {name}")
+    return record
