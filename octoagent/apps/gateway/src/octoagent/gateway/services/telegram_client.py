@@ -326,3 +326,62 @@ class TelegramBotClient:
                     )
                 chunks.append(chunk)
         return b"".join(chunks)
+
+    async def send_voice(
+        self,
+        chat_id: str | int,
+        voice: bytes,
+        *,
+        duration: int | None = None,
+        reply_to_message_id: str | int | None = None,
+        message_thread_id: str | int | None = None,
+        disable_notification: bool = True,
+    ) -> TelegramMessage:
+        """sendVoice：multipart/form-data 上传 OGG/Opus，在 chat 呈现为语音消息气泡。
+
+        F110 FR-C1/C2：不走 `_request` JSON POST 路径（sendVoice 是文件上传，
+        必须 multipart/form-data）。复用 `_load_bot_token()` + `_base_url`，
+        单独构造 multipart httpx 请求。
+
+        失败时抛 `TelegramBotApiError`（FR-C3，AC-C3 可捕获）；
+        bot token 仅作 URL 路径，不记入日志（Constitution #5 Least Privilege）。
+        """
+        bot_token = self._load_bot_token()
+        url = f"{self._base_url}/bot{bot_token}/sendVoice"
+
+        form_data: dict[str, str] = {
+            "chat_id": str(chat_id),
+            "disable_notification": str(disable_notification).lower(),
+        }
+        if duration is not None:
+            form_data["duration"] = str(int(duration))
+        if reply_to_message_id is not None:
+            form_data["reply_to_message_id"] = str(int(reply_to_message_id))
+        if message_thread_id is not None:
+            form_data["message_thread_id"] = str(int(message_thread_id))
+
+        files = {"voice": ("voice.ogg", voice, "audio/ogg")}
+
+        async with httpx.AsyncClient(
+            timeout=self._timeout,
+            transport=self._transport,
+        ) as client:
+            response = await client.post(url, data=form_data, files=files)
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise TelegramBotApiError(
+                f"Telegram Bot API sendVoice 返回非 JSON 响应（status={response.status_code}）",
+                status_code=response.status_code,
+            ) from exc
+
+        if response.status_code != 200 or not data.get("ok", False):
+            description = str(data.get("description") or response.text[:200])
+            raise TelegramBotApiError(
+                description,
+                status_code=response.status_code,
+                payload=data,
+            )
+
+        return TelegramMessage.model_validate(data.get("result"))

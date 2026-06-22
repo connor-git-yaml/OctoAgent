@@ -44,6 +44,8 @@ dev = [
 # 无需系统 ffmpeg,可直接解码 Telegram OGG/Opus。装:`uv pip install -e '.[voice]'`。
 voice = [
     "faster-whisper>=1.0,<2.0",
+    "piper-tts>=1.4,<2.0",          # F110 本地 TTS（GPL-3.0 optional，GATE_DESIGN D1 接受）
+    # "pyogg>=0.8,<1.0",             # D4 备选：Phase 0 实测 PyAV 不可用时启用（本 venv 两者均缺）
 ]
 
 [project.scripts]

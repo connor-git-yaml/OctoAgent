@@ -24,7 +24,7 @@ from .operator_actions import decode_telegram_operator_action, encode_telegram_o
 from .task_service import TaskService
 
 if TYPE_CHECKING:
-    from ..voice import SpeechToTextService
+    from ..voice import SpeechToTextService, TextToSpeechService
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +170,19 @@ class TelegramBotClientProtocol(Protocol):
     async def download_file_bytes(self, file_path: str, *, max_bytes: int = ...) -> bytes:
         ...
 
+    async def send_voice(
+        self,
+        chat_id: str | int,
+        voice: bytes,
+        *,
+        duration: int | None = None,
+        reply_to_message_id: str | int | None = None,
+        message_thread_id: str | int | None = None,
+        disable_notification: bool = True,
+    ) -> Any:
+        """FIX-6：F110 TTS 出站——补全 DI 契约（Protocol 声明与 telegram_client.py 实现签名对齐）。"""
+        ...
+
 
 @dataclass(slots=True)
 class TelegramVoiceRef:
@@ -230,6 +243,7 @@ class TelegramGatewayService:
         bot_client: TelegramBotClientProtocol | None = None,
         polling_timeout_s: int = 15,
         stt_service: SpeechToTextService | None = None,
+        tts_service: TextToSpeechService | None = None,
     ) -> None:
         self._project_root = project_root
         self._stores = store_group
@@ -239,6 +253,7 @@ class TelegramGatewayService:
         self._bot_client = bot_client
         self._polling_timeout_s = polling_timeout_s
         self._stt_service = stt_service  # F109:None = 语音转写未启用(优雅降级)
+        self._tts_service = tts_service  # F110:None = TTS 未启用（优雅降级）
         self._polling_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._operator_inbox_service = None
@@ -447,7 +462,11 @@ class TelegramGatewayService:
         # 窗口的补队不被 binding / reply-thread 写入异常阻断（对齐 slack/discord）
         await self._maybe_enqueue(task_id, context.text, created)
         # F105 FR-E3：accepted 与 duplicate 都 touch（幂等重投不丢 last-route）
-        await self._record_conversation_binding(context, scope_id, reply_thread_root_id)
+        # F110 FIX-3：voice_mode 写入已前移到 _handle_voice_message 转写成功后（enqueue 之前），
+        # 此处 _record_conversation_binding 仅维护 last_* 路由字段（不再传 set_voice_mode_if_unset）。
+        await self._record_conversation_binding(
+            context, scope_id, reply_thread_root_id,
+        )
         self._remember_inbound_reply_thread(context, reply_thread_root_id)
         return TelegramIngestResult(
             status="accepted" if created else "duplicate",
@@ -560,6 +579,11 @@ class TelegramGatewayService:
             voice.duration,
             len(result.text),
         )
+
+        # FIX-3：voice_mode 写入在 enqueue 之前持久化，消除首轮竞态。
+        # D2-C GATE：仅当 voice_mode 未设置（unset）时自动置 True；显式 False 不覆盖。
+        await self._set_voice_mode_if_unset(context)
+
         return replace(context, text=result.text)
 
     async def _reply_voice_degrade(
@@ -581,6 +605,56 @@ class TelegramGatewayService:
                 reply_to_message_id=context.message_id,
             )
 
+    # ---- F110 voice_mode 状态机 helper（AC-D7/D1/D1b）----
+
+    @staticmethod
+    def _get_voice_mode(binding: Any) -> bool:
+        """三态读取：key 缺失 → False；True → True；False → False。
+
+        AC-D7：binding 不存在 / voice_mode key 缺失 → False（文字回复，不崩）。
+        """
+        if binding is None:
+            return False
+        return bool(getattr(binding, "metadata", {}).get("voice_mode", False))
+
+    @staticmethod
+    def _is_voice_mode_explicitly_disabled(binding: Any) -> bool:
+        """区分「unset（key 缺失）」vs「显式 False（用户 /voice off 过）」。
+
+        AC-D1b：显式 /voice off 后发 voice 消息，不自动重开 voice_mode。
+        """
+        if binding is None:
+            return False
+        md = getattr(binding, "metadata", {})
+        return "voice_mode" in md and md["voice_mode"] is False
+
+    async def _set_voice_mode_if_unset(self, context: TelegramInboundContext) -> None:
+        """FIX-3：在 enqueue 之前将 voice_mode 置 True（仅当 unset 时）。
+
+        D2-C GATE 裁决：入站 voice 转写成功后，若 voice_mode 未设置，自动置 True；
+        显式 False（用户 /voice off 过）不覆盖。RMW：get → merge → upsert。
+        失败 suppress，不阻断主链（Constitution #6）。
+        """
+        binding_store = getattr(self._stores, "conversation_binding_store", None)
+        if binding_store is None:
+            return
+        with contextlib.suppress(Exception):
+            existing = await binding_store.get("telegram", context.chat_id, project_id="")
+            if self._is_voice_mode_explicitly_disabled(existing):
+                return  # 显式 False，不自动重开
+            merged: dict[str, Any] = dict(getattr(existing, "metadata", {}) or {})
+            if merged.get("voice_mode") is True:
+                return  # 已是 True，幂等跳过
+            merged["voice_mode"] = True
+            existing_scope_id = str(getattr(existing, "scope_id", "") or "")
+            await binding_store.upsert_runtime_binding(
+                "telegram",
+                context.chat_id,
+                scope_id=existing_scope_id,
+                project_id="",
+                metadata=merged,
+            )
+
     async def _record_conversation_binding(
         self,
         context: TelegramInboundContext,
@@ -588,6 +662,11 @@ class TelegramGatewayService:
         reply_thread_root_id: str,
     ) -> None:
         """F105 FR-E3：登记/touch 渠道会话路由绑定（OC-2 + OC-6 last-route 状态）。
+
+        FIX-3：voice_mode 写入已前移到 _set_voice_mode_if_unset（enqueue 之前），
+        此方法只维护 last_* 路由字段和 scope_id，不再包含 voice_mode 逻辑。
+        - 必须 read-modify-write（先 get → merge existing → upsert），防止全量替换
+          清掉其他 metadata 字段（MEDIUM-3 最大风险，plan §C 说明）。
 
         - conversation_id=chat_id：出站寻址单元=chat 级（spec 已知 limitation L3：
           多 topic 群塌成一行，topic 维度滚动记录在 metadata.last_*）
@@ -597,18 +676,29 @@ class TelegramGatewayService:
         binding_store = getattr(self._stores, "conversation_binding_store", None)
         if binding_store is None:
             return
-        metadata: dict[str, Any] = {}
+
+        # F110 MEDIUM-3：read-modify-write——先 get 现有 binding，merge 后再 upsert，
+        # 防止 upsert 全量替换清掉其他字段（如 last_message_thread_id 等）。
+        try:
+            existing = await binding_store.get("telegram", context.chat_id, project_id="")
+        except Exception:
+            existing = None
+
+        merged: dict[str, Any] = dict(getattr(existing, "metadata", {}) or {})
         if context.message_thread_id:
-            metadata["last_message_thread_id"] = context.message_thread_id
+            merged["last_message_thread_id"] = context.message_thread_id
         if reply_thread_root_id:
-            metadata["last_reply_thread_root_id"] = reply_thread_root_id
+            merged["last_reply_thread_root_id"] = reply_thread_root_id
+        # FIX-3：voice_mode 不在此处写入（已前移到 _set_voice_mode_if_unset），
+        # RMW 保留已持久化的 voice_mode 值（merged 从 existing.metadata 复制）。
+
         try:
             await binding_store.upsert_runtime_binding(
                 "telegram",
                 context.chat_id,
                 scope_id=scope_id,
                 project_id="",
-                metadata=metadata,
+                metadata=merged,
             )
         except Exception:
             logger.warning(
@@ -621,6 +711,12 @@ class TelegramGatewayService:
         self,
         context: TelegramInboundContext,
     ) -> TelegramIngestResult | None:
+        # F110 FR-D2：渠道层 voice 控制命令（Constitution #9：确定性渠道渲染开关，
+        # 不经 Agent LLM 决策环）。优先于 control_plane 检测。
+        text_stripped = context.text.strip().lower()
+        if text_stripped in ("/voice on", "/voice off"):
+            return await self._handle_voice_command(context, enable=(text_stripped == "/voice on"))
+
         if self._control_plane_service is None:
             return None
         request = self._control_plane_service.build_telegram_action_request(
@@ -652,6 +748,49 @@ class TelegramGatewayService:
             detail=result.status.value,
             created=result.status.value == "completed",
         )
+
+    async def _handle_voice_command(
+        self,
+        context: TelegramInboundContext,
+        *,
+        enable: bool,
+    ) -> TelegramIngestResult:
+        """F110 FR-D2：处理 /voice on|off 渠道控制命令。
+
+        Constitution #9：/voice 是确定性渠道渲染开关，非 Agent LLM 决策。
+        FR-B3：控制命令回复只发文字，不走 TTS（防循环）。
+        执行 read-modify-write（get → merge existing metadata → upsert）。
+        """
+        binding_store = getattr(self._stores, "conversation_binding_store", None)
+        if binding_store is not None:
+            with contextlib.suppress(Exception):
+                existing = await binding_store.get("telegram", context.chat_id, project_id="")
+                merged: dict[str, Any] = dict(getattr(existing, "metadata", {}) or {})
+                merged["voice_mode"] = enable
+                # 保留 existing.scope_id（不在此函数重算 scope）。
+                # DEFER L1（主节点裁决）：若 existing is None（用户从未发过消息即发 /voice on），
+                # scope_id 写入空字符串；下一条真实入站消息的 _record_conversation_binding RMW
+                # 会补上 scope_id（自愈），v0.1 出站寻址不依赖 binding.scope_id。归 v0.2 通知路由。
+                existing_scope_id = str(getattr(existing, "scope_id", "") or "")
+                await binding_store.upsert_runtime_binding(
+                    "telegram",
+                    context.chat_id,
+                    scope_id=existing_scope_id,
+                    project_id="",
+                    metadata=merged,
+                )
+
+        if self._bot_client is not None:
+            reply_text = "语音模式已开启 🔊" if enable else "语音模式已关闭 💬"
+            with contextlib.suppress(Exception):
+                await self._bot_client.send_message(
+                    context.chat_id,
+                    reply_text,
+                    reply_to_message_id=context.message_id,
+                )
+
+        detail = "voice_on" if enable else "voice_off"
+        return TelegramIngestResult(status="control_action", detail=detail, created=False)
 
     def _is_allowed(self, context: TelegramInboundContext) -> bool:
         if self._state_store is None:
@@ -881,7 +1020,14 @@ class TelegramGatewayService:
             return
 
         events = await self._stores.event_store.get_events_for_task(task_id)
+        # FR-B2：_build_result_text / _resolve_reply_target 零修改（硬约束）
         text = self._build_result_text(self._status_value(task.status), events)
+
+        # F110 FR-B1：TTS 出站分支（H1：在主 Agent 回复之后，渠道层后处理）
+        if await self._try_send_voice_reply(target, text):
+            return  # 语音发送成功，不再发文字
+
+        # 原有文字路径（voice_mode=False / TTS 不可用 / 所有失败降级后到此）
         sent_message = await self._bot_client.send_message(
             target["chat_id"],
             text,
@@ -889,6 +1035,66 @@ class TelegramGatewayService:
             message_thread_id=target.get("message_thread_id") or None,
         )
         self._remember_outbound_reply_thread(target, sent_message)
+
+    async def _try_send_voice_reply(
+        self, target: dict[str, str], text: str
+    ) -> bool:
+        """尝试 TTS + send_voice；任何失败记日志后返回 False（调用方降级文字）。
+
+        Constitution #6 + FR-B4/B5：所有异常在此捕获，永不逃逸到 notify_task_result 调用方。
+        FR-B3：控制命令回复不走此路径（仅 notify_task_result 调用，确认回复用 send_message）。
+        AC-D7：voice_mode key 缺失 → False → 静默走文字（无日志噪声）。
+
+        DEFER FINDING-3（主节点裁决，v0.2 通知幂等域）：
+        notify_task_result 重入时可能重复发 voice（与 send_message 同样无去重机制，F110 未引入
+        新风险）。去重逻辑属通知幂等范畴，归 v0.2；v0.1 维持 F109 基线行为不变。
+        """
+        try:
+            if self._tts_service is None or not self._tts_service.is_available():
+                logger.debug(
+                    "tts_skip reason=tts_unavailable chat_id=%s", target.get("chat_id")
+                )
+                return False
+
+            # 查 voice_mode
+            binding_store = getattr(self._stores, "conversation_binding_store", None)
+            if binding_store is None:
+                return False
+            binding = await binding_store.get("telegram", target["chat_id"], project_id="")
+            if not self._get_voice_mode(binding):
+                return False  # voice_mode=False/unset，静默走文字
+
+            # TTS 合成（TextToSpeechService 内已有全面兜底，不会抛）
+            tts_result = await self._tts_service.synthesize(text)
+            if not tts_result.ok:
+                logger.warning(
+                    "tts_degrade reason=%s chat_id=%s text_len=%d",
+                    tts_result.reason, target.get("chat_id"), len(text),
+                )
+                return False
+
+            logger.info(
+                "tts_success backend=%s duration_ms=%d text_len=%d",
+                tts_result.backend, tts_result.duration_ms, len(text),
+            )
+
+            # send_voice（失败抛 TelegramBotApiError，此处捕获）
+            sent_message = await self._bot_client.send_voice(
+                target["chat_id"],
+                tts_result.audio,
+                reply_to_message_id=target.get("reply_to_message_id") or None,
+                message_thread_id=target.get("message_thread_id") or None,
+            )
+            self._remember_outbound_reply_thread(target, sent_message)
+            return True
+
+        except Exception:
+            logger.warning(
+                "tts_degrade reason=send_voice_failed chat_id=%s",
+                target.get("chat_id"),
+                exc_info=True,
+            )
+            return False
 
     async def notify_approval_event(
         self,

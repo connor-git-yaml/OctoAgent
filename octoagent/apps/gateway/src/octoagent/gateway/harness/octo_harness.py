@@ -509,7 +509,8 @@ class OctoHarness:
         telegram_state_store = TelegramStateStore(project_root)
         # F109:注入默认本地 STT 服务(faster-whisper)。懒加载——构造期不 import
         # faster_whisper、不加载模型,首次转写才加载;未装则 voice 优雅降级(#6)。
-        from ..voice import build_default_stt_service
+        # F110:注入默认本地 TTS 服务(piper)。同样懒加载，未装则 voice_mode 自动降级(#6)。
+        from ..voice import build_default_stt_service, build_default_tts_service
 
         telegram_service = TelegramGatewayService(
             project_root=project_root,
@@ -519,6 +520,7 @@ class OctoHarness:
             bot_client=TelegramBotClient(project_root),
             polling_timeout_s=_resolve_telegram_polling_timeout(project_root),
             stt_service=build_default_stt_service(),
+            tts_service=build_default_tts_service(),
         )
         app.state.telegram_service = telegram_service
         app.state.telegram_state_store = telegram_state_store
