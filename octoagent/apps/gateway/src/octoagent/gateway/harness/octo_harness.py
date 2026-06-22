@@ -1054,7 +1054,9 @@ class OctoHarness:
                         _req.request_id
                     )
             except Exception:
-                _log.warning("workspace_rollback_rehydrate_failed")
+                from ..main import log as _wg_log
+
+                _wg_log.warning("workspace_rollback_rehydrate_failed")
 
         # F101 Phase B HIGH-01 v3：同步注入 ApprovalManager 到 ToolDeps
         # escalate_permission_handler 需要在 request_approval 后同步注册到 ApprovalManager，
