@@ -64,6 +64,21 @@ class TelegramBotIdentity(TelegramUser):
     """`getMe()` 结果。"""
 
 
+class TelegramVoice(BaseModel):
+    """Telegram voice message 的音频对象(`message.voice`,OGG/Opus)。
+
+    F109:polling 路径经 `TelegramUpdate.model_validate` → `model_dump`,若
+    TelegramMessage 不带 voice 字段,pydantic 会丢弃 voice(webhook 路径走原始
+    dict 不受影响)。故此字段对两路接入都必要。
+    """
+
+    file_id: str
+    file_unique_id: str = ""
+    duration: int = 0
+    mime_type: str = "audio/ogg"
+    file_size: int = 0
+
+
 class TelegramMessage(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
@@ -71,6 +86,7 @@ class TelegramMessage(BaseModel):
     chat: TelegramChat
     from_user: TelegramUser | None = Field(default=None, alias="from")
     text: str | None = None
+    voice: TelegramVoice | None = None
     message_thread_id: int | None = None
     reply_to_message: TelegramMessage | None = None
 
@@ -268,3 +284,45 @@ class TelegramBotClient:
         if not isinstance(result, list):
             raise TelegramBotApiError("getUpdates 返回结构非法")
         return [TelegramUpdate.model_validate(item) for item in result]
+
+    async def get_file(self, file_id: str) -> dict[str, Any]:
+        """`getFile`:用 file_id 换取含 `file_path` 的文件元信息(F109 语音下载第一步)。"""
+        result = await self._request("getFile", payload={"file_id": file_id})
+        if not isinstance(result, dict):
+            raise TelegramBotApiError("getFile 返回结构非法")
+        return result
+
+    async def download_file_bytes(
+        self,
+        file_path: str,
+        *,
+        max_bytes: int = 20 * 1024 * 1024,
+    ) -> bytes:
+        """下载 Telegram 文件到内存(F109 语音下载第二步)。
+
+        走 `{base_url}/file/bot{token}/{file_path}`(文件下载端点,**非** bot API
+        method 端点,故不复用 `_request`)。**流式**累计字节,一旦超 `max_bytes` 立即
+        中断流(不把超大 body 全量读进内存),作为真实内存守卫;上层另有 voice.file_size
+        下载前预检。Telegram 对 getFile 本身亦有 20MB 上限。
+        """
+        bot_token = self._load_bot_token()
+        url = f"{self._base_url}/file/bot{bot_token}/{file_path}"
+        chunks: list[bytes] = []
+        total = 0
+        async with (
+            httpx.AsyncClient(timeout=self._timeout, transport=self._transport) as client,
+            client.stream("GET", url) as response,
+        ):
+            if response.status_code != 200:
+                raise TelegramBotApiError(
+                    f"下载 Telegram 文件失败(status={response.status_code})",
+                    status_code=response.status_code,
+                )
+            async for chunk in response.aiter_bytes():
+                total += len(chunk)
+                if total > max_bytes:
+                    raise TelegramBotApiError(
+                        f"Telegram 文件超过大小上限(> {max_bytes})",
+                    )
+                chunks.append(chunk)
+        return b"".join(chunks)

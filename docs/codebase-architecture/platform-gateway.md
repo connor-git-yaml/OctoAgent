@@ -98,6 +98,20 @@ packages/core/src/octoagent/core/
 | L7（v0.2 新增） | doctor 不诊断 slack/discord 配置（静默忽略）——配置校验靠 webhook 探测（401/403 信号） | 显式排除（运维一次性域） |
 | L8（v0.2 新增） | telegram ingest 存在与 D17a 同型的"落盘未入队"窗口（baseline 既有，零变更红线未动） | 独立 fix Feature 评估 |
 
-## 6. v0.3+ 扩展路径（handoff 摘要）
+## 6. 语音入站预处理（F109 语音 PoC，STT only）
+
+> 语音是 telegram **inbound 的预处理扩展**（inbound 留 per-platform，§2 抽象诚实边界），不进 ChannelAdapter outbound 抽象。
+
+**哲学 H1**：语音=入站预处理。Telegram voice message → STT 转写 → 回填 `context.text` → 走**与文字消息完全相同**的 chat 主路径（`create_task`/`enqueue`/主 Agent），不新增 Agent 模式、不碰决策环。
+
+**接入点**（`services/telegram.py`）：`_ingest_update` 在空文本检查**之前**插入 voice 分支——
+1. `_extract_context` 经 `_extract_voice_ref` 检测 `message.voice` → `TelegramInboundContext.voice`（`TelegramMessage.voice` 字段使 polling 路径 pydantic 往返不丢弃）；
+2. `_handle_voice_message`：①幂等预检（`check_idempotency_key`，重投不重复转写）→ ②STT 可用性 → ③时长/大小守卫 → ④`get_file`+`download_file_bytes`（流式超限即断）→ ⑤`stt_service.transcribe` → ⑥`dataclasses.replace(context, text=转写文本)`；任一步失败走 `_reply_voice_degrade` 优雅降级回复（#6，永不崩/永不静默丢弃）。
+
+**STT 服务层**（`gateway/voice/`）：`SpeechToTextService` 包可替换 `SttBackend`（薄抽象）；默认 `FasterWhisperBackend`（**本地**，GATE_DESIGN 用户拍板：隐私导向选本地非云 API；懒加载单例 + `asyncio.to_thread` + double-checked locking）。faster-whisper 是 `pyproject` **optional 依赖**（`[voice]` extra）+ 函数内 lazy import + `find_spec` 探测——未装则降级"语音未启用"，不阻塞 gateway 启动。隐私（#5）：日志只记 backend/duration/transcript_len，不记音频/转写原文。
+
+**范围**：仅 STT 单向（不做 TTS / voice session → F110）；仅 telegram voice（不做 Web 音频上传）。**已知 limitation**：并发同 update 重投存在转写前幂等窗口（outcome 仍正确，单用户顺序投递不触发；F110 voice session 并发硬化）。详见 `.specify/features/109-voice-poc/`。
+
+## 7. v0.3+ 扩展路径（handoff 摘要）
 
 Slack/Discord interactive components（按钮审批 + dismiss）→ ApprovalBroadcaster 统一评估（v0.2 评估结论：推 v0.3 与交互组件同期，纯文本审批推送是负 UX）→ source_channel_id 写入端（与 A2A source 泛化一并，**单独立项**）→ telegram enqueue 窗口修复 → binding 配置面 UI/API。完整版见 `.specify/features/105-platform-gateway-v02/handoff.md`。

@@ -379,7 +379,7 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 | M3 增强 | ✅ | Chat Import + Vault + ToolIndex + Pipeline |
 | M4 引导式工作台 | ✅ | 30 Feature 全部完成 |
 | **M5 架构债清理 + Worker 完整对等 + 委托模式分离 + 用户感知 ROI** | ✅ | F090-F103（13 Feature）+ F084-F088（基础设施）；H1/H2/H3 哲学全部代码层落地；架构债 D1-D14 闭环 12 推迟 2（D2→F117 ✅ / D8→F108 ✅） |
-| **M6 Surface 扩张** | ⏳ | F104 文件工作台 v0.1 ✅ / F105 Multi-Platform Gateway ✅ / F106 User Plugin Loader ✅ / **F107 文件工作台 v0.2（git-aware）✅** / F108 Capability Layer Refactor ✅ / F109-F110 语音 / F111 Behavior Compactor；地基/债务 sprint F112-F126（穿插） |
+| **M6 Surface 扩张** | ⏳ | F104 文件工作台 v0.1 ✅ / F105 Multi-Platform Gateway ✅ / F106 User Plugin Loader ✅ / **F107 文件工作台 v0.2（git-aware）✅** / F108 Capability Layer Refactor ✅ / **F109 语音 PoC（STT only）✅**（本地 faster-whisper，未 push 等拍板）/ F110 语音 v0.1 / F111 Behavior Compactor ⏭ M7；地基/债务 sprint F112-F126（穿插） |
 
 ### 待办汇总
 

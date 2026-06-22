@@ -7,19 +7,37 @@ import contextlib
 import logging
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from octoagent.core.models import OperatorActionOutcome, OperatorInboxItem, TaskStatus
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.gateway.services.config.config_wizard import load_config
-from octoagent.gateway.services.telegram_client import InlineKeyboardButton, InlineKeyboardMarkup
+from octoagent.gateway.services.telegram_client import (
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    TelegramBotApiError,
+)
 
 from .operator_actions import decode_telegram_operator_action, encode_telegram_operator_action
 from .task_service import TaskService
 
+if TYPE_CHECKING:
+    from ..voice import SpeechToTextService
+
 logger = logging.getLogger(__name__)
+
+# F109 语音降级文案(Constitution #6:永不静默丢弃,给用户可理解回复)。
+_VOICE_DEGRADE_UNAVAILABLE = "🎙️ 语音转写未启用,请改发文字消息。"
+_VOICE_DEGRADE_TOO_LARGE = "🎙️ 语音过长,暂无法处理,请发更短的语音或文字。"
+_VOICE_DEGRADE_DOWNLOAD = "🎙️ 语音下载失败,请重试或改发文字。"
+_VOICE_DEGRADE_TRANSCRIBE = "🎙️ 语音转写失败,请重试或改发文字。"
+_VOICE_DEGRADE_EMPTY = "🎙️ 未能识别语音内容,请重试或改发文字。"
+
+# F109 语音大小/时长上限(防超长占用;Telegram getFile 本身亦有 20MB 上限)。
+_VOICE_MAX_DURATION_S = int(os.environ.get("OCTOAGENT_STT_MAX_DURATION_S", "300"))
+_VOICE_MAX_BYTES = int(os.environ.get("OCTOAGENT_STT_MAX_BYTES", str(20 * 1024 * 1024)))
 
 
 class TelegramPairingRequestLike(Protocol):
@@ -146,6 +164,22 @@ class TelegramBotClientProtocol(Protocol):
     ) -> Any:
         ...
 
+    async def get_file(self, file_id: str) -> dict[str, Any]:
+        ...
+
+    async def download_file_bytes(self, file_path: str, *, max_bytes: int = ...) -> bytes:
+        ...
+
+
+@dataclass(slots=True)
+class TelegramVoiceRef:
+    """F109:入站语音消息的音频引用(`message.voice` 提取)。"""
+
+    file_id: str
+    mime_type: str = "audio/ogg"
+    duration: int = 0
+    file_size: int = 0
+
 
 @dataclass(slots=True)
 class TelegramInboundContext:
@@ -162,6 +196,7 @@ class TelegramInboundContext:
     callback_query_id: str = ""
     callback_data: str = ""
     is_callback: bool = False
+    voice: TelegramVoiceRef | None = None
 
 
 @dataclass(slots=True)
@@ -194,6 +229,7 @@ class TelegramGatewayService:
         state_store: TelegramStateStoreProtocol | None = None,
         bot_client: TelegramBotClientProtocol | None = None,
         polling_timeout_s: int = 15,
+        stt_service: SpeechToTextService | None = None,
     ) -> None:
         self._project_root = project_root
         self._stores = store_group
@@ -202,6 +238,7 @@ class TelegramGatewayService:
         self._state_store = state_store
         self._bot_client = bot_client
         self._polling_timeout_s = polling_timeout_s
+        self._stt_service = stt_service  # F109:None = 语音转写未启用(优雅降级)
         self._polling_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
         self._operator_inbox_service = None
@@ -364,6 +401,15 @@ class TelegramGatewayService:
 
         if context.is_callback:
             return await self._handle_callback_query(context)
+
+        # F109:语音预处理(H1)。voice 且无文字 → 转写填 context.text,失败则降级回复。
+        # 置于空文本检查之前,转写成功后下游 create_task / enqueue / 主 Agent 完全同路。
+        if context.voice is not None and not context.text.strip():
+            outcome = await self._handle_voice_message(context)
+            if isinstance(outcome, TelegramIngestResult):
+                return outcome
+            context = outcome
+
         if not context.text.strip():
             return TelegramIngestResult(status="ignored", detail="unsupported_or_empty_update")
         if control_result := await self._handle_control_command(context):
@@ -428,6 +474,112 @@ class TelegramGatewayService:
         status_value = str(getattr(task.status, "value", task.status))
         if status_value == TaskStatus.CREATED.value:
             await self._task_runner.enqueue(task_id, text)
+
+    async def _handle_voice_message(
+        self, context: TelegramInboundContext
+    ) -> TelegramInboundContext | TelegramIngestResult:
+        """F109:下载语音 → STT 转写 → 回填 context.text(成功)。
+
+        返回更新后的 context(成功)或 TelegramIngestResult(降级/幂等,已回复用户)。
+        全程不抛异常(FR-D3:防 polling loop 崩 / webhook 500),失败一律降级。
+        """
+        voice = context.voice
+        assert voice is not None  # 调用方已判 context.voice is not None
+
+        # ① 幂等预检:重投不重复转写(AC-3)。命中已存在 task → duplicate,不下载不转写。
+        idempotency_key = self._build_idempotency_key(context)
+        existing_task_id = await self._stores.event_store.check_idempotency_key(idempotency_key)
+        if existing_task_id:
+            return TelegramIngestResult(
+                status="duplicate", task_id=existing_task_id, created=False
+            )
+
+        # ② STT 不可用 → 降级(AC-4)。
+        if self._stt_service is None or not self._stt_service.is_available():
+            await self._reply_voice_degrade(
+                context, _VOICE_DEGRADE_UNAVAILABLE, reason="stt_unavailable"
+            )
+            return TelegramIngestResult(status="ignored", detail="voice_stt_unavailable")
+
+        # ③ 时长/大小守卫 → 降级,不下载不转写(FR-C4)。
+        if (voice.duration and voice.duration > _VOICE_MAX_DURATION_S) or (
+            voice.file_size and voice.file_size > _VOICE_MAX_BYTES
+        ):
+            await self._reply_voice_degrade(
+                context, _VOICE_DEGRADE_TOO_LARGE, reason="too_large"
+            )
+            return TelegramIngestResult(status="ignored", detail="voice_too_large")
+
+        # ④ 下载音频 → 失败降级。
+        if self._bot_client is None:
+            await self._reply_voice_degrade(
+                context, _VOICE_DEGRADE_UNAVAILABLE, reason="no_bot_client"
+            )
+            return TelegramIngestResult(status="ignored", detail="voice_no_bot_client")
+        try:
+            file_info = await self._bot_client.get_file(voice.file_id)
+            file_path = str(file_info.get("file_path") or "")
+            if not file_path:
+                raise TelegramBotApiError("getFile 未返回 file_path")
+            audio = await self._bot_client.download_file_bytes(
+                file_path, max_bytes=_VOICE_MAX_BYTES
+            )
+        except Exception:
+            logger.warning(
+                "telegram_voice_download_failed chat_id=%s message_id=%s",
+                context.chat_id,
+                context.message_id,
+                exc_info=True,
+            )
+            await self._reply_voice_degrade(
+                context, _VOICE_DEGRADE_DOWNLOAD, reason="download_failed"
+            )
+            return TelegramIngestResult(status="ignored", detail="voice_download_failed")
+
+        # ⑤ 转写(service 已兜底异常 + 判空)→ 失败/空降级。
+        result = await self._stt_service.transcribe(
+            audio,
+            mime=voice.mime_type,
+            filename=f"voice_{context.message_id}.ogg",
+        )
+        if not result.ok:
+            degrade_text = (
+                _VOICE_DEGRADE_EMPTY if result.reason == "empty" else _VOICE_DEGRADE_TRANSCRIBE
+            )
+            await self._reply_voice_degrade(
+                context, degrade_text, reason=result.reason or "transcribe_failed"
+            )
+            return TelegramIngestResult(
+                status="ignored", detail=f"voice_{result.reason or 'transcribe_failed'}"
+            )
+
+        # ⑥ 成功:回填 text,留观测日志(FR-D1,只记 len/duration/backend,不记转写原文/音频)。
+        logger.info(
+            "telegram_voice_transcribed backend=%s duration_s=%s transcript_len=%s",
+            result.backend,
+            voice.duration,
+            len(result.text),
+        )
+        return replace(context, text=result.text)
+
+    async def _reply_voice_degrade(
+        self, context: TelegramInboundContext, text: str, *, reason: str
+    ) -> None:
+        """F109:给用户发降级文字回复(#6)。发送失败 suppress,不阻断主链。"""
+        logger.warning(
+            "telegram_voice_degraded reason=%s chat_id=%s message_id=%s",
+            reason,
+            context.chat_id,
+            context.message_id,
+        )
+        if self._bot_client is None:
+            return
+        with contextlib.suppress(Exception):
+            await self._bot_client.send_message(
+                context.chat_id,
+                text,
+                reply_to_message_id=context.message_id,
+            )
 
     async def _record_conversation_binding(
         self,
@@ -651,6 +803,7 @@ class TelegramGatewayService:
             return None
 
         text = str(message.get("text") or "").strip()
+        voice_ref = TelegramGatewayService._extract_voice_ref(message)
         username = str(sender.get("username") or "").strip()
         sender_name = (
             username
@@ -689,6 +842,31 @@ class TelegramGatewayService:
             callback_query_id=callback_query_id,
             callback_data=callback_data,
             is_callback=is_callback,
+            voice=voice_ref,
+        )
+
+    @staticmethod
+    def _extract_voice_ref(message: Mapping[str, Any]) -> TelegramVoiceRef | None:
+        """从 `message.voice` 提取音频引用(F109,AC-1)。photo/document 不在范围。"""
+        raw = message.get("voice")
+        if not isinstance(raw, Mapping):
+            return None
+        file_id = str(raw.get("file_id") or "").strip()
+        if not file_id:
+            return None
+        try:
+            duration = int(raw.get("duration") or 0)
+        except (TypeError, ValueError):
+            duration = 0
+        try:
+            file_size = int(raw.get("file_size") or 0)
+        except (TypeError, ValueError):
+            file_size = 0
+        return TelegramVoiceRef(
+            file_id=file_id,
+            mime_type=str(raw.get("mime_type") or "audio/ogg"),
+            duration=duration,
+            file_size=file_size,
         )
 
     async def notify_task_result(self, task_id: str) -> None:
