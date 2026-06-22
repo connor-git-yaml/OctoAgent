@@ -77,9 +77,13 @@ class SentMessage:
 class FakeTaskRunner:
     def __init__(self) -> None:
         self.enqueued: list[tuple[str, str]] = []
+        self.fail_next: bool = False  # D17a 注入：首投 enqueue 失败模拟落盘未入队窗口
 
     async def enqueue(self, task_id: str, user_text: str, model_alias: str | None = None) -> None:
         del model_alias
+        if self.fail_next:
+            self.fail_next = False
+            raise RuntimeError("模拟 enqueue 失败（落盘未入队窗口）")
         self.enqueued.append((task_id, user_text))
 
 
@@ -302,7 +306,13 @@ async def test_authorized_dm_creates_task_and_dedupes_update(tmp_path: Path) -> 
     assert second.status == "duplicate"
     assert second.created is False
     assert second.task_id == first.task_id
-    assert task_runner.enqueued == [(first.task_id or "", "run task")]
+    # D17a 行为对齐（对称 slack test_event_id_idempotent_on_retry）：
+    # FakeTaskRunner 不推进 task 状态，task 仍 CREATED → duplicate 补入队 1 次
+    # created 1 次 + D17a duplicate 补调 1 次 = 2 条
+    assert task_runner.enqueued == [
+        (first.task_id or "", "run task"),
+        (second.task_id or "", "run task"),  # D17a duplicate 补 enqueue
+    ]
 
     task = await store_group.task_store.get_task(first.task_id or "")
     events = await store_group.event_store.get_events_for_task(first.task_id or "")
@@ -822,5 +832,93 @@ async def test_notify_task_result_and_approval_event_reply_to_original_thread(
     assert "filesystem.write 需要审批" in bot_client.sent_messages[1].text
     assert bot_client.sent_messages[1].disable_notification is True
     assert bot_client.sent_messages[1].reply_markup is not None
+
+    await store_group.close()
+
+
+# ── D17a 测试（与 test_slack_service.py 对称） ──────────────────────────────
+
+def _make_dm_update(
+    update_id: int = 202, message_id: int = 11, text: str = "run task"
+) -> dict[str, object]:
+    """构造标准 authorized DM update（供 D17a 测试复用）。"""
+    return {
+        "update_id": update_id,
+        "message": {
+            "message_id": message_id,
+            "text": text,
+            "chat": {"id": 42, "type": "private"},
+            "from": {"id": 42, "username": "owner", "first_name": "Connor"},
+        },
+    }
+
+
+async def _build_telegram_service(
+    tmp_path: Path,
+    task_runner: FakeTaskRunner | None = None,
+) -> tuple[TelegramGatewayService, object]:
+    """构造 TelegramGatewayService + store_group（D17a 测试辅助）。"""
+    _write_config(tmp_path)
+    store_group = await create_store_group(
+        str(tmp_path / "gateway.db"),
+        str(tmp_path / "artifacts"),
+    )
+    state_store = TelegramStateStore(tmp_path)
+    state_store.upsert_approved_user(user_id="42", chat_id="42", username="owner")
+    service = TelegramGatewayService(
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
+        task_runner=task_runner or FakeTaskRunner(),
+        state_store=state_store,
+        bot_client=FakeTelegramBotClient(),
+    )
+    return service, store_group
+
+
+@pytest.mark.asyncio
+async def test_telegram_retry_recovers_unenqueued_task(tmp_path: Path) -> None:
+    """D17a 核心：首投 enqueue 失败（落盘未入队窗口）→ 重投 duplicate 补 enqueue 恢复。
+    对称 slack test_retry_recovers_unenqueued_task。
+    """
+    runner = FakeTaskRunner()
+    runner.fail_next = True
+    service, store_group = await _build_telegram_service(tmp_path, task_runner=runner)
+    update = _make_dm_update()
+
+    with pytest.raises(RuntimeError):
+        await service.handle_webhook_update(update)
+    assert runner.enqueued == []  # 落盘未入队窗口：task 已建，但未入队
+
+    result = await service.handle_webhook_update(update)
+    assert result.status == "duplicate"
+    assert result.task_id is not None
+    assert [t for t, _ in runner.enqueued] == [result.task_id]  # 补入队恢复
+
+    await store_group.close()
+
+
+@pytest.mark.asyncio
+async def test_telegram_late_retry_after_success_no_requeue(tmp_path: Path) -> None:
+    """D17a 反向：task 已达终态（SUCCEEDED）的晚到重投不再入队（状态守卫）。
+    对称 slack test_late_retry_after_success_no_requeue。
+    """
+    runner = FakeTaskRunner()
+    service, store_group = await _build_telegram_service(tmp_path, task_runner=runner)
+    update = _make_dm_update()
+
+    first = await service.handle_webhook_update(update)
+    assert first.task_id is not None
+    # 手动把 task 推进到终态
+    await store_group.task_store.update_task_status(
+        first.task_id,
+        TaskStatus.SUCCEEDED.value,
+        datetime.now(UTC).isoformat(),
+        "evt-test",
+    )
+
+    result = await service.handle_webhook_update(update)
+    assert result.status == "duplicate"
+    assert len(runner.enqueued) == 1  # 首投 1 次，终态不重入队
 
     await store_group.close()

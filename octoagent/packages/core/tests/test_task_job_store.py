@@ -79,3 +79,42 @@ class TestTaskJobStore:
         assert job.model_alias == "main"
         assert job.started_at is None
         assert job.finished_at is None
+
+    async def test_create_job_noop_on_live_job(self, core_db):
+        """D17a 双执行安全底座：create_job 对仍在 QUEUED/RUNNING 的 job 是 no-op
+        （返 False，不重置内容/不重入队）。
+
+        这是平台 duplicate 重投补 enqueue（telegram/slack/discord `_maybe_enqueue`
+        的 CREATED 守卫之外）的最后一道幂等保证——live job 不会被二次启动。
+        与 test_create_job_requeues_terminal_job（终态可重入队）互补，覆盖
+        UPDATE 的 `status IN (终态)` 条件在非终态下不命中的分支。
+        """
+        await _create_task(core_db, "job-task-005")
+        store = SqliteTaskJobStore(core_db)
+
+        assert (
+            await store.create_job("job-task-005", "first", model_alias="main") is True
+        )
+
+        # QUEUED 时重复 create_job → no-op（返 False），内容不被覆盖
+        requeued = await store.create_job("job-task-005", "second", model_alias="alt")
+        assert requeued is False
+        job = await store.get_job("job-task-005")
+        assert job is not None
+        assert job.status == "QUEUED"
+        assert job.user_text == "first"
+        assert job.model_alias == "main"
+
+        # RUNNING 时重复 create_job → no-op（返 False），不重置 started_at
+        assert await store.mark_running("job-task-005") is True
+        running = await store.get_job("job-task-005")
+        assert running is not None and running.status == "RUNNING"
+        started_at = running.started_at
+
+        again = await store.create_job("job-task-005", "third")
+        assert again is False
+        job2 = await store.get_job("job-task-005")
+        assert job2 is not None
+        assert job2.status == "RUNNING"
+        assert job2.user_text == "first"
+        assert job2.started_at == started_at

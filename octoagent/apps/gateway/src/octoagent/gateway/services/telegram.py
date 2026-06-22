@@ -397,16 +397,37 @@ class TelegramGatewayService:
 
         service = TaskService(self._stores, self._sse_hub)
         task_id, created = await service.create_task(message)
+        # H-1/D17a：投递优先——enqueue 先于非关键路由 state 写入，确保"落盘未入队"
+        # 窗口的补队不被 binding / reply-thread 写入异常阻断（对齐 slack/discord）
+        await self._maybe_enqueue(task_id, context.text, created)
         # F105 FR-E3：accepted 与 duplicate 都 touch（幂等重投不丢 last-route）
         await self._record_conversation_binding(context, scope_id, reply_thread_root_id)
         self._remember_inbound_reply_thread(context, reply_thread_root_id)
-        if created and self._task_runner is not None:
-            await self._task_runner.enqueue(task_id, context.text)
         return TelegramIngestResult(
             status="accepted" if created else "duplicate",
             task_id=task_id,
             created=created,
         )
+
+    async def _maybe_enqueue(self, task_id: str, text: str, created: bool) -> None:
+        """spec D17a（与 slack/discord 同语义）：created 直接入队；
+        duplicate 仅当 task 仍 CREATED 时补入队。
+
+        补入队覆盖"create_task 落盘后 enqueue 前失败"的窗口——平台 retry
+        （webhook 重投/polling 重读）是唯一恢复机会。enqueue 幂等由
+        create_job INSERT OR IGNORE + _start_job CAS 保证。
+        """
+        if self._task_runner is None:
+            return
+        if created:
+            await self._task_runner.enqueue(task_id, text)
+            return
+        task = await self._stores.task_store.get_task(task_id)
+        if task is None:
+            return
+        status_value = str(getattr(task.status, "value", task.status))
+        if status_value == TaskStatus.CREATED.value:
+            await self._task_runner.enqueue(task_id, text)
 
     async def _record_conversation_binding(
         self,
