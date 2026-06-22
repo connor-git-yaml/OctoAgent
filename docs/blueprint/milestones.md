@@ -496,7 +496,10 @@ M5 acceptance gate 全部关闭：
 
 ---
 
-### M6（Surface 扩张 F104-F111 + 地基/债务 F112-F122）⏳ 进行中（F104 ✅）
+### M6（Surface 扩张 F104-F111 + 地基/债务 F112-F122）✅ 完成（2026-06-22）
+
+> **M6 收官（2026-06-22）**：surface F104-F110 全部关闭 + 地基/债务/安全/效率 F112-F126 + D2 合并 F117 全部 ✅；F111 Behavior Compactor 推 M7。**交付**：文件工作台 v0.1+v0.2（git-aware）/ 多平台 4 渠道（Telegram/Web/Slack/Discord）/ Plugin Loader / Capability 大重构（12,328 行 → 18 模块）/ profile 合并 / 安全双向（SSRF + tool 结果扫描）/ 语音（STT+TTS+voice session）。下一步：用强 model 跑 OctoBench 验收 M6 整体能力提升（vs M5 baseline 27.6%）+ M7 规划。
+> **遗留小项（backlog，非阻塞）**：F106 `test_start_degrades_without_watchdog` pre-existing race flake（隔离过，非回归）；F105 v0.2 H-2 source_channel_id（与 A2A source 泛化一并立项）；F107 git 快照无 EventStore 事件（M3 归档）。
 
 M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-06-07 调研 + 架构审计 workflow**（31 agent，SDD/开源 agent 调研 + F097-F104 代码审计 + E2E 缺口，全过对抗验证）发现 M5 大重构留有未收口残渣（双轨死代码 + `agent_context.py` 膨胀到 4585 行），用户拍板"**先夯地基再扩张**"：F112-F116 地基 sprint 先于 F105 执行。
 
