@@ -19,6 +19,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 
@@ -30,6 +31,22 @@ from .provider_runtime import ProviderRuntime
 from .transport import ProviderTransport
 
 log = structlog.get_logger()
+
+
+# 瞬态传输错误：连接在收到可用响应前中断（无 partial 内容落地），re-issue 安全。
+# 根因之一：anyio 4.x asyncio backend 在繁忙事件循环（如 OctoHarness 同时跑
+# watchdog / routine / 后台 memory 调用）下偶发 TLS 读竞态——
+# ``SSLWantReadError`` → ``read_queue.popleft()`` IndexError → ``httpx.ReadError``，
+# 控变量 benchmark 实测 ~30-50% 调用命中。这类错误对"单一可用响应"无破坏性，
+# 有界指数退避重试即可恢复；耗尽后仍向上抛交 FallbackManager 决策。
+# 不含 ``ReadTimeout``：请求可能已被 provider 接收只是响应慢，重发有重复处理风险。
+_TRANSIENT_TRANSPORT_ERRORS: tuple[type[Exception], ...] = (
+    httpx.ReadError,
+    httpx.WriteError,
+    httpx.RemoteProtocolError,
+)
+_TRANSIENT_MAX_RETRIES = 3  # 首次 + 最多 3 次重试 = 最多 4 次尝试
+_TRANSIENT_BACKOFF_BASE_S = 0.25  # 指数退避基数：0.25 / 0.5 / 1.0s
 
 
 class LLMCallError(Exception):
@@ -328,6 +345,61 @@ class ProviderClient:
 
         Returns:
             ``(content, tool_calls, metadata)`` triple
+        """
+        last_exc: Exception | None = None
+        for attempt in range(_TRANSIENT_MAX_RETRIES + 1):
+            try:
+                return await self._dispatch_with_auth_refresh(
+                    instructions=instructions,
+                    history=history,
+                    tools=tools,
+                    model_name=model_name,
+                    reasoning=reasoning,
+                    tool_choice=tool_choice,
+                )
+            except _TRANSIENT_TRANSPORT_ERRORS as exc:
+                # 瞬态传输错误：有界指数退避重试。``CancelledError`` 不在此 family，
+                # harness teardown 的取消会照常向上传播，不会被这里吞掉或拖慢。
+                last_exc = exc
+                if attempt >= _TRANSIENT_MAX_RETRIES:
+                    log.warning(
+                        "provider_client_transient_exhausted",
+                        attempts=attempt + 1,
+                        error_type=type(exc).__name__,
+                        provider_id=self._runtime.provider_id,
+                        transport=self._runtime.transport.value,
+                        model=model_name,
+                    )
+                    raise
+                backoff_s = _TRANSIENT_BACKOFF_BASE_S * (2**attempt)
+                log.warning(
+                    "provider_client_transient_retry",
+                    attempt=attempt + 1,
+                    max_attempts=_TRANSIENT_MAX_RETRIES + 1,
+                    backoff_s=backoff_s,
+                    error_type=type(exc).__name__,
+                    provider_id=self._runtime.provider_id,
+                    transport=self._runtime.transport.value,
+                    model=model_name,
+                )
+                await asyncio.sleep(backoff_s)
+        # 不可达：最后一次 attempt 要么 return 要么 raise；保险起见显式抛。
+        raise last_exc  # type: ignore[misc]
+
+    async def _dispatch_with_auth_refresh(
+        self,
+        *,
+        instructions: str,
+        history: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        model_name: str,
+        reasoning: dict[str, Any] | None = None,
+        tool_choice: dict[str, Any] | str | None = None,
+    ) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
+        """单次完整调用：auth resolve + dispatch + 401/403 force-refresh 重试一次。
+
+        协议无关的 401/403 自愈逻辑（原 ``call()`` 主体）。瞬态传输错误（连接层）
+        的重试由外层 ``call()`` 负责——两层关注点分离：认证自愈 vs 传输重试。
         """
         try:
             return await self._dispatch(

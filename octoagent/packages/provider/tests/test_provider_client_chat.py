@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import httpx
 import pytest
 
 from octoagent.provider.auth_resolver import ResolvedAuth
@@ -228,3 +229,80 @@ async def test_chat_streamed_tool_calls() -> None:
     assert len(tool_calls) == 1
     assert tool_calls[0]["id"] == "call_1"
     assert tool_calls[0]["arguments"] == {"q": "a"}
+
+
+class _ReadErrorResponse:
+    """模拟流式读取时连接中断：``__aenter__`` 抛 ``httpx.ReadError``。
+
+    复现根因——anyio 4.x asyncio backend 在繁忙事件循环下的 TLS 读竞态
+    （``SSLWantReadError`` → ``read_queue.popleft()`` IndexError），httpx 对外
+    表现为 message 为空的 ``httpx.ReadError``。
+    """
+
+    def __init__(self) -> None:
+        self.status_code = 200
+        self.request = None
+
+    async def __aenter__(self):
+        raise httpx.ReadError("")
+
+    async def __aexit__(self, *args):
+        return False
+
+    async def aiter_lines(self):  # pragma: no cover - 不会到达
+        yield ""
+
+
+def _chat_runtime(resolver: _StubResolver) -> ProviderRuntime:
+    return ProviderRuntime(
+        provider_id="siliconflow",
+        transport=ProviderTransport.OPENAI_CHAT,
+        api_base="https://api.siliconflow.cn",
+        auth_resolver=resolver,
+    )
+
+
+@pytest.mark.asyncio
+async def test_chat_transient_read_error_retries_then_succeeds(monkeypatch) -> None:
+    """瞬态 ``httpx.ReadError`` → 有界重试 → 恢复成功（前 2 次失败，第 3 次成功）。
+
+    回归保护：控变量 benchmark 实测 anyio TLS 竞态让 ~30-50% siliconflow 调用
+    命中 ReadError，未重试时被 FallbackManager 掩盖成 Echo 假成功。
+    """
+    monkeypatch.setattr(
+        "octoagent.provider.provider_client._TRANSIENT_BACKOFF_BASE_S", 0.0
+    )
+    http = _FakeAsyncClient(
+        [
+            _ReadErrorResponse(),
+            _ReadErrorResponse(),
+            _FakeResponse(_ok_chat_lines()),
+        ]
+    )
+    client = ProviderClient(_chat_runtime(_StubResolver()), http_client=http)  # type: ignore[arg-type]
+    content, _, _ = await client.call(
+        instructions="x",
+        history=[{"role": "user", "content": "hi"}],
+        tools=[],
+        model_name="Qwen",
+    )
+    assert content == "Hello world"
+    assert len(http.calls) == 3  # 2 次瞬态失败 + 1 次成功
+
+
+@pytest.mark.asyncio
+async def test_chat_transient_read_error_exhausts_and_raises(monkeypatch) -> None:
+    """瞬态错误超过重试上限（首次 + 3 重试 = 4 次尝试）→ 向上抛交 FallbackManager。"""
+    monkeypatch.setattr(
+        "octoagent.provider.provider_client._TRANSIENT_BACKOFF_BASE_S", 0.0
+    )
+    http = _FakeAsyncClient([_ReadErrorResponse() for _ in range(4)])
+    client = ProviderClient(_chat_runtime(_StubResolver()), http_client=http)  # type: ignore[arg-type]
+    with pytest.raises(httpx.ReadError):
+        await client.call(
+            instructions="x",
+            history=[{"role": "user", "content": "hi"}],
+            tools=[],
+            model_name="Qwen",
+        )
+    assert len(http.calls) == 4  # 首次 + 3 重试，全部尝试后抛出
