@@ -43,6 +43,10 @@ venv/
 data/sqlite/*.db
 data/sqlite/*.db-wal
 data/sqlite/*.db-shm
+# OctoBench 运行时 DB（baseline json/md 才是归档产物，DB 是可重建缓存）
+benchmarks/baselines/*.db
+benchmarks/baselines/*.db-wal
+benchmarks/baselines/*.db-shm
 data/artifacts/
 data/vault/
 *.log

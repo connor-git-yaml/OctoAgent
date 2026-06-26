@@ -1,0 +1,653 @@
+{
+  "run_id": "sess-a3d4710193f24bd4",
+  "baseline_sha": "c82b5b66944bdbe6e84145d950b120a20dc7b6ad",
+  "created_at": "2026-06-24T03:32:20Z",
+  "summary": {
+    "total_tasks": 30,
+    "total_iterations": 30,
+    "pass_rate": 0.276,
+    "weighted_score": 0.295,
+    "token_usage": {
+      "input": 1998101,
+      "output": 25234,
+      "cache_read": 0
+    },
+    "duration_minutes": 61.681,
+    "skipped": {
+      "TIMEOUT": 1
+    },
+    "inconsistent_count": 0
+  },
+  "by_tier": {
+    "tier1": {
+      "pass_rate": 0.333,
+      "tasks": 25,
+      "passed": 8
+    },
+    "tier3": {
+      "pass_rate": 0.0,
+      "tasks": 5,
+      "passed": 0
+    },
+    "tier2": {}
+  },
+  "by_domain": {
+    "connor_real_world": {
+      "pass_rate": 1.0,
+      "tasks": 4,
+      "passed": 3
+    },
+    "delegation": {
+      "pass_rate": 0.0,
+      "tasks": 4,
+      "passed": 0
+    },
+    "max_depth": {
+      "pass_rate": 0.0,
+      "tasks": 1,
+      "passed": 0
+    },
+    "memory": {
+      "pass_rate": 0.0,
+      "tasks": 3,
+      "passed": 0
+    },
+    "philosophy_h1": {
+      "pass_rate": 0.0,
+      "tasks": 1,
+      "passed": 0
+    },
+    "philosophy_h2": {
+      "pass_rate": 0.0,
+      "tasks": 1,
+      "passed": 0
+    },
+    "philosophy_h3_ww": {
+      "pass_rate": 0.0,
+      "tasks": 1,
+      "passed": 0
+    },
+    "philosophy_h3a": {
+      "pass_rate": 0.0,
+      "tasks": 1,
+      "passed": 0
+    },
+    "philosophy_h3b": {
+      "pass_rate": 0.0,
+      "tasks": 1,
+      "passed": 0
+    },
+    "routine": {
+      "pass_rate": 0.0,
+      "tasks": 1,
+      "passed": 0
+    },
+    "skill_pipeline": {
+      "pass_rate": 0.0,
+      "tasks": 2,
+      "passed": 0
+    },
+    "snapshot": {
+      "pass_rate": 0.5,
+      "tasks": 2,
+      "passed": 1
+    },
+    "threat_scanner": {
+      "pass_rate": 0.0,
+      "tasks": 2,
+      "passed": 0
+    },
+    "tool_call": {
+      "pass_rate": 1.0,
+      "tasks": 3,
+      "passed": 3
+    },
+    "user_md": {
+      "pass_rate": 0.333,
+      "tasks": 3,
+      "passed": 1
+    }
+  },
+  "task_details": [
+    {
+      "task_id": "T1-CONNOR-1",
+      "tier": 1,
+      "domain": "connor_real_world",
+      "majority_result": "TIMEOUT",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "TIMEOUT",
+          "score": null,
+          "duration": 300.0,
+          "token_input": null,
+          "token_output": null,
+          "token_cache_read": null
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-CONNOR-2",
+      "tier": 1,
+      "domain": "connor_real_world",
+      "majority_result": "PASS",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PASS",
+          "score": 1.0,
+          "duration": 149.493,
+          "token_input": 67721,
+          "token_output": 1561,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-CONNOR-3",
+      "tier": 1,
+      "domain": "connor_real_world",
+      "majority_result": "PASS",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PASS",
+          "score": 1.0,
+          "duration": 235.729,
+          "token_input": 103213,
+          "token_output": 1994,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-CONNOR-4",
+      "tier": 1,
+      "domain": "connor_real_world",
+      "majority_result": "PASS",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PASS",
+          "score": 1.0,
+          "duration": 150.493,
+          "token_input": 118024,
+          "token_output": 2870,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-DELEGATION-001",
+      "tier": 1,
+      "domain": "delegation",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 121.395,
+          "token_input": 55794,
+          "token_output": 679,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-DELEGATION-002",
+      "tier": 1,
+      "domain": "delegation",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 71.551,
+          "token_input": 56883,
+          "token_output": 1621,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-DELEGATION-003",
+      "tier": 1,
+      "domain": "delegation",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 73.288,
+          "token_input": 132245,
+          "token_output": 1431,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-DELEGATION-004",
+      "tier": 1,
+      "domain": "delegation",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 197.567,
+          "token_input": 132301,
+          "token_output": 1755,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-MAX-DEPTH-001",
+      "tier": 1,
+      "domain": "max_depth",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 33.189,
+          "token_input": 33115,
+          "token_output": 818,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-MEMORY-001",
+      "tier": 1,
+      "domain": "memory",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 18.149,
+          "token_input": 33255,
+          "token_output": 264,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-MEMORY-002",
+      "tier": 1,
+      "domain": "memory",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 85.304,
+          "token_input": 133862,
+          "token_output": 1574,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-MEMORY-003",
+      "tier": 1,
+      "domain": "memory",
+      "majority_result": "PARTIAL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PARTIAL",
+          "score": 0.1388888888888889,
+          "duration": 185.544,
+          "token_input": 110912,
+          "token_output": 1306,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-ROUTINE-001",
+      "tier": 1,
+      "domain": "routine",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 113.367,
+          "token_input": 131485,
+          "token_output": 650,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-SKILL-001",
+      "tier": 1,
+      "domain": "skill_pipeline",
+      "majority_result": "PARTIAL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PARTIAL",
+          "score": 0.1388888888888889,
+          "duration": 117.444,
+          "token_input": 44729,
+          "token_output": 388,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-SKILL-002",
+      "tier": 1,
+      "domain": "skill_pipeline",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 104.346,
+          "token_input": 56506,
+          "token_output": 338,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-SNAPSHOT-001",
+      "tier": 1,
+      "domain": "snapshot",
+      "majority_result": "PARTIAL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PARTIAL",
+          "score": 0.1388888888888889,
+          "duration": 108.352,
+          "token_input": 33380,
+          "token_output": 187,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-SNAPSHOT-002",
+      "tier": 1,
+      "domain": "snapshot",
+      "majority_result": "PASS",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PASS",
+          "score": 1.0,
+          "duration": 106.359,
+          "token_input": 44692,
+          "token_output": 233,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-THREAT-SCANNER-001",
+      "tier": 1,
+      "domain": "threat_scanner",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 105.347,
+          "token_input": 44779,
+          "token_output": 233,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-THREAT-SCANNER-002",
+      "tier": 1,
+      "domain": "threat_scanner",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 123.399,
+          "token_input": 45616,
+          "token_output": 368,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-TOOL-CALL-001",
+      "tier": 1,
+      "domain": "tool_call",
+      "majority_result": "PASS",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PASS",
+          "score": 1.0,
+          "duration": 104.342,
+          "token_input": 56708,
+          "token_output": 548,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-TOOL-CALL-002",
+      "tier": 1,
+      "domain": "tool_call",
+      "majority_result": "PASS",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PASS",
+          "score": 1.0,
+          "duration": 107.358,
+          "token_input": 33433,
+          "token_output": 184,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-TOOL-CALL-003",
+      "tier": 1,
+      "domain": "tool_call",
+      "majority_result": "PASS",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PASS",
+          "score": 1.0,
+          "duration": 44.219,
+          "token_input": 44236,
+          "token_output": 405,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-USER-MD-001",
+      "tier": 1,
+      "domain": "user_md",
+      "majority_result": "PASS",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PASS",
+          "score": 1.0,
+          "duration": 112.372,
+          "token_input": 32974,
+          "token_output": 239,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-USER-MD-002",
+      "tier": 1,
+      "domain": "user_md",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 115.379,
+          "token_input": 33714,
+          "token_output": 310,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T1-USER-MD-003",
+      "tier": 1,
+      "domain": "user_md",
+      "majority_result": "PARTIAL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "PARTIAL",
+          "score": 0.1388888888888889,
+          "duration": 101.344,
+          "token_input": 57295,
+          "token_output": 327,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T3-H1-001",
+      "tier": 3,
+      "domain": "philosophy_h1",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 232.664,
+          "token_input": 68085,
+          "token_output": 814,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T3-H2-001",
+      "tier": 3,
+      "domain": "philosophy_h2",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 155.486,
+          "token_input": 83722,
+          "token_output": 782,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T3-H3-WW-001",
+      "tier": 3,
+      "domain": "philosophy_h3_ww",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 100.345,
+          "token_input": 68970,
+          "token_output": 1001,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T3-H3A-001",
+      "tier": 3,
+      "domain": "philosophy_h3a",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 139.442,
+          "token_input": 83567,
+          "token_output": 1497,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    },
+    {
+      "task_id": "T3-H3B-001",
+      "tier": 3,
+      "domain": "philosophy_h3b",
+      "majority_result": "FAIL",
+      "iterations": [
+        {
+          "iteration": 1,
+          "result": "FAIL",
+          "score": 0.0,
+          "duration": 87.582,
+          "token_input": 56885,
+          "token_output": 857,
+          "token_cache_read": 0
+        }
+      ],
+      "inconsistency_note": null
+    }
+  ]
+}
