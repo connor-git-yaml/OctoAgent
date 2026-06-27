@@ -318,3 +318,19 @@ class TestH1Boundary:
         svc = _build_service(store_group, user_md=_USER_MD_ACTIVE)
         # 构造签名里根本没有 notification_service（H1 通知走 Phase E NotificationService）
         assert not hasattr(svc, "_notification_service")
+
+
+class TestSystemWorkExclusion:
+    """root Work 是系统占位，不应泄漏到用户可见委派视图（control_plane delegation）。"""
+
+    def test_root_work_id_in_control_plane_exclusion_set(self):
+        """漂移守卫：control_plane _base.SYSTEM_INTERNAL_WORK_IDS 必须含巩固 root work_id。
+
+        两处用字面量（_base 避免拉 apscheduler 进 control_plane import 图），此断言保证
+        它们不漂移（改一处忘改另一处会红）。控制台委派/Worker 视图都从此集合排除系统占位 Work。
+        """
+        from octoagent.gateway.services.control_plane._base import (
+            SYSTEM_INTERNAL_WORK_IDS,
+        )
+
+        assert CONSOLIDATION_ROOT_WORK_ID in SYSTEM_INTERNAL_WORK_IDS

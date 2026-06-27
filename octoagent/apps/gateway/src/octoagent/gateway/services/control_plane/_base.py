@@ -37,6 +37,17 @@ from octoagent.gateway.services.control_plane.control_plane_state import Control
 log = structlog.get_logger()
 
 
+#: F127：系统内部占位 Work 的 work_id 集合——这些 Work 不代表用户委派任务，必须从所有
+#: 用户可见的委派/Worker 视图（get_delegation_document / get_worker_profiles_document）排除。
+#: 巩固 root Work（_memory_consolidation_root_work）是 spawn_child 必需的合成父对象（DP-4），
+#: 仅作 event_store FK + spawn parent，不是真实委派。值与
+#: memory_consolidation.CONSOLIDATION_ROOT_WORK_ID 单一事实源对齐（此处用字面量避免把
+#: apscheduler 等重依赖拉进 control_plane import 图；test_f127_consolidation_trigger 有守卫
+#: 断言两者一致防漂移）。类比 F102 _daily_routine_audit task 是系统占位（但 F102 只建 task
+#: 不建 work 故不进 works 视图）。
+SYSTEM_INTERNAL_WORK_IDS: frozenset[str] = frozenset({"_memory_consolidation_root_work"})
+
+
 class ControlPlaneActionError(RuntimeError):
     """control-plane 动作执行异常。"""
 

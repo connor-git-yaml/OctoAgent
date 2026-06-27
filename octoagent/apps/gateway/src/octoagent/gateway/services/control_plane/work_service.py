@@ -32,7 +32,12 @@ from octoagent.core.models import (
 )
 from ulid import ULID
 
-from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
+from ._base import (
+    SYSTEM_INTERNAL_WORK_IDS,
+    ControlPlaneActionError,
+    ControlPlaneContext,
+    DomainServiceBase,
+)
 log = structlog.get_logger()
 
 
@@ -77,6 +82,9 @@ class WorkDomainService(DomainServiceBase):
                 warnings=["delegation plane unavailable"],
             )
         works = await self._ctx.delegation_plane_service.list_works()
+        # F127：排除系统内部占位 Work（巩固 root Work 永不代表用户委派任务，不应在
+        # 用户可见的委派视图出现——类比 F102 _daily_routine_audit task 是系统占位）。
+        works = [w for w in works if w.work_id not in SYSTEM_INTERNAL_WORK_IDS]
         child_map: dict[str, list[str]] = defaultdict(list)
         for work in works:
             if work.parent_work_id:

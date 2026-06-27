@@ -55,7 +55,12 @@ from ulid import ULID
 
 from ..agent_decision import build_behavior_system_summary, is_worker_behavior_profile
 from ..task_service import TaskService
-from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
+from ._base import (
+    SYSTEM_INTERNAL_WORK_IDS,
+    ControlPlaneActionError,
+    ControlPlaneContext,
+    DomainServiceBase,
+)
 from .worker_profile_ops import WorkerProfileOpsMixin
 
 log = structlog.get_logger()
@@ -114,6 +119,11 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         project_works: list[Work] = []
         if self._ctx.delegation_plane_service is not None:
             project_works = await self._ctx.delegation_plane_service.list_works()
+            # F127：排除系统内部占位 Work（巩固 root Work 不代表用户委派，不应污染
+            # Worker profile 的 dynamic_context / active_project 解析）。
+            project_works = [
+                w for w in project_works if w.work_id not in SYSTEM_INTERNAL_WORK_IDS
+            ]
         worker_profile_ids = {profile.profile_id for profile in stored_profiles}
         works_by_profile_id: dict[str, list[Work]] = defaultdict(list)
         legacy_works_by_type: dict[str, list[Work]] = defaultdict(list)
