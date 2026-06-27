@@ -25,8 +25,11 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-# SENSITIVE_PARTITIONS 复用 enums.py 既有定义（{HEALTH, FINANCE}），不重复造（避免双定义偏移）。
-from ..enums import SENSITIVE_PARTITIONS, MemoryPartition
+# MemoryPartition 复用 enums.py 既有定义，不重复造（避免双定义偏移）。
+# SENSITIVE_PARTITIONS（{HEALTH, FINANCE}）的单一事实源是 ``enums.py``，已由顶层
+# ``octoagent.memory`` re-export；本模块不再 re-export（避免冗余 alias 路径 / 概念泄漏），
+# 需要时从 ``octoagent.memory`` 或 ``octoagent.memory.enums`` 直接引用。
+from ..enums import MemoryPartition
 
 
 class ConsolidationCandidateStatus(StrEnum):
@@ -222,7 +225,6 @@ class ConsolidationRejectedPayload(BaseModel):
 
 __all__ = [
     "CONSOLIDATION_TERMINAL_STATUSES",
-    "SENSITIVE_PARTITIONS",
     "ConsolidationApprovedPayload",
     "ConsolidationCandidate",
     "ConsolidationCandidateStatus",
