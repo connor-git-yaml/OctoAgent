@@ -81,15 +81,15 @@ class EventType(StrEnum):
     MEMORY_RECALL_COMPLETED = "MEMORY_RECALL_COMPLETED"
     MEMORY_RECALL_FAILED = "MEMORY_RECALL_FAILED"
     # F127 Sleep-Time Memory Consolidation（M7 认知深化）——后台巩固编排审计。
-    # 运行级（cron 触发的一次巩固运行的生命周期）：
-    #   MEMORY_CONSOLIDATION_TRIGGERED：cron 到点 + spawn 成功，含 run_id / trigger_ts。
-    #   MEMORY_CONSOLIDATION_COMPLETED：巩固运行结束，含 facts_reviewed / proposals_made / fallback。
-    #   MEMORY_CONSOLIDATION_FAILED：不可恢复异常，含 error_type + error_msg（不含 traceback 原文，防 PII）。
-    #   MEMORY_CONSOLIDATION_SKIPPED：active=False / capacity / 单飞跳过，含 reason。
-    # 提议级（单条合并/删提议的人审生命周期，C4 Two-Phase）：
-    #   MEMORY_CONSOLIDATION_PROPOSED：LLM 产出一条 MERGE 提议写入候选（payload 用 id/hash 引用，不含原文）。
-    #   MEMORY_CONSOLIDATION_APPROVED：用户接受 → write_service MERGE commit（源标 SUPERSEDED）。
-    #   MEMORY_CONSOLIDATION_REJECTED：用户拒绝 → 候选 rejected，不碰 SOR。
+    # 运行级（cron 触发的一次巩固运行生命周期）：
+    #   TRIGGERED：cron 到点 + spawn 成功（含 run_id / trigger_ts）。
+    #   COMPLETED：运行结束（含 facts_reviewed / proposals_made / fallback）。
+    #   FAILED：不可恢复异常（含 error_type + error_msg，不含 traceback，防 PII）。
+    #   SKIPPED：active=False / capacity / 单飞跳过（含 reason）。
+    # 提议级（单条合并/删提议人审生命周期，C4 Two-Phase）：
+    #   PROPOSED：LLM 产一条 MERGE 提议写候选（payload 用 id/hash 引用，不含原文）。
+    #   APPROVED：用户接受 → write_service MERGE commit（源标 SUPERSEDED）。
+    #   REJECTED：用户拒绝 → 候选 rejected，不碰 SOR。
     MEMORY_CONSOLIDATION_TRIGGERED = "MEMORY_CONSOLIDATION_TRIGGERED"
     MEMORY_CONSOLIDATION_COMPLETED = "MEMORY_CONSOLIDATION_COMPLETED"
     MEMORY_CONSOLIDATION_FAILED = "MEMORY_CONSOLIDATION_FAILED"

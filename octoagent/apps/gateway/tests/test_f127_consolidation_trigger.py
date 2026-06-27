@@ -1,0 +1,320 @@
+"""F127 Phase B — MemoryConsolidationService 触发编排单测。
+
+覆盖 `[@test]` 绑定（plan §Phase B / FR-A1~A6）：
+- cron 注册（startup → add_job）
+- consolidation_active=False → SKIPPED(disabled) 不 spawn
+- spawn rejected（capacity）→ SKIPPED(capacity) 优雅退出
+- 并发单飞 try-lock-skip → SKIPPED(already_running)
+- spawn written → TRIGGERED + child_task_id
+- ensure root Task+Work 幂等
+- H1：巩固全程无 user-facing 对话（spawn child 是 SUBAGENT_INTERNAL，无用户通道）
+- spawn launch raise → SKIPPED(spawn_error) 不崩（C6）
+
+**关键**：用真 StoreGroup（SQLite）验证 ensure root 真持久化 + spawn_child 真拿到 task+work
+对象（验证 §0.1.1 "必须传真对象不能 None"）；fake delegation_plane 只捕获 spawn_child 调用
+参数（验证编排正确），不真启动 subagent（task_runner 不在 Phase B 范围）。
+"""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
+
+import pytest_asyncio
+from octoagent.core.models.delegation import DelegationTargetKind
+from octoagent.core.models.enums import EventType
+from octoagent.core.store import StoreGroup, create_store_group
+from octoagent.gateway.services.delegation_plane import SpawnChildResult
+from octoagent.gateway.services.memory_consolidation import (
+    CONSOLIDATION_JOB_ID,
+    CONSOLIDATION_ROOT_TASK_ID,
+    CONSOLIDATION_ROOT_WORK_ID,
+    MemoryConsolidationService,
+)
+
+# ============================================================
+# Fakes
+# ============================================================
+
+
+class _FakeSnapshotStore:
+    def __init__(self, user_md: str | None = None) -> None:
+        self._user_md = user_md or ""
+
+    def get_live_state(self, key: str) -> str | None:
+        if key == "USER.md":
+            return self._user_md
+        return None
+
+
+class _FakeScheduler:
+    def __init__(self) -> None:
+        self._scheduler = MagicMock()
+        self._scheduler.add_job = MagicMock()
+        self._scheduler.remove_job = MagicMock()
+
+
+class _FakePlane:
+    """捕获 spawn_child 调用参数 + 返回可配置 SpawnChildResult。
+
+    可配置：result（默认 written）或 raise_exc（模拟 launch raise）。
+    """
+
+    def __init__(
+        self,
+        *,
+        result: SpawnChildResult | None = None,
+        raise_exc: Exception | None = None,
+    ) -> None:
+        self.calls: list[dict[str, Any]] = []
+        self._result = result or SpawnChildResult(
+            status="written", task_id="child-task-1"
+        )
+        self._raise_exc = raise_exc
+
+    async def spawn_child(self, **kwargs: Any) -> SpawnChildResult:
+        self.calls.append(kwargs)
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        return self._result
+
+
+# 启用巩固的 USER.md（active=true）
+_USER_MD_ACTIVE = """# 用户档案
+
+- **consolidation_active**: true
+- **consolidation_time**: "03:30"
+- **consolidation_window_days**: 14
+- **consolidation_max_facts**: 80
+"""
+
+_USER_MD_DISABLED = """# 用户档案
+
+- **consolidation_active**: false
+"""
+
+
+@pytest_asyncio.fixture
+async def store_group(tmp_path: Path) -> StoreGroup:
+    db_path = str(tmp_path / "test.db")
+    artifacts_dir = tmp_path / "artifacts"
+    artifacts_dir.mkdir(exist_ok=True)
+    return await create_store_group(db_path, str(artifacts_dir))
+
+
+def _build_service(
+    store_group: StoreGroup,
+    *,
+    user_md: str = "",
+    plane: _FakePlane | None = None,
+) -> MemoryConsolidationService:
+    return MemoryConsolidationService(
+        scheduler=_FakeScheduler(),
+        task_store=store_group.task_store,
+        work_store=store_group.work_store,
+        event_store=store_group.event_store,
+        snapshot_store=_FakeSnapshotStore(user_md=user_md),
+        delegation_plane=plane or _FakePlane(),  # type: ignore[arg-type]
+    )
+
+
+async def _events_of_type(
+    store_group: StoreGroup, event_type: EventType
+) -> list[Any]:
+    events = await store_group.event_store.get_events_for_task(
+        CONSOLIDATION_ROOT_TASK_ID
+    )
+    return [e for e in events if e.type == event_type]
+
+
+# ============================================================
+# Cron 注册 + ensure root
+# ============================================================
+
+
+class TestStartup:
+    async def test_startup_registers_cron(self, store_group):
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE)
+        await svc.startup()
+        # add_job 被调用，id 正确
+        add_job = svc._scheduler._scheduler.add_job
+        add_job.assert_called_once()
+        assert add_job.call_args.kwargs["id"] == CONSOLIDATION_JOB_ID
+
+    async def test_startup_ensures_root_task_and_work(self, store_group):
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE)
+        await svc.startup()
+        task = await store_group.task_store.get_task(CONSOLIDATION_ROOT_TASK_ID)
+        work = await store_group.work_store.get_work(CONSOLIDATION_ROOT_WORK_ID)
+        assert task is not None
+        assert work is not None
+        assert work.task_id == CONSOLIDATION_ROOT_TASK_ID
+        assert work.target_kind == DelegationTargetKind.SUBAGENT
+        # root task 有显式 thread_id（子 thread 命名稳定）
+        assert task.thread_id == "_memory_consolidation"
+        assert task.requester.channel == "system"
+
+    async def test_startup_idempotent(self, store_group):
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE)
+        await svc.startup()
+        await svc.startup()  # 第二次 _started 守卫直接 return，不重复 add_job
+        assert svc._scheduler._scheduler.add_job.call_count == 1
+
+    async def test_ensure_root_idempotent_no_duplicate(self, store_group):
+        """重复 ensure root 不产生重复 Task/Work（幂等，沿用 F102 ensure 范式）。"""
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE)
+        t1, w1 = await svc._ensure_consolidation_root()
+        t2, w2 = await svc._ensure_consolidation_root()
+        assert t1.task_id == t2.task_id == CONSOLIDATION_ROOT_TASK_ID
+        assert w1.work_id == w2.work_id == CONSOLIDATION_ROOT_WORK_ID
+
+
+# ============================================================
+# 触发主流程（FR-A2~A6）
+# ============================================================
+
+
+class TestRunConsolidation:
+    async def test_disabled_skips_no_spawn(self, store_group):
+        """FR-A2：active=False → SKIPPED(disabled) 不 spawn。"""
+        plane = _FakePlane()
+        svc = _build_service(store_group, user_md=_USER_MD_DISABLED, plane=plane)
+        await svc._ensure_consolidation_root()
+        await svc._run_consolidation()
+        assert plane.calls == []  # 未 spawn
+        skipped = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
+        )
+        assert len(skipped) == 1
+        assert skipped[0].payload["reason"] == "disabled"
+
+    async def test_written_emits_triggered(self, store_group):
+        """FR-A3/A4：active=True + spawn written → TRIGGERED + child_task_id。"""
+        plane = _FakePlane(
+            result=SpawnChildResult(status="written", task_id="child-xyz")
+        )
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)
+        await svc._run_consolidation()
+        # spawn 被调用一次，参数正确
+        assert len(plane.calls) == 1
+        call = plane.calls[0]
+        assert call["target_kind"] == DelegationTargetKind.SUBAGENT.value
+        assert call["callback_mode"] == "async"
+        assert call["emit_audit_event"] is False
+        assert call["spawned_by"] == "memory_consolidation"
+        # parent_task / parent_work 是真对象（非 None）——§0.1.1 核心
+        assert call["parent_task"] is not None
+        assert call["parent_work"] is not None
+        assert call["parent_task"].task_id == CONSOLIDATION_ROOT_TASK_ID
+        assert call["parent_work"].work_id == CONSOLIDATION_ROOT_WORK_ID
+        # TRIGGERED 事件
+        triggered = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED
+        )
+        assert len(triggered) == 1
+        assert triggered[0].payload["child_task_id"] == "child-xyz"
+        # config 透传：window_days/max_facts 进 payload
+        assert triggered[0].payload["window_days"] == 14
+        assert triggered[0].payload["max_facts"] == 80
+
+    async def test_rejected_capacity_skips(self, store_group):
+        """FR-A4：spawn rejected（capacity）→ SKIPPED(capacity) 优雅退出不报错。"""
+        plane = _FakePlane(
+            result=SpawnChildResult(
+                status="rejected",
+                error_code="CAPACITY_EXCEEDED",
+                reason="too many children",
+            )
+        )
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)
+        await svc._run_consolidation()  # 不应抛
+        skipped = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
+        )
+        assert len(skipped) == 1
+        assert skipped[0].payload["reason"] == "capacity"
+        # 未写 TRIGGERED
+        triggered = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED
+        )
+        assert triggered == []
+
+    async def test_spawn_raise_skips_gracefully(self, store_group):
+        """C6：spawn launch raise → SKIPPED(spawn_error) 不崩。"""
+        plane = _FakePlane(raise_exc=RuntimeError("task runner not bound"))
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)
+        await svc._run_consolidation()  # 不应抛
+        skipped = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
+        )
+        assert len(skipped) == 1
+        assert skipped[0].payload["reason"] == "spawn_error"
+        # 运行标志已复位（finally），可再次触发
+        assert svc._running is False
+
+    async def test_single_flight_skips_concurrent(self, store_group):
+        """FR-A5：运行中再触发 → SKIPPED(already_running) 立即 return 不排队。"""
+        # 用一个会阻塞的 plane 模拟"巩固运行中"
+        release = asyncio.Event()
+
+        class _BlockingPlane:
+            def __init__(self) -> None:
+                self.calls: list[dict] = []
+
+            async def spawn_child(self, **kwargs: Any) -> SpawnChildResult:
+                self.calls.append(kwargs)
+                await release.wait()  # 卡住，模拟巩固进行中
+                return SpawnChildResult(status="written", task_id="child-1")
+
+        plane = _BlockingPlane()
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)  # type: ignore[arg-type]
+
+        # 第一次触发（卡在 spawn）
+        first = asyncio.create_task(svc._run_consolidation())
+        await asyncio.sleep(0.05)  # 让 first 进入 _running=True + spawn await
+        assert svc._running is True
+
+        # 第二次触发（应立即 skip）
+        await svc._run_consolidation()
+        skipped = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
+        )
+        assert len(skipped) == 1
+        assert skipped[0].payload["reason"] == "already_running"
+        # 第二次没有 spawn（只有 first 的一次 call）
+        assert len(plane.calls) == 1
+
+        # 放行 first 完成
+        release.set()
+        await first
+        assert svc._running is False
+
+
+# ============================================================
+# H1 守界
+# ============================================================
+
+
+class TestH1Boundary:
+    async def test_spawn_targets_subagent_not_user(self, store_group):
+        """H1：巩固派 SUBAGENT（后台 spawn-and-die），不向用户发起对话。
+
+        验证 spawn target_kind=subagent + parent.requester.channel=system（非用户渠道），
+        子 subagent 走 SUBAGENT_INTERNAL session 无 user-facing 通道。
+        """
+        plane = _FakePlane()
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)
+        await svc._run_consolidation()
+        call = plane.calls[0]
+        assert call["target_kind"] == DelegationTargetKind.SUBAGENT.value
+        # parent task requester 是 system（非 telegram/web 用户渠道）
+        assert call["parent_task"].requester.channel == "system"
+        assert call["parent_task"].requester.sender_id == "memory_consolidation"
+
+    async def test_no_notification_in_phase_b(self, store_group):
+        """Phase B 不发通知（通知是 Phase E）——本服务无 notification_service 依赖。"""
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE)
+        # 构造签名里根本没有 notification_service（H1 通知走 Phase E NotificationService）
+        assert not hasattr(svc, "_notification_service")

@@ -13,6 +13,7 @@ from datetime import UTC, datetime
 
 import pytest
 from octoagent.memory import MemoryPartition
+from octoagent.memory.enums import SENSITIVE_PARTITIONS
 from octoagent.memory.models import (
     CONSOLIDATION_TERMINAL_STATUSES,
     ConsolidationApprovedPayload,
@@ -26,18 +27,17 @@ from octoagent.memory.models import (
     ConsolidationTriggeredPayload,
     MemoryConsolidationRun,
 )
-from octoagent.memory.enums import SENSITIVE_PARTITIONS
 from pydantic import ValidationError
 
 
 class TestStatusMachine:
     def test_terminal_statuses(self):
-        assert CONSOLIDATION_TERMINAL_STATUSES == frozenset(
+        assert frozenset(
             {
                 ConsolidationCandidateStatus.APPLIED,
                 ConsolidationCandidateStatus.REJECTED,
             }
-        )
+        ) == CONSOLIDATION_TERMINAL_STATUSES
 
     def test_non_terminal_not_in_terminal_set(self):
         assert ConsolidationCandidateStatus.PENDING not in CONSOLIDATION_TERMINAL_STATUSES

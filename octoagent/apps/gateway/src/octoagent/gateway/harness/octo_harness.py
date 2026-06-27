@@ -237,6 +237,15 @@ class OctoHarness:
                 await app.state.daily_routine_service.shutdown()
             except Exception:
                 _log.exception("daily_routine_shutdown_failed")
+        # F127：巩固 routine 在 automation_scheduler.shutdown() 之前 remove 自己的 cron job
+        if (
+            hasattr(app.state, "memory_consolidation_service")
+            and app.state.memory_consolidation_service
+        ):
+            try:
+                await app.state.memory_consolidation_service.shutdown()
+            except Exception:
+                _log.exception("memory_consolidation_shutdown_failed")
         if hasattr(app.state, "automation_scheduler") and app.state.automation_scheduler:
             await app.state.automation_scheduler.shutdown()
 
@@ -1511,6 +1520,29 @@ class OctoHarness:
             # Constitution C6：daily routine 不可用不阻塞 gateway 启动
             _log.exception("daily_routine_bootstrap_failed")
             app.state.daily_routine_service = None
+
+        # F127 Sleep-Time Memory Consolidation：MemoryConsolidationService 同 F102
+        # bootstrap 点构造（automation_scheduler.startup() 之后），额外持有
+        # delegation_plane（spawn_child 后台编排入口）+ work_store（合成 root Work）。
+        try:
+            from ..services.memory_consolidation import (
+                MemoryConsolidationService as _MemoryConsolidationService,
+            )
+
+            _memory_consolidation = _MemoryConsolidationService(
+                scheduler=app.state.automation_scheduler,
+                task_store=store_group.task_store,
+                work_store=store_group.work_store,
+                event_store=store_group.event_store,
+                snapshot_store=app.state.snapshot_store,
+                delegation_plane=app.state.delegation_plane_service,
+            )
+            app.state.memory_consolidation_service = _memory_consolidation
+            await _memory_consolidation.startup()
+        except Exception:
+            # Constitution C6：巩固 routine 不可用不阻塞 gateway 启动
+            _log.exception("memory_consolidation_bootstrap_failed")
+            app.state.memory_consolidation_service = None
 
         _log.info(
             "watchdog_scheduler_started",

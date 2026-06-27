@@ -54,7 +54,9 @@ def _make_candidate(
     )
 
 
-def _make_run(run_id: str = "run-001", scope_id: str = "agent-private/main") -> MemoryConsolidationRun:
+def _make_run(
+    run_id: str = "run-001", scope_id: str = "agent-private/main"
+) -> MemoryConsolidationRun:
     now = datetime.now(UTC)
     return MemoryConsolidationRun(
         run_id=run_id,

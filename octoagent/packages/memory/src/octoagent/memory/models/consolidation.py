@@ -79,7 +79,9 @@ class ConsolidationCandidate(BaseModel):
     """
 
     candidate_id: str = Field(min_length=1, description="ULID，候选唯一标识")
-    run_id: str = Field(min_length=1, description="所属巩固运行 run_id（关联 MemoryConsolidationRun）")
+    run_id: str = Field(
+        min_length=1, description="所属巩固运行 run_id（关联 MemoryConsolidationRun）"
+    )
     scope_id: str = Field(min_length=1, description="记忆 scope（AGENT_PRIVATE 等）")
     partition: MemoryPartition = Field(description="提议合并目标事实所属分区")
     subject_key: str = Field(default="", description="合并后权威事实的 subject_key")
