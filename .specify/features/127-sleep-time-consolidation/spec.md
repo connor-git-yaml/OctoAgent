@@ -3,7 +3,7 @@
 **Feature ID**: F127
 **Feature Branch**: `feature/127-sleep-time-consolidation`
 **Created**: 2026-06-27
-**Status**: **Locked v0.1**（用户已拍板 5 决策为推荐窄路径，见 §0.3；v0.2 项移入 §2.2 deferred）。**Phase A + Phase B 已实施**（地基 + spawn 编排核心风险），Phase C-H 待 go/no-go。
+**Status**: **Locked v0.1**（用户已拍板 5 决策为推荐窄路径，见 §0.3；v0.2 项移入 §2.2 deferred）。**Phase A + Phase B 已实施并测试通过**（数据模型地基 71 test + spawn 编排核心风险走通；Opus 自审抓 2 真回归已修——见 §0.1.4 实施期修正）。全量回归 0 净回归 vs master 0f59bd3e（唯一 worktree 失败 `test_start_degrades_without_watchdog` 实测 master baseline 同样 FAIL=watchdog 环境装了，非 F127）。**Codex review 因环境无 timeout 机制无法安全 bound，待 push 前用户手动跑。** Phase C-H 待 go/no-go。
 **M7 阶段**: M7 认知深化（旗舰 Feature；与 F111 Behavior Compactor 同期"token 成本下降后做的智能合并"族）
 **Upstream**（实测核实，master 0f59bd3e）:
 - **F102 DailyRoutineService**（`daily_routine.py` / `daily_routine_config.py`）：cron 触发范式 + audit-task FK 占位 + LLM/fallback + USER.md 配置解析 + 时区降级链
@@ -89,8 +89,12 @@
 - `MemoryConsolidationService` cron 触发 → `_ensure_consolidation_root()` 合成 **root Task + root Work 一对**（沿用 F102 `_ensure_audit_task` ensure 范式：不存在则建，存在则 no-op）→ 用该对作 `plane.spawn_child(parent_task=root_task, parent_work=root_work, target_kind="subagent", callback_mode="async", spawned_by="memory_consolidation", emit_audit_event=False)`。
 - root Task 必须显式赋 `thread_id`（不能靠默认 `"default"`，子 thread 命名 `{thread_id}:child:{id}` 需稳定）+ `requester=RequesterInfo(channel="system", sender_id="memory_consolidation")` + `scope_id`（供子 NormalizedMessage 继承）。root Work 赋 `work_id`+`task_id`（指向 root Task）+ `target_kind=SUBAGENT`。
 - `SpawnChildResult.status`：`"written"` → 派发成功写 `MEMORY_CONSOLIDATION_TRIGGERED`；`"rejected"`（depth/capacity）→ 写 `MEMORY_CONSOLIDATION_SKIPPED(reason="capacity")` 优雅退出（FR-A4）。
-- **并发单飞（FR-A5）**：进程内 `asyncio.Lock` try-acquire-skip（借鉴 Hermes `.tick.lock` 范式）——跑中再触发 → 写 SKIPPED 立即 return，不排队不阻塞。
+- **并发单飞（FR-A5）**：进程内 `bool` 标志 `_running` check-then-set（在第一个 `await` 之前完成 → 单 event loop 协作式无 race，与 Hermes `.tick.lock` try-lock-skip 等价语义；实施选 bool 而非 `asyncio.Lock` 因后者 `acquire()` 阻塞、需额外 `locked()` 判定才能"试锁即跳"，bool 更直接）——跑中再触发 → 写 SKIPPED 立即 return，不排队不阻塞。
 - **Phase B 边界**：本 Phase 只验证"能派后台 subagent + 优雅 skip + 单飞 + 事件"；subagent **内部巩固逻辑（发现端/提议）是 Phase C**——Phase B 的子任务 objective 是占位描述，spawn 成功即达 Phase B 验收。
+
+**实施期两处修正（Opus 自审 + 全量回归抓出，含对上文的更新）**：
+1. **ensure root 必须在所有 `emit` 之前**（不是"active 检查之后"）：`events` 表有 `FOREIGN KEY(task_id) REFERENCES tasks`，所有 `MEMORY_CONSOLIDATION_*` 事件 `task_id` 引用 root Task。若 ensure 延后，`disabled`/`spawn_error` 路径的 `SKIPPED` 事件会 FK 违规被 `_safe_append_event` 静默丢（C2 审计缺口）。修复：`_run_consolidation` 进 try 后**先** `_ensure_consolidation_root()` 再 active 检查。
+2. **root Work 会泄漏到用户可见委派/Worker 视图**（真回归，非测试 artifact）：`_ensure_consolidation_root` 建的系统占位 root Work 进 `delegation_plane.list_works()`，污染 `control_plane` `get_delegation_document`（works 列表多一条）+ `get_worker_profiles_document`（matched_works 污染 `dynamic_context.active_project_id`）。修复：`control_plane/_base.py` 新增 `SYSTEM_INTERNAL_WORK_IDS` 单一事实源，两个 document builder 都排除（类比 F102 `_daily_routine_audit` 是系统占位，但 F102 只建 task 不建 work 故无此问题——F127 因 spawn_child 必需 work 对而首次引入此面）。`list_works()` 自身**不**过滤（保持忠实 accessor；spawn 容量检查走 `list_descendant_works(parent_work_id=...)` 不受影响）。
 
 > **为什么不 fallback**：草案预警的 fallback（退回 F102 主进程 `provider_router.complete()`）会牺牲 H2 subagent 对等（巩固不再是独立 SUBAGENT_INTERNAL session，无 cleanup hook，无并发隔离）。实测合成 task+work 成本可控（~1 个 ensure helper + 1 对 Pydantic 构造），不值得为省这点而破坏对等。**若后续 Phase C 发现 subagent 内部跑巩固 LLM 有不可逾越的上下文/工具装配障碍，再评估 fallback——但 Phase B 层面 spawn 编排已确证可行。**
 
