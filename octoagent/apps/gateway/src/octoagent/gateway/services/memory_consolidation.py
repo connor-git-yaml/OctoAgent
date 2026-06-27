@@ -221,15 +221,19 @@ class MemoryConsolidationService:
         run_id = f"mcons-{ULID()}"
         trigger_ts = datetime.now(UTC)
         try:
+            # FR-A3：先 ensure root Task+Work（必须在任何 emit 之前——所有
+            # MEMORY_CONSOLIDATION_* 事件 task_id 都引用 root Task，events 表有
+            # FOREIGN KEY(task_id) REFERENCES tasks。若延后到 active 检查之后，
+            # disabled/spawn 失败路径的 SKIPPED 事件会 FK 违规被静默丢（C2 审计缺口）。
+            # 幂等（startup 已 ensure，此处运行时兜底）。
+            root_task, root_work = await self._ensure_consolidation_root()
+
             # FR-A2：active 检查
             config = self._read_config()
             if not config.consolidation_active:
                 await self._emit_skipped(reason="disabled", run_id=run_id)
                 logger.info("consolidation_skipped_disabled")
                 return
-
-            # FR-A3：ensure root Task+Work（运行时兜底，幂等）
-            root_task, root_work = await self._ensure_consolidation_root()
 
             # FR-A4：spawn 后台 subagent
             objective = (

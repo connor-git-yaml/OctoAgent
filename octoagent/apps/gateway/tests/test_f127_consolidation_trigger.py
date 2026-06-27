@@ -178,10 +178,13 @@ class TestStartup:
 
 class TestRunConsolidation:
     async def test_disabled_skips_no_spawn(self, store_group):
-        """FR-A2：active=False → SKIPPED(disabled) 不 spawn。"""
+        """FR-A2：active=False → SKIPPED(disabled) 不 spawn。
+
+        关键：**不**预先 ensure root——验证 _run_consolidation 内部先 ensure（FK 安全），
+        SKIPPED 事件能持久化（events 表 FK(task_id) REFERENCES tasks，root 必须先在）。
+        """
         plane = _FakePlane()
         svc = _build_service(store_group, user_md=_USER_MD_DISABLED, plane=plane)
-        await svc._ensure_consolidation_root()
         await svc._run_consolidation()
         assert plane.calls == []  # 未 spawn
         skipped = await _events_of_type(
@@ -189,6 +192,11 @@ class TestRunConsolidation:
         )
         assert len(skipped) == 1
         assert skipped[0].payload["reason"] == "disabled"
+        # root task 确实被 in-flow ensure 出来了（FK 目标存在）
+        assert (
+            await store_group.task_store.get_task(CONSOLIDATION_ROOT_TASK_ID)
+            is not None
+        )
 
     async def test_written_emits_triggered(self, store_group):
         """FR-A3/A4：active=True + spawn written → TRIGGERED + child_task_id。"""
