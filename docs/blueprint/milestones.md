@@ -498,7 +498,7 @@ M5 acceptance gate 全部关闭：
 
 ### M6（Surface 扩张 F104-F111 + 地基/债务 F112-F122）✅ 完成（2026-06-22）
 
-> **M6 收官（2026-06-22）**：surface F104-F110 全部关闭 + 地基/债务/安全/效率 F112-F126 + D2 合并 F117 全部 ✅；F111 Behavior Compactor 推 M7。**交付**：文件工作台 v0.1+v0.2（git-aware）/ 多平台 4 渠道（Telegram/Web/Slack/Discord）/ Plugin Loader / Capability 大重构（12,328 行 → 18 模块）/ profile 合并 / 安全双向（SSRF + tool 结果扫描）/ 语音（STT+TTS+voice session）。下一步：用强 model 跑 OctoBench 验收 M6 整体能力提升（vs M5 baseline 27.6%）+ M7 规划。
+> **M6 收官（2026-06-22）**：surface F104-F110 全部关闭 + 地基/债务/安全/效率 F112-F126 + D2 合并 F117 全部 ✅；F111 Behavior Compactor 推 M7。**交付**：文件工作台 v0.1+v0.2（git-aware）/ 多平台 4 渠道（Telegram/Web/Slack/Discord）/ Plugin Loader / Capability 大重构（12,328 行 → 18 模块）/ profile 合并 / 安全双向（SSRF + tool 结果扫描）/ 语音（STT+TTS+voice session）。**benchmark 验收 ✅（2026-06-27，本会话）**：控变量 DeepSeek-V3.2 跑出 pass_rate **0.276 = M5 baseline**，回归护栏域（tool_call 100% / connor_real_world 3/4 / snapshot 50%）全守住——**M6 零回归实证**。先决修复 provider 瞬态重试（`52320d7c`，根治 anyio asyncio TLS 读竞态致主 agent 调用偶发退 Echo 假成功；30 task 主调用 0 退 Echo 逐条验证），benchmark 首次可信。**用户拍板：M6 benchmark 闸以零回归收口**——M6 属重构/扩面/安全/语音 milestone，不含解题能力提升，强 model 验证留到 M7 认知深化真有协作/记忆能力提升时再做（避开订阅 OAuth 自动化 benchmark 的 ToS 灰色地带）。下一步：**M7 启动，方向 = 认知深化**（见 §M7）。
 > **遗留小项（backlog，非阻塞）**：F106 `test_start_degrades_without_watchdog` pre-existing race flake（隔离过，非回归）；F105 v0.2 H-2 source_channel_id（与 A2A source 泛化一并立项）；F107 git 快照无 EventStore 事件（M3 归档）。
 
 M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-06-07 调研 + 架构审计 workflow**（31 agent，SDD/开源 agent 调研 + F097-F104 代码审计 + E2E 缺口，全过对抗验证）发现 M5 大重构留有未收口残渣（双轨死代码 + `agent_context.py` 膨胀到 4585 行），用户拍板"**先夯地基再扩张**"：F112-F116 地基 sprint 先于 F105 执行。
@@ -554,5 +554,25 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 - **F113 就绪确认**：agent_context.py 现 4600 行，4 簇成立，建议实际拆 **5 个 mixin**（多 Memory-service ~203），Entity-ensure ~1075 优先抽，`build_task_context`+`_resolve_context_bundle` 必须留基类。
 - **e2e 缺口归 F119**：F123/F124/F116 均有单测无 e2e_live。
 - **基础设施待修**：主仓 `octoagent/.venv` editable .pth 指向已删 worktree → pre-commit 裸 pytest ModuleNotFoundError（SKIP_E2E 根因），重跑 `uv sync` 可修。
+
+---
+
+### M7（认知深化：记忆 / 学习）⏳ 启动（2026-06-27）
+
+> **方向（用户拍板 2026-06-27）**：M6 完成 surface 扩张后，M7 转向**让 agent 越用越懂用户**——后台记忆巩固、行为规则智能合并、skill 自改进。区别于 M5（协作对等）/ M6（功能面），M7 是**认知能力域**。
+> **验证特殊性**：本域改进 DeepSeek 控变量照不出（记忆深化 / 主动委托看不出），**需强 model 单独验证**——M6 推迟的"强 model OctoBench"在此域兑现。
+> **详细规划**：CLAUDE.local.md §"M7 战略规划"。
+
+| Feature | 一句话目的（用户视角） | 规模 | 顺序 |
+|---------|----------------------|------|------|
+| **F127 Sleep-Time Memory Consolidation**（旗舰）| agent 空闲 / 定时在后台"巩固记忆"——回顾近期会话、去重 / 合并 / 组织事实、强化 recall，越用越懂你。仿 Letta sleep-time compute。底层组件（F102 routine / F097 subagent / F094 AGENT_PRIVATE memory / recall）已齐，M7 编排成独立认知能力域 | XL | 第 1（旗舰，设计先行） |
+| **F111 Behavior Compactor**（LLM 智能合并）| 行为规则文件累积后用 LLM 智能合并去冗余（F063 Phase 3 推迟项），与记忆巩固同域 | M | 第 2 |
+| **F128 Skill Self-Improvement**（Hermes 式闭环）| agent 从失败 / 成功中改进自己的 skill（推测性，与 sleep-time 同期评估） | L | 第 3（评估） |
+
+**串行理由**：三者都触碰 memory / behavior 子系统，并行会严重 rebase 冲突。F127 旗舰**设计先行**（spec / plan 设计 → 用户拍板范围 → 再实施）。
+
+**M7 其他 carry-forward 候选**（认知深化 主线后评估）：F120 F104 versionable 收窄 + FK 诚实化；Serena 式 LSP / 符号级代码理解（先外挂 MCP dogfood）；OC-5 用户 / agent 自助 proactive cron；Hermes 文件系统 checkpoint / rollback；Agent Zero 持久交互 shell + Extensions；Companion（独立 agent 伴侣，最开放，可能独立 milestone）。
+
+**bench infra 待办（M7 期间顺手）**：①OctoHarness 轻量 bootstrap（达 SC-001 ≤1h，现每 task 起完整 harness ~2min/task）；②teardown 竞速 memory-extraction 退 Echo（无害噪声，bench-specific 生命周期）；③Tier2 τ-bench 真跑接入。
 
 ---
