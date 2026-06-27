@@ -210,6 +210,55 @@ CREATE TABLE IF NOT EXISTS memory_maintenance_runs (
 );
 """
 
+# F127 Sleep-Time Memory Consolidation（M7）——巩固运行审计表。
+# 与 memory_maintenance_runs 同范式（一次后台运行的生命周期 + 统计）。
+_CONSOLIDATION_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS memory_consolidation_runs (
+    run_id             TEXT PRIMARY KEY,
+    schema_version     INTEGER NOT NULL DEFAULT 1,
+    scope_id           TEXT NOT NULL DEFAULT '',
+    status             TEXT NOT NULL DEFAULT 'running',
+    trigger_ts         TEXT NOT NULL,
+    window_days        INTEGER NOT NULL DEFAULT 7,
+    max_facts          INTEGER NOT NULL DEFAULT 50,
+    facts_reviewed     INTEGER NOT NULL DEFAULT 0,
+    proposals_made     INTEGER NOT NULL DEFAULT 0,
+    proposals_approved INTEGER NOT NULL DEFAULT 0,
+    proposals_rejected INTEGER NOT NULL DEFAULT 0,
+    elapsed_ms         INTEGER NOT NULL DEFAULT 0,
+    fallback           INTEGER NOT NULL DEFAULT 0,
+    error_summary      TEXT NOT NULL DEFAULT '',
+    child_task_id      TEXT NOT NULL DEFAULT '',
+    started_at         TEXT NOT NULL,
+    finished_at        TEXT
+);
+"""
+
+# F127——巩固合并提议候选表（C4 人审 Two-Phase）。
+# 与 observation_candidates 的关键区别（OQ-1 实测）：observation 候选 promote 走 USER.md
+# （snapshot_store.append_entry，不调 write_service）；本候选 approve 走 SOR 层
+# write_service MERGE commit（源标 SUPERSEDED）。数据流不同故独立建表。
+# atomic claim 复用 memory_candidates.py:304 范式：status 列条件 UPDATE + rowcount。
+_CONSOLIDATION_CANDIDATES_DDL = """
+CREATE TABLE IF NOT EXISTS consolidation_candidates (
+    candidate_id    TEXT PRIMARY KEY,
+    run_id          TEXT NOT NULL,
+    scope_id        TEXT NOT NULL,
+    partition       TEXT NOT NULL,
+    subject_key     TEXT NOT NULL DEFAULT '',
+    source_sor_ids  TEXT NOT NULL DEFAULT '[]',
+    merged_content  TEXT NOT NULL DEFAULT '',
+    rationale       TEXT NOT NULL DEFAULT '',
+    proposal_id     TEXT NOT NULL DEFAULT '',
+    confidence      REAL NOT NULL DEFAULT 0.0,
+    is_sensitive    INTEGER NOT NULL DEFAULT 0,
+    status          TEXT NOT NULL DEFAULT 'pending',
+    content_hash    TEXT NOT NULL DEFAULT '',
+    created_at      TEXT NOT NULL,
+    decided_at      TEXT
+);
+"""
+
 _INDEXES = [
     (
         "CREATE INDEX IF NOT EXISTS idx_memory_fragments_scope_created "
@@ -303,6 +352,19 @@ _INDEXES = [
         "CREATE INDEX IF NOT EXISTS idx_memory_maintenance_kind_status "
         "ON memory_maintenance_runs(kind, status, started_at DESC);"
     ),
+    # F127 巩固运行 + 候选索引
+    (
+        "CREATE INDEX IF NOT EXISTS idx_consolidation_runs_scope_started "
+        "ON memory_consolidation_runs(scope_id, started_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_consolidation_candidates_run "
+        "ON consolidation_candidates(run_id, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_consolidation_candidates_status "
+        "ON consolidation_candidates(scope_id, status, created_at DESC);"
+    ),
 ]
 
 
@@ -349,6 +411,8 @@ async def init_memory_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_INGEST_RUNS_DDL)
     await conn.execute(_DERIVED_RECORDS_DDL)
     await conn.execute(_MAINTENANCE_RUNS_DDL)
+    await conn.execute(_CONSOLIDATION_RUNS_DDL)  # F127
+    await conn.execute(_CONSOLIDATION_CANDIDATES_DDL)  # F127
 
     await _migrate_legacy_memory_tables(conn)
 
@@ -373,6 +437,7 @@ async def verify_memory_tables(conn: aiosqlite.Connection) -> bool:
         "memory_ingest_runs",
         "memory_derived_records",
         "memory_maintenance_runs",
+        "memory_consolidation_runs",  # F127
     }
     cursor = await conn.execute(
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'memory_%'"

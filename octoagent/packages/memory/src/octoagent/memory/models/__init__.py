@@ -11,6 +11,19 @@ from .common import (
     ProposalNotValidatedError,
     ProposalValidation,
 )
+from .consolidation import (
+    CONSOLIDATION_TERMINAL_STATUSES,
+    ConsolidationApprovedPayload,
+    ConsolidationCandidate,
+    ConsolidationCandidateStatus,
+    ConsolidationCompletedPayload,
+    ConsolidationFailedPayload,
+    ConsolidationProposedPayload,
+    ConsolidationRejectedPayload,
+    ConsolidationSkippedPayload,
+    ConsolidationTriggeredPayload,
+    MemoryConsolidationRun,
+)
 from .fragment import FragmentRecord
 from .integration import (
     DerivedMemoryQuery,
@@ -48,12 +61,23 @@ from .vault_access import (
 )
 
 __all__ = [
+    "CONSOLIDATION_TERMINAL_STATUSES",
     "BrowseGroup",
     "BrowseItem",
     "BrowseResult",
     "CommitResult",
     "CompactionFlushResult",
+    "ConsolidationApprovedPayload",
+    "ConsolidationCandidate",
+    "ConsolidationCandidateStatus",
+    "ConsolidationCompletedPayload",
+    "ConsolidationFailedPayload",
+    "ConsolidationProposedPayload",
+    "ConsolidationRejectedPayload",
+    "ConsolidationSkippedPayload",
+    "ConsolidationTriggeredPayload",
     "DerivedMemoryQuery",
+    "MemoryConsolidationRun",
     "DerivedMemoryRecord",
     "EvidenceRef",
     "FragmentRecord",
