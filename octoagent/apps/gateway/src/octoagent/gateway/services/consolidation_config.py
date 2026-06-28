@@ -42,11 +42,21 @@ _MAX_FACTS_CAP: Final[int] = 1000
 
 
 # ============================================================
-# 解析正则（强制 key prefix，复用 F102 H1 BLOCKER 修复范式）
+# 解析正则（强制 key prefix，复用 F102 H1 BLOCKER 修复范式 + 左边界锚定）
 # ============================================================
+#
+# Codex review（round3）：仅"key MUST 出现"还不够——``search()`` 会把
+# ``previous_consolidation_active: true`` / ``last_consolidation_time: 02:00`` 这类用户在
+# USER.md 里写的**说明性字段**当真实配置匹配（key 作为子串出现）。consolidation_active 默认
+# False 且门控**破坏性**记忆合并，false-positive 误开后果严重（C4/C7）。故每个 pattern 前加
+# 负向左边界 ``(?<![\w])``（key 前不能紧贴标识符字符），挡掉 ``previous_`` / ``last_`` 等前缀，
+# 仍允许 ``**consolidation_active**`` / 行首裸 key / ``- consolidation_active:``。
+# 注：F102 daily_routine_config 同范式有同隐患（但非破坏性、低风险），留独立 follow-up，
+# 不在 F127 范围内扩。
 
 _CONSOLIDATION_ACTIVE_PATTERN = re.compile(
     r"""
+    (?<![\w])                       # 左边界：key 前不得紧贴标识符字符（挡 previous_ 等）
     (?:\*\*)?
     consolidation_active            # MUST 出现
     (?:\*\*)?
@@ -60,6 +70,7 @@ _CONSOLIDATION_ACTIVE_PATTERN = re.compile(
 
 _CONSOLIDATION_TIME_PATTERN = re.compile(
     r"""
+    (?<![\w])
     (?:\*\*)?
     consolidation_time              # MUST 出现
     (?:\*\*)?
@@ -73,6 +84,7 @@ _CONSOLIDATION_TIME_PATTERN = re.compile(
 
 _CONSOLIDATION_WINDOW_PATTERN = re.compile(
     r"""
+    (?<![\w])
     (?:\*\*)?
     consolidation_window_days       # MUST 出现
     (?:\*\*)?
@@ -86,6 +98,7 @@ _CONSOLIDATION_WINDOW_PATTERN = re.compile(
 
 _CONSOLIDATION_MAX_FACTS_PATTERN = re.compile(
     r"""
+    (?<![\w])
     (?:\*\*)?
     consolidation_max_facts         # MUST 出现
     (?:\*\*)?

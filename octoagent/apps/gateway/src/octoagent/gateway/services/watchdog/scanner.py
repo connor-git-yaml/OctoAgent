@@ -73,8 +73,9 @@ class WatchdogScanner:
 
         try:
             # 获取所有活跃任务 ID，用于重建 cooldown 注册表
+            # F127：exclude_internal 与 scan() 一致——系统占位 Task 不进 watchdog 管理面。
             active_tasks = await self._store_group.task_store.list_tasks_by_statuses(
-                NON_TERMINAL_STATUSES
+                NON_TERMINAL_STATUSES, exclude_internal=True
             )
             active_task_ids = [t.task_id for t in active_tasks]
 
@@ -104,8 +105,11 @@ class WatchdogScanner:
 
         try:
             # 获取活跃任务（单次原子查询，FR-013 保证终态不包含）
+            # F127：exclude_internal 排除系统占位 Task（channel=="system"：ops-control-plane /
+            # F102 audit / F127 巩固 root+child）——卡住的后台巩固 child 不该被 watchdog 漂移
+            # 检测当用户任务告警（H1）。下方 startswith("ops-") 兜底保留（防御历史 id-only 路径）。
             active_tasks = await self._store_group.task_store.list_tasks_by_statuses(
-                NON_TERMINAL_STATUSES
+                NON_TERMINAL_STATUSES, exclude_internal=True
             )
             active_count = len(active_tasks)
             self._cooldown.cleanup_terminated({t.task_id for t in active_tasks})

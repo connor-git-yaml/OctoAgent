@@ -148,3 +148,82 @@ class TestConfigAggregate:
             '- **consolidation_time**: "09:00"'
         )
         assert cfg.to_crontab() == "0 9 * * *"
+
+
+class TestConfigKeyAnchoring:
+    """Codex round3 finding-D：key 须左边界锚定——用户在 USER.md 写说明性字段
+    （``previous_consolidation_active`` / ``last_consolidation_time`` 等，key 作为子串出现）
+    不得被当真实配置，否则默认关的破坏性巩固会被误开（C4/C7）。
+    """
+
+    def test_prefixed_key_does_not_enable_active(self):
+        """previous_consolidation_active: true → 不得误开（仍返回默认 False）。"""
+        assert (
+            extract_consolidation_active_from_user_md(
+                "- previous_consolidation_active: true"
+            )
+            is False
+        )
+
+    def test_underscore_prefixed_active_not_matched(self):
+        """my_consolidation_active: true → 不匹配（左边界挡标识符前缀）。"""
+        assert (
+            extract_consolidation_active_from_user_md(
+                "记录：my_consolidation_active: true（仅说明）"
+            )
+            is False
+        )
+
+    def test_prefixed_time_not_matched(self):
+        """last_consolidation_time: 02:00 → 不匹配，返回默认 03:00。"""
+        assert (
+            extract_consolidation_time_from_user_md(
+                "- last_consolidation_time: 02:00"
+            )
+            == "03:00"
+        )
+
+    def test_prefixed_window_not_matched(self):
+        assert (
+            extract_consolidation_window_days_from_user_md(
+                "- old_consolidation_window_days: 30"
+            )
+            == 7
+        )
+
+    def test_prefixed_max_facts_not_matched(self):
+        assert (
+            extract_consolidation_max_facts_from_user_md(
+                "- prev_consolidation_max_facts: 999"
+            )
+            == 50
+        )
+
+    def test_legitimate_forms_still_match_after_anchoring(self):
+        """锚定不能误伤合法形式：** 包裹 / 行首裸 key / 列表项 key 都仍生效。"""
+        # ** 包裹
+        assert (
+            extract_consolidation_active_from_user_md(
+                "- **consolidation_active**: true"
+            )
+            is True
+        )
+        # 行首裸 key（无列表前缀）
+        assert (
+            extract_consolidation_active_from_user_md("consolidation_active: true")
+            is True
+        )
+        # 列表项裸 key
+        assert (
+            extract_consolidation_active_from_user_md("- consolidation_active: true")
+            is True
+        )
+
+    def test_mixed_prefixed_and_real_line_picks_real(self):
+        """同一 USER.md 既有说明性前缀行又有真实配置行 → 只采真实行。"""
+        content = (
+            "- previous_consolidation_active: true   # 历史说明，不应生效\n"
+            "- consolidation_active: false           # 真实配置\n"
+        )
+        # 前缀行被锚定跳过；真实行 false → False
+        assert extract_consolidation_active_from_user_md(content) is False

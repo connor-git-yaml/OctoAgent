@@ -294,7 +294,12 @@ class OperatorInboxService:
         recent_results: dict[str, OperatorActionResult],
         handled_retry_items: set[str],
     ) -> list[OperatorInboxItem]:
-        tasks = await self._stores.task_store.list_tasks_by_statuses([TaskStatus.FAILED])
+        # F127：exclude_internal 排除系统占位 Task（channel=="system"）——失败的后台巩固
+        # child 不该作为"可重试失败"出现在 operator inbox 让用户人工重试（H1 后台静默 +
+        # 巩固自身 graceful degrade，不走用户 retry 路径）。
+        tasks = await self._stores.task_store.list_tasks_by_statuses(
+            [TaskStatus.FAILED], exclude_internal=True
+        )
         items: list[OperatorInboxItem] = []
         for task in tasks:
             events = await self._stores.event_store.get_events_for_task(task.task_id)

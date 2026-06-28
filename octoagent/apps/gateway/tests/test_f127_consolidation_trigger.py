@@ -635,7 +635,7 @@ class TestSystemTaskExclusion:
     """
 
     async def _create_task(
-        self, store_group, task_id: str, channel: str, *, created_at=None
+        self, store_group, task_id: str, channel: str, *, created_at=None, status=None
     ):
         from datetime import UTC, datetime
 
@@ -648,7 +648,7 @@ class TestSystemTaskExclusion:
             task_id=task_id,
             created_at=now,
             updated_at=now,
-            status=TaskStatus.SUCCEEDED,
+            status=status or TaskStatus.SUCCEEDED,
             title=f"task {task_id}",
             requester=RequesterInfo(channel=channel, sender_id="x"),
         )
@@ -716,3 +716,30 @@ class TestSystemTaskExclusion:
         ids = {t.task_id for t in tasks}
         assert "real-user-task" in ids
         assert CONSOLIDATION_ROOT_TASK_ID not in ids
+
+    async def test_list_tasks_by_statuses_exclude_internal(self, store_group):
+        """finding-C：list_tasks_by_statuses(exclude_internal=True) 排除 system——
+        watchdog/operator inbox/task journal 走此 accessor，失败/卡住的后台巩固 child 不该
+        产生用户可见 drift/retry 告警（H1）。默认忠实保留。
+        """
+        from octoagent.core.models.enums import TaskStatus
+
+        # 用户 FAILED task + 巩固 child FAILED task（channel="system"）
+        await self._create_task(
+            store_group, "user-failed", "telegram", status=TaskStatus.FAILED
+        )
+        await self._create_task(
+            store_group, "cons-child-failed", "system", status=TaskStatus.FAILED
+        )
+
+        # 默认忠实：两条都在
+        faithful = await store_group.task_store.list_tasks_by_statuses(
+            [TaskStatus.FAILED]
+        )
+        assert {"user-failed", "cons-child-failed"} <= {t.task_id for t in faithful}
+
+        # exclude_internal：只剩用户 FAILED
+        filtered = await store_group.task_store.list_tasks_by_statuses(
+            [TaskStatus.FAILED], exclude_internal=True
+        )
+        assert {t.task_id for t in filtered} == {"user-failed"}

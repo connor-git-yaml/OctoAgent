@@ -106,8 +106,10 @@ class TaskJournalService:
         drift_since_ts = now - timedelta(seconds=config.failure_window_seconds)
 
         # 1. 获取所有非终态任务（单次原子查询）
+        # F127：exclude_internal 排除系统占位 Task（channel=="system"）——后台巩固 child
+        # 不该在 Task Journal 健康视图显示为 stalled/drifted（H1）。下方 ops- 兜底保留。
         tasks = await self._store_group.task_store.list_tasks_by_statuses(
-            NON_TERMINAL_STATUSES
+            NON_TERMINAL_STATUSES, exclude_internal=True
         )
 
         running_entries: list[dict] = []

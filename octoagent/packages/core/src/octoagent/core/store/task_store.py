@@ -100,7 +100,12 @@ class SqliteTaskStore:
             ]
         return tasks
 
-    async def list_tasks_by_statuses(self, statuses: list[TaskStatus]) -> list[Task]:
+    async def list_tasks_by_statuses(
+        self,
+        statuses: list[TaskStatus],
+        *,
+        exclude_internal: bool = False,
+    ) -> list[Task]:
         """按状态集合批量查询任务（Feature 011 spec WARNING 3）
 
         单次原子 IN (?) 查询，避免多次串行查询导致的竞态窗口。
@@ -108,6 +113,10 @@ class SqliteTaskStore:
 
         Args:
             statuses: 目标状态列表（空列表返回空结果）
+            exclude_internal: True 时排除系统内部占位 Task（requester.channel=="system"，
+                含 ops-control-plane / F102 audit / F127 巩固 root+child）。**默认 False 保持
+                忠实 accessor**；watchdog 漂移检测 / operator inbox 可重试项等用户可见告警面
+                显式开启——卡住/失败的后台系统占位 Task 不该产生用户可见 drift/retry 告警（H1）。
 
         Returns:
             匹配的任务列表，按 created_at 倒序排列
@@ -123,7 +132,14 @@ class SqliteTaskStore:
             tuple(status_values),
         )
         rows = await cursor.fetchall()
-        return [self._row_to_task(row) for row in rows]
+        tasks = [self._row_to_task(row) for row in rows]
+        if exclude_internal:
+            tasks = [
+                t
+                for t in tasks
+                if t.requester.channel != SYSTEM_INTERNAL_TASK_CHANNEL
+            ]
+        return tasks
 
     async def list_child_tasks(self, parent_task_id: str) -> list[Task]:
         """查询指定父任务的所有子任务（Feature 064），按 created_at 正序"""
