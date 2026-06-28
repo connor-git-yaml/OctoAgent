@@ -743,3 +743,150 @@ class TestSystemTaskExclusion:
             [TaskStatus.FAILED], exclude_internal=True
         )
         assert {t.task_id for t in filtered} == {"user-failed"}
+
+
+class TestSystemTaskNotificationSuppression:
+    """Codex round4 finding-E：系统内部占位 Task（channel=="system"）完成/失败时**不向
+    用户推任何任务结果通知**——后台巩固全程静默（H1 / Phase B）。
+
+    根因：finding-B/C 过滤了任务列表/告警视图，但 TaskRunner._notify_completion 的
+    NotificationService 推送 + _completion_notifier 渠道扇出（Telegram/voice）+ exception
+    路径 audit_worker_error 的 WORKER_ERROR 通知仍会对 system task 触发——用户会收到
+    "记忆巩固"完成/失败推送，而任务列表又看不到该 task，自相矛盾。
+    修复：按 channel="system" 在通知路径统一抑制（事件仍 emit，仅抑制用户可见通知）。
+    """
+
+    async def _make_runner(self, store_group, *, notifier_calls, notif_calls):
+        from octoagent.gateway.services.llm_service import LLMService
+        from octoagent.gateway.services.sse_hub import SSEHub
+        from octoagent.gateway.services.task_runner import TaskRunner
+
+        async def _completion_notifier(task_id: str) -> None:
+            notifier_calls.append(task_id)
+
+        class _FakeNotificationService:
+            async def notify_task_state_change(self, **kwargs):
+                notif_calls.append(kwargs)
+
+        runner = TaskRunner(
+            store_group=store_group,
+            sse_hub=SSEHub(),
+            llm_service=LLMService(),
+            timeout_seconds=60,
+            monitor_interval_seconds=5,
+            completion_notifier=_completion_notifier,
+            notification_service=_FakeNotificationService(),
+        )
+        return runner
+
+    async def _create_task(self, store_group, task_id, channel, status=None):
+        from datetime import UTC, datetime
+
+        from octoagent.core.models.enums import TaskStatus
+        from octoagent.core.models.task import RequesterInfo
+        from octoagent.core.models.task import Task as TaskModel
+
+        now = datetime.now(UTC)
+        task = TaskModel(
+            task_id=task_id,
+            created_at=now,
+            updated_at=now,
+            status=status or TaskStatus.SUCCEEDED,
+            title=f"task {task_id}",
+            requester=RequesterInfo(channel=channel, sender_id="x"),
+        )
+        await store_group.task_store.create_task(task)
+        await store_group.conn.commit()
+        return task
+
+    async def test_system_task_suppresses_completion_notification(self, store_group):
+        """system task 完成 → 既不推 NotificationService，也不走渠道扇出。"""
+        notifier_calls: list[str] = []
+        notif_calls: list[dict] = []
+        runner = await self._make_runner(
+            store_group, notifier_calls=notifier_calls, notif_calls=notif_calls
+        )
+        await self._create_task(store_group, CONSOLIDATION_ROOT_TASK_ID, "system")
+
+        await runner._notify_completion(CONSOLIDATION_ROOT_TASK_ID)
+
+        assert notif_calls == [], "system task 不应推 NotificationService"
+        assert notifier_calls == [], "system task 不应走渠道扇出（Telegram/voice）"
+
+    async def test_regular_task_still_notifies(self, store_group):
+        """对照：普通用户 task 完成 → 正常推 NotificationService + 渠道扇出。"""
+        notifier_calls: list[str] = []
+        notif_calls: list[dict] = []
+        runner = await self._make_runner(
+            store_group, notifier_calls=notifier_calls, notif_calls=notif_calls
+        )
+        await self._create_task(store_group, "user-task-1", "telegram")
+
+        await runner._notify_completion("user-task-1")
+
+        assert len(notif_calls) == 1, "普通 task 应推 NotificationService"
+        assert notifier_calls == ["user-task-1"], "普通 task 应走渠道扇出"
+
+    async def test_audit_worker_error_suppress_emits_event_no_notify(
+        self, store_group
+    ):
+        """audit_worker_error(suppress_notification=True)：仍 emit WORKER_ERROR 事件
+        （审计/可观测 Constitution #2/#8），但不推用户通知。
+        """
+        from octoagent.core.models.enums import EventType
+        from octoagent.gateway.services.task_service import TaskService
+        from octoagent.gateway.services.worker_audit_logger import audit_worker_error
+
+        notif_calls: list[dict] = []
+
+        class _FakeNotificationService:
+            async def notify_task_state_change(self, **kwargs):
+                notif_calls.append(kwargs)
+
+        await self._create_task(store_group, "cons-child-err", "system")
+        task_service = TaskService(store_group)
+
+        event = await audit_worker_error(
+            task_service,
+            task_id="cons-child-err",
+            agent_runtime_id="rt-x",
+            error_class="RuntimeError",
+            error_summary="巩固 subagent 失败",
+            notification_service=_FakeNotificationService(),
+            task_title="记忆巩固",
+            suppress_notification=True,
+        )
+
+        # 事件仍 emit（审计不可少）
+        assert event is not None
+        events = await store_group.event_store.get_events_for_task("cons-child-err")
+        assert any(e.type == EventType.WORKER_ERROR for e in events)
+        # 但不推用户通知
+        assert notif_calls == [], "suppress 时不应推 WORKER_ERROR 通知"
+
+    async def test_audit_worker_error_no_suppress_notifies(self, store_group):
+        """对照：suppress=False（普通 worker 失败）→ 既 emit 事件又推通知。"""
+        from octoagent.gateway.services.task_service import TaskService
+        from octoagent.gateway.services.worker_audit_logger import audit_worker_error
+
+        notif_calls: list[dict] = []
+
+        class _FakeNotificationService:
+            async def notify_task_state_change(self, **kwargs):
+                notif_calls.append(kwargs)
+
+        await self._create_task(store_group, "user-worker-err", "telegram")
+        task_service = TaskService(store_group)
+
+        await audit_worker_error(
+            task_service,
+            task_id="user-worker-err",
+            agent_runtime_id="rt-y",
+            error_class="ValueError",
+            error_summary="普通 worker 失败",
+            notification_service=_FakeNotificationService(),
+            task_title="用户任务",
+            suppress_notification=False,
+        )
+
+        assert len(notif_calls) == 1, "非 suppress 应推 WORKER_ERROR 通知"

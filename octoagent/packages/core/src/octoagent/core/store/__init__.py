@@ -22,7 +22,7 @@ from .project_store import SqliteProjectStore
 from .side_effect_ledger_store import SqliteSideEffectLedgerStore
 from .sqlite_init import init_db
 from .task_job_store import SqliteTaskJobStore
-from .task_store import SqliteTaskStore
+from .task_store import SYSTEM_INTERNAL_TASK_CHANNEL, SqliteTaskStore
 from .transaction import (
     append_event_and_save_checkpoint,
     append_event_and_update_task,
@@ -139,6 +139,7 @@ async def create_store_group(
 __all__ = [
     "StoreGroup",
     "create_store_group",
+    "SYSTEM_INTERNAL_TASK_CHANNEL",
     "SqliteTaskStore",
     "SqliteTaskJobStore",
     "SqliteEventStore",

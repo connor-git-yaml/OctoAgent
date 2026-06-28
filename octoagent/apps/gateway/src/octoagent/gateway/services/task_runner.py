@@ -34,7 +34,7 @@ from octoagent.core.models import (
     SubagentDelegation,
     TaskStatus,
 )
-from octoagent.core.store import StoreGroup
+from octoagent.core.store import SYSTEM_INTERNAL_TASK_CHANNEL, StoreGroup
 from ulid import ULID
 
 from .execution_console import (
@@ -53,6 +53,9 @@ from .worker_audit_logger import (
 from .worker_runtime import WorkerCancellationRegistry, WorkerRuntimeConfig
 
 log = structlog.get_logger()
+
+# F127：系统内部占位 Task 的 channel 值（巩固/ audit / ops），用于抑制其用户可见通知。
+_SYSTEM_INTERNAL_TASK_CHANNEL = SYSTEM_INTERNAL_TASK_CHANNEL
 
 _DEFERRED_TASK_STATUSES: dict[TaskStatus, str] = {
     TaskStatus.WAITING_INPUT: "WAITING_INPUT",
@@ -1003,6 +1006,13 @@ class TaskRunner:
                 agent_runtime_id, degraded_reason = derive_agent_runtime_id(_exc_meta)
                 _task_obj = await service.get_task(task_id)
                 _task_title = (_task_obj.title if _task_obj is not None else "") or task_id
+                # F127：系统内部占位 Task（channel=="system"）失败仍 emit WORKER_ERROR 事件
+                # （审计/可观测），但不向用户推 HIGH 告警——后台巩固 subagent 失败应静默
+                # graceful degrade，不打扰用户/主 Agent（H1）。
+                _suppress_notif = (
+                    _task_obj is not None
+                    and _task_obj.requester.channel == _SYSTEM_INTERNAL_TASK_CHANNEL
+                )
                 await audit_worker_error(
                     service,
                     task_id=task_id,
@@ -1012,6 +1022,7 @@ class TaskRunner:
                     error_summary=error_summary[:200],
                     notification_service=self._notification_service,
                     task_title=_task_title,
+                    suppress_notification=_suppress_notif,
                 )
             except Exception:
                 log.warning("worker_error_audit_failed", task_id=task_id, exc_info=True)
@@ -1262,10 +1273,26 @@ class TaskRunner:
         # cleanup 内部已有 try-except 隔离，异常不影响主流程
         await self._close_subagent_session_if_needed(task_id)
 
+        # F127：系统内部占位 Task（channel=="system"：巩固 root+child / F102 audit / ops）
+        # 不向用户推任何任务结果通知——后台巩固全程静默（H1 / Phase B），且任务列表已过滤
+        # 这些 system task。这里一次性解析，同时门控 ① NotificationService 推送 ②
+        # _completion_notifier 渠道扇出（Telegram/voice 等，走 platform_registry
+        # .notify_task_completion）。解析失败降级 False（保守：宁可推也不静默非系统 task）。
+        # cleanup / 状态机不受影响。
+        _is_system_task = False
+        try:
+            _ch_task = await self._stores.task_store.get_task(task_id)
+            _is_system_task = (
+                _ch_task is not None
+                and _ch_task.requester.channel == _SYSTEM_INTERNAL_TASK_CHANNEL
+            )
+        except Exception:
+            _is_system_task = False
+
         # F101 Phase C T-C-09：FR-B6 精确一次推送
         # NotificationService 内置 (task_id, event_type) 去重（_notified_set），
         # 多次调用 _notify_completion 时只有第一次真正推送，满足 AC-B1 精确一次要求。
-        if self._notification_service is not None:
+        if self._notification_service is not None and not _is_system_task:
             try:
                 from .notification import NotificationPriority as _NotificationPriority
                 # 读取 task 获取状态和标题
@@ -1301,6 +1328,7 @@ class TaskRunner:
                         _session_id = _exec_session.session_id
                 except Exception:
                     pass  # session 不可用时降级为 None（Constitution #6）
+                # 系统 task 已在方法入口 _is_system_task 门控外层 if 提前排除（见上）。
                 await self._notification_service.notify_task_state_change(
                     task_id=task_id,
                     event_type="TASK_COMPLETED",
@@ -1320,7 +1348,8 @@ class TaskRunner:
                     error_type=type(_notif_exc).__name__,
                 )
 
-        if self._completion_notifier is None:
+        # F127：系统 task 不走渠道扇出（Telegram/voice 等），后台巩固静默（H1）。
+        if self._completion_notifier is None or _is_system_task:
             return
         try:
             await self._completion_notifier(task_id)

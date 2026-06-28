@@ -150,19 +150,24 @@ async def audit_worker_error(
     notification_service: NotificationService | None = None,
     task_title: str | None = None,
     degraded_reason: str | None = None,
+    suppress_notification: bool = False,
 ) -> Event | None:
     """Worker fatal exception 走 EventStore + 主 Agent feedback。
 
     流程：
     1. emit ``WORKER_ERROR`` 事件（取返回 event）
-    2. 如 notification_service 非 None → notify_task_state_change priority=HIGH，
-       state_transition_event_id=event.event_id（PM1 幂等闭环）
+    2. 如 notification_service 非 None 且非 suppress → notify_task_state_change
+       priority=HIGH，state_transition_event_id=event.event_id（PM1 幂等闭环）
 
     全部容错；任一步失败仅 log.warning 不抛，便于在 task_runner exception
     分支中安全调用而不破坏后续 mark_failed / _ensure_task_failed 路径。
 
     Args:
         error_summary: 已脱敏；caller 应保证 ≤200 字符（payload schema 强约束）。
+        suppress_notification: F127——True 时**仍 emit WORKER_ERROR 事件**（审计/可观测
+            不可少，Constitution #2/#8），但**跳过用户可见通知**。用于系统内部占位 Task
+            （channel=="system"：F127 后台巩固 child / F102 audit）失败时不向用户推 HIGH
+            告警（H1 后台静默）——主 Agent 不该因巩固 subagent 失败被打扰。
     """
     _assert_audit_inputs(agent_runtime_id, degraded_reason)
 
@@ -198,7 +203,11 @@ async def audit_worker_error(
         log.warning("worker_error_emit_failed", task_id=task_id, exc_info=True)
         return None
 
-    if notification_service is not None and event is not None:
+    if (
+        notification_service is not None
+        and event is not None
+        and not suppress_notification
+    ):
         try:
             await notification_service.notify_task_state_change(
                 task_id=task_id,

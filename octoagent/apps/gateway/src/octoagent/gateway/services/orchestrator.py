@@ -64,7 +64,7 @@ from octoagent.core.models import (
     WorkerReturnedPayload,
     WorkStatus,
 )
-from octoagent.core.store import StoreGroup
+from octoagent.core.store import SYSTEM_INTERNAL_TASK_CHANNEL, StoreGroup
 from octoagent.policy.models import ApprovalDecision, ApprovalStatus
 from octoagent.protocol import (
     build_cancel_message,
@@ -480,6 +480,15 @@ class OrchestratorService(A2ADispatchMixin):
             task_title = ""
             if task is not None:
                 task_title = task.title or task_id
+
+            # F127：系统内部占位 Task（channel=="system"：巩固 root+child / F102 audit /
+            # ops）状态变更不向用户推通知——后台巩固全程静默（H1），且任务列表已过滤这些
+            # system task，推 STATE_TRANSITION 通知自相矛盾。状态机/审计不受影响。
+            if (
+                task is not None
+                and task.requester.channel == SYSTEM_INTERNAL_TASK_CHANNEL
+            ):
+                return
 
             payload = {
                 "task_id": task_id,
