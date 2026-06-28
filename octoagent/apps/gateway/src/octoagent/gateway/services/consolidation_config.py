@@ -63,6 +63,7 @@ _CONSOLIDATION_ACTIVE_PATTERN = re.compile(
     \s*:\s*
     "?
     (true|false|True|False)
+    (?![\w])                        # 右边界：值后不得紧贴标识符字符（挡 truee/true_x → fallback）
     "?
     """,
     re.VERBOSE,
@@ -77,6 +78,7 @@ _CONSOLIDATION_TIME_PATTERN = re.compile(
     \s*:\s*
     "?
     (\d{1,2}:\d{2})                 # HH:MM
+    (?!\d)                          # 右边界：HH:MM 后不得紧跟数字（挡 3:300 → fallback）
     "?
     """,
     re.VERBOSE,
@@ -91,6 +93,7 @@ _CONSOLIDATION_WINDOW_PATTERN = re.compile(
     \s*:\s*
     "?
     (\d{1,4})
+    (?![\w])                        # 右边界：数字后不得紧贴标识符字符（挡 14x / 99999 → fallback）
     "?
     """,
     re.VERBOSE,
@@ -105,10 +108,32 @@ _CONSOLIDATION_MAX_FACTS_PATTERN = re.compile(
     \s*:\s*
     "?
     (\d{1,5})
+    (?![\w])                        # 右边界：数字后不得紧贴标识符字符（挡 80x / 999999 → fallback）
     "?
     """,
     re.VERBOSE,
 )
+
+
+#: 完整 HTML 注释块（含多行）匹配——Codex review（round5）：USER.md 可能用多行
+#: ``<!-- ... -->`` 包住示例配置（如注释块内部行写 ``consolidation_active: true``），
+#: 仅按行首 ``<!--`` 跳过只挡了注释**起始行**，块内部行仍被当真实配置解析 → 误开默认
+#: 关闭的破坏性巩固。先用 DOTALL 整块剥离再做行扫描，单/多行注释统一处理。
+_HTML_COMMENT_BLOCK = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def _config_lines(user_md_content: str) -> list[str]:
+    """剥离完整 HTML 注释块后按行返回（finding-G：多行注释块内的示例配置不得生效）。
+
+    先 ``re.sub`` 去掉所有 ``<!-- ... -->``（含跨行），再 splitlines。保留原"行首 <!--
+    跳过"作单行注释的二次防御（剥离后理论上不再有，但容错）。
+    """
+    stripped = _HTML_COMMENT_BLOCK.sub("", user_md_content)
+    return [
+        line
+        for line in stripped.splitlines()
+        if not line.lstrip().startswith("<!--")
+    ]
 
 
 def _validate_time_format(value: str) -> bool:
@@ -126,9 +151,7 @@ def extract_consolidation_active_from_user_md(user_md_content: str | None) -> bo
     """提取 consolidation_active；缺失/非法 fallback 到 **False**（v0.1 保守默认关）。"""
     if not user_md_content:
         return DEFAULT_CONSOLIDATION_ACTIVE
-    for line in user_md_content.splitlines():
-        if line.lstrip().startswith("<!--"):
-            continue
+    for line in _config_lines(user_md_content):
         if "consolidation_active" not in line:
             continue
         m = _CONSOLIDATION_ACTIVE_PATTERN.search(line)
@@ -152,9 +175,7 @@ def extract_consolidation_time_from_user_md(user_md_content: str | None) -> str:
     """提取 consolidation_time HH:MM；缺失/非法 fallback 到 ``03:00``。"""
     if not user_md_content:
         return DEFAULT_CONSOLIDATION_TIME
-    for line in user_md_content.splitlines():
-        if line.lstrip().startswith("<!--"):
-            continue
+    for line in _config_lines(user_md_content):
         if "consolidation_time" not in line:
             continue
         m = _CONSOLIDATION_TIME_PATTERN.search(line)
@@ -176,9 +197,7 @@ def extract_consolidation_window_days_from_user_md(user_md_content: str | None) 
     """提取 consolidation_window_days；缺失/越界 fallback 到 7（上界 365）。"""
     if not user_md_content:
         return DEFAULT_CONSOLIDATION_WINDOW_DAYS
-    for line in user_md_content.splitlines():
-        if line.lstrip().startswith("<!--"):
-            continue
+    for line in _config_lines(user_md_content):
         if "consolidation_window_days" not in line:
             continue
         m = _CONSOLIDATION_WINDOW_PATTERN.search(line)
@@ -203,9 +222,7 @@ def extract_consolidation_max_facts_from_user_md(user_md_content: str | None) ->
     """提取 consolidation_max_facts；缺失/越界 fallback 到 50（上界 1000）。"""
     if not user_md_content:
         return DEFAULT_CONSOLIDATION_MAX_FACTS
-    for line in user_md_content.splitlines():
-        if line.lstrip().startswith("<!--"):
-            continue
+    for line in _config_lines(user_md_content):
         if "consolidation_max_facts" not in line:
             continue
         m = _CONSOLIDATION_MAX_FACTS_PATTERN.search(line)

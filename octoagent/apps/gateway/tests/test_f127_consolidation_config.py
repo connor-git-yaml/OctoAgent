@@ -227,3 +227,100 @@ class TestConfigKeyAnchoring:
         )
         # 前缀行被锚定跳过；真实行 false → False
         assert extract_consolidation_active_from_user_md(content) is False
+
+
+class TestBoolRightBoundary:
+    """Codex round5 finding-F：布尔值须右边界——consolidation_active: truee / true_x 这类
+    非法值不得匹配前缀 true 误开（默认关的破坏性巩固 C4/C7）。
+    """
+
+    def test_truee_does_not_enable(self):
+        """consolidation_active: truee → 非法，fallback False（不匹配前缀 true）。"""
+        assert (
+            extract_consolidation_active_from_user_md(
+                "- consolidation_active: truee"
+            )
+            is False
+        )
+
+    def test_true_underscore_suffix_does_not_enable(self):
+        assert (
+            extract_consolidation_active_from_user_md(
+                "- consolidation_active: true_enabled"
+            )
+            is False
+        )
+
+    def test_falsey_suffix_does_not_match(self):
+        """consolidation_active: falsey → 非法，fallback False。"""
+        assert (
+            extract_consolidation_active_from_user_md(
+                "- consolidation_active: falsey"
+            )
+            is False
+        )
+
+    def test_quoted_true_still_works_with_right_boundary(self):
+        """右边界不误伤合法引号形式 "true"。"""
+        assert (
+            extract_consolidation_active_from_user_md(
+                '- consolidation_active: "true"'
+            )
+            is True
+        )
+
+    def test_time_trailing_digit_rejected(self):
+        """consolidation_time: 3:300 → HH:MM 后紧跟数字，非法 fallback 03:00。"""
+        assert (
+            extract_consolidation_time_from_user_md(
+                "- consolidation_time: 3:300"
+            )
+            == "03:00"
+        )
+
+    def test_window_trailing_word_rejected(self):
+        """consolidation_window_days: 14x → 数字后紧贴字母，非法 fallback 7。"""
+        assert (
+            extract_consolidation_window_days_from_user_md(
+                "- consolidation_window_days: 14x"
+            )
+            == 7
+        )
+
+
+class TestMultilineHtmlComment:
+    """Codex round5 finding-G：多行 HTML 注释块内的示例配置不得被当真实配置——否则
+    注释里写 consolidation_active: true 也会误开默认关闭的破坏性巩固。
+    """
+
+    def test_multiline_comment_block_config_ignored(self):
+        """多行 <!-- ... --> 块内 consolidation_active: true → 不生效（仍默认 False）。"""
+        content = (
+            "<!--\n"
+            "示例：开启巩固写\n"
+            "- consolidation_active: true\n"
+            "-->\n"
+            "# 用户实际未开启\n"
+        )
+        assert extract_consolidation_active_from_user_md(content) is False
+
+    def test_multiline_comment_then_real_config(self):
+        """注释块内 true（示例）+ 块外 false（真实）→ 取真实 False。"""
+        content = (
+            "<!-- 示例：\n"
+            "- consolidation_active: true\n"
+            "-->\n"
+            "- consolidation_active: false\n"
+        )
+        assert extract_consolidation_active_from_user_md(content) is False
+
+    def test_inline_comment_block_on_one_line_ignored(self):
+        """单行内联 <!-- consolidation_active: true --> → 不生效。"""
+        content = "<!-- consolidation_active: true 是示例 -->\n# 实际未开\n"
+        assert extract_consolidation_active_from_user_md(content) is False
+
+    def test_real_config_after_inline_comment_same_line(self):
+        """行内注释剥离后，同行真实配置仍生效（注释 + 真实在不同语义位置）。"""
+        # 注释块在前被剥离，真实 key 在注释块之后
+        content = "<!-- 旧值 true -->\n- consolidation_active: true\n"
+        assert extract_consolidation_active_from_user_md(content) is True
