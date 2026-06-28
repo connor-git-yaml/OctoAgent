@@ -77,6 +77,14 @@ CONSOLIDATION_MISFIRE_GRACE_SEC: Final[int] = 30
 #: 后台巩固 subagent worker_type（受限只读型；具体 tool_profile 收窄在 Phase C/NFR-3）
 CONSOLIDATION_WORKER_TYPE: Final[str] = "general"
 
+#: 后台巩固 subagent tool_profile（NFR-3 / C5 最小权限）。**必须是 capability_pack
+#: ._coerce_tool_profile 支持的合法值之一 {minimal, standard, privileged}**——传未知串
+#: （如曾经的 "readonly"）会被静默降级成默认 "standard"，反而把标准工具面给了后台巩固
+#: subagent，破坏只读/人审安全边界（Codex review 抓出）。"minimal" 是最受限等级
+#: （_PROFILE_LEVELS[minimal]=0 < standard < privileged），符合 spec NFR-3"只需 memory
+#: 读 + 提议写，不需 terminal/web"的受限要求。
+CONSOLIDATION_TOOL_PROFILE: Final[str] = "minimal"
+
 #: spawn 标识（审计 spawned_by + idempotency_key 前缀）
 CONSOLIDATION_SPAWNED_BY: Final[str] = "memory_consolidation"
 
@@ -266,7 +274,7 @@ class MemoryConsolidationService:
                 objective=objective,
                 worker_type=CONSOLIDATION_WORKER_TYPE,
                 target_kind=DelegationTargetKind.SUBAGENT.value,
-                tool_profile="readonly",
+                tool_profile=CONSOLIDATION_TOOL_PROFILE,
                 title="记忆巩固",
                 spawned_by=CONSOLIDATION_SPAWNED_BY,
                 callback_mode="async",
@@ -517,5 +525,6 @@ __all__ = [
     "CONSOLIDATION_ROOT_TASK_ID",
     "CONSOLIDATION_ROOT_WORK_ID",
     "CONSOLIDATION_SPAWNED_BY",
+    "CONSOLIDATION_TOOL_PROFILE",
     "MemoryConsolidationService",
 ]

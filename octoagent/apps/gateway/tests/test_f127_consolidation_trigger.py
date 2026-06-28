@@ -214,6 +214,8 @@ class TestRunConsolidation:
         assert call["callback_mode"] == "async"
         assert call["emit_audit_event"] is False
         assert call["spawned_by"] == "memory_consolidation"
+        # NFR-3：受限 tool_profile（不能是被静默降级的未知串）
+        assert call["tool_profile"] == "minimal"
         # parent_task / parent_work 是真对象（非 None）——§0.1.1 核心
         assert call["parent_task"] is not None
         assert call["parent_work"] is not None
@@ -328,6 +330,36 @@ class TestH1Boundary:
         svc = _build_service(store_group, user_md=_USER_MD_ACTIVE)
         # 构造签名里根本没有 notification_service（H1 通知走 Phase E NotificationService）
         assert not hasattr(svc, "_notification_service")
+
+
+class TestNFR3RestrictedToolProfile:
+    """NFR-3 / C5 最小权限：巩固 subagent tool_profile 必须是 capability_pack 支持的
+    合法受限值——传未知串会被 _coerce_tool_profile 静默降级成 standard，反而把标准工具面
+    给后台巩固 subagent，破坏只读/人审安全边界（Codex review 抓出 readonly 这个 bug）。
+    """
+
+    def test_consolidation_tool_profile_is_coercion_stable_and_most_restricted(self):
+        """守卫：CONSOLIDATION_TOOL_PROFILE 经 _coerce_tool_profile 不被改写（即合法），
+        且是最受限等级（level 0），不会泄漏更高权限工具面。
+        """
+        from octoagent.gateway.services.capability_pack import (
+            _PROFILE_LEVELS,
+            CapabilityPackService,
+        )
+        from octoagent.gateway.services.memory_consolidation import (
+            CONSOLIDATION_TOOL_PROFILE,
+        )
+
+        # 合法（coerce 不改写）——若传 "readonly" 会被改写成 "standard"，此断言会红
+        assert (
+            CapabilityPackService._coerce_tool_profile(CONSOLIDATION_TOOL_PROFILE)
+            == CONSOLIDATION_TOOL_PROFILE
+        )
+        # 最受限等级（minimal=0 < standard=1 < privileged=2）
+        assert CONSOLIDATION_TOOL_PROFILE in _PROFILE_LEVELS
+        assert _PROFILE_LEVELS[CONSOLIDATION_TOOL_PROFILE] == min(
+            _PROFILE_LEVELS.values()
+        )
 
 
 class TestFinding1NamespaceInjection:
