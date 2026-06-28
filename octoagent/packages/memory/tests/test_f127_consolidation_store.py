@@ -185,10 +185,13 @@ class TestAtomicClaim:
         await store.insert_candidate(_make_candidate("c1"))
         await memory_conn.commit()
         await store.claim_candidate_for_apply("c1")
-        # 模拟 MERGE commit 失败 → 回滚
-        await store.mark_candidate_status(
-            "c1", status=ConsolidationCandidateStatus.PENDING
+        # 模拟 MERGE commit 失败 → CAS 回滚（applying → pending）
+        rolled = await store.mark_candidate_status(
+            "c1",
+            status=ConsolidationCandidateStatus.PENDING,
+            expected_status=ConsolidationCandidateStatus.APPLYING,
         )
+        assert rolled is True
         await memory_conn.commit()
         got = await store.get_candidate("c1")
         assert got is not None
@@ -202,9 +205,13 @@ class TestAtomicClaim:
         await memory_conn.commit()
         await store.claim_candidate_for_apply("c1")
         decided = datetime.now(UTC)
-        await store.mark_candidate_status(
-            "c1", status=ConsolidationCandidateStatus.APPLIED, decided_at=decided
+        applied = await store.mark_candidate_status(
+            "c1",
+            status=ConsolidationCandidateStatus.APPLIED,
+            expected_status=ConsolidationCandidateStatus.APPLYING,
+            decided_at=decided,
         )
+        assert applied is True
         await memory_conn.commit()
         got = await store.get_candidate("c1")
         assert got is not None
@@ -212,21 +219,90 @@ class TestAtomicClaim:
         assert got.decided_at is not None
 
     async def test_reject_does_not_claim(self, memory_conn):
-        """reject 路径：pending → rejected 直接 mark，不经 claim。"""
+        """reject 路径：pending → rejected 直接 mark（CAS expected pending），不经 claim。"""
         store = ConsolidationStore(memory_conn)
         await store.insert_candidate(_make_candidate("c1"))
         await memory_conn.commit()
-        await store.mark_candidate_status(
+        rejected = await store.mark_candidate_status(
             "c1",
             status=ConsolidationCandidateStatus.REJECTED,
+            expected_status=ConsolidationCandidateStatus.PENDING,
             decided_at=datetime.now(UTC),
         )
+        assert rejected is True
         await memory_conn.commit()
         got = await store.get_candidate("c1")
         assert got is not None
         assert got.status == ConsolidationCandidateStatus.REJECTED
         # rejected 是终态，不能再 claim
         assert await store.claim_candidate_for_apply("c1") is False
+
+    async def test_cas_stale_reject_cannot_overwrite_applying(self, memory_conn):
+        """finding-2 核心：accept 后又来一个 stale UI 的 reject，不能把 applying 行覆写成 rejected。
+
+        场景：用户 accept → claim 抢到 applying（正在 MERGE commit）；与此同时一个旧 UI 标签
+        发来 reject（expected pending）。CAS 应拒绝（rowcount=0），状态保持 applying。
+        """
+        store = ConsolidationStore(memory_conn)
+        await store.insert_candidate(_make_candidate("c1"))
+        await memory_conn.commit()
+        # accept 抢到 applying
+        assert await store.claim_candidate_for_apply("c1") is True
+        # stale reject（以为还是 pending）→ CAS 拒绝
+        stale_ok = await store.mark_candidate_status(
+            "c1",
+            status=ConsolidationCandidateStatus.REJECTED,
+            expected_status=ConsolidationCandidateStatus.PENDING,
+        )
+        assert stale_ok is False, "stale reject 不应转换 applying 行"
+        await memory_conn.commit()
+        got = await store.get_candidate("c1")
+        assert got is not None
+        assert got.status == ConsolidationCandidateStatus.APPLYING, (
+            "applying 状态必须保持，未被 stale reject 覆写"
+        )
+
+    async def test_cas_stale_reject_cannot_overwrite_applied(self, memory_conn):
+        """finding-2：已 commit（applied 终态）的 MERGE 不能被 stale reject 翻转。"""
+        store = ConsolidationStore(memory_conn)
+        await store.insert_candidate(_make_candidate("c1"))
+        await memory_conn.commit()
+        await store.claim_candidate_for_apply("c1")
+        await store.mark_candidate_status(
+            "c1",
+            status=ConsolidationCandidateStatus.APPLIED,
+            expected_status=ConsolidationCandidateStatus.APPLYING,
+        )
+        await memory_conn.commit()
+        # stale reject 到达 → 拒绝
+        stale_ok = await store.mark_candidate_status(
+            "c1",
+            status=ConsolidationCandidateStatus.REJECTED,
+            expected_status=ConsolidationCandidateStatus.PENDING,
+        )
+        assert stale_ok is False
+        await memory_conn.commit()
+        got = await store.get_candidate("c1")
+        assert got is not None
+        assert got.status == ConsolidationCandidateStatus.APPLIED
+
+    async def test_mark_no_expected_still_returns_rowcount(self, memory_conn):
+        """expected_status=None（无条件路径）仍返回 rowcount（行存在→True，不存在→False）。"""
+        store = ConsolidationStore(memory_conn)
+        await store.insert_candidate(_make_candidate("c1"))
+        await memory_conn.commit()
+        assert (
+            await store.mark_candidate_status(
+                "c1", status=ConsolidationCandidateStatus.REJECTED
+            )
+            is True
+        )
+        assert (
+            await store.mark_candidate_status(
+                "ghost", status=ConsolidationCandidateStatus.REJECTED
+            )
+            is False
+        )
 
 
 class TestRunAudit:

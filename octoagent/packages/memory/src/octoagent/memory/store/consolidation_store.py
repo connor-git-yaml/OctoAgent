@@ -135,22 +135,54 @@ class ConsolidationStore:
         candidate_id: str,
         *,
         status: ConsolidationCandidateStatus,
+        expected_status: ConsolidationCandidateStatus | None = None,
         decided_at: datetime | None = None,
-    ) -> None:
+    ) -> bool:
         """终态/回滚状态迁移（applied / rejected，或 applying 失败回滚 pending）。
 
         与 claim 配套：claim 抢到后 MERGE commit 成功 → mark applied；失败 → mark pending
         （回滚，复用 Memory Candidates rollback 范式）。reject 路径直接 pending → rejected。
+
+        finding-2 修复（CAS 防 stale 覆写）：``expected_status`` 给定时 UPDATE 带
+        ``WHERE ... AND status = expected``，并返回 rowcount>0 让调用方感知转换是否成功。
+        若不带 expected，accept→applied 与一个 stale UI 的 reject（pending→rejected）会
+        竞态——后者只匹配 candidate_id 能把已 ``applying``/已 commit 的 MERGE 行覆写成
+        rejected（审计错乱 + 状态机破坏）。**生产路径（Phase D accept/reject）必须传
+        expected_status**；转换失败（rowcount=0）说明候选已被并发改到非预期状态，调用方
+        应放弃本次转换（不报错，按"已被处理"对待）。
+
+        Args:
+            candidate_id: 候选 id。
+            status: 目标状态。
+            expected_status: 期望的当前状态（CAS 前置条件）。None 时退化为无条件 UPDATE
+                （仅供不关心并发的内部/测试路径；生产破坏性转换必须显式传）。
+            decided_at: 决策时间（terminal 转换写）。
+
+        Returns:
+            bool：状态是否真被转换（rowcount>0）。expected_status=None 时，行存在即 True。
         """
-        await self._conn.execute(
-            "UPDATE consolidation_candidates SET status = ?, decided_at = ? "
-            "WHERE candidate_id = ?",
-            (
-                status.value,
-                decided_at.isoformat() if decided_at else None,
-                candidate_id,
-            ),
-        )
+        if expected_status is not None:
+            cursor = await self._conn.execute(
+                "UPDATE consolidation_candidates SET status = ?, decided_at = ? "
+                "WHERE candidate_id = ? AND status = ?",
+                (
+                    status.value,
+                    decided_at.isoformat() if decided_at else None,
+                    candidate_id,
+                    expected_status.value,
+                ),
+            )
+        else:
+            cursor = await self._conn.execute(
+                "UPDATE consolidation_candidates SET status = ?, decided_at = ? "
+                "WHERE candidate_id = ?",
+                (
+                    status.value,
+                    decided_at.isoformat() if decided_at else None,
+                    candidate_id,
+                ),
+            )
+        return (cursor.rowcount or 0) > 0
 
     # ============================================================
     # 运行审计 CRUD
