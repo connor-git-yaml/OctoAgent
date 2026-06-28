@@ -12,6 +12,15 @@ import aiosqlite
 from ..models.enums import TaskStatus
 from ..models.task import RequesterInfo, Task, TaskPointers
 
+#: 系统内部占位 Task 的 requester.channel 值——这些 Task（F102 _daily_routine_audit /
+#: F127 记忆巩固 root + 后台巩固 child）由系统后台流程合成，仅作 event_store FK 占位 /
+#: spawn parent，不是用户发起的真实任务。用户可见的 task 列表（/api/tasks）与 daily
+#: routine 统计必须用 ``exclude_internal=True`` 把它们排除（H1 + UI 普通用户原则：不让用户
+#: 在任务列表/日报看到系统后台占位）。child 巩固 Task 继承 parent root 的 channel="system"
+#: （capability_pack._launch_child_task 透传 parent.requester.channel），故按 channel 过滤
+#: 同时覆盖 root + 全部后代，无需逐个 id 枚举。
+SYSTEM_INTERNAL_TASK_CHANNEL: str = "system"
+
 
 class SqliteTaskStore:
     """TaskStore 的 SQLite 实现"""
@@ -61,8 +70,17 @@ class SqliteTaskStore:
             return None
         return self._row_to_task(row)
 
-    async def list_tasks(self, status: str | None = None) -> list[Task]:
-        """查询任务列表，支持按状态筛选，按 created_at 倒序"""
+    async def list_tasks(
+        self, status: str | None = None, *, exclude_internal: bool = False
+    ) -> list[Task]:
+        """查询任务列表，支持按状态筛选，按 created_at 倒序。
+
+        Args:
+            status: 可选状态过滤。
+            exclude_internal: True 时排除系统内部占位 Task（requester.channel=="system"，
+                如 F102 _daily_routine_audit / F127 巩固 root+child）。**默认 False 保持忠实
+                accessor**（与 list_works 不过滤同范式）；仅用户可见消费方（/api/tasks）显式开启。
+        """
         if status:
             cursor = await self._conn.execute(
                 "SELECT * FROM tasks WHERE status = ? ORDER BY created_at DESC",
@@ -73,7 +91,14 @@ class SqliteTaskStore:
                 "SELECT * FROM tasks ORDER BY created_at DESC"
             )
         rows = await cursor.fetchall()
-        return [self._row_to_task(row) for row in rows]
+        tasks = [self._row_to_task(row) for row in rows]
+        if exclude_internal:
+            tasks = [
+                t
+                for t in tasks
+                if t.requester.channel != SYSTEM_INTERNAL_TASK_CHANNEL
+            ]
+        return tasks
 
     async def list_tasks_by_statuses(self, statuses: list[TaskStatus]) -> list[Task]:
         """按状态集合批量查询任务（Feature 011 spec WARNING 3）
@@ -114,6 +139,8 @@ class SqliteTaskStore:
         start: datetime,
         end: datetime,
         statuses: list[TaskStatus] | None = None,
+        *,
+        exclude_internal: bool = False,
     ) -> list[Task]:
         """查询 created_at 在 [start, end) 范围内的 task 列表（F102 FR-T1）。
 
@@ -128,6 +155,10 @@ class SqliteTaskStore:
             start: 查询窗起点（UTC-aware datetime, 含）
             end: 查询窗终点（UTC-aware datetime, 不含）
             statuses: 可选状态过滤；None 时返回时间窗内全部 task
+            exclude_internal: True 时排除系统内部占位 Task（requester.channel=="system"）。
+                **默认 False 保持忠实 accessor**；daily routine 统计显式开启，避免把 F102
+                audit 占位 / F127 巩固 root+child（深夜触发可能落在统计窗内）计入用户 worker
+                数与日报。
 
         Returns:
             按 created_at 倒序排列的 Task 列表（与 list_tasks 保持一致）
@@ -170,7 +201,14 @@ class SqliteTaskStore:
                 (start_iso, end_iso, *status_values),
             )
         rows = await cursor.fetchall()
-        return [self._row_to_task(row) for row in rows]
+        tasks = [self._row_to_task(row) for row in rows]
+        if exclude_internal:
+            tasks = [
+                t
+                for t in tasks
+                if t.requester.channel != SYSTEM_INTERNAL_TASK_CHANNEL
+            ]
+        return tasks
 
     async def update_task_status(
         self,

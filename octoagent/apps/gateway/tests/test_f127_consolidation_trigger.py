@@ -303,6 +303,78 @@ class TestRunConsolidation:
         await first
         assert svc._running is False
 
+    async def test_active_child_work_skips_cross_tick(self, store_group):
+        """FR-A5 跨 tick 补强（Codex review）：root Work 下存在非终态 child Work →
+        即便进程内 _running=False（新 tick / 进程重启）也跳过，不并行起第二个巩固。
+
+        模拟：进程重启后 _running 丢失，但上一轮巩固 child Work 仍 ASSIGNED（非终态）。
+        """
+        from octoagent.core.models.delegation import (
+            DelegationTargetKind,
+            Work,
+            WorkStatus,
+        )
+
+        plane = _FakePlane()
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)
+        # ensure root 就位
+        _, root_work = await svc._ensure_consolidation_root()
+        # 注入一个非终态 child Work（上一轮巩固仍在跑）
+        active_child = Work(
+            work_id="cons-active-child",
+            task_id="cons-active-child-task",
+            parent_work_id=root_work.work_id,
+            title="上一轮巩固 child",
+            status=WorkStatus.ASSIGNED,  # 非终态
+            target_kind=DelegationTargetKind.SUBAGENT,
+        )
+        await store_group.work_store.save_work(active_child)
+        await store_group.conn.commit()
+
+        # _running 默认 False（模拟新 tick / 进程重启）
+        assert svc._running is False
+        await svc._run_consolidation()
+
+        # 不 spawn（持久态 child 拦下）
+        assert plane.calls == []
+        skipped = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
+        )
+        assert len(skipped) == 1
+        assert skipped[0].payload["reason"] == "already_running"
+
+    async def test_terminal_child_work_allows_new_run(self, store_group):
+        """对照：root Work 下 child 全部终态（上一轮巩固已完成）→ 允许派新一轮。"""
+        from octoagent.core.models.delegation import (
+            DelegationTargetKind,
+            Work,
+            WorkStatus,
+        )
+
+        plane = _FakePlane(
+            result=SpawnChildResult(status="written", task_id="child-new")
+        )
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)
+        _, root_work = await svc._ensure_consolidation_root()
+        done_child = Work(
+            work_id="cons-done-child",
+            task_id="cons-done-child-task",
+            parent_work_id=root_work.work_id,
+            title="上一轮巩固已完成",
+            status=WorkStatus.SUCCEEDED,  # 终态
+            target_kind=DelegationTargetKind.SUBAGENT,
+        )
+        await store_group.work_store.save_work(done_child)
+        await store_group.conn.commit()
+
+        await svc._run_consolidation()
+        # 终态 child 不拦，正常派新一轮
+        assert len(plane.calls) == 1
+        triggered = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED
+        )
+        assert len(triggered) == 1
+
 
 # ============================================================
 # H1 守界
@@ -548,3 +620,99 @@ class TestFinding3DescendantExclusion:
         # 巩固 root + child 都不在用户可见视图
         assert CONSOLIDATION_ROOT_WORK_ID not in visible_ids
         assert "cons-child-leak" not in visible_ids
+
+
+class TestSystemTaskExclusion:
+    """Codex 复审 finding-B：系统内部占位 Task（channel=="system"）不应泄漏进用户可见
+    任务列表（/api/tasks）与 daily routine 统计。
+
+    根因：a40e205d/finding-3 只过滤了 Work 视图；但 _ensure_consolidation_root 还建了
+    系统 root Task（spawn_child 派的 child Task 继承 channel="system"），而 /api/tasks
+    (TaskService.list_tasks) 与 daily routine (list_tasks_in_time_range) 都直读 tasks 表
+    不过滤——用户会在任务列表看到"F127 记忆巩固根任务占位"等系统条目（违 H1 + UI 普通
+    用户原则）。修复：store 两 accessor 加 exclude_internal（默认 False 保持忠实），
+    用户可见消费方显式开启，按 channel="system" 过滤同时覆盖 root + 全部 child。
+    """
+
+    async def _create_task(
+        self, store_group, task_id: str, channel: str, *, created_at=None
+    ):
+        from datetime import UTC, datetime
+
+        from octoagent.core.models.enums import TaskStatus
+        from octoagent.core.models.task import RequesterInfo
+        from octoagent.core.models.task import Task as TaskModel
+
+        now = created_at or datetime.now(UTC)
+        task = TaskModel(
+            task_id=task_id,
+            created_at=now,
+            updated_at=now,
+            status=TaskStatus.SUCCEEDED,
+            title=f"task {task_id}",
+            requester=RequesterInfo(channel=channel, sender_id="x"),
+        )
+        await store_group.task_store.create_task(task)
+        await store_group.conn.commit()
+        return task
+
+    async def test_list_tasks_exclude_internal_filters_system_channel(
+        self, store_group
+    ):
+        """store list_tasks(exclude_internal=True) 排除 channel=="system"；默认忠实保留。"""
+        await self._create_task(store_group, "user-task-1", "telegram")
+        await self._create_task(store_group, CONSOLIDATION_ROOT_TASK_ID, "system")
+        await self._create_task(store_group, "cons-child-task", "system")
+
+        # 默认忠实 accessor：全返回（含 system）
+        faithful = await store_group.task_store.list_tasks()
+        faithful_ids = {t.task_id for t in faithful}
+        assert CONSOLIDATION_ROOT_TASK_ID in faithful_ids
+        assert "cons-child-task" in faithful_ids
+
+        # exclude_internal：只剩用户 task
+        filtered = await store_group.task_store.list_tasks(exclude_internal=True)
+        filtered_ids = {t.task_id for t in filtered}
+        assert filtered_ids == {"user-task-1"}
+
+    async def test_list_tasks_in_time_range_exclude_internal(self, store_group):
+        """list_tasks_in_time_range(exclude_internal=True) 排除 system；默认保留。"""
+        from datetime import UTC, datetime, timedelta
+
+        now = datetime.now(UTC)
+        win_start = now - timedelta(hours=1)
+        win_end = now + timedelta(hours=1)
+        mid = now  # 落在窗内
+        await self._create_task(
+            store_group, "user-in-window", "web", created_at=mid
+        )
+        await self._create_task(
+            store_group, CONSOLIDATION_ROOT_TASK_ID, "system", created_at=mid
+        )
+
+        faithful = await store_group.task_store.list_tasks_in_time_range(
+            win_start, win_end
+        )
+        assert CONSOLIDATION_ROOT_TASK_ID in {t.task_id for t in faithful}
+
+        filtered = await store_group.task_store.list_tasks_in_time_range(
+            win_start, win_end, exclude_internal=True
+        )
+        assert {t.task_id for t in filtered} == {"user-in-window"}
+
+    async def test_task_service_list_tasks_excludes_consolidation_root(
+        self, store_group
+    ):
+        """集成：TaskService.list_tasks（/api/tasks 后端）不返回巩固 root Task。"""
+        from octoagent.gateway.services.task_service import TaskService
+
+        # ensure 巩固 root（channel="system"）+ 一条用户 task
+        svc = _build_service(store_group, user_md=_USER_MD_ACTIVE)
+        await svc._ensure_consolidation_root()
+        await self._create_task(store_group, "real-user-task", "telegram")
+
+        task_service = TaskService(store_group)
+        tasks = await task_service.list_tasks()
+        ids = {t.task_id for t in tasks}
+        assert "real-user-task" in ids
+        assert CONSOLIDATION_ROOT_TASK_ID not in ids

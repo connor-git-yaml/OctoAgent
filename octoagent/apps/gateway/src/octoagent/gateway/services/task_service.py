@@ -2758,8 +2758,16 @@ class TaskService:
         return {}
 
     async def list_tasks(self, status: str | None = None) -> list[Task]:
-        """查询任务列表"""
-        return await self._stores.task_store.list_tasks(status)
+        """查询任务列表（用户可见，排除系统内部占位 Task）。
+
+        F127：/api/tasks 是用户可见任务列表，必须排除系统后台占位 Task
+        （channel=="system"：F102 _daily_routine_audit / F127 巩固 root+child），
+        否则用户会在任务列表看到"F127 记忆巩固根任务占位"等系统条目（违 H1 + UI
+        普通用户原则）。store accessor 默认忠实不过滤，此处显式开 exclude_internal。
+        """
+        return await self._stores.task_store.list_tasks(
+            status, exclude_internal=True
+        )
 
     @classmethod
     async def _get_task_lock(cls, task_id: str) -> asyncio.Lock:

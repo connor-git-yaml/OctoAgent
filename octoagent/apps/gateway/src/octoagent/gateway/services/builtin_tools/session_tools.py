@@ -143,7 +143,12 @@ async def register(broker: Any, deps: ToolDeps) -> None:
     async def sessions_list(limit: int = 20, status: str = "") -> str:
         """列出最近 session/task 概览。"""
 
-        tasks = await deps.stores.task_store.list_tasks(status or None)
+        # F127：sessions.list 是 session/task 概览（web + agent_runtime 入口），排除系统
+        # 后台占位 Task（channel=="system"：F102 audit / F127 巩固 root+child），与
+        # session 投影 _AUDIT_TASK_ID 过滤同范式，不向用户/Agent 暴露系统占位条目。
+        tasks = await deps.stores.task_store.list_tasks(
+            status or None, exclude_internal=True
+        )
         payload = []
         for task in tasks[: max(1, min(limit, 50))]:
             session = (

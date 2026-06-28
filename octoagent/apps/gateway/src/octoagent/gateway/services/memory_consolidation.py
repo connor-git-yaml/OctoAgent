@@ -28,7 +28,12 @@ from typing import TYPE_CHECKING, Any, Final
 
 import structlog
 from apscheduler.triggers.cron import CronTrigger
-from octoagent.core.models.delegation import DelegationTargetKind, Work, WorkStatus
+from octoagent.core.models.delegation import (
+    WORK_TERMINAL_STATUSES,
+    DelegationTargetKind,
+    Work,
+    WorkStatus,
+)
 from octoagent.core.models.enums import ActorType, EventType, TaskStatus
 from octoagent.core.models.event import Event
 from octoagent.core.models.task import RequesterInfo
@@ -249,6 +254,19 @@ class MemoryConsolidationService:
                 logger.info("consolidation_skipped_disabled")
                 return
 
+            # FR-A5 跨 tick 单飞补强（Codex review）：进程内 _running bool 只覆盖本次
+            # orchestration tick——spawn(callback_mode="async") 返回后 finally 即复位
+            # _running，但巩固 subagent 仍在后台跑。若上一次巩固 child 未达终态时本次又触发
+            # （misfire 补跑 / 跨日 / 进程重启后 _running 丢失但 child 仍活），仅靠 bool 拦不住，
+            # 会并行起多个 subagent 处理同一批记忆（浪费 + 重复提议）。补一道**持久态**前置检查：
+            # root Work 下存在非终态 child Work → 视为"巩固进行中"，写 SKIPPED 跳过。只读检查、
+            # 不改 async 模型，与 spec FR-A5 try-check-skip 语义一致（DelegationManager capacity 仍
+            # 是兜底硬限）。查询失败时降级放行（不阻断巩固，与 list_descendant 容错一致）。
+            if await self._has_active_consolidation_child(root_work.work_id):
+                await self._emit_skipped(reason="already_running", run_id=run_id)
+                logger.info("consolidation_skipped_active_child_running")
+                return
+
             # finding-1：解析主 Agent MAIN runtime，注入其身份让巩固 subagent 经 α 共享
             # 语义读到主 Agent AGENT_PRIVATE 记忆（它要回顾/合并的目标）。找不到时降级
             # （subagent 拿不到记忆，task_runner 会写 namespaces_empty warning，不阻断）。
@@ -382,6 +400,32 @@ class MemoryConsolidationService:
                 logger.exception("consolidation_root_commit_failed")
 
         return root_task, root_work
+
+    async def _has_active_consolidation_child(self, root_work_id: str) -> bool:
+        """root Work 下是否存在非终态 child Work（FR-A5 跨 tick 单飞补强）。
+
+        进程内 ``_running`` bool 只覆盖本次 orchestration tick；spawn(async) 返回后
+        subagent 仍在后台跑，跨 tick（misfire 补跑 / 跨日 / 进程重启 _running 丢失）只靠
+        bool 拦不住并行巩固。本检查用**持久态** child Work 状态判定"巩固进行中"。
+
+        Args:
+            root_work_id: 巩固 root Work id（child 的 parent_work_id）。
+
+        Returns:
+            True：存在至少一个非终态（非 WORK_TERMINAL_STATUSES）child Work → 应跳过。
+            False：无 child 或全部终态 → 可派新一轮。查询异常时返回 False（降级放行，
+            不阻断巩固——DelegationManager capacity 仍是兜底硬限）。
+        """
+        try:
+            children = await self._work_store.list_works(
+                parent_work_id=root_work_id
+            )
+        except Exception:
+            logger.exception("consolidation_active_child_check_failed")
+            return False
+        return any(
+            child.status not in WORK_TERMINAL_STATUSES for child in children
+        )
 
     # ============================================================
     # 主 Agent runtime/scope 定位（finding-1：注入巩固目标记忆 scope）

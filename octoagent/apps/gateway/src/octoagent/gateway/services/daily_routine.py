@@ -239,8 +239,11 @@ class DailyRoutineService:
             yesterday_start_utc, yesterday_end_utc, yesterday_date_str = (
                 self._compute_yesterday_range_utc(run_started_ts, effective_tz)
             )
+            # F127：排除系统内部占位 Task（channel=="system"）——F102 自身 audit 占位
+            # 与 F127 巩固 root+child（深夜触发可能落在昨日窗内）都不该计入用户 worker
+            # 数 / 日报统计。store 默认忠实不过滤，此处显式开 exclude_internal。
             tasks = await self._task_store.list_tasks_in_time_range(
-                yesterday_start_utc, yesterday_end_utc
+                yesterday_start_utc, yesterday_end_utc, exclude_internal=True
             )
 
             # Step 5：空数据（SD-8）直接写 ROUTINE_COMPLETED 不推送
