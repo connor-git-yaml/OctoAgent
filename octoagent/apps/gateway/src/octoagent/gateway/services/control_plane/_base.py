@@ -48,6 +48,41 @@ log = structlog.get_logger()
 SYSTEM_INTERNAL_WORK_IDS: frozenset[str] = frozenset({"_memory_consolidation_root_work"})
 
 
+def expand_internal_work_ids(works: Any) -> set[str]:
+    """计算系统内部 Work 集合 + 它们的全部后代 work_id（finding-3）。
+
+    finding-3 根因：巩固 subagent 的 child Work ``parent_work_id`` = 巩固 root Work
+    （``_memory_consolidation_root_work``）。仅按 ``SYSTEM_INTERNAL_WORK_IDS`` 过滤 root 本身
+    会让这些 child Work 作为"孤儿内部任务"泄漏进用户可见委派/Worker 视图（它们既非用户
+    委派，也不该让用户看到系统后台巩固的执行步进，违 H1 + UI 普通用户原则）。
+
+    本函数从给定 works 集合用 BFS 把 ``SYSTEM_INTERNAL_WORK_IDS`` 的所有后代一并纳入排除
+    集，作为两处过滤（get_delegation_document / get_worker_profiles_document）的单一事实源。
+
+    Args:
+        works: 可迭代的 Work 对象（duck-typed：需 ``.work_id`` / ``.parent_work_id``）。
+
+    Returns:
+        set[str]：应从用户可见视图排除的 work_id 全集（root + 全部后代）。
+    """
+    children_by_parent: dict[str, list[str]] = {}
+    for work in works:
+        parent_id = getattr(work, "parent_work_id", None)
+        if parent_id:
+            children_by_parent.setdefault(parent_id, []).append(
+                getattr(work, "work_id", "")
+            )
+    excluded: set[str] = set(SYSTEM_INTERNAL_WORK_IDS)
+    pending: list[str] = list(SYSTEM_INTERNAL_WORK_IDS)
+    while pending:
+        current = pending.pop()
+        for child_id in children_by_parent.get(current, []):
+            if child_id and child_id not in excluded:
+                excluded.add(child_id)
+                pending.append(child_id)
+    return excluded
+
+
 class ControlPlaneActionError(RuntimeError):
     """control-plane 动作执行异常。"""
 

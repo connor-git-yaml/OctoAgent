@@ -56,10 +56,10 @@ from ulid import ULID
 from ..agent_decision import build_behavior_system_summary, is_worker_behavior_profile
 from ..task_service import TaskService
 from ._base import (
-    SYSTEM_INTERNAL_WORK_IDS,
     ControlPlaneActionError,
     ControlPlaneContext,
     DomainServiceBase,
+    expand_internal_work_ids,
 )
 from .worker_profile_ops import WorkerProfileOpsMixin
 
@@ -119,10 +119,12 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         project_works: list[Work] = []
         if self._ctx.delegation_plane_service is not None:
             project_works = await self._ctx.delegation_plane_service.list_works()
-            # F127：排除系统内部占位 Work（巩固 root Work 不代表用户委派，不应污染
-            # Worker profile 的 dynamic_context / active_project 解析）。
+            # F127：排除系统内部占位 Work 及其全部后代（巩固 root Work 及其 child Work
+            # 都不代表用户委派，不应污染 Worker profile 的 dynamic_context / active_project
+            # 解析）。finding-3：仅过滤 root 会让 child Work 泄漏，须连后代一并排除。
+            excluded_work_ids = expand_internal_work_ids(project_works)
             project_works = [
-                w for w in project_works if w.work_id not in SYSTEM_INTERNAL_WORK_IDS
+                w for w in project_works if w.work_id not in excluded_work_ids
             ]
         worker_profile_ids = {profile.profile_id for profile in stored_profiles}
         works_by_profile_id: dict[str, list[Work]] = defaultdict(list)

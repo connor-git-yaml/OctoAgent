@@ -413,3 +413,106 @@ class TestSystemWorkExclusion:
         )
 
         assert CONSOLIDATION_ROOT_WORK_ID in SYSTEM_INTERNAL_WORK_IDS
+
+
+class TestFinding3DescendantExclusion:
+    """finding-3：巩固 subagent 的 **child** Work（parent_work_id=巩固 root）也是系统内部
+    执行步进，必须连同 root 的全部后代一并从用户可见委派/Worker 视图排除。
+
+    根因：a40e205d 只过滤 root 本身（SYSTEM_INTERNAL_WORK_IDS 字面比较），但
+    spawn_child 建的 child Work parent_work_id=巩固 root → 这些 child Work 会以
+    "孤儿内部任务"泄漏（既非用户委派，又让普通用户看到后台巩固步进，违 H1 + UI 普通
+    用户原则）。expand_internal_work_ids 用 BFS 把后代一并纳入排除集。
+    """
+
+    def _make_work(
+        self, work_id: str, parent_work_id: str | None = None
+    ):
+        from octoagent.core.models.delegation import (
+            DelegationTargetKind,
+            Work,
+            WorkStatus,
+        )
+
+        return Work(
+            work_id=work_id,
+            task_id=f"task-{work_id}",
+            parent_work_id=parent_work_id,
+            title=f"work {work_id}",
+            status=WorkStatus.CREATED,
+            target_kind=DelegationTargetKind.SUBAGENT,
+        )
+
+    def test_expand_includes_multi_level_descendants(self):
+        """BFS：root → child → grandchild 全部纳入排除集；无关用户 Work 不受影响。"""
+        from octoagent.gateway.services.control_plane._base import (
+            expand_internal_work_ids,
+        )
+
+        works = [
+            self._make_work(CONSOLIDATION_ROOT_WORK_ID),  # 系统 root
+            self._make_work("cons-child-1", parent_work_id=CONSOLIDATION_ROOT_WORK_ID),
+            self._make_work("cons-grandchild-1", parent_work_id="cons-child-1"),
+            # 无关的用户委派树（不应被排除）
+            self._make_work("user-root"),
+            self._make_work("user-child", parent_work_id="user-root"),
+        ]
+        excluded = expand_internal_work_ids(works)
+        assert CONSOLIDATION_ROOT_WORK_ID in excluded
+        assert "cons-child-1" in excluded
+        assert "cons-grandchild-1" in excluded
+        # 用户委派树不能被误排
+        assert "user-root" not in excluded
+        assert "user-child" not in excluded
+
+    def test_expand_handles_empty_and_root_only(self):
+        """边界：空 works → 仅 root 字面集；只有 root 无 child → 仅 root。"""
+        from octoagent.gateway.services.control_plane._base import (
+            SYSTEM_INTERNAL_WORK_IDS,
+            expand_internal_work_ids,
+        )
+
+        assert expand_internal_work_ids([]) == set(SYSTEM_INTERNAL_WORK_IDS)
+        assert expand_internal_work_ids(
+            [self._make_work(CONSOLIDATION_ROOT_WORK_ID)]
+        ) == set(SYSTEM_INTERNAL_WORK_IDS)
+
+    async def test_delegation_document_excludes_consolidation_child(
+        self, store_group
+    ):
+        """集成：get_delegation_document 不暴露巩固 root 的 child Work（finding-3）。
+
+        构造 [巩固 root, 巩固 child, 用户委派 Work] 三条，验证返回 document 的 works
+        只含用户委派 Work——root + child 都被排除（不是仅排除 root）。
+        """
+        from pathlib import Path
+
+        from octoagent.gateway.services.control_plane._base import (
+            ControlPlaneContext,
+        )
+        from octoagent.gateway.services.control_plane.work_service import (
+            WorkDomainService,
+        )
+
+        root_work = self._make_work(CONSOLIDATION_ROOT_WORK_ID)
+        child_work = self._make_work(
+            "cons-child-leak", parent_work_id=CONSOLIDATION_ROOT_WORK_ID
+        )
+        user_work = self._make_work("user-delegation-1")
+
+        class _FakeDelegationPlane:
+            async def list_works(self, *, task_id: str | None = None):
+                return [root_work, child_work, user_work]
+
+        ctx = ControlPlaneContext(
+            project_root=Path("/tmp/f127-finding3"),
+            store_group=store_group,
+            delegation_plane_service=_FakeDelegationPlane(),
+        )
+        svc = WorkDomainService(ctx)
+        doc = await svc.get_delegation_document()
+        visible_ids = {item.work_id for item in doc.works}
+        assert visible_ids == {"user-delegation-1"}
+        # 巩固 root + child 都不在用户可见视图
+        assert CONSOLIDATION_ROOT_WORK_ID not in visible_ids
+        assert "cons-child-leak" not in visible_ids
