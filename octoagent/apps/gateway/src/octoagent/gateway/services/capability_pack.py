@@ -1080,12 +1080,36 @@ class CapabilityPackService(
                 caller_agent_runtime_id = exec_ctx.agent_runtime_id or ""
             except RuntimeError:
                 pass
+            # F127 Phase A finding-1 修复：后台合成 spawn（cron 记忆巩固）没有当前执行
+            # 上下文 → exec_ctx 拿不到 caller_agent_runtime_id → 下游 task_runner 把
+            # caller 当 "<unknown>" 跳过 AGENT_PRIVATE namespace 查询 → 巩固 subagent
+            # 读不到它要合并的目标记忆（fail-closed）。修复：当 exec_ctx 缺失时，允许调用方
+            # 经 extra_control_metadata 显式注入目标 agent 的 runtime/project（如 F127 注入
+            # 主 Agent MAIN runtime）。**仅在 exec_ctx 缺失时生效**——绝不覆盖真实执行上下文
+            # 派生的 caller（避免普通委托被注入伪造 caller）。namespace 查询仍单一走
+            # task_runner._emit_subagent_delegation_init_if_needed（零并行路径）。
+            explicit_caller_runtime = ""
+            explicit_caller_project = ""
+            if extra_control_metadata:
+                explicit_caller_runtime = str(
+                    extra_control_metadata.get(
+                        "synthetic_caller_agent_runtime_id", ""
+                    )
+                    or ""
+                )
+                explicit_caller_project = str(
+                    extra_control_metadata.get("synthetic_caller_project_id", "") or ""
+                )
+            if not caller_agent_runtime_id and explicit_caller_runtime:
+                caller_agent_runtime_id = explicit_caller_runtime
             base_control_metadata["__subagent_delegation_init__"] = {
                 "delegation_id": str(ULID()),
                 "parent_task_id": parent_task.task_id,
                 "parent_work_id": parent_work.work_id,
                 "caller_agent_runtime_id": caller_agent_runtime_id,
-                "caller_project_id": parent_work.project_id or "",
+                "caller_project_id": (
+                    parent_work.project_id or explicit_caller_project or ""
+                ),
                 "spawned_by": spawned_by,
             }
 

@@ -1536,6 +1536,9 @@ class OctoHarness:
                 event_store=store_group.event_store,
                 snapshot_store=app.state.snapshot_store,
                 delegation_plane=app.state.delegation_plane_service,
+                # finding-1：定位主 Agent MAIN runtime → 注入其 AGENT_PRIVATE namespace
+                # scope 给后台巩固 subagent（cron 无执行上下文）。
+                agent_context_store=store_group.agent_context_store,
             )
             app.state.memory_consolidation_service = _memory_consolidation
             await _memory_consolidation.startup()

@@ -109,6 +109,7 @@ def _build_service(
     *,
     user_md: str = "",
     plane: _FakePlane | None = None,
+    agent_context_store: Any = None,
 ) -> MemoryConsolidationService:
     return MemoryConsolidationService(
         scheduler=_FakeScheduler(),
@@ -117,6 +118,7 @@ def _build_service(
         event_store=store_group.event_store,
         snapshot_store=_FakeSnapshotStore(user_md=user_md),
         delegation_plane=plane or _FakePlane(),  # type: ignore[arg-type]
+        agent_context_store=agent_context_store,
     )
 
 
@@ -326,6 +328,75 @@ class TestH1Boundary:
         svc = _build_service(store_group, user_md=_USER_MD_ACTIVE)
         # 构造签名里根本没有 notification_service（H1 通知走 Phase E NotificationService）
         assert not hasattr(svc, "_notification_service")
+
+
+class TestFinding1NamespaceInjection:
+    """finding-1：cron 后台合成 spawn 无执行上下文，须显式注入主 Agent MAIN runtime
+    身份，让巩固 subagent 经 α 共享读到主 Agent AGENT_PRIVATE 记忆（要合并的目标）。
+
+    本层验证 service 编排：解析 MAIN runtime → 经 extra_control_metadata 注入
+    synthetic_caller_agent_runtime_id。capability_pack 注入回退 + task_runner namespace
+    查询的端到端证明在 services/test_capability_pack_phase_d.py（test_f127_synthetic_*）。
+    """
+
+    async def _make_main_runtime(self, store_group: StoreGroup):
+        from octoagent.core.models.agent_context import (
+            AgentRuntime,
+            AgentRuntimeRole,
+        )
+
+        rt = AgentRuntime(
+            agent_runtime_id="main-runtime-f127",
+            project_id="proj-main-f127",
+            role=AgentRuntimeRole.MAIN,
+        )
+        await store_group.agent_context_store.save_agent_runtime(rt)
+        await store_group.conn.commit()
+        return rt
+
+    async def test_main_runtime_injected_into_spawn(self, store_group):
+        """active MAIN runtime 存在 → spawn_child 收到 synthetic_caller_agent_runtime_id。"""
+        await self._make_main_runtime(store_group)
+        plane = _FakePlane()
+        svc = _build_service(
+            store_group,
+            user_md=_USER_MD_ACTIVE,
+            plane=plane,
+            agent_context_store=store_group.agent_context_store,
+        )
+        await svc._run_consolidation()
+        assert len(plane.calls) == 1
+        extra = plane.calls[0].get("extra_control_metadata")
+        assert extra is not None, "应注入 extra_control_metadata"
+        assert extra["synthetic_caller_agent_runtime_id"] == "main-runtime-f127"
+        assert extra["synthetic_caller_project_id"] == "proj-main-f127"
+
+    async def test_no_main_runtime_degrades_no_injection(self, store_group):
+        """无 MAIN runtime（全新实例）→ 不注入（降级），spawn 仍进行（subagent 拿不到记忆但不崩）。"""
+        plane = _FakePlane()
+        svc = _build_service(
+            store_group,
+            user_md=_USER_MD_ACTIVE,
+            plane=plane,
+            agent_context_store=store_group.agent_context_store,
+        )
+        await svc._run_consolidation()
+        assert len(plane.calls) == 1
+        # 无 runtime → extra_control_metadata 为 None（spawn_child 默认）
+        assert plane.calls[0].get("extra_control_metadata") is None
+
+    async def test_no_agent_context_store_degrades_gracefully(self, store_group):
+        """agent_context_store 未注入（None）→ _resolve_main_agent_runtime 返回空，不崩。"""
+        plane = _FakePlane()
+        svc = _build_service(
+            store_group,
+            user_md=_USER_MD_ACTIVE,
+            plane=plane,
+            agent_context_store=None,
+        )
+        await svc._run_consolidation()
+        assert len(plane.calls) == 1
+        assert plane.calls[0].get("extra_control_metadata") is None
 
 
 class TestSystemWorkExclusion:

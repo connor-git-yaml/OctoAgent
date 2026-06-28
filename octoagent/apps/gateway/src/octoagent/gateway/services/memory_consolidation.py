@@ -42,6 +42,7 @@ from ulid import ULID
 from .consolidation_config import ConsolidationConfig
 
 if TYPE_CHECKING:
+    from octoagent.core.store.agent_context_store import SqliteAgentContextStore
     from octoagent.core.store.event_store import SqliteEventStore
     from octoagent.core.store.snapshot_store import SnapshotStore
     from octoagent.core.store.task_store import SqliteTaskStore
@@ -101,6 +102,7 @@ class MemoryConsolidationService:
         event_store: SqliteEventStore,
         snapshot_store: SnapshotStore,
         delegation_plane: DelegationPlaneService,
+        agent_context_store: SqliteAgentContextStore | None = None,
     ) -> None:
         self._scheduler = scheduler
         self._task_store = task_store
@@ -108,6 +110,10 @@ class MemoryConsolidationService:
         self._event_store = event_store
         self._snapshot_store = snapshot_store
         self._delegation_plane = delegation_plane
+        # finding-1：定位主 Agent MAIN runtime 以注入其 AGENT_PRIVATE namespace scope
+        # 给后台巩固 subagent（cron 无执行上下文，不能靠 exec_ctx 派生 caller）。
+        # None 时降级（subagent 拿不到目标记忆，写 warning，不阻断 spawn——graceful）。
+        self._agent_context_store = agent_context_store
         self._started: bool = False
         self._cron_registered: bool = False
         # FR-A5 并发单飞标志（进程内，单 event loop 协作式）。check-then-set 在第一个
@@ -235,6 +241,20 @@ class MemoryConsolidationService:
                 logger.info("consolidation_skipped_disabled")
                 return
 
+            # finding-1：解析主 Agent MAIN runtime，注入其身份让巩固 subagent 经 α 共享
+            # 语义读到主 Agent AGENT_PRIVATE 记忆（它要回顾/合并的目标）。找不到时降级
+            # （subagent 拿不到记忆，task_runner 会写 namespaces_empty warning，不阻断）。
+            main_runtime_id, main_project_id = await self._resolve_main_agent_runtime()
+            extra_control_metadata: dict[str, Any] = {}
+            if main_runtime_id:
+                extra_control_metadata["synthetic_caller_agent_runtime_id"] = (
+                    main_runtime_id
+                )
+                if main_project_id:
+                    extra_control_metadata["synthetic_caller_project_id"] = (
+                        main_project_id
+                    )
+
             # FR-A4：spawn 后台 subagent
             objective = (
                 "[F127 sleep-time consolidation] 后台记忆巩固占位任务（Phase B）。"
@@ -252,6 +272,7 @@ class MemoryConsolidationService:
                 callback_mode="async",
                 emit_audit_event=False,
                 audit_task_fallback=CONSOLIDATION_ROOT_TASK_ID,
+                extra_control_metadata=extra_control_metadata or None,
             )
 
             if result.status == "rejected":
@@ -353,6 +374,53 @@ class MemoryConsolidationService:
                 logger.exception("consolidation_root_commit_failed")
 
         return root_task, root_work
+
+    # ============================================================
+    # 主 Agent runtime/scope 定位（finding-1：注入巩固目标记忆 scope）
+    # ============================================================
+
+    async def _resolve_main_agent_runtime(self) -> tuple[str, str]:
+        """定位最近活跃的主 Agent MAIN runtime（id, project_id）。
+
+        finding-1 根因：cron 后台合成 spawn **没有当前执行上下文**——``_launch_child_task``
+        从 ``get_current_execution_context()`` 取不到 caller_agent_runtime_id → 下游
+        ``task_runner`` 把 caller 当 ``<unknown>`` 跳过 AGENT_PRIVATE namespace 查询 →
+        巩固 subagent **读不到它要合并的目标记忆**（α 共享语义 fail-closed）。
+
+        修复策略：F127 v0.1 巩固范围 = 主 Agent AGENT_PRIVATE（spec §约束，跨 project/
+        Worker 私有留后续）。这里查最近活跃的 MAIN runtime（``list_agent_runtimes`` 按
+        updated_at DESC，无需 project_id——系统级 cron 不绑定单一 project），把它的
+        runtime_id 经 ``synthetic_caller_agent_runtime_id`` 注入，让 task_runner 用现有
+        namespace 查询路径解析其 AGENT_PRIVATE namespace（**零并行路径**，复用 α 语义）。
+
+        Returns:
+            (agent_runtime_id, project_id)：找不到时返回 ("", "")（调用方降级，不阻断）。
+        """
+        if self._agent_context_store is None:
+            return "", ""
+        try:
+            from octoagent.core.models.agent_context import (
+                AgentRuntimeRole,
+                AgentRuntimeStatus,
+            )
+
+            runtimes = await self._agent_context_store.list_agent_runtimes(
+                role=AgentRuntimeRole.MAIN,
+            )
+        except Exception:
+            logger.exception("consolidation_main_runtime_lookup_failed")
+            return "", ""
+        # list_agent_runtimes 已按 updated_at DESC 排序；优先 active，无 active 退最近一条。
+        active = [
+            r
+            for r in runtimes
+            if getattr(r, "status", None) == AgentRuntimeStatus.ACTIVE
+        ]
+        chosen = active[0] if active else (runtimes[0] if runtimes else None)
+        if chosen is None:
+            logger.warning("consolidation_no_main_runtime_found")
+            return "", ""
+        return chosen.agent_runtime_id, chosen.project_id
 
     # ============================================================
     # 配置读取（USER.md）

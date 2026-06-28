@@ -417,3 +417,111 @@ async def test_subagent_spawn_surface_fallback_to_channel() -> None:
     assert hints["surface"] == "telegram", (
         f"surface 应 fallback 到 parent_task.requester.channel 'telegram'，实际: {hints['surface']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# F127 finding-1: synthetic caller 注入回退（后台合成 spawn 无 exec_ctx）
+# ---------------------------------------------------------------------------
+
+
+async def _capture_subagent_init(
+    *,
+    exec_ctx_side: Any,
+    extra_control_metadata: dict[str, Any] | None,
+    parent_project_id: str = "proj-d-001",
+) -> dict[str, Any]:
+    """跑 _launch_child_task(target_kind=subagent) 并捕获 __subagent_delegation_init__。"""
+    import copy
+
+    runner = _make_task_runner_mock()
+    captured: list[NormalizedMessage] = []
+
+    async def _fake_launch(msg: NormalizedMessage) -> tuple[str, bool]:
+        captured.append(
+            msg.model_copy(
+                update={"control_metadata": copy.deepcopy(msg.control_metadata)}
+            )
+        )
+        return "child-task-f127", True
+
+    runner.launch_child_task = _fake_launch
+    cap = _make_cap_pack(runner)
+
+    patch_kwargs: dict[str, Any] = {}
+    if isinstance(exec_ctx_side, BaseException):
+        patch_kwargs["side_effect"] = exec_ctx_side
+    else:
+        patch_kwargs["return_value"] = exec_ctx_side
+
+    with patch(
+        "octoagent.gateway.services.capability_pack.get_current_execution_context",
+        **patch_kwargs,
+    ):
+        await cap._launch_child_task(
+            parent_task=_make_parent_task(),
+            parent_work=_make_parent_work(project_id=parent_project_id),
+            objective="f127 consolidation spawn",
+            worker_type="general",
+            target_kind=DelegationTargetKind.SUBAGENT.value,
+            tool_profile="readonly",
+            title="记忆巩固",
+            spawned_by="memory_consolidation",
+            extra_control_metadata=extra_control_metadata,
+        )
+
+    assert len(captured) == 1
+    return captured[0].control_metadata["__subagent_delegation_init__"]
+
+
+@pytest.mark.asyncio
+async def test_f127_synthetic_caller_runtime_injected_when_no_exec_ctx() -> None:
+    """finding-1: 无执行上下文（cron 后台合成 spawn）时，synthetic_caller_agent_runtime_id
+    经 extra_control_metadata 注入 → __subagent_delegation_init__.caller_agent_runtime_id
+    被填充（下游 task_runner 据此查 AGENT_PRIVATE namespace → 巩固 subagent 读到目标记忆）。
+    """
+    init = await _capture_subagent_init(
+        exec_ctx_side=RuntimeError("no execution context"),
+        extra_control_metadata={
+            "synthetic_caller_agent_runtime_id": "main-runtime-f127",
+            "synthetic_caller_project_id": "proj-main-f127",
+        },
+        parent_project_id="",  # root work 无 project（系统占位）
+    )
+    assert init["caller_agent_runtime_id"] == "main-runtime-f127", (
+        "无 exec_ctx 时应回退用 synthetic_caller_agent_runtime_id"
+    )
+    # parent_work.project_id 为空 → 回退用 synthetic_caller_project_id
+    assert init["caller_project_id"] == "proj-main-f127"
+
+
+@pytest.mark.asyncio
+async def test_f127_synthetic_caller_does_not_override_real_exec_ctx() -> None:
+    """finding-1 红线: 有真实执行上下文时，synthetic 注入**绝不**覆盖真实 caller_agent_runtime_id
+    （防普通委托被伪造 caller 注入——synthetic 仅在 exec_ctx 缺失时生效）。
+    """
+    mock_exec_ctx = MagicMock()
+    mock_exec_ctx.agent_runtime_id = "real-caller-runtime"
+    mock_exec_ctx.runtime_context = None
+    init = await _capture_subagent_init(
+        exec_ctx_side=mock_exec_ctx,
+        extra_control_metadata={
+            "synthetic_caller_agent_runtime_id": "ATTACKER-runtime",
+        },
+    )
+    assert init["caller_agent_runtime_id"] == "real-caller-runtime", (
+        "真实 exec_ctx caller 必须优先，synthetic 不得覆盖（防伪造）"
+    )
+
+
+@pytest.mark.asyncio
+async def test_f127_no_synthetic_no_exec_ctx_stays_empty() -> None:
+    """finding-1 降级: 既无 exec_ctx 又无 synthetic 注入 → caller_agent_runtime_id 空
+    （baseline 行为保留，下游写 namespaces_empty warning 不阻断）。
+    """
+    init = await _capture_subagent_init(
+        exec_ctx_side=RuntimeError("no execution context"),
+        extra_control_metadata=None,
+        parent_project_id="",
+    )
+    assert init["caller_agent_runtime_id"] == ""
+    assert init["caller_project_id"] == ""
