@@ -501,3 +501,66 @@ class TestSensitiveHumanReview:
         assert result.ok is True
         for sid in source_ids:
             assert await _sor_status(memory_conn, sid) == "superseded"
+
+
+# ============================================================
+# 边界：MERGE 目标 subject_key 与既有 CURRENT 冲突 → 优雅回滚（C4 安全不破）
+# ============================================================
+
+
+class TestCommitCollisionGracefulRollback:
+    """LLM 选的合并 subject_key 撞已有 CURRENT 事实（UNIQUE idx_memory_sor_current_unique）→
+    commit_memory 报 UNIQUE → approval 回滚 APPLYING→PENDING（候选可重审，无数据损坏）。
+
+    根因：write_service MERGE commit 先 _commit_add（插新 CURRENT）再标源 SUPERSEDED；
+    若新事实 subject_key 撞一个仍 CURRENT 的事实（含某个源事实自身的 key），插入违 UNIQUE。
+    v0.1 默认路径不踩此坑（发现端 subject_key 缺省兜底用 consolidated_{首源id} 新 key），
+    本测试覆盖 LLM 显式复用源 key 的对抗场景——核心断言：**C4 安全不破**（源不被 supersede，
+    候选回 PENDING 可重审，不静默损坏记忆）。
+    """
+
+    async def test_subject_key_collision_rolls_back_to_pending_no_corruption(
+        self, memory_conn, store_group
+    ):
+        memory = MemoryService(memory_conn)
+        # 源事实 A/B，且 LLM 把合并 subject_key 设成 A 的 key（撞 A 仍 CURRENT）
+        id_a = await _seed_fact(memory, subject_key="tz", content="时区 上海")
+        id_b = await _seed_fact(memory, subject_key="tz.alt", content="时区 Asia/Shanghai")
+        consol_store = ConsolidationStore(memory_conn)
+        discovery = ConsolidationDiscoveryService(
+            memory_service=memory,
+            memory_store=memory._store,  # type: ignore[attr-defined]
+            consolidation_store=consol_store,
+            event_store=store_group.event_store,
+            llm_client=_FakeLLM(
+                content=_groups_json(
+                    [
+                        {
+                            "source_ids": [id_a, id_b],
+                            "merged_content": "用户时区上海（权威）",
+                            "subject_key": "tz",  # 撞源 A 的 key（仍 CURRENT）
+                            "rationale": "同指",
+                            "confidence": 0.9,
+                        }
+                    ]
+                )
+            ),
+        )
+        await discovery.discover_and_propose(
+            run_id="run-1", scope_id=_SCOPE, root_task_id=_ROOT_TASK_ID
+        )
+        cand_id = (await consol_store.list_candidates(scope_id=_SCOPE))[0].candidate_id
+
+        approval = _build_approval(
+            memory=memory, consol_store=consol_store, store_group=store_group
+        )
+        result = await approval.accept(cand_id)
+        # commit 撞 UNIQUE → 回滚到 pending（不报 ok）
+        assert result.ok is False
+        assert result.status == "pending"
+        # 候选回 PENDING（可重审）
+        cand = await consol_store.get_candidate(cand_id)
+        assert cand.status == ConsolidationCandidateStatus.PENDING
+        # ★ C4 安全：源事实仍 CURRENT（未被 supersede，无数据损坏）
+        assert await _sor_status(memory_conn, id_a) == "current"
+        assert await _sor_status(memory_conn, id_b) == "current"
