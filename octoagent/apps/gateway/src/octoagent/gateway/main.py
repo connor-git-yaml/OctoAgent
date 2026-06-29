@@ -43,6 +43,7 @@ from .routes import (
     behavior_versions,
     cancel,
     chat,
+    consolidation_candidates,
     control_plane,
     execution,
     files,
@@ -374,6 +375,10 @@ def create_app() -> FastAPI:
     app.include_router(plugins.router, dependencies=protected)
     # F084 Phase 3 T050-T051：Memory Candidates + Snapshots API
     app.include_router(memory_candidates.router, tags=["memory"], dependencies=protected)
+    # F127 Phase D：巩固合并候选人审 API（C7 用户面，破坏性 MERGE accept/reject）
+    app.include_router(
+        consolidation_candidates.router, tags=["memory"], dependencies=protected
+    )
     # F101 Phase C v2 H-4：Web Notification list/dismiss API
     app.include_router(notifications.router, tags=["notifications"], dependencies=protected)
     pipelines.include_pipeline_routers(app, tags=["pipelines"], dependencies=protected)
