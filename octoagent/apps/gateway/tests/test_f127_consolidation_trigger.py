@@ -890,3 +890,189 @@ class TestSystemTaskNotificationSuppression:
         )
 
         assert len(notif_calls) == 1, "非 suppress 应推 WORKER_ERROR 通知"
+
+
+# ============================================================
+# Phase C 发现端 wiring（spawn 成功后跑发现端 runner + COMPLETED/FAILED）
+# ============================================================
+
+
+class _RecordingRunner:
+    """记录调用 + 返回可配置 DiscoveryOutcome（或抛异常）的发现端 runner。"""
+
+    def __init__(self, *, outcome=None, raise_exc: Exception | None = None) -> None:
+        from octoagent.gateway.services.consolidation_discovery import DiscoveryOutcome
+
+        self.calls: list[dict[str, Any]] = []
+        self._outcome = outcome or DiscoveryOutcome(
+            facts_reviewed=3, proposals_made=1, candidate_ids=["cand-1"]
+        )
+        self._raise_exc = raise_exc
+
+    async def __call__(self, **kwargs: Any):
+        self.calls.append(kwargs)
+        if self._raise_exc is not None:
+            raise self._raise_exc
+        return self._outcome
+
+
+async def _seed_main_runtime_with_namespace(
+    store_group: StoreGroup,
+    *,
+    runtime_id: str = "main-rt",
+    project_id: str = "proj-main",
+    scope_id: str = "agent-private/main",
+) -> None:
+    """种主 Agent MAIN runtime + AGENT_PRIVATE namespace（含 scope_id），供发现端解析 scope。"""
+    from octoagent.core.models.agent_context import (
+        AgentRuntime,
+        AgentRuntimeRole,
+        MemoryNamespace,
+        MemoryNamespaceKind,
+    )
+
+    await store_group.agent_context_store.save_agent_runtime(
+        AgentRuntime(
+            agent_runtime_id=runtime_id,
+            project_id=project_id,
+            role=AgentRuntimeRole.MAIN,
+        )
+    )
+    await store_group.agent_context_store.save_memory_namespace(
+        MemoryNamespace(
+            namespace_id="ns-main",
+            project_id=project_id,
+            agent_runtime_id=runtime_id,
+            kind=MemoryNamespaceKind.AGENT_PRIVATE,
+            memory_scope_ids=[scope_id],
+        )
+    )
+    await store_group.conn.commit()
+
+
+class TestPhaseCDiscoveryWiring:
+    """spawn 成功后跑发现端 runner（解析主 Agent scope → discover_and_propose）。"""
+
+    def _build_with_runner(self, store_group, runner, *, user_md=_USER_MD_ACTIVE):
+        return MemoryConsolidationService(
+            scheduler=_FakeScheduler(),
+            task_store=store_group.task_store,
+            work_store=store_group.work_store,
+            event_store=store_group.event_store,
+            snapshot_store=_FakeSnapshotStore(user_md=user_md),
+            delegation_plane=_FakePlane(),  # type: ignore[arg-type]
+            agent_context_store=store_group.agent_context_store,
+            discovery_runner=runner,
+        )
+
+    async def test_runner_invoked_after_written_spawn(self, store_group):
+        """spawn written + 有 scope → runner 被调用，scope/window 正确传入。"""
+        await _seed_main_runtime_with_namespace(store_group)
+        runner = _RecordingRunner()
+        svc = self._build_with_runner(store_group, runner)
+        await svc._run_consolidation()
+        assert len(runner.calls) == 1, "spawn 成功后应跑发现端 runner"
+        call = runner.calls[0]
+        assert call["scope_id"] == "agent-private/main"
+        assert call["root_task_id"] == CONSOLIDATION_ROOT_TASK_ID
+        # _USER_MD_ACTIVE 配 window=14 / max_facts=80
+        assert call["window_days"] == 14
+        assert call["max_facts"] == 80
+
+    async def test_completed_event_emitted(self, store_group):
+        """runner 成功 → emit MEMORY_CONSOLIDATION_COMPLETED（facts/proposals 计数）。"""
+        await _seed_main_runtime_with_namespace(store_group)
+        runner = _RecordingRunner()
+        svc = self._build_with_runner(store_group, runner)
+        await svc._run_consolidation()
+        events = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
+        )
+        assert len(events) == 1
+        assert events[0].payload["facts_reviewed"] == 3
+        assert events[0].payload["proposals_made"] == 1
+
+    async def test_runner_not_invoked_when_disabled(self, store_group):
+        """active=False → 不 spawn 不跑 runner。"""
+        await _seed_main_runtime_with_namespace(store_group)
+        runner = _RecordingRunner()
+        svc = self._build_with_runner(store_group, runner, user_md=_USER_MD_DISABLED)
+        await svc._run_consolidation()
+        assert runner.calls == [], "disabled 不应跑发现端"
+
+    async def test_runner_not_invoked_when_capacity_rejected(self, store_group):
+        """spawn rejected（capacity）→ 不跑 runner（发现端依赖 H2 vessel 派发成功）。"""
+        await _seed_main_runtime_with_namespace(store_group)
+        runner = _RecordingRunner()
+        plane = _FakePlane(
+            result=SpawnChildResult(
+                status="rejected", error_code="CAPACITY_EXCEEDED", reason="full"
+            )
+        )
+        svc = MemoryConsolidationService(
+            scheduler=_FakeScheduler(),
+            task_store=store_group.task_store,
+            work_store=store_group.work_store,
+            event_store=store_group.event_store,
+            snapshot_store=_FakeSnapshotStore(user_md=_USER_MD_ACTIVE),
+            delegation_plane=plane,  # type: ignore[arg-type]
+            agent_context_store=store_group.agent_context_store,
+            discovery_runner=runner,
+        )
+        await svc._run_consolidation()
+        assert runner.calls == [], "capacity rejected 不应跑发现端"
+
+    async def test_no_scope_emits_completed_fallback_not_failed(self, store_group):
+        """无主 Agent AGENT_PRIVATE namespace → 空运行 COMPLETED(fallback)，非 FAILED。"""
+        # 不 seed namespace（只 seed runtime 也行，但 scope 解析会返回空）
+        runner = _RecordingRunner()
+        svc = self._build_with_runner(store_group, runner)
+        await svc._run_consolidation()
+        assert runner.calls == [], "无 scope 不应调 runner"
+        completed = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
+        )
+        assert len(completed) == 1
+        assert completed[0].payload["fallback"] is True
+        # 不应有 FAILED（没记忆可整理是正常空运行非失败）
+        failed = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_FAILED
+        )
+        assert failed == []
+
+    async def test_runner_exception_emits_failed_no_crash(self, store_group):
+        """runner 抛异常 → emit MEMORY_CONSOLIDATION_FAILED，_run_consolidation 不崩（C6）。"""
+        await _seed_main_runtime_with_namespace(store_group)
+        runner = _RecordingRunner(raise_exc=RuntimeError("discovery boom"))
+        svc = self._build_with_runner(store_group, runner)
+        await svc._run_consolidation()  # 不应抛
+        failed = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_FAILED
+        )
+        assert len(failed) == 1
+        assert failed[0].payload["error_type"] == "RuntimeError"
+
+    async def test_no_runner_skips_discovery_phase_b_behavior(self, store_group):
+        """discovery_runner=None（Phase B 行为）→ spawn 成功但不跑发现端、无 COMPLETED。"""
+        await _seed_main_runtime_with_namespace(store_group)
+        svc = MemoryConsolidationService(
+            scheduler=_FakeScheduler(),
+            task_store=store_group.task_store,
+            work_store=store_group.work_store,
+            event_store=store_group.event_store,
+            snapshot_store=_FakeSnapshotStore(user_md=_USER_MD_ACTIVE),
+            delegation_plane=_FakePlane(),  # type: ignore[arg-type]
+            agent_context_store=store_group.agent_context_store,
+            discovery_runner=None,
+        )
+        await svc._run_consolidation()
+        # spawn 成功 → TRIGGERED 仍 emit
+        triggered = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED
+        )
+        assert len(triggered) == 1
+        # 但无 COMPLETED（Phase B 不跑发现端）
+        completed = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
+        )
+        assert completed == []

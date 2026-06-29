@@ -1525,9 +1525,58 @@ class OctoHarness:
         # bootstrap 点构造（automation_scheduler.startup() 之后），额外持有
         # delegation_plane（spawn_child 后台编排入口）+ work_store（合成 root Work）。
         try:
+            from octoagent.memory.service import MemoryService as _MemoryService
+            from octoagent.memory.store import (
+                ConsolidationStore as _ConsolidationStore,
+            )
+            from octoagent.memory.store import SqliteMemoryStore as _SqliteMemoryStore
+            from octoagent.provider.router_message_adapter import (
+                ProviderRouterMessageAdapter as _ProviderRouterMessageAdapter,
+            )
+
+            from ..services.consolidation_discovery import (
+                ConsolidationDiscoveryService as _ConsolidationDiscoveryService,
+            )
             from ..services.memory_consolidation import (
                 MemoryConsolidationService as _MemoryConsolidationService,
             )
+
+            # Phase C 发现端 runner：每次巩固运行构造一个 ConsolidationDiscoveryService。
+            # memory 表（含 consolidation_candidates）与 core 同在 store_group.conn
+            # （harness init_memory_db(store_group.conn)），故共享连接事务边界正确。
+            # LLM client = ProviderRouterMessageAdapter（complete 契约）；None 时发现端 fallback。
+            _consol_provider_router = getattr(app.state, "provider_router", None)
+            _consol_llm = (
+                _ProviderRouterMessageAdapter(_consol_provider_router)
+                if _consol_provider_router is not None
+                else None
+            )
+
+            async def _consolidation_discovery_runner(
+                *,
+                run_id: str,
+                scope_id: str,
+                root_task_id: str,
+                window_days: int,
+                max_facts: int,
+            ):
+                mem_store = _SqliteMemoryStore(store_group.conn)
+                memory_service = _MemoryService(store_group.conn, store=mem_store)
+                consol_store = _ConsolidationStore(store_group.conn)
+                discovery = _ConsolidationDiscoveryService(
+                    memory_service=memory_service,
+                    memory_store=mem_store,
+                    consolidation_store=consol_store,
+                    event_store=store_group.event_store,
+                    llm_client=_consol_llm,
+                )
+                return await discovery.discover_and_propose(
+                    run_id=run_id,
+                    scope_id=scope_id,
+                    root_task_id=root_task_id,
+                    window_days=window_days,
+                    max_facts=max_facts,
+                )
 
             _memory_consolidation = _MemoryConsolidationService(
                 scheduler=app.state.automation_scheduler,
@@ -1539,6 +1588,8 @@ class OctoHarness:
                 # finding-1：定位主 Agent MAIN runtime → 注入其 AGENT_PRIVATE namespace
                 # scope 给后台巩固 subagent（cron 无执行上下文）。
                 agent_context_store=store_group.agent_context_store,
+                # Phase C：发现端 runner（spawn 成功后跑窗口回顾 + LLM 提议 + 写候选）。
+                discovery_runner=_consolidation_discovery_runner,
             )
             app.state.memory_consolidation_service = _memory_consolidation
             await _memory_consolidation.startup()

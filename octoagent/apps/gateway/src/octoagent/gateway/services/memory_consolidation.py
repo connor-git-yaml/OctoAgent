@@ -24,7 +24,7 @@ import asyncio
 import os
 import zoneinfo
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Final
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
 import structlog
 from apscheduler.triggers.cron import CronTrigger
@@ -39,6 +39,8 @@ from octoagent.core.models.event import Event
 from octoagent.core.models.task import RequesterInfo
 from octoagent.core.models.task import Task as TaskModel
 from octoagent.memory.models import (
+    ConsolidationCompletedPayload,
+    ConsolidationFailedPayload,
     ConsolidationSkippedPayload,
     ConsolidationTriggeredPayload,
 )
@@ -54,6 +56,7 @@ if TYPE_CHECKING:
     from octoagent.core.store.work_store import SqliteWorkStore
 
     from .automation_scheduler import AutomationSchedulerService
+    from .consolidation_discovery import DiscoveryOutcome
     from .delegation_plane import DelegationPlaneService
 
 
@@ -94,6 +97,25 @@ CONSOLIDATION_TOOL_PROFILE: Final[str] = "minimal"
 CONSOLIDATION_SPAWNED_BY: Final[str] = "memory_consolidation"
 
 
+class ConsolidationDiscoveryRunner(Protocol):
+    """发现端 runner 回调契约（注入式，harness 提供真实现，测试可省略）。
+
+    给定主 Agent AGENT_PRIVATE scope + run/root_task 上下文，跑发现端（拉窗口 → LLM
+    识别冗余 → 产 PENDING 候选）并返回 ``DiscoveryOutcome``。**本回调内绝不 commit 既有
+    事实合并**（C4，发现端只提议）。异常应由调用方（_run_consolidation）捕获降级。
+    """
+
+    async def __call__(
+        self,
+        *,
+        run_id: str,
+        scope_id: str,
+        root_task_id: str,
+        window_days: int,
+        max_facts: int,
+    ) -> DiscoveryOutcome: ...
+
+
 class MemoryConsolidationService:
     """睡眠时记忆巩固编排服务（Phase B：cron 触发 → 后台 spawn subagent）。
 
@@ -116,6 +138,7 @@ class MemoryConsolidationService:
         snapshot_store: SnapshotStore,
         delegation_plane: DelegationPlaneService,
         agent_context_store: SqliteAgentContextStore | None = None,
+        discovery_runner: ConsolidationDiscoveryRunner | None = None,
     ) -> None:
         self._scheduler = scheduler
         self._task_store = task_store
@@ -127,6 +150,12 @@ class MemoryConsolidationService:
         # 给后台巩固 subagent（cron 无执行上下文，不能靠 exec_ctx 派生 caller）。
         # None 时降级（subagent 拿不到目标记忆，写 warning，不阻断 spawn——graceful）。
         self._agent_context_store = agent_context_store
+        # Phase C 发现端 runner（注入式回调：给定 scope/run/root_task → 跑发现端产候选）。
+        # None 时跳过发现端——退回 Phase B 纯 spawn 编排行为（trigger 测试无 runner 即此路径）。
+        # 拆成回调而非直接持 MemoryService/store，是为了：①保 trigger 测试零改动（无 runner =
+        # Phase B 行为）；②发现端的 MemoryService 需按 scope 解析（memory_runtime_service），
+        # 在 harness 构造期注入工厂比在本服务里组装更干净（避免本服务持一堆 memory 子 store）。
+        self._discovery_runner = discovery_runner
         self._started: bool = False
         self._cron_registered: bool = False
         # FR-A5 并发单飞标志（进程内，单 event loop 协作式）。check-then-set 在第一个
@@ -327,6 +356,20 @@ class MemoryConsolidationService:
                 run_id=run_id,
                 child_task_id=result.task_id,
             )
+
+            # Phase C：spawn 成功后跑发现端（拉窗口 → LLM 识别冗余 → 产 PENDING 候选）。
+            # spawn 提供 H2 对等审计容器（SUBAGENT_INTERNAL session + cleanup +
+            # SUBAGENT_COMPLETED）+ finding-1 注入的 caller scope；发现端做确定性结构化工作。
+            # discovery_runner 为 None（trigger 测试）→ 跳过，退回 Phase B 纯 spawn 行为。
+            # 发现端异常 → 写 FAILED 不崩（C6），不阻塞 finally 复位 _running。
+            await self._run_discovery(
+                run_id=run_id,
+                trigger_ts=trigger_ts,
+                child_task_id=result.task_id or "",
+                config=config,
+                main_runtime_id=main_runtime_id,
+                main_project_id=main_project_id,
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -474,6 +517,115 @@ class MemoryConsolidationService:
             return "", ""
         return chosen.agent_runtime_id, chosen.project_id
 
+    async def _resolve_main_agent_scope_id(
+        self, *, main_runtime_id: str, main_project_id: str
+    ) -> str:
+        """把主 Agent MAIN runtime → AGENT_PRIVATE namespace 首个 scope_id（发现端拉窗口用）。
+
+        复用 ``resolve_worker_default_scope_id`` 同逻辑（按 (project_id, agent_runtime_id,
+        AGENT_PRIVATE) 三元组查 namespace 取 memory_scope_ids[0]），但不依赖 ToolDeps——
+        本服务直接调 ``agent_context_store.list_memory_namespaces``。找不到返回 ""（调用方
+        降级跳过发现端，不阻断）。
+        """
+        if self._agent_context_store is None or not main_runtime_id:
+            return ""
+        try:
+            from octoagent.core.models.agent_context import MemoryNamespaceKind
+
+            namespaces = await self._agent_context_store.list_memory_namespaces(
+                project_id=main_project_id or None,
+                agent_runtime_id=main_runtime_id,
+                kind=MemoryNamespaceKind.AGENT_PRIVATE,
+            )
+        except Exception:
+            logger.exception("consolidation_scope_resolve_failed")
+            return ""
+        if not namespaces:
+            logger.warning(
+                "consolidation_no_agent_private_namespace",
+                runtime_id=main_runtime_id,
+            )
+            return ""
+        scope_ids = getattr(namespaces[0], "memory_scope_ids", None) or []
+        return scope_ids[0] if scope_ids else ""
+
+    # ============================================================
+    # Phase C 发现端编排（spawn 成功后跑发现端 + 写 run 审计）
+    # ============================================================
+
+    async def _run_discovery(
+        self,
+        *,
+        run_id: str,
+        trigger_ts: datetime,
+        child_task_id: str,
+        config: ConsolidationConfig,
+        main_runtime_id: str,
+        main_project_id: str,
+    ) -> None:
+        """跑发现端（拉窗口 → LLM 识别冗余 → 产 PENDING 候选）+ 写 COMPLETED/FAILED。
+
+        - discovery_runner 为 None → 跳过（Phase B 纯 spawn 行为，trigger 测试路径）。
+        - scope 解析失败 → 跳过发现端（写 COMPLETED proposals=0 fallback，不算 FAILED——
+          没记忆可整理是正常空运行）。
+        - 发现端异常 → 写 FAILED（C6 不崩，不阻塞 finally 复位 _running）。
+
+        **C4**：发现端只产 PENDING 候选——既有事实 MERGE 绝不在此 commit（Phase D 人审）。
+        """
+        if self._discovery_runner is None:
+            return  # Phase B 行为：无 runner 不跑发现端
+
+        scope_id = await self._resolve_main_agent_scope_id(
+            main_runtime_id=main_runtime_id, main_project_id=main_project_id
+        )
+        if not scope_id:
+            # 无 scope（无主 Agent 记忆 namespace）→ 空运行 COMPLETED（非 FAILED）
+            await self._emit_completed(
+                run_id=run_id,
+                facts_reviewed=0,
+                proposals_made=0,
+                elapsed_ms=0,
+                fallback=True,
+            )
+            logger.info("consolidation_discovery_skipped_no_scope", run_id=run_id)
+            return
+
+        started = datetime.now(UTC)
+        try:
+            outcome: DiscoveryOutcome = await self._discovery_runner(
+                run_id=run_id,
+                scope_id=scope_id,
+                root_task_id=CONSOLIDATION_ROOT_TASK_ID,
+                window_days=config.consolidation_window_days,
+                max_facts=config.consolidation_max_facts,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await self._emit_failed(
+                run_id=run_id,
+                error_type=type(exc).__name__,
+                error_msg=str(exc)[:200],
+            )
+            logger.exception("consolidation_discovery_failed", run_id=run_id)
+            return
+
+        elapsed_ms = int((datetime.now(UTC) - started).total_seconds() * 1000)
+        await self._emit_completed(
+            run_id=run_id,
+            facts_reviewed=outcome.facts_reviewed,
+            proposals_made=outcome.proposals_made,
+            elapsed_ms=elapsed_ms,
+            fallback=outcome.fallback,
+        )
+        logger.info(
+            "consolidation_discovery_completed",
+            run_id=run_id,
+            facts_reviewed=outcome.facts_reviewed,
+            proposals_made=outcome.proposals_made,
+            fallback=outcome.fallback,
+        )
+
     # ============================================================
     # 配置读取（USER.md）
     # ============================================================
@@ -527,6 +679,36 @@ class MemoryConsolidationService:
         if detail:
             logger.debug("consolidation_skip_detail", reason=reason, detail=detail)
         await self._safe_append_event(EventType.MEMORY_CONSOLIDATION_SKIPPED, data)
+
+    async def _emit_completed(
+        self,
+        *,
+        run_id: str,
+        facts_reviewed: int,
+        proposals_made: int,
+        elapsed_ms: int,
+        fallback: bool,
+    ) -> None:
+        payload = ConsolidationCompletedPayload(
+            run_id=run_id,
+            facts_reviewed=facts_reviewed,
+            proposals_made=proposals_made,
+            elapsed_ms=elapsed_ms,
+            fallback=fallback,
+        )
+        await self._safe_append_event(
+            EventType.MEMORY_CONSOLIDATION_COMPLETED, payload.model_dump()
+        )
+
+    async def _emit_failed(
+        self, *, run_id: str, error_type: str, error_msg: str
+    ) -> None:
+        payload = ConsolidationFailedPayload(
+            run_id=run_id, error_type=error_type, error_msg=error_msg
+        )
+        await self._safe_append_event(
+            EventType.MEMORY_CONSOLIDATION_FAILED, payload.model_dump()
+        )
 
     def _build_event(self, event_type: EventType, payload: dict[str, Any]) -> Event:
         return Event(
