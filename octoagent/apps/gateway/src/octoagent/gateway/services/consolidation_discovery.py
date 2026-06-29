@@ -539,14 +539,10 @@ class ConsolidationDiscoveryService:
             logger.exception("consolidation_insert_candidate_failed", run_id=run_id)
             return None
 
-        # C2：emit PROPOSED（PII 防护——candidate_id + content_hash，不含原文）
-        await self._emit_proposed(
-            run_id=run_id,
-            root_task_id=root_task_id,
-            candidate=candidate,
-        )
-
-        # 事务边界：propose + validate + insert_candidate + emit 一起提交（保证候选与提议原子）
+        # **先 commit 候选 + 提议，再 emit 事件**：emit 走 append_event_committed，其 task_seq
+        # 冲突重试（PROPOSED 与 Phase B TRIGGERED / 后续 PROPOSED 都挂同一 root_task，task_seq=0
+        # 会撞 UNIQUE(task_id,task_seq)）会 rollback 整个连接事务——若 insert_candidate +
+        # propose/validate 未先 commit，重试 rollback 会把候选与提议一起回滚丢失。
         conn = getattr(self._consolidation_store, "_conn", None)
         if conn is not None and hasattr(conn, "commit"):
             try:
@@ -555,6 +551,12 @@ class ConsolidationDiscoveryService:
                 logger.exception("consolidation_candidate_commit_failed", run_id=run_id)
                 return None
 
+        # C2：emit PROPOSED（PII 防护——candidate_id + content_hash，不含原文）。
+        await self._emit_proposed(
+            run_id=run_id,
+            root_task_id=root_task_id,
+            candidate=candidate,
+        )
         return candidate.candidate_id
 
     @staticmethod
@@ -625,8 +627,16 @@ class ConsolidationDiscoveryService:
             trace_id="",
         )
         try:
-            # 用非 committed append——事务由 _propose_group 末尾统一 commit
-            await self._event_store.append_event(event)
+            # append_event_committed：task_seq 冲突自动重试（MAX+1）+ commit 整个连接事务
+            # （含 insert_candidate + propose/validate）→ 候选与提议原子落盘。update_task_pointer
+            # =False：root task 是 SUCCEEDED 系统占位，不动其 pointer。
+            append_committed = getattr(
+                self._event_store, "append_event_committed", None
+            )
+            if append_committed is not None:
+                await append_committed(event, update_task_pointer=False)
+            else:
+                await self._event_store.append_event(event)
         except Exception:
             logger.exception("consolidation_emit_proposed_failed", run_id=run_id)
 
