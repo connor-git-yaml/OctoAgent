@@ -8,7 +8,10 @@
 - atomic claim 防双 accept（第二次 accept 同候选 → conflict，不重复 commit MERGE）
 - claim 后 commit 失败 → 回滚 APPLYING→PENDING（候选可重审）
 - 软删可回滚（AC-4）：MERGE 后源是 SUPERSEDED（无物理删），可经历史恢复
-- 敏感分区候选同样走人审（NFR-3：v0.1 无自动路径）
+- 敏感分区候选 v0.1 不可 commit（NFR-3 codex P1 修复后：发现端不产 + 审批端最后闸
+  拦存量/伪装候选 → CONFLICT 终态，敏感合并推 v0.2 vault-aware MERGE）
+- P2 源新鲜度：accept 前验证全部源 SOR 仍 current——pending 期间源被更新/删除/被
+  共享源候选合并 → conflict 409 + SOR 零触碰 + CONFLICT 终态 + emit CONFLICTED
 
 **关键**：用真 MemoryService（SQLite）跑完整 Phase C 发现端造真 PENDING 候选 → 再测
 Phase D accept/reject 对 SOR 的真实影响。用 ConsolidationDiscoveryService（注入 fake LLM）
@@ -473,34 +476,372 @@ class TestSoftDeleteRollbackable:
 
 
 # ============================================================
-# NFR-3：敏感分区候选同样走人审（v0.1 无自动路径）
+# NFR-3（codex P1 修复后）：敏感分区候选 v0.1 不可 commit——三层防御最后闸
 # ============================================================
 
 
-class TestSensitiveHumanReview:
-    async def test_sensitive_candidate_same_human_review_path(
+class TestSensitiveBlockedAtApproval:
+    async def test_discovery_no_longer_produces_sensitive_candidates(
         self, memory_conn, store_group
     ):
-        """NFR-3：HEALTH 分区候选走与普通候选**完全相同**的人审 accept 路径（无自动旁路）。"""
+        """P1 根治验证：HEALTH 事实经完整发现端管道产 **0 候选**（窗口排除）。"""
+        memory = MemoryService(memory_conn)
+        id_a = await _seed_fact(
+            memory,
+            subject_key="h.a",
+            content="血压 120",
+            partition=MemoryPartition.HEALTH,
+        )
+        id_b = await _seed_fact(
+            memory,
+            subject_key="h.b",
+            content="血压 正常",
+            partition=MemoryPartition.HEALTH,
+        )
+        consol_store = ConsolidationStore(memory_conn)
+        discovery = ConsolidationDiscoveryService(
+            memory_service=memory,
+            memory_store=memory._store,  # type: ignore[attr-defined]
+            consolidation_store=consol_store,
+            event_store=store_group.event_store,
+            llm_client=_FakeLLM(
+                content=_groups_json(
+                    [
+                        {
+                            "source_ids": [id_a, id_b],
+                            "merged_content": "用户血压正常约 120（权威）",
+                            "subject_key": "bp",
+                            "rationale": "同指血压",
+                            "confidence": 0.9,
+                        }
+                    ]
+                )
+            ),
+        )
+        await discovery.discover_and_propose(
+            run_id="run-1", scope_id=_SCOPE, root_task_id=_ROOT_TASK_ID
+        )
+        assert await consol_store.list_candidates(scope_id=_SCOPE) == []
+        # 源不受任何影响
+        for sid in (id_a, id_b):
+            assert await _sor_status(memory_conn, sid) == "current"
+
+    async def test_legacy_sensitive_candidate_accept_blocked_conflict(
+        self, memory_conn, store_group
+    ):
+        """★ P1 第三层最后闸：存量敏感候选（发现端修复前产出/数据侧插入）accept →
+        conflict 409 + **SOR 零触碰**（不 commit——敏感 MERGE commit 会被
+        _safe_sor_content 毁内容）+ 候选 CONFLICT 终态 + emit CONFLICTED。"""
+        memory = MemoryService(memory_conn)
+        id_a = await _seed_fact(
+            memory,
+            subject_key="h.a",
+            content="血压 120",
+            partition=MemoryPartition.HEALTH,
+        )
+        id_b = await _seed_fact(
+            memory,
+            subject_key="h.b",
+            content="血压 正常",
+            partition=MemoryPartition.HEALTH,
+        )
+        consol_store = ConsolidationStore(memory_conn)
+        # 直接插入存量敏感候选（模拟修复前产出的历史数据）
+        from octoagent.memory.models import ConsolidationCandidate
+
+        await consol_store.insert_candidate(
+            ConsolidationCandidate(
+                candidate_id="legacy-sensitive-1",
+                run_id="run-legacy",
+                scope_id=_SCOPE,
+                partition=MemoryPartition.HEALTH,
+                subject_key="bp",
+                source_sor_ids=[id_a, id_b],
+                merged_content="用户血压正常约 120（权威）",
+                rationale="同指血压",
+                proposal_id="prop-legacy-1",
+                confidence=0.9,
+                is_sensitive=True,
+                status=ConsolidationCandidateStatus.PENDING,
+                content_hash="deadbeef",
+                created_at=datetime.now(UTC),
+            )
+        )
+        await memory_conn.commit()
+
+        approval = _build_approval(
+            memory=memory, consol_store=consol_store, store_group=store_group
+        )
+        result = await approval.accept("legacy-sensitive-1")
+        assert result.ok is False
+        assert result.status == "conflict"
+        assert "敏感" in result.detail
+        # SOR 零触碰（源仍 CURRENT，无新 SOR 产生）
+        for sid in (id_a, id_b):
+            assert await _sor_status(memory_conn, sid) == "current"
+        # 候选 CONFLICT 终态（非回滚 PENDING——重审也不能 commit）
+        cand = await consol_store.get_candidate("legacy-sensitive-1")
+        assert cand.status == ConsolidationCandidateStatus.CONFLICT
+        # emit CONFLICTED（actor=SYSTEM 系统检测）且无 APPROVED
+        conflicted = await _events(
+            store_group, EventType.MEMORY_CONSOLIDATION_CONFLICTED
+        )
+        assert len(conflicted) == 1
+        assert conflicted[0].payload["reason"] == "sensitive_partition"
+        assert await _events(store_group, EventType.MEMORY_CONSOLIDATION_APPROVED) == []
+
+    async def test_sensitive_source_sor_blocked_even_if_candidate_fields_clean(
+        self, memory_conn, store_group
+    ):
+        """源级敏感防御：候选字段伪装非敏感（is_sensitive=False + partition=PROFILE）
+        但 source_sor_ids 指向 HEALTH 源 → 仍被源级检查拦截（SOR 层 partition 是事实）。"""
+        memory = MemoryService(memory_conn)
+        id_h = await _seed_fact(
+            memory,
+            subject_key="h.a",
+            content="血压 120",
+            partition=MemoryPartition.HEALTH,
+        )
+        id_p = await _seed_fact(memory, subject_key="tz.a", content="时区 上海")
+        consol_store = ConsolidationStore(memory_conn)
+        from octoagent.memory.models import ConsolidationCandidate
+
+        await consol_store.insert_candidate(
+            ConsolidationCandidate(
+                candidate_id="disguised-1",
+                run_id="run-x",
+                scope_id=_SCOPE,
+                partition=MemoryPartition.PROFILE,  # 伪装非敏感
+                subject_key="mixed",
+                source_sor_ids=[id_p, id_h],  # 但含 HEALTH 源
+                merged_content="混合内容",
+                rationale="r",
+                proposal_id="prop-x",
+                confidence=0.5,
+                is_sensitive=False,  # 伪装非敏感
+                status=ConsolidationCandidateStatus.PENDING,
+                content_hash="cafebabe",
+                created_at=datetime.now(UTC),
+            )
+        )
+        await memory_conn.commit()
+        approval = _build_approval(
+            memory=memory, consol_store=consol_store, store_group=store_group
+        )
+        result = await approval.accept("disguised-1")
+        assert result.ok is False
+        assert result.status == "conflict"
+        for sid in (id_h, id_p):
+            assert await _sor_status(memory_conn, sid) == "current"
+        cand = await consol_store.get_candidate("disguised-1")
+        assert cand.status == ConsolidationCandidateStatus.CONFLICT
+
+
+# ============================================================
+# P2：accept 前源新鲜度验证（pending 期间源被更新/删除/共享源已被合并）
+# ============================================================
+
+
+class TestStaleSourcesConflict:
+    async def test_source_updated_while_pending_accept_conflicts_zero_sor_touch(
+        self, memory_conn, store_group
+    ):
+        """★ P2-①：候选 pending 期间源被 UPDATE（旧行 SUPERSEDED + 新行 CURRENT）→
+        accept → conflict + **SOR 零触碰**（不 supersede、不产合并事实——绝不静默
+        用旧内容 commit）+ 候选 CONFLICT 终态 + emit CONFLICTED(stale_sources)。"""
         memory = MemoryService(memory_conn)
         cand_id, source_ids, consol_store = await _make_pending_candidate(
-            memory,
-            memory_conn,
-            store_group,
-            partition=MemoryPartition.HEALTH,
-            merged_content="用户血压正常约 120（权威）",
+            memory, memory_conn, store_group
         )
-        cand = await consol_store.get_candidate(cand_id)
-        assert cand.is_sensitive is True
-        assert cand.status == ConsolidationCandidateStatus.PENDING  # 仍待人审，无自动 applied
-        # 人审 accept 才生效（与普通候选同一入口，无自动旁路）
+        id_a, id_b = source_ids
+        # pending 期间用户经 memory 工具 UPDATE 源 A（旧 A SUPERSEDED + 新行 CURRENT）
+        cursor = await memory_conn.execute(
+            "SELECT subject_key FROM memory_sor WHERE memory_id = ?", (id_a,)
+        )
+        subject_a = (await cursor.fetchone())["subject_key"]
+        updated = await memory.fast_commit(
+            scope_id=_SCOPE,
+            partition=MemoryPartition.PROFILE,
+            action=WriteAction.UPDATE,
+            subject_key=subject_a,
+            content="时区 更新为 Asia/Tokyo",
+            confidence=1.0,
+        )
+        assert updated.sor_id
+        assert await _sor_status(memory_conn, id_a) == "superseded"
+
+        # SOR 快照（验证 accept 失败后零变化）
+        cursor = await memory_conn.execute(
+            "SELECT COUNT(*) AS n FROM memory_sor WHERE scope_id = ?", (_SCOPE,)
+        )
+        sor_count_before = (await cursor.fetchone())["n"]
+
         approval = _build_approval(
             memory=memory, consol_store=consol_store, store_group=store_group
         )
         result = await approval.accept(cand_id)
-        assert result.ok is True
-        for sid in source_ids:
-            assert await _sor_status(memory_conn, sid) == "superseded"
+        assert result.ok is False
+        assert result.status == "conflict"
+        assert id_a in result.detail  # detail 指明过期源
+
+        # SOR 零触碰：行数不变（无合并事实产生）+ 新 current 不受影响 + B 仍 current
+        cursor = await memory_conn.execute(
+            "SELECT COUNT(*) AS n FROM memory_sor WHERE scope_id = ?", (_SCOPE,)
+        )
+        assert (await cursor.fetchone())["n"] == sor_count_before
+        assert await _sor_status(memory_conn, updated.sor_id) == "current"
+        assert await _sor_status(memory_conn, id_b) == "current"
+        # 候选 CONFLICT 终态
+        cand = await consol_store.get_candidate(cand_id)
+        assert cand.status == ConsolidationCandidateStatus.CONFLICT
+        assert cand.decided_at is not None
+        # 事件：CONFLICTED(stale_sources, stale_sor_ids=[id_a]) 且无 APPROVED
+        conflicted = await _events(
+            store_group, EventType.MEMORY_CONSOLIDATION_CONFLICTED
+        )
+        assert len(conflicted) == 1
+        assert conflicted[0].payload["reason"] == "stale_sources"
+        assert conflicted[0].payload["stale_sor_ids"] == [id_a]
+        assert await _events(store_group, EventType.MEMORY_CONSOLIDATION_APPROVED) == []
+        # proposal 未被 commit（仍 validated）
+        cursor = await memory_conn.execute(
+            "SELECT status FROM memory_write_proposals WHERE proposal_id = ?",
+            (cand.proposal_id,),
+        )
+        row = await cursor.fetchone()
+        assert row is not None and row["status"] == "validated"
+
+    async def test_source_deleted_while_pending_accept_conflicts(
+        self, memory_conn, store_group
+    ):
+        """P2：pending 期间源被 DELETE（软删 status=deleted）→ accept → conflict。"""
+        memory = MemoryService(memory_conn)
+        cand_id, source_ids, consol_store = await _make_pending_candidate(
+            memory, memory_conn, store_group
+        )
+        id_a, id_b = source_ids
+        await memory_conn.execute(
+            "UPDATE memory_sor SET status = 'deleted' WHERE memory_id = ?", (id_a,)
+        )
+        await memory_conn.commit()
+        approval = _build_approval(
+            memory=memory, consol_store=consol_store, store_group=store_group
+        )
+        result = await approval.accept(cand_id)
+        assert result.ok is False
+        assert result.status == "conflict"
+        assert await _sor_status(memory_conn, id_b) == "current"
+        cand = await consol_store.get_candidate(cand_id)
+        assert cand.status == ConsolidationCandidateStatus.CONFLICT
+
+    async def test_shared_source_second_candidate_conflicts_after_first_applied(
+        self, memory_conn, store_group
+    ):
+        """★ P2-②：同批两候选共享源——第一个 accept 成功（共享源 SUPERSEDED）后，
+        第二个 accept → conflict（共享源已非 current），不产生重复/并存合并事实。"""
+        memory = MemoryService(memory_conn)
+        # 三条事实：A/B 组成候选 1；B/C 组成候选 2（B 共享）
+        id_a = await _seed_fact(memory, subject_key="tz.a", content="时区 上海")
+        id_b = await _seed_fact(memory, subject_key="tz.b", content="时区 Asia/Shanghai")
+        id_c = await _seed_fact(memory, subject_key="tz.c", content="时区 GMT+8")
+        consol_store = ConsolidationStore(memory_conn)
+
+        async def _discover(groups: list[dict[str, Any]], run_id: str) -> None:
+            discovery = ConsolidationDiscoveryService(
+                memory_service=memory,
+                memory_store=memory._store,  # type: ignore[attr-defined]
+                consolidation_store=consol_store,
+                event_store=store_group.event_store,
+                llm_client=_FakeLLM(content=_groups_json(groups)),
+            )
+            await discovery.discover_and_propose(
+                run_id=run_id, scope_id=_SCOPE, root_task_id=_ROOT_TASK_ID
+            )
+
+        await _discover(
+            [
+                {
+                    "source_ids": [id_a, id_b],
+                    "merged_content": "时区上海（候选1）",
+                    "subject_key": "tz.merged.1",
+                    "rationale": "r1",
+                    "confidence": 0.9,
+                }
+            ],
+            "run-1",
+        )
+        await _discover(
+            [
+                {
+                    "source_ids": [id_b, id_c],
+                    "merged_content": "时区上海（候选2）",
+                    "subject_key": "tz.merged.2",
+                    "rationale": "r2",
+                    "confidence": 0.9,
+                }
+            ],
+            "run-2",
+        )
+        cands = await consol_store.list_candidates(scope_id=_SCOPE)
+        assert len(cands) == 2
+        by_run = {c.run_id: c for c in cands}
+        cand1, cand2 = by_run["run-1"], by_run["run-2"]
+
+        approval = _build_approval(
+            memory=memory, consol_store=consol_store, store_group=store_group
+        )
+        first = await approval.accept(cand1.candidate_id)
+        assert first.ok is True
+        assert await _sor_status(memory_conn, id_b) == "superseded"  # 共享源已合并
+
+        second = await approval.accept(cand2.candidate_id)
+        assert second.ok is False
+        assert second.status == "conflict"
+        assert id_b in second.detail
+        # C 未被误 supersede（候选 2 未 commit）
+        assert await _sor_status(memory_conn, id_c) == "current"
+        # 候选 2 CONFLICT 终态；只有 1 个 APPROVED（候选 1）
+        assert (
+            await consol_store.get_candidate(cand2.candidate_id)
+        ).status == ConsolidationCandidateStatus.CONFLICT
+        approved = await _events(store_group, EventType.MEMORY_CONSOLIDATION_APPROVED)
+        assert len(approved) == 1
+        assert approved[0].payload["candidate_id"] == cand1.candidate_id
+
+    async def test_conflict_is_terminal_no_reclaim_no_reject(
+        self, memory_conn, store_group
+    ):
+        """CONFLICT 终态与既有 CAS 不打架：conflict 后再 accept → claim 失败 conflict
+        （不重复验证/commit）；再 reject → conflict（PENDING→REJECTED CAS 失败）。"""
+        memory = MemoryService(memory_conn)
+        cand_id, source_ids, consol_store = await _make_pending_candidate(
+            memory, memory_conn, store_group
+        )
+        id_a, _ = source_ids
+        await memory_conn.execute(
+            "UPDATE memory_sor SET status = 'deleted' WHERE memory_id = ?", (id_a,)
+        )
+        await memory_conn.commit()
+        approval = _build_approval(
+            memory=memory, consol_store=consol_store, store_group=store_group
+        )
+        first = await approval.accept(cand_id)
+        assert first.status == "conflict"
+        # 再 accept：claim 失败（status=conflict 非 pending）
+        again = await approval.accept(cand_id)
+        assert again.ok is False
+        assert again.status == "conflict"
+        # 再 reject：CAS 失败（同样 conflict，不覆写终态）
+        rej = await approval.reject(cand_id)
+        assert rej.ok is False
+        assert rej.status == "conflict"
+        cand = await consol_store.get_candidate(cand_id)
+        assert cand.status == ConsolidationCandidateStatus.CONFLICT
+        # 只 emit 1 次 CONFLICTED（重入不重复 emit）
+        conflicted = await _events(
+            store_group, EventType.MEMORY_CONSOLIDATION_CONFLICTED
+        )
+        assert len(conflicted) == 1
 
 
 # ============================================================

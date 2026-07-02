@@ -169,6 +169,29 @@ class TestAcceptEndpoint:
         second = client.post(f"/api/consolidation/candidates/{cand_id}/accept")
         assert second.status_code == 409  # conflict（已 applied）
 
+    async def test_stale_source_accept_409_user_informed(self, store_group, client):
+        """★ P2 REST 契约：候选 pending 期间源被更新 → accept → **409**（用户被明确
+        告知要重审，绝不静默用旧内容 commit）+ 候选转 conflict 不再挂 pending 列表。"""
+        cand_id = await _seed_pending_candidate(store_group)
+        # pending 期间源 tz.a 被 UPDATE（旧行 SUPERSEDED + 新行 CURRENT）
+        memory = MemoryService(store_group.conn)
+        await memory.fast_commit(
+            scope_id=_SCOPE,
+            partition=MemoryPartition.PROFILE,
+            action=WriteAction.UPDATE,
+            subject_key="tz.a",
+            content="时区 更新为 Asia/Tokyo",
+            confidence=1.0,
+        )
+        resp = client.post(f"/api/consolidation/candidates/{cand_id}/accept")
+        assert resp.status_code == 409
+        body = resp.json()
+        assert body["ok"] is False
+        assert body["status"] == "conflict"
+        assert "已变更" in body["detail"]  # 用户可读的重审提示
+        # 候选转 conflict 终态：不再挂在 pending 列表（无红点残留）
+        assert client.get("/api/consolidation/candidates").json()["pending_count"] == 0
+
 
 # ============================================================
 # POST reject
