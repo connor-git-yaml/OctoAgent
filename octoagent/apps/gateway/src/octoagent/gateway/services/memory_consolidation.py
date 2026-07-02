@@ -15,6 +15,8 @@ Phase 的子任务 objective 是占位描述，spawn 成功即达 Phase B 验收
 - FR-A4：spawn rejected（CAPACITY/depth）→ 写 SKIPPED(capacity) 优雅退出，不阻塞/不报错/不抢槽
 - FR-A5：并发单飞（try-lock-skip）——运行中再触发 → 写 SKIPPED(already_running) 立即 return
 - FR-A6（H1）：巩固全程不向用户发起对话；用户感知仅来自 NotificationService（Phase E）
+- FR-E（Phase E）：**仅当** proposals > 0 才发一条 MEDIUM"待确认"通知（引导用户去审批）；
+  0 提议 / 失败 / skip 全部静默（事件已审计）。与 finding-E 的关系见 _notify_pending_review。
 - C6：cron 注册失败 / spawn 异常不阻塞 gateway，graceful degrade
 """
 
@@ -58,6 +60,7 @@ if TYPE_CHECKING:
     from .automation_scheduler import AutomationSchedulerService
     from .consolidation_discovery import DiscoveryOutcome
     from .delegation_plane import DelegationPlaneService
+    from .notification import NotificationService
 
 
 logger = structlog.get_logger(__name__)
@@ -95,6 +98,13 @@ CONSOLIDATION_TOOL_PROFILE: Final[str] = "minimal"
 
 #: spawn 标识（审计 spawned_by + idempotency_key 前缀）
 CONSOLIDATION_SPAWNED_BY: Final[str] = "memory_consolidation"
+
+#: Phase E 通知 event_type（FR-E1）。是 NotificationService 的通知类型字符串（同 F102
+#: "ROUTINE_DAILY_SUMMARY" 范式），**不是** core EventType 枚举成员——审计枚举事件是
+#: MEMORY_CONSOLIDATION_COMPLETED，通知是其用户面衍生物。
+CONSOLIDATION_PENDING_REVIEW_EVENT_TYPE: Final[str] = (
+    "MEMORY_CONSOLIDATION_PENDING_REVIEW"
+)
 
 
 class ConsolidationDiscoveryRunner(Protocol):
@@ -139,6 +149,7 @@ class MemoryConsolidationService:
         delegation_plane: DelegationPlaneService,
         agent_context_store: SqliteAgentContextStore | None = None,
         discovery_runner: ConsolidationDiscoveryRunner | None = None,
+        notification_service: NotificationService | None = None,
     ) -> None:
         self._scheduler = scheduler
         self._task_store = task_store
@@ -156,6 +167,9 @@ class MemoryConsolidationService:
         # Phase B 行为）；②发现端的 MemoryService 需按 scope 解析（memory_runtime_service），
         # 在 harness 构造期注入工厂比在本服务里组装更干净（避免本服务持一堆 memory 子 store）。
         self._discovery_runner = discovery_runner
+        # Phase E：巩固完成"待确认"通知（FR-E）。None 时静默跳过（C6 降级——通知不可用
+        # 不影响巩固主流程，用户仍可经 Web 候选列表主动发现，FR-C6）。
+        self._notification_service = notification_service
         self._started: bool = False
         self._cron_registered: bool = False
         # FR-A5 并发单飞标志（进程内，单 event loop 协作式）。check-then-set 在第一个
@@ -618,6 +632,14 @@ class MemoryConsolidationService:
             elapsed_ms=elapsed_ms,
             fallback=outcome.fallback,
         )
+        # Phase E（FR-E1/E2）：审计事件先落盘，通知 best-effort 在后——仅当有待审提议才发
+        # （引导用户去审批）；0 提议不发（无噪声）。
+        await self._notify_pending_review(
+            run_id=run_id,
+            facts_reviewed=outcome.facts_reviewed,
+            proposals_made=outcome.proposals_made,
+            config=config,
+        )
         logger.info(
             "consolidation_discovery_completed",
             run_id=run_id,
@@ -625,6 +647,87 @@ class MemoryConsolidationService:
             proposals_made=outcome.proposals_made,
             fallback=outcome.fallback,
         )
+
+    # ============================================================
+    # Phase E 通知（FR-E：仅"有提议待确认"这一种情况发）
+    # ============================================================
+
+    async def _notify_pending_review(
+        self,
+        *,
+        run_id: str,
+        facts_reviewed: int,
+        proposals_made: int,
+        config: ConsolidationConfig,
+    ) -> None:
+        """巩固产出待审提议 → 发一条 MEDIUM"整理了记忆，N 条合并建议待确认"通知。
+
+        **发/不发的完整决策表（FR-E1/E2 + finding-E 调和）**：
+        - proposals_made > 0 → 发**一条** MEDIUM（引导用户去候选列表审批，有行动价值）
+        - proposals_made == 0（事实已干净 / fallback 空运行）→ **不发**（无行动价值，纯噪声）
+        - 巩固 FAILED / SKIPPED → **不发**（调用点只在 COMPLETED 成功路径；失败静默，
+          事件已审计，Constitution C2/C8 可观测不靠推送）
+        - notification_service 未注入 → 静默跳过（C6 降级）
+
+        **与 finding-E（round4）的关系——两者互补不冲突**：finding-E 压掉的是
+        ``channel=="system"`` 后台 Task 的**通用**任务完成/失败/状态变更推送
+        （TaskRunner._notify_completion / audit_worker_error / orchestrator
+        ._notify_state_change）——那些是"后台任务刷存在感"，用户看不到对应任务还收推送，
+        自相矛盾。本方法是**专用直调** ``notify_task_state_change``（同 F102 daily routine
+        summary 范式——finding-E commit 已显式注明该路径不受抑制），只在"有提议等用户拍板"
+        时发，是用户**必须知道**的待办引导。绝不恢复通用路径的抑制。
+
+        **H1**：这是系统级通知（NotificationService 渠道推送），不是 Agent 对话——
+        无 session / 无对话通道，用户感知是"系统帮我整理了记忆"。
+
+        **quiet hours（FR-E3）**：MEDIUM 受 quiet hours 约束，由 NotificationService
+        自身处理（quiet 内 discard + NOTIFICATION_DISPATCHED(filtered=true) 审计，
+        F101 H4 契约）——深夜 03:00 触发的通知若在用户 quiet hours 内会被丢弃，用户
+        仍可经 Web 候选列表红点主动发现（FR-C6）。本方法不重复实现时段判断。
+
+        **幂等（FR-E4）**：``state_transition_event_id=run_id`` → notification_id =
+        sha256(root_task:event_type:run_id)[:16]——同一 run 重放不双发，不同 run 各发一条。
+        """
+        if proposals_made <= 0:
+            return  # FR-E2：无提议不噪声
+        if self._notification_service is None:
+            logger.debug("consolidation_notify_skipped_no_service", run_id=run_id)
+            return
+
+        from .notification import NotificationPriority
+
+        summary = (
+            f"帮你整理了记忆：回顾 {facts_reviewed} 条近期事实，"
+            f"{proposals_made} 条合并建议待确认"
+        )
+        try:
+            await self._notification_service.notify_task_state_change(
+                task_id=CONSOLIDATION_ROOT_TASK_ID,
+                event_type=CONSOLIDATION_PENDING_REVIEW_EVENT_TYPE,
+                # payload 无敏感原文（FR-D1 PII 惯例）：计数 + run_id 引用，合并内容
+                # 用户去候选列表看（payload 会进 NOTIFICATION_DISPATCHED 审计事件）。
+                payload={
+                    "summary": summary,
+                    "facts_reviewed": facts_reviewed,
+                    "proposals_made": proposals_made,
+                    "run_id": run_id,
+                },
+                priority=NotificationPriority.MEDIUM,
+                state_transition_event_id=run_id,
+                session_id=None,
+                channels=config.summary_channels,
+            )
+            logger.info(
+                "consolidation_pending_review_notified",
+                run_id=run_id,
+                proposals_made=proposals_made,
+                channels=sorted(config.summary_channels),
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            # C6：通知失败不影响巩固运行结论（COMPLETED 已落盘）
+            logger.exception("consolidation_notify_failed", run_id=run_id)
 
     # ============================================================
     # 配置读取（USER.md）
@@ -748,6 +851,7 @@ class MemoryConsolidationService:
 
 __all__ = [
     "CONSOLIDATION_JOB_ID",
+    "CONSOLIDATION_PENDING_REVIEW_EVENT_TYPE",
     "CONSOLIDATION_ROOT_TASK_ID",
     "CONSOLIDATION_ROOT_WORK_ID",
     "CONSOLIDATION_SPAWNED_BY",

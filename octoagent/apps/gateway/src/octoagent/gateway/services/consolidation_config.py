@@ -12,7 +12,9 @@ USER.md 机器可读字段（FR-F1）：
 - ``consolidation_max_facts``（int，默认 50）
 
 时区复用 F102 ``extract_user_timezone_from_user_md``（同一 USER.md user_timezone 字段，
-单一事实源不重复解析）。
+单一事实源不重复解析）。通知 channels 复用 F102 ``summary_channels`` 字段
+（FR-E3：**不新增** consolidation 专属 channels 字段——巩固通知与日报走同一组用户
+偏好渠道，避免 USER.md 模板预算膨胀 + 概念重复）。
 """
 
 from __future__ import annotations
@@ -22,6 +24,14 @@ from dataclasses import dataclass
 from typing import Final
 
 import structlog
+
+# FR-E3 单一事实源：巩固通知渠道解析/默认值直接复用 F102（模块级 import 无环——
+# daily_routine_config 只依赖 stdlib/structlog/pydantic）。
+from .daily_routine_config import (
+    DEFAULT_SUMMARY_CHANNELS,
+    extract_summary_channels_from_user_md,
+    extract_user_timezone_from_user_md,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -249,6 +259,8 @@ class ConsolidationConfig:
 
     ``user_timezone`` 复用 F102 ``extract_user_timezone_from_user_md``（同一字段单一
     事实源）；``None`` 表示 USER.md 未提供，由 service 降级 env → UTC。
+    ``summary_channels`` 复用 F102 ``extract_summary_channels_from_user_md``
+    （FR-E3：巩固完成通知走用户日报同一组渠道偏好，不新增字段）。
     """
 
     consolidation_active: bool
@@ -256,12 +268,13 @@ class ConsolidationConfig:
     consolidation_window_days: int
     consolidation_max_facts: int
     user_timezone: str | None = None
+    # 默认全渠道（与 F102 DEFAULT_SUMMARY_CHANNELS 一致）——空集会让通知一个渠道都不推
+    # （notify_task_state_change 的 channels 过滤语义），不能作默认。
+    summary_channels: frozenset[str] = DEFAULT_SUMMARY_CHANNELS
 
     @classmethod
     def from_user_md(cls, user_md_content: str | None) -> ConsolidationConfig:
-        # 复用 F102 时区解析（避免重复造，单一事实源）
-        from .daily_routine_config import extract_user_timezone_from_user_md
-
+        # 复用 F102 时区 + channels 解析（模块级已 import，单一事实源）
         return cls(
             consolidation_active=extract_consolidation_active_from_user_md(user_md_content),
             consolidation_time=extract_consolidation_time_from_user_md(user_md_content),
@@ -272,6 +285,7 @@ class ConsolidationConfig:
                 user_md_content
             ),
             user_timezone=extract_user_timezone_from_user_md(user_md_content),
+            summary_channels=extract_summary_channels_from_user_md(user_md_content),
         )
 
     def to_crontab(self) -> str:

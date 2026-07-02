@@ -1590,6 +1590,11 @@ class OctoHarness:
                 agent_context_store=store_group.agent_context_store,
                 # Phase C：发现端 runner（spawn 成功后跑窗口回顾 + LLM 提议 + 写候选）。
                 discovery_runner=_consolidation_discovery_runner,
+                # Phase E：巩固完成"待确认"通知（仅 proposals>0 发 MEDIUM，FR-E）。
+                # notification_service 在本 bootstrap 更早处构造（None 时巩固静默降级）。
+                notification_service=getattr(
+                    app.state, "notification_service", None
+                ),
             )
             app.state.memory_consolidation_service = _memory_consolidation
             await _memory_consolidation.startup()

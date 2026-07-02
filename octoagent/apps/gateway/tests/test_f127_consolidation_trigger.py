@@ -397,11 +397,16 @@ class TestH1Boundary:
         assert call["parent_task"].requester.channel == "system"
         assert call["parent_task"].requester.sender_id == "memory_consolidation"
 
-    async def test_no_notification_in_phase_b(self, store_group):
-        """Phase B 不发通知（通知是 Phase E）——本服务无 notification_service 依赖。"""
+    async def test_no_notification_service_defaults_none_and_silent(self, store_group):
+        """Phase E 后：notification_service 可选默认 None——未注入时全程零通知零崩溃。
+
+        spawn/skip/单飞路径**从不**发通知（Phase E 通知只挂发现端 COMPLETED 且
+        proposals>0，见 test_f127_consolidation_notify.py）；finding-E 压掉的通用
+        task 完成/失败推送也不因 Phase E 恢复（见 TestSystemTaskNotificationSuppression）。
+        """
         svc = _build_service(store_group, user_md=_USER_MD_ACTIVE)
-        # 构造签名里根本没有 notification_service（H1 通知走 Phase E NotificationService）
-        assert not hasattr(svc, "_notification_service")
+        assert svc._notification_service is None
+        await svc._run_consolidation()  # 不崩（通知路径静默跳过）
 
 
 class TestNFR3RestrictedToolProfile:
