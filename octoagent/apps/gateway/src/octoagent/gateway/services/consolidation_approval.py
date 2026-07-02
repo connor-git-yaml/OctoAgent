@@ -159,15 +159,31 @@ class ConsolidationApprovalService:
             )
 
         # ★ commit 前验证（codex P1 第三层敏感闸 + P2 源新鲜度）：claim 后候选已被本
-        # 调用独占（无并发 accept），再验证候选是否仍可安全 commit。失败 → CONFLICT
-        # 终态 + emit CONFLICTED（actor=SYSTEM），绝不静默用旧/敏感内容 commit。
+        # 调用独占（无并发 accept），再验证候选是否仍可安全 commit。**判定失败** →
+        # CONFLICT 终态 + emit CONFLICTED（actor=SYSTEM），绝不静默用旧/敏感内容 commit。
+        # **验证自身异常**（get_memory 临时 SQLite/连接错误，codex 复审 round3 P2）→
+        # 走与 commit 失败相同的回滚路径（APPLYING→PENDING 可重试）——否则候选卡死
+        # 在 APPLYING（不在 pending 列表且 claim/CAS 全失败，审批流不可恢复）。
         # 残余 TOCTOU 窗口（验证与 commit_memory 之间的 await 点，同进程其他写路径
         # 理论可穿插）诚实归档：无法在不动 write_service 事务边界的前提下消除；
         # 兜底=MERGE 源软删可回滚（FR-C5）。
-        block_reason, stale_ids = await self._verify_sources_for_commit(candidate)
-        if block_reason:
-            return await self._conflict_candidate(
-                candidate, reason=block_reason, stale_sor_ids=stale_ids
+        try:
+            block_reason, stale_ids = await self._verify_sources_for_commit(candidate)
+            if block_reason:
+                # 判定失败 → CONFLICT 终态（确定性结论）。_conflict_candidate 的
+                # mark 若同样遇 DB 故障抛出，也落入下方回滚（候选回 PENDING，
+                # 下次 accept 重新验证会收敛到同一 CONFLICT 结论）。
+                return await self._conflict_candidate(
+                    candidate, reason=block_reason, stale_sor_ids=stale_ids
+                )
+        except Exception as exc:
+            logger.exception(
+                "consolidation_verify_sources_failed", candidate_id=candidate_id
+            )
+            await self._rollback_to_pending(candidate_id)
+            return ApprovalResult(
+                ok=False, status="pending", candidate_id=candidate_id,
+                detail=f"commit 前验证遇临时错误，已回滚可重试：{type(exc).__name__}",
             )
 
         # Execute：commit MERGE（proposal 是 Phase C 已 VALIDATED 持久化的）。

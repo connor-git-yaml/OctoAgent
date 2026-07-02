@@ -875,6 +875,45 @@ class TestStaleSourcesConflict:
         assert await _sor_status(memory_conn, updated.sor_id) == "superseded"
         assert await _sor_status(memory_conn, id_b) == "superseded"
 
+    async def test_verify_transient_error_rolls_back_to_pending_not_stuck(
+        self, memory_conn, store_group
+    ):
+        """★ codex 复审 round3 P2：验证步自身异常（get_memory 临时 SQLite/连接错误）
+        → 回滚 APPLYING→PENDING（与 commit 失败同路径），候选**不卡死在 applying**
+        （仍在 pending 列表、故障恢复后可再次 accept 成功）。"""
+        memory = MemoryService(memory_conn)
+        cand_id, source_ids, consol_store = await _make_pending_candidate(
+            memory, memory_conn, store_group
+        )
+        approval = _build_approval(
+            memory=memory, consol_store=consol_store, store_group=store_group
+        )
+        # 注入临时故障：get_memory 抛（模拟 SQLite 连接抖动）
+        original_get_memory = memory.get_memory
+
+        async def _boom(*args: Any, **kwargs: Any) -> Any:
+            raise RuntimeError("transient sqlite error")
+
+        memory.get_memory = _boom  # type: ignore[method-assign]
+        result = await approval.accept(cand_id)
+        assert result.ok is False
+        assert result.status == "pending"  # 回滚可重试，非 conflict 终态
+        cand = await consol_store.get_candidate(cand_id)
+        assert cand.status == ConsolidationCandidateStatus.PENDING, (
+            "验证异常后候选必须回 PENDING（卡在 APPLYING = 审批流不可恢复）"
+        )
+        # SOR 零触碰 + 无 CONFLICTED 误发（临时故障不是失效判定）
+        for sid in source_ids:
+            assert await _sor_status(memory_conn, sid) == "current"
+        assert (
+            await _events(store_group, EventType.MEMORY_CONSOLIDATION_CONFLICTED) == []
+        )
+        # 故障恢复后重试成功（候选未被终态化）
+        memory.get_memory = original_get_memory  # type: ignore[method-assign]
+        retry = await approval.accept(cand_id)
+        assert retry.ok is True
+        assert retry.status == "applied"
+
     async def test_conflict_is_terminal_no_reclaim_no_reject(
         self, memory_conn, store_group
     ):
