@@ -20,6 +20,7 @@ from octoagent.memory.models import (
     ConsolidationCandidate,
     ConsolidationCandidateStatus,
     ConsolidationCompletedPayload,
+    ConsolidationConflictedPayload,
     ConsolidationFailedPayload,
     ConsolidationProposedPayload,
     ConsolidationRejectedPayload,
@@ -36,12 +37,18 @@ class TestStatusMachine:
             {
                 ConsolidationCandidateStatus.APPLIED,
                 ConsolidationCandidateStatus.REJECTED,
+                ConsolidationCandidateStatus.CONFLICT,
             }
         ) == CONSOLIDATION_TERMINAL_STATUSES
 
     def test_non_terminal_not_in_terminal_set(self):
         assert ConsolidationCandidateStatus.PENDING not in CONSOLIDATION_TERMINAL_STATUSES
         assert ConsolidationCandidateStatus.APPLYING not in CONSOLIDATION_TERMINAL_STATUSES
+
+    def test_conflict_is_terminal(self):
+        """CONFLICT 终态（accept 时源过期/敏感防御检测）：不可再 claim/commit。"""
+        assert ConsolidationCandidateStatus.CONFLICT in CONSOLIDATION_TERMINAL_STATUSES
+        assert ConsolidationCandidateStatus.CONFLICT.value == "conflict"
 
     def test_sensitive_partitions_single_source(self):
         """SENSITIVE_PARTITIONS 单一事实源 = enums；顶层 octoagent.memory re-export 同对象。
@@ -179,3 +186,23 @@ class TestPayloadPiiProtection:
     def test_rejected_payload_minimal(self):
         p = ConsolidationRejectedPayload(run_id="r1", candidate_id="c1")
         assert p.candidate_id == "c1"
+
+    def test_conflicted_payload_ids_only_no_raw_content(self):
+        """CONFLICTED payload：stale_sor_ids 是 id 引用非内容；无原文字段（PII 防护）。"""
+        fields = set(ConsolidationConflictedPayload.model_fields.keys())
+        assert "merged_content" not in fields
+        assert "rationale" not in fields
+        assert "content" not in fields
+        assert {"candidate_id", "reason", "stale_sor_ids"} <= fields
+        p = ConsolidationConflictedPayload(
+            run_id="r1",
+            candidate_id="c1",
+            reason="stale_sources",
+            stale_sor_ids=["sor-a", "sor-b"],
+        )
+        assert p.stale_sor_ids == ["sor-a", "sor-b"]
+        # 敏感防御路径 reason，stale_sor_ids 可空
+        p2 = ConsolidationConflictedPayload(
+            candidate_id="c2", reason="sensitive_partition"
+        )
+        assert p2.stale_sor_ids == []

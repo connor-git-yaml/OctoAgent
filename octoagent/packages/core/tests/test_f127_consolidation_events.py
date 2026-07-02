@@ -11,7 +11,7 @@ from octoagent.core.models.enums import EventType
 
 
 class TestConsolidationEventTypes:
-    """7 个 MEMORY_CONSOLIDATION_* 事件类型存在且命名规范。"""
+    """8 个 MEMORY_CONSOLIDATION_* 事件类型存在且命名规范。"""
 
     def test_run_level_event_types_exist(self):
         # 运行级（一次 cron 巩固运行的生命周期）
@@ -25,6 +25,11 @@ class TestConsolidationEventTypes:
         assert EventType.MEMORY_CONSOLIDATION_PROPOSED.value == "MEMORY_CONSOLIDATION_PROPOSED"
         assert EventType.MEMORY_CONSOLIDATION_APPROVED.value == "MEMORY_CONSOLIDATION_APPROVED"
         assert EventType.MEMORY_CONSOLIDATION_REJECTED.value == "MEMORY_CONSOLIDATION_REJECTED"
+        # CONFLICTED：accept 时系统检测候选失效（源过期/敏感防御）→ 不 commit（actor=SYSTEM）
+        assert (
+            EventType.MEMORY_CONSOLIDATION_CONFLICTED.value
+            == "MEMORY_CONSOLIDATION_CONFLICTED"
+        )
 
     def test_value_equals_name(self):
         """StrEnum 惯例：value 与 name 一致（与现有 MEMORY_* / ROUTINE_* 对齐）。"""
@@ -36,10 +41,11 @@ class TestConsolidationEventTypes:
             EventType.MEMORY_CONSOLIDATION_PROPOSED,
             EventType.MEMORY_CONSOLIDATION_APPROVED,
             EventType.MEMORY_CONSOLIDATION_REJECTED,
+            EventType.MEMORY_CONSOLIDATION_CONFLICTED,
         ):
             assert member.value == member.name
 
-    def test_all_seven_distinct(self):
+    def test_all_eight_distinct(self):
         members = {
             EventType.MEMORY_CONSOLIDATION_TRIGGERED,
             EventType.MEMORY_CONSOLIDATION_COMPLETED,
@@ -48,8 +54,9 @@ class TestConsolidationEventTypes:
             EventType.MEMORY_CONSOLIDATION_PROPOSED,
             EventType.MEMORY_CONSOLIDATION_APPROVED,
             EventType.MEMORY_CONSOLIDATION_REJECTED,
+            EventType.MEMORY_CONSOLIDATION_CONFLICTED,
         }
-        assert len(members) == 7
+        assert len(members) == 8
 
     def test_string_lookup_round_trip(self):
         """事件持久化/replay 需要 EventType('MEMORY_CONSOLIDATION_...') 反查可行。"""

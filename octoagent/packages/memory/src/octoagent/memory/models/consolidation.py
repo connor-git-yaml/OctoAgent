@@ -39,19 +39,26 @@ class ConsolidationCandidateStatus(StrEnum):
 
         PENDING ──(用户 accept, atomic claim 抢到)──▶ APPLYING ──(MERGE commit 成功)──▶ APPLIED
            │                                              │
-           │                                              └──(commit 失败回滚)──▶ PENDING
+           │                                              ├──(commit 失败回滚)──▶ PENDING
+           │                                              └──(commit 前验证失败：源 SOR 已
+           │                                                  非 current / 敏感分区防御)──▶ CONFLICT
            └──(用户 reject)──▶ REJECTED
 
     - PENDING：LLM 产出待用户审。
     - APPLYING：用户已 accept，正在调 write_service MERGE commit（CAS 占用，防双 accept）。
     - APPLIED：MERGE commit 成功（源已标 SUPERSEDED）。终态。
     - REJECTED：用户拒绝，不碰 SOR。终态。
+    - CONFLICT：accept 时系统检测候选已失效——任一源 SOR 已非 current（pending 期间被
+      更新/删除/被其他候选合并）或命中敏感分区纵深防御。**不 commit、不碰 SOR**，终态
+      （区别 REJECTED：非用户决策，是系统检测；区别回滚 PENDING：候选内容已过期，
+      重审也不能 commit，终态避免用户反复 accept 反复失败）。终态。
     """
 
     PENDING = "pending"
     APPLYING = "applying"
     APPLIED = "applied"
     REJECTED = "rejected"
+    CONFLICT = "conflict"
 
 
 #: 终态集合（不可再流转）。
@@ -59,6 +66,7 @@ CONSOLIDATION_TERMINAL_STATUSES: frozenset[ConsolidationCandidateStatus] = froze
     {
         ConsolidationCandidateStatus.APPLIED,
         ConsolidationCandidateStatus.REJECTED,
+        ConsolidationCandidateStatus.CONFLICT,
     }
 )
 
@@ -225,12 +233,32 @@ class ConsolidationRejectedPayload(BaseModel):
     candidate_id: str = Field(description="候选 id")
 
 
+class ConsolidationConflictedPayload(BaseModel):
+    """MEMORY_CONSOLIDATION_CONFLICTED 事件 payload（accept 时系统检测候选失效 → 不 commit）。
+
+    **PII 防护**：stale_sor_ids 是 id 引用非内容。区别 REJECTED（用户决策，actor=USER）：
+    CONFLICTED 是系统检测（actor=SYSTEM）——源过期（pending 期间被更新/删除/被其他候选
+    合并）或敏感分区纵深防御命中。
+    """
+
+    run_id: str = Field(default="", description="巩固运行 run_id")
+    candidate_id: str = Field(description="候选 id")
+    reason: str = Field(
+        description="失效原因（'stale_sources' / 'sensitive_partition'）"
+    )
+    stale_sor_ids: list[str] = Field(
+        default_factory=list,
+        description="已非 current 的源 SOR id 列表（reason=stale_sources 时；id 非内容）",
+    )
+
+
 __all__ = [
     "CONSOLIDATION_TERMINAL_STATUSES",
     "ConsolidationApprovedPayload",
     "ConsolidationCandidate",
     "ConsolidationCandidateStatus",
     "ConsolidationCompletedPayload",
+    "ConsolidationConflictedPayload",
     "ConsolidationFailedPayload",
     "ConsolidationProposedPayload",
     "ConsolidationRejectedPayload",
