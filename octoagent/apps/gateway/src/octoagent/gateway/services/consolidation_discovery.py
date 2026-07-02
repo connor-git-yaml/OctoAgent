@@ -23,8 +23,14 @@ minimal），free-loop 路径需先打通 per-tool profile override 链路（spe
   ``fallback=True``），不崩。
 - C9 Agent Autonomy：是否冗余/可合并**由 LLM 决策**——本服务不写任何关键词/相似度规则判重，
   只提供候选窗口 + 写管道。
-- NFR-3 C5：敏感分区（HEALTH/FINANCE）提议标 ``is_sensitive=True``（强制人审，Phase D 不进
-  任何自动路径——v0.1 全人审本就如此，此标志是 v0.2 自动模式的护栏地基）。
+- NFR-3 C5（codex P1-1/P1-2 修复后语义）：**v0.1 巩固只处理非敏感事实**——窗口直接排除
+  敏感分区（``SENSITIVE_PARTITIONS``，与 write_service ``_safe_sor_content`` 同一判定源）。
+  根因：①敏感性若按推断目标 partition 算，LLM 混组（敏感+普通源）会把敏感内容降级到
+  非敏感路径（P1-1）；②敏感 MERGE 提议 commit 时 ``_safe_sor_content`` 会把 SOR content
+  替换成 rationale 且 MERGE 不建 vault——accept 后源 SUPERSEDED、新事实只剩合并理由，
+  **毁掉敏感记忆**（P1-2）。敏感事实合并推 v0.2（vault-aware MERGE，spec §2.2 deferred）。
+  纵深防御：``_propose_group`` 对"任一源或目标 partition 敏感"的组拒绝产候选；
+  审批端 accept 前再验一道（三层防御，防 LLM/数据侧漏网）。
 - NFR-4 幂等：``content_hash`` 账本——同 scope 已有 pending/applied 同内容候选则跳过（防 crash
   重放产重复候选）。
 """
@@ -244,6 +250,16 @@ class ConsolidationDiscoveryService:
         复用 ``search_sor(include_history=False)``——默认只看 status='current'，按 updated_at
         DESC 排序。window_days → updated_after cutoff；max_facts → limit。窗口超限时
         search_sor 自身按 updated_at DESC 取最近的（FR-B5 优先近期）。
+
+        **敏感分区排除（codex P1-1/P1-2 根治，NFR-3 v0.1 收窄）**：拉取后过滤掉
+        ``SENSITIVE_PARTITIONS``（HEALTH/FINANCE，单一事实源 ``octoagent.memory.enums``，
+        与 write_service ``_safe_sor_content``/``persist_vault`` 同一判定源）的事实——
+        v0.1 巩固只处理非敏感事实；LLM 看不到敏感事实 → ``valid_ids`` 白名单不含敏感 id
+        → 不可能产出含敏感源的合并组。敏感事实合并推 v0.2 vault-aware MERGE。
+
+        Known limitation（v0.1 接受）：过滤在 SQL limit 之后——敏感事实会占 max_facts
+        名额（如 50 条里 10 条敏感则本次只回顾 40 条非敏感）。窗口本就是 best-effort
+        截断，下次运行会补上；不为此把排除下沉 store 层（避免动共享 search_sor 面）。
         """
         cutoff = (datetime.now(UTC) - timedelta(days=window_days)).isoformat()
         try:
@@ -256,7 +272,15 @@ class ConsolidationDiscoveryService:
         except Exception:
             logger.exception("consolidation_pull_window_failed", scope_id=scope_id)
             return []
-        return facts
+        non_sensitive = [f for f in facts if f.partition not in SENSITIVE_PARTITIONS]
+        excluded = len(facts) - len(non_sensitive)
+        if excluded:
+            logger.info(
+                "consolidation_window_sensitive_excluded",
+                scope_id=scope_id,
+                excluded=excluded,
+            )
+        return non_sensitive
 
     # ============================================================
     # Step 2：LLM 识别冗余（FR-B2 / C9 / FR-B6 fallback）
@@ -450,7 +474,30 @@ class ConsolidationDiscoveryService:
         """
         # 推断合并目标 partition（取组内多数源事实的 partition；混合则取第一条）
         partition = self._infer_partition(group, facts_by_id)
-        is_sensitive = partition in SENSITIVE_PARTITIONS
+
+        # ★ 纵深防御（codex P1-1/P1-2 第二层；第一层是 _pull_window 窗口排除）：
+        # 敏感性按 **any 语义** 判定——目标 partition 敏感 **或任一源事实 partition 敏感**
+        # 即拒绝产候选。不能只看推断目标（P1-1 根因）：LLM 把 HEALTH 事实混进普通组时
+        # 众数 partition 是非敏感 → 敏感内容会以 is_sensitive=False 走普通 SOR 明文存储。
+        # 也不能产 is_sensitive=True 的 MERGE 候选（P1-2 根因）：commit 走 _commit_add，
+        # _safe_sor_content 会把 content 换成 rationale 且 MERGE 不建 vault——accept 后
+        # 源 SUPERSEDED、新事实只剩合并理由，毁掉敏感记忆。v0.1 一律不产（v0.2 vault-aware
+        # MERGE 再放开，spec §2.2 deferred）。正常管道此分支不可达（窗口已排除敏感事实，
+        # valid_ids 白名单挡住幻觉 id）——防的是窗口逻辑演化/数据侧漏网。
+        group_sensitive = partition in SENSITIVE_PARTITIONS or any(
+            facts_by_id[sid].partition in SENSITIVE_PARTITIONS
+            for sid in group.source_sor_ids
+            if sid in facts_by_id
+        )
+        if group_sensitive:
+            logger.warning(
+                "consolidation_sensitive_group_blocked",
+                run_id=run_id,
+                partition=partition.value,
+                source_count=len(group.source_sor_ids),
+            )
+            return None
+        is_sensitive = False  # 走到这里必非敏感（上方已拒绝）；字段保留供 v0.2 护栏
 
         # WriteProposal 校验要求非 NONE proposal 必须有非空 subject_key
         # （proposal.py:39-40）。LLM 漏给 subject_key 时用确定性兜底（取首个源 id 派生），

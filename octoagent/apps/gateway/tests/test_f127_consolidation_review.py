@@ -9,7 +9,8 @@
 - C9：无任何关键词/相似度硬规则判重（提议组完全来自 LLM 输出，grep 验证 + 行为验证）
 - C2：每条候选 emit MEMORY_CONSOLIDATION_PROPOSED（payload 不含 merged_content 原文）
 - NFR-4：content_hash 幂等账本——同 scope 重复内容候选去重
-- NFR-3：敏感分区（HEALTH/FINANCE）提议标 is_sensitive=True
+- NFR-3（codex P1-1/P1-2 修复后）：敏感分区（HEALTH/FINANCE）事实**不进巩固**——
+  窗口排除（第一层）+ _propose_group any 语义纵深防御（第二层）；敏感合并推 v0.2
 
 **关键**：用真 MemoryService（SQLite）+ 真 ConsolidationStore + 真 StoreGroup event_store，
 注入 fake LLM client（返回固定 JSON）——验证确定性编排正确（窗口/propose/validate/写候选/
@@ -501,20 +502,35 @@ class TestEventsSensitiveIdempotency:
         assert events[0].payload["source_count"] == 2
         assert events[0].payload["content_hash"]  # hash 引用而非原文
 
-    async def test_sensitive_partition_flagged(self, memory_conn, store_group):
-        """NFR-3：HEALTH/FINANCE 分区提议标 is_sensitive=True。"""
+    async def test_sensitive_partition_excluded_from_window(
+        self, memory_conn, store_group
+    ):
+        """★ NFR-3（codex P1-1/P1-2 修复）：敏感分区事实**不进巩固窗口**——
+        HEALTH/FINANCE 事实不出现在 LLM prompt，不可能产生候选（v0.1 收窄，
+        敏感合并推 v0.2 vault-aware MERGE）。"""
         memory = MemoryService(memory_conn)
-        id_a = await _seed_fact(
+        id_h1 = await _seed_fact(
             memory, subject_key="h.a", content="血压 120", partition=MemoryPartition.HEALTH
         )
-        id_b = await _seed_fact(
+        id_h2 = await _seed_fact(
             memory, subject_key="h.b", content="血压 正常", partition=MemoryPartition.HEALTH
         )
+        id_f1 = await _seed_fact(
+            memory,
+            subject_key="fin.a",
+            content="月供 8000",
+            partition=MemoryPartition.FINANCE,
+        )
+        # 普通事实 ×2（保证 LLM 会被调用——非敏感事实数 ≥ MIN_GROUP_SOURCE_COUNT）
+        id_p1 = await _seed_fact(memory, subject_key="tz.a", content="时区 上海")
+        id_p2 = await _seed_fact(memory, subject_key="tz.b", content="时区 Asia/Shanghai")
+
+        # 对抗性 LLM：无视窗口硬引用敏感 id 组队（模拟 LLM 幻觉/越权引用）
         llm = _FakeLLM(
             content=_groups_json(
                 [
                     {
-                        "source_ids": [id_a, id_b],
+                        "source_ids": [id_h1, id_h2],
                         "merged_content": "用户血压正常约 120",
                         "subject_key": "bp",
                         "rationale": "同指血压",
@@ -526,12 +542,81 @@ class TestEventsSensitiveIdempotency:
         svc, consol_store = _build_discovery(
             memory=memory, memory_conn=memory_conn, store_group=store_group, llm=llm
         )
-        await svc.discover_and_propose(
+        outcome = await svc.discover_and_propose(
             run_id="run-1", scope_id=_SCOPE, root_task_id=_ROOT_TASK_ID
         )
-        cand = (await consol_store.list_candidates(scope_id=_SCOPE))[0]
-        assert cand.is_sensitive is True
-        assert cand.partition == MemoryPartition.HEALTH
+        # facts_reviewed 只算非敏感（HEALTH×2 + FINANCE×1 被窗口排除）
+        assert outcome.facts_reviewed == 2
+        # LLM prompt 不含任何敏感事实 id（敏感内容零暴露给巩固 LLM）
+        prompt = llm.calls[0]["messages"][0]["content"]
+        for sensitive_id in (id_h1, id_h2, id_f1):
+            assert sensitive_id not in prompt
+        assert id_p1 in prompt and id_p2 in prompt
+        # 敏感 id 不在 valid_ids 白名单 → 组被丢弃，0 候选 0 提议
+        assert outcome.proposals_made == 0
+        assert await consol_store.list_candidates(scope_id=_SCOPE) == []
+        assert await _events_proposed(store_group) == []
+
+    async def test_sensitive_defense_in_depth_blocks_mixed_group(
+        self, memory_conn, store_group
+    ):
+        """★ 纵深防御第二层（codex P1-1 any 语义）：直调 _propose_group 构造
+        "敏感+普通混组"（绕过窗口，模拟窗口逻辑演化/数据侧漏网）——任一源敏感
+        即拒绝产候选，即便众数/目标 partition 是非敏感。"""
+        from octoagent.gateway.services.consolidation_discovery import _MergeGroup
+
+        memory = MemoryService(memory_conn)
+        # 2 普通 + 1 HEALTH：众数 partition=PROFILE（非敏感）——旧逻辑会以
+        # is_sensitive=False 产候选（P1-1 降级 bug），新逻辑整组拒绝
+        id_p1 = await _seed_fact(memory, subject_key="tz.a", content="时区 上海")
+        id_p2 = await _seed_fact(memory, subject_key="tz.b", content="时区 SH")
+        id_h = await _seed_fact(
+            memory,
+            subject_key="h.a",
+            content="血压 120",
+            partition=MemoryPartition.HEALTH,
+        )
+        svc, consol_store = _build_discovery(
+            memory=memory, memory_conn=memory_conn, store_group=store_group, llm=None
+        )
+        facts_by_id = {
+            sid: await memory._store.get_sor(sid)  # type: ignore[attr-defined]
+            for sid in (id_p1, id_p2, id_h)
+        }
+        group = _MergeGroup(
+            source_sor_ids=[id_p1, id_p2, id_h],
+            merged_content="时区上海且血压120（混合泄漏）",
+            subject_key="mixed",
+            rationale="对抗混组",
+            confidence=0.9,
+        )
+        candidate_id = await svc._propose_group(
+            run_id="run-1",
+            scope_id=_SCOPE,
+            root_task_id=_ROOT_TASK_ID,
+            group=group,
+            facts_by_id=facts_by_id,
+        )
+        assert candidate_id is None, "任一源敏感的组必须被纵深防御拒绝"
+        assert await consol_store.list_candidates(scope_id=_SCOPE) == []
+        # 全敏感组（目标 partition 也敏感）同样拒绝
+        group_all_h = _MergeGroup(
+            source_sor_ids=[id_h, id_p1],
+            merged_content="x",
+            subject_key="h2",
+            rationale="r",
+            confidence=0.5,
+        )
+        assert (
+            await svc._propose_group(
+                run_id="run-1",
+                scope_id=_SCOPE,
+                root_task_id=_ROOT_TASK_ID,
+                group=group_all_h,
+                facts_by_id={id_h: facts_by_id[id_h]},
+            )
+            is None
+        )
 
     async def test_duplicate_content_hash_deduped(self, memory_conn, store_group):
         """NFR-4：同 scope 重复内容候选去重（防 crash 重放产重复候选）。"""
