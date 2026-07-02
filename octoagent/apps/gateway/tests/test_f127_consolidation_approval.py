@@ -808,6 +808,73 @@ class TestStaleSourcesConflict:
         assert len(approved) == 1
         assert approved[0].payload["candidate_id"] == cand1.candidate_id
 
+    async def test_conflict_candidate_does_not_block_reproposal(
+        self, memory_conn, store_group
+    ):
+        """★ codex 复审 round2 P2：conflict 候选不得吞掉下次巩固的同内容重新提议——
+        409 引导"等下次巩固重新提议"的恢复主流程必须真能走通：
+        源更新 → accept 409(conflict) → 新一轮发现端基于新 current 源提同内容 →
+        新 PENDING 候选产生（幂等账本放行）→ 新候选可正常 accept。"""
+        memory = MemoryService(memory_conn)
+        cand_id, source_ids, consol_store = await _make_pending_candidate(
+            memory, memory_conn, store_group
+        )
+        id_a, id_b = source_ids
+        # 源 A 被 UPDATE → accept → conflict（同 P2-① 场景）
+        cursor = await memory_conn.execute(
+            "SELECT subject_key FROM memory_sor WHERE memory_id = ?", (id_a,)
+        )
+        subject_a = (await cursor.fetchone())["subject_key"]
+        updated = await memory.fast_commit(
+            scope_id=_SCOPE,
+            partition=MemoryPartition.PROFILE,
+            action=WriteAction.UPDATE,
+            subject_key=subject_a,
+            content="时区 上海（更新）",
+            confidence=1.0,
+        )
+        approval = _build_approval(
+            memory=memory, consol_store=consol_store, store_group=store_group
+        )
+        first = await approval.accept(cand_id)
+        assert first.status == "conflict"
+
+        # 下次巩固：LLM 基于新 current 源（updated.sor_id + id_b）提**相同 merged_content**
+        old_cand = await consol_store.get_candidate(cand_id)
+        discovery = ConsolidationDiscoveryService(
+            memory_service=memory,
+            memory_store=memory._store,  # type: ignore[attr-defined]
+            consolidation_store=consol_store,
+            event_store=store_group.event_store,
+            llm_client=_FakeLLM(
+                content=_groups_json(
+                    [
+                        {
+                            "source_ids": [updated.sor_id, id_b],
+                            "merged_content": old_cand.merged_content,  # 同内容
+                            "subject_key": "timezone.v2",
+                            "rationale": "基于最新源重新提议",
+                            "confidence": 0.9,
+                        }
+                    ]
+                )
+            ),
+        )
+        outcome = await discovery.discover_and_propose(
+            run_id="run-2", scope_id=_SCOPE, root_task_id=_ROOT_TASK_ID
+        )
+        # conflict 候选不阻断：新候选产生（旧黑名单逻辑会在此吞掉提议 → 0）
+        assert outcome.proposals_made == 1
+        pending = await consol_store.list_candidates(
+            scope_id=_SCOPE, status=ConsolidationCandidateStatus.PENDING
+        )
+        assert len(pending) == 1
+        # 恢复闭环：新候选可正常 accept（新源全 current）
+        second = await approval.accept(pending[0].candidate_id)
+        assert second.ok is True
+        assert await _sor_status(memory_conn, updated.sor_id) == "superseded"
+        assert await _sor_status(memory_conn, id_b) == "superseded"
+
     async def test_conflict_is_terminal_no_reclaim_no_reject(
         self, memory_conn, store_group
     ):

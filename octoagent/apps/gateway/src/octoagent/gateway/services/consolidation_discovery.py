@@ -623,11 +623,28 @@ class ConsolidationDiscoveryService:
         # most_common 取众数（混合时取第一个出现最多的）
         return Counter(partitions).most_common(1)[0][0]
 
-    async def _is_duplicate_candidate(self, scope_id: str, content_hash: str) -> bool:
-        """同 scope 是否已有非 rejected 同 content_hash 候选（NFR-4 幂等账本）。
+    #: 幂等账本**阻断白名单**（codex 复审 round2 P2 修复——白名单而非黑名单）：
+    #: - PENDING/APPLYING：同内容已有待审/在途候选，重复提议无意义；
+    #: - APPLIED：已生效，重复提议是重放。
+    #: 不阻断的终态显式排除在外：
+    #: - REJECTED：用户拒过的内容 LLM 再提议 = 新提议让用户重新决定（既有语义）；
+    #: - CONFLICT：候选因源过期/敏感防御失效——下次巩固基于**新 current 源**重新提议
+    #:   必须放行，否则 accept 409 引导"等下次巩固重新提议"的恢复主流程被旧 conflict
+    #:   候选吞掉。白名单式写法保证未来新增终态默认不阻断（不再重蹈黑名单覆辙）。
+    _DUP_BLOCKING_STATUSES: frozenset[ConsolidationCandidateStatus] = frozenset(
+        {
+            ConsolidationCandidateStatus.PENDING,
+            ConsolidationCandidateStatus.APPLYING,
+            ConsolidationCandidateStatus.APPLIED,
+        }
+    )
 
-        查 pending / applying / applied——rejected 不算（用户拒过的内容若 LLM 再次提议，
-        视为新提议让用户重新决定，不静默吞）。
+    async def _is_duplicate_candidate(self, scope_id: str, content_hash: str) -> bool:
+        """同 scope 是否已有阻断态（pending/applying/applied）同 content_hash 候选
+        （NFR-4 幂等账本）。
+
+        rejected / conflict 不阻断——前者是用户决策可重提（用户重新决定），后者是
+        系统检测失效（源已变更），新一轮巩固基于新源的同内容提议必须放行（恢复主流程）。
         """
         try:
             existing = await self._consolidation_store.list_candidates(
@@ -639,7 +656,7 @@ class ConsolidationDiscoveryService:
         for cand in existing:
             if (
                 cand.content_hash == content_hash
-                and cand.status != ConsolidationCandidateStatus.REJECTED
+                and cand.status in self._DUP_BLOCKING_STATUSES
             ):
                 return True
         return False
