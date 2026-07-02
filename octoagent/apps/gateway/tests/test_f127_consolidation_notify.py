@@ -247,6 +247,9 @@ class TestPendingReviewNotification:
         assert call["state_transition_event_id"] == payload["run_id"]
         # FR-E3：channels 默认全渠道（USER.md 未配 summary_channels）
         assert call["channels"] == frozenset({"telegram", "web_sse"})
+        # Codex P2：session_id=""（全局通知桶）——None 会让 _record_active 跳过，
+        # GET /api/notifications 查不到（Web-only 用户服务端死角）
+        assert call["session_id"] == ""
 
     async def test_channels_read_from_user_md_summary_channels(self, store_group):
         """FR-E3：USER.md summary_channels: "telegram" → 通知只发 telegram。"""
@@ -501,3 +504,21 @@ class TestRealNotificationServiceIntegration:
                 run_id=run_id, facts_reviewed=3, proposals_made=1, config=config
             )
         assert len(tg.calls) == 2
+
+    async def test_visible_in_global_web_inbox(self, store_group):
+        """Codex P2 修复验证：通知落 session_id="" 全局桶 → list_active("")
+        （即 GET /api/notifications 默认查询）真能看到；Web-only 用户不再是服务端死角。
+        """
+        await _seed_main_runtime_with_namespace(store_group)
+        notif_svc, _tg, _web = self._build_real_notif(store_group)
+        svc = _build_service(
+            store_group, runner=_RecordingRunner(), notification_service=notif_svc
+        )
+        await svc._run_consolidation()
+
+        inbox = notif_svc.list_active("")  # notifications 路由默认 session_id=""
+        assert len(inbox) == 1
+        entry = inbox[0]
+        assert entry["notification_type"] == CONSOLIDATION_PENDING_REVIEW_EVENT_TYPE
+        assert entry["task_id"] == CONSOLIDATION_ROOT_TASK_ID
+        assert entry["payload"]["proposals_made"] == 2

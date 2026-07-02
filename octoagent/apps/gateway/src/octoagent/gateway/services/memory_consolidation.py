@@ -714,7 +714,14 @@ class MemoryConsolidationService:
                 },
                 priority=NotificationPriority.MEDIUM,
                 state_transition_event_id=run_id,
-                session_id=None,
+                # Codex Phase E review P2：session_id=None 会让 _record_active 跳过记录，
+                # GET /api/notifications 查不到（Web-only / Telegram 未绑定用户的待审
+                # 通知服务端死角）。session_id=""（空串）是 notifications 路由**文档化的
+                # 全局通知桶**（"为空时返回全局通知"）——巩固通知不绑定任何会话，落全局
+                # 收件箱 + F116 落盘 rehydrate。剩余缺口（SSE 按 task_id 广播订不到隐藏
+                # 系统任务 + 前端通知 UI 未建）是与 F102 ROUTINE_DAILY_SUMMARY 共享的
+                # 平台级缺口，归 F101/前端 follow-up，非 F127 范围。
+                session_id="",
                 channels=config.summary_channels,
             )
             logger.info(

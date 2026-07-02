@@ -40,6 +40,7 @@ from fastapi.testclient import TestClient
 from octoagent.core.models.enums import EventType
 from octoagent.core.store import StoreGroup, create_store_group
 from octoagent.gateway.routes import consolidation_candidates as route_mod
+from octoagent.gateway.routes import notifications as notifications_route_mod
 from octoagent.gateway.services.consolidation_discovery import (
     ConsolidationDiscoveryService,
 )
@@ -153,10 +154,15 @@ async def store_group(tmp_path: Path):
 
 @pytest_asyncio.fixture
 def client(store_group: StoreGroup) -> TestClient:
-    """真 REST 客户端（consolidation_candidates 路由，同 production include_router）。"""
+    """真 REST 客户端（candidates + notifications 路由，同 production include_router）。
+
+    app.state.notification_service 由测试在 _build_chain 后挂上（GET /api/notifications
+    全局收件箱验证用，Codex P2）。
+    """
     app = FastAPI()
     app.state.store_group = store_group
     app.include_router(route_mod.router)
+    app.include_router(notifications_route_mod.router)
     return TestClient(app)
 
 
@@ -224,7 +230,13 @@ def _merge_llm_json(sor_ids: list[str]) -> str:
 
 def _build_chain(
     store_group: StoreGroup, *, llm_content: str
-) -> tuple[MemoryConsolidationService, _FakeChannel, _FakeChannel, _FakePlane]:
+) -> tuple[
+    MemoryConsolidationService,
+    _FakeChannel,
+    _FakeChannel,
+    _FakePlane,
+    NotificationService,
+]:
     """装配全链服务（发现端 runner 装配镜像 harness `_consolidation_discovery_runner`）。"""
     llm = _FakeLLM(llm_content)
 
@@ -266,7 +278,7 @@ def _build_chain(
         discovery_runner=_discovery_runner,
         notification_service=notif_svc,
     )
-    return svc, tg, web, plane
+    return svc, tg, web, plane, notif_svc
 
 
 async def _root_events(store_group: StoreGroup) -> list[Any]:
@@ -359,9 +371,10 @@ class TestAcceptChain:
         """
         await _seed_main_runtime_with_namespace(store_group)
         sor_ids = await _seed_redundant_facts(store_group)
-        svc, tg, web, plane = _build_chain(
+        svc, tg, web, plane, notif_svc = _build_chain(
             store_group, llm_content=_merge_llm_json(sor_ids)
         )
+        client.app.state.notification_service = notif_svc
 
         # ---- 阶段 1：cron 触发（_run_consolidation 即 cron job 回调）----
         await svc._run_consolidation()
@@ -388,6 +401,17 @@ class TestAcceptChain:
         # 此刻源事实仍全部 CURRENT（C4：发现端只提议不 commit）
         for sid in sor_ids:
             assert await _sor_status(store_group.conn, sid) == "current"
+
+        # Codex P2：通知落全局收件箱——真 REST GET /api/notifications（默认
+        # session_id=""）能查到（Web-only 用户不再是服务端死角）
+        inbox = client.get("/api/notifications")
+        assert inbox.status_code == 200
+        inbox_items = inbox.json()["notifications"]
+        assert len(inbox_items) == 1
+        assert (
+            inbox_items[0]["notification_type"]
+            == CONSOLIDATION_PENDING_REVIEW_EVENT_TYPE
+        )
 
         # ---- 阶段 2：用户经 REST 审查 + accept（C7 用户主动）----
         listed = client.get("/api/consolidation/candidates")
@@ -452,7 +476,7 @@ class TestRejectChain:
         """全链到 REST reject：候选 rejected + SOR 完全不动 + REJECTED 审计（FR-C4/C7）。"""
         await _seed_main_runtime_with_namespace(store_group)
         sor_ids = await _seed_redundant_facts(store_group)
-        svc, tg, web, plane = _build_chain(
+        svc, tg, web, plane, _notif_svc = _build_chain(
             store_group, llm_content=_merge_llm_json(sor_ids)
         )
         await svc._run_consolidation()
@@ -499,9 +523,10 @@ class TestZeroProposalChain:
         """LLM 判定无可合并组 → COMPLETED(proposals=0)、无候选、**零通知**（FR-E2）。"""
         await _seed_main_runtime_with_namespace(store_group)
         await _seed_redundant_facts(store_group)
-        svc, tg, web, plane = _build_chain(
+        svc, tg, web, plane, notif_svc = _build_chain(
             store_group, llm_content='{"groups": []}'
         )
+        client.app.state.notification_service = notif_svc
         await svc._run_consolidation()
 
         # 无候选
@@ -509,13 +534,14 @@ class TestZeroProposalChain:
         assert await consol_store.list_candidates(scope_id=_SCOPE) == []
         assert client.get("/api/consolidation/candidates").json()["pending_count"] == 0
 
-        # 零通知（channel 层 + NOTIFICATION_DISPATCHED 审计都不存在）
+        # 零通知（channel 层 + NOTIFICATION_DISPATCHED 审计 + 全局收件箱三重否定）
         assert tg.calls == []
         assert web.calls == []
         events = await _root_events(store_group)
         assert not any(
             e.type == EventType.NOTIFICATION_DISPATCHED for e in events
         ), "0 提议不该有任何通知派发（含审计）"
+        assert client.get("/api/notifications").json()["notifications"] == []
 
         # 审计链：TRIGGERED → COMPLETED（无 PROPOSED）
         chain = _consolidation_chain(events)
