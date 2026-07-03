@@ -129,3 +129,30 @@ def test_stop_has_no_service_hint_in_command_mode(monkeypatch, tmp_path) -> None
 
     assert result.exit_code == 0
     assert "octo service uninstall" not in result.output
+
+
+def test_stop_force_warns_immediate_respawn_in_os_service_mode(
+    monkeypatch, tmp_path
+) -> None:
+    """Codex review P2（三轮）：OS_SERVICE 模式下 --force（SIGKILL）会被
+    supervisor 判异常退出立即拉起——不得让用户以为服务已停。"""
+    monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("OCTOAGENT_DATA_DIR", str(tmp_path / "data"))
+    _write_runtime_fixtures(tmp_path, os_service=True)
+    # 第一次探测存活 → 发信号（拦截不真发）→ 之后探测已退出
+    alive_states = iter([True, False, False, False])
+    monkeypatch.setattr(
+        "octoagent.provider.dx.update_commands._pid_alive",
+        lambda pid: next(alive_states, False),
+    )
+    monkeypatch.setattr(
+        "octoagent.provider.dx.update_commands.os.kill", lambda pid, sig: None
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["stop", "--force"])
+
+    assert result.exit_code == 0
+    flattened = result.output.replace("\n", "")
+    assert "立即被拉起" in flattened
+    assert "service uninstall" in flattened  # rich 会在反引号命令中间换行

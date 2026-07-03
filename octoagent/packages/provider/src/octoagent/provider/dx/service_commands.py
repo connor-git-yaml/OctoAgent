@@ -14,6 +14,7 @@ import time
 from pathlib import Path
 
 import click
+from octoagent.core.log_redaction import redact_sensitive_text
 
 from .console_output import create_console, render_panel
 from .service_manager import (
@@ -263,9 +264,12 @@ def logs_command(lines: int, follow: bool, level: str | None, verbose: bool) -> 
     if verbose:
         console.print(f"[dim]日志文件: {log_file}[/dim]")
 
+    # 展示前统一再过一遍脱敏（Codex review P2 三轮）：主日志写侧已脱敏
+    # （幂等重跑无害）；err.log 回退是 service 层未脱敏原始输出，这里是
+    # 它唯一的出站展示口。
     for line in _tail_lines(log_file, max(lines, 1)):
         if minimum_level is None or _level_matches(line, minimum_level):
-            click.echo(line)
+            click.echo(redact_sensitive_text(line))
 
     if not follow:
         return
@@ -288,6 +292,6 @@ def logs_command(lines: int, follow: bool, level: str | None, verbose: bool) -> 
                     offset = handle.tell()
                 for line in chunk.splitlines():
                     if minimum_level is None or _level_matches(line, minimum_level):
-                        click.echo(line)
+                        click.echo(redact_sensitive_text(line))
     except KeyboardInterrupt:
         raise SystemExit(0) from None

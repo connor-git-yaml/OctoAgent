@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Literal
 
 import httpx
+from octoagent.core.log_redaction import redact_sensitive_text
 from octoagent.core.models import RestartStrategy
 from pydantic import BaseModel, Field
 
@@ -232,7 +233,9 @@ def validate_stable_paths(spec_paths: list[str]) -> list[str]:
     return problems
 
 
-def validate_start_command(command: list[str]) -> list[str]:
+def validate_start_command(
+    command: list[str], *, instance_root: Path | None = None
+) -> list[str]:
     """校验 descriptor.start_command 满足稳定 ExecStart 约束（FR-A2）。
 
     要求：
@@ -241,6 +244,11 @@ def validate_start_command(command: list[str]) -> list[str]:
     3. 必须是 ``run-octo-home.sh`` 稳定脚本形态（DP-2）——dev 形态
        ``uv run uvicorn ...`` 依赖 cwd=源码 checkout，违反 stable-working-dir。
     4. 脚本文件真实存在（防 install 后 CHDIR/exec 阶段死循环）。
+    5. 传入 ``instance_root`` 时，脚本必须解析在实例根之下（Codex review P2
+       三轮：普通源码 clone 里的 run-octo-home.sh 不含 worktree 标记也能过
+       前 4 条，但 checkout 被移动/删除后服务 exec 阶段永久失败；托管实例
+       真实形态恒为 ``~/.octoagent/app/octoagent/scripts/run-octo-home.sh``，
+       实测 Connor 实例吻合）。``None`` 仅供无实例上下文的单元校验。
     """
     problems: list[str] = []
     if not command:
@@ -256,6 +264,15 @@ def validate_start_command(command: list[str]) -> list[str]:
         return problems
     if not Path(script).exists():
         problems.append(f"启动脚本不存在: {script}（请重新运行 scripts/install-octo-home.sh）")
+    if instance_root is not None:
+        script_resolved = Path(script).expanduser().resolve()
+        root_resolved = instance_root.expanduser().resolve()
+        if not script_resolved.is_relative_to(root_resolved):
+            problems.append(
+                f"启动脚本不在实例根 {root_resolved} 之下: {script}"
+                "（源码 checkout 被移动/删除会让服务 exec 阶段永久失败）。"
+                "请重新运行 scripts/install-octo-home.sh 完成托管实例引导。"
+            )
     return problems
 
 
@@ -721,7 +738,9 @@ class ServiceManager:
                 "未检测到 managed runtime descriptor（~/.octoagent/data/ops/"
                 "managed-runtime.json）。请先运行 scripts/install-octo-home.sh 完成实例引导。"
             ]
-        problems = validate_start_command(list(descriptor.start_command))
+        problems = validate_start_command(
+            list(descriptor.start_command), instance_root=self._root
+        )
         problems.extend(validate_stable_paths([str(self._root)]))
         if problems:
             return None, problems
@@ -887,6 +906,7 @@ class ServiceManager:
             else:
                 messages.append(f"[dry-run] 服务定义不存在（无需删除）: {service_path}")
             messages.append("[dry-run] 将把 restart 策略复位为 command。")
+            messages.append("[dry-run] 将清理 runtime-state（旧 pid 记录）。")
             messages.append("[dry-run] 未执行任何删除 / launchctl / systemctl 操作。")
             return ServiceInstallResult(
                 backend=self._backend.name,
@@ -902,6 +922,7 @@ class ServiceManager:
             strategy_message = self._set_restart_strategy(RestartStrategy.COMMAND)
             if strategy_message:
                 messages.append(strategy_message)
+            self._clear_runtime_state(messages)
             messages.append("服务定义本来不存在，无需删除。")
             return ServiceInstallResult(
                 backend=self._backend.name,
@@ -917,6 +938,7 @@ class ServiceManager:
         strategy_message = self._set_restart_strategy(RestartStrategy.COMMAND)
         if strategy_message:
             messages.append(strategy_message)
+        self._clear_runtime_state(messages)
 
         # 残留清单显式枚举验证（FR-B3）
         residues: list[str] = []
@@ -1007,6 +1029,16 @@ class ServiceManager:
         except OSError:
             return None
 
+    def _clear_runtime_state(self, messages: list[str]) -> None:
+        """uninstall 时清运行状态（Codex review P2 三轮）：旧 pid 残留会被
+        COMMAND 模式 stop/restart 误用（PID 复用时甚至向无关进程发信号）。
+        失败不阻塞卸载主流程（#6）。"""
+        try:
+            self._store.clear_runtime_state()
+            messages.append("已清理 runtime-state（旧 pid 记录不再被 stop/restart 误用）。")
+        except Exception as exc:
+            messages.append(f"runtime-state 清理失败（忽略）: {type(exc).__name__}")
+
     def _set_restart_strategy(self, strategy: RestartStrategy) -> str:
         descriptor = self._store.load_runtime_descriptor()
         if descriptor is None:
@@ -1074,7 +1106,9 @@ class ServiceManager:
             for line in reversed(tail.splitlines()):
                 lowered = line.lower()
                 if "error" in lowered or "critical" in lowered or "traceback" in lowered:
-                    return line.strip()[:300]
+                    # err.log 是 service 层未脱敏原始输出——展示前必须脱敏
+                    # （Codex review P2 三轮；主日志双跑幂等无害）
+                    return redact_sensitive_text(line.strip()[:300])
         return ""
 
     def _soft_result(self, future, fallback, label: str, messages: list[str]):  # noqa: ANN001, ANN201

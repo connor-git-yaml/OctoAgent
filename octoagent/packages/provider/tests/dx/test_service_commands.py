@@ -288,6 +288,19 @@ class TestLogsCli:
         assert result.exit_code == 0
         assert "暂无日志" in result.output
 
+    def test_logs_stderr_fallback_output_is_redacted(self, log_env: Path) -> None:
+        """Codex review P2（三轮）：err.log 由 init 系统直接重定向、未经
+        redacting formatter——logs 展示前必须再脱敏。"""
+        secret = "sk-abcdef1234567890abcdefXYZ"
+        (log_env.parent / "octoagent.err.log").write_text(
+            f"Traceback ...\nRuntimeError: init failed key={secret}\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(logs_command, [])
+        assert result.exit_code == 0
+        assert secret not in result.output
+        assert "RuntimeError" in result.output
+
     def test_logs_verbose_shows_path(self, log_env: Path) -> None:
         log_env.write_text("hello\n", encoding="utf-8")
         result = CliRunner().invoke(logs_command, ["--verbose"])

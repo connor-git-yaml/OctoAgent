@@ -244,6 +244,31 @@ class TestStablePathValidation:
     def test_stable_script_passes(self, stable_script: Path) -> None:
         assert validate_start_command(["/bin/bash", str(stable_script)]) == []
 
+    def test_script_inside_instance_root_passes(
+        self, instance_root: Path, stable_script: Path
+    ) -> None:
+        assert (
+            validate_start_command(
+                ["/bin/bash", str(stable_script)], instance_root=instance_root
+            )
+            == []
+        )
+
+    def test_script_outside_instance_root_rejected(
+        self, instance_root: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（三轮）：普通源码 clone 的 run-octo-home.sh 不含
+        worktree 标记也真实存在，但 checkout 被移动/删除后服务永久失败——
+        脚本必须解析在实例根之下（托管实例真实形态恒为
+        ~/.octoagent/app/.../run-octo-home.sh）。"""
+        outside = tmp_path / "some-clone" / "octoagent" / "scripts" / "run-octo-home.sh"
+        outside.parent.mkdir(parents=True)
+        outside.write_text("#!/bin/bash\n", encoding="utf-8")
+        problems = validate_start_command(
+            ["/bin/bash", str(outside)], instance_root=instance_root
+        )
+        assert any("不在实例根" in problem for problem in problems)
+
     def test_worktree_instance_root_blocks_install(
         self, tmp_path: Path, stable_script: Path
     ) -> None:
@@ -742,6 +767,44 @@ class TestUninstall:
         result = manager.uninstall()
         assert result.action == "absent"
 
+    def test_uninstall_clears_runtime_state_both_branches(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（三轮）：uninstall 必须清 runtime-state——旧 pid
+        残留会被 COMMAND 模式 stop/restart 误用（PID 复用误杀风险）。
+        uninstalled 与 absent 两分支都要清。"""
+        from octoagent.core.models import RuntimeStateSnapshot
+
+        manager, _, store = _build_manager(instance_root, stable_script, tmp_path)
+        manager.install()
+        now = utc_now()
+        store.save_runtime_state(
+            RuntimeStateSnapshot(
+                pid=99999,
+                project_root=str(instance_root),
+                started_at=now,
+                heartbeat_at=now,
+                verify_url="http://127.0.0.1:8000/ready?profile=core",
+            )
+        )
+        result = manager.uninstall()
+        assert result.action == "uninstalled"
+        assert store.load_runtime_state() is None
+
+        # absent 分支同样清理
+        store.save_runtime_state(
+            RuntimeStateSnapshot(
+                pid=88888,
+                project_root=str(instance_root),
+                started_at=now,
+                heartbeat_at=now,
+                verify_url="http://127.0.0.1:8000/ready?profile=core",
+            )
+        )
+        second = manager.uninstall()
+        assert second.action == "absent"
+        assert store.load_runtime_state() is None
+
     def test_uninstall_dry_run_removes_nothing(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
     ) -> None:
@@ -808,6 +871,23 @@ class TestStatus:
         assert status.loaded is False
         assert status.running is False
         assert status.pid is None
+
+    def test_status_last_error_line_is_redacted(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（三轮）：err.log 是 service 层未脱敏原始输出，
+        last_error_line 展示前必须脱敏。"""
+        manager, _, _ = _build_manager(instance_root, stable_script, tmp_path)
+        log_dir = instance_root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        secret = "sk-abcdef1234567890abcdefXYZ"
+        (log_dir / "octoagent.err.log").write_text(
+            f"boot ok\nERROR: provider init failed key={secret}\n",
+            encoding="utf-8",
+        )
+        status = manager.status()
+        assert secret not in status.last_error_line
+        assert "ERROR" in status.last_error_line
 
     def test_status_returns_even_when_probe_thread_hangs(
         self, instance_root: Path, stable_script: Path, tmp_path: Path

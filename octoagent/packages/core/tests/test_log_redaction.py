@@ -8,8 +8,8 @@ from __future__ import annotations
 import importlib
 
 import pytest
-from octoagent.gateway.middleware import log_redaction
-from octoagent.gateway.middleware.log_redaction import (
+from octoagent.core import log_redaction
+from octoagent.core.log_redaction import (
     _redact_with_flag,
     redact_sensitive_text,
 )

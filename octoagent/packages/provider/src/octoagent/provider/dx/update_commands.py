@@ -19,11 +19,18 @@ from .update_status_store import UpdateStatusStore
 console = create_console()
 
 
-def _print_service_mode_hint(store: UpdateStatusStore) -> None:
+def _print_service_mode_hint(
+    store: UpdateStatusStore, *, force_killed: bool = False
+) -> None:
     """F129 FR-C3：service 托管模式下 stop 后提示"服务还会再起"。
 
     launchd/systemd 定义仍在（开机自启 / `octo restart` 委托拉起），
     彻底停用需 `octo service uninstall`（对标 OpenClaw `stop --disable` 语义）。
+
+    Codex review P2（三轮）：``--force``（SIGKILL）会被 launchd
+    ``KeepAlive{SuccessfulExit=false}`` / systemd ``Restart=on-failure``
+    判为异常退出并**立即拉起新进程**——不得让用户以为服务已停；
+    优雅 SIGTERM（退出码 0）不触发自动重启，文案区分两种语义。
     读取失败静默跳过（提示是增强，不阻塞 stop 主流程）。
     """
     try:
@@ -31,6 +38,14 @@ def _print_service_mode_hint(store: UpdateStatusStore) -> None:
     except Exception:
         return
     if descriptor is None or descriptor.restart_strategy != RestartStrategy.OS_SERVICE:
+        return
+    if force_killed:
+        console.print(
+            "[red]注意：当前 runtime 由 OS 服务托管，SIGKILL 被 supervisor 判为"
+            "异常退出——服务通常会**立即被拉起新进程**（并非已停止）。"
+            "彻底停用请运行 `octo service uninstall`；"
+            "临时停止请不带 --force（优雅退出不会被自动重启）。[/red]"
+        )
         return
     console.print(
         "[yellow]提示：当前 runtime 由 OS 服务托管（octo service install）。"
@@ -108,7 +123,7 @@ def stop(force: bool, timeout: int) -> None:
         if not _pid_alive(pid):
             store.clear_runtime_state()
             console.print(f"[green]OctoAgent (PID {pid}) 已停止。[/green]")
-            _print_service_mode_hint(store)
+            _print_service_mode_hint(store, force_killed=force)
             raise SystemExit(0)
         time.sleep(0.2)
 

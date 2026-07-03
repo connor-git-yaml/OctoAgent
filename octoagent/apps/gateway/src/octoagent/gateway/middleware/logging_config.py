@@ -35,8 +35,7 @@ from pathlib import Path
 from typing import IO, Any
 
 import structlog
-
-from .log_redaction import redact_sensitive_text
+from octoagent.core.log_redaction import redact_sensitive_text
 
 _LOGFIRE_INITIALIZED = False
 
