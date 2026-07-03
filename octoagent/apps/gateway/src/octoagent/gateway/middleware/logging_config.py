@@ -123,6 +123,9 @@ def _build_file_handler(formatter: logging.Formatter) -> logging.Handler | None:
         return None
     try:
         log_dir.mkdir(parents=True, exist_ok=True)
+        # 目录 0700：日志属敏感（脱敏非万能，FR-E5），仅 owner 可进
+        with contextlib.suppress(OSError):
+            os.chmod(log_dir, 0o700)
         handler = _SecureRotatingFileHandler(
             log_dir / PROCESS_LOG_FILE_NAME,
             maxBytes=_env_int("OCTOAGENT_LOG_MAX_BYTES", _DEFAULT_LOG_MAX_BYTES),

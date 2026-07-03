@@ -428,6 +428,22 @@ class TestInstallIdempotency:
         assert descriptor is not None
         assert descriptor.restart_strategy == RestartStrategy.OS_SERVICE
 
+    def test_install_precreates_service_logs_with_tight_permissions(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """G-1（Opus 评审）：service 层 out/err 抓的是未脱敏裸 stdout——
+        若交给 launchd/systemd 首次创建会跟随 umask（0644）。install 必须
+        预创建 0600 + 目录 0700（两个 init 系统对已存在文件 append 保留权限）。"""
+        manager, _runner, _ = _build_manager(instance_root, stable_script, tmp_path)
+        result = manager.install()
+        assert result.action == "installed"
+        log_dir = instance_root / "logs"
+        assert (log_dir.stat().st_mode & 0o777) == 0o700
+        for name in ("octoagent.out.log", "octoagent.err.log"):
+            target = log_dir / name
+            assert target.exists()
+            assert (target.stat().st_mode & 0o777) == 0o600
+
     def test_second_install_skips_when_content_identical(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
     ) -> None:

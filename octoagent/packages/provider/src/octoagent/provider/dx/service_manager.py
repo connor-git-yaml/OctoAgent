@@ -23,6 +23,7 @@ systemd——所有探测/激活命令经 ``CommandRunner`` 注入 stub，服务
 from __future__ import annotations
 
 import concurrent.futures
+import contextlib
 import difflib
 import os
 import plistlib
@@ -787,7 +788,7 @@ class ServiceManager:
                 messages=messages,
             )
 
-        self.log_dir.mkdir(parents=True, exist_ok=True)
+        self._prepare_log_dir()
 
         if action == "skipped":
             messages.append("服务定义内容一致，跳过写入（--force 可强制重写）。")
@@ -926,6 +927,24 @@ class ServiceManager:
         return self._backend.restart_service()
 
     # -- 内部 helper ---------------------------------------------------------
+
+    def _prepare_log_dir(self) -> None:
+        """创建日志目录并收紧权限（Constitution #5 出站延伸，评审 G-1）。
+
+        service 层 ``StandardOutPath/StandardErrorPath`` 文件若交给
+        launchd/systemd 首次创建，权限跟随默认 umask（0644）——而这层抓的是
+        **未经脱敏**的裸 stdout / 启动期 traceback。install 时预创建为 0600
+        （两个 init 系统对已存在文件都是 append，权限得以保留），目录 0700。
+        权限收紧失败不阻塞 install（#6）。
+        """
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            os.chmod(self.log_dir, 0o700)
+        for name in (SERVICE_STDOUT_LOG, SERVICE_STDERR_LOG):
+            target = self.log_dir / name
+            with contextlib.suppress(OSError):
+                target.touch(exist_ok=True)
+                os.chmod(target, 0o600)
 
     @staticmethod
     def _read_existing(path: Path) -> str | None:
