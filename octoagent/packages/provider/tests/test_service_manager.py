@@ -602,6 +602,115 @@ class TestInstallIdempotency:
         assert descriptor is not None
         assert descriptor.restart_strategy == RestartStrategy.COMMAND  # 未切换
 
+    def test_install_stops_legacy_command_process_before_activation(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Codex review P1（十一轮）：迁移场景——旧自管 COMMAND 进程占端口
+        时新服务起不来但旧进程 /ready 骗过 gate。install 前须优雅停旧进程。"""
+        from octoagent.core.models import RuntimeStateSnapshot
+
+        manager, _, store = _build_manager(instance_root, stable_script, tmp_path)
+        now = utc_now()
+        store.save_runtime_state(
+            RuntimeStateSnapshot(
+                pid=54321,
+                project_root=str(instance_root),
+                started_at=now,
+                heartbeat_at=now,
+                verify_url="http://127.0.0.1:8000/ready?profile=core",
+            )
+        )
+        sent_signals: list[tuple[int, int]] = []
+        alive = {"value": True}
+
+        def fake_kill(pid: int, sig: int) -> None:
+            if sig == 0:
+                if not alive["value"]:
+                    raise ProcessLookupError(pid)
+                return
+            sent_signals.append((pid, sig))
+            alive["value"] = False  # SIGTERM 后旧进程退出
+
+        monkeypatch.setattr(
+            "octoagent.provider.dx.service_manager.os.kill", fake_kill
+        )
+        result = manager.install()
+        assert result.repair_required is False
+        import signal as signal_module
+
+        assert (54321, signal_module.SIGTERM) in sent_signals
+        assert any("交由 OS 服务接管" in message for message in result.messages)
+        assert store.load_runtime_state() is None  # 干净交接
+
+    def test_install_does_not_touch_supervisor_managed_pid(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """策略已 OS_SERVICE 时 pid 属 supervisor 管理，绝不能杀。"""
+        from octoagent.core.models import RuntimeStateSnapshot
+
+        manager, _, store = _build_manager(instance_root, stable_script, tmp_path)
+        descriptor = store.load_runtime_descriptor()
+        assert descriptor is not None
+        descriptor.restart_strategy = RestartStrategy.OS_SERVICE
+        store.save_runtime_descriptor(descriptor)
+        now = utc_now()
+        store.save_runtime_state(
+            RuntimeStateSnapshot(
+                pid=54321,
+                project_root=str(instance_root),
+                started_at=now,
+                heartbeat_at=now,
+                verify_url="http://127.0.0.1:8000/ready?profile=core",
+            )
+        )
+        killed: list[tuple[int, int]] = []
+        monkeypatch.setattr(
+            "octoagent.provider.dx.service_manager.os.kill",
+            lambda pid, sig: killed.append((pid, sig)),
+        )
+        manager.install()
+        assert killed == []  # 零信号
+
+    def test_lifecycle_commands_use_drain_timeout(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（十一轮）：stop/restart/bootout 须用 >= drain 窗口
+        的超时（systemctl restart 合法等 90s，5s probe 超时会误判 124）。"""
+        from octoagent.provider.dx.service_manager import (
+            LIFECYCLE_TIMEOUT_SECONDS,
+            STOP_TIMEOUT_SECONDS,
+        )
+
+        class TimeoutRecorder(FakeCommandRunner):
+            def __init__(self) -> None:
+                super().__init__()
+                self.timeouts: dict[str, float] = {}
+
+            def __call__(self, command: list[str], timeout_s: float) -> CommandOutcome:
+                self.timeouts[" ".join(command)] = timeout_s
+                return super().__call__(command, timeout_s)
+
+        assert LIFECYCLE_TIMEOUT_SECONDS >= STOP_TIMEOUT_SECONDS
+        recorder = TimeoutRecorder()
+        manager, _, _ = _build_manager(
+            instance_root, stable_script, tmp_path,
+            backend_kind="systemd", runner=recorder,
+        )
+        manager.backend.restart_service()
+        restart_key = next(
+            key for key in recorder.timeouts if "restart" in key
+        )
+        assert recorder.timeouts[restart_key] >= STOP_TIMEOUT_SECONDS
+        manager.backend.deactivate()
+        stop_key = next(key for key in recorder.timeouts if " stop " in f" {key} ")
+        assert recorder.timeouts[stop_key] >= STOP_TIMEOUT_SECONDS
+        # 只读探测保持短超时（防 wedged 挂死 status）
+        manager.backend.probe_loaded()
+        enabled_key = next(key for key in recorder.timeouts if "is-enabled" in key)
+        assert recorder.timeouts[enabled_key] <= 10
+
     def test_systemd_install_warns_when_linger_disabled(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
     ) -> None:

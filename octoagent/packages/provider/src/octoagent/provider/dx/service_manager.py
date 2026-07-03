@@ -29,6 +29,7 @@ import os
 import plistlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -71,6 +72,12 @@ PROCESS_LOG_FILE = "octoagent.log"
 #: 优雅关闭窗口（秒）。launchd ExitTimeOut / systemd TimeoutStopSec 都必须
 #: 大于 gateway drain 窗口，否则优雅关闭中途被 SIGKILL（Hermes B.1.5）。
 STOP_TIMEOUT_SECONDS = 90
+
+#: 生命周期命令（stop/restart/bootout/kickstart）超时（Codex review P2
+#: 十一轮）：``systemctl --user restart`` 会同步等待优雅关闭（合法可达
+#: TimeoutStopSec=90s），复用 5s probe 超时会把正常 drain 误判为 124 失败。
+#: 只读探测保留短超时。
+LIFECYCLE_TIMEOUT_SECONDS = STOP_TIMEOUT_SECONDS + 30
 
 #: worktree 标记：子串形态（`.worktrees` 隐藏目录）+ 路径段形态
 #: （`worktrees` 目录段，覆盖 `.claude/worktrees/...` 等真实布局——
@@ -366,10 +373,13 @@ class ServiceBackend(ABC):
         service_dir: Path,
         command_runner: CommandRunner,
         probe_timeout_s: float = 5.0,
+        lifecycle_timeout_s: float = LIFECYCLE_TIMEOUT_SECONDS,
     ) -> None:
         self._service_dir = service_dir
         self._run = command_runner
         self._probe_timeout_s = probe_timeout_s
+        #: 生命周期命令超时（stop/restart 会同步等 drain，P2 十一轮）
+        self._lifecycle_timeout_s = lifecycle_timeout_s
 
     @abstractmethod
     def service_file_path(self) -> Path:
@@ -490,10 +500,10 @@ class LaunchdBackend(ServiceBackend):
         warnings: list[str] = []
         plist_path = str(self.service_file_path())
         # bootout 旧注册（可能不存在，check=False 幂等）→ bootstrap 新定义
-        self._run(["launchctl", "bootout", self._service_target], self._probe_timeout_s)
+        self._run(["launchctl", "bootout", self._service_target], self._lifecycle_timeout_s)
         bootstrap = self._run(
             ["launchctl", "bootstrap", self._domain_target, plist_path],
-            self._probe_timeout_s,
+            self._lifecycle_timeout_s,
         )
         if not bootstrap.ok:
             warnings.append(
@@ -504,7 +514,7 @@ class LaunchdBackend(ServiceBackend):
         if not enable.ok:
             warnings.append(f"launchctl enable 返回 {enable.returncode}")
         kickstart = self._run(
-            ["launchctl", "kickstart", self._service_target], self._probe_timeout_s
+            ["launchctl", "kickstart", self._service_target], self._lifecycle_timeout_s
         )
         if not kickstart.ok:
             warnings.append(f"launchctl kickstart 返回 {kickstart.returncode}")
@@ -512,7 +522,7 @@ class LaunchdBackend(ServiceBackend):
 
     def deactivate(self) -> list[str]:
         outcome = self._run(
-            ["launchctl", "bootout", self._service_target], self._probe_timeout_s
+            ["launchctl", "bootout", self._service_target], self._lifecycle_timeout_s
         )
         if outcome.ok:
             return ["launchctl bootout 完成。"]
@@ -521,7 +531,8 @@ class LaunchdBackend(ServiceBackend):
 
     def restart_service(self) -> CommandOutcome:
         return self._run(
-            ["launchctl", "kickstart", "-k", self._service_target], self._probe_timeout_s
+            ["launchctl", "kickstart", "-k", self._service_target],
+            self._lifecycle_timeout_s,
         )
 
     def probe_loaded(self) -> bool:
@@ -645,7 +656,8 @@ WantedBy=default.target
                 f"systemctl enable 返回 {enable.returncode}: {enable.stderr.strip()}"
             )
         restart = self._run(
-            ["systemctl", "--user", "restart", SYSTEMD_UNIT_NAME], self._probe_timeout_s
+            ["systemctl", "--user", "restart", SYSTEMD_UNIT_NAME],
+            self._lifecycle_timeout_s,
         )
         if not restart.ok:
             warnings.append(
@@ -656,7 +668,7 @@ WantedBy=default.target
     def deactivate(self) -> list[str]:
         messages: list[str] = []
         stop = self._run(
-            ["systemctl", "--user", "stop", SYSTEMD_UNIT_NAME], self._probe_timeout_s
+            ["systemctl", "--user", "stop", SYSTEMD_UNIT_NAME], self._lifecycle_timeout_s
         )
         if stop.ok:
             messages.append("systemctl stop 完成。")
@@ -697,7 +709,8 @@ WantedBy=default.target
 
     def restart_service(self) -> CommandOutcome:
         return self._run(
-            ["systemctl", "--user", "restart", SYSTEMD_UNIT_NAME], self._probe_timeout_s
+            ["systemctl", "--user", "restart", SYSTEMD_UNIT_NAME],
+            self._lifecycle_timeout_s,
         )
 
     def probe_loaded(self) -> bool:
@@ -899,6 +912,11 @@ class ServiceManager:
             )
 
         self._prepare_log_dir()
+        # Codex review P1（十一轮）：迁移场景——旧的自管 COMMAND 进程仍占
+        # verify_url 端口时，新 supervisor 进程会启动失败，但共享 /ready 由
+        # 旧进程应答会骗过 gate（假成功接管）。install 语义即"交由 OS 托管"，
+        # 激活前优雅停掉旧自管进程完成交接。
+        self._stop_legacy_command_process(messages)
 
         if action == "skipped":
             messages.append("服务定义内容一致，跳过写入（--force 可强制重写）。")
@@ -1148,6 +1166,53 @@ class ServiceManager:
             return None
         except OSError:
             return None
+
+    def _stop_legacy_command_process(self, messages: list[str]) -> None:
+        """install 前优雅停掉旧的自管（COMMAND/SELF_SIGNAL）gateway 进程。
+
+        Codex review P1（十一轮）：不停旧进程 → 新 supervisor 进程端口冲突
+        启动失败 + 旧进程 /ready 应答骗过 gate = 假成功接管。仅在 descriptor
+        策略**非 OS_SERVICE** 时才视为自管旧进程（OS_SERVICE 下 pid 属
+        supervisor 管理，绝不能杀）。失败软化为消息（gate 会兜底报 repair）。
+        """
+        try:
+            descriptor = self._store.load_runtime_descriptor()
+            if descriptor is None or descriptor.restart_strategy == RestartStrategy.OS_SERVICE:
+                return
+            state = self._store.load_runtime_state()
+        except Exception:
+            return
+        if state is None or state.pid <= 0:
+            return
+        pid = state.pid
+        try:
+            os.kill(pid, 0)
+        except OSError:
+            return  # 旧 pid 已不存在
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError as exc:
+            messages.append(
+                f"停止旧自管 gateway 进程（pid={pid}）失败：{exc}。"
+                "端口可能被占用导致新服务启动失败（start gate 会复核）。"
+            )
+            return
+        messages.append(
+            f"已请求停止旧的自管 gateway 进程（pid={pid}），交由 OS 服务接管。"
+        )
+        deadline = time.monotonic() + 15.0
+        while time.monotonic() < deadline:
+            try:
+                os.kill(pid, 0)
+            except OSError:
+                with contextlib.suppress(Exception):
+                    self._store.clear_runtime_state()
+                return
+            self._sleep(0.2)
+        messages.append(
+            f"旧进程（pid={pid}）未在 15s 内退出——新服务可能因端口占用"
+            "启动失败（start gate 会复核并报 repair-required）。"
+        )
 
     def _linger_notes(self) -> list[str]:
         """systemd 平台的 linger 知情提示（Codex review P2 六轮，不改系统）。"""
