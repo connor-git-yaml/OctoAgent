@@ -18,6 +18,7 @@ import click
 from .console_output import create_console, render_panel
 from .service_manager import (
     PROCESS_LOG_FILE,
+    SERVICE_STDERR_LOG,
     ServiceInstallResult,
     ServiceManagerError,
     ServiceStatus,
@@ -245,8 +246,19 @@ def logs_command(lines: int, follow: bool, level: str | None, verbose: bool) -> 
         minimum_level = normalized
 
     if not log_file.exists():
-        _print_no_log_hint(log_file, verbose=verbose)
-        return
+        # Codex review P2（二轮）：启动期 import 崩溃发生在 setup_logging 之前，
+        # 唯一 traceback 落在 service 层 octoagent.err.log（主日志尚未生成）——
+        # 回退展示它，别让用户在最需要日志的时刻看到"暂无日志"。
+        stderr_fallback = log_file.parent / SERVICE_STDERR_LOG
+        if stderr_fallback.exists() and stderr_fallback.stat().st_size > 0:
+            console.print(
+                "[yellow]主日志尚未生成（gateway 可能在启动期崩溃）。"
+                f"以下为 service 层原始 stderr（{SERVICE_STDERR_LOG}）：[/yellow]"
+            )
+            log_file = stderr_fallback
+        else:
+            _print_no_log_hint(log_file, verbose=verbose)
+            return
 
     if verbose:
         console.print(f"[dim]日志文件: {log_file}[/dim]")

@@ -65,6 +65,22 @@ class TestCheckServiceStatus:
         overall = DoctorRunner._compute_overall([result])
         assert overall != CheckStatus.FAIL
 
+    async def test_running_but_ready_false_warns_not_pass(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review P2（二轮）：进程在跑但 /ready 明确失败 = gateway
+        不可用，doctor 不得报健康 PASS。"""
+        runner = _runner_with_service(
+            tmp_path,
+            ServiceStatus(
+                backend="launchd", installed=True, loaded=True, running=True,
+                pid=321, ready=False,
+            ),
+        )
+        result = await runner.check_service_status()
+        assert result.status == CheckStatus.WARN
+        assert "octo logs" in result.fix_hint
+
     async def test_installed_not_running_warns_with_repair_hint(
         self, tmp_path: Path
     ) -> None:

@@ -266,6 +266,28 @@ class TestLogsCli:
         assert "暂无日志" in result.output
         assert "octo service install" in result.output
 
+    def test_logs_falls_back_to_service_stderr_on_startup_crash(
+        self, log_env: Path
+    ) -> None:
+        """Codex review P2（二轮）：启动期 import 崩溃时主日志不存在、唯一
+        traceback 在 service 层 err.log —— logs 必须回退展示而非"暂无日志"。"""
+        err_file = log_env.parent / "octoagent.err.log"
+        err_file.write_text(
+            "Traceback (most recent call last):\nImportError: boom\n",
+            encoding="utf-8",
+        )
+        result = CliRunner().invoke(logs_command, [])
+        assert result.exit_code == 0
+        assert "ImportError: boom" in result.output
+        assert "octoagent.err.log" in result.output.replace("\n", "")  # 来源标注
+        assert "暂无日志" not in result.output
+
+    def test_logs_empty_stderr_still_shows_no_log_hint(self, log_env: Path) -> None:
+        (log_env.parent / "octoagent.err.log").write_text("", encoding="utf-8")
+        result = CliRunner().invoke(logs_command, [])
+        assert result.exit_code == 0
+        assert "暂无日志" in result.output
+
     def test_logs_verbose_shows_path(self, log_env: Path) -> None:
         log_env.write_text("hello\n", encoding="utf-8")
         result = CliRunner().invoke(logs_command, ["--verbose"])

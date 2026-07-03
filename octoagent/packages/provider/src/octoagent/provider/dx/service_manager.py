@@ -264,13 +264,22 @@ def build_service_path_value(environ: dict[str, str] | None = None) -> str:
 
     不复制当前 shell 的完整 PATH（易变字段会导致幂等比对反复误判过时，
     research §B.1.2）；只拼 uv 所在目录 + 标准系统路径。
+
+    Codex review P1（二轮）：从 worktree/.venv 激活的 shell 执行 install 时，
+    ``which("uv")`` 可能解析到 ``.claude/worktrees/.../.venv/bin`` 等**可删
+    目录**——且幂等比对剔除 PATH，写错永不自愈。不稳定 uv 目录直接弃用，
+    由 ``~/.local/bin``（uv 官方安装位）+ Homebrew 兜底。
     """
     del environ  # 保留签名扩展位；当前实现不读 env，确定性来自 which("uv")
     parts: list[str] = []
     uv_path = shutil.which("uv")
     if uv_path:
-        parts.append(str(Path(uv_path).parent))
+        uv_dir = Path(uv_path).parent
+        unstable = bool(validate_stable_paths([str(uv_dir)])) or ".venv" in uv_dir.parts
+        if not unstable:
+            parts.append(str(uv_dir))
     for candidate in (
+        str(Path.home() / ".local" / "bin"),  # uv 官方安装位兜底
         "/opt/homebrew/bin",
         "/usr/local/bin",
         "/usr/bin",
@@ -822,10 +831,11 @@ class ServiceManager:
                 gate_messages = self._start_gate()
                 messages.extend(gate_messages)
             elif not self._probe_ready_or_none_ok():
-                messages.append(
-                    "注意：服务在运行但 /ready 未通过——可能仍在启动中；"
-                    "请稍后 `octo service status` 复查，异常时查 `octo logs`。"
-                )
+                # Codex review P2（二轮）：ready 明确 False 不得静默提示了事
+                # ——重走 start gate（窗口内恢复视为通过，超时转 repair-required，
+                # 不绕过 FR-A5）。
+                gate_messages = self._start_gate()
+                messages.extend(gate_messages)
             repair_required = any(
                 "repair-required" in message for message in gate_messages
             )

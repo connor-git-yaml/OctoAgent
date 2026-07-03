@@ -533,9 +533,21 @@ class DoctorRunner:
             )
         if status.running:
             detail = f"pid={status.pid}" if status.pid else "运行中"
-            ready_note = ""
-            if status.ready is not None:
-                ready_note = "，/ready 通过" if status.ready else "，/ready 未通过"
+            if status.ready is False:
+                # Codex review P2（二轮）：进程在跑但 readiness 明确失败 =
+                # gateway 实际不可用，不得报健康通过
+                return CheckResult(
+                    name=name,
+                    status=CheckStatus.WARN,
+                    level=CheckLevel.RECOMMENDED,
+                    message=f"服务进程在运行但 /ready 未通过（{status.backend}，{detail}）"
+                    "——gateway 当前不可用",
+                    fix_hint=(
+                        "octo logs 查失败原因（常见：配置/数据库/凭证）；"
+                        "修复后 `octo restart`，再 `octo service status` 复查"
+                    ),
+                )
+            ready_note = "，/ready 通过" if status.ready else ""
             return CheckResult(
                 name=name,
                 status=CheckStatus.PASS,

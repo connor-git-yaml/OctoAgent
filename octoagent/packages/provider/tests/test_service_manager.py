@@ -362,6 +362,28 @@ class TestRenderedDefinitions:
         assert value.startswith("/fake/uv-bin")
         assert "/usr/bin" in value
 
+    @pytest.mark.parametrize(
+        "unstable_uv",
+        [
+            "/Users/x/repo/.claude/worktrees/F129/octoagent/.venv/bin/uv",
+            "/Users/x/repo/.worktrees/F129/.venv/bin/uv",
+            "/Users/x/repo/octoagent/.venv/bin/uv",
+        ],
+    )
+    def test_path_value_rejects_unstable_uv_dir(
+        self, monkeypatch: pytest.MonkeyPatch, unstable_uv: str
+    ) -> None:
+        """Codex review P1（二轮）：worktree/.venv 里的 uv 目录绝不进服务
+        PATH（PATH 被幂等比对剔除，写错永不自愈）——弃用 + ~/.local/bin 兜底。"""
+        monkeypatch.setattr(
+            "octoagent.provider.dx.service_manager.shutil.which",
+            lambda name: unstable_uv if name == "uv" else None,
+        )
+        value = build_service_path_value()
+        assert ".venv" not in value
+        assert "worktrees" not in value
+        assert str(Path.home() / ".local" / "bin") in value
+
 
 # ---------------------------------------------------------------------------
 # keep-awake（FR-H1/H2，GATE-2 选项 C opt-in）
@@ -504,6 +526,22 @@ class TestInstallIdempotency:
         second = manager.install()
         assert second.action == "skipped"
         assert second.repair_required is True, "skipped 路径不得吞掉 gate 失败"
+
+    def test_skip_running_but_not_ready_reruns_gate_to_repair(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（二轮）：skipped + 进程在跑但 /ready 明确 False →
+        必须重走 start gate（超时转 repair-required），不得 exit 0 假成功。"""
+        manager, _runner, store = _build_manager(instance_root, stable_script, tmp_path)
+        first = manager.install()
+        assert first.repair_required is False
+        # 复用同一 service_dir/store 重建 manager，唯一差异：ready 恒 False
+        manager_bad_ready, _, _ = _build_manager(
+            instance_root, stable_script, tmp_path, ready=False
+        )
+        second = manager_bad_ready.install()
+        assert second.action == "skipped"
+        assert second.repair_required is True, "ready=False 不得绕过 FR-A5 gate"
 
     def test_skip_gate_pass_resyncs_restart_strategy(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
