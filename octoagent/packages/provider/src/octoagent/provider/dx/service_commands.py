@@ -140,11 +140,28 @@ def _render_status(status: ServiceStatus, *, verbose: bool) -> None:
             "提示: 服务未在运行——`octo restart` 拉起；反复失败请查 "
             "`octo logs` 或 `octo service install --force` 修复。"
         )
+    elif not status.loaded:
+        # Codex review P2（十轮）：进程在跑但未注册 OS → 开机自启保障失效
+        lines.append(
+            "提示: 服务进程在运行但未注册到 OS（开机自启保障失效）——"
+            "运行 `octo service install --force` 修复注册。"
+        )
+    elif status.ready is False:
+        lines.append(
+            "提示: 服务在运行但 /ready 未通过（gateway 当前不可用）——"
+            "`octo logs` 查失败原因。"
+        )
     if verbose:
         lines.append(f"backend: {status.backend}")
         lines.append(f"服务定义: {status.service_file_path}")
         lines.extend(status.messages)
-    healthy = status.installed and status.running
+    # Codex review P2（十轮）：健康 = 装了 + 注册了 + 在跑 + 就绪未明确失败
+    healthy = (
+        status.installed
+        and status.loaded
+        and status.running
+        and status.ready is not False
+    )
     console.print(
         render_panel(
             "octo service status",

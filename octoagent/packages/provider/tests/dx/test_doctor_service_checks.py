@@ -65,6 +65,20 @@ class TestCheckServiceStatus:
         overall = DoctorRunner._compute_overall([result])
         assert overall != CheckStatus.FAIL
 
+    async def test_running_but_not_loaded_warns(self, tmp_path: Path) -> None:
+        """Codex review P2（十轮）：进程在跑但未注册 OS（enable 失败）——
+        开机自启保障失效，不得 PASS。"""
+        runner = _runner_with_service(
+            tmp_path,
+            ServiceStatus(
+                backend="systemd", installed=True, loaded=False, running=True,
+                pid=77, ready=True,
+            ),
+        )
+        result = await runner.check_service_status()
+        assert result.status == CheckStatus.WARN
+        assert "--force" in result.fix_hint
+
     async def test_running_but_ready_false_warns_not_pass(
         self, tmp_path: Path
     ) -> None:

@@ -51,6 +51,20 @@ class TestEnvAndJsonFields:
         assert "hunter2" not in result
         assert "MY_SECRET=***" in result
 
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "TOKEN=abc123def456ghi789jkl",
+            "API_KEY=abc123def456ghi789jkl",
+            "PASSWORD=hunter2secret",
+        ],
+    )
+    def test_bare_env_key_names_masked(self, line: str) -> None:
+        """Codex review P1（十轮）：裸键名（无前缀）同样是 secret 赋值。"""
+        result = redact_sensitive_text(line)
+        secret = line.split("=", 1)[1]
+        assert secret not in result
+
     def test_json_field_masked(self) -> None:
         result = redact_sensitive_text('payload {"api_key": "value12345"} sent')
         assert "value12345" not in result

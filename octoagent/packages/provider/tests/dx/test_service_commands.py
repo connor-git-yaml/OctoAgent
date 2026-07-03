@@ -165,6 +165,23 @@ class TestServiceUninstallStatusCli:
         assert result.exit_code == 0
         assert "octo service install" in result.output
 
+    def test_status_running_not_loaded_gives_repair_hint(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review P2（十轮）：running 但未 loaded → 提示修复注册。"""
+        fake = FakeServiceManager(
+            status_result=ServiceStatus(
+                backend="systemd", installed=True, loaded=False, running=True,
+                pid=9, ready=True,
+            )
+        )
+        _patch_manager(monkeypatch, fake)
+        result = CliRunner().invoke(service_group, ["status"])
+        assert result.exit_code == 0
+        flattened = result.output.replace("\n", "")
+        assert "未注册" in flattened
+        assert "install --force" in flattened.replace("`", "")
+
     def test_status_json(self, monkeypatch: pytest.MonkeyPatch) -> None:
         fake = FakeServiceManager(
             status_result=ServiceStatus(

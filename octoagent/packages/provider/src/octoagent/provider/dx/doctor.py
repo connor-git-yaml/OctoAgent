@@ -557,6 +557,17 @@ class DoctorRunner:
             )
         if status.running:
             detail = f"pid={status.pid}" if status.pid else "运行中"
+            if not status.loaded:
+                # Codex review P2（十轮）：进程在跑但未注册 OS（enable 失败/
+                # 手动起了 disabled unit）——开机自启保障失效，不得 PASS
+                return CheckResult(
+                    name=name,
+                    status=CheckStatus.WARN,
+                    level=CheckLevel.RECOMMENDED,
+                    message=f"服务进程在运行但未注册到 OS supervisor"
+                    f"（{status.backend}，{detail}）——开机自启保障失效",
+                    fix_hint="octo service install --force 修复服务注册",
+                )
             if status.ready is False:
                 # Codex review P2（二轮）：进程在跑但 readiness 明确失败 =
                 # gateway 实际不可用，不得报健康通过

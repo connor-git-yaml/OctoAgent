@@ -78,8 +78,10 @@ _PREFIX_KEY_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}")
 # 2a) ENV 赋值：字段名含 API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH（大小写
 #     不敏感），值到下一个空白/引号为止。安全优先：AUTH_MODE=api_key 这类
 #     低敏值也会被遮（可读性让位安全，spec FR-E2 显式列 AUTH）。
+#     Codex review P1（十轮）：前缀必须**可选**——裸键名 `TOKEN=` / `API_KEY=`
+#     / `PASSWORD=` 同样是 secret 赋值，强制前缀 ≥1 字符会漏。
 _ENV_ASSIGN_PATTERN = re.compile(
-    r"\b([A-Za-z_][A-Za-z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)"
+    r"\b((?:[A-Za-z_][A-Za-z0-9_]*)?(?:API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH)"
     r"[A-Za-z0-9_]*)\s*=\s*([\"']?)([^\s\"']+)",
     flags=re.IGNORECASE,
 )
