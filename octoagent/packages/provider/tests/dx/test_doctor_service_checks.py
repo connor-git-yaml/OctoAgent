@@ -81,6 +81,39 @@ class TestCheckServiceStatus:
         assert result.status == CheckStatus.WARN
         assert "octo logs" in result.fix_hint
 
+    async def test_systemd_installed_without_linger_warns(
+        self, tmp_path: Path
+    ) -> None:
+        """Codex review P2（六轮）：linger 未启用 = 登出即停，常驻不成立。"""
+        from octoagent.provider.dx.service_manager import (
+            CommandOutcome,
+            SystemdUserBackend,
+        )
+
+        class LingerOffManager(FakeStatusManager):
+            def __init__(self) -> None:
+                super().__init__(
+                    ServiceStatus(
+                        backend="systemd", installed=True, loaded=True, running=True,
+                        pid=1, ready=True,
+                    )
+                )
+                self.backend = SystemdUserBackend(
+                    service_dir=tmp_path,
+                    command_runner=lambda cmd, timeout: CommandOutcome(
+                        0, "Linger=no\n", ""
+                    ),
+                )
+
+        runner = DoctorRunner(
+            project_root=tmp_path,
+            service_manager_factory=lambda _root: LingerOffManager(),
+            sleep_risk_probe=lambda: SleepRisk(supported=False),
+        )
+        result = await runner.check_service_status()
+        assert result.status == CheckStatus.WARN
+        assert "enable-linger" in result.fix_hint
+
     async def test_installed_not_running_warns_with_repair_hint(
         self, tmp_path: Path
     ) -> None:

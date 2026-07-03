@@ -12,7 +12,6 @@ import pytest
 from click.testing import CliRunner
 from octoagent.provider.dx import service_commands
 from octoagent.provider.dx.service_commands import (
-    _resolve_instance_root,
     _resolve_log_file,
     _tail_lines,
     logs_command,
@@ -23,6 +22,7 @@ from octoagent.provider.dx.service_manager import (
     ServiceInstallResult,
     ServiceManagerError,
     ServiceStatus,
+    resolve_instance_root,
 )
 
 
@@ -183,13 +183,13 @@ class TestResolveRoots:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
-        assert _resolve_instance_root() == tmp_path
+        assert resolve_instance_root() == tmp_path
 
     def test_instance_root_defaults_to_home_octoagent(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.delenv("OCTOAGENT_PROJECT_ROOT", raising=False)
-        assert _resolve_instance_root() == Path.home() / ".octoagent"
+        assert resolve_instance_root() == Path.home() / ".octoagent"
 
     def test_log_file_explicit_log_dir_wins(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

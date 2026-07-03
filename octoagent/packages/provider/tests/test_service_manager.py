@@ -593,10 +593,49 @@ class TestInstallIdempotency:
         )
         result = manager.install()
         assert result.repair_required is True
-        assert any("未注册到 OS" in message for message in result.messages)
+        # 六轮改法：activate 硬失败直接置 repair（文案"激活步骤存在失败"）
+        assert any(
+            "激活步骤存在失败" in message or "未注册到 OS" in message
+            for message in result.messages
+        )
         descriptor = store.load_runtime_descriptor()
         assert descriptor is not None
         assert descriptor.restart_strategy == RestartStrategy.COMMAND  # 未切换
+
+    def test_systemd_install_warns_when_linger_disabled(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（六轮）：无 linger 时登出即停——install 必须知情
+        提示（只检测不自动 enable-linger）。"""
+        runner = FakeCommandRunner()
+        runner.rules.append(
+            (("loginctl", "show-user"), CommandOutcome(0, "Linger=no\n", ""))
+        )
+        manager, runner, _ = _build_manager(
+            instance_root, stable_script, tmp_path, backend_kind="systemd",
+            runner=runner,
+        )
+        result = manager.install()
+        assert any("linger" in message for message in result.messages)
+        assert any("enable-linger" in message for message in result.messages)
+        # 只读探测：loginctl 只有 show-user 形态
+        for command in runner.commands_containing("loginctl"):
+            assert "show-user" in command
+            assert "enable-linger" not in " ".join(command)
+
+    def test_systemd_install_no_linger_note_when_enabled(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        runner = FakeCommandRunner()
+        runner.rules.append(
+            (("loginctl", "show-user"), CommandOutcome(0, "Linger=yes\n", ""))
+        )
+        manager, _, _ = _build_manager(
+            instance_root, stable_script, tmp_path, backend_kind="systemd",
+            runner=runner,
+        )
+        result = manager.install()
+        assert not any("enable-linger" in message for message in result.messages)
 
     def test_skip_gate_failure_reports_repair_required(
         self, instance_root: Path, stable_script: Path, tmp_path: Path

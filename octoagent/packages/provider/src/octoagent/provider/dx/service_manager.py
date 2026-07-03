@@ -153,6 +153,20 @@ def detect_init_system(platform_name: str | None = None) -> InitSystem:
     return "none"
 
 
+def resolve_instance_root() -> Path:
+    """托管实例根解析（`octo service` / `octo logs` / doctor service 检查共用）。
+
+    env ``OCTOAGENT_PROJECT_ROOT`` → ``~/.octoagent``。与 update/config 命令的
+    cwd fallback 刻意不同：service 定义 / 落盘日志都钉在托管实例根
+    （spec §0.4），用户在任意目录执行都应命中同一实例（Codex review P2
+    六轮：doctor 曾用 cwd 项目根导致 descriptor/日志读错位置）。
+    """
+    env_root = os.environ.get("OCTOAGENT_PROJECT_ROOT", "").strip()
+    if env_root:
+        return Path(env_root).expanduser()
+    return Path.home() / ".octoagent"
+
+
 # ---------------------------------------------------------------------------
 # 数据模型
 # ---------------------------------------------------------------------------
@@ -661,6 +675,26 @@ WantedBy=default.target
         """删除 unit 文件后刷新 systemd 视图（尽力而为）。"""
         self._run(["systemctl", "--user", "daemon-reload"], self._probe_timeout_s)
 
+    def linger_enabled(self) -> bool | None:
+        """login linger 是否启用（Codex review P2 六轮）。
+
+        无 linger 时 systemd user manager 随最后一个登录会话退出而停止，
+        重启后也需登录才启动——"常驻"承诺不成立。只读探测（loginctl
+        show-user），读不到返回 None；**不自动 enable-linger**（改用户
+        login 状态属系统设置，检测+建议交还用户，GATE-2 精神）。
+        """
+        outcome = self._run(
+            ["loginctl", "show-user", str(os.getuid()), "--property=Linger"],
+            self._probe_timeout_s,
+        )
+        if not outcome.ok:
+            return None
+        if "Linger=yes" in outcome.stdout:
+            return True
+        if "Linger=no" in outcome.stdout:
+            return False
+        return None
+
     def restart_service(self) -> CommandOutcome:
         return self._run(
             ["systemctl", "--user", "restart", SYSTEMD_UNIT_NAME], self._probe_timeout_s
@@ -872,8 +906,10 @@ class ServiceManager:
             loaded = self._backend.probe_loaded()
             running, _ = self._backend.probe_running()
             gate_messages: list[str] = []
+            activation_warnings: list[str] = []
             if not (loaded and running):
-                messages.extend(self._backend.activate())
+                activation_warnings = self._backend.activate()
+                messages.extend(activation_warnings)
                 gate_messages = self._start_gate()
                 messages.extend(gate_messages)
             elif not self._probe_ready_or_none_ok():
@@ -882,13 +918,17 @@ class ServiceManager:
                 # 不绕过 FR-A5）。
                 gate_messages = self._start_gate()
                 messages.extend(gate_messages)
-            repair_required = any(
+            # Codex review P2（六轮）：activate 硬失败（bootstrap/enable/
+            # restart 非零）本身即 repair——旧进程还健康时 gate 会放行，
+            # 但新定义可能根本没被注册。
+            repair_required = bool(activation_warnings) or any(
                 "repair-required" in message for message in gate_messages
             )
             if not repair_required:
                 strategy_message = self._set_restart_strategy(RestartStrategy.OS_SERVICE)
                 if strategy_message:
                     messages.append(strategy_message)
+            messages.extend(self._linger_notes())
             return ServiceInstallResult(
                 backend=self._backend.name,
                 action="skipped",
@@ -903,13 +943,23 @@ class ServiceManager:
             ("已重写过时服务定义: " if action == "refreshed" else "已写入服务定义: ")
             + str(service_path)
         )
-        messages.extend(self._backend.activate())
+        activation_warnings = self._backend.activate()
+        messages.extend(activation_warnings)
         gate_messages = self._start_gate()
         messages.extend(gate_messages)
-        repair_required = any("repair-required" in message for message in gate_messages)
-        # Codex review P2（五轮）：activate 部分失败（如 bootstrap/enable 挂）
-        # 但旧进程还在跑 + /ready 通过时，gate 会放行——新定义可能没真注册到
-        # OS（开机自启失效）。gate 后补验 loaded 目标态，未注册即 repair。
+        # Codex review P2（六轮）：activate 硬失败（bootstrap/enable/restart
+        # 非零）本身即 repair——旧进程还健康 + ready 通过时 gate 会放行，
+        # 但新定义可能根本没被注册。
+        repair_required = bool(activation_warnings) or any(
+            "repair-required" in message for message in gate_messages
+        )
+        if activation_warnings:
+            messages.append(
+                "repair-required：服务激活步骤存在失败（见上方告警），新定义"
+                "可能未注册到 OS。修复后重试 `octo service install --force`。"
+            )
+        # Codex review P2（五轮）：gate 后补验 loaded 目标态（bootout 成功但
+        # bootstrap 失败时旧注册已被清，activate 告警 + 此兜底双保险）。
         if not repair_required and not self._backend.probe_loaded():
             repair_required = True
             messages.append(
@@ -922,6 +972,7 @@ class ServiceManager:
             strategy_message = self._set_restart_strategy(RestartStrategy.OS_SERVICE)
             if strategy_message:
                 messages.append(strategy_message)
+        messages.extend(self._linger_notes())
         return ServiceInstallResult(
             backend=self._backend.name,
             action=action,
@@ -1065,6 +1116,18 @@ class ServiceManager:
             return None
         except OSError:
             return None
+
+    def _linger_notes(self) -> list[str]:
+        """systemd 平台的 linger 知情提示（Codex review P2 六轮，不改系统）。"""
+        if not isinstance(self._backend, SystemdUserBackend):
+            return []
+        if self._backend.linger_enabled() is False:
+            return [
+                "提示：未启用 login linger——用户登出后 systemd user manager "
+                "会停止服务，重启后也需登录才会启动。要真正常驻请运行 "
+                "`loginctl enable-linger`（本工具不自动修改系统登录设置）。"
+            ]
+        return []
 
     def _clear_runtime_state(self, messages: list[str]) -> None:
         """uninstall 时清运行状态（Codex review P2 三轮）：旧 pid 残留会被

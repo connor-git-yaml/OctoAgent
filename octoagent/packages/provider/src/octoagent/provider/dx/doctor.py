@@ -20,7 +20,13 @@ from ..auth.store import CredentialStore
 from octoagent.gateway.services.config.config_schema import TelegramChannelConfig
 from .models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from .onboarding_models import OnboardingStepStatus
-from .service_manager import ServiceManager, ServiceManagerError, build_service_manager
+from .service_manager import (
+    ServiceManager,
+    ServiceManagerError,
+    SystemdUserBackend,
+    build_service_manager,
+    resolve_instance_root,
+)
 from .sleep_probe import SleepRisk, probe_sleep_risk
 from .telegram_verifier import TelegramOnboardingVerifier
 
@@ -55,8 +61,14 @@ class DoctorRunner:
             self._root = project_root
         self._store = CredentialStore()
         self._telegram_verifier = telegram_verifier or TelegramOnboardingVerifier()
-        # F129 FR-G DI 缝：测试注入 stub（绝不真跑 launchctl/systemctl/pmset）
-        self._service_manager_factory = service_manager_factory or build_service_manager
+        # F129 FR-G DI 缝：测试注入 stub（绝不真跑 launchctl/systemctl/pmset）。
+        # 默认 factory 忽略 doctor 项目根、用**托管实例根**（与 `octo service`
+        # / `octo logs` 同解析）——Codex review P2（六轮）：doctor 从源码/任意
+        # 目录跑时，cwd 根会让 descriptor/日志读错位置（ready=None 掩盖
+        # readiness 失败）。
+        self._service_manager_factory = service_manager_factory or (
+            lambda _root: build_service_manager(resolve_instance_root())
+        )
         self._sleep_risk_probe = sleep_risk_probe or probe_sleep_risk
 
     def _has_yaml_runtime_config(self) -> bool:
@@ -530,6 +542,18 @@ class DoctorRunner:
                 level=CheckLevel.RECOMMENDED,
                 message="未安装 OS 托管服务（关终端/崩溃/重启后 gateway 不会自动恢复）",
                 fix_hint="octo service install 安装为常驻服务（崩溃自愈 + 开机自启）",
+            )
+        # Codex review P2（六轮）：systemd user unit 无 linger 时登出即停、
+        # 重启需登录才启动——常驻承诺不成立，必须 WARN（只检测不自动改）。
+        backend = getattr(manager, "backend", None)
+        if isinstance(backend, SystemdUserBackend) and backend.linger_enabled() is False:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.WARN,
+                level=CheckLevel.RECOMMENDED,
+                message="服务已安装，但未启用 login linger——用户登出后服务会停止，"
+                "重启后也需登录才启动（常驻不成立）",
+                fix_hint="运行 `loginctl enable-linger` 启用（本工具不自动修改登录设置）",
             )
         if status.running:
             detail = f"pid={status.pid}" if status.pid else "运行中"

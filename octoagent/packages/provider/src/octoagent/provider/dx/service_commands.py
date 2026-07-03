@@ -24,6 +24,7 @@ from .service_manager import (
     ServiceManagerError,
     ServiceStatus,
     build_service_manager,
+    resolve_instance_root,
 )
 
 console = create_console()
@@ -36,34 +37,23 @@ _LEVEL_ORDER = ["debug", "info", "warning", "error", "critical"]
 _LEVEL_ALIASES = {"warn": "warning", "err": "error", "fatal": "critical"}
 
 
-def _resolve_instance_root() -> Path:
-    """CLI 侧实例根解析：env ``OCTOAGENT_PROJECT_ROOT`` → ``~/.octoagent``。
-
-    与 update/config 命令的 cwd fallback 刻意不同：`octo service/logs`
-    操作的是**托管实例**（service 定义 / 落盘日志都钉在实例根，spec §0.4），
-    用户在任意目录执行都应命中同一实例；cwd fallback 只会误导。
-    """
-    env_root = os.environ.get("OCTOAGENT_PROJECT_ROOT", "").strip()
-    if env_root:
-        return Path(env_root).expanduser()
-    return Path.home() / ".octoagent"
-
-
 def _resolve_log_file() -> Path:
     """`octo logs` 目标文件：``OCTOAGENT_LOG_DIR`` 显式覆盖 → 实例根 logs/。
 
     与 gateway ``logging_config._resolve_log_dir`` 同一约定（写侧），
     读侧多一层 ``~/.octoagent`` 兜底（读无污染风险，用户体验优先）。
+    实例根解析下沉 ``service_manager.resolve_instance_root``（Codex review
+    P2 六轮：doctor / service / logs 三处共用同一语义）。
     """
     explicit = os.environ.get("OCTOAGENT_LOG_DIR", "").strip()
     if explicit:
         return Path(explicit).expanduser() / PROCESS_LOG_FILE
-    return _resolve_instance_root() / "logs" / PROCESS_LOG_FILE
+    return resolve_instance_root() / "logs" / PROCESS_LOG_FILE
 
 
 def _build_manager():
     try:
-        return build_service_manager(_resolve_instance_root())
+        return build_service_manager(resolve_instance_root())
     except ServiceManagerError as exc:
         raise click.ClickException(str(exc)) from exc
 
