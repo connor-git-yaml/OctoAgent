@@ -574,6 +574,30 @@ class TestInstallIdempotency:
             len(runner.commands_containing("launchctl", "bootstrap")) > bootstrap_count_before
         )
 
+    def test_activation_failure_with_stale_running_process_is_repair(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（五轮）：enable 失败但旧进程在跑 + ready 通过时，
+        gate 会放行——新定义可能没注册到 OS（开机自启失效）。gate 后补验
+        loaded，未注册即 repair-required 且不切 OS_SERVICE。"""
+        runner = FakeCommandRunner()
+        # systemd：is-enabled 恒失败（注册失败）；show 显示旧进程 active
+        runner.rules.append((("is-enabled",), CommandOutcome(1, "", "disabled")))
+        manager, _, store = _build_manager(
+            instance_root,
+            stable_script,
+            tmp_path,
+            backend_kind="systemd",
+            runner=runner,
+            running_pid=4242,
+        )
+        result = manager.install()
+        assert result.repair_required is True
+        assert any("未注册到 OS" in message for message in result.messages)
+        descriptor = store.load_runtime_descriptor()
+        assert descriptor is not None
+        assert descriptor.restart_strategy == RestartStrategy.COMMAND  # 未切换
+
     def test_skip_gate_failure_reports_repair_required(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
     ) -> None:

@@ -19,6 +19,37 @@ from .update_status_store import UpdateStatusStore
 console = create_console()
 
 
+def _has_managed_descriptor(root) -> bool:
+    try:
+        return UpdateStatusStore(root).load_runtime_descriptor() is not None
+    except Exception:
+        return False
+
+
+def _resolve_managed_root():
+    """restart/stop 的实例根解析（Codex review P2 五轮）。
+
+    与 `octo service`/`octo logs` 对齐：env ``OCTOAGENT_PROJECT_ROOT``
+    显式设置 → 尊重（即使无 descriptor，维持 baseline 报错语义）；
+    否则 cwd（**有 managed-runtime descriptor 才算命中**，保 FR-C4：dev
+    在源码目录的行为字节级不变）→ ``~/.octoagent``（托管实例兜底——
+    否则 `octo service status` 提示"octo restart 拉起"在任意目录无法照做）
+    → cwd（维持 baseline 报错语义）。
+    """
+    import os as _os
+    from pathlib import Path
+
+    if _os.environ.get("OCTOAGENT_PROJECT_ROOT", "").strip():
+        return _resolve_project_root()
+    cwd_root = _resolve_project_root()
+    if _has_managed_descriptor(cwd_root):
+        return cwd_root
+    home_instance = Path.home() / ".octoagent"
+    if _has_managed_descriptor(home_instance):
+        return home_instance
+    return cwd_root
+
+
 def _print_service_mode_hint(
     store: UpdateStatusStore, *, force_killed: bool = False
 ) -> None:
@@ -90,7 +121,7 @@ def _pid_alive(pid: int) -> bool:
 @click.option("--timeout", default=10, type=int, help="等待进程退出的超时秒数")
 def stop(force: bool, timeout: int) -> None:
     """停止正在运行的 OctoAgent 服务。"""
-    root = _resolve_project_root()
+    root = _resolve_managed_root()
     store = UpdateStatusStore(root)
     state = store.load_runtime_state()
 
@@ -172,7 +203,7 @@ def update(dry_run: bool, wait: bool) -> None:
 @click.command("restart")
 def restart() -> None:
     """执行受托管 runtime restart。"""
-    service = UpdateService(_resolve_project_root())
+    service = UpdateService(_resolve_managed_root())
 
     async def _run() -> int:
         summary = await service.restart(trigger_source="cli")

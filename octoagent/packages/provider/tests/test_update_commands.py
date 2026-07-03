@@ -156,3 +156,62 @@ def test_stop_force_warns_immediate_respawn_in_os_service_mode(
     flattened = result.output.replace("\n", "")
     assert "立即被拉起" in flattened
     assert "service uninstall" in flattened  # rich 会在反引号命令中间换行
+
+
+class TestResolveManagedRoot:
+    """Codex review P2（五轮）：restart/stop 实例根解析与 service/logs 对齐。"""
+
+    def test_env_override_wins_even_without_descriptor(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        from octoagent.provider.dx.update_commands import _resolve_managed_root
+
+        monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+        assert _resolve_managed_root() == tmp_path
+
+    def test_cwd_with_descriptor_wins(self, monkeypatch, tmp_path) -> None:
+        from octoagent.provider.dx.update_commands import _resolve_managed_root
+
+        monkeypatch.delenv("OCTOAGENT_PROJECT_ROOT", raising=False)
+        monkeypatch.delenv("OCTOAGENT_DATA_DIR", raising=False)
+        _write_runtime_fixtures(tmp_path, os_service=False)
+        monkeypatch.chdir(tmp_path)
+        assert _resolve_managed_root() == tmp_path
+
+    def test_falls_back_to_home_instance_with_descriptor(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        """FR-C4 边界：cwd 无 descriptor（以前 stop/restart 只会报错）→
+        兜底到 ~/.octoagent 托管实例（status 提示可照做）。"""
+        from pathlib import Path
+
+        from octoagent.provider.dx.update_commands import _resolve_managed_root
+
+        monkeypatch.delenv("OCTOAGENT_PROJECT_ROOT", raising=False)
+        monkeypatch.delenv("OCTOAGENT_DATA_DIR", raising=False)
+        fake_home = tmp_path / "home"
+        instance = fake_home / ".octoagent"
+        instance.mkdir(parents=True)
+        _write_runtime_fixtures(instance, os_service=True)
+        empty_cwd = tmp_path / "empty"
+        empty_cwd.mkdir()
+        monkeypatch.chdir(empty_cwd)
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        assert _resolve_managed_root() == instance
+
+    def test_no_descriptor_anywhere_keeps_cwd_baseline(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        from pathlib import Path
+
+        from octoagent.provider.dx.update_commands import _resolve_managed_root
+
+        monkeypatch.delenv("OCTOAGENT_PROJECT_ROOT", raising=False)
+        monkeypatch.delenv("OCTOAGENT_DATA_DIR", raising=False)
+        fake_home = tmp_path / "home2"
+        fake_home.mkdir()
+        empty_cwd = tmp_path / "empty2"
+        empty_cwd.mkdir()
+        monkeypatch.chdir(empty_cwd)
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: fake_home))
+        assert _resolve_managed_root() == empty_cwd

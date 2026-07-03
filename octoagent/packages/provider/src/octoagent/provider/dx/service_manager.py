@@ -907,6 +907,16 @@ class ServiceManager:
         gate_messages = self._start_gate()
         messages.extend(gate_messages)
         repair_required = any("repair-required" in message for message in gate_messages)
+        # Codex review P2（五轮）：activate 部分失败（如 bootstrap/enable 挂）
+        # 但旧进程还在跑 + /ready 通过时，gate 会放行——新定义可能没真注册到
+        # OS（开机自启失效）。gate 后补验 loaded 目标态，未注册即 repair。
+        if not repair_required and not self._backend.probe_loaded():
+            repair_required = True
+            messages.append(
+                "repair-required：服务未注册到 OS supervisor（开机自启可能失效）。"
+                "请检查上方 launchctl/systemctl 告警，修复后重试 "
+                "`octo service install --force`。"
+            )
         # FR-A4：安装成功后把 restart 策略切到 OS_SERVICE（`octo restart` 分层委托）
         if not repair_required:
             strategy_message = self._set_restart_strategy(RestartStrategy.OS_SERVICE)

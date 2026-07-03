@@ -132,8 +132,9 @@ class TestCheckSleepSettings:
     """FR-G2/G3：会睡 WARN + fix_hint 三条建议 + 合盖诚实说明；降级 SKIP。"""
 
     async def test_will_sleep_laptop_warns_with_honest_hint(
-        self, tmp_path: Path
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        monkeypatch.setattr("octoagent.provider.dx.doctor.sys.platform", "darwin")
         runner = _runner_with_sleep(
             tmp_path,
             SleepRisk(supported=True, will_sleep=True, is_laptop=True, detail="sleep=15"),
@@ -147,6 +148,22 @@ class TestCheckSleepSettings:
         # 诚实告知合盖限制
         assert "合盖" in result.fix_hint
         assert "挡不住" in result.fix_hint
+
+    async def test_linux_hint_has_no_mac_only_advice(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex review P3（五轮）：Linux 上不得给 caffeinate/Mac mini/
+        --keep-awake 等 macOS-only 建议（install 会跳过 keep-awake）。"""
+        monkeypatch.setattr("octoagent.provider.dx.doctor.sys.platform", "linux")
+        runner = _runner_with_sleep(
+            tmp_path,
+            SleepRisk(supported=True, will_sleep=None, is_laptop=True, detail="linux"),
+        )
+        result = await runner.check_sleep_settings()
+        assert result.status == CheckStatus.WARN
+        assert "--keep-awake" not in result.fix_hint or "不支持" in result.fix_hint
+        assert "caffeinate" not in result.fix_hint or "不支持" in result.fix_hint
+        assert "logind" in result.fix_hint
 
     async def test_sleep_disabled_passes(self, tmp_path: Path) -> None:
         runner = _runner_with_sleep(

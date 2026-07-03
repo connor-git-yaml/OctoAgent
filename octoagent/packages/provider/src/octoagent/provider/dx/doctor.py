@@ -589,13 +589,24 @@ class DoctorRunner:
                 level=CheckLevel.RECOMMENDED,
                 message=risk.detail or "当前平台不支持自动电源检测",
             )
-        fix_hint = (
-            "①系统设置 → 显示器/节能 → 开启「接通电源时防止自动进入睡眠」；"
-            "②诚实边界：合盖睡眠（clamshell）软件挡不住——需外接电源+显示器，"
-            "或部署在 Mac mini；"
-            "③或 `octo service install --keep-awake`（服务运行期用户级 "
-            "caffeinate 防 idle 睡眠，零 sudo）"
-        )
+        # Codex review P3（五轮）：fix_hint 按平台生成——Linux 上给 macOS
+        # 系统设置 / Mac mini / caffeinate 建议全不可用（install 也会跳过
+        # keep-awake），会把用户引向无效修复。
+        if sys.platform == "darwin":
+            fix_hint = (
+                "①系统设置 → 显示器/节能 → 开启「接通电源时防止自动进入睡眠」；"
+                "②诚实边界：合盖睡眠（clamshell）软件挡不住——需外接电源+显示器，"
+                "或部署在 Mac mini；"
+                "③或 `octo service install --keep-awake`（服务运行期用户级 "
+                "caffeinate 防 idle 睡眠，零 sudo）"
+            )
+        else:
+            fix_hint = (
+                "①检查 /etc/systemd/logind.conf 的 HandleLidSwitch/IdleAction"
+                "（合盖/闲置策略）；②桌面环境（GNOME/KDE）电源管理里关闭自动挂起；"
+                "③长任务可用 `systemd-inhibit` 手动阻止挂起"
+                "（本平台不支持 --keep-awake/caffeinate）"
+            )
         if risk.will_sleep is None:
             if risk.is_laptop:
                 return CheckResult(
