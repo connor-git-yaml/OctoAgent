@@ -34,6 +34,7 @@ from octoagent.provider.dx.service_manager import (
     build_backend,
     build_service_path_value,
     detect_init_system,
+    start_command_stability_warnings,
     validate_start_command,
 )
 from octoagent.provider.dx.update_status_store import UpdateStatusStore
@@ -244,30 +245,33 @@ class TestStablePathValidation:
     def test_stable_script_passes(self, stable_script: Path) -> None:
         assert validate_start_command(["/bin/bash", str(stable_script)]) == []
 
-    def test_script_inside_instance_root_passes(
+    def test_script_inside_instance_root_no_warning(
         self, instance_root: Path, stable_script: Path
     ) -> None:
         assert (
-            validate_start_command(
-                ["/bin/bash", str(stable_script)], instance_root=instance_root
+            start_command_stability_warnings(
+                ["/bin/bash", str(stable_script)], instance_root
             )
             == []
         )
 
-    def test_script_outside_instance_root_rejected(
+    def test_script_outside_instance_root_warns_but_not_blocked(
         self, instance_root: Path, tmp_path: Path
     ) -> None:
-        """Codex review P2（三轮）：普通源码 clone 的 run-octo-home.sh 不含
-        worktree 标记也真实存在，但 checkout 被移动/删除后服务永久失败——
-        脚本必须解析在实例根之下（托管实例真实形态恒为
-        ~/.octoagent/app/.../run-octo-home.sh）。"""
+        """Codex review 三轮 P2 曾硬拒实例根外脚本 → 四轮抓出与现有
+        bootstrap 流程不兼容（install-octo-home.sh 的 descriptor 指向源码
+        checkout，可在任意位置）。裁决分级：稳定 clone **警告放行**、
+        worktree 标记仍硬拒。"""
         outside = tmp_path / "some-clone" / "octoagent" / "scripts" / "run-octo-home.sh"
         outside.parent.mkdir(parents=True)
         outside.write_text("#!/bin/bash\n", encoding="utf-8")
-        problems = validate_start_command(
-            ["/bin/bash", str(outside)], instance_root=instance_root
+        # 不阻断（validate_start_command 无实例根 problem）
+        assert validate_start_command(["/bin/bash", str(outside)]) == []
+        # 但给出知情警告
+        warnings = start_command_stability_warnings(
+            ["/bin/bash", str(outside)], instance_root
         )
-        assert any("不在实例根" in problem for problem in problems)
+        assert any("实例根之外" in warning for warning in warnings)
 
     def test_worktree_instance_root_blocks_install(
         self, tmp_path: Path, stable_script: Path
@@ -353,7 +357,7 @@ class TestRenderedDefinitions:
         content = manager.backend.render(spec)
         assert "sk-super-secret" not in content
         assert "SILICONFLOW_API_KEY" not in content
-        assert any("跳过非 OCTOAGENT_*" in message for message in messages)
+        assert any("跳过" in message and "OCTOAGENT_*" in message for message in messages)
 
     def test_systemd_unit_pins_stable_paths_and_backoff(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
@@ -492,6 +496,40 @@ class TestInstallIdempotency:
         descriptor = store.load_runtime_descriptor()
         assert descriptor is not None
         assert descriptor.restart_strategy == RestartStrategy.OS_SERVICE
+
+    def test_sensitive_octoagent_env_keys_never_enter_service_definition(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（四轮）：OCTOAGENT_ 前缀不是安全边界——
+        OCTOAGENT_API_KEY 这类键名照样是 secret，不得进持久化 plist/unit。"""
+        store = _write_descriptor(
+            instance_root, start_command=["/bin/bash", str(stable_script)]
+        )
+        descriptor = store.load_runtime_descriptor()
+        assert descriptor is not None
+        descriptor.environment_overrides["OCTOAGENT_API_KEY"] = "sk-super-secret-value"
+        descriptor.environment_overrides["OCTOAGENT_BOT_TOKEN"] = "tg-secret"
+        store.save_runtime_descriptor(descriptor)
+        manager = ServiceManager(
+            instance_root,
+            backend=LaunchdBackend(
+                service_dir=tmp_path / "LaunchAgents",
+                command_runner=FakeCommandRunner(),
+                uid=501,
+            ),
+            status_store=store,
+            ready_prober=lambda url, timeout: True,
+            start_gate_timeout_s=0.1,
+            sleeper=lambda seconds: None,
+        )
+        spec, messages = manager.build_spec()
+        assert spec is not None
+        assert "OCTOAGENT_API_KEY" not in spec.environment
+        assert "OCTOAGENT_BOT_TOKEN" not in spec.environment
+        assert "OCTOAGENT_PORT" in spec.environment  # 正常键不受影响
+        rendered = manager.backend.render(spec)
+        assert "sk-super-secret-value" not in rendered
+        assert any("敏感" in message for message in messages)
 
     def test_install_precreates_service_logs_with_tight_permissions(
         self, instance_root: Path, stable_script: Path, tmp_path: Path

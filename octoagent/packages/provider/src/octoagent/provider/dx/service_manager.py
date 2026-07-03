@@ -233,22 +233,15 @@ def validate_stable_paths(spec_paths: list[str]) -> list[str]:
     return problems
 
 
-def validate_start_command(
-    command: list[str], *, instance_root: Path | None = None
-) -> list[str]:
+def validate_start_command(command: list[str]) -> list[str]:
     """校验 descriptor.start_command 满足稳定 ExecStart 约束（FR-A2）。
 
-    要求：
+    要求（违规 = 阻断，不可被 --force 绕过）：
     1. 非空。
     2. 不含 worktree 标记（validate_stable_paths）。
     3. 必须是 ``run-octo-home.sh`` 稳定脚本形态（DP-2）——dev 形态
        ``uv run uvicorn ...`` 依赖 cwd=源码 checkout，违反 stable-working-dir。
     4. 脚本文件真实存在（防 install 后 CHDIR/exec 阶段死循环）。
-    5. 传入 ``instance_root`` 时，脚本必须解析在实例根之下（Codex review P2
-       三轮：普通源码 clone 里的 run-octo-home.sh 不含 worktree 标记也能过
-       前 4 条，但 checkout 被移动/删除后服务 exec 阶段永久失败；托管实例
-       真实形态恒为 ``~/.octoagent/app/octoagent/scripts/run-octo-home.sh``，
-       实测 Connor 实例吻合）。``None`` 仅供无实例上下文的单元校验。
     """
     problems: list[str] = []
     if not command:
@@ -264,16 +257,46 @@ def validate_start_command(
         return problems
     if not Path(script).exists():
         problems.append(f"启动脚本不存在: {script}（请重新运行 scripts/install-octo-home.sh）")
-    if instance_root is not None:
+    return problems
+
+
+def start_command_stability_warnings(
+    command: list[str], instance_root: Path
+) -> list[str]:
+    """脚本位于实例根之外的**警告**（放行不阻断）。
+
+    Codex review 三轮 P2 曾把"脚本必须在实例根下"做成硬拒；四轮 review 抓出
+    这与现有 bootstrap 流程不兼容——``install-octo-home.sh`` 的 descriptor
+    ``start_command`` 指向**运行安装脚本的源码 checkout**（Connor 实例恰好
+    放在 ``~/.octoagent/app`` 下所以吻合，一般 clone 在任意位置会被硬拒）。
+    裁决分级：worktree 标记仍硬拒（Hermes 死目录惨案，validate_stable_paths）；
+    实例根外的**稳定 clone** 警告放行——用户长期保留源码目录是合法形态，
+    但要知情"移动/删除它会让服务启动失败"。
+    """
+    script = next((token for token in command if token.endswith("run-octo-home.sh")), None)
+    if script is None:
+        return []
+    try:
         script_resolved = Path(script).expanduser().resolve()
         root_resolved = instance_root.expanduser().resolve()
-        if not script_resolved.is_relative_to(root_resolved):
-            problems.append(
-                f"启动脚本不在实例根 {root_resolved} 之下: {script}"
-                "（源码 checkout 被移动/删除会让服务 exec 阶段永久失败）。"
-                "请重新运行 scripts/install-octo-home.sh 完成托管实例引导。"
-            )
-    return problems
+    except OSError:
+        return []
+    if script_resolved.is_relative_to(root_resolved):
+        return []
+    return [
+        f"提示：启动脚本位于实例根之外（{script}）。服务将依赖该源码目录——"
+        "移动或删除它会让服务启动失败。建议把源码长期放在 "
+        f"{root_resolved / 'app'} 下并重跑 scripts/install-octo-home.sh。"
+    ]
+
+
+_SENSITIVE_ENV_KEY_TOKENS = ("KEY", "TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTH")
+
+
+def _is_sensitive_env_key(key: str) -> bool:
+    """键名含敏感词 → 不进持久化服务定义（Codex review P2 四轮）。"""
+    upper = key.upper()
+    return any(token in upper for token in _SENSITIVE_ENV_KEY_TOKENS)
 
 
 def build_service_path_value(environ: dict[str, str] | None = None) -> str:
@@ -738,9 +761,7 @@ class ServiceManager:
                 "未检测到 managed runtime descriptor（~/.octoagent/data/ops/"
                 "managed-runtime.json）。请先运行 scripts/install-octo-home.sh 完成实例引导。"
             ]
-        problems = validate_start_command(
-            list(descriptor.start_command), instance_root=self._root
-        )
+        problems = validate_start_command(list(descriptor.start_command))
         problems.extend(validate_stable_paths([str(self._root)]))
         if problems:
             return None, problems
@@ -750,15 +771,21 @@ class ServiceManager:
         for key, value in descriptor.environment_overrides.items():
             # 只放 OCTOAGENT_* 进服务定义——secret 永不写进 plist/unit
             # （Constitution #5；.env 由 run-octo-home.sh 运行期 source）。
-            if key.startswith("OCTOAGENT_"):
+            # Codex review P2（四轮）：OCTOAGENT_ 前缀不是安全边界——
+            # `OCTOAGENT_API_KEY` 这类键名照样是 secret，持久化服务定义文件
+            # 默认可读。键名含敏感词的一律剔除（现实键
+            # INSTANCE_ROOT/PROJECT_ROOT/DATA_DIR/PORT/HOST 都不受影响）。
+            if key.startswith("OCTOAGENT_") and not _is_sensitive_env_key(key):
                 environment[key] = value
             else:
                 skipped_keys.append(key)
-        messages: list[str] = []
+        messages: list[str] = list(
+            start_command_stability_warnings(list(descriptor.start_command), self._root)
+        )
         if skipped_keys:
             messages.append(
-                f"已跳过非 OCTOAGENT_* 环境变量（不写入服务定义，防 secret 落盘）: "
-                f"{', '.join(sorted(skipped_keys))}"
+                f"已跳过疑似敏感/非 OCTOAGENT_* 环境变量（不写入服务定义，"
+                f"防 secret 落盘）: {', '.join(sorted(skipped_keys))}"
             )
         spec = ServiceSpec(
             instance_root=self._root,
