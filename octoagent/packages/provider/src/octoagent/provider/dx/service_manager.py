@@ -1028,18 +1028,32 @@ class ServiceManager:
             messages.append(strategy_message)
         self._clear_runtime_state(messages)
 
-        # 残留清单显式枚举验证（FR-B3）
+        # 残留清单显式枚举验证（FR-B3）。Codex review P2（八轮）：deactivate
+        # 是"尽力而为"（幂等要求忽略 not-loaded 类错误），无法自辨真实停止
+        # 失败——删文件后**复查 loaded/running**，仍在 = 失管残留，不得报
+        # "残留清单为空"假成功。
         residues: list[str] = []
         if service_path.exists():
             residues.append(str(service_path))
+        if self._backend.probe_loaded():
+            residues.append("OS supervisor 注册仍存在（unload 失败）")
+        still_running, running_pid = self._backend.probe_running()
+        if still_running:
+            residues.append(
+                f"服务进程仍在运行（stop 失败，pid={running_pid or '未知'}）"
+            )
         if residues:
-            messages.append(f"警告：以下残留未能清除: {', '.join(residues)}")
+            messages.append(
+                f"警告：以下残留未能清除: {', '.join(residues)}。"
+                "请检查上方 launchctl/systemctl 输出后重试 `octo service uninstall`。"
+            )
         else:
             messages.append("残留清单为空：服务定义文件已删除，restart 策略已复位 command。")
         return ServiceInstallResult(
             backend=self._backend.name,
             action="uninstalled",
             service_file_path=str(service_path),
+            repair_required=bool(residues),
             messages=messages,
         )
 

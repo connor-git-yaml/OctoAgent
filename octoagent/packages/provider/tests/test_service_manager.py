@@ -852,8 +852,13 @@ class TestUninstall:
         assert descriptor is not None
         assert descriptor.restart_strategy == RestartStrategy.OS_SERVICE
 
+        # 模拟 bootout 生效后的真实语义：launchctl print 不再命中（复查干净）
+        runner.rules.insert(
+            0, (("launchctl print",), CommandOutcome(3, "", "not found"))
+        )
         result = manager.uninstall()
         assert result.action == "uninstalled"
+        assert result.repair_required is False
         assert not manager.backend.service_file_path().exists()
         assert runner.commands_containing("launchctl", "bootout")
         descriptor = store.load_runtime_descriptor()
@@ -876,8 +881,12 @@ class TestUninstall:
         uninstalled 与 absent 两分支都要清。"""
         from octoagent.core.models import RuntimeStateSnapshot
 
-        manager, _, store = _build_manager(instance_root, stable_script, tmp_path)
+        manager, runner_ref, store = _build_manager(instance_root, stable_script, tmp_path)
         manager.install()
+        # 复查干净语义：bootout 生效后 print 不再命中
+        runner_ref.rules.insert(
+            0, (("launchctl print",), CommandOutcome(3, "", "not found"))
+        )
         now = utc_now()
         store.save_runtime_state(
             RuntimeStateSnapshot(
@@ -906,6 +915,21 @@ class TestUninstall:
         assert second.action == "absent"
         assert store.load_runtime_state() is None
 
+    def test_uninstall_reports_residue_when_service_still_running(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（八轮）：bootout/stop 真实失败（权限/卡死）时服务
+        仍 loaded/running——不得报"残留清单为空"假成功，须 repair_required。"""
+        manager, runner, _ = _build_manager(instance_root, stable_script, tmp_path)
+        manager.install()
+        # print 恒 ok 带 pid（默认规则保持）→ 复查发现仍 loaded/running
+        result = manager.uninstall()
+        assert result.action == "uninstalled"
+        assert result.repair_required is True
+        assert any("仍在运行" in message or "unload 失败" in message
+                   for message in result.messages)
+        assert not any("残留清单为空" in message for message in result.messages)
+
     def test_uninstall_dry_run_removes_nothing(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
     ) -> None:
@@ -927,7 +951,13 @@ class TestUninstall:
             instance_root, stable_script, tmp_path, backend_kind="systemd"
         )
         manager.install()
-        manager.uninstall()
+        # 模拟 stop/disable 生效后的真实语义：is-enabled/show 不再命中
+        runner.rules.insert(0, (("is-enabled",), CommandOutcome(1, "", "disabled")))
+        runner.rules.insert(
+            0, (("systemctl", "show"), CommandOutcome(0, "ActiveState=inactive\nMainPID=0\n", ""))
+        )
+        result = manager.uninstall()
+        assert result.repair_required is False
         assert runner.commands_containing("systemctl", "stop")
         assert runner.commands_containing("systemctl", "disable")
         assert runner.commands_containing("systemctl", "daemon-reload")

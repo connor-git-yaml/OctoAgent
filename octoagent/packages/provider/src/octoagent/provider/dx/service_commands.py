@@ -111,6 +111,9 @@ def service_uninstall(dry_run: bool, verbose: bool) -> None:
     manager = _build_manager()
     result = manager.uninstall(dry_run=dry_run)
     _render_install_result(result, verbose=verbose)
+    # Codex review P2（八轮）：真实停止/unload 失败留下失管残留 → exit 1
+    if result.repair_required:
+        raise SystemExit(1)
 
 
 def _status_icon(flag: bool | None) -> str:
