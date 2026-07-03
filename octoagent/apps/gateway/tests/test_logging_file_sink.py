@@ -38,6 +38,7 @@ def _isolate_logging_globals(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.delenv("OCTOAGENT_PROJECT_ROOT", raising=False)
     monkeypatch.delenv("OCTOAGENT_LOG_MAX_BYTES", raising=False)
     monkeypatch.delenv("OCTOAGENT_LOG_BACKUP_COUNT", raising=False)
+    monkeypatch.delenv("OCTOAGENT_SUPERVISED", raising=False)
     # 崩溃钩子 sentinel 复位，允许每个测试独立安装
     monkeypatch.setattr(logging_config, "_CRASH_HOOKS_INSTALLED", False)
     monkeypatch.setattr(logging_config, "_CRASH_FILE_HANDLE", None)
@@ -133,6 +134,38 @@ class TestFileSinkMounting:
         assert log_file.exists()
         assert "file sink smoke line" in log_file.read_text(encoding="utf-8")
         assert (log_file.stat().st_mode & 0o777) == 0o600
+
+
+class TestSupervisedStreamThrottle:
+    """Codex review P2（七轮）：supervised 模式 stderr 被 append 到无轮转
+    err.log——落盘可用时 StreamHandler 收窄 WARNING+ 防双写无界增长。"""
+
+    def test_supervised_with_file_sink_raises_stream_level(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OCTOAGENT_LOG_DIR", str(tmp_path))
+        monkeypatch.setenv("OCTOAGENT_SUPERVISED", "launchd")
+        setup_logging()
+        stream = _stream_handlers()[0]
+        assert stream.level == logging.WARNING
+        # file handler 不受影响（info 仍进主日志）
+        assert _file_handlers()[0].level == logging.NOTSET
+
+    def test_unsupervised_keeps_stream_level_baseline(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("OCTOAGENT_LOG_DIR", str(tmp_path))
+        monkeypatch.delenv("OCTOAGENT_SUPERVISED", raising=False)
+        setup_logging()
+        assert _stream_handlers()[0].level == logging.NOTSET
+
+    def test_supervised_without_file_sink_keeps_stream(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """无落盘时绝不收窄 stream（那是唯一输出，#6）。"""
+        monkeypatch.setenv("OCTOAGENT_SUPERVISED", "launchd")
+        setup_logging()
+        assert _stream_handlers()[0].level == logging.NOTSET
 
 
 class TestRotation:

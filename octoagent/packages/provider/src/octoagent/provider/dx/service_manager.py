@@ -1207,8 +1207,9 @@ class ServiceManager:
                 lowered = line.lower()
                 if "error" in lowered or "critical" in lowered or "traceback" in lowered:
                     # err.log 是 service 层未脱敏原始输出——展示前必须脱敏
-                    # （Codex review P2 三轮；主日志双跑幂等无害）
-                    return redact_sensitive_text(line.strip()[:300])
+                    # （Codex review P2 三轮）。**先脱敏后截断**（P2 七轮：
+                    # 先截断会破坏跨边界 token 形状导致漏脱敏）。
+                    return redact_sensitive_text(line.strip())[:300]
         return ""
 
     def _soft_result(self, future, fallback, label: str, messages: list[str]):  # noqa: ANN001, ANN201

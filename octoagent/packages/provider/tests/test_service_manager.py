@@ -990,6 +990,23 @@ class TestStatus:
         assert secret not in status.last_error_line
         assert "ERROR" in status.last_error_line
 
+    def test_status_last_error_redacts_before_truncation(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（七轮）：先截断会破坏跨 300 边界的 token 形状
+        导致漏脱敏——必须先对完整行脱敏再截断。"""
+        manager, _, _ = _build_manager(instance_root, stable_script, tmp_path)
+        log_dir = instance_root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        secret = "sk-abcdef1234567890abcdefXYZ"
+        padding = "x" * 290  # secret 跨越 300 截断边界
+        (log_dir / "octoagent.err.log").write_text(
+            f"ERROR: {padding} key={secret}\n", encoding="utf-8"
+        )
+        status = manager.status()
+        assert "sk-abcdef" not in status.last_error_line
+        assert len(status.last_error_line) <= 300
+
     def test_status_returns_even_when_probe_thread_hangs(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
     ) -> None:

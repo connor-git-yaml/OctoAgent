@@ -253,6 +253,12 @@ def setup_logging() -> None:
     if file_handler is not None:
         root_logger.addHandler(file_handler)
         _install_crash_hooks(Path(file_handler.baseFilename).parent)
+        # Codex review P2（七轮）：supervised 模式下 stderr 被 init 系统
+        # append 到 octoagent.err.log（**无轮转**）——常规日志双写会让它
+        # 无界增长。落盘可用时把 StreamHandler 收窄到 WARNING+：
+        # info 洪流只进轮转主日志，异常类输出仍留 stderr → service 层兜底。
+        if os.environ.get("OCTOAGENT_SUPERVISED", "").strip():
+            handler.setLevel(logging.WARNING)
 
 
 def setup_logfire() -> None:
