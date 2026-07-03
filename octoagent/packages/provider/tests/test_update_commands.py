@@ -58,3 +58,74 @@ def test_restart_command_failure_returns_exit_1(monkeypatch) -> None:
 
     assert result.exit_code == 1
     assert "restart failed" in result.output
+
+
+# ---------------------------------------------------------------------------
+# F129 Phase C：service 托管模式下 `octo stop` 提示（FR-C3）
+# ---------------------------------------------------------------------------
+
+
+def _write_runtime_fixtures(tmp_path, *, os_service: bool) -> None:
+    from octoagent.core.models import (
+        ManagedRuntimeDescriptor,
+        RestartStrategy,
+        RuntimeStateSnapshot,
+        utc_now,
+    )
+    from octoagent.provider.dx.update_status_store import UpdateStatusStore
+
+    store = UpdateStatusStore(tmp_path, data_dir=tmp_path / "data")
+    now = utc_now()
+    store.save_runtime_state(
+        RuntimeStateSnapshot(
+            pid=987654,
+            project_root=str(tmp_path),
+            started_at=now,
+            heartbeat_at=now,
+            verify_url="http://127.0.0.1:8000/ready?profile=core",
+        )
+    )
+    store.save_runtime_descriptor(
+        ManagedRuntimeDescriptor(
+            project_root=str(tmp_path),
+            restart_strategy=(
+                RestartStrategy.OS_SERVICE if os_service else RestartStrategy.COMMAND
+            ),
+            start_command=["/bin/bash", "run-octo-home.sh"],
+            verify_url="http://127.0.0.1:8000/ready?profile=core",
+            created_at=now,
+            updated_at=now,
+        )
+    )
+
+
+def test_stop_prints_service_hint_in_os_service_mode(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("OCTOAGENT_DATA_DIR", str(tmp_path / "data"))
+    _write_runtime_fixtures(tmp_path, os_service=True)
+    # pid 探测强制"已不存在"→ 走清理路径（deterministic，不真发信号）
+    monkeypatch.setattr(
+        "octoagent.provider.dx.update_commands._pid_alive", lambda pid: False
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["stop"])
+
+    assert result.exit_code == 0
+    assert "octo service uninstall" in result.output
+
+
+def test_stop_has_no_service_hint_in_command_mode(monkeypatch, tmp_path) -> None:
+    """FR-C4：未 install service 的用户 stop 输出不变（无 service 提示）。"""
+    monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("OCTOAGENT_DATA_DIR", str(tmp_path / "data"))
+    _write_runtime_fixtures(tmp_path, os_service=False)
+    monkeypatch.setattr(
+        "octoagent.provider.dx.update_commands._pid_alive", lambda pid: False
+    )
+    runner = CliRunner()
+
+    result = runner.invoke(main, ["stop"])
+
+    assert result.exit_code == 0
+    assert "octo service uninstall" not in result.output

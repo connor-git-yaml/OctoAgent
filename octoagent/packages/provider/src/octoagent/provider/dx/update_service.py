@@ -17,6 +17,7 @@ from octoagent.core.models import (
     ManagedRuntimeDescriptor,
     MigrationStepKind,
     MigrationStepResult,
+    RestartStrategy,
     RuntimeManagementMode,
     UpdateAttempt,
     UpdateAttemptSummary,
@@ -32,11 +33,13 @@ from ulid import ULID
 
 from .backup_service import BackupService, resolve_project_root
 from .doctor import CheckStatus, DoctorRunner
+from .service_manager import ServiceManager, ServiceManagerError, build_service_manager
 from .update_status_store import UpdateStatusStore
 
 PhaseMap = dict[UpdatePhaseName, UpdatePhaseResult]
 CommandRunner = Callable[[list[str], Path], str]
 WorkerLauncher = Callable[[Path, str], None]
+ServiceManagerFactory = Callable[[Path], ServiceManager]
 
 
 class UpdateActionError(RuntimeError):
@@ -139,12 +142,14 @@ class UpdateService:
         doctor_factory: Callable[[Path], DoctorRunner] | None = None,
         command_runner: CommandRunner | None = None,
         worker_launcher: WorkerLauncher | None = None,
+        service_manager_factory: ServiceManagerFactory | None = None,
     ) -> None:
         self._root = resolve_project_root(project_root).resolve()
         self._status_store = status_store or UpdateStatusStore(self._root)
         self._doctor_factory = doctor_factory or (lambda root: DoctorRunner(project_root=root))
         self._command_runner = command_runner or _default_run_command
         self._worker_launcher = worker_launcher or _default_launch_worker
+        self._service_manager_factory = service_manager_factory or build_service_manager
 
     def load_summary(self) -> UpdateAttemptSummary:
         return self._status_store.load_summary()
@@ -553,6 +558,11 @@ class UpdateService:
         descriptor: ManagedRuntimeDescriptor | None,
     ) -> None:
         descriptor = descriptor or self._require_descriptor(None)
+        # F129 GATE-4 并存分层：OS 服务托管时委托 launchctl/systemctl（不再自己
+        # Popen，也不要求旧 pid 存活——OS 会拉起）；COMMAND/SELF_SIGNAL 路径不变。
+        if descriptor.restart_strategy == RestartStrategy.OS_SERVICE:
+            self._delegate_restart_to_os_service(phase)
+            return
         runtime_state = self._status_store.load_runtime_state()
         if runtime_state is not None and runtime_state.pid > 0:
             try:
@@ -589,6 +599,29 @@ class UpdateService:
         phase.completed_at = utc_now()
         phase.status = UpdatePhaseStatus.SUCCEEDED
         phase.summary = "restart 命令已发起。"
+
+    def _delegate_restart_to_os_service(self, phase: UpdatePhaseResult) -> None:
+        """F129 FR-C2：service 模式 restart 委托 launchctl kickstart -k /
+        systemctl --user restart。"""
+        try:
+            manager = self._service_manager_factory(self._root)
+        except ServiceManagerError as exc:
+            raise RuntimeError(
+                f"restart 策略为 os_service 但当前平台无法构造 service backend：{exc}\n"
+                "可运行 `octo service uninstall` 复位为 command 策略。"
+            ) from exc
+        outcome = manager.restart_service()
+        if not outcome.ok:
+            detail = outcome.stderr.strip() or outcome.stdout.strip() or "无输出"
+            raise RuntimeError(
+                f"委托 {manager.backend.name} 重启服务失败"
+                f"（returncode={outcome.returncode}）：{detail}\n"
+                "如服务定义损坏，请运行 `octo service install --force` 修复，"
+                "或 `octo service status` 查看详情。"
+            )
+        phase.completed_at = utc_now()
+        phase.status = UpdatePhaseStatus.SUCCEEDED
+        phase.summary = f"已委托 {manager.backend.name} 重启服务（OS 会自动拉起进程）。"
 
     async def _run_verify_phase(
         self,

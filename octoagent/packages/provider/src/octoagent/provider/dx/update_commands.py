@@ -9,6 +9,7 @@ import signal
 import time
 
 import click
+from octoagent.core.models import RestartStrategy
 
 from .config_commands import _resolve_project_root
 from .console_output import create_console, render_panel
@@ -16,6 +17,26 @@ from .update_service import ActiveUpdateError, UpdateActionError, UpdateService
 from .update_status_store import UpdateStatusStore
 
 console = create_console()
+
+
+def _print_service_mode_hint(store: UpdateStatusStore) -> None:
+    """F129 FR-C3：service 托管模式下 stop 后提示"服务还会再起"。
+
+    launchd/systemd 定义仍在（开机自启 / `octo restart` 委托拉起），
+    彻底停用需 `octo service uninstall`（对标 OpenClaw `stop --disable` 语义）。
+    读取失败静默跳过（提示是增强，不阻塞 stop 主流程）。
+    """
+    try:
+        descriptor = store.load_runtime_descriptor()
+    except Exception:
+        return
+    if descriptor is None or descriptor.restart_strategy != RestartStrategy.OS_SERVICE:
+        return
+    console.print(
+        "[yellow]提示：当前 runtime 由 OS 服务托管（octo service install）。"
+        "进程已停止，但开机自启/`octo restart` 仍会拉起服务；"
+        "彻底停用请运行 `octo service uninstall`。[/yellow]"
+    )
 
 
 def _render_summary(title: str, summary) -> None:
@@ -66,6 +87,7 @@ def stop(force: bool, timeout: int) -> None:
     if not _pid_alive(pid):
         console.print(f"[yellow]PID {pid} 已不存在，清理运行状态文件。[/yellow]")
         store.clear_runtime_state()
+        _print_service_mode_hint(store)
         raise SystemExit(0)
 
     # 发送终止信号
@@ -77,6 +99,7 @@ def stop(force: bool, timeout: int) -> None:
     except ProcessLookupError:
         console.print(f"[yellow]PID {pid} 在发送信号前已退出。[/yellow]")
         store.clear_runtime_state()
+        _print_service_mode_hint(store)
         raise SystemExit(0)
 
     # 等待进程退出
@@ -85,6 +108,7 @@ def stop(force: bool, timeout: int) -> None:
         if not _pid_alive(pid):
             store.clear_runtime_state()
             console.print(f"[green]OctoAgent (PID {pid}) 已停止。[/green]")
+            _print_service_mode_hint(store)
             raise SystemExit(0)
         time.sleep(0.2)
 

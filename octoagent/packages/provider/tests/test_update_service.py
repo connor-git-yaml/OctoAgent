@@ -409,3 +409,131 @@ async def test_restart_marks_failure_when_new_process_exits_immediately(
         phase for phase in summary.phases if phase.phase == UpdatePhaseName.RESTART
     )
     assert restart_phase.status == UpdatePhaseStatus.FAILED
+
+
+# ---------------------------------------------------------------------------
+# F129 Phase C：OS_SERVICE 策略 restart 委托（FR-C2）+ COMMAND 路径不变（FR-C4）
+# ---------------------------------------------------------------------------
+
+
+class FakeServiceBackendHandle:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class FakeServiceManager:
+    """update_service 委托缝的 stub：记录 restart_service 调用。"""
+
+    def __init__(self, *, returncode: int = 0, stderr: str = "") -> None:
+        self.backend = FakeServiceBackendHandle("launchd")
+        self.restart_calls = 0
+        self._returncode = returncode
+        self._stderr = stderr
+
+    def restart_service(self):
+        from octoagent.provider.dx.service_manager import CommandOutcome
+
+        self.restart_calls += 1
+        return CommandOutcome(self._returncode, "", self._stderr)
+
+
+def _os_service_descriptor(tmp_path: Path) -> ManagedRuntimeDescriptor:
+    from octoagent.core.models import RestartStrategy
+
+    descriptor = _descriptor(tmp_path)
+    descriptor.restart_strategy = RestartStrategy.OS_SERVICE
+    return descriptor
+
+
+@pytest.mark.asyncio
+async def test_restart_os_service_delegates_to_service_manager(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """OS_SERVICE 策略：restart 委托 launchctl/systemctl，不走 Popen。"""
+    status_store = UpdateStatusStore(tmp_path)
+    status_store.save_runtime_descriptor(_os_service_descriptor(tmp_path))
+    fake_manager = FakeServiceManager(returncode=0)
+
+    def _explode_popen(*_args, **_kwargs):
+        raise AssertionError("OS_SERVICE 路径不得调用 subprocess.Popen")
+
+    monkeypatch.setattr("octoagent.provider.dx.update_service.subprocess.Popen", _explode_popen)
+
+    service = UpdateService(
+        tmp_path,
+        status_store=status_store,
+        doctor_factory=lambda _root: FakeDoctorRunner(_report_with_status(CheckStatus.PASS)),
+        service_manager_factory=lambda _root: fake_manager,
+    )
+
+    summary = await service.restart(trigger_source="cli")
+
+    assert fake_manager.restart_calls == 1
+    assert summary.overall_status == UpdateOverallStatus.SUCCEEDED
+    restart_phase = next(
+        phase for phase in summary.phases if phase.phase == UpdatePhaseName.RESTART
+    )
+    assert restart_phase.status == UpdatePhaseStatus.SUCCEEDED
+    assert "已委托 launchd" in restart_phase.summary
+
+
+@pytest.mark.asyncio
+async def test_restart_os_service_failure_reports_repair_hint(
+    tmp_path: Path,
+) -> None:
+    status_store = UpdateStatusStore(tmp_path)
+    status_store.save_runtime_descriptor(_os_service_descriptor(tmp_path))
+    fake_manager = FakeServiceManager(returncode=5, stderr="Bootstrap failed")
+
+    service = UpdateService(
+        tmp_path,
+        status_store=status_store,
+        doctor_factory=lambda _root: FakeDoctorRunner(_report_with_status(CheckStatus.PASS)),
+        service_manager_factory=lambda _root: fake_manager,
+    )
+
+    summary = await service.restart(trigger_source="cli")
+
+    assert summary.overall_status == UpdateOverallStatus.FAILED
+    assert summary.failure_report is not None
+    assert "octo service install --force" in summary.failure_report.message
+    assert "Bootstrap failed" in summary.failure_report.message
+
+
+@pytest.mark.asyncio
+async def test_restart_command_strategy_never_touches_service_manager(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """FR-C4 向后兼容：COMMAND 策略 restart 仍走 Popen，绝不碰 service manager。"""
+    status_store = UpdateStatusStore(tmp_path)
+    status_store.save_runtime_descriptor(_descriptor(tmp_path))  # 默认 COMMAND
+
+    class DummyPopen:
+        @staticmethod
+        def poll():
+            return None  # 存活
+
+    popen_calls: list[object] = []
+
+    def fake_popen(*args, **kwargs):
+        popen_calls.append(args)
+        return DummyPopen()
+
+    monkeypatch.setattr("octoagent.provider.dx.update_service.subprocess.Popen", fake_popen)
+
+    def _explode_factory(_root):
+        raise AssertionError("COMMAND 策略不得构造 service manager")
+
+    service = UpdateService(
+        tmp_path,
+        status_store=status_store,
+        doctor_factory=lambda _root: FakeDoctorRunner(_report_with_status(CheckStatus.PASS)),
+        service_manager_factory=_explode_factory,
+    )
+
+    summary = await service.restart(trigger_source="cli")
+
+    assert popen_calls, "COMMAND 策略必须走 Popen 启动路径"
+    assert summary.overall_status == UpdateOverallStatus.SUCCEEDED
