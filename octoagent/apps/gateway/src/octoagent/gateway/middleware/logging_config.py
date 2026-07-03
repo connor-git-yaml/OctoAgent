@@ -29,6 +29,7 @@ import faulthandler
 import logging
 import os
 import sys
+import traceback
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import IO, Any
@@ -176,6 +177,18 @@ def _install_crash_hooks(log_dir: Path) -> None:
                 "uncaught_exception",
                 exc_info=(exc_type, exc_value, exc_tb),
             )
+        if previous_hook is sys.__excepthook__:
+            # Codex review P1：service 模式下 stderr 被 StandardErrorPath 落盘
+            # ——默认 hook 会把**未脱敏**原始 traceback 写 stderr，绕过 FR-E。
+            # 替换为脱敏后的文本（前台可读性不变；写失败纯丢 stderr 输出，
+            # 主日志已有脱敏 traceback，信息不缺失）。
+            with contextlib.suppress(Exception):
+                rendered = "".join(
+                    traceback.format_exception(exc_type, exc_value, exc_tb)
+                )
+                sys.stderr.write(redact_sensitive_text(rendered))
+            return
+        # 第三方已装自定义 hook（如测试 harness）→ 尊重链式语义原样调用
         previous_hook(exc_type, exc_value, exc_tb)
 
     sys.excepthook = _logging_excepthook

@@ -71,7 +71,12 @@ PROCESS_LOG_FILE = "octoagent.log"
 #: 大于 gateway drain 窗口，否则优雅关闭中途被 SIGKILL（Hermes B.1.5）。
 STOP_TIMEOUT_SECONDS = 90
 
-_WORKTREE_MARKERS = (".worktrees",)
+#: worktree 标记：子串形态（`.worktrees` 隐藏目录）+ 路径段形态
+#: （`worktrees` 目录段，覆盖 `.claude/worktrees/...` 等真实布局——
+#: Codex review P1：本 feature 自己的 worktree 就是 `.claude/worktrees/` 形态，
+#: 仅查 `.worktrees` 子串会放行）。
+_WORKTREE_SUBSTRING_MARKERS = (".worktrees",)
+_WORKTREE_SEGMENT_MARKERS = frozenset({"worktrees"})
 
 InitSystem = Literal["launchd", "systemd", "none"]
 
@@ -203,15 +208,27 @@ def validate_stable_paths(spec_paths: list[str]) -> list[str]:
 
     返回违规说明列表（空 = 通过）。**此校验不可被 --force 绕过**——
     死目录进服务定义 = 永久崩溃循环，比"装不上"严重得多。
+
+    双重形态检测：子串 ``.worktrees`` + 路径段 ``worktrees``
+    （后者覆盖 ``.claude/worktrees/...`` 等真实 worktree 布局）。
     """
     problems: list[str] = []
     for token in spec_paths:
-        for marker in _WORKTREE_MARKERS:
+        marker_hit: str | None = None
+        for marker in _WORKTREE_SUBSTRING_MARKERS:
             if marker in token:
-                problems.append(
-                    f"路径包含 worktree 标记 `{marker}`（目录可能被删除导致服务"
-                    f"永久崩溃循环）: {token}"
-                )
+                marker_hit = marker
+                break
+        if marker_hit is None:
+            for segment in token.split("/"):
+                if segment in _WORKTREE_SEGMENT_MARKERS:
+                    marker_hit = segment
+                    break
+        if marker_hit is not None:
+            problems.append(
+                f"路径包含 worktree 标记 `{marker_hit}`（目录可能被删除导致服务"
+                f"永久崩溃循环）: {token}"
+            )
     return problems
 
 
@@ -663,6 +680,7 @@ class ServiceManager:
         ready_prober: ReadyProber | None = None,
         start_gate_timeout_s: float = 20.0,
         sleeper: Callable[[float], None] = time.sleep,
+        probe_future_timeout_s: float = 10.0,
     ) -> None:
         self._root = instance_root.expanduser().resolve()
         self._backend = backend if backend is not None else build_backend(detect_init_system())
@@ -670,6 +688,7 @@ class ServiceManager:
         self._ready_prober = ready_prober or _default_ready_prober
         self._start_gate_timeout_s = start_gate_timeout_s
         self._sleep = sleeper
+        self._probe_future_timeout_s = probe_future_timeout_s
 
     @property
     def backend(self) -> ServiceBackend:
@@ -792,16 +811,33 @@ class ServiceManager:
 
         if action == "skipped":
             messages.append("服务定义内容一致，跳过写入（--force 可强制重写）。")
-            # 幂等 install 仍保证服务已加载并在跑（start gate）
+            # 幂等 install 仍保证服务已加载并在跑（start gate）。
+            # Codex review P2：gate 失败必须透传 repair_required（否则 CLI
+            # exit 0 假成功）；gate 通过后策略位同样补切 OS_SERVICE。
             loaded = self._backend.probe_loaded()
             running, _ = self._backend.probe_running()
+            gate_messages: list[str] = []
             if not (loaded and running):
                 messages.extend(self._backend.activate())
-                messages.extend(self._start_gate())
+                gate_messages = self._start_gate()
+                messages.extend(gate_messages)
+            elif not self._probe_ready_or_none_ok():
+                messages.append(
+                    "注意：服务在运行但 /ready 未通过——可能仍在启动中；"
+                    "请稍后 `octo service status` 复查，异常时查 `octo logs`。"
+                )
+            repair_required = any(
+                "repair-required" in message for message in gate_messages
+            )
+            if not repair_required:
+                strategy_message = self._set_restart_strategy(RestartStrategy.OS_SERVICE)
+                if strategy_message:
+                    messages.append(strategy_message)
             return ServiceInstallResult(
                 backend=self._backend.name,
                 action="skipped",
                 service_file_path=str(service_path),
+                repair_required=repair_required,
                 messages=messages,
             )
 
@@ -897,8 +933,12 @@ class ServiceManager:
             return service_path.exists()
 
         # 并行探测 + 双层 timeout 软化（CommandRunner 内层 + future 外层，
-        # 防 wedged systemctl 把状态查询挂死——OpenClaw service.ts:184-206）
-        with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        # 防 wedged systemctl 把状态查询挂死——OpenClaw service.ts:184-206）。
+        # Codex review P2：不可用 `with`（退出时 shutdown(wait=True) 会 join
+        # 卡死线程，外层 timeout 失效）——shutdown(wait=False) 立即返回，
+        # 残余线程由 CommandRunner/httpx 内层 timeout 自然到期回收。
+        pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        try:
             installed_future = pool.submit(probe_installed)
             loaded_future = pool.submit(self._backend.probe_loaded)
             running_future = pool.submit(self._backend.probe_running)
@@ -908,6 +948,8 @@ class ServiceManager:
             loaded = self._soft_result(loaded_future, False, "loaded", messages)
             running, pid = self._soft_result(running_future, (False, None), "running", messages)
             ready = self._soft_result(ready_future, None, "ready", messages)
+        finally:
+            pool.shutdown(wait=False, cancel_futures=True)
 
         return ServiceStatus(
             backend=self._backend.name,
@@ -998,6 +1040,10 @@ class ServiceManager:
             return None
         return self._ready_prober(descriptor.verify_url, 3.0)
 
+    def _probe_ready_or_none_ok(self) -> bool:
+        """ready 三值折叠：True/None（无 verify_url 不苛求）→ 通过。"""
+        return self._probe_ready() is not False
+
     def _read_last_error_line(self) -> str:
         """从日志尾部捞最后一条 error 行（status↔logging 联动 UX，OpenClaw C.1）。"""
         for candidate in (
@@ -1021,10 +1067,9 @@ class ServiceManager:
                     return line.strip()[:300]
         return ""
 
-    @staticmethod
-    def _soft_result(future, fallback, label: str, messages: list[str]):  # noqa: ANN001, ANN205
+    def _soft_result(self, future, fallback, label: str, messages: list[str]):  # noqa: ANN001, ANN201
         try:
-            return future.result(timeout=10.0)
+            return future.result(timeout=self._probe_future_timeout_s)
         except Exception as exc:
             messages.append(f"{label} 探测失败（软化为默认值）: {type(exc).__name__}")
             return fallback

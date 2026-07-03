@@ -109,6 +109,12 @@ def _has_keyword(text_lower: str) -> bool:
     return any(keyword in text_lower for keyword in _KEYWORD_PROBES)
 
 
+#: ANSI CSI 转义序列（rich/ConsoleRenderer 彩色输出）。
+#: 色码以字母结尾（如 ``\\x1b[33m``）紧贴 secret 时会打断 ``\\b`` 词边界，
+#: 让前缀规则失配（实测 rich traceback 源码行泄漏 sk- key）——见
+#: ``redact_sensitive_text`` 的降级第二遍。
+_ANSI_CSI_PATTERN = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")
+
 _RuleProbe = Callable[[str, str], bool]
 _RuleReplace = Callable[[Match[str]], str]
 
@@ -154,20 +160,34 @@ _RULES: list[tuple[_RuleProbe, Pattern[str], _RuleReplace]] = [
 ]
 
 
+def _apply_rules(text: str) -> str:
+    lower = text.lower()
+    for probe, pattern, replace in _RULES:
+        if probe(text, lower):
+            text = pattern.sub(replace, text)
+    return text
+
+
 def _redact_with_flag(text: str, *, enabled: bool) -> str:
     """脱敏核心纯函数（enabled 显式传入，仅供本模块与测试使用）。
 
     任何内部异常都不得抛出（FR-D5 日志链路不阻塞主流程）；异常时**宁可
     丢弃原文**返回占位符，也不把可能含 secret 的原文放行（安全优先）。
+
+    ANSI 降级第二遍：彩色渲染（rich traceback 等）的色码以字母结尾、
+    紧贴 secret 时会打断 ``\\b`` 词边界让规则失配——若剥掉 ANSI 后仍能
+    抓到 secret 形状，整段降级输出「无色 + 脱敏」版本（安全 > 颜色）。
     """
     if not enabled or not text:
         return text
     try:
-        lower = text.lower()
-        for probe, pattern, replace in _RULES:
-            if probe(text, lower):
-                text = pattern.sub(replace, text)
-        return text
+        redacted = _apply_rules(text)
+        if "\x1b[" in redacted:
+            stripped = _ANSI_CSI_PATTERN.sub("", redacted)
+            stripped_redacted = _apply_rules(stripped)
+            if stripped_redacted != stripped:
+                return stripped_redacted
+        return redacted
     except Exception as exc:  # pragma: no cover - 正则纯函数极难触发
         return f"[log-redaction-error: {type(exc).__name__}]"
 

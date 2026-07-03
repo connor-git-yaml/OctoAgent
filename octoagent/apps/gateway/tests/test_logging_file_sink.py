@@ -211,6 +211,28 @@ class TestCrashHooks:
         # 原 excepthook 仍被链式调用（stderr 输出交给 service 层兜底）
         assert len(recorded) == 1
 
+    def test_excepthook_default_chain_writes_redacted_stderr(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+    ) -> None:
+        """Codex review P1：service 模式 stderr 被 StandardErrorPath 落盘——
+        原 hook 是默认 hook 时必须输出**脱敏后**的 traceback 到 stderr，
+        不得让原始 secret 绕过 FR-E 落进 octoagent.err.log。"""
+        monkeypatch.setattr(sys, "excepthook", sys.__excepthook__)
+        monkeypatch.setenv("OCTOAGENT_LOG_DIR", str(tmp_path))
+        setup_logging()
+
+        secret = "sk-abcdef1234567890abcdefXYZ"
+        try:
+            raise ValueError(f"boom with {secret} inside")
+        except ValueError:
+            exc_info = sys.exc_info()
+        sys.excepthook(*exc_info)  # type: ignore[arg-type]
+
+        captured = capsys.readouterr()
+        assert "ValueError" in captured.err  # 前台可读性保留
+        assert secret not in captured.err  # 脱敏后才写 stderr
+        assert "sk-abc…" in captured.err
+
     def test_faulthandler_enabled_with_crash_file(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

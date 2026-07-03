@@ -208,6 +208,24 @@ class TestStablePathValidation:
         assert problems, "worktree 路径必须被拒绝"
         assert any(".worktrees" in problem for problem in problems)
 
+    def test_claude_worktrees_segment_rejected(self, tmp_path: Path) -> None:
+        """Codex review P1：`.claude/worktrees/...`（无 `.worktrees` 子串的
+        真实 worktree 布局——本 feature 自己的 worktree 就是这形态）必须被拒。"""
+        script = (
+            tmp_path / ".claude" / "worktrees" / "F129" / "scripts" / "run-octo-home.sh"
+        )
+        script.parent.mkdir(parents=True)
+        script.write_text("#!/bin/bash\n", encoding="utf-8")
+        problems = validate_start_command(["/bin/bash", str(script)])
+        assert problems, ".claude/worktrees 路径必须被拒绝"
+        assert any("worktree" in problem for problem in problems)
+
+    def test_bare_worktrees_segment_rejected(self, tmp_path: Path) -> None:
+        problems = validate_start_command(
+            ["/bin/bash", str(tmp_path / "worktrees" / "x" / "run-octo-home.sh")]
+        )
+        assert any("worktree" in problem for problem in problems)
+
     def test_missing_script_rejected(self, tmp_path: Path) -> None:
         problems = validate_start_command(
             ["/bin/bash", str(tmp_path / "nowhere" / "run-octo-home.sh")]
@@ -471,6 +489,40 @@ class TestInstallIdempotency:
             len(runner.commands_containing("launchctl", "bootstrap")) > bootstrap_count_before
         )
 
+    def test_skip_gate_failure_reports_repair_required(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2：skipped 路径 gate 失败必须透传 repair_required
+        （否则 CLI exit 0 假成功——用户 install 修复坏服务时被骗）。"""
+        manager, runner, _ = _build_manager(
+            instance_root, stable_script, tmp_path, running_pid=None
+        )
+        # print 恒失败 → loaded False / running False → activate + gate 超时
+        runner.rules.append((("launchctl", "print"), CommandOutcome(3, "", "not found")))
+        first = manager.install()
+        assert first.repair_required is True
+        second = manager.install()
+        assert second.action == "skipped"
+        assert second.repair_required is True, "skipped 路径不得吞掉 gate 失败"
+
+    def test_skip_gate_pass_resyncs_restart_strategy(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """skipped 且健康时策略位补切 OS_SERVICE（descriptor 漂移自愈）。"""
+        manager, _runner, store = _build_manager(instance_root, stable_script, tmp_path)
+        manager.install()
+        # 模拟 descriptor 漂移（手工/旧版本把策略改回 COMMAND）
+        descriptor = store.load_runtime_descriptor()
+        assert descriptor is not None
+        descriptor.restart_strategy = RestartStrategy.COMMAND
+        store.save_runtime_descriptor(descriptor)
+        second = manager.install()
+        assert second.action == "skipped"
+        assert second.repair_required is False
+        refreshed = store.load_runtime_descriptor()
+        assert refreshed is not None
+        assert refreshed.restart_strategy == RestartStrategy.OS_SERVICE
+
     def test_stale_definition_auto_refreshes(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
     ) -> None:
@@ -718,6 +770,49 @@ class TestStatus:
         assert status.loaded is False
         assert status.running is False
         assert status.pid is None
+
+    def test_status_returns_even_when_probe_thread_hangs(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2：probe 线程真卡死时 status 必须仍能返回
+        （shutdown(wait=False)，不 join 卡死线程）。"""
+        import threading
+        import time as time_module
+
+        release = threading.Event()
+
+        class HangingRunner(FakeCommandRunner):
+            def __call__(self, command: list[str], timeout_s: float) -> CommandOutcome:
+                if "print" in " ".join(command):
+                    release.wait(timeout=30.0)  # 模拟 wedged launchctl
+                return super().__call__(command, timeout_s)
+
+        try:
+            runner = HangingRunner()
+            store = _write_descriptor(
+                instance_root, start_command=["/bin/bash", str(stable_script)]
+            )
+            manager = ServiceManager(
+                instance_root,
+                backend=LaunchdBackend(
+                    service_dir=tmp_path / "LaunchAgents",
+                    command_runner=runner,
+                    uid=501,
+                ),
+                status_store=store,
+                ready_prober=lambda url, timeout: True,
+                start_gate_timeout_s=0.1,
+                sleeper=lambda seconds: None,
+                probe_future_timeout_s=0.3,
+            )
+            started = time_module.monotonic()
+            status = manager.status()
+            elapsed = time_module.monotonic() - started
+            assert elapsed < 5.0, "status 不得等待卡死线程"
+            assert status.loaded is False  # 软化默认值
+            assert any("探测失败" in message for message in status.messages)
+        finally:
+            release.set()  # 释放挂起线程，防测试进程退出被 join 卡住
 
     def test_status_probe_exception_softens_to_default(
         self, instance_root: Path, stable_script: Path, tmp_path: Path

@@ -127,6 +127,19 @@ class TestSafetyProperties:
         twice = redact_sensitive_text(once)
         assert twice == once
 
+    def test_ansi_color_codes_cannot_shield_secrets(self) -> None:
+        """rich/ConsoleRenderer 色码（字母结尾）紧贴 secret 会打断 \\b 词边界
+        ——剥 ANSI 降级第二遍必须兜住（实测 rich traceback 泄漏路径）。"""
+        secret = "sk-abcdef1234567890abcdefXYZ"
+        colored = f'\x1b[33m"\x1b[0m\x1b[33m{secret}\x1b[0m\x1b[33m"\x1b[0m'
+        result = redact_sensitive_text(colored)
+        assert secret not in result
+
+    def test_plain_colored_line_without_secret_keeps_ansi(self) -> None:
+        """无 secret 的彩色行保持原样（不无差别剥色）。"""
+        colored = "\x1b[32minfo\x1b[0m task completed"
+        assert redact_sensitive_text(colored) == colored
+
     def test_runtime_env_change_does_not_disable(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
