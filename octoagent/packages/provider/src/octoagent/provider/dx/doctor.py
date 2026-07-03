@@ -8,6 +8,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,6 +20,8 @@ from ..auth.store import CredentialStore
 from octoagent.gateway.services.config.config_schema import TelegramChannelConfig
 from .models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from .onboarding_models import OnboardingStepStatus
+from .service_manager import ServiceManager, ServiceManagerError, build_service_manager
+from .sleep_probe import SleepRisk, probe_sleep_risk
 from .telegram_verifier import TelegramOnboardingVerifier
 
 log = structlog.get_logger()
@@ -43,6 +46,8 @@ class DoctorRunner:
         project_root: Path | None = None,
         *,
         telegram_verifier: TelegramOnboardingVerifier | None = None,
+        service_manager_factory: Callable[[Path], ServiceManager] | None = None,
+        sleep_risk_probe: Callable[[], SleepRisk] | None = None,
     ) -> None:
         if project_root is None:
             self._root = Path.cwd()
@@ -50,6 +55,9 @@ class DoctorRunner:
             self._root = project_root
         self._store = CredentialStore()
         self._telegram_verifier = telegram_verifier or TelegramOnboardingVerifier()
+        # F129 FR-G DI 缝：测试注入 stub（绝不真跑 launchctl/systemctl/pmset）
+        self._service_manager_factory = service_manager_factory or build_service_manager
+        self._sleep_risk_probe = sleep_risk_probe or probe_sleep_risk
 
     def _has_yaml_runtime_config(self) -> bool:
         return (self._root / "octoagent.yaml").exists()
@@ -93,6 +101,10 @@ class DoctorRunner:
         checks.append(await self.check_telegram_config())
         checks.append(await self.check_telegram_token())
         checks.append(await self.check_secret_bindings())
+
+        # F129 新增检查项（服务健康 + 睡眠风险）
+        checks.append(await self.check_service_status())
+        checks.append(await self.check_sleep_settings())
 
         # --live 检查
         if live:
@@ -477,6 +489,135 @@ class DoctorRunner:
             level=CheckLevel.RECOMMENDED,
             message=f"secret bindings 尚未完成：{detail[0]}",
             fix_hint="运行 octo secrets audit / configure / apply / reload 收口",
+        )
+
+    async def check_service_status(self) -> CheckResult:
+        """F129 FR-G1：OS 托管服务健康（installed/loaded/running 三态）。
+
+        未安装是 RECOMMENDED 非 blocking——未部署常驻服务的用户不该 FAIL。
+        探测只读（launchctl print / systemctl show），任何失败降级 SKIP（#6）。
+        """
+        name = "service_status"
+        try:
+            manager = self._service_manager_factory(self._root)
+        except ServiceManagerError as exc:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message=f"当前平台不支持 OS 服务托管：{exc}",
+            )
+        except Exception as exc:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message=f"service backend 构造失败（{type(exc).__name__}），跳过检查",
+            )
+        try:
+            status = manager.status()
+        except Exception as exc:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message=f"服务状态探测失败（{type(exc).__name__}），跳过检查",
+            )
+        if not status.installed:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.WARN,
+                level=CheckLevel.RECOMMENDED,
+                message="未安装 OS 托管服务（关终端/崩溃/重启后 gateway 不会自动恢复）",
+                fix_hint="octo service install 安装为常驻服务（崩溃自愈 + 开机自启）",
+            )
+        if status.running:
+            detail = f"pid={status.pid}" if status.pid else "运行中"
+            ready_note = ""
+            if status.ready is not None:
+                ready_note = "，/ready 通过" if status.ready else "，/ready 未通过"
+            return CheckResult(
+                name=name,
+                status=CheckStatus.PASS,
+                level=CheckLevel.RECOMMENDED,
+                message=f"服务运行中（{status.backend}，{detail}{ready_note}）",
+            )
+        return CheckResult(
+            name=name,
+            status=CheckStatus.WARN,
+            level=CheckLevel.RECOMMENDED,
+            message="服务已安装但当前未在运行"
+            + ("（已注册到 OS）" if status.loaded else "（未注册到 OS）"),
+            fix_hint=(
+                "octo restart 拉起；反复失败查 `octo logs` / `octo service status`，"
+                "或 `octo service install --force` 修复服务定义"
+            ),
+        )
+
+    async def check_sleep_settings(self) -> CheckResult:
+        """F129 FR-G2/G3：睡眠风险感知（只读检测 + 建议，绝不改系统设置）。
+
+        GATE-2 用户拍板：doctor 只 WARN + fix_hint；修改电源设置是用户决策
+        （自动改需 sudo，违 Constitution #7 + 单次授权）。
+        """
+        name = "sleep_settings"
+        try:
+            risk = self._sleep_risk_probe()
+        except Exception as exc:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message=f"电源设置探测失败（{type(exc).__name__}），跳过检查",
+            )
+        if not risk.supported:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message=risk.detail or "当前平台不支持自动电源检测",
+            )
+        fix_hint = (
+            "①系统设置 → 显示器/节能 → 开启「接通电源时防止自动进入睡眠」；"
+            "②诚实边界：合盖睡眠（clamshell）软件挡不住——需外接电源+显示器，"
+            "或部署在 Mac mini；"
+            "③或 `octo service install --keep-awake`（服务运行期用户级 "
+            "caffeinate 防 idle 睡眠，零 sudo）"
+        )
+        if risk.will_sleep is None:
+            if risk.is_laptop:
+                return CheckResult(
+                    name=name,
+                    status=CheckStatus.WARN,
+                    level=CheckLevel.RECOMMENDED,
+                    message=f"无法确定睡眠策略，且检测到笔记本电池——{risk.detail}",
+                    fix_hint=fix_hint,
+                )
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message=f"无法自动判定睡眠策略：{risk.detail}",
+            )
+        if risk.will_sleep:
+            prefix = "本机会自动睡眠（睡着 = 手机/Telegram 失联）"
+            if risk.is_laptop:
+                prefix = "笔记本会自动睡眠（合盖/闲置 = 手机失联，笔记本是最隐蔽的失联源）"
+            return CheckResult(
+                name=name,
+                status=CheckStatus.WARN,
+                level=CheckLevel.RECOMMENDED,
+                message=f"{prefix}——{risk.detail}",
+                fix_hint=fix_hint,
+            )
+        message = f"系统不会自动睡眠（{risk.detail}）"
+        if risk.is_laptop:
+            message += "；注意合盖睡眠仍会发生（软件挡不住）"
+        return CheckResult(
+            name=name,
+            status=CheckStatus.PASS,
+            level=CheckLevel.RECOMMENDED,
+            message=message,
         )
 
     @staticmethod
