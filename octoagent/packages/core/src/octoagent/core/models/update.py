@@ -52,6 +52,9 @@ class RuntimeManagementMode(StrEnum):
 class RestartStrategy(StrEnum):
     COMMAND = "command"
     SELF_SIGNAL = "self_signal"
+    # F129：runtime 已被 OS 服务托管（launchd LaunchAgent / systemd user unit），
+    # `octo restart` 委托 launchctl/systemctl 而非自己 Popen（FR-A4/FR-C2）。
+    OS_SERVICE = "os_service"
 
 
 class MigrationStepKind(StrEnum):
