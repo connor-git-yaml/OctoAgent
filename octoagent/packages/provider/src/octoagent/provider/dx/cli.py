@@ -23,6 +23,7 @@ from .memory_commands import memory  # F094 E1: octo memory migrate-094 命令�
 from .console_output import create_console, render_panel
 from .project_commands import project_group
 from .secret_commands import secrets_group
+from .service_commands import logs_command, service_group  # F129 常驻服务地基
 from .update_commands import restart, stop, update, verify
 
 console = create_console()
@@ -97,6 +98,8 @@ main.add_command(project_group)
 main.add_command(secrets_group)
 main.add_command(cleanup_group)  # Feature 082 P4
 main.add_command(memory)  # F094 E1: octo memory migrate-094 命令组
+main.add_command(service_group)  # F129: octo service install/uninstall/status
+main.add_command(logs_command)  # F129: octo logs
 
 # Feature 087 P4 T-P4-10：octo e2e CLI（懒加载，避免 gateway 包 import 循环）
 try:
