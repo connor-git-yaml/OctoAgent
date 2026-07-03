@@ -85,7 +85,7 @@
 |------|------|------|
 | 工程蓝图（索引） | `docs/blueprint.md` | 所有设计决策的权威来源 |
 | 蓝图子文档 | `docs/blueprint/` | 核心设计 / 部署运维 / 里程碑 / 审计等 |
-| 代码架构导览 | `docs/codebase-architecture/` | 6 个模块实现级文档 |
+| 代码架构导览 | `docs/codebase-architecture/` | 模块实现级文档（service/日志/文件工作台/平台网关等） |
 | 竞品架构分析 | `docs/design/` | Claude Code / Agent Zero / OpenClaw 等 |
 | 里程碑拆解 | `docs/milestone/` | M1-M4 Feature 拆解 |
 

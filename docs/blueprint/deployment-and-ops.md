@@ -432,6 +432,34 @@ Watchdog 作为 kernel 内部组件，监控 Task 执行健康度：
   - `cancel`：自动取消并推进终态
 - **心跳机制**：Worker 定期发送 HEARTBEAT 事件；超过 2 个周期未收到 → 标记 unhealthy
 
+#### 12.5.6 OS 服务托管（F129 常驻服务地基，M8 实际部署形态）
+
+> 实际单机部署（`~/.octoagent` 托管实例）**不走 Docker restart policy**——
+> 进程守护由 OS 原生 supervisor 承担（launchd LaunchAgent / systemd user unit），
+> 不自写 supervisor 循环。
+
+- **安装**：`octo service install` 生成并加载服务定义
+  （Mac：`~/Library/LaunchAgents/com.octoagent.gateway.plist`；
+  Linux：`~/.config/systemd/user/octoagent.service`），三态幂等
+  （一致 skip / 过时自愈重写 / 缺失装）+ `--dry-run` 预览 + `--force` 强制重写。
+- **stable-working-dir 红线**：服务定义 `WorkingDirectory` 钉实例根
+  （`~/.octoagent`），ExecStart 指向稳定安装位 `run-octo-home.sh`；
+  含 worktree 标记（`.worktrees` 子串 / `worktrees` 路径段）的路径被硬拒绝
+  且**不可被 `--force` 绕过**（死目录 = 永久崩溃循环）。
+- **崩溃自愈 + 退避熔断**：launchd `KeepAlive{SuccessfulExit=false}` +
+  `ThrottleInterval=10`；systemd `Restart=on-failure` + `StartLimitBurst=5/60s`
+  + `RestartPreventExitStatus=78`（确定性配置错不重启，防坏配置刷盘）。
+- **restart 分层**：`RestartStrategy.OS_SERVICE` 下 `octo restart` 委托
+  `launchctl kickstart -k` / `systemctl --user restart`（不再 Popen，不要求旧
+  pid 存活）；未安装服务的用户走 COMMAND 路径行为不变。`octo stop` 在
+  service 模式提示"开机自启仍会拉起，彻底停用请 `octo service uninstall`"。
+- **状态**：`octo service status` 三态 `{installed, loaded, running}` 并行探测
+  （双层 timeout 软化，防 wedged systemctl 挂死）+ pid + `/ready` 就绪。
+- **禁睡**：doctor `check_sleep_settings` 只读检测（`pmset -g`）+ WARN +
+  fix_hint（**绝不自动改系统电源设置**——需 sudo 违 C7）；可选
+  `octo service install --keep-awake`（用户级 caffeinate 伴随，零 sudo，
+  合盖睡眠软件挡不住——诚实边界）。
+
 ### 12.6 升级与迁移
 
 #### 12.6.1 Schema 迁移策略
@@ -491,6 +519,36 @@ F094 引入 `octo memory migrate-094` CLI 命令组（dry-run / apply / rollback
   - `max-size: 10m`，`max-file: 3`（每个容器最多 30MB 日志）
 - 长期日志归档：定期 `docker compose logs > archive.log` 到 NAS（可选）
 - Logfire 自动采集 Pydantic AI / FastAPI 的 traces 和 spans（§9.10），无需额外配置
+
+#### 12.7.3 进程内落盘 + 脱敏（F129，`~/.octoagent` 托管实例 reality）
+
+> 非容器部署（实际形态）下日志不靠 Docker 日志驱动——由进程内
+> `RotatingFileHandler` + service 层 fd 重定向双层承载。
+> 实现：`apps/gateway/.../middleware/logging_config.py` + `log_redaction.py`。
+
+- **层 1（进程内）**：`setup_logging()` 挂 `RotatingFileHandler` →
+  `~/.octoagent/logs/octoagent.log`（10MB × 5 轮转，env
+  `OCTOAGENT_LOG_MAX_BYTES` / `OCTOAGENT_LOG_BACKUP_COUNT` 可配；文件 0600 /
+  目录 0700）。目录解析：`OCTOAGENT_LOG_DIR` 显式 →
+  `$OCTOAGENT_PROJECT_ROOT/logs`（run-octo-home.sh 恒设）→ 都缺省不落盘
+  （前台 dev / hermetic 单测保持仅 stdout）。进程内 handler 不受 Popen
+  DEVNULL 影响——日志不再随终端消失。
+- **层 2（service 层）**：launchd `StandardOutPath/StandardErrorPath` /
+  systemd `StandardOutput=append:` → `octoagent.{out,err}.log`，抓裸 stdout
+  与 **setup_logging 之前的启动期崩溃 traceback**（这层在 Python logging
+  之外，内容未脱敏——install 预创建 0600 缓解）。
+- **脱敏（Constitution #5 出站延伸）**：formatter 最终字符串层统一跑
+  `redact_sensitive_text()`——厂商 key 前缀（sk-）/ ENV/JSON 敏感字段 /
+  Bearer / Telegram bot token / 连接串密码 / JWT；短 token 全遮、长留头 6
+  尾 4；**默认 ON 且 import 时快照 env**（运行时 `export
+  OCTOAGENT_LOG_REDACT=false` 不生效）；ANSI 色码打断词边界时降级输出
+  无色+脱敏版。诚实边界：正则非万能，日志文件仍属敏感勿外发。
+- **崩溃兜底**：`sys.excepthook` 链式包装（脱敏落盘 + 脱敏 stderr）+
+  `faulthandler` → `octoagent-crash.log`。
+- **查看**：`octo logs`（tail 200 默认 / `-n` / `-f` follow 轮转感知 /
+  `--level` best-effort 过滤）；主日志缺失时回退展示 service 层 err.log
+  （启动期崩溃场景）。结构化查询仍由 Event Store 承担（#2），文件日志只服务
+  人肉 triage。
 
 ### 12.8 SSL/TLS 与外部访问
 

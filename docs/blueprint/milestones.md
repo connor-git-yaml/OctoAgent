@@ -585,7 +585,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 
 | Feature | 优先级 | 一句话 | 规模 |
 |---------|--------|--------|------|
-| **F129 常驻服务地基**（进程守护 + 日志落盘）| **P0** | `octo service install` → launchd/systemd，崩溃自愈 + 开机自启（现连 `octo restart` 都要求进程存活）；RotatingFileHandler 日志落盘（现前台日志随终端消失、崩溃 traceback 进 DEVNULL）| M |
+| **F129 常驻服务地基**（进程守护 + 日志落盘）✅ 完成（2026-07-04，双评审 10 finding 全闭环 0 HIGH）| **P0** | `octo service {install,uninstall,status}` → launchd/systemd 三态幂等 + stable-working-dir 红线 + 退避熔断；`octo restart` 在 OS_SERVICE 策略下委托 launchctl/systemctl（不再要求进程存活）；RotatingFileHandler 脱敏落盘（10MB×5 + import 快照防关）+ `octo logs`（tail/-f/--level + 启动期崩溃回退 err.log）+ doctor 服务健康/睡眠风险 2 check（只检测绝不改系统设置，可选 `--keep-awake`）。详见 `.specify/features/129-service-foundation/completion-report.md` + `deployment-and-ops.md` §12.5.6 | M |
 | **F130 安全远程触达**（Tailscale）| **P0** | Tailscale serve 三态 helper + `octo` 一键切 front_door 模式 + host↔mode 校验 + doctor 自检扩展（防误配裸奔）| M |
 | **F131 Telegram 可靠性** | P1 | polling 断线重试 / 409 双开识别 / 出站补偿 spool（仿 OpenClaw telegram-ingress）| S |
 | **F132 cron 自助工具**（OC-5）| P1 | 用户/agent 从手机自助建定时任务（后端 CRUD 已在，缺 agent 工具 + UI；OpenClaw 18 job 实证用法）| M |
