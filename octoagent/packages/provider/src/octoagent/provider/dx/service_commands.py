@@ -239,20 +239,32 @@ def logs_command(lines: int, follow: bool, level: str | None, verbose: bool) -> 
             )
         minimum_level = normalized
 
-    if not log_file.exists():
-        # Codex review P2（二轮）：启动期 import 崩溃发生在 setup_logging 之前，
-        # 唯一 traceback 落在 service 层 octoagent.err.log（主日志尚未生成）——
-        # 回退展示它，别让用户在最需要日志的时刻看到"暂无日志"。
-        stderr_fallback = log_file.parent / SERVICE_STDERR_LOG
-        if stderr_fallback.exists() and stderr_fallback.stat().st_size > 0:
+    stderr_fallback = log_file.parent / SERVICE_STDERR_LOG
+    stderr_has_content = stderr_fallback.exists() and stderr_fallback.stat().st_size > 0
+    main_missing_or_empty = not log_file.exists() or log_file.stat().st_size == 0
+    if main_missing_or_empty:
+        # Codex review P2（二轮 + 九轮）：启动期 import 崩溃发生在
+        # setup_logging 之前，唯一 traceback 落在 service 层 err.log——
+        # 主日志**缺失或为空**（预创建空文件同样掩盖崩溃）都回退展示它。
+        if stderr_has_content:
             console.print(
-                "[yellow]主日志尚未生成（gateway 可能在启动期崩溃）。"
+                "[yellow]主日志缺失或为空（gateway 可能在启动期崩溃）。"
                 f"以下为 service 层原始 stderr（{SERVICE_STDERR_LOG}）：[/yellow]"
             )
             log_file = stderr_fallback
         else:
             _print_no_log_hint(log_file, verbose=verbose)
             return
+    elif stderr_has_content and (
+        stderr_fallback.stat().st_mtime > log_file.stat().st_mtime
+    ):
+        # 主日志有旧内容但 err.log 更新（本次启动崩在 setup_logging 前）——
+        # 提示而不混流（Codex review P2 九轮）。
+        console.print(
+            f"[yellow]注意：{SERVICE_STDERR_LOG} 有比主日志更新的内容"
+            "（可能是最近一次启动失败的 traceback），可直接查看 "
+            f"{stderr_fallback}[/yellow]"
+        )
 
     if verbose:
         console.print(f"[dim]日志文件: {log_file}[/dim]")

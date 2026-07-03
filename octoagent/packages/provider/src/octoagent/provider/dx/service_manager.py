@@ -886,7 +886,9 @@ class ServiceManager:
                         lineterm="",
                     )
                 )
-                messages.append(f"[dry-run] 内容 diff：\n{diff}")
+                # Codex review P2（九轮）：现有文件可能是旧版/手工创建含
+                # secret——diff 删除行会原样打出，展示前脱敏。
+                messages.append(f"[dry-run] 内容 diff：\n{redact_sensitive_text(diff)}")
             messages.append("[dry-run] 未执行任何写入 / launchctl / systemctl 操作。")
             return ServiceInstallResult(
                 backend=self._backend.name,
@@ -1012,10 +1014,26 @@ class ServiceManager:
                 messages.append(strategy_message)
             self._clear_runtime_state(messages)
             messages.append("服务定义本来不存在，无需删除。")
+            # Codex review P2（九轮）：文件缺失但 supervisor 仍 loaded/running
+            # （手工删文件 / 上次 unload 失败）同样是失管残留，对称复查。
+            residues: list[str] = []
+            if self._backend.probe_loaded():
+                residues.append("OS supervisor 注册仍存在（unload 失败）")
+            still_running, running_pid = self._backend.probe_running()
+            if still_running:
+                residues.append(
+                    f"服务进程仍在运行（stop 失败，pid={running_pid or '未知'}）"
+                )
+            if residues:
+                messages.append(
+                    f"警告：以下残留未能清除: {', '.join(residues)}。"
+                    "请检查上方 launchctl/systemctl 输出后重试 `octo service uninstall`。"
+                )
             return ServiceInstallResult(
                 backend=self._backend.name,
                 action="absent",
                 service_file_path=str(service_path),
+                repair_required=bool(residues),
                 messages=messages,
             )
 

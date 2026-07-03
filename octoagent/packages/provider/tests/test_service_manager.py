@@ -915,6 +915,38 @@ class TestUninstall:
         assert second.action == "absent"
         assert store.load_runtime_state() is None
 
+    def test_uninstall_absent_branch_reports_residue_when_still_loaded(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（九轮）：文件缺失但 supervisor 仍 loaded/running
+        （手工删文件/上次 unload 失败）→ absent 分支对称复查残留。"""
+        manager, _runner, _ = _build_manager(instance_root, stable_script, tmp_path)
+        # 不 install（文件缺失）；print 默认 ok 带 pid → loaded/running 仍在
+        result = manager.uninstall()
+        assert result.action == "absent"
+        assert result.repair_required is True
+        assert any("仍在运行" in message or "unload 失败" in message
+                   for message in result.messages)
+
+    def test_dry_run_diff_is_redacted(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """Codex review P2（九轮）：现有服务文件含 secret 时 dry-run diff
+        删除行不得原样打出。"""
+        manager, _, _ = _build_manager(instance_root, stable_script, tmp_path)
+        manager.install()
+        service_path = manager.backend.service_file_path()
+        secret = "sk-abcdef1234567890abcdefXYZ"
+        service_path.write_text(
+            service_path.read_text(encoding="utf-8").replace(
+                "</dict>", f"<key>LEAK</key><string>{secret}</string></dict>"
+            ),
+            encoding="utf-8",
+        )
+        result = manager.install(dry_run=True)
+        joined = "\n".join(result.messages)
+        assert secret not in joined
+
     def test_uninstall_reports_residue_when_service_still_running(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
     ) -> None:

@@ -288,6 +288,32 @@ class TestLogsCli:
         assert result.exit_code == 0
         assert "暂无日志" in result.output
 
+    def test_logs_empty_main_log_falls_back_to_stderr(self, log_env: Path) -> None:
+        """Codex review P2（九轮）：预创建的空主日志同样掩盖启动崩溃——
+        主日志为空时也回退 err.log。"""
+        log_env.write_text("", encoding="utf-8")  # 空主日志
+        (log_env.parent / "octoagent.err.log").write_text(
+            "ImportError: startup boom\n", encoding="utf-8"
+        )
+        result = CliRunner().invoke(logs_command, [])
+        assert result.exit_code == 0
+        assert "startup boom" in result.output
+
+    def test_logs_stale_main_log_hints_newer_stderr(self, log_env: Path) -> None:
+        """主日志有旧内容但 err.log 更新 → 提示不混流。"""
+        import os as os_module
+
+        log_env.write_text("old normal line\n", encoding="utf-8")
+        err = log_env.parent / "octoagent.err.log"
+        err.write_text("Traceback: newest crash\n", encoding="utf-8")
+        # 确保 err mtime 更新
+        past = os_module.stat(log_env).st_mtime - 100
+        os_module.utime(log_env, (past, past))
+        result = CliRunner().invoke(logs_command, [])
+        assert result.exit_code == 0
+        assert "old normal line" in result.output  # 主日志仍是正文
+        assert "octoagent.err.log" in result.output.replace("\n", "")  # 提示存在
+
     def test_logs_stderr_fallback_output_is_redacted(self, log_env: Path) -> None:
         """Codex review P2（三轮）：err.log 由 init 系统直接重定向、未经
         redacting formatter——logs 展示前必须再脱敏。"""
