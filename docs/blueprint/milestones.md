@@ -565,7 +565,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 
 | Feature | 一句话目的（用户视角） | 规模 | 顺序 |
 |---------|----------------------|------|------|
-| **F127 Sleep-Time Memory Consolidation**（旗舰）| agent 空闲 / 定时在后台"巩固记忆"——回顾近期会话、去重 / 合并 / 组织事实、强化 recall，越用越懂你。仿 Letta sleep-time compute。底层组件（F102 routine / F097 subagent / F094 AGENT_PRIVATE memory / recall）已齐，M7 编排成独立认知能力域 | XL | 第 1（旗舰，设计先行） |
+| **F127 Sleep-Time Memory Consolidation**（旗舰）✅ 完成（2026-07-03）| agent 空闲 / 定时在后台"巩固记忆"——回顾近期会话、去重 / 合并 / 组织事实、强化 recall，越用越懂你。仿 Letta sleep-time compute。底层组件（F102 routine / F097 subagent / F094 AGENT_PRIVATE memory / recall）已齐，M7 编排成独立认知能力域。**v0.1 实际范围（用户拍板 5 决策收窄）**：纯 cron 深夜触发 + 事实层去重合并（复用 MERGE 写管道）+ 破坏性变更全人审（`consolidation_candidates` + CONFLICT 终态 + REST 审批）+ 敏感分区排除三层防御 + H1 守界通知；idle-detect / session 摘要 / recall 权重 / 敏感 vault-aware MERGE 推 v0.2。G-lite 真 LLM 验证 6/6 PASS（DeepSeek-V3.2）；强 model 质量评估归 M7 统一 OctoBench 方案。见 core-design §8.7.6 + `.specify/features/127-sleep-time-consolidation/` | XL | 第 1 ✅ |
 | **F111 Behavior Compactor**（LLM 智能合并）| 行为规则文件累积后用 LLM 智能合并去冗余（F063 Phase 3 推迟项），与记忆巩固同域 | M | 第 2 |
 | **F128 Skill Self-Improvement**（Hermes 式闭环）| agent 从失败 / 成功中改进自己的 skill（推测性，与 sleep-time 同期评估） | L | 第 3（评估） |
 

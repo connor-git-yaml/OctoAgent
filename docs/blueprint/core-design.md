@@ -896,6 +896,17 @@ octo update                                         # 重启
 # bootstrap 完成由 USER.md 实质填充（>100 字符）判定，不依赖任何旧表 / 状态机
 ```
 
+#### 8.7.6 Sleep-Time Memory Consolidation（F127，M7）
+
+后台记忆巩固——深夜 cron 触发，回顾近期 AGENT_PRIVATE 事实，LLM 识别冗余提议合并，破坏性变更全部人审（Two-Phase）。**不造 memory 原语**：复用本节写管道（propose→validate→commit MERGE 源标 superseded）+ F097 subagent + F102 cron 范式，F127 是编排 + 触发 + 审批治理层。
+
+- **触发编排**（`gateway/services/memory_consolidation.py`）：`MemoryConsolidationService` cron 触发（USER.md 机器可读字段 `consolidation_active`（默认关）/ `consolidation_time`（默认 03:00）/ `consolidation_window_days` / `consolidation_max_facts`）→ 合成 consolidation root Task+Work 对（F102 audit-task 合成范式扩展；系统占位经 `SYSTEM_INTERNAL_WORK_IDS` 排除，不泄漏用户可见委派 / Worker 视图）→ `spawn_child(target_kind="subagent", callback_mode="async")` 派后台 subagent（H2 对等 SUBAGENT_INTERNAL 容器 + cleanup hook；capacity 不足优雅 SKIPPED 不抢用户槽；进程内单飞）。
+- **发现端**（`gateway/services/consolidation_discovery.py`）：确定性编排组件（`llm_client` 注入式可单测；spawn 的 subagent 是审计容器，发现逻辑不走 free-loop——实施期归档偏离）。拉窗口（**排除敏感分区 HEALTH/FINANCE**，v0.1 收窄）→ LLM 识别冗余组（C9：无任何关键词 / 相似度规则）→ `WriteProposal[MERGE]` validate-no-commit → 写 `consolidation_candidates`（PENDING）→ emit PROPOSED；content_hash 幂等账本（阻断白名单 PENDING/APPLYING/APPLIED——REJECTED/CONFLICT 不阻断，允许基于新源重新提议）。
+- **审批端**（`gateway/services/consolidation_approval.py` + REST `/api/consolidation/candidates` GET/accept/reject/bulk_reject）：accept → atomic claim（PENDING→APPLYING CAS）→ **commit 前验证**（敏感最后闸 + 逐源仍 current）→ 写管道 commit MERGE（源 superseded 软删可回滚）；验证**判定失败**（源过期 / 敏感）→ **CONFLICT 终态**（不回滚 PENDING——内容已失效重审无意义；REST 409 引导等下次巩固重新提议）；验证**自身异常**（临时故障）→ 回滚 PENDING 可重试。reject 不碰 SoR。**绝不 agent 自主 commit 既有事实合并（C4/C7 红线）**。
+- **事件（8 个 `MEMORY_CONSOLIDATION_*`）**：运行级 TRIGGERED / COMPLETED / FAILED / SKIPPED + 提议级 PROPOSED / APPROVED / REJECTED / CONFLICTED（CONFLICTED actor=SYSTEM，与用户决策 REJECTED 区分；payload PII 防护——content_hash / id 引用不含原文）。
+- **通知（H1 守界）**：仅 proposals>0 发一条 MEDIUM `MEMORY_CONSOLIDATION_PENDING_REVIEW`（NotificationService 系统级，quiet hours 内 discard + 审计）；0 提议 / FAILED / SKIPPED 全静默；subagent 全程不对用户说话，审批经 Web 候选列表用户主动查看。
+- **v0.2 deferred**：idle-detect 触发 / session 摘要巩固 / recall 持久权重 / 敏感分区 vault-aware MERGE / 高置信自动合并。
+
 ---
 
 ### 8.8 Execution Plane：Worker + JobRunner + Sandboxing

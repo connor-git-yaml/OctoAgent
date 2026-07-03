@@ -194,7 +194,7 @@ ROUTINE_FAILED = "ROUTINE_FAILED"          # error_type + error_msg（无 traceb
 ROUTINE_SKIPPED = "ROUTINE_SKIPPED"        # reason (routine_disabled / no_user_timezone)
 ```
 
-### 10.6 EventType 清单（F084-F102 新增）
+### 10.6 EventType 清单（F084-F127 新增）
 
 > 完整 EventType 见 `packages/core/src/octoagent/core/models/enums.py`。
 
@@ -209,6 +209,7 @@ ROUTINE_SKIPPED = "ROUTINE_SKIPPED"        # reason (routine_disabled / no_user_
 | `BEHAVIOR_PACK_LOADED` | F095 schema / F096 EventStore 接入 | BehaviorPack 加载（含 `agent_id` + `agent_kind` 字段）|
 | `BEHAVIOR_PACK_USED` | F096 | BehaviorPack 实际被消费（dispatch e2e 验证）|
 | `MEMORY_RECALL_SCHEDULED` / `MEMORY_RECALL_COMPLETED` / `MEMORY_RECALL_FAILED` | F094 引入 + F096 覆盖范围扩大到同步路径 | Recall 三态事件（scheduled / completed / failed）；F096 引入 `list_recall_frames` audit endpoint 暴露 agent_runtime_id 维度审计 |
+| `MEMORY_CONSOLIDATION_TRIGGERED` / `COMPLETED` / `FAILED` / `SKIPPED` + `PROPOSED` / `APPROVED` / `REJECTED` / `CONFLICTED` | F127（M7） | 睡眠时记忆巩固：运行级 4 + 提议级 4；`CONFLICTED` actor=SYSTEM（accept 时源过期 / 敏感最后闸检测，与用户决策 REJECTED 区分）；payload PII 防护（content_hash / id 引用不含原文）；全部挂 `_memory_consolidation_root` 系统占位 task |
 
 ### 10.7 ask_back 三工具（F099 引入）
 
@@ -225,5 +226,16 @@ ROUTINE_SKIPPED = "ROUTINE_SKIPPED"        # reason (routine_disabled / no_user_
 - 通过 `CONTROL_METADATA_UPDATED` 事件机制持久化 `is_caller_worker_signal`
 - resume 路径从 `resume_state_snapshot` 读取信号恢复
 - 桥接：`worker_runtime emit` + `task_runner attach_input` + `connection_metadata TASK_SCOPED_CONTROL_KEYS`
+
+### 10.8 Consolidation Candidates API（F127 引入）
+
+巩固合并提议人审 REST（C4/C7 Two-Phase 的 Gate 面，`routes/consolidation_candidates.py`）：
+
+- `GET /api/consolidation/candidates?scope_id=...&status=...`：候选列表（默认 pending）
+- `POST /api/consolidation/candidates/{candidate_id}/accept`：atomic claim（PENDING→APPLYING CAS）→ commit 前验证（敏感最后闸 + 逐源仍 current）→ 写管道 commit MERGE（源 superseded）→ APPLIED；**验证判定失败 → CONFLICT 终态 + 409**（detail 引导等下次巩固基于新源重新提议）；验证自身异常 → 回滚 PENDING 可重试
+- `POST /api/consolidation/candidates/{candidate_id}/reject`：REJECTED（不碰 SoR）
+- `POST /api/consolidation/candidates/bulk_reject`：批量 reject
+
+系统 audit task 占位 `_memory_consolidation_root`（同 F102 `_daily_routine_audit` 范式，**task+work 成对合成**——`spawn_child` 必需真 parent 对；经 `SYSTEM_INTERNAL_WORK_IDS` 排除不泄漏用户可见委派 / Worker 视图）。
 
 ---

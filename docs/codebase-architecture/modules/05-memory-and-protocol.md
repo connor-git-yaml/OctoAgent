@@ -128,6 +128,15 @@ Memory 已经深度接入：
 `MemoryService` 内部维护 backend 状态、失败原因、回放积压和 fallback 行为。  
 这说明记忆系统已经按“可退化但不整体不可用”的原则在设计。
 
+### 3.3 睡眠时巩固层（F127）不造新写路径，是写管道的一个新调用方
+
+F127 在 memory 包内只新增两样东西：
+
+- [`models/consolidation.py`](../../../octoagent/packages/memory/src/octoagent/memory/models/consolidation.py)：`ConsolidationCandidate`（PENDING / APPLYING / APPLIED / REJECTED / **CONFLICT** 五态）+ `MemoryConsolidationRun` 审计模型 + 8 个 `MEMORY_CONSOLIDATION_*` 事件 payload schema（PII 防护：content_hash / id 引用不含原文）
+- [`store/consolidation_store.py`](../../../octoagent/packages/memory/src/octoagent/memory/store/consolidation_store.py)：`consolidation_candidates` 表 CRUD + atomic claim（条件 UPDATE + rowcount CAS，复用 `memory_candidates` 范式）
+
+“发现冗余 → 提议合并 → 人审 → commit”的编排全在 gateway 侧（`memory_consolidation.py` cron 触发 + 合成 root spawn / `consolidation_discovery.py` LLM 发现端 / `consolidation_approval.py` 审批端 + REST `/api/consolidation/candidates`），全部走本模块既有 `propose_write → validate_proposal → commit_memory` 写管道（MERGE 源标 superseded 软删可回滚）。CONFLICT 是审批期系统检测候选失效（源被更新 / 删除 / 被共享源候选合并，或敏感分区最后闸）的终态，actor=SYSTEM，与用户决策 REJECTED 区分。v0.1 巩固窗口排除敏感分区（HEALTH / FINANCE）——敏感 MERGE 需 vault-aware 写路径（v0.2 deferred）。
+
 ## 4. Protocol 模块：内部模型与 A2A-Lite 之间的适配层
 
 当前协议层对应 [`octoagent/packages/protocol`](../../../octoagent/packages/protocol)。
