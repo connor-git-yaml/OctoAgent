@@ -576,3 +576,30 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 **bench infra 待办（M7 期间顺手）**：①OctoHarness 轻量 bootstrap（达 SC-001 ≤1h，现每 task 起完整 harness ~2min/task）；②teardown 竞速 memory-extraction 退 Echo（无害噪声，bench-specific 生命周期）；③Tier2 τ-bench 真跑接入。
 
 ---
+
+### M8（部署与日常使用：从"能跑"到"手机天天用"）⏳ 启动（2026-07-03，P0 插队优先）
+
+> **目标（用户拍板 2026-07-03）**：Connor 要开始**真实部署 + 工作/生活日常使用** Octo，典型场景=**手机经互联网安全访问**。功能面 M5-M7 已很全，卡点在**运维地基**——没人守护进程、日志不落盘、远程最后一公里未通。
+> **决策来源**：`octo-daily-use-readiness` workflow（38 agent 深读 Hermes/OpenClaw 部署机制 + Octo 三域审计 + 外部远程方案调研，26 findings 过对抗验证 / 7 条幻觉 gap 被推翻）。报告 Artifact 存 CLAUDE.local.md §M8。
+> **两项用户拍板**：①远程访问 = **Tailscale serve**（WireGuard 私网，手机装 App 即得完整 Web UI，零证书/不公网暴露/契合 §0 单用户锁定；辅以 Telegram 增强；**不做公网反代**）；②开**独立 M8**（与 M7 认知深化关注点不同、不共享子系统、可并行），**P0 插队优先**（它决定 M7 记忆巩固能否从手机被触达）。
+
+| Feature | 优先级 | 一句话 | 规模 |
+|---------|--------|--------|------|
+| **F129 常驻服务地基**（进程守护 + 日志落盘）| **P0** | `octo service install` → launchd/systemd，崩溃自愈 + 开机自启（现连 `octo restart` 都要求进程存活）；RotatingFileHandler 日志落盘（现前台日志随终端消失、崩溃 traceback 进 DEVNULL）| M |
+| **F130 安全远程触达**（Tailscale）| **P0** | Tailscale serve 三态 helper + `octo` 一键切 front_door 模式 + host↔mode 校验 + doctor 自检扩展（防误配裸奔）| M |
+| **F131 Telegram 可靠性** | P1 | polling 断线重试 / 409 双开识别 / 出站补偿 spool（仿 OpenClaw telegram-ingress）| S |
+| **F132 cron 自助工具**（OC-5）| P1 | 用户/agent 从手机自助建定时任务（后端 CRUD 已在，缺 agent 工具 + UI；OpenClaw 18 job 实证用法）| M |
+| **F133 voice 从 polling 剥离** | P1 | 语音处理与 Telegram polling 解耦（避免长语音阻塞入站）| M |
+| **F134 bearer 加固** | P1→P2 | 限流 / 强 token / SSE ticket 化（**选 Tailscale 后降 P2**——私网已挡）| S |
+
+**P2 nice-to-have（候选，不阻塞）**：容器交付 · toolsets 死配置清理 · cron 后台失败 HIGH 通知。
+
+**波次编排**：①**F129 守护+日志**（强绑先做，是一切前提）→ ②**F130 Tailscale 触达**（手机能开 Web UI 完整体验）→ ③F131/F132/F133 并行（渠道/自助/语音）→ ④P2 顺手清。**F129→F130 严格串行**（守护是触达前提）。
+
+**部署形态**：单用户不需容器化/云托管。首选**禁睡的常驻 Mac（mini）+ Tailscale 隧道**——launchd user unit + 禁睡设置即得崩溃自愈+开机自启+手机随时可达。睡眠是笔记本最隐蔽的杀手。NAS/容器是迁移期 nice-to-have。
+
+**竞品借鉴（已验证）**：Hermes `service_manager` 五态抽象 + unit/plist 模板 + stable-working-dir + rotating+脱敏日志；OpenClaw `server-tailscale` 三态 + auth-rate-limit + `telegram-ingress` spool/409 建模。
+
+**已确认无需做（REFUTED，留档防重复立项）**：`--host 0.0.0.0 默认全网卡`（默认已 127.0.0.1）· `任务结果结构性推不到手机`（链路未被 gate）· `通知无优先级/静默`（grep 的是过时 worktree）· `doctor 只 28 行空壳`（真 doctor 557 行 13 检查）· `更新无回滚`（四阶段状态机 + BackupService）· `弱 token 拷示例即失守`（示例只存变量名）· `terminal.exec 锁死 project`（沙箱是 instance root）。**Octo 地基比想象扎实，真缺口集中在"守护 + 触达"。**
+
+---
