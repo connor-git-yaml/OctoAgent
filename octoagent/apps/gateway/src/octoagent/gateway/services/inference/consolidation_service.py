@@ -22,7 +22,7 @@ from octoagent.memory import (
     WriteAction,
 )
 
-from .llm_common import LlmServiceProtocol, parse_llm_json_array, resolve_default_model_alias
+from .llm_common import LlmServiceProtocol, ensure_llm_call_contract, parse_llm_json_array, resolve_default_model_alias
 
 # 单次 consolidate 操作的 Fragment 批量上限
 _MAX_FRAGMENTS_PER_BATCH: int = 200
@@ -208,6 +208,7 @@ class ConsolidationService:
         tom_extraction_service: Any | None = None,  # Phase 3: ToMExtractionService
     ) -> None:
         self._memory_store = memory_store
+        ensure_llm_call_contract(llm_service, owner="ConsolidationService")
         self._llm_service = llm_service
         self._project_root = project_root
         self._derived_service = derived_extraction_service

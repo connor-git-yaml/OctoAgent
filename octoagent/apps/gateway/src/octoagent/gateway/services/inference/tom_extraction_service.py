@@ -24,7 +24,7 @@ from octoagent.memory import MemoryPartition, SqliteMemoryStore
 from octoagent.memory.models.integration import DerivedMemoryRecord
 
 from .consolidation_service import CommittedSorInfo
-from .llm_common import LlmServiceProtocol, parse_llm_json_array, resolve_default_model_alias
+from .llm_common import LlmServiceProtocol, ensure_llm_call_contract, parse_llm_json_array, resolve_default_model_alias
 
 _log = structlog.get_logger()
 
@@ -117,6 +117,7 @@ class ToMExtractionService:
         project_root: Path,
     ) -> None:
         self._memory_store = memory_store
+        ensure_llm_call_contract(llm_service, owner="ToMExtractionService")
         self._llm_service = llm_service
         self._project_root = project_root
 

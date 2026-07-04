@@ -28,7 +28,7 @@ from octoagent.memory import (
 )
 from octoagent.memory.models.integration import DerivedMemoryQuery
 
-from .llm_common import LlmServiceProtocol, resolve_default_model_alias
+from .llm_common import LlmServiceProtocol, ensure_llm_call_contract, resolve_default_model_alias
 
 _log = structlog.get_logger()
 
@@ -137,6 +137,7 @@ class ProfileGeneratorService:
         project_root: Path,
     ) -> None:
         self._memory_store = memory_store
+        ensure_llm_call_contract(llm_service, owner="ProfileGeneratorService")
         self._llm_service = llm_service
         self._project_root = project_root
 

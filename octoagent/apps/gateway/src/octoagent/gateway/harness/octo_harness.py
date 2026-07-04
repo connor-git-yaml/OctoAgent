@@ -1479,7 +1479,13 @@ class OctoHarness:
             memory_console_service=MemoryConsoleService(
                 project_root,
                 store_group=store_group,
-                llm_service=fallback_manager,
+                # 注入 LLMService（内部包装 FallbackManager），不是裸 fallback_manager——
+                # 下游 inference 四服务（consolidation/profile/derived/tom）契约是
+                # LlmServiceProtocol.call；裸 FallbackManager 只有 call_with_fallback，
+                # 会让 memory 巩固管线在生产静默 AttributeError（extractor 线注入的
+                # 就是 LLMService，两线必须一致）。app.state.llm_service 由
+                # _bootstrap_llm（先于本方法）赋值。
+                llm_service=app.state.llm_service,
             ),
             capability_pack_service=app.state.capability_pack_service,
             delegation_plane_service=app.state.delegation_plane_service,

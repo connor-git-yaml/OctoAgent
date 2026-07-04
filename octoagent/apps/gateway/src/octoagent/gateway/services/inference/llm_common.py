@@ -18,14 +18,40 @@ _log = structlog.get_logger()
 
 @runtime_checkable
 class LlmServiceProtocol(Protocol):
-    """LLM 服务的最小接口契约。"""
+    """LLM 服务的最小接口契约。
 
-    async def call_with_fallback(
+    契约方法是 ``call``（gateway ``LLMService.call`` 的签名子集，返回带
+    ``.content`` 的 ModelCallResult）。注意**不是** ``FallbackManager.call_with_fallback``
+    ——历史上本协议曾误声明为 ``call_with_fallback``，而全部消费方调用的是
+    ``.call``，叠加 harness 一处误注入裸 FallbackManager，导致 memory 巩固/画像/
+    派生/ToM 四条管线在生产静默 AttributeError（e051bd4b 修过一次方向相反的
+    同类漂移）。正确注入对象是 gateway ``LLMService``（内部包装 FallbackManager）。
+    构造期用 ``ensure_llm_call_contract`` 守卫，误接线在启动即 fail-fast。
+    """
+
+    async def call(
         self,
-        messages: list[dict[str, str]],
-        model_alias: str = "main",
+        prompt_or_messages: str | list[dict[str, str]],
+        model_alias: str | None = None,
         **kwargs: Any,
     ) -> Any: ...
+
+
+def ensure_llm_call_contract(llm_service: Any, *, owner: str) -> None:
+    """构造期契约守卫：llm_service 必须实现 ``call``（或为 None 表示降级）。
+
+    F108b W7 先例：wiring 契约违规属构造期错误，fail-fast 前移到 TypeError，
+    而非运行到 cron 深处才 AttributeError。裸 ``FallbackManager``（只有
+    ``call_with_fallback``）是历史误注入形态，在此显式拦截。
+    """
+    if llm_service is None:
+        return
+    if not callable(getattr(llm_service, "call", None)):
+        raise TypeError(
+            f"{owner} 需要实现 LlmServiceProtocol.call 的 llm_service"
+            f"（如 gateway LLMService），实际得到 {type(llm_service).__name__}；"
+            "若手头只有 FallbackManager，请注入包装它的 LLMService。"
+        )
 
 
 def parse_llm_json_array(text: str) -> list[dict[str, Any]] | None:
