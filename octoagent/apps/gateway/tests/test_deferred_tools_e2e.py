@@ -192,6 +192,13 @@ def _build_test_tool_metas() -> list[ToolMeta]:
         _make_tool_meta("runtime.now", "获取当前时间", tool_group="runtime"),
         _make_tool_meta("memory.write", "写入记忆", tool_group="memory",
                         side_effect_level=SideEffectLevel.REVERSIBLE),
+        # F135：CoreToolSet 新增 behavior.write_file（gap-1）后，synthetic Core 集从
+        # CoreToolSet.default() 动态生成会多一个完整 schema，令本 14 工具小样本的
+        # deferred/full 比率对 Core 集大小敏感（60% → 59.29%）。补两个代表性 deferred 工具
+        # 恢复生产比例（真实 pack 50+ 工具、deferred ≫ core，比率远高于 60%）——这是让
+        # synthetic 更贴近生产、非降阈值 gaming SC-001。
+        _make_tool_meta("project.inspect", "查看 project 详情", tool_group="project"),
+        _make_tool_meta("config.inspect", "查看配置", tool_group="config"),
     ]
     return core_metas + deferred_metas
 

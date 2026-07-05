@@ -407,6 +407,13 @@ class CoreToolSet(BaseModel):
             "delegate_task",       # Sub-agent 派发（与 graph_pipeline 同 agent_runtime 入口；
                                    # 不进 Core 会被压成 deferred → 强制走 tool_search 两跳链路 →
                                    # F087 e2e 域 #8 在 240s SIGALRM 内永远来不及 → SKIP）
+            "behavior.write_file", # 行为文件写入（USER.md 等）——F135 gap-1：首次见面填画像的
+                                   # 核心引导闭环高频且语义关键。不进 Core 会被压成 deferred →
+                                   # 主 Agent 只在 system prompt 文本里看到名字、无完整 schema →
+                                   # 须先 tool_search 两跳激活 → 弱 model/单轮场景不可靠 → Agent
+                                   # 回复"入口没暴露给我"，引导在生产走不通（与上面两个同款先例）。
+                                   # 治理不受影响：写 REVIEW_REQUIRED 文件仍走 handler 内 Two-Phase
+                                   # proposal→confirm（Core/deferred 是发现层，review_mode 是执行层）。
         ])
 
     def is_core(self, tool_name: str) -> bool:
