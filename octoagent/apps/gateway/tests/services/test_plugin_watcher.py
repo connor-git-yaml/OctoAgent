@@ -1,16 +1,19 @@
 """F106 Phase C PluginWatcher 测试：ignore 过滤 / 降级（无 watchdog）/ debounce→refresh 桥接。
 
-watchdog 未装 → start() 返回 False（降级）。debounce→refresh 链经直接调 _on_event 测（绕真 observer）。
+watchdog 缺席经 monkeypatch 强制模拟（不依赖环境装没装）→ start() 返回 False（降级）。
+debounce→refresh 链经直接调 _on_event 测（绕真 observer）。
 """
 
 from __future__ import annotations
 
 import asyncio
+import sys
 from pathlib import Path
 
+import pytest
 from octoagent.gateway.harness.tool_registry import ToolRegistry
-from octoagent.gateway.services.plugin_watcher import PluginWatcher
 from octoagent.gateway.services.plugin_registry import PluginRegistry
+from octoagent.gateway.services.plugin_watcher import PluginWatcher
 from octoagent.skills.discovery import SkillDiscovery
 
 
@@ -56,11 +59,14 @@ def test_ignore_filter() -> None:
     assert not w._is_ignored("/plugins/p/tools.py")
 
 
-def test_start_degrades_without_watchdog(tmp_path: Path) -> None:
-    # watchdog 未装（worktree 环境）→ start() 返回 False，不抛
+def test_start_degrades_without_watchdog(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # sys.modules 置 None → import 必抛 ModuleNotFoundError（不触盘，与真未装走同一 except 分支），
+    # 三个名字都要置：CPython import 快路径命中 sys.modules["watchdog.events"] 时不查父模块
+    for name in ("watchdog", "watchdog.events", "watchdog.observers"):
+        monkeypatch.setitem(sys.modules, name, None)
     reg, plugins_dir = _registry(tmp_path)
     w = PluginWatcher(plugins_dir, reg, None)
-    assert w.start() is False
+    assert w.start() is False  # 优雅降级（Constitution #6）：返回 False，不抛
     w.stop()  # 幂等，不抛
 
 
