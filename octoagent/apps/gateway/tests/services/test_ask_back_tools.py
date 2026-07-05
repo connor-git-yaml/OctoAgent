@@ -610,3 +610,51 @@ async def test_request_input_returns_empty_when_task_not_running():
 
     assert result == "", f"非 RUNNING 状态下 request_input 应返回 ''，实际 {result!r}"
     mock_ctx.request_input.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_escalate_permission_allow_always_does_not_shortcircuit():
+    """F136 顺手修：即便 worker.escalate_permission 已进 ApprovalManager allow-always
+    全局白名单，下一次申请仍必须真实注册进 pending（不短路）。
+
+    否则 register 直接返回 APPROVED 但不入 _pending → Web/Telegram resolve 404 →
+    gate wait_for_decision 等满 300s 假超时（用户点过"总是批准"反而永远批不了）。
+    用真 ApprovalManager 验证 register 行为；gate 用 mock 立即返回 approved。
+    """
+    from octoagent.policy.approval_manager import ApprovalManager
+    from octoagent.policy.models import ApprovalStatus
+
+    manager = ApprovalManager()  # 无 event_store：事件写入 no-op，专注 register 语义
+    manager._allow_always["worker.escalate_permission"] = True  # 预置用户点过"总是批准"
+
+    mock_gate = AsyncMock()
+    mock_handle = MagicMock()
+    mock_handle.handle_id = "esc-allow-always-001"
+    mock_gate.request_approval = AsyncMock(return_value=mock_handle)
+    mock_gate.wait_for_decision = AsyncMock(return_value="approved")
+
+    deps = _make_mock_deps(approval_gate=mock_gate)
+    deps._approval_manager = manager
+    mock_ctx = _make_mock_execution_context()
+
+    with patch(
+        "octoagent.gateway.services.builtin_tools.ask_back_tools.get_current_execution_context",
+        return_value=mock_ctx,
+    ):
+        handlers = await _register_and_get_handlers(deps)
+        result = await handlers["worker.escalate_permission"](
+            action="写入生产配置文件",
+            scope="系统配置",
+            reason="任务需要更新服务端口配置",
+        )
+
+    assert result == "approved"
+    record = manager.get_approval("esc-allow-always-001")
+    assert record is not None, (
+        "allow-always 命中时 register 不得短路——必须真实入 pending，"
+        "否则 Web/Telegram resolve 404 → 假超时"
+    )
+    assert record.status == ApprovalStatus.PENDING, "注册记录应为 PENDING（非系统自动批准）"
+    assert record.request.allow_always_eligible is False, (
+        "escalate 注册必须声明不参与 allow-always（F136 DP-3 同款）"
+    )

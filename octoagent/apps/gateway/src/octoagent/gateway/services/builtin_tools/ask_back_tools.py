@@ -518,6 +518,11 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                         side_effect_level=_SideEffectLevel.IRREVERSIBLE,
                         expires_at=_now + _td(seconds=300),
                         created_at=_now,
+                        # F136 顺手修：escalate 走 gate 阻塞等待，ApprovalManager 的
+                        # allow-always 短路（register 直接返回 APPROVED 不入 pending）会让
+                        # Web/Telegram resolve 404 → 等满 300s 假超时。gate 侧本就无
+                        # allow-always 语义 → 每次申请独立审批（"总是批准"降级为本次批准）。
+                        allow_always_eligible=False,
                     )
                     await approval_manager.register(_approval_request)
                     log.debug(

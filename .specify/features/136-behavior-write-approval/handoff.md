@@ -38,10 +38,11 @@
    有 APPROVE_ALWAYS（operator_actions.py:236）——用户一定点得到。要么传
    `allow_always_eligible=False`，要么实现 gate 侧真 allow-always 语义。
 
-3. **escalate_permission 有同款 404 隐患（未修）**：escalate 也 register ApprovalManager 不传
-   `allow_always_eligible=False` → 用户对 escalate 选"总是批准"同样短路 404 超时。F136 范围内
-   未动（escalate 语义上 allow-always 可辩护）。**若要修**：escalate register 处传
-   `allow_always_eligible=False`（一行），或给 ApprovalGate 实现 allow-always 语义。
+3. **escalate_permission 同款 404 隐患（已并入本次修复）**：escalate register 已传
+   `allow_always_eligible=False`（ask_back_tools.py，用户拍板并入）。含义：所有走 gate 阻塞
+   等待的审批（escalate + behavior.write）"总是批准"均降级为本次批准。**gate 侧真 allow-always
+   语义仍不存在**——若未来要 auto-approve，需独立设计（ApprovalGate 在 request_approval 前查
+   override 并直接放行，Constitution #7 需权衡）。
 
 4. **ApprovalGate 二态 vs ApprovalManager 三态**：ApprovalGate.resolve_approval 只有
    approved/rejected；allow-always 是 ApprovalManager 概念，由 Web/Telegram 路由把
