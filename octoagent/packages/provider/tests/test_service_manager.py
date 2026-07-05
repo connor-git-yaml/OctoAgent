@@ -885,6 +885,40 @@ class TestInstallIdempotency:
         result = manager.install()
         assert result.action == "skipped"
 
+    def test_path_schema_bump_triggers_refresh_on_installed_service(
+        self,
+        instance_root: Path,
+        stable_script: Path,
+        tmp_path: Path,
+    ) -> None:
+        """F135 gap-2 / Codex P2：PATH 生成逻辑变更（schema bump）必须让**已装**服务自愈重写。
+
+        PATH 值本身被 definitions_equivalent 剔除，所以单纯改 PATH 内容不触发重装（上一 test）。
+        用非 PATH 的 OCTOAGENT_PATH_SCHEMA marker 承载版本——模拟旧版本安装（schema=1）落盘后
+        升级到当前版本（schema=2），install 必须走 refreshed 分支重写 plist（否则已部署用户
+        保留旧 PATH，npx 型 MCP 继续失败）。
+        """
+        manager, _, _ = _build_manager(instance_root, stable_script, tmp_path)
+        manager.install()
+        service_path = manager.backend.service_file_path()
+        # 模拟"旧版本"已装服务：把落盘定义里的 schema 版本降级为 1（PATH 无 node 段的旧世界）。
+        old_content = service_path.read_text(encoding="utf-8")
+        downgraded = old_content.replace(
+            "<string>2</string>", "<string>1</string>"  # launchd plist
+        ).replace(
+            'OCTOAGENT_PATH_SCHEMA=2', 'OCTOAGENT_PATH_SCHEMA=1'  # systemd unit（若适用）
+        )
+        assert downgraded != old_content, "测试前置：应能把 schema marker 降级"
+        service_path.write_text(downgraded, encoding="utf-8")
+        # 升级到当前版本（schema=2）重跑 install → 必须重写（非 skipped）。
+        result = manager.install()
+        assert result.action == "refreshed", (
+            "PATH schema bump 必须让已装服务自愈重写；否则已部署用户保留旧 PATH（无 node）"
+        )
+        assert "<string>2</string>" in service_path.read_text(encoding="utf-8") or (
+            "OCTOAGENT_PATH_SCHEMA=2" in service_path.read_text(encoding="utf-8")
+        )
+
     def test_force_reinstalls_even_when_identical(
         self, instance_root: Path, stable_script: Path, tmp_path: Path
     ) -> None:

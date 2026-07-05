@@ -53,6 +53,14 @@ from .update_status_store import UpdateStatusStore
 LAUNCHD_LABEL = "com.octoagent.gateway"
 SYSTEMD_UNIT_NAME = "octoagent.service"
 
+#: 服务 PATH 生成方案版本（F135 gap-2）。PATH 值本身是幂等比对**剔除的易变字段**
+#: （node/uv 安装位随环境变，见 definitions_equivalent），所以单纯改 PATH 内容**不会**
+#: 让已装服务的 `octo service install` 触发重写（走 skipped）。把版本号写进服务定义的
+#: **非 PATH** env marker（不被剔除）：当 PATH 生成逻辑变更（如本次新增 node 段）时 bump
+#: 此版本 → 已部署用户下次 `octo service install` 检测到 marker 差异 → 走自愈重写分支 →
+#: 新 PATH 真正落盘 + 服务重启。v1=初始（uv+系统路径）；v2=F135 追加 node/npx 稳定位置。
+SERVICE_PATH_SCHEMA_VERSION = "2"
+
 #: 确定性配置错误退出码（BSD EX_CONFIG）。systemd 通过
 #: ``RestartPreventExitStatus`` 识别此码后不再重启（防坏配置无限崩溃循环，
 #: 对标 OpenClaw systemd-unit.ts RestartPreventExitStatus=78）。
@@ -489,6 +497,9 @@ class LaunchdBackend(ServiceBackend):
             "PATH": spec.path_value,
             # supervisor env-marker 自证（OpenClaw supervisor-markers.ts 范式）
             "OCTOAGENT_SUPERVISED": "launchd",
+            # PATH 方案版本 marker（F135 gap-2）：非 PATH 字段，参与幂等比对，PATH 生成
+            # 逻辑变更时 bump 触发已装服务自愈重写（否则 PATH 被剔除、install 走 skipped）。
+            "OCTOAGENT_PATH_SCHEMA": SERVICE_PATH_SCHEMA_VERSION,
             **spec.environment,
         }
         payload: dict[str, object] = {
@@ -618,6 +629,11 @@ class SystemdUserBackend(ServiceBackend):
         # systemd-inhibit 包装留后续），提示由 ServiceManager.install 发出。
         env_lines = [f'Environment="PATH={spec.path_value}"']
         env_lines.append('Environment="OCTOAGENT_SUPERVISED=systemd"')
+        # PATH 方案版本 marker（F135 gap-2）：非 PATH 行，参与幂等比对（_normalize 只剔 PATH 行），
+        # PATH 生成逻辑变更时 bump 触发已装服务自愈重写。
+        env_lines.append(
+            f'Environment="OCTOAGENT_PATH_SCHEMA={SERVICE_PATH_SCHEMA_VERSION}"'
+        )
         for key in sorted(spec.environment):
             env_lines.append(f'Environment="{key}={spec.environment[key]}"')
         environment_block = "\n".join(env_lines)
