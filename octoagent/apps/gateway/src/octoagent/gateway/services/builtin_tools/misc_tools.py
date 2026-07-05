@@ -193,7 +193,11 @@ async def register(broker, deps: ToolDeps) -> None:
         content: str,
         confirmed: bool = False,
     ) -> BehaviorWriteFileResult:
-        """修改行为文件内容。file_id 为短名（如 USER.md），系统自动解析路径。"""
+        """修改行为文件内容。file_id 为短名（如 USER.md），系统自动解析路径。
+
+        REVIEW_REQUIRED 文件两段调用：先 confirmed=false 拿 proposal 向用户说明，
+        再 confirmed=true 发起服务端审批——用户在 Web/Telegram 审批卡片批准后才落盘。
+        """
         from octoagent.core.behavior_workspace import (
             commit_behavior_file_write,
             prepare_behavior_file_write,
@@ -259,7 +263,10 @@ async def register(broker, deps: ToolDeps) -> None:
             return BehaviorWriteFileResult(
                 status="skipped",
                 target=str(resolved),
-                preview="请向用户展示修改摘要并请求确认，确认后再次调用并设置 confirmed=true",
+                preview=(
+                    "请向用户展示修改摘要并请求确认；确认后再次调用并设置 confirmed=true，"
+                    "系统将发出审批卡片（Web/Telegram），用户批准后才会真正写入"
+                ),
                 reason="REVIEW_REQUIRED: 需要用户确认后再写入",
                 file_id=file_id,
                 written=False,
@@ -268,15 +275,45 @@ async def register(broker, deps: ToolDeps) -> None:
                 proposal=True,
             )
 
-        # F107 W1：写盘前读旧内容作版本 baseline（record-after + 首版 baseline，FR-W1-2b）
         from octoagent.gateway.services.behavior_versioning import (
             read_disk_content,
             record_behavior_version,
         )
 
+        # F136：confirmed=true 不再自证——REVIEW_REQUIRED 写入须经服务端 ApprovalGate
+        # 批准（用户在 Web/Telegram 审批卡片点批准）后才允许落盘（Constitution #4/#7/#10）。
+        approval_id = ""
+        if review_mode == BehaviorReviewMode.REVIEW_REQUIRED:
+            from .write_approval import gate_behavior_write
+
+            outcome = await gate_behavior_write(
+                deps,
+                exec_ctx=ctx,
+                file_id=file_id,
+                resolved=resolved,
+                old_content=read_disk_content(resolved) or "",
+                new_content=content,
+                budget_chars=budget_result["budget_chars"],
+            )
+            if outcome.decision != "approved":
+                return BehaviorWriteFileResult(
+                    status="rejected",
+                    target=str(resolved),
+                    preview=outcome.reason,
+                    reason=outcome.reason,
+                    file_id=file_id,
+                    written=False,
+                    chars_written=0,
+                    budget_chars=budget_result["budget_chars"],
+                    approval_id=outcome.approval_id,
+                )
+            approval_id = outcome.approval_id
+
+        # F107 W1：写盘前读旧内容作版本 baseline（record-after + 首版 baseline，FR-W1-2b）。
+        # F136 DP-6：批准后重读——审批等待期间磁盘若被并发改，版本 baseline 不失真。
         old_content = read_disk_content(resolved)
 
-        # 实际写入磁盘（confirmed=true 时直接信任 Agent 传入的 content）
+        # 实际写入磁盘（F136：REVIEW_REQUIRED 已过服务端审批；NONE 直写）
         try:
             commit_behavior_file_write(pending, content)
         except Exception as exc:
@@ -297,6 +334,7 @@ async def register(broker, deps: ToolDeps) -> None:
             file_id=file_id,
             chars_written=len(content),
             resolved_path=str(resolved),
+            approval_id=approval_id,
         )
 
         # F107 W1：record-after 版本记录 + BEHAVIOR_VERSION_RECORDED 审计（best-effort，不阻断写）
@@ -343,6 +381,7 @@ async def register(broker, deps: ToolDeps) -> None:
             chars_written=len(content),
             budget_chars=budget_result["budget_chars"],
             onboarding_completed=onboarding_completed,
+            approval_id=approval_id,
         )
 
     @tool_contract(

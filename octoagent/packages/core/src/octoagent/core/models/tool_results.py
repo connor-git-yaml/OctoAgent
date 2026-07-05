@@ -235,6 +235,10 @@ class BehaviorWriteFileResult(WriteResult):
 
     onboarding_completed: bool = False
 
+    approval_id: str = ""
+    """F136：REVIEW_REQUIRED 写入关联的服务端审批 handle_id（审计链
+    APPROVAL_REQUESTED/DECIDED ↔ 写入结果）；NONE 直写 / proposal 阶段为空。"""
+
 
 class CanvasWriteResult(WriteResult):
     """canvas.write 写入结果。保留 artifact_id / task_id（防 F4 压扁）。"""

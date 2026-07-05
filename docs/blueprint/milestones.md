@@ -292,7 +292,7 @@ $PROJECT_ROOT (~/.octoagent)/
 **Behavior 工具接口**（2026-03-21 确认）：
 
 - `behavior.read_file` **已删除**——所有 behavior 文件内容已在 system prompt 的 `BehaviorSystem` block 中按 `[file_id]` 标注内联展示，Agent 不需要工具读取
-- `behavior.write_file(file_id, content, confirmed)` 接口：Agent 只传 `file_id` 短名（如 `USER.md`），系统根据当前 session 的 agent/project 上下文通过 `resolve_write_path_by_file_id()` 自动解析磁盘路径
+- `behavior.write_file(file_id, content, confirmed)` 接口：Agent 只传 `file_id` 短名（如 `USER.md`），系统根据当前 session 的 agent/project 上下文通过 `resolve_write_path_by_file_id()` 自动解析磁盘路径。**F136 起 `confirmed=true` 不再是 LLM 自证**——REVIEW_REQUIRED 文件写入经服务端 ApprovalGate（审批卡片含 unified diff，用户在 Web/Telegram 批准后才落盘；每次写独立审批、不入 session allowlist）
 - 参考 Agent Zero 的 `behaviour_adjustment` 设计——Agent 不感知文件路径，系统全权处理
 
 **双维度审批模型**（§8.6 已有详述，此处索引）：
@@ -543,7 +543,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 - **F106 设计输入**：plugin toggle/热重载/git（Agent Zero az-2，在现有 SkillDiscovery 上扩）。
 - **M7**：文件系统 checkpoint/rollback（Hermes，亦 F107 输入）；用户/Agent 自助 proactive cron（OC-5，后端 CRUD 已在缺工具+UI，F102 同域）；skill 自改进闭环（sleep-time 同期）。
 - **剔除**：Pydantic typed deps DI（已有 ToolDeps+ExecutionRuntimeContext）/ Claude Code 细分 failure hook（走 event-sourcing）/ Agent Zero 自改写规则（违 #4/#7）。
-- **待核查**：`behavior.write_file` 的 `confirmed=true` LLM 自填未接 ApprovalGate，疑似自确认绕过人审，需实测。
+- ~~**待核查**：`behavior.write_file` 的 `confirmed=true` LLM 自填未接 ApprovalGate，疑似自确认绕过人审，需实测。~~ **已证实并修复（F136 ✅）**：F135 Codex P1 + 经验复现确认首调 confirmed=true 可无 proposal 直写 REVIEW_REQUIRED 文件；F136 把 confirmed 绑定服务端 ApprovalGate（`builtin_tools/write_approval.py`，镜像 escalate_permission 生产范式；显式拒绝恢复 RUNNING 的差异语义见 spec DP-4）。
 
 **不进 M5/M6 的项**：071b Slice D 高层工具暴露（命中"不需要 Codex review 的微改"，空闲间隙顺手做）；Agent Zero Extensions / Instruments 系统（规模 ≥ 1 个月，放 M7 评估）；front-door 公网暴露 / 多用户 / 团队 / 家庭模式（Blueprint §0 已锁单用户深度）；Companion（原 F105，推 M7）。
 **M7 追加（2026-06-07 调研）**：sleep-time compute 后台记忆巩固（Letta，底层组件已齐但独立能力域，与 F111 同期，需强 model 验证）；Serena 式 LSP/符号级 Python 代码理解（先外挂 MCP dogfood 评估）。

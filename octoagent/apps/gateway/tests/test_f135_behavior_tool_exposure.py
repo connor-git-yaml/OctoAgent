@@ -131,7 +131,24 @@ async def test_main_web_agent_mounts_behavior_write_file(tmp_path: Path) -> None
 # ---------------------------------------------------------------------------
 
 
-async def _capture_behavior_tool(tmp_path: Path, store_group: Any):
+class _AutoApproveGate:
+    """F136 后 REVIEW_REQUIRED + confirmed=true 须经服务端审批批准才落盘（自动批准替身；
+    审批语义在 test_f136_write_approval.py 用真 ApprovalGate 钉死）。"""
+
+    async def request_approval(self, **kwargs: Any) -> Any:
+        from octoagent.gateway.harness.approval_gate import ApprovalHandle
+
+        handle = ApprovalHandle()
+        handle.operator = "user:test"
+        return handle
+
+    async def wait_for_decision(self, handle: Any, timeout_seconds: float = 300.0) -> str:
+        return "approved"
+
+
+async def _capture_behavior_tool(
+    tmp_path: Path, store_group: Any, *, approval_gate: Any = None
+):
     """misc_tools 注册捕获 handler 直调（test_behavior_write_golden 同款）。"""
     captured: dict[str, Any] = {}
 
@@ -147,6 +164,7 @@ async def _capture_behavior_tool(tmp_path: Path, store_group: Any):
         skill_discovery=None,
         memory_console_service=None,
         memory_runtime_service=None,
+        _approval_gate=approval_gate,
     )
     await misc_tools.register(_CaptureBroker(), deps)
     handler = captured.get("behavior.write_file")
@@ -192,7 +210,8 @@ async def test_behavior_write_review_required_still_two_phase(tmp_path: Path) ->
 
 
 async def test_behavior_write_confirmed_records_version(tmp_path: Path) -> None:
-    """AC-1.4：confirmed=True 写 USER.md 落盘 + 产 F107 行为版本记录（引导可追溯 + 可恢复）。"""
+    """AC-1.4：confirmed=True 经服务端审批批准后写 USER.md 落盘 + 产 F107 行为版本记录
+    （F136 起 confirmed 不再自证——落盘依赖 ApprovalGate approved）。"""
     store_group = await create_store_group(
         str(tmp_path / "gateway.db"),
         str(tmp_path / "artifacts"),
@@ -202,11 +221,14 @@ async def test_behavior_write_confirmed_records_version(tmp_path: Path) -> None:
         store_group=store_group,
     ).ensure_default_project()
     try:
-        call = await _capture_behavior_tool(tmp_path, store_group)
+        call = await _capture_behavior_tool(
+            tmp_path, store_group, approval_gate=_AutoApproveGate()
+        )
         content = "# USER\n喜欢喝美式\n时区 Asia/Shanghai\n"
         result = await call(file_id="USER.md", content=content, confirmed=True)
         assert result.status == "written"
         assert result.written is True
+        assert result.approval_id, "F136：写入结果必须关联服务端审批 ID"
         assert Path(result.target).read_text(encoding="utf-8") == content
 
         # F107 行为版本记录：从实际落盘路径派生 key，查 behavior_versions 存在该文件的记录。

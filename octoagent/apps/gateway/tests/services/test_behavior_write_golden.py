@@ -75,6 +75,24 @@ async def _make_control_plane(tmp_path: Path):
     return control_plane, store_group
 
 
+class _AutoApproveGate:
+    """F136 后 REVIEW_REQUIRED + confirmed=true 须经服务端审批批准才落盘。
+
+    golden 关注写核行为对齐（非审批语义），注入自动批准替身让写路径可达；
+    审批语义本身在 test_f136_write_approval.py 用真 ApprovalGate 钉死。
+    """
+
+    async def request_approval(self, **kwargs: Any) -> Any:
+        from octoagent.gateway.harness.approval_gate import ApprovalHandle
+
+        handle = ApprovalHandle()
+        handle.operator = "user:test"
+        return handle
+
+    async def wait_for_decision(self, handle: Any, timeout_seconds: float = 300.0) -> str:
+        return "approved"
+
+
 async def _capture_behavior_tool(tmp_path: Path, store_group: Any):
     """misc_tools 注册捕获（factories._CaptureBroker 同款）。"""
     captured: dict[str, Any] = {}
@@ -91,6 +109,7 @@ async def _capture_behavior_tool(tmp_path: Path, store_group: Any):
         skill_discovery=None,
         memory_console_service=None,
         memory_runtime_service=None,
+        _approval_gate=_AutoApproveGate(),
     )
     await misc_tools.register(_CaptureBroker(), deps)
     handler = captured.get("behavior.write_file")

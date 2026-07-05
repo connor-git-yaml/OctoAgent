@@ -58,6 +58,11 @@ apps/gateway/src/octoagent/gateway/harness/
 > `behavior`，在 general default_tool_groups 内）此前是 Deferred → 首次引导填 USER.md 的闭环
 > 因两跳链路脆弱而在生产走不通，F135 将其提进 Core（发现层），治理执行层（review_mode
 > Two-Phase）不受影响。entrypoint 三件套作为历史冗余保留（未清理）。
+>
+> **F136 治理执行层加固**：F135 Codex P1 证实 handler 的 `confirmed` 是 LLM 自填参数、
+> 一轮自确认即绕过人审。F136 起 REVIEW_REQUIRED 文件 `confirmed=true` 不再自证，
+> 而是经 `builtin_tools/write_approval.gate_behavior_write` 发起服务端 ApprovalGate
+> 审批（卡片含 unified diff），用户在 Web/Telegram 批准后才落盘（详见 §2.4）。
 
 ### 2.2 SnapshotStore（FR-2，Hermes 核心模式）
 
@@ -100,6 +105,14 @@ apps/gateway/src/octoagent/gateway/harness/
 | 异步等待 | `wait_for_decision(handle, timeout=300)` 阻塞等 `asyncio.Event.set()` |
 | 决策注入 | `resolve_approval(handle_id, decision)` 写 `APPROVAL_DECIDED` 事件（同时写 `handle_id` 和 `approval_id` 兼容字段）|
 | Timeout | 显式 reject + 写 `APPROVAL_DECIDED` 终态事件（防事件重放悬挂）|
+
+**工具内阻塞审批消费者**（request_approval → ApprovalManager 双注册 → mark_waiting_approval →
+notify_approval_request(CRITICAL) → wait_for_decision → 条件恢复 RUNNING）：
+
+| 消费者 | 引入 | 差异语义 |
+|--------|------|----------|
+| `worker.escalate_permission`（ask_back_tools）| F099/F101 | rejected/timeout 均不恢复 RUNNING（任务核心动作被禁止 → task_runner 推 FAILED）|
+| `behavior.write_file` REVIEW_REQUIRED 写（write_approval.gate_behavior_write）| F136 | **显式拒绝恢复 RUNNING**（用户否决一次写入，对话继续）；超时不恢复；审批卡片携带 unified diff；**每次写独立审批、不参与 session allowlist**（allowlist 无法区分内容，一次批准会变成 session 内任意改写豁免）；gate 缺失 fail-closed 拒写 |
 
 ### 2.5 DelegationManager（FR-5）
 
