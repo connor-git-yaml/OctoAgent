@@ -130,11 +130,17 @@ class ApprovalManager:
             return self._pending[request.approval_id].record
 
         # Feature 061: 检查 always 覆盖（优先使用 Cache，兼容旧全局白名单）
+        # F136：allow_always_eligible=False 的请求（如 behavior.write_file）跳过覆盖短路——
+        # 强制每次独立审批（DP-3），避免短路后不入 pending 导致 resolve 404 超时。
         agent_rid = getattr(request, "agent_runtime_id", "") or ""
-        if (
-            agent_rid
-            and self._override_cache.has(agent_rid, request.tool_name)
-        ) or self._allow_always.get(request.tool_name):
+        allow_always_eligible = getattr(request, "allow_always_eligible", True)
+        if allow_always_eligible and (
+            (
+                agent_rid
+                and self._override_cache.has(agent_rid, request.tool_name)
+            )
+            or self._allow_always.get(request.tool_name)
+        ):
             logger.info(
                 "工具 '%s' 在 always 覆盖中（agent=%s），自动批准",
                 request.tool_name,
@@ -302,7 +308,12 @@ class ApprovalManager:
             pending.timer_handle = None
 
         # Feature 061: allow-always 写入 Cache + Repository（Agent 实例级隔离）
-        if decision == ApprovalDecision.ALLOW_ALWAYS:
+        # F136：allow_always_eligible=False（如 behavior.write_file）即便用户点"总是批准"，
+        # 也降级为一次性批准——不写覆盖，下次仍独立审批（DP-3）。当次写入照常放行
+        # （gate handle 已被 resolve 为 approved）。
+        if decision == ApprovalDecision.ALLOW_ALWAYS and getattr(
+            pending.record.request, "allow_always_eligible", True
+        ):
             tool_name = pending.record.request.tool_name
             agent_rid = getattr(pending.record.request, "agent_runtime_id", "") or ""
             if agent_rid:

@@ -250,6 +250,14 @@ class ApprovalRequest(BaseModel):
         default="",
         description="发起审批的 Agent 会话 ID（用于 ApprovalGate.allowlist 更新）",
     )
+    # F136：是否允许该请求参与 allow-always 覆盖（默认 True 保持现有工具行为）。
+    # behavior.write_file 传 False——每次写内容不同，必须每次独立审批（spec DP-3），
+    # 否则一次"总是批准"会让 register 短路成全局白名单：后续 register 直接返回
+    # APPROVED 但不入 pending → Web/Telegram resolve 找不到 approval_id → 404 → 写入超时。
+    allow_always_eligible: bool = Field(
+        default=True,
+        description="False 时该工具不参与 allow-always 覆盖，每次调用独立审批（F136 DP-3）",
+    )
 
 
 class ApprovalRecord(BaseModel):

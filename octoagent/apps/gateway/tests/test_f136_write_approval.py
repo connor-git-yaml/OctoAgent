@@ -220,12 +220,14 @@ async def test_approved_write_lands_with_version_and_events(tmp_path: Path) -> N
     gate = ApprovalGate(
         event_store=store_group.event_store, task_store=store_group.task_store
     )
+    manager = _RecordingApprovalManager()
     notifications = _RecordingNotificationService()
     try:
         call = await _capture_behavior_tool(
             tmp_path,
             store_group,
             approval_gate=gate,
+            approval_manager=manager,
             notification_service=notifications,
         )
         content = "# USER\n时区 Asia/Shanghai\n"
@@ -254,6 +256,14 @@ async def test_approved_write_lands_with_version_and_events(tmp_path: Path) -> N
         assert requested and requested[0].payload.get("diff_content"), (
             "审批卡片必须携带 unified diff"
         )
+
+        # P1（Codex）：diff 必须进 risk_explanation——审批渲染渠道（Web 卡片 /
+        # OperatorInbox / Telegram）读的是它而非 diff_content 结构化字段。
+        registered = manager.registered[0]
+        assert "Asia/Shanghai" in registered.risk_explanation, (
+            "risk_explanation 必须含内容 diff，否则各渲染渠道看不到实际变更（P1）"
+        )
+        assert "diff" in registered.risk_explanation.lower()
 
         # CRITICAL 审批通知（FR-5）。
         assert len(notifications.notifications) == 1
@@ -436,5 +446,73 @@ async def test_approval_manager_dual_registration(tmp_path: Path) -> None:
         assert registered.approval_id == handle_id
         assert registered.tool_name == "behavior.write_file"
         assert registered.task_id == TASK_ID
+        # DP-3：注册时声明不参与 allow-always（否则一次"总是批准"会短路后续审批）。
+        assert registered.allow_always_eligible is False
+    finally:
+        await store_group.close()
+
+
+# ---------------------------------------------------------------------------
+# AC-11（Codex P2）：allow-always 不破坏后续独立审批（用真 ApprovalManager）
+# ---------------------------------------------------------------------------
+
+
+async def test_allow_always_does_not_shortcircuit_next_write(tmp_path: Path) -> None:
+    """Codex P2：即便用户对某次 behavior.write_file 点"总是批准"，下一次写仍必须
+    发起独立审批——不能因 ApprovalManager 全局白名单短路（短路会不入 pending →
+    Web/Telegram resolve 找不到 approval_id → 404 → 写入超时）。用真 ApprovalManager。"""
+    from octoagent.policy.approval_manager import ApprovalManager
+    from octoagent.policy.models import ApprovalDecision
+
+    store_group = await _setup(tmp_path)
+    gate = ApprovalGate(
+        event_store=store_group.event_store, task_store=store_group.task_store
+    )
+    manager = ApprovalManager()  # 真实覆盖逻辑
+
+    async def _resolve_manager_and_gate(decision: ApprovalDecision) -> None:
+        """镜像 routes/approvals.py 双 resolve：先 ApprovalManager 后 ApprovalGate。"""
+        for _ in range(500):
+            pending = manager.get_pending_approvals()
+            if pending:
+                approval_id = pending[0].request.approval_id
+                ok = await manager.resolve(approval_id, decision, resolved_by="user:web")
+                assert ok is True, "resolve 必须成功——短路会导致 approval_id 不在 pending"
+                gate_decision = (
+                    "approved"
+                    if decision
+                    in (ApprovalDecision.ALLOW_ONCE, ApprovalDecision.ALLOW_ALWAYS)
+                    else "rejected"
+                )
+                await gate.resolve_approval(
+                    handle_id=approval_id,
+                    decision=gate_decision,  # type: ignore[arg-type]
+                    operator="user:web",
+                    task_id=TASK_ID,
+                )
+                return
+            await asyncio.sleep(0.01)
+        raise AssertionError("ApprovalManager pending 从未出现——register 被 allow-always 短路")
+
+    try:
+        call = await _capture_behavior_tool(
+            tmp_path, store_group, approval_gate=gate, approval_manager=manager
+        )
+        # 第一次：用户点"总是批准"。
+        result1, _ = await asyncio.gather(
+            call(file_id="USER.md", content="v1\n", confirmed=True),
+            _resolve_manager_and_gate(ApprovalDecision.ALLOW_ALWAYS),
+        )
+        assert result1.status == "written"
+        # allow-always 不得写入全局白名单（DP-3）。
+        assert manager._allow_always.get("behavior.write_file") is not True
+
+        # 第二次：仍须弹出独立审批（若被短路，_resolve_manager_and_gate 会 AssertionError）。
+        result2, _ = await asyncio.gather(
+            call(file_id="USER.md", content="v2\n", confirmed=True),
+            _resolve_manager_and_gate(ApprovalDecision.ALLOW_ONCE),
+        )
+        assert result2.status == "written"
+        assert Path(result2.target).read_text(encoding="utf-8") == "v2\n"
     finally:
         await store_group.close()

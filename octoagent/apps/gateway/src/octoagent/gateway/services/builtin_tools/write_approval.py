@@ -38,8 +38,12 @@ log = structlog.get_logger(__name__)
 # 保持同值（300s）：monitor 的 FAILED 阈值与 wait_for_decision 超时对齐，避免语义漂移。
 BEHAVIOR_WRITE_APPROVAL_TIMEOUT_SECONDS = 300.0
 
-# 审批卡片 diff 上限（SSE payload / 事件体积护栏）。
+# ApprovalGate 事件 diff_content 上限（结构化字段 / 事件体积护栏）。
 _DIFF_MAX_CHARS = 4000
+# 拼进 risk_explanation 的 diff 上限——所有审批渲染渠道（Web 卡片 / OperatorInbox /
+# Telegram，均读 risk_explanation 而非 diff_content）都要看到内容变更；给 Telegram
+# 4096 消息上限留足余量，故比结构化 diff_content 更短。
+_RISK_DIFF_MAX_CHARS = 1500
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +55,9 @@ class WriteApprovalOutcome:
     reason: str = ""
 
 
-def _build_unified_diff(old_content: str, new_content: str, file_id: str) -> str:
+def _build_unified_diff(
+    old_content: str, new_content: str, file_id: str, *, max_chars: int = _DIFF_MAX_CHARS
+) -> str:
     """构造审批卡片展示的 unified diff（用户批准的是这份具体修改，不是抽象权限）。"""
     diff_text = "".join(
         difflib.unified_diff(
@@ -61,8 +67,11 @@ def _build_unified_diff(old_content: str, new_content: str, file_id: str) -> str
             tofile=f"{file_id}（提议）",
         )
     )
-    if len(diff_text) > _DIFF_MAX_CHARS:
-        diff_text = diff_text[:_DIFF_MAX_CHARS] + "\n…（diff 超长已截断）"
+    if not diff_text:
+        # 无行级差异（如仅尾部空白/编码差异）——给渲染渠道一个明确提示，别显示空 diff。
+        diff_text = "（无行级差异——可能仅空白或元数据变化）\n"
+    if len(diff_text) > max_chars:
+        diff_text = diff_text[:max_chars] + "\n…（diff 超长已截断）"
     return diff_text
 
 
@@ -112,13 +121,22 @@ async def gate_behavior_write(
         f"新内容 {len(new_content)} 字符（预算 {budget_chars}）"
     )
     diff_content = _build_unified_diff(old_content, new_content, file_id)
+    # risk_explanation 是所有审批渲染渠道（Web 卡片 / OperatorInbox / Telegram）实际
+    # 展示的字段——把内容 diff 一并放进去，用户批准前才真能看到增删了什么（DP-6）。
+    risk_explanation = (
+        operation_summary
+        + "\n\n变更预览（unified diff）：\n"
+        + _build_unified_diff(
+            old_content, new_content, file_id, max_chars=_RISK_DIFF_MAX_CHARS
+        )
+    )
 
     try:
         handle = await approval_gate.request_approval(
             session_id=session_id,
             tool_name="behavior.write_file",
             scan_result=None,  # 非 ThreatScanner 触发（Two-Phase 治理门）
-            operation_summary=operation_summary,
+            operation_summary=risk_explanation,
             diff_content=diff_content,
             task_id=task_id,
         )
@@ -153,12 +171,16 @@ async def gate_behavior_write(
                     tool_args_summary=(
                         f"file_id={file_id!r}, chars={len(new_content)}"
                     ),
-                    risk_explanation=operation_summary,
+                    # risk_explanation 含 diff——审批面板 / OperatorInbox / Telegram 展示的就是它。
+                    risk_explanation=risk_explanation,
                     policy_label="behavior.write_file",
                     side_effect_level=SideEffectLevel.REVERSIBLE,
                     expires_at=_now
                     + timedelta(seconds=BEHAVIOR_WRITE_APPROVAL_TIMEOUT_SECONDS),
                     created_at=_now,
+                    # DP-3：每次写独立审批——即便用户点"总是批准"也不写全局白名单，
+                    # 否则下次 register 短路不入 pending → resolve 404 → 写入超时。
+                    allow_always_eligible=False,
                 )
             )
         except Exception as reg_exc:
