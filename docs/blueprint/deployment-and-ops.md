@@ -454,6 +454,12 @@ Watchdog 作为 kernel 内部组件，监控 Task 执行健康度：
   `validate_stable_paths`（stable-working-dir 红线）；PATH 是幂等比对**剔除的易变字段**
   （node/uv 位置变化不触发服务重装）。选注入 PATH 而非解析 npx 绝对路径——更通用，
   所有依赖用户 PATH 的 MCP/子进程都受益。
+  - **PATH 方案版本 marker（`OCTOAGENT_PATH_SCHEMA`）**：因 PATH 值被幂等比对剔除，
+    单纯改 PATH 生成逻辑（如 F135 追加 node 段）**不会**让已装服务的 `octo service install`
+    触发重写（走 skipped），已部署用户会保留旧 PATH。故把方案版本写进服务定义的**非 PATH**
+    env marker（参与比对）：PATH 逻辑变更时 bump `SERVICE_PATH_SCHEMA_VERSION`（当前 v2）→
+    已装服务下次 install 检测 marker 差异→走自愈重写+重启→新 PATH 真正落盘。既保证迁移覆盖
+    已部署用户，又不破坏"同版本 PATH 值变化仍 skip"（uv 挪位不误判重装）。
 - **崩溃自愈 + 退避熔断**：launchd `KeepAlive{SuccessfulExit=false}` +
   `ThrottleInterval=10`；systemd `Restart=on-failure` + `StartLimitBurst=5/60s`
   + `RestartPreventExitStatus=78`（确定性配置错不重启，防坏配置刷盘）。
