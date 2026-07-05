@@ -46,6 +46,19 @@ apps/gateway/src/octoagent/gateway/harness/
 2. **`func._tool_meta` metadata 同步**：`register(entry)` 自动从 handler 同步 produces_write 等元数据
 3. **WriteResult 契约 enforce**：`produces_write=True` 工具的 return type 必须是 `WriteResult` 子类（fail-fast 启动期）
 
+> **F135 gap-1 校正（LLM 工具可见性的真实门）**：`ToolEntry.entrypoints` +
+> `ToolsetResolver.resolve_for_entrypoint` + `toolsets.yaml` 三者是 F084 D1 遗留的设计，
+> **在当前生产链路里对"给 LLM 的工具集"零作用**（`resolve_for_entrypoint` 无生产调用者）。
+> 主 Agent（含 web 来源）的工具可见性真实由 `CapabilityPackService.resolve_profile_first_tools`
+> 决定，过滤维度是 **tool_group ∈ default_tool_groups / selected_tools 白名单 / tool_profile /
+> availability**——**不看 entrypoint**。可见工具再按 `CoreToolSet.default()` 二分：
+> **Core = 完整 schema 直接可调（一跳）**；**Deferred = 只在 system prompt 列名，须 `tool_search`
+> 激活（两跳）**。因此"某工具对聊天会话是否可用"取决于它是否在 default_tool_groups 覆盖的
+> tool_group 里 + 是否 Core，**与 entrypoints 声明无关**。`behavior.write_file`（tool_group=
+> `behavior`，在 general default_tool_groups 内）此前是 Deferred → 首次引导填 USER.md 的闭环
+> 因两跳链路脆弱而在生产走不通，F135 将其提进 Core（发现层），治理执行层（review_mode
+> Two-Phase）不受影响。entrypoint 三件套作为历史冗余保留（未清理）。
+
 ### 2.2 SnapshotStore（FR-2，Hermes 核心模式）
 
 **冻结快照 + Live State 二分**（保护 prefix cache，SC-011）：

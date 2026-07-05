@@ -446,6 +446,14 @@ Watchdog 作为 kernel 内部组件，监控 Task 执行健康度：
   （`~/.octoagent`），ExecStart 指向稳定安装位 `run-octo-home.sh`；
   含 worktree 标记（`.worktrees` 子串 / `worktrees` 路径段）的路径被硬拒绝
   且**不可被 `--force` 绕过**（死目录 = 永久崩溃循环）。
+- **服务 PATH 注入（F135 gap-2）**：launchd/systemd 干净环境 `PATH` 极简，缺
+  uv / node / npx。`build_service_path_value` 拼**确定性 PATH**——uv 目录（经稳定校验，
+  worktree/.venv 弃用）+ **node/npx 稳定位置**（`~/.volta/bin` + homebrew）+ 系统路径。
+  没有 node 位置时 `npx` 型 MCP（如 openrouter-perplexity）在常驻服务下会
+  `[Errno 2] No such file` 启动失败（前台跑有 shell PATH 掩盖）。注入的每个目录同样过
+  `validate_stable_paths`（stable-working-dir 红线）；PATH 是幂等比对**剔除的易变字段**
+  （node/uv 位置变化不触发服务重装）。选注入 PATH 而非解析 npx 绝对路径——更通用，
+  所有依赖用户 PATH 的 MCP/子进程都受益。
 - **崩溃自愈 + 退避熔断**：launchd `KeepAlive{SuccessfulExit=false}` +
   `ThrottleInterval=10`；systemd `Restart=on-failure` + `StartLimitBurst=5/60s`
   + `RestartPreventExitStatus=78`（确定性配置错不重启，防坏配置刷盘）。
