@@ -320,18 +320,42 @@ def _is_sensitive_env_key(key: str) -> bool:
     return any(token in upper for token in _SENSITIVE_ENV_KEY_TOKENS)
 
 
+def _node_runtime_path_candidates() -> list[str]:
+    """常见 node/npx 安装位置（F135 gap-2）——只列**稳定**目录（$HOME 下 + 系统级）。
+
+    launchd/systemd 干净环境 PATH 无 node/npx（用户 node 常经 volta/nvm/homebrew）。
+    `npx` 型 MCP（如 openrouter-perplexity）在常驻服务下会 `[Errno 2] No such file` 启动失败。
+    前台跑有 shell PATH 掩盖。注入这些稳定目录让所有依赖用户 PATH 的 MCP/子进程都可解析。
+
+    **stable-working-dir 红线**（FR-2.2）：只列字面稳定目录——`~/.volta/bin`（volta shim，
+    `$HOME` 下恒稳）+ homebrew（`/opt/homebrew/bin` / `/usr/local/bin`）。**不**列 nvm 的
+    版本化子目录（`~/.nvm/versions/node/<ver>/bin` 随 node 版本变，且 which 解析到的具体版本
+    目录属易变——违红线且幂等比对会误判）。返回的每个目录由调用方再过 validate_stable_paths。
+    """
+    return [
+        str(Path.home() / ".volta" / "bin"),  # volta（用户实测位置，shim → homebrew）
+        "/opt/homebrew/bin",                  # homebrew node（Apple Silicon）
+        "/usr/local/bin",                     # homebrew node（Intel）/ 官方 node pkg
+    ]
+
+
 def build_service_path_value(environ: dict[str, str] | None = None) -> str:
-    """构造服务定义用的确定性 PATH（launchd 默认 PATH 极简，缺 uv/Homebrew）。
+    """构造服务定义用的确定性 PATH（launchd 默认 PATH 极简，缺 uv/Homebrew/node）。
 
     不复制当前 shell 的完整 PATH（易变字段会导致幂等比对反复误判过时，
-    research §B.1.2）；只拼 uv 所在目录 + 标准系统路径。
+    research §B.1.2）；只拼 uv 所在目录 + node/npx 稳定位置 + 标准系统路径。
 
     Codex review P1（二轮）：从 worktree/.venv 激活的 shell 执行 install 时，
     ``which("uv")`` 可能解析到 ``.claude/worktrees/.../.venv/bin`` 等**可删
     目录**——且幂等比对剔除 PATH，写错永不自愈。不稳定 uv 目录直接弃用，
     由 ``~/.local/bin``（uv 官方安装位）+ Homebrew 兜底。
+
+    F135 gap-2：追加 node/npx 稳定位置（``~/.volta/bin`` 等），使 ``npx`` 型 MCP
+    在常驻服务干净环境下能被解析（前台 shell PATH 掩盖了它）。每个候选目录同样过
+    ``validate_stable_paths`` 守卫（stable-working-dir 红线，FR-2.2），worktree/易删
+    路径绝不入 PATH。node 目录与 uv 目录同属幂等比对剔除的易变字段（不触发重装，FR-2.3）。
     """
-    del environ  # 保留签名扩展位；当前实现不读 env，确定性来自 which("uv")
+    del environ  # 保留签名扩展位；当前实现不读 env，确定性来自 which("uv") + 稳定字面目录
     parts: list[str] = []
     uv_path = shutil.which("uv")
     if uv_path:
@@ -339,7 +363,14 @@ def build_service_path_value(environ: dict[str, str] | None = None) -> str:
         unstable = bool(validate_stable_paths([str(uv_dir)])) or ".venv" in uv_dir.parts
         if not unstable:
             parts.append(str(uv_dir))
+    # F135 gap-2：node/npx 稳定位置（每个再过稳定校验，防未来改动引入 worktree/.venv 目录）
+    node_candidates = [
+        cand
+        for cand in _node_runtime_path_candidates()
+        if not validate_stable_paths([cand]) and ".venv" not in Path(cand).parts
+    ]
     for candidate in (
+        *node_candidates,
         str(Path.home() / ".local" / "bin"),  # uv 官方安装位兜底
         "/opt/homebrew/bin",
         "/usr/local/bin",

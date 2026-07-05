@@ -14,6 +14,7 @@ FR-C1（status 三态 + 超时软化）、FR-H（keep-awake）。
 
 from __future__ import annotations
 
+import plistlib
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,7 @@ from octoagent.provider.dx.service_manager import (
     build_service_path_value,
     detect_init_system,
     start_command_stability_warnings,
+    validate_stable_paths,
     validate_start_command,
 )
 from octoagent.provider.dx.update_status_store import UpdateStatusStore
@@ -412,6 +414,63 @@ class TestRenderedDefinitions:
         assert ".venv" not in value
         assert "worktrees" not in value
         assert str(Path.home() / ".local" / "bin") in value
+
+    # -- F135 gap-2：launchd 服务 PATH 注入 node/npx 稳定位置 --
+
+    def test_path_value_includes_node_locations(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-2.1：build_service_path_value 含 node/npx 稳定位置（~/.volta/bin 等）。
+
+        launchd 干净环境无 node → npx 型 MCP 启动失败（F135 gap-2）。
+        """
+        monkeypatch.setattr(
+            "octoagent.provider.dx.service_manager.shutil.which",
+            lambda name: None,  # 无 uv 也不影响 node 注入
+        )
+        value = build_service_path_value()
+        assert str(Path.home() / ".volta" / "bin") in value, (
+            "服务 PATH 必须含 ~/.volta/bin（用户 node/npx 实际位置），否则 npx 型 MCP 在"
+            "常驻服务下 [Errno 2] No such file 启动失败"
+        )
+        # homebrew node 常见位置（Apple Silicon / Intel）也在列
+        assert "/opt/homebrew/bin" in value
+        assert "/usr/local/bin" in value
+
+    def test_path_value_node_locations_are_stable(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC-2.2：注入的 node 位置均过 validate_stable_paths（stable-working-dir 红线）。
+
+        node 路径写错进 PATH（如 worktree/.venv）= 服务永久崩溃循环，比装不上严重。
+        """
+        monkeypatch.setattr(
+            "octoagent.provider.dx.service_manager.shutil.which",
+            lambda name: None,
+        )
+        value = build_service_path_value()
+        for segment in value.split(":"):
+            assert not validate_stable_paths([segment]), (
+                f"服务 PATH 段含 worktree 标记（stable-working-dir 违规）: {segment}"
+            )
+            assert ".venv" not in Path(segment).parts
+
+    def test_launchd_plist_path_contains_node(
+        self, instance_root: Path, stable_script: Path, tmp_path: Path
+    ) -> None:
+        """AC-2.3（hermetic，不真装 launchd）：渲染的 plist EnvironmentVariables.PATH 含 node 位置。"""
+        manager, _, _ = _build_manager(instance_root, stable_script, tmp_path)
+        spec, _ = manager.build_spec()
+        assert spec is not None
+        content = manager.backend.render(spec)
+        payload = plistlib.loads(content.encode("utf-8"))
+        env = payload.get("EnvironmentVariables", {})
+        path_value = env.get("PATH", "")
+        assert str(Path.home() / ".volta" / "bin") in path_value, (
+            "launchd plist 的 PATH 必须含 node/npx 稳定位置（F135 gap-2 治本）"
+        )
+        # 仍不含 worktree 标记（AC-2 不回归）
+        assert ".worktrees" not in path_value
 
 
 # ---------------------------------------------------------------------------
