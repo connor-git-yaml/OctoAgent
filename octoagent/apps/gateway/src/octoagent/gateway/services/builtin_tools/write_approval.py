@@ -246,6 +246,9 @@ async def gate_behavior_write(
             error=str(wait_exc),
         )
 
+    # "system_timeout" 是 ApprovalGate.wait_for_decision 超时分支写入 handle.operator 的
+    # 内部保留值（唯一来源）；resolve 端（Web/Telegram）传的是 user:web / actor_id 等真实
+    # operator，绝不会是此值——故 timed_out 判定可靠区分"超时"与"显式拒绝"（Opus F-1）。
     timed_out = getattr(handle, "operator", "") == "system_timeout"
 
     # 条件恢复 RUNNING（spec DP-4）：
