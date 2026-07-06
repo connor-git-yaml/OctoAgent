@@ -514,10 +514,14 @@ class TelegramGatewayService:
         target: Mapping[str, str],
         text: str,
         *,
-        disable_notification: bool = False,
+        disable_notification: bool = True,
         task_id: str = "",
     ) -> Any | None:
         """发送出站文字消息；失败入 spool 补偿队列（G3 主缺口修复）。
+
+        disable_notification 默认 True：对齐 telegram_client.send_message 真实默认
+        （baseline notify_task_result 省略该参数用 client 默认 True，approval 路径
+        显式传 True）——两条 baseline 调用等价保持，静音不被改成有声（AC-11）。
 
         成功路径与 baseline `bot_client.send_message` 逐字节等价（返回 sent_message）；
         失败路径（网络抖动 / Telegram 5xx / 429）入队落盘，返回 None。调用方据此

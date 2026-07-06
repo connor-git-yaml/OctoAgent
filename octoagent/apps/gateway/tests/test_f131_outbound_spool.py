@@ -262,6 +262,32 @@ async def test_successful_send_does_not_spool(tmp_path: Path) -> None:
     await store_group.close()
 
 
+@pytest.mark.asyncio
+async def test_send_or_spool_defaults_disable_notification_true(tmp_path: Path) -> None:
+    """AC-11 回归锁：_send_or_spool 默认静音（disable_notification=True）——对齐
+    baseline notify_task_result 省略参数用 client 默认 True 的行为，不被改成有声。
+    并验证 spool 落盘也保留该 flag。"""
+    _write_config(tmp_path)
+    store_group = await create_store_group(
+        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
+    )
+    ok_bot = _OKBot()
+    service = TelegramGatewayService(
+        project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
+        bot_client=ok_bot,
+    )
+    # 成功路径：默认静音
+    await service._send_or_spool({"chat_id": "1"}, "静音结果")
+    assert ok_bot.sent[0]["disable_notification"] is True
+
+    # 失败路径 spool 落盘也保留静音 flag
+    service._bot_client = _FailBot()
+    await service._send_or_spool({"chat_id": "2"}, "静音入队")
+    due = await store_group.telegram_outbound_spool_store.list_due(now=1e12)
+    assert due[0].disable_notification is True
+    await store_group.close()
+
+
 # ---------------------------------------------------------------------------
 # AC-9：重试退避 + 上限
 # ---------------------------------------------------------------------------
