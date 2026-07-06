@@ -429,17 +429,15 @@ class TelegramGatewayService:
         self._stop_event.clear()
         if not self.enabled or self._bot_client is None or self._state_store is None:
             return
-        # F131：进程重启后先 drain 一次出站 spool（补发上次崩溃/停机前未送达的消息）。
-        # 独立于模式——polling/webhook 都在 startup 补发一次（AC-7 重启不丢）。
-        await self._drain_outbound_spool()
+        # Codex P2：出站 spool drain 一律走独立后台任务，绝不在 startup / polling 主路径
+        # 同步等待（50 条 × 每条 10s send timeout 可拖住启动/收 update 数分钟）。
+        # _spool_drain_loop 首轮立即 drain 一次（重启补偿 AC-7），随后周期 drain。
+        # polling 与 webhook 模式都起此任务——drain 与 get_updates 关键路径彻底解耦。
+        if self._spool_drain_task is None or self._spool_drain_task.done():
+            self._spool_drain_task = asyncio.create_task(self._spool_drain_loop())
         if self._resolve_mode() == "polling":
             if self._polling_task is None or self._polling_task.done():
                 self._polling_task = asyncio.create_task(self._polling_loop())
-            return
-        # Codex P1：webhook 模式无 polling loop——起独立周期 drain 任务，使出站补偿
-        # 不依赖 inbound 流量、不占请求路径（活跃/静默用户都能定期重试待发消息）。
-        if self._spool_drain_task is None or self._spool_drain_task.done():
-            self._spool_drain_task = asyncio.create_task(self._spool_drain_loop())
 
     async def shutdown(self) -> None:
         self._stop_event.set()
@@ -452,18 +450,23 @@ class TelegramGatewayService:
                 setattr(self, attr, None)
 
     async def _spool_drain_loop(self) -> None:
-        """webhook 模式出站 spool 周期 drain（Codex P1）。
+        """出站 spool 独立周期 drain 任务（Codex P1/P2）。
 
-        每 _spool_drain_interval_s 唤醒一次跑 due drain；退避 wait_for 期间响应 stop
-        （shutdown 立即醒来）。drain 全降级不崩，本 loop 亦兜底任何异常不退出。
+        首轮立即 drain（重启补偿），随后每 _spool_drain_interval_s 一次。与 polling
+        get_updates 关键路径 + startup 主路径解耦——慢/超时的 send 不阻塞启动或收 update。
+        退避 wait_for 期间响应 stop（shutdown 立即醒来）。drain 全降级；本 loop 亦兜底
+        任何异常不退出。
         """
+        first = True
         while not self._stop_event.is_set():
-            with contextlib.suppress(asyncio.TimeoutError):
-                await asyncio.wait_for(
-                    self._stop_event.wait(), timeout=self._spool_drain_interval_s
-                )
-            if self._stop_event.is_set():
-                return
+            if not first:
+                with contextlib.suppress(asyncio.TimeoutError):
+                    await asyncio.wait_for(
+                        self._stop_event.wait(), timeout=self._spool_drain_interval_s
+                    )
+                if self._stop_event.is_set():
+                    return
+            first = False
             try:
                 await self._drain_outbound_spool()
             except asyncio.CancelledError:
@@ -522,9 +525,9 @@ class TelegramGatewayService:
                     next_offset = candidate if next_offset is None else max(next_offset, candidate)
                 if next_offset != offset:
                     self._state_store.set_polling_offset(next_offset)
-                # F131：成功一轮 → 退避重置；顺带 drain 出站 spool（polling 存活即周期补发）。
+                # F131：成功一轮 → 退避重置。出站 spool drain 由独立 _spool_drain_loop
+                # 负责（Codex P2：不在 get_updates 关键路径同步 drain，慢 send 不拖住收 update）。
                 failure_streak = 0
-                await self._drain_outbound_spool()
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # 防御性兜底：任何 get_updates/ingest 异常不崩 loop

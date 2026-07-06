@@ -208,7 +208,12 @@ async def test_spool_survives_process_restart(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_startup_drains_spool(tmp_path: Path) -> None:
-    """AC-7 补充：startup() 重启后先 drain 一次（补发上次未送达）。"""
+    """AC-7 补充：startup() 重启后后台 drain 首轮立即补发（Codex P2：非阻塞，
+    走独立 _spool_drain_loop 首轮，不在 startup 主路径同步等待）。"""
+    import asyncio as _aio
+
+    from octoagent.provider.dx.telegram_pairing import TelegramStateStore
+
     _write_config(tmp_path)
     db_path = str(tmp_path / "g.db")
     artifacts = str(tmp_path / "artifacts")
@@ -224,15 +229,11 @@ async def test_startup_drains_spool(tmp_path: Path) -> None:
     ok_bot = _OKBot()
     service_2 = TelegramGatewayService(
         project_root=tmp_path, store_group=store_group_2, sse_hub=SSEHub(),
-        state_store=None, bot_client=ok_bot,
+        state_store=TelegramStateStore(tmp_path), bot_client=ok_bot,
     )
-    # startup 无 state_store 会早退——直接验证 drain 逻辑经 startup 前置调用。
-    # 为覆盖 startup drain，注入 state_store。
-    from octoagent.provider.dx.telegram_pairing import TelegramStateStore
-
-    service_2._state_store = TelegramStateStore(tmp_path)
-    await service_2.startup()
-    # startup 会拉起 polling task；立即 stop 收尾
+    await service_2.startup()  # 起后台 drain loop（首轮立即 drain）+ polling task
+    # 让后台 drain 首轮跑完（非阻塞，故需 yield 给事件循环）
+    await _aio.sleep(0.05)
     await service_2.shutdown()
     assert ok_bot.sent and ok_bot.sent[0]["text"] == "startup补发"
     await store_group_2.close()
