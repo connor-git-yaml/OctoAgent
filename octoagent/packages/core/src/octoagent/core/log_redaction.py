@@ -75,6 +75,13 @@ def _mask_value(secret: str) -> str:
 #    SiliconFlow 实测均为 ``sk-`` 前缀，一条规则全覆盖。
 _PREFIX_KEY_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_\-]{8,}")
 
+# 1b) Tailscale key 前缀（F130，research.md §A.6）：``tskey-auth-* /
+#     tskey-api-* / tskey-client-*``（auth key / API token / OAuth client
+#     secret）。与 sk- 同构——启动期崩溃 traceback 可能带出裸 key（不在
+#     ENV/JSON 赋值形态），必须独立前缀规则。掩码后 token 形状被破坏，
+#     重跑正则不再命中（幂等）。
+_TSKEY_PATTERN = re.compile(r"\btskey-(?:auth|api|client)-[A-Za-z0-9_\-]{4,}")
+
 # 2a) ENV 赋值：字段名含 API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH（大小写
 #     不敏感），值到下一个空白/引号为止。安全优先：AUTH_MODE=api_key 这类
 #     低敏值也会被遮（可读性让位安全，spec FR-E2 显式列 AUTH）。
@@ -128,6 +135,11 @@ _RULES: list[tuple[_RuleProbe, Pattern[str], _RuleReplace]] = [
     (
         lambda text, _lower: "sk-" in text,
         _PREFIX_KEY_PATTERN,
+        lambda match: _mask_token(match.group(0)),
+    ),
+    (
+        lambda text, _lower: "tskey-" in text,
+        _TSKEY_PATTERN,
         lambda match: _mask_token(match.group(0)),
     ),
     (
