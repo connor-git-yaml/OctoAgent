@@ -67,14 +67,21 @@ _SPOOL_RETRY_FACTOR = 2.0
 _SPOOL_MAX_ATTEMPTS = int(os.environ.get("OCTOAGENT_TG_SPOOL_MAX_ATTEMPTS", "8"))
 
 
+# 指数封顶——超此 exp 后退避已封顶到 max，无需再算大幂（防持续断网时 factor^exp
+# 在 min() 生效前 OverflowError 崩 _polling_loop）。base=2/max=60 时 exp≈5 即到顶，
+# 64 是极宽松的安全上界（2^64 远未溢出 float）。
+_BACKOFF_EXP_CAP = 64
+
+
 def _compute_poll_backoff(attempt: int) -> float:
     """指数退避 + jitter：base * factor^(attempt-1)，封顶 max。attempt 从 1 起。
 
     纯函数（局部 random，无外部依赖）。attempt<=0 视为首次失败（attempt=1）。
+    exp 先封顶 _BACKOFF_EXP_CAP，防持续失败时大幂 OverflowError（Codex P2）。
     """
     import random
 
-    exp = max(0, attempt - 1)
+    exp = min(max(0, attempt - 1), _BACKOFF_EXP_CAP)
     raw = _POLL_BACKOFF_BASE_S * (_POLL_BACKOFF_FACTOR**exp)
     capped = min(raw, _POLL_BACKOFF_MAX_S)
     jitter = capped * _POLL_BACKOFF_JITTER
@@ -85,8 +92,10 @@ def _compute_spool_retry_delay(attempts: int) -> float:
     """spool 重试退避：base * factor^attempts，封顶 max（无 jitter，串行 drain 无共振）。
 
     attempts 是"已尝试次数"（本次失败后的新值），从 1 起。
+    exp 先封顶 _BACKOFF_EXP_CAP，防大幂 OverflowError（Codex P2；spool max_attempts=8
+    虽本就不会触及，但纯函数防御性封顶，与 poll 退避一致）。
     """
-    exp = max(0, attempts - 1)
+    exp = min(max(0, attempts - 1), _BACKOFF_EXP_CAP)
     raw = _SPOOL_RETRY_BASE_S * (_SPOOL_RETRY_FACTOR**exp)
     return min(raw, _SPOOL_RETRY_MAX_S)
 
@@ -327,11 +336,18 @@ class TelegramGatewayService:
         self._stt_service = stt_service  # F109:None = 语音转写未启用(优雅降级)
         self._tts_service = tts_service  # F110:None = TTS 未启用（优雅降级）
         self._polling_task: asyncio.Task[None] | None = None
+        # F131：webhook 模式专用出站 spool 周期 drain 任务（polling 模式在其 loop 内 drain，
+        # 不起此任务）。与入站请求解耦——不在 webhook 请求路径同步 drain（Codex P1）。
+        self._spool_drain_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
-        # F131：出站 spool drain 串行锁——webhook 模式并发 inbound 可能并发触发 drain，
+        # F131：出站 spool drain 串行锁——webhook 周期 drain 与 startup drain 可能并发触发，
         # 单进程用锁串行化，避免两个 drain 各自 list_due 取到同一行重复发（polling
         # 模式单 loop 本就串行，锁在此路径无竞争、开销可忽略）。
         self._spool_drain_lock = asyncio.Lock()
+        # webhook 模式周期 drain 间隔（秒）——比 polling timeout 略长，避免空转过频。
+        self._spool_drain_interval_s = float(
+            os.environ.get("OCTOAGENT_TG_SPOOL_DRAIN_INTERVAL_S", "30.0")
+        )
         self._operator_inbox_service = None
         self._operator_action_service = None
         self._control_plane_service = None
@@ -414,20 +430,46 @@ class TelegramGatewayService:
         if not self.enabled or self._bot_client is None or self._state_store is None:
             return
         # F131：进程重启后先 drain 一次出站 spool（补发上次崩溃/停机前未送达的消息）。
-        # 独立于 polling——webhook 模式也在 startup 补发一次（AC-7 重启不丢）。
+        # 独立于模式——polling/webhook 都在 startup 补发一次（AC-7 重启不丢）。
         await self._drain_outbound_spool()
-        if self._resolve_mode() != "polling":
+        if self._resolve_mode() == "polling":
+            if self._polling_task is None or self._polling_task.done():
+                self._polling_task = asyncio.create_task(self._polling_loop())
             return
-        if self._polling_task is None or self._polling_task.done():
-            self._polling_task = asyncio.create_task(self._polling_loop())
+        # Codex P1：webhook 模式无 polling loop——起独立周期 drain 任务，使出站补偿
+        # 不依赖 inbound 流量、不占请求路径（活跃/静默用户都能定期重试待发消息）。
+        if self._spool_drain_task is None or self._spool_drain_task.done():
+            self._spool_drain_task = asyncio.create_task(self._spool_drain_loop())
 
     async def shutdown(self) -> None:
         self._stop_event.set()
-        if self._polling_task is not None:
-            self._polling_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self._polling_task
-            self._polling_task = None
+        for attr in ("_polling_task", "_spool_drain_task"):
+            task = getattr(self, attr)
+            if task is not None:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+                setattr(self, attr, None)
+
+    async def _spool_drain_loop(self) -> None:
+        """webhook 模式出站 spool 周期 drain（Codex P1）。
+
+        每 _spool_drain_interval_s 唤醒一次跑 due drain；退避 wait_for 期间响应 stop
+        （shutdown 立即醒来）。drain 全降级不崩，本 loop 亦兜底任何异常不退出。
+        """
+        while not self._stop_event.is_set():
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    self._stop_event.wait(), timeout=self._spool_drain_interval_s
+                )
+            if self._stop_event.is_set():
+                return
+            try:
+                await self._drain_outbound_spool()
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # 防御性：drain 内已全降级，此处再兜底不退出 loop
+                logger.warning("telegram_spool_drain_loop_failed", exc_info=True)
 
     async def handle_webhook_update(
         self,
@@ -450,13 +492,10 @@ class TelegramGatewayService:
             if secret_token != expected_secret:
                 return TelegramIngestResult(status="unauthorized", detail="invalid_webhook_secret")
 
-        result = await self._ingest_update(update)
-        # Codex P1：webhook 模式无 polling loop 周期 drain——借每次 inbound webhook
-        # 顺带 drain 到期 spool（活跃用户 inbound 提供自然 drain 节奏），使 webhook
-        # 模式出站补偿真正生效而非只靠进程重启。drain 有串行锁 + 全降级，不阻断入站。
-        with contextlib.suppress(Exception):
-            await self._drain_outbound_spool()
-        return result
+        # Codex P1：drain 不在请求路径同步跑（避免慢 send 拖垮 webhook 响应 → Telegram
+        # 超时重投）。webhook 模式的周期 drain 由独立 _spool_drain_loop 后台任务负责
+        # （startup 拉起），与入站请求解耦。
+        return await self._ingest_update(update)
 
     async def _polling_loop(self) -> None:
         # F131：连续失败次数——驱动指数退避（成功一轮后 reset），断网/双开时不 busy-loop。

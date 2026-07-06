@@ -419,12 +419,13 @@ async def test_drain_reregisters_reply_thread_root(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_webhook_inbound_triggers_spool_drain(tmp_path: Path) -> None:
-    """Codex P1：webhook 模式无 polling loop——每次 inbound webhook 顺带 drain
-    到期 spool，使 webhook 模式出站补偿真正生效（不只靠进程重启）。"""
+async def test_webhook_mode_background_drain_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Codex P1：webhook 模式起独立后台周期 drain 任务（不依赖 inbound、不占请求路径）。
+    startup 拉起 _spool_drain_loop → 周期 drain 待发消息。"""
     import os
 
-    # webhook 模式配置 + 授权用户（让 inbound 走完整路径）
     from octoagent.gateway.services.config.config_schema import (
         ChannelsConfig,
         OctoAgentConfig,
@@ -441,7 +442,6 @@ async def test_webhook_inbound_triggers_spool_drain(tmp_path: Path) -> None:
                     enabled=True,
                     mode="webhook",
                     webhook_url="https://example.com/api/telegram/webhook",
-                    dm_policy="open",
                 )
             ),
         ),
@@ -452,39 +452,46 @@ async def test_webhook_inbound_triggers_spool_drain(tmp_path: Path) -> None:
         store_group = await create_store_group(
             str(tmp_path / "g.db"), str(tmp_path / "artifacts")
         )
-        # 预置一条到期 spool 项（模拟上次 notify 失败留下的待发）
+        # 用失败 bot 预置一条待发（startup 首轮 drain 发不出去，留给周期 loop）
         await store_group.telegram_outbound_spool_store.enqueue(
-            chat_id="1", text="待补发", created_at=0.0, next_retry_at=0.0
+            chat_id="1", text="后台补发", created_at=0.0, next_retry_at=0.0
         )
         ok_bot = _OKBot()
-
-        class _FakeRunner:
-            async def enqueue(self, *a, **k):
-                return None
-
         service = TelegramGatewayService(
             project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
-            task_runner=_FakeRunner(), state_store=TelegramStateStore(tmp_path),
-            bot_client=ok_bot,
+            state_store=TelegramStateStore(tmp_path), bot_client=ok_bot,
         )
-        # 一条 inbound webhook（open dm_policy → 授权）
-        await service.handle_webhook_update(
-            {
-                "update_id": 500,
-                "message": {
-                    "message_id": 1,
-                    "text": "hi",
-                    "chat": {"id": 2, "type": "private"},
-                    "from": {"id": 2, "username": "u", "first_name": "U"},
-                },
-            }
-        )
-        # inbound webhook 触发了 drain → 待补发消息已送出
-        assert any(m["text"] == "待补发" for m in ok_bot.sent)
+        service._spool_drain_interval_s = 0.02  # 加速周期
+        await service.startup()  # webhook 模式 → 起后台 drain loop
+        assert service._spool_drain_task is not None
+        # 等后台 loop 至少跑一轮 drain
+        import asyncio as _aio
+
+        await _aio.sleep(0.1)
+        await service.shutdown()
+        assert any(m["text"] == "后台补发" for m in ok_bot.sent)
         assert await store_group.telegram_outbound_spool_store.count_pending() == 0
         await store_group.close()
     finally:
         os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+
+
+def test_backoff_no_overflow_on_long_streak() -> None:
+    """Codex P2：持续断网/409 → failure_streak 巨大也不 OverflowError（exp 封顶）。"""
+    from octoagent.gateway.services.telegram import (
+        _POLL_BACKOFF_MAX_S,
+        _SPOOL_RETRY_MAX_S,
+        _compute_poll_backoff,
+        _compute_spool_retry_delay,
+    )
+
+    # 远超 float 幂溢出阈值（~1025）的 streak 不抛，且封顶到 max
+    for big in (2000, 100_000, 10**9):
+        d = _compute_poll_backoff(big)
+        assert d <= _POLL_BACKOFF_MAX_S * 1.2
+        assert d >= 0.0
+        s = _compute_spool_retry_delay(big)
+        assert s <= _SPOOL_RETRY_MAX_S
 
 
 @pytest.mark.asyncio
