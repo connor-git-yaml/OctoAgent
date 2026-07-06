@@ -104,13 +104,13 @@ packages/core/src/octoagent/core/
 
 **哲学 H1**：语音=入站预处理。Telegram voice message → STT 转写 → 回填 `context.text` → 走**与文字消息完全相同**的 chat 主路径（`create_task`/`enqueue`/主 Agent），不新增 Agent 模式、不碰决策环。
 
-**接入点**（`services/telegram.py`）：`_ingest_update` 在空文本检查**之前**插入 voice 分支——
+**接入点**（`services/telegram.py`，F133 异步化）：`_ingest_update` 在空文本检查**之前**的 voice 分支经 `_enqueue_voice_processing` 入全局 FIFO 队列后**立即返回** `accepted+voice_queued`——下载+转写+降级 send（秒级~数十秒）不再阻塞 polling `get_updates` / webhook 响应。后台 `_voice_worker_loop`（单 consumer 串行，并发上界=1 防 faster-whisper 并发打爆 CPU，天然同 chat FIFO；lazy spawn 自愈；单条失败不退出 loop；shutdown cancel + 显式清队列）逐条执行原 pipeline：
 1. `_extract_context` 经 `_extract_voice_ref` 检测 `message.voice` → `TelegramInboundContext.voice`（`TelegramMessage.voice` 字段使 polling 路径 pydantic 往返不丢弃）；
-2. `_handle_voice_message`：①幂等预检（`check_idempotency_key`，重投不重复转写）→ ②STT 可用性 → ③时长/大小守卫 → ④`get_file`+`download_file_bytes`（流式超限即断）→ ⑤`stt_service.transcribe` → ⑥`dataclasses.replace(context, text=转写文本)`；任一步失败走 `_reply_voice_degrade` 优雅降级回复（#6，永不崩/永不静默丢弃）。
+2. `_handle_voice_message`（逻辑与 F109 零改动，仅调用点挪到 worker）：①幂等预检（`check_idempotency_key`，重投不重复转写）→ ②STT 可用性 → ③时长/大小守卫 → ④`get_file`+`download_file_bytes`（流式超限即断）→ ⑤`stt_service.transcribe` → ⑥`dataclasses.replace(context, text=转写文本)` → `_ingest_text_context`（baseline 主链原样抽取，与文字消息完全同路，H1）；任一步失败走 `_reply_voice_degrade` 优雅降级回复（#6，永不崩/永不静默丢弃）；worker 意外异常亦降级回复（`_VOICE_DEGRADE_PIPELINE`，不静默）。
 
 **STT 服务层**（`gateway/voice/`）：`SpeechToTextService` 包可替换 `SttBackend`（薄抽象）；默认 `FasterWhisperBackend`（**本地**，GATE_DESIGN 用户拍板：隐私导向选本地非云 API；懒加载单例 + `asyncio.to_thread` + double-checked locking）。faster-whisper 是 `pyproject` **optional 依赖**（`[voice]` extra）+ 函数内 lazy import + `find_spec` 探测——未装则降级"语音未启用"，不阻塞 gateway 启动。隐私（#5）：日志只记 backend/duration/transcript_len，不记音频/转写原文。
 
-**范围**：仅 STT 单向（不做 TTS / voice session → F110）；仅 telegram voice（不做 Web 音频上传）。**已知 limitation**：并发同 update 重投存在转写前幂等窗口（outcome 仍正确，单用户顺序投递不触发；F110 voice session 并发硬化）。详见 `.specify/features/109-voice-poc/`。
+**范围**：仅 STT 单向（TTS / voice session → F110）；仅 telegram voice（不做 Web 音频上传）。F109 原"转写前幂等窗口" limitation 已被 F133 全局串行 worker **闭合**（重复副本排队、处理时点预检必然命中首条已建 task）。**F133 已知 limitation**：①offset 先行确认——进程崩溃时"已确认未转写"的排队语音丢失（v0.1 显式接受，见 `.specify/features/133-voice-async/spec.md` §3）；②voice→text 跨类型不再全局有序（文字不等语音是 Feature 目的本身；voice 间仍 FIFO）。详见 `.specify/features/109-voice-poc/` + `.specify/features/133-voice-async/`。
 
 ## 6b. Telegram 可靠性（F131，M8 P1）
 
