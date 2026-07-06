@@ -18,7 +18,6 @@ tailscale_helper（DI exec，零 sudo）；host↔mode 判定走 frontdoor_expos
 
 from __future__ import annotations
 
-import os
 import secrets
 
 import click
@@ -42,28 +41,17 @@ _TOKEN_ENV = "OCTOAGENT_FRONTDOOR_TOKEN"
 
 
 def _effective_env(root) -> dict[str, str]:
-    """服务实际生效的 env：实例 ``~/.octoagent/.env`` 为底 + 当前进程 env 覆盖。
+    """服务实际生效的 env（实例 ``.env`` 为底 + 进程 env 覆盖）。
 
     Codex review P2：``octo remote`` 若只读当前 shell env，会与托管服务实际
-    source 的 ``.env``（run-octo-home.sh source 实例根 .env）不一致——端口 /
-    mode / token env 都可能配错。此处对齐服务侧「.env 为底、显式 export 覆盖」
-    语义（load_project_dotenv override=False）。**只读**：不 mutate os.environ。
+    source 的 ``.env`` 不一致——端口 / mode / token env 都可能配错。委托
+    ``frontdoor_exposure.read_instance_effective_env``（单一事实源，doctor 共用）。
     """
-    merged: dict[str, str] = {}
-    try:
-        from dotenv import dotenv_values
+    from octoagent.gateway.services.frontdoor_exposure import (
+        read_instance_effective_env,
+    )
 
-        for filename in (".env", ".env.litellm"):
-            env_path = root / filename
-            if env_path.exists():
-                for key, value in dotenv_values(env_path).items():
-                    if value is not None and key not in merged:
-                        merged[key] = value
-    except Exception:  # pragma: no cover - dotenv 缺失/读失败降级为纯进程 env
-        pass
-    # 进程 env 覆盖（显式 export 优先，对齐 override=False）
-    merged.update(os.environ)
-    return merged
+    return read_instance_effective_env(root)
 
 
 def _resolve_port(env: dict[str, str]) -> int:
@@ -240,18 +228,24 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
         console.print(render_panel("octo remote enable", lines, border_style="cyan"))
         return
 
-    # 幂等：yaml 已是 bearer 不重复写（比对持久化值，非 env 生效值）。
+    # Codex re-review P2：先跑 serve，**成功后**才持久化 bearer——避免 serve
+    # 失败却已把 yaml 切成 bearer（重启后 bearer 无 serve/token 会让本地 UI 失效）
+    # 的非原子状态。serve 失败则 yaml 保持原样，命令失败退出。
+    serve = enable_tailscale_serve(port, dns_name=probe.dns_name)
+    if not serve.ok:
+        lines.append(f"[red]serve 启用失败（{serve.error_code}）：{serve.hint}[/red]")
+        lines.append(
+            "[yellow]front_door.mode 未改动（保持原样）——修好 Tailscale 后重试。[/yellow]"
+        )
+        console.print(render_panel("octo remote enable", lines, border_style="red"))
+        raise SystemExit(1)
+
+    # serve 成功 → 幂等持久化 bearer（yaml 已 bearer 不重复写，比对持久化值）。
     if persisted != "bearer":
         _set_front_door_mode(cfg, root, "bearer")
         lines.append(f"front_door.mode: {persisted} → bearer（已写入 octoagent.yaml）")
     else:
         lines.append("front_door.mode 已是 bearer（幂等）")
-
-    serve = enable_tailscale_serve(port, dns_name=probe.dns_name)
-    if not serve.ok:
-        lines.append(f"[red]serve 启用失败（{serve.error_code}）：{serve.hint}[/red]")
-        console.print(render_panel("octo remote enable", lines, border_style="red"))
-        raise SystemExit(1)
 
     lines.append("[green]Tailscale serve 已启用[/green]")
     lines.append(f"[bold]手机访问：{serve.published_url}[/bold]")
@@ -340,7 +334,10 @@ def remote_status(verbose: bool) -> None:
             validate_front_door_exposure,
         )
 
-        host = resolve_bind_host()
+        # Codex re-review P2：用实例 .env 生效的 host（run-octo-home.sh 实际
+        # source），不读当前 shell——否则 OCTOAGENT_HOST 只在实例 .env 时会
+        # 误报 127.0.0.1 safe，把服务实际 0.0.0.0+loopback 裸奔判成安全。
+        host = resolve_bind_host(env)
         verdict = validate_front_door_exposure(host, mode)
         verdict_icon = {
             "safe": "[green]安全[/green]",

@@ -200,12 +200,15 @@ class TestRemoteEnable:
         assert "OCTOAGENT_FRONTDOOR_TOKEN" in result.output
         assert ".env" in result.output
 
-    def test_enable_serve_failure_reports_hint(
+    def test_enable_serve_failure_reports_hint_and_no_yaml_write(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Codex re-review P2：serve 失败 → 报 hint + exit1 + **不写 yaml**
+        （原子：serve 成功才持久化 bearer，避免 bearer-without-serve 状态）。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
-        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        saved: list = []
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), saved)
         monkeypatch.setattr(
             remote_commands,
             "enable_tailscale_serve",
@@ -219,6 +222,9 @@ class TestRemoteEnable:
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 1
         assert "https_required" in result.output
+        # ★ 原子：serve 失败绝不已把 yaml 切成 bearer
+        assert saved == []
+        assert "未改动" in result.output
 
 
 class TestRemoteDisable:
@@ -428,3 +434,25 @@ class TestCodexReviewFixes:
         assert saved == []  # yaml 已 bearer 不重写
         # 但仍警告 env shadow
         assert "覆盖" in result.output
+
+    def test_status_reads_instance_env_host_flags_naked(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """P2：status 用实例 .env 的 OCTOAGENT_HOST 判暴露面（非仅进程 env）。
+
+        实例 .env 设 0.0.0.0 + yaml loopback → 应标危险（裸奔），即使进程 env
+        未 export OCTOAGENT_HOST。"""
+        _patch_env(monkeypatch)  # 进程 env 无 OCTOAGENT_HOST
+        monkeypatch.delenv("OCTOAGENT_HOST", raising=False)
+        _patch_probe(
+            monkeypatch,
+            TailscaleProbeResult(supported=True, state=TailscaleState.NOT_INSTALLED),
+        )
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        # 实例根 .env 设 0.0.0.0（服务实际会用）
+        (tmp_path / ".env").write_text("OCTOAGENT_HOST=0.0.0.0\n", encoding="utf-8")
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+
+        result = CliRunner().invoke(remote_group, ["status"])
+        assert result.exit_code == 0
+        assert "裸奔" in result.output  # 未被误报为安全

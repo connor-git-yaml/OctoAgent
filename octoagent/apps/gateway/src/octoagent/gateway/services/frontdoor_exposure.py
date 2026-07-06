@@ -26,6 +26,7 @@ from __future__ import annotations
 import ipaddress
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 #: host 读取的 env 名（与 ``scripts/run-octo-home.sh`` 的
@@ -69,6 +70,30 @@ def _is_loopback_host(host: str) -> bool:
     except ValueError:
         # 非法/无法解析的 host 保守当"非 loopback"（不给虚假安全感）
         return False
+
+
+def read_instance_effective_env(root: Path) -> dict[str, str]:
+    """服务实际生效的 env：实例根 ``.env`` 为底 + 当前进程 env 覆盖（只读）。
+
+    ``run-octo-home.sh`` source 实例根 ``.env`` 再起 gateway；从任意 shell 跑
+    ``octo remote`` / ``octo doctor`` 时进程 env 未含这些值 → 会与运行时不一致
+    （host/mode/port 误判）。此处对齐服务侧「.env 为底、显式 export 覆盖」语义
+    （load_project_dotenv override=False）。**不 mutate os.environ**。
+    """
+    merged: dict[str, str] = {}
+    try:
+        from dotenv import dotenv_values
+
+        for filename in (".env", ".env.litellm"):
+            env_path = root / filename
+            if env_path.exists():
+                for key, value in dotenv_values(env_path).items():
+                    if value is not None and key not in merged:
+                        merged[key] = value
+    except Exception:  # pragma: no cover - dotenv 缺失/读失败降级为纯进程 env
+        pass
+    merged.update(os.environ)
+    return merged
 
 
 def resolve_bind_host(env: dict[str, str] | None = None) -> str:
@@ -134,6 +159,7 @@ def validate_front_door_exposure(host: str, mode: str) -> FrontDoorExposureVerdi
 __all__ = [
     "HOST_ENV",
     "FrontDoorExposureVerdict",
+    "read_instance_effective_env",
     "resolve_bind_host",
     "validate_front_door_exposure",
 ]

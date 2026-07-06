@@ -747,12 +747,16 @@ class DoctorRunner:
         name = "front_door_exposure"
         try:
             from octoagent.gateway.services.frontdoor_exposure import (
+                read_instance_effective_env,
                 resolve_bind_host,
                 validate_front_door_exposure,
             )
 
-            host = resolve_bind_host()
-            mode = self._resolve_front_door_mode()
+            # Codex re-review P2：读实例 .env 生效的 host/mode（服务实际 source），
+            # 不只读当前 shell——否则 OCTOAGENT_HOST 只在实例 .env 时会误判安全。
+            env = read_instance_effective_env(resolve_instance_root())
+            host = resolve_bind_host(env)
+            mode = self._resolve_front_door_mode(env)
             verdict = validate_front_door_exposure(host, mode)
         except Exception as exc:
             return CheckResult(
@@ -784,13 +788,15 @@ class DoctorRunner:
             message=verdict.reason,
         )
 
-    def _resolve_front_door_mode(self) -> str:
+    def _resolve_front_door_mode(self, env: dict[str, str] | None = None) -> str:
         """跨源读当前 front_door.mode：env 覆盖 > octoagent.yaml > 默认 loopback。
 
         与 ``frontdoor_auth._read_env_overrides`` 同一 env 名
         （``OCTOAGENT_FRONTDOOR_MODE``），保证 doctor 判定与运行时一致。
+        ``env`` 传入实例生效 env（含 .env）；缺省回退 os.environ。
         """
-        env_mode = os.environ.get("OCTOAGENT_FRONTDOOR_MODE", "").strip()
+        source = env if env is not None else os.environ
+        env_mode = source.get("OCTOAGENT_FRONTDOOR_MODE", "").strip()
         if env_mode:
             return env_mode
         cfg, _skip = self._load_config_safe("front_door_exposure")
