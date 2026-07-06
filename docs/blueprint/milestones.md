@@ -602,4 +602,10 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 
 **已确认无需做（REFUTED，留档防重复立项）**：`--host 0.0.0.0 默认全网卡`（默认已 127.0.0.1）· `任务结果结构性推不到手机`（链路未被 gate）· `通知无优先级/静默`（grep 的是过时 worktree）· `doctor 只 28 行空壳`（真 doctor 557 行 13 检查）· `更新无回滚`（四阶段状态机 + BackupService）· `弱 token 拷示例即失守`（示例只存变量名）· `terminal.exec 锁死 project`（沙箱是 instance root）。**Octo 地基比想象扎实，真缺口集中在"守护 + 触达"。**
 
+**真机部署首日修复（2026-07-04/05，真实使用暴露的 gap 当天回补）**：实例从 F086 跨 M5/M6/M7 升级到 master（评估先行、零数据丢失）后真机日常用，暴露并已修 3 类真 bug（纸面调研照不出、只有真用才出）：
+- **记忆巩固管线生产静默失败** ✅（`b46ecc2b`）：`LlmServiceProtocol` 契约误声明 call_with_fallback + harness 注入裸 FallbackManager → 巩固/画像/派生/ToM 四管线每 tick AttributeError；测试全用 AsyncMock 假 LLM 掩盖。三层修：协议改回 call + harness 注 LLMService + 4 消费方构造期 `ensure_llm_call_contract` fail-fast + 契约锁测试防翻烙饼。
+- **F135 日常使用就绪修复** ✅（`662df4a7`）：**gap-1** `behavior.write_file` 落进 Deferred 桶（须 tool_search 两跳）致"首次见面填画像"引导闭环走不通 → 提入 `CoreToolSet.default()`（同 graph_pipeline/delegate_task 先例）；**gap-2** F129 launchd 干净环境 PATH 无 node → npx 型 MCP 全挂 → plist 注入 `~/.volta/bin`+homebrew（过 stable-working-dir 守卫）+ schema marker 让已装用户自愈重写；gap-3 时区/USER.md 用户手动解。
+- **F136 behavior.write_file 服务端审批绑定** ✅（`4e80b149`）：F135 gap-1 暴露的 pre-existing 安全缺陷——`confirmed=true` 是 LLM 自填参数、可一轮自确认绕过人审直接写 behavior 文件 → 服务端审批绑定关闭自确认；顺手修 escalate_permission 同款 allow-always 404 隐患。
+- **待办 follow-up**：F135 P2 衍生——`octo service install --force` 重写已运行服务时 launchd 卸载→重载有窗口，20s 就绪超时太紧致 `repair-required`（真机实测手动 `launchctl bootstrap` 即恢复），install 应加 bootstrap 兜底 / 放宽超时（归 F129 followup 或 P2）。
+
 ---
