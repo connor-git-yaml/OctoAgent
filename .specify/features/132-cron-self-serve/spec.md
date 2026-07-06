@@ -176,6 +176,12 @@
 - ❌ OpenClaw 的 on-exit / webhook delivery / 复杂 delivery 路由 / creatorToolAllowlist capping。
 - ❌ NL 解析规则引擎（LLM 自译，Constitution #9）。
 
+## 4b. 已知设计权衡（非 bug）
+
+- **quiet hours 与 reminder**：`reminder.notify` 用 `NotificationPriority.MEDIUM`，与 F102 daily summary 同路径。若用户**显式配置**了 quiet hours 且提醒时刻落在其内，会被静默过滤。**默认（未配 quiet hours）→ 提醒正常触发**。是否让用户自定义提醒豁免自己的 quiet hours 是产品判断，本期不做（避免范围外扩）。
+- **cron.update 改 name 也需审批**：保守设计（任何非 enabled 改动走审批）。renaming 低风险但仍走审批，后续可放宽。
+- **ONCE 时区**：naive ISO 已按 timezone 归一化为 aware（Codex P1-2 修复）；用户显式带 offset 的 ISO 直接尊重。
+
 ## 5. Codex/Opus 双评审重点
 - H1：reminder.notify 是否真的不构成"主 Agent 偷偷说话"？（通知 vs 对话轮次边界）
 - 治理：cron.delete/update 审批是否真 fail-closed？enabled-only 直改是否被滥用绕审批（如同一 update 混 enabled+schedule）？
