@@ -113,9 +113,14 @@ class TestFullE2EToolTierPartition:
         assert "tool_search" in core.tool_names
 
     def test_core_toolset_reasonable_size(self) -> None:
-        """Core Tools 数量合理（≤15）"""
+        """Core Tools 数量合理（≤20）
+
+        上限随高频工具入 Core 而调整：F135 加 behavior.write_file、F132 加
+        cron.list/create/update/delete（手机自助定时任务高频）。上限保留"远小于全量"
+        的护栏语义（生产工具 50+），不是逐个工具的硬计数。
+        """
         core = CoreToolSet.default()
-        assert len(core.tool_names) <= 15
+        assert len(core.tool_names) <= 20
         assert len(core.tool_names) >= 5
 
     def test_deferred_entry_one_line_desc_limit(self) -> None:
