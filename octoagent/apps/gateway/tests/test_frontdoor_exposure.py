@@ -127,6 +127,10 @@ class TestReadInstanceEffectiveEnv:
     def test_no_instance_env_falls_back_to_process(
         self, tmp_path, monkeypatch
     ) -> None:
+        from octoagent.gateway.services.frontdoor_exposure import (
+            read_instance_effective_env,
+        )
+
         monkeypatch.setenv("OCTOAGENT_PORT", "9001")
         env = read_instance_effective_env(tmp_path)  # 无 .env 文件
         assert env["OCTOAGENT_PORT"] == "9001"
