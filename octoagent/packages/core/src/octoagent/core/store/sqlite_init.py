@@ -253,6 +253,35 @@ _CONVERSATION_BINDINGS_INDEXES = [
     ),
 ]
 
+# F131: Telegram 出站补偿 spool——notify_task_result / notify_approval_event 的
+# send_message 失败时入队，后台 drain 重试，进程重启不丢待发消息（Constitution #1
+# Durability）。无 task FK：出站消息文本是已生成的任务结果快照，不绑 task 生命周期
+# （对齐 notification_active 无 FK 设计）；重试语义靠 attempts/next_retry_at/status。
+_TELEGRAM_OUTBOUND_SPOOL_DDL = """
+CREATE TABLE IF NOT EXISTS telegram_outbound_spool (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel              TEXT NOT NULL DEFAULT 'telegram',
+    chat_id              TEXT NOT NULL,
+    text                 TEXT NOT NULL,
+    reply_to_message_id  TEXT NOT NULL DEFAULT '',
+    message_thread_id    TEXT NOT NULL DEFAULT '',
+    disable_notification INTEGER NOT NULL DEFAULT 0,
+    task_id              TEXT NOT NULL DEFAULT '',
+    attempts             INTEGER NOT NULL DEFAULT 0,
+    next_retry_at        REAL NOT NULL DEFAULT 0,
+    status               TEXT NOT NULL DEFAULT 'pending',
+    last_error           TEXT NOT NULL DEFAULT '',
+    created_at           REAL NOT NULL
+);
+"""
+
+_TELEGRAM_OUTBOUND_SPOOL_INDEXES = [
+    (
+        "CREATE INDEX IF NOT EXISTS idx_telegram_outbound_spool_due "
+        "ON telegram_outbound_spool(status, next_retry_at);"
+    ),
+]
+
 # Feature 025: projects/workspaces/bindings/migration_runs
 _PROJECTS_DDL = """
 CREATE TABLE IF NOT EXISTS projects (
@@ -1865,6 +1894,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_NOTIFICATION_DISMISSALS_DDL)
     await conn.execute(_NOTIFICATION_ACTIVE_DDL)
     await conn.execute(_CONVERSATION_BINDINGS_DDL)
+    await conn.execute(_TELEGRAM_OUTBOUND_SPOOL_DDL)
     await _migrate_legacy_tables(conn)
 
     # 创建索引
@@ -1887,6 +1917,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _MEMORY_EXTRACTION_LEDGER_INDEXES
         + _NOTIFICATION_ACTIVE_INDEXES
         + _CONVERSATION_BINDINGS_INDEXES
+        + _TELEGRAM_OUTBOUND_SPOOL_INDEXES
     ):
         await conn.execute(idx_sql)
 

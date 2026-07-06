@@ -23,6 +23,10 @@ from .side_effect_ledger_store import SqliteSideEffectLedgerStore
 from .sqlite_init import init_db
 from .task_job_store import SqliteTaskJobStore
 from .task_store import SYSTEM_INTERNAL_TASK_CHANNEL, SqliteTaskStore
+from .telegram_outbound_spool_store import (
+    OutboundSpoolItem,
+    SqliteTelegramOutboundSpoolStore,
+)
 from .transaction import (
     append_event_and_save_checkpoint,
     append_event_and_update_task,
@@ -80,6 +84,8 @@ class StoreGroup:
         self.notification_store = SqliteNotificationStore(conn)
         # F105：渠道会话路由绑定（OC-2 ConversationBinding + OC-6 last-route 状态）
         self.conversation_binding_store = SqliteConversationBindingStore(conn)
+        # F131：Telegram 出站补偿 spool（send 失败入队 + 跨重启 drain 重试）
+        self.telegram_outbound_spool_store = SqliteTelegramOutboundSpoolStore(conn)
 
     async def close(self) -> None:
         """关闭主连接 + versionable 独立写连接（幂等，suppress 已关闭异常）。
@@ -145,6 +151,8 @@ __all__ = [
     "SqliteEventStore",
     "SqliteNotificationStore",
     "SqliteConversationBindingStore",
+    "SqliteTelegramOutboundSpoolStore",
+    "OutboundSpoolItem",
     "SqliteArtifactStore",
     "SqliteBehaviorVersionStore",
     "SqliteCheckpointStore",
