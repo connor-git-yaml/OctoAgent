@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 from pathlib import Path
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from octoagent.core.models import ManagedRuntimeDescriptor, RuntimeManagementMode, utc_now
@@ -372,3 +373,112 @@ async def test_lifespan_default_mode_uses_provider_router_with_skill_runner(
             f"default mode 期望 primary=ProviderRouterMessageAdapter，实际 {type(primary).__name__}"
         )
         assert llm_service._skill_runner is not None
+
+
+# ---------------------------------------------------------------------------
+# F130 Phase D：host↔mode 启动期防裸奔 fail-fast（spec [@test] FR-C2/C3/AC-3）
+# ---------------------------------------------------------------------------
+
+
+def _clear_exposure_env(monkeypatch) -> None:
+    monkeypatch.delenv("OCTOAGENT_HOST", raising=False)
+    monkeypatch.delenv("OCTOAGENT_FRONTDOOR_MODE", raising=False)
+    monkeypatch.setenv("LOGFIRE_SEND_TO_LOGFIRE", "false")
+
+
+def test_create_app_default_host_mode_is_safe_no_exit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """★ 最高危护栏：默认 127.0.0.1 + loopback = safe，create_app 正常返回
+    （不误 exit——否则 gateway 起不来连本机都用不了，plan §2 Phase D）。"""
+    _clear_exposure_env(monkeypatch)
+    monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    app = gateway_main.create_app()  # 不抛 SystemExit
+    assert isinstance(app, FastAPI)
+
+
+def test_enforce_exposure_naked_combo_exits_78(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """★ AC-3：host=0.0.0.0 + mode=loopback → 启动期 sys.exit(78)。"""
+    _clear_exposure_env(monkeypatch)
+    monkeypatch.setenv("OCTOAGENT_HOST", "0.0.0.0")
+    monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "loopback")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    with pytest.raises(SystemExit) as exc_info:
+        gateway_main._enforce_front_door_exposure(tmp_path)
+    assert exc_info.value.code == 78
+
+
+def test_enforce_exposure_exit_message_mentions_exposure(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    """裸奔拒绝的 stderr 信息含关键词（供 err.log / octo logs 诊断）。"""
+    _clear_exposure_env(monkeypatch)
+    monkeypatch.setenv("OCTOAGENT_HOST", "0.0.0.0")
+    monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "loopback")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    with pytest.raises(SystemExit):
+        gateway_main._enforce_front_door_exposure(tmp_path)
+    captured = capsys.readouterr()
+    assert "裸奔" in captured.err
+    assert "0.0.0.0" in captured.err
+    assert "octo remote enable" in captured.err
+
+
+def test_enforce_exposure_warn_combo_does_not_exit(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """FR-C3：host=0.0.0.0 + mode=bearer → 强警告放行，不 exit。"""
+    _clear_exposure_env(monkeypatch)
+    monkeypatch.setenv("OCTOAGENT_HOST", "0.0.0.0")
+    monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "bearer")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    # 不抛 SystemExit
+    gateway_main._enforce_front_door_exposure(tmp_path)
+
+
+def test_enforce_exposure_serve_recommended_combo_safe(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Tailscale serve 推荐组合 127.0.0.1 + bearer → safe，不 exit。"""
+    _clear_exposure_env(monkeypatch)
+    monkeypatch.setenv("OCTOAGENT_HOST", "127.0.0.1")
+    monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "bearer")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    gateway_main._enforce_front_door_exposure(tmp_path)
+
+
+def test_enforce_exposure_uses_config_error_exit_code_constant(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """exit code 复用 service_manager.CONFIG_ERROR_EXIT_CODE 单一事实源
+    （对齐 systemd RestartPreventExitStatus）。"""
+    from octoagent.provider.dx.service_manager import CONFIG_ERROR_EXIT_CODE
+
+    _clear_exposure_env(monkeypatch)
+    monkeypatch.setenv("OCTOAGENT_HOST", "0.0.0.0")
+    monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "loopback")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    with pytest.raises(SystemExit) as exc_info:
+        gateway_main._enforce_front_door_exposure(tmp_path)
+    assert exc_info.value.code == CONFIG_ERROR_EXIT_CODE
+
+
+def test_resolve_front_door_mode_env_overrides_config(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _clear_exposure_env(monkeypatch)
+    monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "bearer")
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    assert gateway_main._resolve_front_door_mode(tmp_path) == "bearer"
+
+
+def test_resolve_front_door_mode_defaults_loopback_when_no_config(
+    tmp_path: Path, monkeypatch
+) -> None:
+    _clear_exposure_env(monkeypatch)
+    gateway_main = importlib.import_module("octoagent.gateway.main")
+    # 空 tmp_path 无 octoagent.yaml → 默认 loopback
+    assert gateway_main._resolve_front_door_mode(tmp_path) == "loopback"
