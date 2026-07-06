@@ -337,6 +337,38 @@ class DelegateTaskResult(WriteResult):
 
 
 # ---------------------------------------------------------------------------
+# cron 自助工具子类（F132）
+# ---------------------------------------------------------------------------
+
+
+class CronMutationResult(WriteResult):
+    """cron.create / cron.update / cron.delete 工具统一返回结果（F132 FR-9）。
+
+    status 语义（继承 WriteResult）：
+    - "written"：job 已落盘（create/update）或已删除（delete）+ scheduler 已同步
+    - "rejected"：schedule 校验失败 / job 不存在 / 审批被拒 / 审批通道不可用（fail-closed）
+    - "pending"：破坏性操作已发起服务端审批、等待用户决策（本 Feature 用同步 wait，
+      故实际不返回 pending；保留供未来 async 审批扩展）
+
+    job_id / job_name 保留供调用方回显确认（防追踪链断裂）。
+    scheduler_synced 显式暴露 scheduler 是否成功挂载/移除——False 时 job 已落盘但
+    需重启才生效（DP-6 degraded 降级），调用方据此提示用户。
+    """
+
+    job_id: str = ""
+    """目标 job ID（create 新建 / update/delete 目标）。"""
+
+    job_name: str = ""
+    """job 名称（回显）。"""
+
+    scheduler_synced: bool = False
+    """scheduler.sync_job / remove_job 是否成功。False=落盘成功但需重启生效。"""
+
+    approval_requested: bool = False
+    """是否发起过服务端审批（破坏性操作）。"""
+
+
+# ---------------------------------------------------------------------------
 # 模块导出
 # ---------------------------------------------------------------------------
 
@@ -371,4 +403,6 @@ __all__ = [
     "ObserveResult",
     # Delegate Task（Feature 084 Phase 3）
     "DelegateTaskResult",
+    # cron 自助工具（F132）
+    "CronMutationResult",
 ]

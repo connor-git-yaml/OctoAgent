@@ -61,12 +61,28 @@
 
 `cron.create` 参数二选一：
 - 传 `reminder_text` → 自动设 `action_id="reminder.notify"`, `params={"message": reminder_text, ...}`（用户面默认路径）。
-- 传 `action_id`（+ `action_params`）→ 直连管理动作（高级，沿用 `automation.create` 既有校验）。
+- 传 `action_id`（+ `action_params`）→ 直连已注册动作（高级）。**【Codex P1-2】安全白名单**：agent 工具的
+  action_id 路径**仅允许**安全只读/低风险管理动作白名单 `_CRON_AGENT_ACTION_ALLOWLIST`
+  （初始 `{"reminder.notify", "memory.consolidate", "memory.profile_generate"}`）。传入白名单外
+  action_id（如 `update.apply` / `runtime.restart` / `operator.*`）→ `status="rejected",
+  reason="action_not_allowed"`，不落盘。理由：automation scheduler 触发时按 SYSTEM surface
+  直接 `execute_action`，coordinator **不会**按 action_registry 的 `approval_hint` 自动拦截——
+  若放任 agent 排任意 action，等于让 Agent 免审批安排高风险操作（绕过 Constitution #4/#7）。
+  高风险动作的定时化留 Web/CLI 显式操作（非本 agent 工具范围）。
 
 ### DP-3 NL↔cron 转换：LLM 自己译，工具只收结构化（Constitution #9）
 
 **不写正则/规则引擎**把「每天早8点」解析成 cron。主 Agent（LLM）负责把自然语言译成
-`schedule_kind` + `schedule_expr`（cron 表达式 / 秒数 / ISO datetime），工具只接收结构化入参并**校验合法性**（cron 表达式能否被 `CronTrigger.from_crontab` 解析；秒数>0；ISO 可 parse）。工具 docstring 给足 few-shot 示例（「每天早8点」→ kind=cron, expr=`0 8 * * *`；「每周一9点」→ `0 9 * * 1`；「30分钟后一次」→ kind=once + 算好的 ISO），引导 LLM 正确产出——这是"提供上下文让 LLM 决策"，非硬编码替代决策。
+`schedule_kind` + `schedule_expr`（cron 表达式 / 秒数 / ISO datetime），工具只接收结构化入参并**校验合法性**（cron 表达式能否被 `CronTrigger.from_crontab` 解析；秒数>0；ISO 可 parse）。工具 docstring 给足 few-shot 示例（「每天早8点」→ kind=cron, expr=`0 8 * * *`；「每周一9点」→ `0 9 * * mon`；「30分钟后一次」→ kind=once + 算好的 ISO），引导 LLM 正确产出——这是"提供上下文让 LLM 决策"，非硬编码替代决策。
+
+**【Codex P1-1 关键陷阱】星期约定**：调度器用 APScheduler `CronTrigger.from_crontab`，其数字
+星期是 **Monday=0 / Sunday=6**（与标准 Unix cron 的 Sunday=0 / Monday=1 **不同**）。实证：
+`0 9 * * 1` 在 APScheduler 下触发**周二**（不是周一）。LLM 多按 Unix 约定产出数字 DOW，会导致
+**每个周提醒错一天**。缓解（两层）：
+1. docstring 强制 few-shot **只用命名星期**（`mon/tue/wed/thu/fri/sat/sun`），APScheduler 对
+   命名 DOW 无歧义（`0 9 * * mon` 实证触发周一）。
+2. 工具校验层：`schedule_expr` 的第 5 字段若为**纯数字 DOW**（含范围/列表），`status="rejected",
+   reason` 提示改用命名星期——把 off-by-one 的沉默错误变成显式拒绝 + 引导。`*` 与命名星期放行。
 
 ### DP-4 时区：工具层接 F115 降级链（USER.md > env > UTC）
 
@@ -87,9 +103,15 @@
 
 `cron.create/update/delete` 必须进 `CoreToolSet.default()`（`packages/tooling/src/octoagent/tooling/models.py:396`）。否则落 Deferred 桶 → 主 Agent 只在 system prompt 见名字无 schema → 须 tool_search 两跳 → 弱 model / 手机单轮场景不可靠（与 `delegate_task`/`behavior.write_file` 同款教训，models.py:407-416 已注释此坑）。`cron.list` 已在 ops_tools 但**未在 Core**——一并补进 Core（用户问「我有哪些定时任务」是高频）。
 
-### DP-8 Web UI 范围：只读列表 + enable/disable + delete（最小自助面）
+### DP-8 Web UI 范围：只读列表 + enable/disable toggle（可逆自助面，删除走对话治理）
 
-新增 `GET /api/control/resources/automation` REST resource endpoint（接现存 `get_automation_document`）+ 前端 `AutomationCenter` 页（列表：名称/schedule 人读化/下次运行/状态；行内 toggle 调 `automation.pause|resume`；删除按钮调 `automation.delete`）。**不做**创建表单（创建走对话让 Agent 建，符合 H1 mediated + 避免 UI 重造 NL 理解）。面向普通用户：schedule 表达式人读化展示（cron→「每天 08:00」近似），技术字段（action_id/job_id）收折叠。
+新增 `GET /api/control/resources/automation` REST resource endpoint（接现存 `get_automation_document`）+ 前端 `AutomationCenter` 页（列表：名称/schedule 人读化/下次运行/状态；行内 toggle 调 `automation.pause|resume`）。
+
+**【Codex P1-3】Web 不放直接删除按钮**。理由：`automation.delete` control-plane action（`automation_service.py:413`）**立即删除**、无审批；从 SYSTEM/WEB surface 触发时没有 task/session 上下文可挂 ApprovalGate（ApprovalGate 依赖 exec_ctx 的 WAITING_APPROVAL 转移，见 write_approval）。若 Web 放直接删除按钮会绕过 DP-5 的 Two-Phase 治理。故：
+- Web 只做**可逆** enable/disable（toggle）——禁用等于停止触发，用户随时可恢复，无需审批。
+- **删除走对话**：用户在聊天里说「删掉那个提醒」→ 主 Agent 调 `cron.delete`（走 ApprovalGate Two-Phase）。AutomationCenter 页对每行给一句提示「如需删除，在对话中让助手删除」而非删除按钮。
+
+**不做**创建表单（创建走对话让 Agent 建，符合 H1 mediated + 避免 UI 重造 NL 理解）。面向普通用户：schedule 表达式人读化展示（cron→「每天 08:00」近似），技术字段（action_id/job_id）收折叠。
 
 ### DP-9 Telegram 命令：本期不加专用命令
 
@@ -104,6 +126,8 @@
 
 - **AC-1.1** `cron.create` 传 `reminder_text` → 落 `AutomationJob{action_id="reminder.notify", params.message=reminder_text}` + scheduler `sync_job` 被调 + 返回 `CronMutationResult{status="written", job_id}`。`[@test: apps/gateway/tests/tools/test_cron_tools.py::test_create_reminder_job]`
 - **AC-1.2** `schedule_expr` 非法 cron（如 `"每天"`）→ `status="rejected", reason` 含解析失败，不落盘。`[@test: ::test_create_invalid_cron_rejected]`
+- **AC-1.2b** `schedule_expr` 用纯数字 DOW（如 `0 9 * * 1`）→ `status="rejected", reason` 提示改命名星期（Codex P1-1 off-by-one 防护）。`[@test: ::test_create_numeric_dow_rejected]`
+- **AC-1.2c** `cron.create` 传白名单外 `action_id`（如 `update.apply`）→ `status="rejected", reason="action_not_allowed"`，不落盘（Codex P1-2）。`[@test: ::test_create_action_id_not_allowed]`
 - **AC-1.3** `timezone` 缺省 → 走 F115 链解析（USER.md `user_timezone` 优先）。`[@test: ::test_create_timezone_fallback_user_md]`
 - **AC-1.4** 到点触发 `reminder.notify` → `NotificationService.notify_task_state_change` 被调、message 透传。`[@test: apps/gateway/tests/test_reminder_action.py::test_reminder_notify_delivers]`
 
@@ -123,7 +147,7 @@
 
 ### US-5（P1）Web 定时任务列表 + 开关 + 删除
 - **AC-5.1** `GET /api/control/resources/automation` 返回 `AutomationJobDocument`（含 jobs + next_run_at + status）。`[@test: apps/gateway/tests/test_automation_resource_route.py::test_get_automation_resource]`
-- **AC-5.2** 前端 `AutomationCenter` 渲染 job 列表、toggle 调 pause/resume action、删除调 delete action。`[@test: frontend/src/pages/AutomationCenter.test.tsx]`
+- **AC-5.2** 前端 `AutomationCenter` 渲染 job 列表、toggle 调 pause/resume action。**无直接删除按钮**（删除走对话，Codex P1-3）。`[@test: frontend/src/pages/AutomationCenter.test.tsx]`
 
 ### US-6（非功能）零回归 + H1
 - **AC-6.1** 全量回归 0 regression vs master 1e64ecd3（动到的包）。
@@ -133,14 +157,14 @@
 
 ## 3. FR 清单
 
-- FR-1 `cron.create` 工具：reminder_text 路径 + action_id 路径二选一；cron/interval/once 校验；F115 时区；REVERSIBLE；进 Core。
+- FR-1 `cron.create` 工具：reminder_text 路径 + action_id 路径（白名单 `_CRON_AGENT_ACTION_ALLOWLIST`）二选一；cron/interval/once 校验 + 纯数字 DOW 拒绝（命名星期防 off-by-one）；F115 时区；REVERSIBLE；进 Core。
 - FR-2 `cron.update` 工具：enabled-only 直改 / 其他字段走审批；scheduler sync；进 Core。
 - FR-3 `cron.delete` 工具：ApprovalGate Two-Phase；fail-closed；scheduler remove；进 Core。
 - FR-4 `reminder.notify` action：NotificationService 交付 message；注册进 action_registry + 校验白名单；不违 H1。
 - FR-5 `ToolDeps._automation_scheduler` late-bind + `_bootstrap_control_plane` 后补绑。
 - FR-6 F115 时区解析抽共享 helper（USER.md > env > UTC），cron 工具与 daily_routine 共用。
 - FR-7 `GET /api/control/resources/automation` REST resource route + 前端契约条目。
-- FR-8 前端 `AutomationCenter` 页（列表 + toggle + delete + schedule 人读化）+ 路由挂载。
+- FR-8 前端 `AutomationCenter` 页（列表 + toggle + schedule 人读化，**无删除按钮**——删除走对话治理）+ 路由挂载。
 - FR-9 `CronMutationResult(WriteResult)` 回显契约（status/job_id/reason/approval_requested）。
 - FR-10 审计事件：cron job 建/改/删 emit 事件（复用 MEMORY_ENTRY_ADDED 模式或新 `AUTOMATION_JOB_MUTATED`）。
 
