@@ -277,6 +277,8 @@ async def test_shutdown_cancels_voice_worker(tmp_path: Path) -> None:
     # 第 1 条挂起在转写中被 cancel，第 2 条从未开始
     assert stt.transcribe_calls == 1
     assert await store_group.task_store.list_tasks() == []
+    # Codex P2：pending 项已显式丢弃——同实例复用（shutdown→startup）不复活 stale voice
+    assert service._voice_queue.qsize() == 0
 
     # shutdown 后新入站 voice：入队但 worker 守卫退出，不处理（进程退出语义）
     result = await service.handle_webhook_update(_voice_update(update_id=823, message_id=823))

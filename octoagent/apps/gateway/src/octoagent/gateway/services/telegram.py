@@ -459,6 +459,13 @@ class TelegramGatewayService:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
                 setattr(self, attr, None)
+        # F133 Codex P2：显式丢弃 pending voice 队列项——同实例 shutdown→startup 复用
+        # 时不复活 stale voice（保持与"随进程丢弃"语义一致；in-flight 项已随 worker
+        # cancel 丢弃）。get_nowait+task_done 成对调，保 queue.join() 计数语义完整。
+        while not self._voice_queue.empty():
+            with contextlib.suppress(asyncio.QueueEmpty):
+                self._voice_queue.get_nowait()
+                self._voice_queue.task_done()
 
     async def _spool_drain_loop(self) -> None:
         """出站 spool 独立周期 drain 任务（Codex P1/P2）。
