@@ -11,18 +11,17 @@ from types import SimpleNamespace
 
 import pytest
 from octoagent.core.store import create_store_group
-from octoagent.gateway.services.sse_hub import SSEHub
-from octoagent.gateway.services.telegram import (
-    _SPOOL_MAX_ATTEMPTS,
-    TelegramGatewayService,
-)
-
 from octoagent.gateway.services.config.config_schema import (
     ChannelsConfig,
     OctoAgentConfig,
     TelegramChannelConfig,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
+from octoagent.gateway.services.sse_hub import SSEHub
+from octoagent.gateway.services.telegram import (
+    _SPOOL_MAX_ATTEMPTS,
+    TelegramGatewayService,
+)
 
 
 def _write_config(project_root: Path) -> None:

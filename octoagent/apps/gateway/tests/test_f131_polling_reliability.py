@@ -14,6 +14,12 @@ from pathlib import Path
 
 import pytest
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.config.config_schema import (
+    ChannelsConfig,
+    OctoAgentConfig,
+    TelegramChannelConfig,
+)
+from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.telegram import (
     _POLL_BACKOFF_BASE_S,
@@ -25,13 +31,6 @@ from octoagent.gateway.services.telegram import (
 )
 from octoagent.gateway.services.telegram_client import TelegramBotApiError
 from octoagent.provider.dx.telegram_pairing import TelegramStateStore
-
-from octoagent.gateway.services.config.config_schema import (
-    ChannelsConfig,
-    OctoAgentConfig,
-    TelegramChannelConfig,
-)
-from octoagent.gateway.services.config.config_wizard import save_config
 
 
 def _write_polling_config(project_root: Path) -> None:
@@ -94,10 +93,11 @@ def test_backoff_sequence_bounded() -> None:
 
 def test_is_getupdates_conflict_detects_409() -> None:
     """AC-3：error_code=409 + 描述含 getUpdates/conflict → 判定双开冲突。"""
+    desc = "Conflict: terminated by other getUpdates request"
     exc = TelegramBotApiError(
-        "Conflict: terminated by other getUpdates request",
+        desc,
         status_code=409,
-        payload={"error_code": 409, "description": "Conflict: terminated by other getUpdates request"},
+        payload={"error_code": 409, "description": desc},
     )
     assert _is_getupdates_conflict(exc) is True
 
