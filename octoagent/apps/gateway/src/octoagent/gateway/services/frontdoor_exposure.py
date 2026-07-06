@@ -36,7 +36,23 @@ HOST_ENV = "OCTOAGENT_HOST"
 _DEFAULT_HOST = "127.0.0.1"
 _LOOPBACK_HOST_NAMES = {"localhost", ""}
 
+#: 「实例权威」env 键——托管服务的真实生效值只来自实例 ``.env`` / descriptor，
+#: **不从当前 CLI shell 继承**（launchd/systemd 起的服务不继承 CLI export）。
+#: Codex 第五轮 P2：这些键的 shell-only 值会误导 remote/doctor（serve 指错端口 /
+#: 跳过 token 提示但重启 503）。前缀匹配（覆盖 ``OCTOAGENT_FRONTDOOR_TOKEN`` 及
+#: 自定义 ``*_TOKEN_ENV`` 指向的变量由调用方另行按名解析）。
+_INSTANCE_AUTHORITATIVE_PREFIXES = (
+    "OCTOAGENT_HOST",
+    "OCTOAGENT_PORT",
+    "OCTOAGENT_FRONTDOOR_",  # MODE / TOKEN / TOKEN_ENV
+    "OCTOAGENT_TRUSTED_PROXY_",
+)
+
 Verdict = Literal["safe", "warn", "reject"]
+
+
+def _is_instance_authoritative_key(key: str) -> bool:
+    return any(key.startswith(prefix) for prefix in _INSTANCE_AUTHORITATIVE_PREFIXES)
 
 
 @dataclass(slots=True)
@@ -82,10 +98,18 @@ def read_instance_effective_env(root: Path) -> dict[str, str]:
     必须覆盖 shell 值（否则 shell 里 ``OCTOAGENT_PORT=9001`` 会让 serve 发布到错
     端口、shell-only token 会让 CLI 跳过 token 提示但重启后 bearer 503）。
 
-    ``.env`` 未设的键回退进程 env（如 PATH 等服务确实继承的值）。**不 mutate
+    ★ 「实例权威」键（host/port/mode/token，见 ``_INSTANCE_AUTHORITATIVE_PREFIXES``）
+    **只来自 ``.env``，绝不从当前 CLI shell 继承**（Codex 第五轮 P2：托管服务不继承
+    CLI export，shell-only 值会误导——serve 指错端口 / 跳过 token 提示但重启 503）。
+    非权威键（PATH 等服务确实继承的值）以进程 env 为底、``.env`` 覆盖。**不 mutate
     os.environ**。
     """
-    merged: dict[str, str] = dict(os.environ)  # 进程 env 为底（.env 未设的键回退）
+    # 非权威键：进程 env 为底（服务确实继承的 PATH 等）。
+    merged: dict[str, str] = {
+        key: value
+        for key, value in os.environ.items()
+        if not _is_instance_authoritative_key(key)
+    }
     try:
         from dotenv import dotenv_values
 
@@ -94,8 +118,9 @@ def read_instance_effective_env(root: Path) -> dict[str, str]:
             if env_path.exists():
                 for key, value in dotenv_values(env_path).items():
                     if value is not None:
-                        merged[key] = value  # 实例 .env 覆盖（服务真实生效值）
-    except Exception:  # pragma: no cover - dotenv 缺失/读失败降级为纯进程 env
+                        # 权威键只从 .env 来；非权威键 .env 覆盖进程 env。
+                        merged[key] = value
+    except Exception:  # pragma: no cover - dotenv 缺失/读失败降级
         pass
     return merged
 

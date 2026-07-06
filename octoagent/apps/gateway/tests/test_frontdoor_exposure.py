@@ -96,44 +96,46 @@ class TestValidationIsReadOnly:
 
 
 class TestReadInstanceEffectiveEnv:
-    """Codex 第四轮 P2：托管服务诊断——实例 .env 覆盖 shell env。"""
+    """Codex 第四/五轮 P2：托管服务诊断——权威键只来自实例 .env（不继承 shell）。"""
 
-    def test_instance_env_overrides_shell(
+    def test_non_authoritative_key_falls_back_to_shell(
         self, tmp_path, monkeypatch
     ) -> None:
-        """shell OCTOAGENT_PORT=9001 但实例 .env=8000 → 取 8000（服务真实值）。"""
+        """非权威键（如 PATH）.env 未设时回退进程 env。"""
         from octoagent.gateway.services.frontdoor_exposure import (
             read_instance_effective_env,
         )
 
-        monkeypatch.setenv("OCTOAGENT_PORT", "9001")
+        monkeypatch.setenv("SOME_NON_OCTO_KEY", "shellval")
         (tmp_path / ".env").write_text("OCTOAGENT_PORT=8000\n", encoding="utf-8")
         env = read_instance_effective_env(tmp_path)
-        assert env["OCTOAGENT_PORT"] == "8000"  # .env 覆盖 shell
+        assert env["SOME_NON_OCTO_KEY"] == "shellval"  # 非权威键回退 shell
 
-    def test_shell_fills_keys_absent_from_instance_env(
+    def test_authoritative_key_shell_only_is_dropped(
         self, tmp_path, monkeypatch
     ) -> None:
-        """.env 未设的键回退进程 env。"""
+        """★ Codex 第五轮 P2：权威键（host/port/mode/token）shell-only 不生效
+        （托管服务不继承 CLI export）——.env 无此键则视为未设，不回退 shell。"""
         from octoagent.gateway.services.frontdoor_exposure import (
             read_instance_effective_env,
         )
 
-        monkeypatch.setenv("OCTOAGENT_HOST", "127.0.0.1")
-        (tmp_path / ".env").write_text("OCTOAGENT_PORT=8000\n", encoding="utf-8")
-        env = read_instance_effective_env(tmp_path)
-        assert env["OCTOAGENT_HOST"] == "127.0.0.1"  # .env 无此键 → 用 shell
-
-    def test_no_instance_env_falls_back_to_process(
-        self, tmp_path, monkeypatch
-    ) -> None:
-        from octoagent.gateway.services.frontdoor_exposure import (
-            read_instance_effective_env,
-        )
-
-        monkeypatch.setenv("OCTOAGENT_PORT", "9001")
+        monkeypatch.setenv("OCTOAGENT_PORT", "9001")  # 仅 shell，无 .env
         env = read_instance_effective_env(tmp_path)  # 无 .env 文件
-        assert env["OCTOAGENT_PORT"] == "9001"
+        assert "OCTOAGENT_PORT" not in env  # shell-only 权威键被丢弃
+
+    def test_authoritative_key_from_instance_env_wins(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """权威键：shell=9001 + 实例 .env=8000 → 取 .env 的 8000。"""
+        from octoagent.gateway.services.frontdoor_exposure import (
+            read_instance_effective_env,
+        )
+
+        monkeypatch.setenv("OCTOAGENT_PORT", "9001")
+        (tmp_path / ".env").write_text("OCTOAGENT_PORT=8000\n", encoding="utf-8")
+        env = read_instance_effective_env(tmp_path)
+        assert env["OCTOAGENT_PORT"] == "8000"
 
     def test_does_not_mutate_os_environ(self, tmp_path, monkeypatch) -> None:
         import os

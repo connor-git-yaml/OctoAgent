@@ -294,15 +294,21 @@ class TestRemoteStatus:
         assert "X-Forwarded" in result.output
 
     def test_status_naked_exposure_flagged(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """0.0.0.0 + loopback → status 标危险（裸奔）。"""
-        _patch_env(monkeypatch, OCTOAGENT_HOST="0.0.0.0")
+        """实例 .env host=0.0.0.0 + loopback → status 标危险（裸奔）。
+
+        Codex 第五轮 P2：host 是「实例权威」键——用实例 .env（服务真实生效值），
+        shell-only 值不再被当服务值。"""
+        _patch_env(monkeypatch)
+        monkeypatch.delenv("OCTOAGENT_HOST", raising=False)
         _patch_probe(
             monkeypatch,
             TailscaleProbeResult(supported=True, state=TailscaleState.NOT_INSTALLED),
         )
         _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        (tmp_path / ".env").write_text("OCTOAGENT_HOST=0.0.0.0\n", encoding="utf-8")
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
 
         result = CliRunner().invoke(remote_group, ["status"])
         assert result.exit_code == 0
@@ -335,12 +341,19 @@ class TestCodexReviewFixes:
         assert serve_calls == [9000]  # 用了实例 .env 的端口
 
     def test_enable_warns_when_env_shadows_yaml_mode(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """P2：OCTOAGENT_FRONTDOOR_MODE env 会 shadow yaml → 显式警告。"""
-        _patch_env(monkeypatch, OCTOAGENT_FRONTDOOR_MODE="loopback")
+        """P2：实例 .env 的 OCTOAGENT_FRONTDOOR_MODE 会 shadow yaml → 显式警告。
+
+        Codex 第五轮 P2：mode 是权威键，shadow 信号来自实例 .env（服务真实生效）
+        而非 shell（服务不继承）。"""
+        _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        (tmp_path / ".env").write_text(
+            "OCTOAGENT_FRONTDOOR_MODE=loopback\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
         monkeypatch.setattr(
             remote_commands,
             "enable_tailscale_serve",
@@ -417,13 +430,17 @@ class TestCodexReviewFixes:
         assert "仍开着" in result.output
 
     def test_enable_idempotent_when_yaml_bearer_but_env_loopback(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """幂等比对持久化值：yaml=bearer 即不重写，即便 env=loopback shadow。"""
-        _patch_env(monkeypatch, OCTOAGENT_FRONTDOOR_MODE="loopback")
+        """幂等比对持久化值：yaml=bearer 即不重写，即便实例 .env=loopback shadow。"""
+        _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         saved: list = []
         _patch_config(monkeypatch, _FakeConfig(mode="bearer"), saved)
+        (tmp_path / ".env").write_text(
+            "OCTOAGENT_FRONTDOOR_MODE=loopback\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
         monkeypatch.setattr(
             remote_commands,
             "enable_tailscale_serve",
@@ -432,7 +449,7 @@ class TestCodexReviewFixes:
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 0
         assert saved == []  # yaml 已 bearer 不重写
-        # 但仍警告 env shadow
+        # 但仍警告 .env shadow
         assert "覆盖" in result.output
 
     def test_status_reads_instance_env_host_flags_naked(

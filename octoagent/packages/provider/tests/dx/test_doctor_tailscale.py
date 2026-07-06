@@ -117,13 +117,31 @@ class TestCheckFrontDoorExposure:
         result = await runner.check_front_door_exposure()
         assert result.status == CheckStatus.PASS
 
+    @staticmethod
+    def _instance_env(
+        tmp_path: Path, monkeypatch: pytest.MonkeyPatch, content: str
+    ) -> None:
+        """把 host/mode 写进**实例 .env** 并让 doctor 从此 root 读（Codex 第五轮
+        P2：权威键只来自实例 .env，不继承 CLI shell）。"""
+        monkeypatch.delenv("OCTOAGENT_HOST", raising=False)
+        monkeypatch.delenv("OCTOAGENT_FRONTDOOR_MODE", raising=False)
+        (tmp_path / ".env").write_text(content, encoding="utf-8")
+        (tmp_path / "octoagent.yaml").write_text(
+            "config_version: 1\nupdated_at: '2026-07-06'\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(
+            "octoagent.provider.dx.doctor.resolve_instance_root", lambda: tmp_path
+        )
+
     async def test_naked_exposure_fails_but_recommended(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """0.0.0.0 + loopback → doctor FAIL，但 RECOMMENDED 级（不把 overall
         变 REQUIRED-FAIL，doctor 本身不 exit——纵深诊断）。"""
-        monkeypatch.setenv("OCTOAGENT_HOST", "0.0.0.0")
-        monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "loopback")
+        self._instance_env(
+            tmp_path, monkeypatch,
+            "OCTOAGENT_HOST=0.0.0.0\nOCTOAGENT_FRONTDOOR_MODE=loopback\n",
+        )
         runner = _runner_with_tailscale(
             tmp_path,
             TailscaleProbeResult(supported=True, state=TailscaleState.NOT_INSTALLED),
@@ -136,8 +154,10 @@ class TestCheckFrontDoorExposure:
     async def test_exposed_bearer_warns(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setenv("OCTOAGENT_HOST", "0.0.0.0")
-        monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "bearer")
+        self._instance_env(
+            tmp_path, monkeypatch,
+            "OCTOAGENT_HOST=0.0.0.0\nOCTOAGENT_FRONTDOOR_MODE=bearer\n",
+        )
         runner = _runner_with_tailscale(
             tmp_path,
             TailscaleProbeResult(supported=True, state=TailscaleState.NOT_INSTALLED),
@@ -149,8 +169,10 @@ class TestCheckFrontDoorExposure:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Tailscale serve 推荐组合：127.0.0.1 + bearer → safe。"""
-        monkeypatch.setenv("OCTOAGENT_HOST", "127.0.0.1")
-        monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "bearer")
+        self._instance_env(
+            tmp_path, monkeypatch,
+            "OCTOAGENT_HOST=127.0.0.1\nOCTOAGENT_FRONTDOOR_MODE=bearer\n",
+        )
         runner = _runner_with_tailscale(
             tmp_path,
             TailscaleProbeResult(supported=True, state=TailscaleState.NOT_INSTALLED),

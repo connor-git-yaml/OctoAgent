@@ -125,16 +125,20 @@ def _set_front_door_mode(cfg, root, mode: str) -> None:
     save_config(cfg, root)
 
 
-def _token_hint_lines(token_env: str) -> list[str]:
+def _token_hint_lines(token_env: str, root) -> list[str]:
     """bearer token 未设时的提示（给强 token 建议 + 强调走 .env 不落 config）。
 
     ``token_env`` 为运行时实际读取的变量名（尊重用户自定义，Codex review P2）。
+    ``root`` 为本次实际加载的实例根——Codex 第五轮 P2：非默认实例根
+    （``OCTOAGENT_PROJECT_ROOT``）下提示路径必须指向真实 root 的 .env，否则用户照
+    默认 ``~/.octoagent/.env`` 写，服务读的是别处，重启后仍 503。
     """
     suggested = secrets.token_urlsafe(32)
+    env_path = root / ".env"
     return [
         f"[yellow]提醒：bearer 模式需要设置 token 环境变量 {token_env}[/yellow]",
         "  手机访问 Web UI 时在页面输入此 token（SSE 用 access_token 查询参数）。",
-        "  建议在 ~/.octoagent/.env 追加（强随机值，勿写进 octoagent.yaml）：",
+        f"  建议在 {env_path} 追加（强随机值，勿写进 octoagent.yaml）：",
         f"    [dim]{token_env}={suggested}[/dim]",
     ]
 
@@ -250,7 +254,7 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
     lines.append("[green]Tailscale serve 已启用[/green]")
     lines.append(f"[bold]手机访问：{serve.published_url}[/bold]")
     if not env.get(token_env, "").strip():
-        lines.extend(_token_hint_lines(token_env))
+        lines.extend(_token_hint_lines(token_env, root))
     if shadow_warn:
         lines.append(shadow_warn)
     lines.append(
