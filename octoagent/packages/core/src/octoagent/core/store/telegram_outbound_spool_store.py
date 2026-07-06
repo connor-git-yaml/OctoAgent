@@ -28,6 +28,7 @@ class OutboundSpoolItem:
     text: str
     reply_to_message_id: str
     message_thread_id: str
+    reply_thread_root_id: str
     disable_notification: bool
     task_id: str
     attempts: int
@@ -50,6 +51,7 @@ class SqliteTelegramOutboundSpoolStore:
         text: str,
         reply_to_message_id: str = "",
         message_thread_id: str = "",
+        reply_thread_root_id: str = "",
         disable_notification: bool = False,
         task_id: str = "",
         created_at: float,
@@ -61,16 +63,17 @@ class SqliteTelegramOutboundSpoolStore:
             """
             INSERT INTO telegram_outbound_spool (
                 channel, chat_id, text, reply_to_message_id, message_thread_id,
-                disable_notification, task_id, attempts, next_retry_at, status,
-                last_error, created_at
+                reply_thread_root_id, disable_notification, task_id, attempts,
+                next_retry_at, status, last_error, created_at
             )
-            VALUES ('telegram', ?, ?, ?, ?, ?, ?, 0, ?, 'pending', ?, ?)
+            VALUES ('telegram', ?, ?, ?, ?, ?, ?, ?, 0, ?, 'pending', ?, ?)
             """,
             (
                 chat_id,
                 text,
                 reply_to_message_id,
                 message_thread_id,
+                reply_thread_root_id,
                 1 if disable_notification else 0,
                 task_id,
                 next_retry_at,
@@ -89,8 +92,8 @@ class SqliteTelegramOutboundSpoolStore:
         cursor = await self._conn.execute(
             """
             SELECT id, chat_id, text, reply_to_message_id, message_thread_id,
-                   disable_notification, task_id, attempts, next_retry_at,
-                   status, last_error, created_at
+                   reply_thread_root_id, disable_notification, task_id, attempts,
+                   next_retry_at, status, last_error, created_at
             FROM telegram_outbound_spool
             WHERE status = 'pending' AND next_retry_at <= ?
             ORDER BY next_retry_at ASC, id ASC
@@ -156,11 +159,12 @@ class SqliteTelegramOutboundSpoolStore:
             text=str(row[2]),
             reply_to_message_id=str(row[3]),
             message_thread_id=str(row[4]),
-            disable_notification=bool(row[5]),
-            task_id=str(row[6]),
-            attempts=int(row[7]),
-            next_retry_at=float(row[8]),
-            status=str(row[9]),
-            last_error=str(row[10]),
-            created_at=float(row[11]),
+            reply_thread_root_id=str(row[5]),
+            disable_notification=bool(row[6]),
+            task_id=str(row[7]),
+            attempts=int(row[8]),
+            next_retry_at=float(row[9]),
+            status=str(row[10]),
+            last_error=str(row[11]),
+            created_at=float(row[12]),
         )

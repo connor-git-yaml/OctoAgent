@@ -388,6 +388,130 @@ async def test_spool_failure_degrades_gracefully(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_drain_reregisters_reply_thread_root(tmp_path: Path) -> None:
+    """Codex P2：群聊 reply-thread 任务结果首发失败入队时保存 root id；
+    drain 补发成功后登记新 message_id → root 映射（用户回复补发消息落回原线程）。"""
+    _write_config(tmp_path)
+    from octoagent.provider.dx.telegram_pairing import TelegramStateStore
+
+    store_group = await create_store_group(
+        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
+    )
+    state_store = TelegramStateStore(tmp_path)
+    # 首发失败 → 入队（带 reply_thread_root_id）
+    service = TelegramGatewayService(
+        project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
+        state_store=state_store, bot_client=_FailBot(),
+    )
+    await service._send_or_spool(
+        {"chat_id": "-100", "reply_thread_root_id": "88"}, "群聊补发", task_id="t"
+    )
+    due = await store_group.telegram_outbound_spool_store.list_due(now=1e12)
+    assert due[0].reply_thread_root_id == "88"
+
+    # 换成功 bot drain（send_message 返回 message_id=555）
+    service._bot_client = _OKBot()
+    await service._drain_outbound_spool()
+    # 补发消息 message_id=555 → root=88 映射已登记，用户回复 555 能解析回 88
+    resolved = state_store.resolve_reply_thread_root(chat_id="-100", message_id="555")
+    assert resolved == "88"
+    await store_group.close()
+
+
+@pytest.mark.asyncio
+async def test_webhook_inbound_triggers_spool_drain(tmp_path: Path) -> None:
+    """Codex P1：webhook 模式无 polling loop——每次 inbound webhook 顺带 drain
+    到期 spool，使 webhook 模式出站补偿真正生效（不只靠进程重启）。"""
+    import os
+
+    # webhook 模式配置 + 授权用户（让 inbound 走完整路径）
+    from octoagent.gateway.services.config.config_schema import (
+        ChannelsConfig,
+        OctoAgentConfig,
+        TelegramChannelConfig,
+    )
+    from octoagent.gateway.services.config.config_wizard import save_config
+    from octoagent.provider.dx.telegram_pairing import TelegramStateStore
+
+    save_config(
+        OctoAgentConfig(
+            updated_at="2026-07-06",
+            channels=ChannelsConfig(
+                telegram=TelegramChannelConfig(
+                    enabled=True,
+                    mode="webhook",
+                    webhook_url="https://example.com/api/telegram/webhook",
+                    dm_policy="open",
+                )
+            ),
+        ),
+        tmp_path,
+    )
+    os.environ["TELEGRAM_BOT_TOKEN"] = "test-token"
+    try:
+        store_group = await create_store_group(
+            str(tmp_path / "g.db"), str(tmp_path / "artifacts")
+        )
+        # 预置一条到期 spool 项（模拟上次 notify 失败留下的待发）
+        await store_group.telegram_outbound_spool_store.enqueue(
+            chat_id="1", text="待补发", created_at=0.0, next_retry_at=0.0
+        )
+        ok_bot = _OKBot()
+
+        class _FakeRunner:
+            async def enqueue(self, *a, **k):
+                return None
+
+        service = TelegramGatewayService(
+            project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
+            task_runner=_FakeRunner(), state_store=TelegramStateStore(tmp_path),
+            bot_client=ok_bot,
+        )
+        # 一条 inbound webhook（open dm_policy → 授权）
+        await service.handle_webhook_update(
+            {
+                "update_id": 500,
+                "message": {
+                    "message_id": 1,
+                    "text": "hi",
+                    "chat": {"id": 2, "type": "private"},
+                    "from": {"id": 2, "username": "u", "first_name": "U"},
+                },
+            }
+        )
+        # inbound webhook 触发了 drain → 待补发消息已送出
+        assert any(m["text"] == "待补发" for m in ok_bot.sent)
+        assert await store_group.telegram_outbound_spool_store.count_pending() == 0
+        await store_group.close()
+    finally:
+        os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_drain_skips_when_locked(tmp_path: Path) -> None:
+    """串行锁：drain 进行中再次调用 drain 直接跳过（不重复取同批行）。"""
+    _write_config(tmp_path)
+    store_group = await create_store_group(
+        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
+    )
+    service = TelegramGatewayService(
+        project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
+        bot_client=_OKBot(),
+    )
+    # 手动持锁 → drain 应立即返回不动
+    await service._spool_drain_lock.acquire()
+    try:
+        await store_group.telegram_outbound_spool_store.enqueue(
+            chat_id="1", text="x", created_at=0.0, next_retry_at=0.0
+        )
+        await service._drain_outbound_spool()  # 锁被占 → 跳过
+        assert await store_group.telegram_outbound_spool_store.count_pending() == 1
+    finally:
+        service._spool_drain_lock.release()
+    await store_group.close()
+
+
+@pytest.mark.asyncio
 async def test_flip_bot_drain_recovers_after_transient_failures(tmp_path: Path) -> None:
     """端到端：入队 → 数次 drain 失败（退避）→ 恢复后 drain 成功清账。"""
     _write_config(tmp_path)

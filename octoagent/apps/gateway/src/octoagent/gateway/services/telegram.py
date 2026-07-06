@@ -328,6 +328,10 @@ class TelegramGatewayService:
         self._tts_service = tts_service  # F110:None = TTS 未启用（优雅降级）
         self._polling_task: asyncio.Task[None] | None = None
         self._stop_event = asyncio.Event()
+        # F131：出站 spool drain 串行锁——webhook 模式并发 inbound 可能并发触发 drain，
+        # 单进程用锁串行化，避免两个 drain 各自 list_due 取到同一行重复发（polling
+        # 模式单 loop 本就串行，锁在此路径无竞争、开销可忽略）。
+        self._spool_drain_lock = asyncio.Lock()
         self._operator_inbox_service = None
         self._operator_action_service = None
         self._control_plane_service = None
@@ -446,7 +450,13 @@ class TelegramGatewayService:
             if secret_token != expected_secret:
                 return TelegramIngestResult(status="unauthorized", detail="invalid_webhook_secret")
 
-        return await self._ingest_update(update)
+        result = await self._ingest_update(update)
+        # Codex P1：webhook 模式无 polling loop 周期 drain——借每次 inbound webhook
+        # 顺带 drain 到期 spool（活跃用户 inbound 提供自然 drain 节奏），使 webhook
+        # 模式出站补偿真正生效而非只靠进程重启。drain 有串行锁 + 全降级，不阻断入站。
+        with contextlib.suppress(Exception):
+            await self._drain_outbound_spool()
+        return result
 
     async def _polling_loop(self) -> None:
         # F131：连续失败次数——驱动指数退避（成功一轮后 reset），断网/双开时不 busy-loop。
@@ -533,6 +543,9 @@ class TelegramGatewayService:
         chat_id = str(target.get("chat_id", "")).strip()
         reply_to = str(target.get("reply_to_message_id", "") or "").strip()
         thread_id = str(target.get("message_thread_id", "") or "").strip()
+        # Codex P2：群聊 reply-thread 根 id——首发失败入队时一并持久化，drain 补发成功后
+        # 据此登记新 message_id → root 映射，用户回复补发消息仍能落回原线程。
+        reply_thread_root_id = str(target.get("reply_thread_root_id", "") or "").strip()
         try:
             sent_message = await self._bot_client.send_message(
                 chat_id,
@@ -548,6 +561,7 @@ class TelegramGatewayService:
                 text=text,
                 reply_to_message_id=reply_to,
                 message_thread_id=thread_id,
+                reply_thread_root_id=reply_thread_root_id,
                 disable_notification=disable_notification,
                 task_id=task_id,
                 error=str(exc),
@@ -561,6 +575,7 @@ class TelegramGatewayService:
         text: str,
         reply_to_message_id: str,
         message_thread_id: str,
+        reply_thread_root_id: str = "",
         disable_notification: bool,
         task_id: str,
         error: str,
@@ -582,6 +597,7 @@ class TelegramGatewayService:
                 text=text,
                 reply_to_message_id=reply_to_message_id,
                 message_thread_id=message_thread_id,
+                reply_thread_root_id=reply_thread_root_id,
                 disable_notification=disable_notification,
                 task_id=task_id,
                 created_at=now,
@@ -606,60 +622,77 @@ class TelegramGatewayService:
     async def _drain_outbound_spool(self) -> None:
         """取出到期待发消息逐条重发（AC-6/7/9）。全程降级不崩（AC-10）。
 
-        成功 → mark_sent（删行，不重复发）；失败未超上限 → mark_retry（退避延后）；
-        超 _SPOOL_MAX_ATTEMPTS → mark_failed（落档，不再 drain）。
+        成功 → mark_sent（删行，不重复发）+ 补登记 reply-thread 映射（Codex P2）；
+        失败未超上限 → mark_retry（退避延后）；超 _SPOOL_MAX_ATTEMPTS → mark_failed。
+
+        串行锁：webhook 模式并发 inbound 可能并发触发——若已有 drain 在跑就直接跳过
+        （非阻塞 try-acquire），避免两个 drain 取到同一批行重复发。
         """
         store = self._spool_store()
         if store is None or self._bot_client is None:
             return
-        try:
-            due = await store.list_due(time.time())
-        except Exception:
-            logger.warning("telegram_outbound_spool_list_failed", exc_info=True)
-            return
-        for item in due:
+        if self._spool_drain_lock.locked():
+            return  # 已有 drain 在跑，跳过（下轮/下次 inbound 会再触发）
+        async with self._spool_drain_lock:
             try:
-                await self._bot_client.send_message(
-                    item.chat_id,
-                    item.text,
-                    reply_to_message_id=item.reply_to_message_id or None,
-                    message_thread_id=item.message_thread_id or None,
-                    disable_notification=item.disable_notification,
-                )
-            except Exception as exc:
-                attempts = item.attempts + 1
-                if attempts >= _SPOOL_MAX_ATTEMPTS:
-                    with contextlib.suppress(Exception):
-                        await store.mark_failed(
-                            item.id, attempts=attempts, last_error=str(exc)
+                due = await store.list_due(time.time())
+            except Exception:
+                logger.warning("telegram_outbound_spool_list_failed", exc_info=True)
+                return
+            for item in due:
+                try:
+                    sent_message = await self._bot_client.send_message(
+                        item.chat_id,
+                        item.text,
+                        reply_to_message_id=item.reply_to_message_id or None,
+                        message_thread_id=item.message_thread_id or None,
+                        disable_notification=item.disable_notification,
+                    )
+                except Exception as exc:
+                    attempts = item.attempts + 1
+                    if attempts >= _SPOOL_MAX_ATTEMPTS:
+                        with contextlib.suppress(Exception):
+                            await store.mark_failed(
+                                item.id, attempts=attempts, last_error=str(exc)
+                            )
+                        logger.warning(
+                            "telegram_outbound_spool_failed_final spool_id=%s "
+                            "chat_id=%s attempts=%s error=%s",
+                            item.id,
+                            item.chat_id,
+                            attempts,
+                            str(exc),
                         )
-                    logger.warning(
-                        "telegram_outbound_spool_failed_final spool_id=%s "
-                        "chat_id=%s attempts=%s error=%s",
+                    else:
+                        next_retry_at = time.time() + _compute_spool_retry_delay(attempts)
+                        with contextlib.suppress(Exception):
+                            await store.mark_retry(
+                                item.id,
+                                attempts=attempts,
+                                next_retry_at=next_retry_at,
+                                last_error=str(exc),
+                            )
+                    continue
+                # 成功 → 删行（不重复发）。
+                with contextlib.suppress(Exception):
+                    await store.mark_sent(item.id)
+                    logger.info(
+                        "telegram_outbound_spool_delivered spool_id=%s chat_id=%s attempts=%s",
                         item.id,
                         item.chat_id,
-                        attempts,
-                        str(exc),
+                        item.attempts,
                     )
-                else:
-                    next_retry_at = time.time() + _compute_spool_retry_delay(attempts)
-                    with contextlib.suppress(Exception):
-                        await store.mark_retry(
-                            item.id,
-                            attempts=attempts,
-                            next_retry_at=next_retry_at,
-                            last_error=str(exc),
-                        )
-                continue
-            # 成功 → 删行（不重复发）。
-            with contextlib.suppress(Exception):
-                await store.mark_sent(item.id)
-                logger.info(
-                    "telegram_outbound_spool_delivered spool_id=%s chat_id=%s attempts=%s",
-                    item.id,
-                    item.chat_id,
-                    item.attempts,
-                )
+                # Codex P2：补发成功后登记 reply-thread 映射——群聊 reply-thread 任务结果
+                # 首发失败入队时保存了 reply_thread_root_id，补发成功后登记新 message_id，
+                # 使用户回复补发消息时 resolve_reply_thread_root 仍能找到原线程根。
+                if item.reply_thread_root_id:
+                    self._remember_outbound_reply_thread(
+                        {
+                            "chat_id": item.chat_id,
+                            "reply_thread_root_id": item.reply_thread_root_id,
+                        },
+                        sent_message,
+                    )
 
     async def _ingest_update(self, update: Mapping[str, Any] | Any) -> TelegramIngestResult:
         payload = self._coerce_update(update)

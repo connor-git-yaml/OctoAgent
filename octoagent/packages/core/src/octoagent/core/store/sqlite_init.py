@@ -259,19 +259,20 @@ _CONVERSATION_BINDINGS_INDEXES = [
 # （对齐 notification_active 无 FK 设计）；重试语义靠 attempts/next_retry_at/status。
 _TELEGRAM_OUTBOUND_SPOOL_DDL = """
 CREATE TABLE IF NOT EXISTS telegram_outbound_spool (
-    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-    channel              TEXT NOT NULL DEFAULT 'telegram',
-    chat_id              TEXT NOT NULL,
-    text                 TEXT NOT NULL,
-    reply_to_message_id  TEXT NOT NULL DEFAULT '',
-    message_thread_id    TEXT NOT NULL DEFAULT '',
-    disable_notification INTEGER NOT NULL DEFAULT 0,
-    task_id              TEXT NOT NULL DEFAULT '',
-    attempts             INTEGER NOT NULL DEFAULT 0,
-    next_retry_at        REAL NOT NULL DEFAULT 0,
-    status               TEXT NOT NULL DEFAULT 'pending',
-    last_error           TEXT NOT NULL DEFAULT '',
-    created_at           REAL NOT NULL
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    channel               TEXT NOT NULL DEFAULT 'telegram',
+    chat_id               TEXT NOT NULL,
+    text                  TEXT NOT NULL,
+    reply_to_message_id   TEXT NOT NULL DEFAULT '',
+    message_thread_id     TEXT NOT NULL DEFAULT '',
+    reply_thread_root_id  TEXT NOT NULL DEFAULT '',
+    disable_notification  INTEGER NOT NULL DEFAULT 0,
+    task_id               TEXT NOT NULL DEFAULT '',
+    attempts              INTEGER NOT NULL DEFAULT 0,
+    next_retry_at         REAL NOT NULL DEFAULT 0,
+    status                TEXT NOT NULL DEFAULT 'pending',
+    last_error            TEXT NOT NULL DEFAULT '',
+    created_at            REAL NOT NULL
 );
 """
 
