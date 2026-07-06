@@ -193,18 +193,16 @@ def _resolve_front_door_mode(project_root: Path) -> str:
 
 
 def _resolve_startup_host() -> str:
-    """启动期解析实际绑定 host：``OCTOAGENT_HOST`` env 优先，回退扫 ``sys.argv``
-    的 ``--host``（best-effort）。
+    """启动期解析**实际绑定** host：``sys.argv`` 的 ``--host`` **优先**，回退
+    ``OCTOAGENT_HOST`` env，再默认 127.0.0.1。
 
-    Codex re-review P2：生产路径 run-octo-home.sh 用 ``--host
-    "${OCTOAGENT_HOST:-127.0.0.1}"`` 二者恒同步；但手动 ``uvicorn --host
-    0.0.0.0``（不设 env）会让纯 env 校验回退 127.0.0.1 漏判裸奔。此处补一层
-    argv 扫描兜住该路径。仍非万能（gunicorn / 编程式启动的 host 看不到）——
-    见 completion-report limitations。
+    ★ Codex 第六轮 P1：uvicorn 的 CLI ``--host`` 参数**覆盖** env——实际绑定以
+    argv 为准。若 env=127.0.0.1 但启动是 ``uvicorn --host 0.0.0.0``，真实绑定
+    是 0.0.0.0；env-优先会漏判裸奔。故 argv 显式 host 优先（更贴近真实绑定 +
+    更暴露侧保守）。生产 run-octo-home.sh 用 ``--host "${OCTOAGENT_HOST:-127.0.0.1}"``
+    二者恒同步，不受影响。仍非万能（gunicorn / 编程式 uvicorn.run(host=) 看不到）
+    ——见 completion-report limitations。
     """
-    env_host = os.environ.get("OCTOAGENT_HOST", "").strip()
-    if env_host:
-        return env_host
     argv = sys.argv
     for index, token in enumerate(argv):
         if token == "--host" and index + 1 < len(argv):
@@ -215,6 +213,9 @@ def _resolve_startup_host() -> str:
             candidate = token.split("=", 1)[1].strip()
             if candidate:
                 return candidate
+    env_host = os.environ.get("OCTOAGENT_HOST", "").strip()
+    if env_host:
+        return env_host
     return "127.0.0.1"
 
 

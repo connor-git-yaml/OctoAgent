@@ -484,11 +484,21 @@ def test_resolve_front_door_mode_defaults_loopback_when_no_config(
     assert gateway_main._resolve_front_door_mode(tmp_path) == "loopback"
 
 
-def test_resolve_startup_host_env_wins(monkeypatch) -> None:
-    """OCTOAGENT_HOST env 优先。"""
+def test_resolve_startup_host_argv_overrides_env(monkeypatch) -> None:
+    """★ Codex 第六轮 P1：argv --host 覆盖 env（uvicorn CLI 参数是真实绑定）。
+
+    env=127.0.0.1 但 uvicorn --host 0.0.0.0 → 真实绑定 0.0.0.0，取 argv。"""
+    gateway_main = _import_gateway_main_safely(monkeypatch)
+    monkeypatch.setenv("OCTOAGENT_HOST", "127.0.0.1")
+    monkeypatch.setattr(gateway_main.sys, "argv", ["uvicorn", "--host", "0.0.0.0"])
+    assert gateway_main._resolve_startup_host() == "0.0.0.0"
+
+
+def test_resolve_startup_host_env_used_when_no_argv_host(monkeypatch) -> None:
+    """无 argv --host 时用 env。"""
     gateway_main = _import_gateway_main_safely(monkeypatch)
     monkeypatch.setenv("OCTOAGENT_HOST", "0.0.0.0")
-    monkeypatch.setattr(gateway_main.sys, "argv", ["uvicorn", "--host", "127.0.0.1"])
+    monkeypatch.setattr(gateway_main.sys, "argv", ["uvicorn", "app"])
     assert gateway_main._resolve_startup_host() == "0.0.0.0"
 
 

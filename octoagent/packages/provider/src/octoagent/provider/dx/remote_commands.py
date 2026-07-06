@@ -54,6 +54,27 @@ def _effective_env(root) -> dict[str, str]:
     return read_instance_effective_env(root)
 
 
+def _token_set_in_instance_env(root, token_env: str) -> bool:
+    """bearer token 是否在**实例 .env**（服务实际 source）里设了非空值。
+
+    Codex 第六轮 P2：不能看 `env`（含 shell）——自定义 token env（非 OCTOAGENT_
+    前缀）的 shell-only 值不会被 read_instance_effective_env 屏蔽，会误判"已设"
+    但托管服务不继承 → 重启后 bearer 缺 token → 受保护 API 全 503。故只查 .env。
+    """
+    try:
+        from dotenv import dotenv_values
+
+        for filename in (".env", ".env.litellm"):
+            env_path = root / filename
+            if env_path.exists():
+                value = dotenv_values(env_path).get(token_env)
+                if value is not None and value.strip():
+                    return True
+    except Exception:  # pragma: no cover - dotenv 缺失/读失败降级为"未设"
+        pass
+    return False
+
+
 def _resolve_port(env: dict[str, str]) -> int:
     raw = env.get("OCTOAGENT_PORT", "").strip()
     if raw.isdigit():
@@ -253,7 +274,9 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
 
     lines.append("[green]Tailscale serve 已启用[/green]")
     lines.append(f"[bold]手机访问：{serve.published_url}[/bold]")
-    if not env.get(token_env, "").strip():
+    # 只看实例 .env（服务真实 source），不看 shell——自定义 token env 的 shell-only
+    # 值托管服务不继承（Codex 第六轮 P2）。
+    if not _token_set_in_instance_env(root, token_env):
         lines.extend(_token_hint_lines(token_env, root))
     if shadow_warn:
         lines.append(shadow_warn)

@@ -52,13 +52,16 @@ def _build_runtime_descriptor(
     start_command: list[str]
     if instance_root is None:
         environment_overrides["OCTOAGENT_PROJECT_ROOT"] = str(project_root)
+        # F130：绑 127.0.0.1（最小暴露面，spec §0.3）——绑 0.0.0.0 + 默认
+        # front_door.mode=loopback 是「裸奔」组合（会被启动期 exit(78) 拒绝）。
+        # 远程访问走 `octo remote enable`（Tailscale serve + bearer），不绑外部网卡。
         start_command = [
             "uv",
             "run",
             "uvicorn",
             "octoagent.gateway.main:app",
             "--host",
-            "0.0.0.0",
+            "127.0.0.1",
             "--port",
             port,
         ]
@@ -284,7 +287,8 @@ def run_install_bootstrap(
                         "运行 octo doctor 检查项目健康度。",
                         (
                             "使用 uv run uvicorn octoagent.gateway.main:app "
-                            "--host 0.0.0.0 --port 8000 启动 gateway。"
+                            "--host 127.0.0.1 --port 8000 启动 gateway"
+                            "（远程访问走 `octo remote enable`，不绑 0.0.0.0）。"
                         ),
                     ]
                 )

@@ -389,11 +389,14 @@ class TestCodexReviewFixes:
             "MY_CUSTOM_TOKEN", ""
         )
 
-    def test_enable_token_hint_skipped_when_custom_token_set(
-        self, monkeypatch: pytest.MonkeyPatch
+    def test_enable_token_hint_skipped_when_custom_token_in_instance_env(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """自定义 token env 已设值 → 不提示（尊重用户配置）。"""
-        _patch_env(monkeypatch, MY_CUSTOM_TOKEN="already-set-value")
+        """自定义 token env 已在**实例 .env** 设值 → 不提示（尊重用户配置）。
+
+        Codex 第六轮 P2：token-set 判断只看实例 .env（服务真实 source），shell-only
+        值不算（托管服务不继承）。"""
+        _patch_env(monkeypatch)
 
         class _CfgCustomToken(_FakeConfig):
             def __init__(self) -> None:
@@ -402,6 +405,10 @@ class TestCodexReviewFixes:
 
         _patch_probe(monkeypatch, _READY)
         _patch_config(monkeypatch, _CfgCustomToken(), [])
+        (tmp_path / ".env").write_text(
+            "MY_CUSTOM_TOKEN=already-set-value\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
         monkeypatch.setattr(
             remote_commands,
             "enable_tailscale_serve",
@@ -410,6 +417,31 @@ class TestCodexReviewFixes:
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 0
         assert "MY_CUSTOM_TOKEN=" not in result.output  # 未提示追加
+
+    def test_enable_token_hint_shown_when_custom_token_shell_only(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """★ Codex 第六轮 P2：自定义 token env 只在 shell 设（不在实例 .env）→
+        仍提示（托管服务不继承 shell，重启会 503）。"""
+        _patch_env(monkeypatch, MY_CUSTOM_TOKEN="shell-only-value")
+
+        class _CfgCustomToken(_FakeConfig):
+            def __init__(self) -> None:
+                super().__init__(mode="loopback")
+                self.front_door.bearer_token_env = "MY_CUSTOM_TOKEN"
+
+        _patch_probe(monkeypatch, _READY)
+        _patch_config(monkeypatch, _CfgCustomToken(), [])
+        # 实例 .env 无该 token（只 shell 有）
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 0
+        assert "MY_CUSTOM_TOKEN" in result.output  # 仍提示设到 .env
 
     def test_disable_serve_reset_failure_exits_1(
         self, monkeypatch: pytest.MonkeyPatch
