@@ -110,6 +110,12 @@ async def get_control_delegation(control_plane=Depends(get_control_plane_service
     return (await control_plane.get_delegation_document()).model_dump(mode="json", by_alias=True)
 
 
+@router.get("/api/control/resources/automation")
+async def get_control_automation(control_plane=Depends(get_control_plane_service)):
+    """F132: 定时任务列表（Web AutomationCenter 数据源）。"""
+    return (await control_plane.get_automation_document()).model_dump(mode="json", by_alias=True)
+
+
 @router.get("/api/control/resources/diagnostics")
 async def get_control_diagnostics(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_diagnostics_summary()).model_dump(mode="json", by_alias=True)

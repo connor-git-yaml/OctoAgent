@@ -295,6 +295,11 @@ class EventType(StrEnum):
     PLUGIN_APPROVED = "PLUGIN_APPROVED"
     PLUGIN_CODE_CHANGED = "PLUGIN_CODE_CHANGED"
 
+    # F132 cron 自助工具 — cron.create/update/delete 的审计事件。
+    # payload: operation[create|update|delete] / job_id / name / action_id /
+    #   schedule_kind / schedule_expr / timezone / enabled。
+    AUTOMATION_JOB_MUTATED = "AUTOMATION_JOB_MUTATED"
+
 
 class ActorType(StrEnum):
     """操作者类型 -- 对齐 Blueprint §8.1.2"""

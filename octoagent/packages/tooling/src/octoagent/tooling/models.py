@@ -414,6 +414,14 @@ class CoreToolSet(BaseModel):
                                    # 回复"入口没暴露给我"，引导在生产走不通（与上面两个同款先例）。
                                    # 治理不受影响：写 REVIEW_REQUIRED 文件仍走 handler 内 Two-Phase
                                    # proposal→confirm（Core/deferred 是发现层，review_mode 是执行层）。
+            # F132 cron 自助工具：用户从手机让 Agent 建/改/删/列定时任务是 M8 P1 核心场景。
+            # 同 delegate_task/behavior.write_file 先例——不进 Core 会被压成 deferred → 弱 model
+            # 手机单轮场景须 tool_search 两跳不可靠。破坏性操作（delete/改 schedule）的治理
+            # 不受影响：走 handler 内 ApprovalGate Two-Phase（Core 是发现层，审批是执行层）。
+            "cron.list",           # 查现有定时任务（"我有哪些提醒"高频）
+            "cron.create",         # 建定时任务/提醒
+            "cron.update",         # 改/暂停/恢复定时任务
+            "cron.delete",         # 删定时任务（走审批）
         ])
 
     def is_core(self, tool_name: str) -> bool:

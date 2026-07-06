@@ -106,6 +106,7 @@ class ControlPlaneService(TelegramCommandMixin):
         delegation_plane_service: Any = None,
         import_workbench_service: ImportWorkbenchService | None = None,
         policy_engine: Any = None,
+        notification_service: Any = None,
     ) -> None:
         # 构建共享上下文
         self._ctx = ControlPlaneContext(
@@ -133,6 +134,7 @@ class ControlPlaneService(TelegramCommandMixin):
             policy_engine=policy_engine,
             update_service=update_service,
             automation_store=AutomationStore(project_root),
+            notification_service=notification_service,
         )
 
         self._stores = store_group

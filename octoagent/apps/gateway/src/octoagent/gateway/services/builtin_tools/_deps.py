@@ -66,6 +66,7 @@ class ToolDeps:
     _approval_manager: Any = None  # F101 Phase B HIGH-01 v3: ApprovalManager 实例（escalate_permission 注册用）
     _notification_service: Any = None  # F101 Phase C T-C-07: NotificationService 实例（WAITING_APPROVAL 通知用）
     _workspace_git: Any = None  # F107 W2: WorkspaceGitStore（file-mutating 工具写前快照）
+    _automation_scheduler: Any = None  # F132: AutomationSchedulerService（cron 工具落盘后 sync_job/remove_job）
 
     @property
     def workspace_git(self):

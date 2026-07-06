@@ -417,16 +417,24 @@ class TestCoreToolSet:
         defaults = CoreToolSet.default()
         assert "tool_search" in defaults.tool_names
 
-    def test_default_has_12_tools(self) -> None:
+    def test_default_has_16_tools(self) -> None:
         defaults = CoreToolSet.default()
         # 9 核心工具 + graph_pipeline + delegate_task（agent_runtime 入口的两个 1 跳工具，
         # 避免绕 tool_search 慢路径触发 e2e timeout）
         # + behavior.write_file（F135 gap-1：首次引导填 USER.md 闭环高频且语义关键，
         #   不进 Core 会被压成 deferred → tool_search 两跳 → 弱 model 不可靠）
-        assert len(defaults.tool_names) == 12
+        # + cron.list/create/update/delete（F132：手机自助建定时任务，同款 Core 先例）
+        assert len(defaults.tool_names) == 16
         assert "graph_pipeline" in defaults.tool_names
         assert "delegate_task" in defaults.tool_names
         assert "behavior.write_file" in defaults.tool_names
+        for _cron in ("cron.list", "cron.create", "cron.update", "cron.delete"):
+            assert _cron in defaults.tool_names
+
+    def test_cron_tools_in_core(self) -> None:
+        """F132 AC-4.1: cron 自助 4 工具进 Core。"""
+        names = CoreToolSet.default().tool_names
+        assert {"cron.list", "cron.create", "cron.update", "cron.delete"} <= set(names)
 
     def test_is_core(self) -> None:
         ts = CoreToolSet(tool_names=["tool_search", "echo"])

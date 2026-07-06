@@ -1490,6 +1490,10 @@ class OctoHarness:
             capability_pack_service=app.state.capability_pack_service,
             delegation_plane_service=app.state.delegation_plane_service,
             policy_engine=None,
+            # F132: reminder.notify action 用 NotificationService 交付用户提醒。
+            # notification_service 由 _bootstrap_executors（先于本方法，行 179<181）创建，
+            # 此处已非 None。
+            notification_service=getattr(app.state, "notification_service", None),
         )
         app.state.automation_scheduler = AutomationSchedulerService(
             control_plane_service=app.state.control_plane_service,
@@ -1498,6 +1502,11 @@ class OctoHarness:
         app.state.control_plane_service.bind_automation_scheduler(
             app.state.automation_scheduler,
         )
+        # F132: 把 automation_scheduler late-bind 到 ToolDeps，供 cron.create/update/delete
+        # 落盘后立即 sync_job/remove_job（否则新 job 要等重启才生效）。同 _snapshot_store 模式。
+        _cp_tool_deps = getattr(app.state.capability_pack_service, "_tool_deps", None)
+        if _cp_tool_deps is not None:
+            _cp_tool_deps._automation_scheduler = app.state.automation_scheduler
         app.state.control_plane_service.bind_proxy_manager(app.state.proxy_manager)
         # Feature 065: 注册系统内置自动化作业（在 scheduler.startup 之前）
         await app.state.control_plane_service.ensure_system_automation_jobs()

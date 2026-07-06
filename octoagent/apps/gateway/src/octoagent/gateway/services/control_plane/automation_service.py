@@ -77,6 +77,9 @@ class AutomationDomainService(DomainServiceBase):
             "automation.pause": lambda req: self._handle_automation_pause_resume(req, enable=False),
             "automation.resume": lambda req: self._handle_automation_pause_resume(req, enable=True),
             "automation.delete": self._handle_automation_delete,
+            # F132: cron 自助工具的默认交付动作——把用户自定义提醒推送到 channel。
+            # 这是"cron→交付用户"缺口的补齐（此前 automation 只能跑管理动作，无法给用户发提醒）。
+            "reminder.notify": self._handle_reminder_notify,
         }
 
     def document_routes(self) -> dict[str, Callable[..., Coroutine[Any, Any, Any]]]:
@@ -432,6 +435,69 @@ class AutomationDomainService(DomainServiceBase):
                     target_type="automation_job", target_id=job_id, label=job.name
                 )
             ],
+        )
+
+    async def _handle_reminder_notify(
+        self, request: ActionRequestEnvelope
+    ) -> ActionResultEnvelope:
+        """F132: 交付一条用户自定义提醒（cron 自助工具的默认交付动作）。
+
+        触发时把 ``params.message`` 经 NotificationService 推到用户 channel。
+        H1 守界：这是**通知**（系统提醒卡片），不是主 Agent「假装说话」——主 Agent 是
+        建 job 的人，到点由通知系统提醒用户，用户看到后可再对话。与 F102 daily summary 同构。
+
+        降级（Constitution #6）：notification_service 缺失/推送失败 → 记 warning + 返回
+        COMPLETED（不 raise——automation run 不因通知通道不可用而标 rejected 制造噪声）。
+        """
+        message = str(request.params.get("message", "")).strip()
+        if not message:
+            raise ControlPlaneActionError(
+                "REMINDER_MESSAGE_REQUIRED", "reminder.notify 需要非空 message 参数"
+            )
+        job_id = str(request.context.get("automation_job_id", "")).strip()
+        run_id = str(request.context.get("automation_run_id", "")).strip()
+
+        notification_service = getattr(self._ctx, "notification_service", None)
+        delivered = False
+        if notification_service is not None:
+            # 延迟导入避免 control_plane 包对 notification 的构造期依赖。
+            from octoagent.gateway.services.notification import NotificationPriority
+
+            channels_raw = request.params.get("channels")
+            channels = (
+                frozenset(str(c) for c in channels_raw)
+                if isinstance(channels_raw, (list, tuple, set)) and channels_raw
+                else None
+            )
+            try:
+                await notification_service.notify_task_state_change(
+                    # 用 job_id 作为 task_id 承载（automation 无真实 task）；无 job_id 时降级占位。
+                    task_id=job_id or "_reminder",
+                    event_type="REMINDER_NOTIFY",
+                    payload={"message": message, "job_id": job_id, "run_id": run_id},
+                    priority=NotificationPriority.MEDIUM,
+                    # run_id 作为去重维度：同一 run 只推一次；不同 run（每次触发）各自推送。
+                    state_transition_event_id=run_id,
+                    session_id=None,
+                    channels=channels,
+                )
+                delivered = True
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "reminder_notify_delivery_failed",
+                    job_id=job_id,
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                )
+        else:
+            log.warning("reminder_notify_no_notification_service", job_id=job_id)
+
+        return self._completed_result(
+            request=request,
+            code="REMINDER_NOTIFIED" if delivered else "REMINDER_NOTIFY_DEGRADED",
+            message="已推送提醒" if delivered else "提醒未推送（通知通道不可用，已降级）",
+            data={"delivered": delivered, "job_id": job_id},
+            resource_refs=[self._resource_ref("automation_job", "automation:jobs")],
         )
 
     # ------------------------------------------------------------------

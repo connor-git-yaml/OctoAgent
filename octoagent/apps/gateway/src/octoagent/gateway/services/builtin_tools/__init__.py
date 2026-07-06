@@ -16,6 +16,7 @@ from . import (
     ask_back_tools,
     browser_tools,
     config_tools,
+    cron_tools,  # F132 cron 自助工具
     delegate_task_tool,
     delegation_tools,
     filesystem_tools,
@@ -56,6 +57,8 @@ async def register_all(broker, deps: ToolDeps) -> None:
     await user_profile_tools.register(broker, deps)
     await delegate_task_tool.register(broker, deps)
     await graph_pipeline_tool.register(broker, deps)
+    # F132: cron 自助工具（cron.create/update/delete）
+    await cron_tools.register(broker, deps)
     # F099 Phase B: 三工具（ask_back / request_input / escalate_permission）
     await ask_back_tools.register(broker, deps)
     # F126 项3: artifact read-back 工具

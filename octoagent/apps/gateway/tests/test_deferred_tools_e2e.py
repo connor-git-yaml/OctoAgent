@@ -199,6 +199,25 @@ def _build_test_tool_metas() -> list[ToolMeta]:
         # synthetic 更贴近生产、非降阈值 gaming SC-001。
         _make_tool_meta("project.inspect", "查看 project 详情", tool_group="project"),
         _make_tool_meta("config.inspect", "查看配置", tool_group="config"),
+        # F132：CoreToolSet 又新增 cron.list/create/update/delete（4 个）后，同 F135 逻辑
+        # 补代表性 deferred 工具，恢复生产比例（生产 deferred 工具远多于此小样本：
+        # 真实 pack 50+ 工具、deferred ≫ core）。以下均为真实存在的 deferred 工具，非虚构。
+        _make_tool_meta("gateway.inspect", "查看 gateway 状态", tool_group="runtime"),
+        _make_tool_meta("nodes.list", "列出 runtime 节点", tool_group="runtime"),
+        _make_tool_meta("artifact.list", "列出任务产物", tool_group="artifact"),
+        _make_tool_meta("config.add_provider", "添加 provider", tool_group="config",
+                        side_effect_level=SideEffectLevel.REVERSIBLE),
+        _make_tool_meta("config.set_model_alias", "设置模型别名", tool_group="config",
+                        side_effect_level=SideEffectLevel.REVERSIBLE),
+        _make_tool_meta("config.sync", "同步配置", tool_group="config",
+                        side_effect_level=SideEffectLevel.REVERSIBLE),
+        _make_tool_meta("mcp.install", "安装 MCP 服务器", tool_group="mcp",
+                        side_effect_level=SideEffectLevel.REVERSIBLE),
+        _make_tool_meta("mcp.uninstall", "卸载 MCP 服务器", tool_group="mcp",
+                        side_effect_level=SideEffectLevel.REVERSIBLE),
+        _make_tool_meta("user_profile.read", "读取用户档案", tool_group="user_profile"),
+        _make_tool_meta("user_profile.observe", "观察用户偏好", tool_group="user_profile",
+                        side_effect_level=SideEffectLevel.REVERSIBLE),
     ]
     return core_metas + deferred_metas
 

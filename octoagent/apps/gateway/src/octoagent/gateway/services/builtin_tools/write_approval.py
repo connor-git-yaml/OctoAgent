@@ -75,6 +75,183 @@ def _build_unified_diff(
     return diff_text
 
 
+async def gate_destructive_action(
+    deps: Any,
+    *,
+    exec_ctx: Any,
+    tool_name: str,
+    operation_summary: str,
+    args_summary: str,
+) -> WriteApprovalOutcome:
+    """通用破坏性操作的服务端 Two-Phase 审批门（F132 cron.delete / cron.update 复用）。
+
+    与 ``gate_behavior_write`` 同款序列（request_approval → ApprovalManager 双注册 →
+    mark_waiting_approval → notify_approval_request(CRITICAL) → wait_for_decision(300s) →
+    条件恢复 RUNNING），但**不涉及文件 diff**——operation_summary 由调用方拼好（如
+    「删除定时任务『交周报』（每周一 09:00）」）。
+
+    不 raise（任何异常 → fail-closed，decision=unavailable，调用方不得执行破坏性操作）。
+    降级分层（Constitution #6）：approval_gate 缺失 → fail-closed；manager/notification
+    缺失 → 仅降级对应通道，审批主路径继续。
+
+    Args:
+        deps: ToolDeps（读 _approval_gate / _approval_manager / _notification_service）。
+        exec_ctx: 当前 ExecutionRuntimeContext（session_id / task_id / WAITING_APPROVAL 转移）。
+        tool_name: 工具名（审批卡片 policy_label / 通知 tool_name）。
+        operation_summary: 人读操作摘要（审批卡片 risk_explanation 展示）。
+        args_summary: 参数摘要（ApprovalManager tool_args_summary 展示）。
+    """
+    approval_gate = getattr(deps, "_approval_gate", None)
+    if approval_gate is None:
+        log.warning(
+            "destructive_action_approval_gate_unavailable",
+            tool_name=tool_name,
+            hint="approval_gate is None，破坏性操作 fail-closed 拒绝",
+        )
+        return WriteApprovalOutcome(
+            decision="unavailable",
+            reason=(
+                f"APPROVAL_UNAVAILABLE: 审批通道不可用，{tool_name} 已拒绝（未执行）"
+            ),
+        )
+
+    task_id = getattr(exec_ctx, "task_id", "") or ""
+    session_id = getattr(exec_ctx, "session_id", "") or ""
+
+    try:
+        handle = await approval_gate.request_approval(
+            session_id=session_id,
+            tool_name=tool_name,
+            scan_result=None,  # 非 ThreatScanner 触发（Two-Phase 治理门）
+            operation_summary=operation_summary,
+            diff_content="",
+            task_id=task_id,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "destructive_action_approval_request_failed",
+            tool_name=tool_name,
+            error=str(exc),
+        )
+        return WriteApprovalOutcome(
+            decision="unavailable",
+            reason=f"APPROVAL_UNAVAILABLE: 审批请求创建失败，{tool_name} 已拒绝（未执行）",
+        )
+
+    # ApprovalManager 双注册（Web resolve 依赖，否则 404）。
+    approval_manager = getattr(deps, "_approval_manager", None)
+    if approval_manager is not None:
+        try:
+            from datetime import UTC, datetime, timedelta
+
+            from octoagent.core.models.enums import SideEffectLevel
+            from octoagent.policy.models import ApprovalRequest
+
+            _now = datetime.now(tz=UTC)
+            await approval_manager.register(
+                ApprovalRequest(
+                    approval_id=handle.handle_id,
+                    task_id=task_id,
+                    tool_name=tool_name,
+                    tool_args_summary=args_summary,
+                    risk_explanation=operation_summary,
+                    policy_label=tool_name,
+                    side_effect_level=SideEffectLevel.IRREVERSIBLE,
+                    expires_at=_now
+                    + timedelta(seconds=BEHAVIOR_WRITE_APPROVAL_TIMEOUT_SECONDS),
+                    created_at=_now,
+                    # 每次操作独立审批——不写全局白名单（同 gate_behavior_write DP-3）。
+                    allow_always_eligible=False,
+                )
+            )
+        except Exception as reg_exc:  # noqa: BLE001
+            log.warning(
+                "destructive_action_approval_manager_register_failed",
+                approval_id=handle.handle_id,
+                tool_name=tool_name,
+                error=str(reg_exc),
+            )
+    else:
+        log.debug(
+            "destructive_action_approval_manager_unavailable",
+            approval_id=handle.handle_id,
+        )
+
+    try:
+        await exec_ctx.mark_waiting_approval()
+    except Exception as mark_exc:  # noqa: BLE001
+        log.warning(
+            "destructive_action_approval_mark_waiting_failed",
+            task_id=task_id,
+            error=str(mark_exc),
+        )
+
+    notification_service = getattr(deps, "_notification_service", None)
+    if notification_service is not None:
+        try:
+            from ...services.notification import NotificationPriority
+
+            await notification_service.notify_approval_request(
+                task_id=task_id,
+                tool_name=tool_name,
+                ask_reason=operation_summary,
+                payload={
+                    "timeout_seconds": int(BEHAVIOR_WRITE_APPROVAL_TIMEOUT_SECONDS),
+                },
+                priority=NotificationPriority.CRITICAL,
+                state_transition_event_id=handle.handle_id,
+                session_id=session_id,
+            )
+        except Exception as notif_exc:  # noqa: BLE001
+            log.debug(
+                "destructive_action_approval_notification_failed",
+                task_id=task_id,
+                error=str(notif_exc),
+            )
+
+    decision = "rejected"
+    try:
+        decision = await approval_gate.wait_for_decision(
+            handle, timeout_seconds=BEHAVIOR_WRITE_APPROVAL_TIMEOUT_SECONDS
+        )
+    except Exception as wait_exc:  # noqa: BLE001
+        log.warning(
+            "destructive_action_approval_wait_failed",
+            approval_id=handle.handle_id,
+            error=str(wait_exc),
+        )
+
+    timed_out = getattr(handle, "operator", "") == "system_timeout"
+
+    # 条件恢复 RUNNING（同 gate_behavior_write DP-4）：approved / 显式拒绝 → 恢复；超时 → 不恢复。
+    if decision == "approved" or (decision == "rejected" and not timed_out):
+        try:
+            await exec_ctx.mark_running_from_waiting_approval()
+        except Exception as restore_exc:  # noqa: BLE001
+            log.warning(
+                "destructive_action_approval_restore_running_failed",
+                task_id=task_id,
+                error=str(restore_exc),
+            )
+
+    if decision == "approved":
+        return WriteApprovalOutcome(decision="approved", approval_id=handle.handle_id)
+    if timed_out:
+        return WriteApprovalOutcome(
+            decision="timeout",
+            approval_id=handle.handle_id,
+            reason=(
+                f"APPROVAL_TIMEOUT: 审批等待超时"
+                f"（{int(BEHAVIOR_WRITE_APPROVAL_TIMEOUT_SECONDS)}s），{tool_name} 未执行"
+            ),
+        )
+    return WriteApprovalOutcome(
+        decision="rejected",
+        approval_id=handle.handle_id,
+        reason=f"APPROVAL_REJECTED: 用户在审批卡片拒绝了本次{tool_name}，未执行",
+    )
+
+
 async def gate_behavior_write(
     deps: Any,
     *,

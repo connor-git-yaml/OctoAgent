@@ -482,6 +482,13 @@ def build_action_registry() -> ActionRegistryDocument:
             definition(
                 "automation.delete", "删除自动化任务", category="automation", risk_hint="medium"
             ),
+            # F132: cron 自助工具默认交付动作（定时提醒推送用户）。
+            definition(
+                "reminder.notify",
+                "定时提醒推送",
+                category="automation",
+                params_schema={"type": "object", "required": ["message"]},
+            ),
             definition(
                 "work.cancel",
                 "取消 Work",

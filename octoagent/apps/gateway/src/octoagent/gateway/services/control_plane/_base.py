@@ -165,6 +165,7 @@ class ControlPlaneContext:
         policy_engine: Any = None,
         update_service: Any = None,
         automation_store: Any = None,
+        notification_service: Any = None,
     ) -> None:
         self.project_root = project_root
         self.store_group = store_group
@@ -181,6 +182,8 @@ class ControlPlaneContext:
         self.policy_engine = policy_engine
         self.update_service = update_service
         self.automation_store = automation_store
+        # F132: reminder.notify action 交付用户提醒（None 时降级：job 触发但不推送）
+        self.notification_service = notification_service
         # 跨 service 调用注册表（coordinator 构建后一次性注入）
         self.services: ControlPlaneServiceRegistry | None = None
 
