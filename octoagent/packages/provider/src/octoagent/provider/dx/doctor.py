@@ -789,17 +789,26 @@ class DoctorRunner:
         )
 
     def _resolve_front_door_mode(self, env: dict[str, str] | None = None) -> str:
-        """跨源读当前 front_door.mode：env 覆盖 > octoagent.yaml > 默认 loopback。
+        """跨源读当前 front_door.mode：env 覆盖 > 托管实例 octoagent.yaml > loopback。
 
         与 ``frontdoor_auth._read_env_overrides`` 同一 env 名
         （``OCTOAGENT_FRONTDOOR_MODE``），保证 doctor 判定与运行时一致。
         ``env`` 传入实例生效 env（含 .env）；缺省回退 os.environ。
+
+        Codex re-review P2：yaml 与 env 一致从 ``resolve_instance_root()`` 读
+        （服务实际用的配置），不用 doctor 的 cwd ``self._root``——否则从源码/
+        任意目录跑 doctor 会误判 mode（实例是 bearer 却当默认 loopback）。
         """
         source = env if env is not None else os.environ
         env_mode = source.get("OCTOAGENT_FRONTDOOR_MODE", "").strip()
         if env_mode:
             return env_mode
-        cfg, _skip = self._load_config_safe("front_door_exposure")
+        try:
+            from octoagent.gateway.services.config.config_wizard import load_config
+
+            cfg = load_config(resolve_instance_root())
+        except Exception:
+            cfg = None
         if cfg is not None:
             front_door = getattr(cfg, "front_door", None)
             mode = getattr(front_door, "mode", None)

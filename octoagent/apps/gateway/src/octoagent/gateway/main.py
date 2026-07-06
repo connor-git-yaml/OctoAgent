@@ -70,7 +70,7 @@ from .services.capability_pack import CapabilityPackService
 from .services.control_plane import ControlPlaneService
 from .services.delegation_plane import DelegationPlaneService
 from .services.frontdoor_auth import FrontDoorGuard
-from .services.frontdoor_exposure import resolve_bind_host, validate_front_door_exposure
+from .services.frontdoor_exposure import validate_front_door_exposure
 from .services.llm_service import LLMService
 from .services.mcp_registry import McpRegistryService
 from .services.operator_actions import OperatorActionService
@@ -192,10 +192,36 @@ def _resolve_front_door_mode(project_root: Path) -> str:
     return str(cfg.front_door.mode)
 
 
+def _resolve_startup_host() -> str:
+    """启动期解析实际绑定 host：``OCTOAGENT_HOST`` env 优先，回退扫 ``sys.argv``
+    的 ``--host``（best-effort）。
+
+    Codex re-review P2：生产路径 run-octo-home.sh 用 ``--host
+    "${OCTOAGENT_HOST:-127.0.0.1}"`` 二者恒同步；但手动 ``uvicorn --host
+    0.0.0.0``（不设 env）会让纯 env 校验回退 127.0.0.1 漏判裸奔。此处补一层
+    argv 扫描兜住该路径。仍非万能（gunicorn / 编程式启动的 host 看不到）——
+    见 completion-report limitations。
+    """
+    env_host = os.environ.get("OCTOAGENT_HOST", "").strip()
+    if env_host:
+        return env_host
+    argv = sys.argv
+    for index, token in enumerate(argv):
+        if token == "--host" and index + 1 < len(argv):
+            candidate = argv[index + 1].strip()
+            if candidate:
+                return candidate
+        elif token.startswith("--host="):
+            candidate = token.split("=", 1)[1].strip()
+            if candidate:
+                return candidate
+    return "127.0.0.1"
+
+
 def _enforce_front_door_exposure(project_root: Path) -> None:
     """F130 FR-C2：启动期 host↔mode 防裸奔 fail-fast（spec §E / 岔路⑤）。
 
-    跨源读 ``OCTOAGENT_HOST`` env + ``front_door.mode`` → 纯函数判定：
+    跨源读 host（env 优先，回退 argv ``--host``）+ ``front_door.mode`` → 纯函数判定：
     - **reject**（确定裸奔，如 host=0.0.0.0 + mode=loopback）→ 写清晰错误到
       stderr（F129 service 层捕获进 err.log）+ ``sys.exit(78)``。systemd
       ``RestartPreventExitStatus=78`` 识别此码熔断不刷重启；launchd 无等价
@@ -208,7 +234,7 @@ def _enforce_front_door_exposure(project_root: Path) -> None:
     （不因校验 bug 挡启动 = 连本机都用不了，plan §2 Phase D 最高危警告）。
     """
     try:
-        host = resolve_bind_host()
+        host = _resolve_startup_host()
         mode = _resolve_front_door_mode(project_root)
         verdict = validate_front_door_exposure(host, mode)
     except Exception as exc:  # pragma: no cover - 纯函数极难触发；保守放行

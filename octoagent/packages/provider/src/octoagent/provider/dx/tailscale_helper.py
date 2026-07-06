@@ -269,21 +269,33 @@ def disable_tailscale_serve(
     runner: CommandRunner | None = None,
     *,
     binary: str | None = None,
+    port: int | None = None,
 ) -> TailscaleServeResult:
-    """清理 serve 配置：``tailscale serve reset``（FR-A4，供切回本机模式用）。
+    """关闭 serve 映射（FR-A4，供切回本机模式用）。
 
-    openclaw ``tailscale.ts:385``。失败软化返回 error 对象不抛。
+    Codex re-review P2：``tailscale serve reset`` 会清空**整机** serve 配置，
+    误删用户为其它服务发布的映射。默认改为**只关本功能的映射**——用
+    ``tailscale serve --https=443 off``（enable 的 ``serve <port>`` 默认发布在
+    https/443 代理到 localhost:port，off 只移除该 handler）。仅当调用方显式不
+    传 port 时才回退全局 reset（并在 result 标注）。失败软化返回 error 不抛。
     """
     run = runner or _default_command_runner
     resolved = binary or find_tailscale_binary()
-    argv = ["serve", "reset"]
     if resolved is None:
         return TailscaleServeResult(
             ok=False,
             error_code="not_installed",
             hint="未找到 tailscale CLI",
-            argv=argv,
+            argv=["serve", "off"],
         )
+
+    # 默认 scoped：只关 https/443 handler（enable 发布的位置），不动整机配置。
+    if port is not None:
+        argv = ["serve", "--https=443", "off"]
+    else:
+        # 无 port 信息 → 回退全局 reset（调用方应尽量传 port 避免误删他人配置）。
+        argv = ["serve", "reset"]
+
     outcome = run([resolved, *argv], _PROBE_TIMEOUT_S)
     if outcome.ok:
         return TailscaleServeResult(ok=True, argv=argv)
@@ -293,15 +305,15 @@ def disable_tailscale_serve(
             ok=False,
             error_code="permission_denied",
             hint=(
-                "serve reset 需更高权限，请手动运行 `sudo tailscale serve reset`"
+                f"关闭 serve 需更高权限，请手动运行 `sudo tailscale {' '.join(argv)}`"
                 "（本工具不自动 sudo）"
             ),
             argv=argv,
         )
     return TailscaleServeResult(
         ok=False,
-        error_code="reset_failed",
-        hint=f"tailscale serve reset 失败（rc={outcome.returncode}）",
+        error_code="disable_failed",
+        hint=f"关闭 serve 失败（rc={outcome.returncode}）：{' '.join(argv)}",
         argv=argv,
     )
 

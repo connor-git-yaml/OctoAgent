@@ -240,22 +240,33 @@ class TestEnableServe:
 
 
 # ---------------------------------------------------------------------------
-# FR-A4：serve reset
+# FR-A4：关闭 serve（scoped off / 全局 reset 回退）
 # ---------------------------------------------------------------------------
 
 
 class TestDisableServe:
-    def test_disable_serve_success(self) -> None:
+    def test_disable_scoped_off_with_port(self) -> None:
+        """Codex re-review P2：传 port → 只关本功能的 https/443 handler，
+        不 `serve reset` 清整机他人配置。"""
+        runner = FakeCommandRunner({"serve --https=443 off": CommandOutcome(0, "")})
+        result = disable_tailscale_serve(runner, binary=_FAKE_BINARY, port=8000)
+        assert result.ok is True
+        assert runner.commands[0][1:] == ["serve", "--https=443", "off"]
+        # 绝不出现全局 reset
+        assert all("reset" not in cmd for cmd in runner.commands)
+
+    def test_disable_global_reset_fallback_when_no_port(self) -> None:
+        """不传 port → 回退全局 reset（调用方应尽量传 port）。"""
         runner = FakeCommandRunner({"serve reset": CommandOutcome(0, "")})
         result = disable_tailscale_serve(runner, binary=_FAKE_BINARY)
         assert result.ok is True
         assert runner.commands[0][1:] == ["serve", "reset"]
 
-    def test_disable_serve_permission_denied_no_sudo(self) -> None:
+    def test_disable_permission_denied_no_sudo(self) -> None:
         runner = FakeCommandRunner(
-            {"serve reset": CommandOutcome(1, "", "permission denied")}
+            {"serve --https=443 off": CommandOutcome(1, "", "permission denied")}
         )
-        result = disable_tailscale_serve(runner, binary=_FAKE_BINARY)
+        result = disable_tailscale_serve(runner, binary=_FAKE_BINARY, port=8000)
         assert result.ok is False
         assert result.error_code == "permission_denied"
         assert all("sudo" not in cmd for cmd in runner.commands)

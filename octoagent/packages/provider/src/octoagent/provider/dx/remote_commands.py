@@ -265,9 +265,11 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
 @remote_group.command("disable")
 @click.option("--dry-run", is_flag=True, default=False, help="只预览将做的改动，不落地")
 def remote_disable(dry_run: bool) -> None:
-    """关闭远程触达：切回 loopback 模式 + 清理 serve（serve reset）。"""
+    """关闭远程触达：切回 loopback 模式 + 只关本功能的 serve 映射。"""
     cfg, root = _load_config_and_root()
     persisted = _persisted_mode(cfg)
+    env = _effective_env(root)
+    port = _resolve_port(env)
 
     lines: list[str] = []
     if dry_run:
@@ -276,7 +278,7 @@ def remote_disable(dry_run: bool) -> None:
             lines.append(f"将把 front_door.mode: {persisted} → loopback")
         else:
             lines.append("front_door.mode 已是 loopback（幂等）")
-        lines.append("将运行: tailscale serve reset")
+        lines.append("将运行: tailscale serve --https=443 off（只关本功能映射）")
         console.print(render_panel("octo remote disable", lines, border_style="cyan"))
         return
 
@@ -286,20 +288,19 @@ def remote_disable(dry_run: bool) -> None:
     else:
         lines.append("front_door.mode 已是 loopback（幂等）")
 
-    # Codex review P2：serve reset 失败必须如实反映（红色 + exit 1）——否则用户
-    # 以为远程入口已关，实际 serve 规则仍在、运行中服务重启前仍是原 mode。
-    reset = disable_tailscale_serve()
+    # Codex review P2：①只关本功能的 serve 映射（传 port，用 --https=443 off，
+    # 不 `serve reset` 清整机他人配置）；②失败必须如实反映（红色 + exit 1）——
+    # 否则用户以为远程入口已关，实际映射仍在、运行中服务重启前仍是原 mode。
+    reset = disable_tailscale_serve(port=port)
     if reset.ok:
-        lines.append("[green]Tailscale serve 已清理（serve reset）[/green]")
+        lines.append("[green]Tailscale serve 映射已关闭[/green]")
         lines.append("下一步：重启服务使模式生效——`octo restart`。")
         console.print(render_panel("octo remote disable", lines, border_style="green"))
         return
 
+    lines.append(f"[red]关闭 serve 失败（{reset.error_code}）：{reset.hint}[/red]")
     lines.append(
-        f"[red]serve reset 失败（{reset.error_code}）：{reset.hint}[/red]"
-    )
-    lines.append(
-        "[yellow]远程入口可能仍开着——请手动 `tailscale serve reset` 确认，"
+        "[yellow]远程入口可能仍开着——请手动确认 `tailscale serve status`，"
         "再 `octo restart` 使 loopback 模式生效。[/yellow]"
     )
     console.print(render_panel("octo remote disable", lines, border_style="red"))
