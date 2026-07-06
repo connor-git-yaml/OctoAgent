@@ -474,7 +474,14 @@ class AutomationDomainService(DomainServiceBase):
                     # 用 job_id 作为 task_id 承载（automation 无真实 task）；无 job_id 时降级占位。
                     task_id=job_id or "_reminder",
                     event_type="REMINDER_NOTIFY",
-                    payload={"message": message, "job_id": job_id, "run_id": run_id},
+                    # notify_kind="reminder" 让各渠道文本渲染走提醒专用分支（渲染 message，
+                    # 而非 task_title/to_status 模板——否则提醒正文丢失，Codex P1）。
+                    payload={
+                        "notify_kind": "reminder",
+                        "message": message,
+                        "job_id": job_id,
+                        "run_id": run_id,
+                    },
                     priority=NotificationPriority.MEDIUM,
                     # run_id 作为去重维度：同一 run 只推一次；不同 run（每次触发）各自推送。
                     state_transition_event_id=run_id,

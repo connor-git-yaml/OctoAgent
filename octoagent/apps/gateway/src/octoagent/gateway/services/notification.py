@@ -948,6 +948,12 @@ class TelegramNotificationChannel:
 
     def _build_state_change_text(self, payload: dict[str, Any]) -> str:
         """构建状态变更通知的消息文本。"""
+        # F132：reminder.notify 专用渲染——用户设置的提醒正文在 payload.message，
+        # 而非 task_title/to_status/summary。不特判会渲染成"任务:未命名任务/状态:"，
+        # 提醒正文丢失（Codex P1）。
+        reminder = _reminder_text_or_none(payload)
+        if reminder is not None:
+            return reminder
         task_title = payload.get("task_title", "未命名任务")
         to_status = payload.get("to_status", "")
         status_text = _STATUS_DISPLAY.get(to_status, to_status)
@@ -1121,9 +1127,28 @@ def _format_duration_plain(duration_ms: int | None) -> str:
     return f"{hours:.1f}小时"
 
 
+def _reminder_text_or_none(payload: dict[str, Any]) -> str | None:
+    """F132：若 payload 是 reminder.notify 交付，返回渲染好的提醒文本，否则 None。
+
+    reminder 的正文在 payload.message（用户设置的提醒内容），不走 task_title/summary
+    模板——单独渲染成「🔔 提醒\n<正文>」，各渠道文案一致。
+    """
+    if payload.get("notify_kind") != "reminder":
+        return None
+    message = str(payload.get("message", "")).strip()
+    if not message:
+        return None
+    if len(message) > 500:
+        message = message[:500] + "…"
+    return f"🔔 提醒\n{message}"
+
+
 def _build_plain_state_change_text(payload: dict[str, Any]) -> str:
     """纯文本状态变更通知（无 inline 按钮——Slack/Discord v0.2 不支持
     交互组件；文案格式与 telegram 渠道一致）。"""
+    reminder = _reminder_text_or_none(payload)
+    if reminder is not None:
+        return reminder
     task_title = payload.get("task_title", "未命名任务")
     to_status = payload.get("to_status", "")
     status_text = _STATUS_DISPLAY.get(to_status, to_status)

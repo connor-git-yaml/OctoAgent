@@ -159,10 +159,18 @@ export default function AutomationCenter() {
       const actionId = nextEnabled ? "automation.resume" : "automation.pause";
       setBusyId(item.job.job_id);
       try {
-        await executeWorkbenchAction(doc?.contract_version, actionId, {
-          job_id: item.job.job_id,
-        });
-        flashToast(nextEnabled ? "已恢复" : "已暂停", false);
+        const result = await executeWorkbenchAction(
+          doc?.contract_version,
+          actionId,
+          { job_id: item.job.job_id }
+        );
+        // executeControlAction 在 4xx（404/409，如任务已被别处删除）时仍会解析 result，
+        // 故必须查 result.status——rejected 走错误提示而非假成功（Codex P2）。
+        if (result.status === "rejected") {
+          flashToast(result.message || "操作未生效，请刷新重试", true);
+        } else {
+          flashToast(nextEnabled ? "已恢复" : "已暂停", false);
+        }
         await load();
       } catch (err) {
         flashToast(

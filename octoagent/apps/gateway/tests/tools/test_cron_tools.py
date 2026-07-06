@@ -233,6 +233,27 @@ async def test_create_timezone_fallback_user_md(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_create_once_naive_iso_normalized_to_tz(tmp_path: Path) -> None:
+    """Codex P1-2: once 的 naive ISO 按 timezone 归一化为 aware（防 UTC 错开）。"""
+    user_md = tmp_path / "behavior" / "system" / "USER.md"
+    user_md.parent.mkdir(parents=True, exist_ok=True)
+    user_md.write_text('- **user_timezone**: "Asia/Shanghai"\n', encoding="utf-8")
+
+    deps = _make_deps(tmp_path, scheduler=_fake_scheduler())
+    handlers = await _register_and_get(deps)
+    result = await handlers["cron.create"](
+        name="一次性提醒",
+        schedule_kind="once",
+        schedule_expr="2026-07-07T15:00:00",  # naive
+        reminder_text="开会",
+    )
+    assert result.status == "written"
+    stored = AutomationStore(tmp_path).get_job(result.job_id)
+    # 归一化后带 +08:00 offset（Asia/Shanghai），而非裸 naive（会被调度器补 UTC）
+    assert "+08:00" in stored.schedule_expr
+
+
+@pytest.mark.asyncio
 async def test_create_scheduler_unbound_degraded(tmp_path: Path) -> None:
     """scheduler 未绑定 → job 落盘但 scheduler_synced=False（DP-6 degraded）。"""
     deps = _make_deps(tmp_path, scheduler=None)

@@ -140,6 +140,8 @@ def _resolve_timezone(deps: ToolDeps, explicit_tz: str) -> str:
 class _ScheduleValidation(BaseModel):
     ok: bool
     reason: str = ""
+    normalized_expr: str = ""
+    """校验后归一化的表达式（当前仅 once：naive ISO → 按 timezone 补 offset）。空=用原始 expr。"""
 
 
 def _cron_field_is_numeric_dow(dow_field: str) -> bool:
@@ -210,12 +212,24 @@ def _validate_schedule(
 
     if schedule_kind == AutomationScheduleKind.ONCE:
         try:
-            datetime.fromisoformat(expr)
+            parsed = datetime.fromisoformat(expr)
         except ValueError:
             return _ScheduleValidation(
                 ok=False,
                 reason=f"once 的 schedule_expr 必须是 ISO datetime（如 2026-07-10T09:00:00），收到 {expr!r}",
             )
+        # 【Codex P1-2】naive ISO（无 offset）按 job timezone 归一化为 aware。
+        # 否则调度器 DateTrigger 对 naive datetime 直接补 UTC（忽略 job.timezone），
+        # 导致非 UTC 用户的一次性提醒错开（Asia/Shanghai 晚 8 小时）。
+        if parsed.tzinfo is None:
+            try:
+                import zoneinfo
+
+                aware = parsed.replace(tzinfo=zoneinfo.ZoneInfo(timezone))
+                return _ScheduleValidation(ok=True, normalized_expr=aware.isoformat())
+            except Exception:  # noqa: BLE001
+                # timezone 非法（理论上已被上游解析保证合法）——退回 UTC 语义，不 crash。
+                return _ScheduleValidation(ok=True)
         return _ScheduleValidation(ok=True)
 
     return _ScheduleValidation(ok=False, reason=f"不支持的 schedule_kind: {schedule_kind}")
@@ -428,6 +442,8 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             return CronMutationResult(
                 status="rejected", target="cron", reason=validation.reason
             )
+        # once 的 naive ISO 已按 tz 归一化为 aware（Codex P1-2）；其余用原始 expr。
+        stored_expr = validation.normalized_expr or schedule_expr.strip()
 
         project_id = await _resolve_project_id(deps)
         job = AutomationJob(
@@ -437,7 +453,7 @@ async def register(broker: Any, deps: ToolDeps) -> None:
             params=params,
             project_id=project_id,
             schedule_kind=kind,
-            schedule_expr=schedule_expr.strip(),
+            schedule_expr=stored_expr,
             timezone=effective_tz,
             enabled=bool(enabled),
         )
@@ -552,7 +568,8 @@ async def register(broker: Any, deps: ToolDeps) -> None:
                     target=f"automation_job:{job_id}",
                     reason=validation.reason,
                 )
-            updates["schedule_expr"] = schedule_expr
+            # once naive ISO → 按 tz 归一化 aware（Codex P1-2）；其余用原始 expr。
+            updates["schedule_expr"] = validation.normalized_expr or schedule_expr
         elif schedule_kind:
             # 改了 kind 但没给新 expr——旧 expr 可能与新 kind 不匹配，校验之。
             validation = _validate_schedule(new_kind, job.schedule_expr, new_tz)

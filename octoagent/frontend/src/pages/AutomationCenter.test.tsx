@@ -142,6 +142,48 @@ describe("AutomationCenter", () => {
     );
   });
 
+  it("toggle 返回 rejected → 错误提示（不假成功，Codex P2）", async () => {
+    fetchMock.mockResolvedValue(
+      makeDoc({
+        jobs: [
+          {
+            job: {
+              job_id: "job-1",
+              name: "喝水提醒",
+              action_id: "reminder.notify",
+              params: { message: "喝水" },
+              project_id: "p1",
+              schedule_kind: "cron",
+              schedule_expr: "0 8 * * *",
+              timezone: "UTC",
+              enabled: true,
+              created_at: "2026-07-06T00:00:00Z",
+              updated_at: "2026-07-06T00:00:00Z",
+            },
+            status: "active",
+            next_run_at: null,
+            last_run: null,
+            supported_actions: [],
+            degraded_reason: "",
+          },
+        ],
+      })
+    );
+    // 后端 404/409 时 executeControlAction 仍解析 result（status=rejected）
+    actionMock.mockResolvedValue({
+      status: "rejected",
+      message: "任务不存在",
+    } as never);
+
+    renderPage();
+    await waitFor(() => expect(screen.getByText("喝水提醒")).toBeInTheDocument());
+    await userEvent.click(screen.getByRole("button", { name: "暂停" }));
+
+    await waitFor(() => expect(screen.getByText("任务不存在")).toBeInTheDocument());
+    // 不应出现"已暂停"假成功提示
+    expect(screen.queryByText("已暂停")).toBeNull();
+  });
+
   it("加载失败展示错误 + 重试", async () => {
     fetchMock.mockRejectedValueOnce(new Error("boom"));
     renderPage();

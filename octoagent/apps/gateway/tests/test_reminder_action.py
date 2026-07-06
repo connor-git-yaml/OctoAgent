@@ -71,6 +71,24 @@ async def test_reminder_notify_delivers() -> None:
     assert kwargs["task_id"] == "job-1"
     # 去重维度用 run_id（每次触发各自推送）
     assert kwargs["state_transition_event_id"] == "run-1"
+    # Codex P1: notify_kind=reminder 让渠道渲染走提醒专用分支（否则正文丢失）
+    assert kwargs["payload"]["notify_kind"] == "reminder"
+
+
+def test_reminder_render_shows_message() -> None:
+    """Codex P1: 渠道文本渲染展示 reminder message，而非'未命名任务'。"""
+    from octoagent.gateway.services.notification import (
+        _build_plain_state_change_text,
+        _reminder_text_or_none,
+    )
+
+    payload = {"notify_kind": "reminder", "message": "交周报"}
+    assert _reminder_text_or_none(payload) == "🔔 提醒\n交周报"
+    plain = _build_plain_state_change_text(payload)
+    assert "交周报" in plain
+    assert "未命名任务" not in plain
+    # 非 reminder payload 不受影响
+    assert _reminder_text_or_none({"task_title": "x", "to_status": "done"}) is None
 
 
 @pytest.mark.asyncio
