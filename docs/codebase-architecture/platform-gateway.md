@@ -112,6 +112,24 @@ packages/core/src/octoagent/core/
 
 **范围**：仅 STT 单向（不做 TTS / voice session → F110）；仅 telegram voice（不做 Web 音频上传）。**已知 limitation**：并发同 update 重投存在转写前幂等窗口（outcome 仍正确，单用户顺序投递不触发；F110 voice session 并发硬化）。详见 `.specify/features/109-voice-poc/`。
 
+## 6b. Telegram 可靠性（F131，M8 P1）
+
+> polling 断线重连 / 409 双开识别 / 出站补偿 spool——让"手机天天用"下渠道自愈不丢消息。仿 OpenClaw `telegram-ingress`；每条反向验证"是否已有"，只补真缺口。
+
+**现状诊断（改前）**：入站已防丢（Telegram offset 重发 + `_maybe_enqueue` 补队窗口）+ polling loop 不崩（`except Exception` 兜底）——但三缺口：①失败恢复扁平 `sleep(1.0)` 无退避 → 断网 busy-loop 刷日志；②409 双开与普通网络错日志不可区分（都 `telegram_polling_loop_failed`）；③**出站 send 失败被 `registry.notify_task_completion` 只 log.warning 后永久丢弃，零重试零补偿、进程重启也不补发**（主缺口）。
+
+**G1 polling 指数退避**（`services/telegram.py`）：`_polling_loop` 扁平 sleep → `_compute_poll_backoff`（base=2s / max=60s / factor=2 / jitter±20%，成功一轮 `failure_streak` reset）；退避走 `wait_for(stop_event, timeout=delay)` 使 shutdown 立即醒来；exp 封顶 `_BACKOFF_EXP_CAP` 防持续失败时 `factor^exp` OverflowError。
+
+**G2 409 双开识别**：`_is_getupdates_conflict`（`error_code==409` 且描述含 getUpdates/conflict，镜像 OpenClaw `isGetUpdatesConflict` 双条件防误判）→ WARNING 含固定 hint `_TELEGRAM_409_CONFLICT_HINT`（用户可修：关另一 poller / 切 webhook），与普通网络错日志文案区分；409 亦走退避。
+
+**G3 出站补偿 spool**（`packages/core` `telegram_outbound_spool_store.py` + `telegram_outbound_spool` 表，仿 `SqliteNotificationStore` 范式挂 StoreGroup 主 conn）：
+- `notify_task_result` 文字路径 + `notify_approval_event` **无 inline keyboard** 路径经 `_send_or_spool`——send 失败入队落盘（chat_id/text/reply/thread/reply_thread_root_id/task_id），返回 None（成功路径逐字节等价 baseline，`disable_notification` 默认 True 保静音）。
+- **带 inline keyboard 的 `approval:requested` 不 spool**（延后送达按钮失效的审批卡片比丢弃更糟，审批有 SSE/operator-inbox 独立 durability）——显式设计决策。
+- drain 走**独立 `_spool_drain_loop` 后台任务**（polling+webhook 都起，首轮立即 drain 做重启补偿，随后周期默认 30s）——**不在 startup / polling get_updates 主路径同步 drain**（50 条 × 每条 10s send timeout 会拖住启动/收 update 数分钟）；`_spool_drain_lock` 串行化防并发重复发。
+- 成功 `mark_sent` 删行 + 群聊 reply-thread 补登记；失败退避 `mark_retry`；超 8 次 `mark_failed` 落档（保留诊断）。进程重启：drain loop 首轮 + 新 store 读同一 SQLite → 待发不丢。
+
+**观测**：`telegram_polling_conflict_409` / `telegram_outbound_spooled` / `telegram_outbound_spool_delivered` / `telegram_outbound_spool_failed_final` 结构化日志。**已知 limitation**：审批请求（带按钮）出站失败仍丢（设计决策，有 SSE 兜底）；spool 无跨会话去重（继承 F110 通知幂等基线）；failed 行无 TTL 清理（单用户量小）。详见 `.specify/features/131-telegram-reliability/`。
+
 ## 7. v0.3+ 扩展路径（handoff 摘要）
 
 Slack/Discord interactive components（按钮审批 + dismiss）→ ApprovalBroadcaster 统一评估（v0.2 评估结论：推 v0.3 与交互组件同期，纯文本审批推送是负 UX）→ source_channel_id 写入端（与 A2A source 泛化一并，**单独立项**）→ telegram enqueue 窗口修复 → binding 配置面 UI/API。完整版见 `.specify/features/105-platform-gateway-v02/handoff.md`。

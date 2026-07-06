@@ -587,7 +587,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 |---------|--------|--------|------|
 | **F129 常驻服务地基**（进程守护 + 日志落盘）✅ 完成（2026-07-04，双评审 10 finding 全闭环 0 HIGH）| **P0** | `octo service {install,uninstall,status}` → launchd/systemd 三态幂等 + stable-working-dir 红线 + 退避熔断；`octo restart` 在 OS_SERVICE 策略下委托 launchctl/systemctl（不再要求进程存活）；RotatingFileHandler 脱敏落盘（10MB×5 + import 快照防关）+ `octo logs`（tail/-f/--level + 启动期崩溃回退 err.log）+ doctor 服务健康/睡眠风险 2 check（只检测绝不改系统设置，可选 `--keep-awake`）。详见 `.specify/features/129-service-foundation/completion-report.md` + `deployment-and-ops.md` §12.5.6 | M |
 | **F130 安全远程触达**（Tailscale）| **P0** | Tailscale serve 三态 helper + `octo` 一键切 front_door 模式 + host↔mode 校验 + doctor 自检扩展（防误配裸奔）| M |
-| **F131 Telegram 可靠性** | P1 | polling 断线重试 / 409 双开识别 / 出站补偿 spool（仿 OpenClaw telegram-ingress）| S |
+| **F131 Telegram 可靠性** ✅ 完成（2026-07-06，Opus 自审 1 HIGH + Codex 4 轮 0 HIGH，146 tests 0 regression）| P1 | polling 指数退避（替扁平 sleep 防 busy-loop）/ 409 双开识别（`_is_getupdates_conflict` + 用户可修 hint，区别普通网络错）/ 出站补偿 spool（`telegram_outbound_spool` 表 + 独立后台 drain loop，send 失败入队、进程重启不丢；带按钮审批不 spool）。诊断结论：入站已防丢（offset 重发），真缺口在出站零补偿。详见 `.specify/features/131-telegram-reliability/completion-report.md` + `platform-gateway.md` §6b | S |
 | **F132 cron 自助工具**（OC-5）| P1 | 用户/agent 从手机自助建定时任务（后端 CRUD 已在，缺 agent 工具 + UI；OpenClaw 18 job 实证用法）| M |
 | **F133 voice 从 polling 剥离** | P1 | 语音处理与 Telegram polling 解耦（避免长语音阻塞入站）| M |
 | **F134 bearer 加固** | P1→P2 | 限流 / 强 token / SSE ticket 化（**选 Tailscale 后降 P2**——私网已挡）| S |
