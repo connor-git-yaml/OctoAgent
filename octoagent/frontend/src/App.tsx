@@ -6,6 +6,7 @@ import RouteErrorBoundary from "./components/shell/RouteErrorBoundary";
 import WorkbenchLayout from "./components/shell/WorkbenchLayout";
 
 const AgentCenter = lazy(() => import("./pages/AgentCenter"));
+const AutomationCenter = lazy(() => import("./pages/AutomationCenter"));
 const ChatWorkbench = lazy(() => import("./pages/ChatWorkbench"));
 const FilesCenter = lazy(() => import("./pages/FilesCenter"));
 const MemoryCenter = lazy(() => import("./pages/MemoryCenter"));
@@ -72,6 +73,10 @@ export default function App() {
             <Route
               path="memory/candidates"
               element={withRouteSuspense(<MemoryCandidates />, "待确认记忆")}
+            />
+            <Route
+              path="automation"
+              element={withRouteSuspense(<AutomationCenter />, "定时任务")}
             />
             <Route path="settings" element={withRouteSuspense(<SettingsCenter />, "设置中心")} />
           </Route>

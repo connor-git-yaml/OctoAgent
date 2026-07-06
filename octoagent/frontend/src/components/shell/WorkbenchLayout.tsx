@@ -106,6 +106,8 @@ function renderNavDescription(path: string): string {
       return "查看任务产出文件的版本变化";
     case "/memory":
       return "回看系统记住的背景";
+    case "/automation":
+      return "查看和暂停定时提醒";
     case "/settings":
       return "连接模型与常用入口";
     default:
@@ -435,6 +437,7 @@ export default function WorkbenchLayout() {
               { to: "/mcp", label: "MCP" },
               { to: "/files", label: "文件" },
               { to: "/memory", label: "记忆" },
+              { to: "/automation", label: "定时任务" },
               { to: "/settings", label: "设置" },
             ].map((item) => (
               <NavLink

@@ -7,6 +7,7 @@ import type {
   ActionResultEnvelope,
   ApprovalsListResponse,
   AttachExecutionInputResponse,
+  AutomationJobDocument,
   BackupBundle,
   ControlPlaneActionResponse,
   ControlPlaneSnapshot,
@@ -400,6 +401,15 @@ export async function fetchTaskExecutionSession(
 
 export async function fetchApprovals(): Promise<ApprovalsListResponse> {
   return apiFetch<ApprovalsListResponse>("/api/approvals");
+}
+
+// ---------------------------------------------------------------------------
+// F132 cron 自助 -- 定时任务列表（AutomationCenter 数据源）
+// ---------------------------------------------------------------------------
+
+/** GET /api/control/resources/automation -- 定时任务文档 */
+export async function fetchAutomationDocument(): Promise<AutomationJobDocument> {
+  return apiFetch<AutomationJobDocument>("/api/control/resources/automation");
 }
 
 // ---------------------------------------------------------------------------
