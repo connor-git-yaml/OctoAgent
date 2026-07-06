@@ -113,6 +113,7 @@ notify_approval_request(CRITICAL) → wait_for_decision → 条件恢复 RUNNING
 |--------|------|----------|
 | `worker.escalate_permission`（ask_back_tools）| F099/F101 | rejected/timeout 均不恢复 RUNNING（任务核心动作被禁止 → task_runner 推 FAILED）|
 | `behavior.write_file` REVIEW_REQUIRED 写（write_approval.gate_behavior_write）| F136 | **显式拒绝恢复 RUNNING**（用户否决一次写入，对话继续）；超时不恢复；审批卡片携带 unified diff；**每次写独立审批、不参与 session allowlist**（allowlist 无法区分内容，一次批准会变成 session 内任意改写豁免）；gate 缺失 fail-closed 拒写 |
+| `cron.delete` / `cron.update`（改 schedule）（write_approval.gate_destructive_action）| F132 | 与 behavior.write 同款序列的**通用**破坏性操作审批门（无文件 diff，operation_summary 由调用方拼）；rejected 恢复 RUNNING；超时不恢复；**每次操作独立审批**；gate 缺失 fail-closed 拒执行。`cron.update` 仅改 `enabled`（暂停/恢复，可逆）时**跳过审批**直接生效 |
 
 ### 2.5 DelegationManager（FR-5）
 

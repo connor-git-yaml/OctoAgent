@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 import structlog
@@ -280,7 +280,7 @@ async def _emit_cron_event(
             event_id=str(ULID()),
             task_id=task_id,
             task_seq=task_seq,
-            ts=datetime.now(),
+            ts=datetime.now(timezone.utc),
             type=EventType.AUTOMATION_JOB_MUTATED,
             actor=ActorType.SYSTEM,
             payload={
