@@ -93,3 +93,52 @@ class TestValidationIsReadOnly:
         validate_front_door_exposure("0.0.0.0", "loopback")
         resolve_bind_host()
         assert dict(os.environ) == before
+
+
+class TestReadInstanceEffectiveEnv:
+    """Codex 第四轮 P2：托管服务诊断——实例 .env 覆盖 shell env。"""
+
+    def test_instance_env_overrides_shell(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """shell OCTOAGENT_PORT=9001 但实例 .env=8000 → 取 8000（服务真实值）。"""
+        from octoagent.gateway.services.frontdoor_exposure import (
+            read_instance_effective_env,
+        )
+
+        monkeypatch.setenv("OCTOAGENT_PORT", "9001")
+        (tmp_path / ".env").write_text("OCTOAGENT_PORT=8000\n", encoding="utf-8")
+        env = read_instance_effective_env(tmp_path)
+        assert env["OCTOAGENT_PORT"] == "8000"  # .env 覆盖 shell
+
+    def test_shell_fills_keys_absent_from_instance_env(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """.env 未设的键回退进程 env。"""
+        from octoagent.gateway.services.frontdoor_exposure import (
+            read_instance_effective_env,
+        )
+
+        monkeypatch.setenv("OCTOAGENT_HOST", "127.0.0.1")
+        (tmp_path / ".env").write_text("OCTOAGENT_PORT=8000\n", encoding="utf-8")
+        env = read_instance_effective_env(tmp_path)
+        assert env["OCTOAGENT_HOST"] == "127.0.0.1"  # .env 无此键 → 用 shell
+
+    def test_no_instance_env_falls_back_to_process(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("OCTOAGENT_PORT", "9001")
+        env = read_instance_effective_env(tmp_path)  # 无 .env 文件
+        assert env["OCTOAGENT_PORT"] == "9001"
+
+    def test_does_not_mutate_os_environ(self, tmp_path, monkeypatch) -> None:
+        import os
+
+        from octoagent.gateway.services.frontdoor_exposure import (
+            read_instance_effective_env,
+        )
+
+        (tmp_path / ".env").write_text("OCTOAGENT_PORT=8000\n", encoding="utf-8")
+        before = dict(os.environ)
+        read_instance_effective_env(tmp_path)
+        assert dict(os.environ) == before

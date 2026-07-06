@@ -73,14 +73,19 @@ def _is_loopback_host(host: str) -> bool:
 
 
 def read_instance_effective_env(root: Path) -> dict[str, str]:
-    """服务实际生效的 env：实例根 ``.env`` 为底 + 当前进程 env 覆盖（只读）。
+    """托管服务实际生效的 env：进程 env 为底 + 实例根 ``.env`` **覆盖**（只读）。
 
-    ``run-octo-home.sh`` source 实例根 ``.env`` 再起 gateway；从任意 shell 跑
-    ``octo remote`` / ``octo doctor`` 时进程 env 未含这些值 → 会与运行时不一致
-    （host/mode/port 误判）。此处对齐服务侧「.env 为底、显式 export 覆盖」语义
-    （load_project_dotenv override=False）。**不 mutate os.environ**。
+    ★ 语义（Codex 第四轮 P2）：这是给 ``octo remote`` / ``octo doctor`` 从任意
+    shell 诊断**托管服务**用的。托管服务由 launchd/systemd 起、``run-octo-home.sh``
+    source 实例根 ``.env``——**CLI 当前 shell 里临时 export 的值不会被 OS 服务继承**。
+    因此对 host/port/mode/token 这些键，**实例 ``.env`` 才是服务真实生效值**，
+    必须覆盖 shell 值（否则 shell 里 ``OCTOAGENT_PORT=9001`` 会让 serve 发布到错
+    端口、shell-only token 会让 CLI 跳过 token 提示但重启后 bearer 503）。
+
+    ``.env`` 未设的键回退进程 env（如 PATH 等服务确实继承的值）。**不 mutate
+    os.environ**。
     """
-    merged: dict[str, str] = {}
+    merged: dict[str, str] = dict(os.environ)  # 进程 env 为底（.env 未设的键回退）
     try:
         from dotenv import dotenv_values
 
@@ -88,11 +93,10 @@ def read_instance_effective_env(root: Path) -> dict[str, str]:
             env_path = root / filename
             if env_path.exists():
                 for key, value in dotenv_values(env_path).items():
-                    if value is not None and key not in merged:
-                        merged[key] = value
+                    if value is not None:
+                        merged[key] = value  # 实例 .env 覆盖（服务真实生效值）
     except Exception:  # pragma: no cover - dotenv 缺失/读失败降级为纯进程 env
         pass
-    merged.update(os.environ)
     return merged
 
 
