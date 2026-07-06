@@ -35,6 +35,9 @@ _VOICE_DEGRADE_TOO_LARGE = "🎙️ 语音过长,暂无法处理,请发更短的
 _VOICE_DEGRADE_DOWNLOAD = "🎙️ 语音下载失败,请重试或改发文字。"
 _VOICE_DEGRADE_TRANSCRIBE = "🎙️ 语音转写失败,请重试或改发文字。"
 _VOICE_DEGRADE_EMPTY = "🎙️ 未能识别语音内容,请重试或改发文字。"
+# F133:后台 voice worker 意外异常(转写成功后主链失败等)的降级文案——offset 已
+# 先行确认无重投机会,不静默,显式告知用户重试(#6;baseline 该异常经 polling 兜底重投)。
+_VOICE_DEGRADE_PIPELINE = "🎙️ 语音消息处理失败,请重试或改发文字。"
 
 # F109 语音大小/时长上限(防超长占用;Telegram getFile 本身亦有 20MB 上限)。
 _VOICE_MAX_DURATION_S = int(os.environ.get("OCTOAGENT_STT_MAX_DURATION_S", "300"))
@@ -336,6 +339,11 @@ class TelegramGatewayService:
         self._stt_service = stt_service  # F109:None = 语音转写未启用(优雅降级)
         self._tts_service = tts_service  # F110:None = TTS 未启用（优雅降级）
         self._polling_task: asyncio.Task[None] | None = None
+        # F133：voice 处理剥离 ingest 热路径——全局 FIFO 队列 + 单 consumer 后台 worker
+        # （并发上界=1：faster-whisper CPU-bound，串行防多语音并发打爆 CPU；全局 FIFO
+        # 天然同 chat 保序）。item 是轻量 context（无音频字节），无界队列单用户可承受。
+        self._voice_queue: asyncio.Queue[TelegramInboundContext] = asyncio.Queue()
+        self._voice_worker_task: asyncio.Task[None] | None = None
         # F131：webhook 模式专用出站 spool 周期 drain 任务（polling 模式在其 loop 内 drain，
         # 不起此任务）。与入站请求解耦——不在 webhook 请求路径同步 drain（Codex P1）。
         self._spool_drain_task: asyncio.Task[None] | None = None
@@ -441,7 +449,10 @@ class TelegramGatewayService:
 
     async def shutdown(self) -> None:
         self._stop_event.set()
-        for attr in ("_polling_task", "_spool_drain_task"):
+        # F133：_voice_worker_task 一并 cancel——打断 queue.get()/转写 await，不留 orphan
+        # task。pending 队列项随进程丢弃（durability trade-off 见 spec §3：不发降级回复，
+        # shutdown 时网络 send 不可靠且拖慢退出）。
+        for attr in ("_polling_task", "_spool_drain_task", "_voice_worker_task"):
             task = getattr(self, attr)
             if task is not None:
                 task.cancel()
@@ -752,13 +763,77 @@ class TelegramGatewayService:
             return await self._handle_callback_query(context)
 
         # F109:语音预处理(H1)。voice 且无文字 → 转写填 context.text,失败则降级回复。
-        # 置于空文本检查之前,转写成功后下游 create_task / enqueue / 主 Agent 完全同路。
+        # F133:整条 voice pipeline(幂等预检+守卫+下载+转写+降级回复)剥离出 ingest
+        # 热路径——入队后台串行 worker 立即返回,下载+STT(秒级~数十秒)与降级 send
+        # (坏网下亦秒级)不再阻塞 polling get_updates / webhook 响应。转写成功后
+        # worker 走 _ingest_text_context,与文字消息完全同路(H1 只挪"何时跑")。
         if context.voice is not None and not context.text.strip():
-            outcome = await self._handle_voice_message(context)
-            if isinstance(outcome, TelegramIngestResult):
-                return outcome
-            context = outcome
+            return self._enqueue_voice_processing(context)
 
+        return await self._ingest_text_context(context)
+
+    def _enqueue_voice_processing(self, context: TelegramInboundContext) -> TelegramIngestResult:
+        """F133:voice 消息入全局 FIFO 队列 + 确保后台 worker 存活(lazy spawn,自愈)。
+
+        - lazy spawn:首条 voice 才拉起 worker(无 voice 用户零后台任务);worker 意外
+          死亡(不应发生,loop 内有兜底)下条 voice 自动重拉。
+        - 返回 accepted + voice_queued:route 层 accepted→200,Telegram 快速确认,
+          webhook 超时重投概率反而下降。
+        - shutdown 后(_stop_event set)入队的项不会被处理(worker loop 守卫退出),
+          随进程丢弃——与 pending 项同一 durability 窗口(spec §3)。
+        """
+        self._voice_queue.put_nowait(context)
+        if self._voice_worker_task is None or self._voice_worker_task.done():
+            self._voice_worker_task = asyncio.create_task(self._voice_worker_loop())
+        logger.info(
+            "telegram_voice_queued chat_id=%s message_id=%s queue_depth=%s",
+            context.chat_id,
+            context.message_id,
+            self._voice_queue.qsize(),
+        )
+        return TelegramIngestResult(status="accepted", detail="voice_queued")
+
+    async def _voice_worker_loop(self) -> None:
+        """F133:后台 voice 串行 worker——全局 FIFO 逐条处理(并发上界=1)。
+
+        - 串行单 consumer:faster-whisper CPU-bound,防多条语音并发转写打爆 CPU;
+          全局 FIFO 天然同 chat 保序。幂等预检在处理时点跑(串行 → webhook 重投的
+          重复副本必然看到首条已建 task → duplicate 跳过,比 baseline 并发窗口更严)。
+        - 单条失败不退出 loop(#6):意外异常(转写成功后主链 store 故障等)降级回复
+          用户后继续下一条。baseline 该异常冒泡到 polling 兜底经 offset 重投;F133
+          offset 已先行确认无重投机会 → 显式告知用户重试,不静默(spec §3 次级 delta)。
+        - shutdown:task.cancel() 打断 queue.get()/处理中 await;finally 保证
+          task_done 计数不漏(queue.join() 语义完整,测试依赖)。
+        """
+        while not self._stop_event.is_set():
+            context = await self._voice_queue.get()
+            try:
+                outcome = await self._handle_voice_message(context)
+                if not isinstance(outcome, TelegramIngestResult):
+                    await self._ingest_text_context(outcome)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.warning(
+                    "telegram_voice_async_pipeline_failed chat_id=%s message_id=%s",
+                    context.chat_id,
+                    context.message_id,
+                    exc_info=True,
+                )
+                await self._reply_voice_degrade(
+                    context, _VOICE_DEGRADE_PIPELINE, reason="pipeline_error"
+                )
+            finally:
+                self._voice_queue.task_done()
+
+    async def _ingest_text_context(
+        self, context: TelegramInboundContext
+    ) -> TelegramIngestResult:
+        """文字消息主链(baseline _ingest_update 后半段原样抽取,F133 零行为变更)。
+
+        文字 update 直接走此路;voice 由后台 worker 转写成功回填 text 后走此路——
+        create_task / enqueue / binding / reply-thread 与 baseline 完全同路(H1)。
+        """
         if not context.text.strip():
             return TelegramIngestResult(status="ignored", detail="unsupported_or_empty_update")
         if control_result := await self._handle_control_command(context):
@@ -834,7 +909,9 @@ class TelegramGatewayService:
         """F109:下载语音 → STT 转写 → 回填 context.text(成功)。
 
         返回更新后的 context(成功)或 TelegramIngestResult(降级/幂等,已回复用户)。
-        全程不抛异常(FR-D3:防 polling loop 崩 / webhook 500),失败一律降级。
+        全程不抛异常(FR-D3),失败一律降级。
+        F133:本函数逻辑零改动,但调用点从 ingest 热路径挪到 _voice_worker_loop
+        (后台串行)——幂等预检/守卫/下载/转写/降级回复全部不再阻塞 polling。
         """
         voice = context.voice
         assert voice is not None  # 调用方已判 context.voice is not None

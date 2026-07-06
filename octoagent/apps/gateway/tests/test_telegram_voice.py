@@ -2,10 +2,14 @@
 
 H1 验证:语音 → STT → 回填 text → 走与文字消息**完全相同**的 chat 主路径。
 全部用 Fake backend,零依赖真 faster-whisper。
+F133:voice 处理已剥离 ingest 热路径(后台串行 worker)——ingest 立即返回
+accepted+voice_queued,终态(转写/降级/幂等)由 worker 落定。本文件既有断言
+经 _drain_voice 同步后全部保持;异步语义专项断言见 test_f133_voice_async.py。
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -218,6 +222,11 @@ def _voice_update(
     return {"update_id": update_id, "message": message}
 
 
+async def _drain_voice(service: TelegramGatewayService) -> None:
+    """F133:等后台 voice worker 处理完队列中全部消息(转写/降级/主链落定)。"""
+    await asyncio.wait_for(service._voice_queue.join(), timeout=5)
+
+
 async def _build_service(
     tmp_path: Path,
     *,
@@ -304,17 +313,24 @@ async def test_voice_message_transcribed_and_enqueued(tmp_path: Path) -> None:
 
     result = await service.handle_webhook_update(_voice_update())
 
+    # F133:ingest 立即返回排队确认(不再内联转写),终态由后台 worker 落定
     assert result.status == "accepted"
-    assert result.created is True
+    assert result.detail == "voice_queued"
+    assert result.created is False
+    await _drain_voice(service)
+
     # H1:enqueue 收到的是转写文本(与等价文字消息走完全相同主路径)
-    assert runner.enqueued == [(result.task_id, "明天提醒我开会")]
+    assert len(runner.enqueued) == 1
+    task_id, enqueued_text = runner.enqueued[0]
+    assert enqueued_text == "明天提醒我开会"
     assert bot.get_file_calls == 1
     assert bot.download_calls == 1
     assert stt.transcribe_calls == 1
-    task = await store_group.task_store.get_task(result.task_id or "")
+    task = await store_group.task_store.get_task(task_id)
     assert task is not None
     assert task.title == "明天提醒我开会"
     assert task.requester.channel == "telegram"
+    await service.shutdown()
     await store_group.close()
 
 
@@ -331,13 +347,16 @@ async def test_voice_message_idempotent_replay(tmp_path: Path) -> None:
     first = await service.handle_webhook_update(update)
     second = await service.handle_webhook_update(update)
 
-    assert first.status == "accepted"
-    assert second.status == "duplicate"
-    assert second.task_id == first.task_id
-    # 重投:幂等预检命中,不重复转写/下载
+    # F133:两次重投都立即返回排队确认;幂等判定在 worker 处理时点(全局串行 →
+    # 第二条必然看到首条已建的 task → duplicate 跳过,不重复转写/下载)
+    assert first.detail == "voice_queued"
+    assert second.detail == "voice_queued"
+    await _drain_voice(service)
+
     assert stt.transcribe_calls == 1
     assert bot.download_calls == 1
     assert len(await store_group.task_store.list_tasks()) == 1
+    await service.shutdown()
     await store_group.close()
 
 
@@ -355,8 +374,10 @@ async def test_voice_degrade_unavailable(tmp_path: Path) -> None:
 
     result = await service.handle_webhook_update(_voice_update())
 
-    assert result.status == "ignored"
-    assert result.detail == "voice_stt_unavailable"
+    # F133:降级判定与回复在后台 worker(用户可见契约=降级回复,不再经 ingest 返回值)
+    assert result.detail == "voice_queued"
+    await _drain_voice(service)
+
     assert len(bot.sent) == 1
     assert "未启用" in bot.sent[0].text
     assert runner.enqueued == []
@@ -364,6 +385,7 @@ async def test_voice_degrade_unavailable(tmp_path: Path) -> None:
     # 不可用时不应下载/转写
     assert bot.download_calls == 0
     assert stt.transcribe_calls == 0
+    await service.shutdown()
     await store_group.close()
 
 
@@ -375,9 +397,10 @@ async def test_voice_degrade_no_stt_service(tmp_path: Path) -> None:
 
     result = await service.handle_webhook_update(_voice_update())
 
-    assert result.status == "ignored"
-    assert result.detail == "voice_stt_unavailable"
+    assert result.detail == "voice_queued"  # F133:降级在后台 worker
+    await _drain_voice(service)
     assert "未启用" in bot.sent[0].text
+    await service.shutdown()
     await store_group.close()
 
 
@@ -389,11 +412,12 @@ async def test_voice_degrade_download_fail(tmp_path: Path) -> None:
 
     result = await service.handle_webhook_update(_voice_update())
 
-    assert result.status == "ignored"
-    assert result.detail == "voice_download_failed"
+    assert result.detail == "voice_queued"  # F133:降级在后台 worker
+    await _drain_voice(service)
     assert "下载失败" in bot.sent[0].text
     assert stt.transcribe_calls == 0
     assert await store_group.task_store.list_tasks() == []
+    await service.shutdown()
     await store_group.close()
 
 
@@ -405,10 +429,11 @@ async def test_voice_degrade_transcribe_fail(tmp_path: Path) -> None:
 
     result = await service.handle_webhook_update(_voice_update())
 
-    assert result.status == "ignored"
-    assert result.detail == "voice_transcribe_error"
+    assert result.detail == "voice_queued"  # F133:降级在后台 worker
+    await _drain_voice(service)
     assert "转写失败" in bot.sent[0].text
     assert await store_group.task_store.list_tasks() == []
+    await service.shutdown()
     await store_group.close()
 
 
@@ -420,9 +445,10 @@ async def test_voice_degrade_empty(tmp_path: Path) -> None:
 
     result = await service.handle_webhook_update(_voice_update())
 
-    assert result.status == "ignored"
-    assert result.detail == "voice_empty"
+    assert result.detail == "voice_queued"  # F133:降级在后台 worker
+    await _drain_voice(service)
     assert "未能识别" in bot.sent[0].text
+    await service.shutdown()
     await store_group.close()
 
 
@@ -435,11 +461,12 @@ async def test_voice_degrade_too_large(tmp_path: Path) -> None:
     # duration 超 300s 上限 → 守卫拦截,不下载不转写
     result = await service.handle_webhook_update(_voice_update(duration=999))
 
-    assert result.status == "ignored"
-    assert result.detail == "voice_too_large"
+    assert result.detail == "voice_queued"  # F133:守卫与降级在后台 worker
+    await _drain_voice(service)
     assert "过长" in bot.sent[0].text
     assert bot.download_calls == 0
     assert stt.transcribe_calls == 0
+    await service.shutdown()
     await store_group.close()
 
 
@@ -524,6 +551,7 @@ async def test_voice_transcription_observable(
 
     with caplog.at_level(logging.INFO, logger="octoagent.gateway.services.telegram"):
         await service.handle_webhook_update(_voice_update())
+        await _drain_voice(service)  # F133:转写观测日志由后台 worker 产生
 
     lines = [
         r.getMessage()
@@ -535,6 +563,7 @@ async def test_voice_transcription_observable(
     assert "transcript_len=" in lines[0]
     # 隐私:日志只记长度,不含转写原文
     assert "可观测内容" not in lines[0]
+    await service.shutdown()
     await store_group.close()
 
 
@@ -662,12 +691,14 @@ async def test_voice_message_sets_voice_mode(tmp_path: Path) -> None:
 
     result = await service.handle_webhook_update(_voice_update())
     assert result.status == "accepted"
+    await _drain_voice(service)  # F133:voice_mode 写入由后台 worker 落定
 
     # 验证 binding voice_mode=True
     binding_store = store_group.conversation_binding_store
     binding = await binding_store.get("telegram", "42", project_id="")
     assert binding is not None
     assert binding.metadata.get("voice_mode") is True
+    await service.shutdown()
     await store_group.close()
 
 
@@ -695,6 +726,7 @@ async def test_voice_off_then_voice_message_stays_off(tmp_path: Path) -> None:
 
     # 再发 voice 消息
     await service.handle_webhook_update(_voice_update(update_id=402, message_id=52))
+    await _drain_voice(service)  # F133:等后台 worker 处理完该 voice
 
     # voice_mode 不应被重开
     binding2 = await binding_store.get("telegram", "42", project_id="")
@@ -702,6 +734,7 @@ async def test_voice_off_then_voice_message_stays_off(tmp_path: Path) -> None:
     assert binding2.metadata.get("voice_mode") is False, (
         "显式 /voice off 后，入站 voice 不应自动重开 voice_mode"
     )
+    await service.shutdown()
     await store_group.close()
 
 
@@ -714,6 +747,7 @@ async def test_voice_off_command_clears_voice_mode(tmp_path: Path) -> None:
 
     # 先开启（voice 消息触发）
     await service.handle_webhook_update(_voice_update(update_id=410, message_id=60))
+    await _drain_voice(service)  # F133:voice_mode=True 由后台 worker 落定
 
     # 发 /voice off
     bot.sent.clear()
@@ -731,6 +765,7 @@ async def test_voice_off_command_clears_voice_mode(tmp_path: Path) -> None:
 
     # 确认 bot 回复了确认文字（含"关闭"）
     assert any("关闭" in s.text for s in bot.sent), f"应回复语音关闭确认，实际: {bot.sent}"
+    await service.shutdown()
     await store_group.close()
 
 
@@ -1002,6 +1037,7 @@ async def test_voice_session_continuous_rounds(tmp_path: Path) -> None:
     # 第 1 轮：发 voice update → voice_mode 应置 True
     result1 = await service.handle_webhook_update(_voice_update(update_id=601, message_id=601))
     assert result1.status == "accepted"
+    await _drain_voice(service)  # F133:转写+voice_mode 写入由后台 worker 落定
 
     # 验证 voice_mode=True 已持久化
     binding_store = store_group.conversation_binding_store
@@ -1029,6 +1065,7 @@ async def test_voice_session_continuous_rounds(tmp_path: Path) -> None:
         f"第 2 轮文字 update 在语音模式下应走 send_voice，实际 send_voice_calls={bot.send_voice_calls}"
     )
     assert bot.send_voice_calls[0].audio == b"OggS\x00fake-tts"
+    await service.shutdown()
     await store_group.close()
 
 
@@ -1087,7 +1124,11 @@ async def test_voice_roundtrip_e2e(tmp_path: Path) -> None:
     # 发 voice update → voice_mode 应自动置 True，task 创建
     result = await service_voice.handle_webhook_update(_voice_update(update_id=701, message_id=701))
     assert result.status == "accepted"
-    voice_task_id = result.task_id
+    assert result.detail == "voice_queued"
+    await _drain_voice(service_voice)  # F133:task 由后台 worker 落定,从 task_store 取 id
+    voice_tasks = await store_voice.task_store.list_tasks()
+    assert len(voice_tasks) == 1
+    voice_task_id = voice_tasks[0].task_id
     assert voice_task_id is not None
 
     # 清除入站时的任何 send 记录
@@ -1131,5 +1172,7 @@ async def test_voice_roundtrip_e2e(tmp_path: Path) -> None:
     assert len(bot_text.send_voice_calls) == 0, "文字 chat 不应走 send_voice"
     assert len(bot_text.sent) >= 1, "文字 chat 应走 send_message"
 
+    await service_voice.shutdown()
+    await service_text.shutdown()
     await store_voice.close()
     await store_text.close()
