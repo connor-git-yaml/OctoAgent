@@ -474,6 +474,36 @@ Watchdog 作为 kernel 内部组件，监控 Task 执行健康度：
   `octo service install --keep-awake`（用户级 caffeinate 伴随，零 sudo，
   合盖睡眠软件挡不住——诚实边界）。
 
+#### 12.5.7 手机安全远程触达（F130 Tailscale，M8）
+
+> 让手机经互联网**安全打开完整 Web UI**（不只 Telegram 文本），走 Tailscale serve 私网隧道——
+> 零证书配置、不公网暴露、依托 F129 已常驻的服务。详见 `docs/codebase-architecture/remote-access.md`。
+
+**上手步骤（手机首次配置）**：
+
+1. **常驻服务在线**：先 `octo service install`（F129），确认 `octo service status` 三态健康。
+2. **装 Tailscale + 登录**：Mac 装 Tailscale.app，`tailscale up` 登录 tailnet；admin console
+   启用 **MagicDNS + HTTPS Certificates**（serve 前置）。手机装 Tailscale App 登录同一 tailnet。
+3. **一键切远程模式**：`octo remote enable` →
+   - 检测 Tailscale 三态（未就绪给可操作指引，**不改配置**）；
+   - 就绪则**先跑 `tailscale serve`（成功后才**切 `front_door.mode=bearer`，原子）；
+   - 提示在 `~/.octoagent/.env` 设 `OCTOAGENT_FRONTDOOR_TOKEN=<强随机>`（走 .env 不落 config）；
+   - 打印手机访问 URL `https://<magicdns>/`。
+4. **重启生效**：`octo restart`（front_door 模式改动需重启）。
+5. **手机访问**：浏览器打开 `https://<magicdns>/`，页面输入 token 即得完整 Web UI。
+
+**关键约束 / 红线**：
+- **serve 必配 bearer**（非 loopback）：serve 从 loopback 代理会注入 `X-Forwarded-*`，loopback 模式会全 403；
+  bearer 是 tailnet ACL 之外的纵深第二道闸。
+- **host 保持 127.0.0.1**：serve 从 loopback 代理，gateway 不监听任何外部网卡 = 暴露面最小；
+  **绑 0.0.0.0 + loopback 模式 = 裸奔** → 启动期 `exit(78)` 拒绝（`octo doctor` 亦标 FAIL）。
+- **零 sudo / 不代改系统**：serve 遇 permission / HTTPS 未启用给手动指引不代跑（延续 F129 红线）。
+- **secret 零落盘**：tskey 只在 `~/.octoagent/.env`，绝不进 plist/config/日志（log_redaction 补 tskey 前缀）。
+- **关闭**：`octo remote disable` 切回 loopback + 只关本功能的 serve 映射（不清整机他人 serve 配置）。
+
+**诊断**：`octo remote status`（当前 mode + 三态 + 暴露判定 + 手机 URL）；`octo doctor`
+新增 `tailscale_connectivity` + `front_door_exposure` 两 check。
+
 ### 12.6 升级与迁移
 
 #### 12.6.1 Schema 迁移策略

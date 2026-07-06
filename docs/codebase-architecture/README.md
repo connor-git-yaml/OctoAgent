@@ -21,6 +21,7 @@
    - [Testing Concurrency](./testing-concurrency.md)（F083 thread shutdown hang 修复）
    - [Platform Gateway](./platform-gateway.md)（F105 多平台 ChannelAdapter 抽象）
    - [File Workbench](./file-workbench.md)（F104/F107 文件工作台：artifact/behavior SQLite 轨 + workspace 真 git 轨）
+   - [Remote Access](./remote-access.md)（F130 Tailscale 安全远程触达：front_door 模式 + serve 编排 + host↔mode 防裸奔）
 
 ## 1. 这份文档集解决什么问题
 
