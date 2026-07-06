@@ -28,6 +28,11 @@ from .service_manager import (
     resolve_instance_root,
 )
 from .sleep_probe import SleepRisk, probe_sleep_risk
+from .tailscale_helper import (
+    TailscaleProbeResult,
+    TailscaleState,
+    probe_tailscale_status,
+)
 from .telegram_verifier import TelegramOnboardingVerifier
 
 log = structlog.get_logger()
@@ -54,6 +59,7 @@ class DoctorRunner:
         telegram_verifier: TelegramOnboardingVerifier | None = None,
         service_manager_factory: Callable[[Path], ServiceManager] | None = None,
         sleep_risk_probe: Callable[[], SleepRisk] | None = None,
+        tailscale_probe: Callable[[], TailscaleProbeResult] | None = None,
     ) -> None:
         if project_root is None:
             self._root = Path.cwd()
@@ -70,6 +76,9 @@ class DoctorRunner:
             lambda _root: build_service_manager(resolve_instance_root())
         )
         self._sleep_risk_probe = sleep_risk_probe or probe_sleep_risk
+        # F130 FR-D1 DI 缝：测试注入 stub（绝不真跑 tailscale status）。默认
+        # 走真实只读 probe（status --json），异常软化 SKIP（#6）。
+        self._tailscale_probe = tailscale_probe or probe_tailscale_status
 
     def _has_yaml_runtime_config(self) -> bool:
         return (self._root / "octoagent.yaml").exists()
@@ -117,6 +126,10 @@ class DoctorRunner:
         # F129 新增检查项（服务健康 + 睡眠风险）
         checks.append(await self.check_service_status())
         checks.append(await self.check_sleep_settings())
+
+        # F130 新增检查项（Tailscale 连通 + host↔mode 暴露面）
+        checks.append(await self.check_tailscale_connectivity())
+        checks.append(await self.check_front_door_exposure())
 
         # --live 检查
         if live:
@@ -677,6 +690,116 @@ class DoctorRunner:
             level=CheckLevel.RECOMMENDED,
             message=message,
         )
+
+    async def check_tailscale_connectivity(self) -> CheckResult:
+        """F130 FR-D1：Tailscale 三态 + tailnet 连接（远程触达诊断）。
+
+        未装是 RECOMMENDED 非 blocking——未用远程触达的用户不该 FAIL。
+        探测只读（``status --json``），任何失败降级 SKIP（#6）。DI
+        ``tailscale_probe`` 注入 stub 保 hermetic。
+        """
+        name = "tailscale_connectivity"
+        try:
+            probe = self._tailscale_probe()
+        except Exception as exc:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message=f"Tailscale 探测失败（{type(exc).__name__}），跳过检查",
+            )
+        if probe.state == TailscaleState.NOT_INSTALLED:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="未安装 Tailscale（手机远程触达需要，未部署可忽略）",
+                fix_hint=(
+                    "如需手机经互联网安全访问 Web UI：安装 Tailscale "
+                    "(https://tailscale.com/download) 后 `octo remote enable`"
+                ),
+            )
+        if probe.state == TailscaleState.INSTALLED_NOT_READY:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.WARN,
+                level=CheckLevel.RECOMMENDED,
+                message=f"Tailscale 已安装但未就绪——{probe.detail}",
+                fix_hint="运行 `tailscale up` 登录并启用 MagicDNS，再 `octo remote enable`",
+            )
+        return CheckResult(
+            name=name,
+            status=CheckStatus.PASS,
+            level=CheckLevel.RECOMMENDED,
+            message=f"Tailscale 就绪（{probe.dns_name}"
+            + (f"，{probe.ipv4}" if probe.ipv4 else "")
+            + "）",
+        )
+
+    async def check_front_door_exposure(self) -> CheckResult:
+        """F130 FR-D2：host↔mode 暴露面（spec §E 矩阵，跨源读，报警不阻塞）。
+
+        跨源读 ``OCTOAGENT_HOST`` env + ``config.front_door.mode`` → 纯函数
+        判定。doctor 层：safe=PASS / warn=WARN / reject=FAIL（**此处 FAIL 但
+        不 exit**——exit 在启动期 Phase D；doctor 是纵深诊断）。任何异常
+        降级 SKIP（#6）。
+        """
+        name = "front_door_exposure"
+        try:
+            from octoagent.gateway.services.frontdoor_exposure import (
+                resolve_bind_host,
+                validate_front_door_exposure,
+            )
+
+            host = resolve_bind_host()
+            mode = self._resolve_front_door_mode()
+            verdict = validate_front_door_exposure(host, mode)
+        except Exception as exc:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message=f"暴露面检查失败（{type(exc).__name__}），跳过",
+            )
+        if verdict.verdict == "reject":
+            return CheckResult(
+                name=name,
+                status=CheckStatus.FAIL,
+                level=CheckLevel.RECOMMENDED,
+                message=f"危险的 host↔mode 组合：{verdict.reason}",
+                fix_hint=verdict.fix_hint,
+            )
+        if verdict.verdict == "warn":
+            return CheckResult(
+                name=name,
+                status=CheckStatus.WARN,
+                level=CheckLevel.RECOMMENDED,
+                message=verdict.reason,
+                fix_hint=verdict.fix_hint,
+            )
+        return CheckResult(
+            name=name,
+            status=CheckStatus.PASS,
+            level=CheckLevel.RECOMMENDED,
+            message=verdict.reason,
+        )
+
+    def _resolve_front_door_mode(self) -> str:
+        """跨源读当前 front_door.mode：env 覆盖 > octoagent.yaml > 默认 loopback。
+
+        与 ``frontdoor_auth._read_env_overrides`` 同一 env 名
+        （``OCTOAGENT_FRONTDOOR_MODE``），保证 doctor 判定与运行时一致。
+        """
+        env_mode = os.environ.get("OCTOAGENT_FRONTDOOR_MODE", "").strip()
+        if env_mode:
+            return env_mode
+        cfg, _skip = self._load_config_safe("front_door_exposure")
+        if cfg is not None:
+            front_door = getattr(cfg, "front_door", None)
+            mode = getattr(front_door, "mode", None)
+            if isinstance(mode, str) and mode:
+                return mode
+        return "loopback"
 
     @staticmethod
     def _fix_hint_from_actions(actions: list[object]) -> str:
