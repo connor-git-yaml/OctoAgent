@@ -609,3 +609,30 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 - **待办 follow-up**：F135 P2 衍生——`octo service install --force` 重写已运行服务时 launchd 卸载→重载有窗口，20s 就绪超时太紧致 `repair-required`（真机实测手动 `launchctl bootstrap` 即恢复），install 应加 bootstrap 兜底 / 放宽超时（归 F129 followup 或 P2）。
 
 ---
+
+### M9（质量保证体系：四层测试金字塔 + 门禁改造）⏳ 启动（2026-07-09）
+
+> **目标（用户拍板 2026-07-09）**：把 E2E 验证拆成四层金字塔（L1 UI E2E / L2 非 UI 含真 LLM / L3 确定性无 LLM / L4 单元）+ UI/逻辑分离 + 质量门禁分层，最大化自动化、**最小化用户手工测试**。
+> **决策来源**：`qa-four-layer-audit` workflow（内部 6 路审计 + 竞品 5 路测试架构深读 + 28 候选对抗验证）+ `deep-research`（业界测试分层 / 去 LLM 依赖 / UI 可测性 / 门禁 四子题，9 条硬证据 3-0/2-0）。两 workflow 均撞 session 用量上限（synthesis/critique + 5 路 agent 被杀），**synthesis 由主节点综合完成**（决策集中原则，3 幸存审计交叉覆盖被杀路 + 亲历补齐）。
+> **两个总纲判断**：①**金字塔倒挂**——L4 单元 ~87%（厚），但 L2 真 LLM 回归**仅 2 文件**、L1 UI E2E **绝对零**；L3 有 ~50 文件但缺「能产 tool_calls 的脚本化 LLM」→ agent 决策环在 L3 测不了 = **反复要手工测的结构性根因**。②**CI 断链**——唯一 workflow 引用的测试文件已删（4600+ 测试零 CI 覆盖）；前端复杂度护栏已 FAIL 无人知；pyproject marker 描述与实现矛盾；provider 无硬闸防漏网真调用（bench TLS 事故根源=漏网真调用被 FallbackManager 静默退 Echo）。
+> **三项用户拍板**：①独立 M9 里程碑（7 Feature 成体系跨 gate/L1-L4）；②首波 F137 止血 + F138 keystone 并行；③L1 走 Playwright 薄输入 + 外部断言（断言走 event_store/文件系统 diff，不脆弱 DOM）。
+
+| Feature | 层 | 优先级 | 一句话 | 规模 |
+|---------|-----|--------|--------|------|
+| **F137 门禁止血** | gate | **P0** | 修断链 CI + pyproject marker 矛盾 + vitest/前端复杂度进闸 + `ALLOW_MODEL_REQUESTS` 式硬闸植入 provider `_dispatch`（漏网真调用必炸，区分**合法** Echo 降级 vs 漏网）。**设计先行**（CI 平台/硬闸 env 语义+e2e_live 开闸/前端门禁落 pre-commit vs CI 三岔路回拍板）| S-M |
+| **F138 脚本化 LLM harness**（keystone）| L3 | **P0** | harness 级 `model_client` DI + `SchemaTestAdapter`（TestModel 等价，按工具 JSON schema 产 tool_calls，`reflect_tool_schema` 原料已齐）+ 上提 skills/tests 的 `QueueModelClient` + clock DI。**打通 63 工具决策环 L3 确定性覆盖**，把大半 L2 降层。**设计先行**（adapter 放 provider 随包发布 vs test-only / 要不要 FunctionModel 脚本脑多步 / 与 EchoAdapter 并存 三岔路回拍板）| L |
+| **F139 VCR 录制回放** | L2→L3 | P1 | vcrpy 挂 ProviderClient `http_client` 注入点，**secret 过滤 serializer 先行**（#5）+ cassette 完整消费护栏（未播尾巴=漂移信号）。真 LLM 用例首跑真录、之后确定回放降本。依赖 F137 | M-L |
+| **F140 L1 UI E2E** | L1 | P1 | Playwright 薄输入（UI 仅输入通道）+ 外部断言（复用 e2e_live `state_diff`/`assertions` helper）+ data-testid 选择器契约（当前全库仅 3 处）+ 失败 marker 定性扫描。**直接减手工测**。仿 cc-haha desktop-smoke | L |
+| **F141 三模式 lane 门禁** | gate | P1 | pr/baseline/release 三模式 + **release 强制 live**（skip 即 FAIL，堵 AC-1 真机验证反复推迟）+ change-policy 路径→check 路由 + `tests/AGENTS.md` 机器可读契约 + flaky quarantine 过期强制复查。依赖 F137 | M |
+| **F142 确定性护栏补齐** | L3/L4 | P1 | 第三方库语义钉住（anyio/httpx/APScheduler/piper 各一真库假设测试，治那三个依赖 bug）+ prompt token 预算护栏 + wire 边界用例族（malformed JSON/粘包）+ inline-snapshot/dirty-equals 替手写 payload 断言 + changed-lines 90% coverage 门。基本独立 | M |
+| **F143 UI 变薄扩 L4** | L4 | P2 | ChatWorkbench 1204 行 / useChatStream 660 行 reducer 纯函数化下沉 + 3600 行已抽出纯逻辑补测 + 删死代码 ApprovalPanel/useApprovals + 共享前端 test util（去重 FakeEventSource）+ MarkdownContent XSS 断言。使 F140 更小 | M |
+
+**波次编排**：①**F137 止血 ∥ F138 keystone**（首发并行，文件不冲突：F137=CI/pyproject/githooks/provider，F138=harness/adapter/skills）→ ②F139 VCR / F142 护栏（F139 依赖 F137）→ ③F140 L1 / F141 lane（F141 依赖 F137，F140 可承 F143 变薄）→ ④F143 顺手。**首波两个均设计先行**（重大架构变更，产 spec/plan 回拍板范围再实施，仿 F127/F129/F130）。
+
+**竞品借鉴（已对抗验证「我们是否已有」，28 候选 = 5 真缺 / 21 部分有 / 2 已有）**：pydantic-ai（**TestModel/FunctionModel** 确定性测试模型 + **ALLOW_MODEL_REQUESTS** 硬闸 + **VCR cassette** + inline-snapshot/dirty-equals + xdist_group 治 flaky 非重试，Python 测试天花板 100% 分支覆盖）；cc-haha（**三模式 lane + release 必跑 live** + **UI 仅输入通道外部断言** + change-policy 路由 + changed-lines 覆盖门 + flaky quarantine）；agent-zero（**第三方库语义钉住** + prompt 预算护栏 + tests/AGENTS.md）。**DeepResearch 外部共识**：TestModel（pydantic-ai）/GenericFakeChatModel（LangChain）跨框架确认脚本化 fake model 是行业惯例非单一做法；ALLOW_MODEL_REQUESTS 机械禁真调用；unit(fake) vs integration(real) 边界=是否打真 LLM；LLM-as-judge 非确定性需校准、不能做免校准门禁，code grader 才 fast/cheap/reproducible（Anthropic）；capability eval（低通过率）vs regression eval（~100%）分套件分阈值（Anthropic）；tau-bench SOTA agent <50% → 真 agent E2E 不能做二元 CI 门（arxiv 2406.12045）。
+
+**风险留档**：①M9 **不消灭真 LLM 测试**——决策质量仍需真 model，本质是「把不需判断力的用例降层、需判断力的收敛到 weekly 而非 per-commit」；②F141 收紧会挡现在习惯的 `SKIP_E2E=1` 随手 bypass（**故意**，堵 AC-1 反复推迟）；③F140 L1 harness 首建（起后端复用 OctoHarness DI + 前端 dev server）是实打实 L 规模。
+
+**已确认已有别重造（对抗验证 already-have）**：UI 测试收敛到协议层（48 文件 HTTP 层 + SSE 序列断言 + 前端 FakeEventSource stub，结构上已具备，仅缺 golden snapshot 便利件）；provider double /v1 wire 回归（a6b51fc4 已治本 + 23 用例三 transport 出站 body shape 断言成体系，比 pydantic-ai SDK 层更贴 wire）。
+
+---
