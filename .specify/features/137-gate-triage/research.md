@@ -53,14 +53,14 @@
 
 ## B. Provider 分发链全解剖（硬闸落点 + Echo swallow 站点）
 
-### B.1 单一分发点 `_dispatch`（硬闸落点，比 pydantic-ai 7 处便宜）
+### B.1 分发链三层结构（⚠️ 本节「植 `_dispatch`」为**历史方案，已被 §I.1 推翻**——最终落点 = `call()` + `embed()` 入口第一行）
 
 `provider_client.py`（`packages/provider/src/octoagent/provider/`）三层调用链：
-- `call()`（`:315`）：瞬态传输错误有界指数重试外壳 → 调 `_dispatch_with_auth_refresh`。
-- `_dispatch_with_auth_refresh()`（`:389`）：auth resolve + 401/403 force-refresh 重试一次 → 调 `_dispatch`。
-- **`_dispatch()`（`:452`）：唯一 fan-out 点**——按 `transport` 路由到 3 协议实现：
+- `call()`（`:315`）：瞬态传输错误有界指数重试外壳 → 调 `_dispatch_with_auth_refresh`。**← 最终闸点（§I.1 实测修正）**。
+- `_dispatch_with_auth_refresh()`（`:389`）：auth resolve（**preemptive，有网络副作用**）+ 401/403 force-refresh 重试一次 → 调 `_dispatch`。
+- `_dispatch()`（`:452`）：唯一 fan-out 点——按 `transport` 路由到 3 协议实现：
   - `_call_openai_responses`（`:496`）/ `_call_openai_chat`（`:746`）/ `_call_anthropic_messages`（`:994`），每个内部才真发 `self._http.post(...)`。
-- **硬闸就植在 `_dispatch` 入口**（在 3 transport 分叉之前、任何网络 I/O 之前）。pydantic-ai 要植 `openai.py` 6-7 处 request 入口（`models/openai.py:831,868,1796`），我们**一处 = 全覆盖**。
+- ~~硬闸就植在 `_dispatch` 入口~~ **设计先行草案原方案，实测证伪**：`_dispatch` 在 auth resolve 之后，deny 带过期凭证仍会打真 OAuth token 端点（§I.1）。对比价值保留：pydantic-ai 要植 `openai.py` 6-7 处 request 入口（`models/openai.py:831,868,1796`），我们 `call()`+`embed()` **两处 = 全覆盖**。
 
 ### B.2 第二网络入口 `embed()`（不走 `_dispatch`，独立 leak 面）
 
@@ -123,7 +123,7 @@
 
 ## E. 竞品采纳明细（qa_audit_survivors.md，带 file:line）
 
-- **pydantic-ai `ALLOW_MODEL_REQUESTS`**（`models/__init__.py:901-938` check + `openai.py:831,868,1796` 6 入口 + `tests/conftest.py:72` 顶层置 False + `314-317` override context manager）：模块级布尔 + `check_allow_model_requests()` 植每个真 provider request 入口；漏网 → `RuntimeError`；opt-in 走 context manager / fixture；TestModel/FunctionModel 显式不受限。→ **F137 硬闸直接范本**，但我们单点 `_dispatch`（+`embed`）取代其 6-7 点。
+- **pydantic-ai `ALLOW_MODEL_REQUESTS`**（`models/__init__.py:901-938` check + `openai.py:831,868,1796` 6 入口 + `tests/conftest.py:72` 顶层置 False + `314-317` override context manager）：模块级布尔 + `check_allow_model_requests()` 植每个真 provider request 入口；漏网 → `RuntimeError`；opt-in 走 context manager / fixture；TestModel/FunctionModel 显式不受限。→ **F137 硬闸直接范本**，但我们 `call()`+`embed()` 两入口取代其 6-7 点（§I.1 实测修正原 `_dispatch` 单点方案）。
 - **cc-haha 三模式 lane**（`scripts/quality-gate/modes.ts:21-198` + `runner.ts`）：pr=hermetic / baseline+release=含 live / release 下 skip live → FAIL。→ **F141 主责**，F137 不 front-run；但 F137 CI 范围决策要为 F141 留接口（deterministic-only lane）。
 - **cc-haha change-policy + coverage 三重门**（`change-policy.ts` + `coverage-thresholds.json`）：ratchet + changed-lines 90%。→ F141/F142，非 F137。F137 只做「护栏进闸 + 现 FAIL 阈值处置」。
 - **DeepResearch 外部共识**：真 agent E2E 不能做二元 CI 门（tau-bench SOTA <50%，arxiv 2406.12045）；unit(fake)/integration(real) 边界=是否打真 LLM；CI 永不打真 API，真 LLM 收敛 weekly canary（SDK `gateway-model-health.yml`）。→ **F137 CI 范围 = deterministic 层（L4+L3），真 LLM 不进 per-PR CI**（岔路①推荐依据）。

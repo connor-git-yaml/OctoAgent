@@ -28,7 +28,7 @@ Phase 0  研究闭环 + 用户拍板 §7 三岔路 ✅（2026-07-09 拍板 + Fab
         ▼
 Phase A  provider 硬闸（最独立、最微妙、最先——F138/F141 前置）
         │  model_request_gate.py + ModelRequestsNotAllowedError
-        │  + _dispatch/embed 植闸 + 两 swallow 站点 re-raise + grep sweep
+        │  + call()/embed() 入口植闸 + 两 swallow 站点 re-raise + grep sweep
         │  + 顶层 conftest deny 默认 + e2e_live allow opt-in
         │  ★ 跑全量（gate=deny）triage 存量假绿 ★
         │
@@ -51,7 +51,7 @@ Phase F  文档 + living-docs 漂移闸 + completion-report
 ```
 
 **顺序理由**（先难后易 + 硬闸最先，沿用 F091/F129 Phase 优化经验）：
-- **A 最先且独立成 Phase**：硬闸是唯一「重大架构变更」子项（触碰 provider 分发 + 全仓测试默认），最微妙（不误伤 Echo）、需单独跑全量 triage 假绿、是 F138/F141 前置——先做完 A 拿到干净基线，后续 B/C/D 才有稳固地基。**A 内部也有序**：先建 gate 模块 + 异常（无副作用）→ 植 `_dispatch`/`embed` → 两站点 re-raise + grep sweep → conftest deny/allow → 全量 triage。
+- **A 最先且独立成 Phase**：硬闸是唯一「重大架构变更」子项（触碰 provider 分发 + 全仓测试默认），最微妙（不误伤 Echo）、需单独跑全量 triage 假绿、是 F138/F141 前置——先做完 A 拿到干净基线，后续 B/C/D 才有稳固地基。**A 内部也有序**：先建 gate 模块 + 异常（无副作用）→ 植 `call()`/`embed()` 入口 → 两站点 re-raise + grep sweep → 插件/conftest deny + allow opt-in → 全量 triage。
 - **B/C/D 并行**：文件完全不冲突（B=`.github/workflows/`；C=`.githooks/pre-commit`+`package.json`+`check-frontend-complexity.mjs`；D=`pyproject.toml`）。B 依赖 A（CI 要 gate=deny 生效）；C/D 独立于 A。
 - **E/F**：双评审 + 文档收尾。
 
@@ -88,7 +88,7 @@ Phase F  文档 + living-docs 漂移闸 + completion-report
 **A.5 deny 布线 + e2e allow opt-in（FR-8/9，★0-regression 关键★）**
 - **主布线**：provider 包 pytest11 entry-point 插件（`provider/testing/pytest_model_request_gate.py` + pyproject `[project.entry-points.pytest11]`），`pytest_configure` 置 deny。
 - **冗余布线**：顶层 `octoagent/conftest.py` 同置 deny（幂等）。
-- **两处均防御式 import**（try/except ImportError → no-op + 注释）：pre-commit hook 跑 master src 的 pre-merge 窗口不得炸（memory `project_precommit_hook_execution_model`）。
+- **ImportError 策略分置**（Codex P2-2）：仅根 conftest 防御式 import（pre-merge hook 窗口不得炸）；插件内 gate import 严格（同包发布，缺失=安装态损坏，响亮失败正确）。
 - **激活验证**（worktree 无 metadata 注册）：用 `-p octoagent.provider.testing.pytest_model_request_gate` 显式加载断言插件生效；根 conftest 布线由标准全量跑断言。
 - `e2e_live/conftest.py` 加 **e2e_full marker 驱动** autouse fixture：带 marker 时 `allow_model_requests()` context 包裹（autouse 先于显式 fixture 实例化，早于 `octo_harness_e2e`）。
 - 绑定 AC-4：宿主有 OAuth → e2e_full 真跑；无 → SKIP。
