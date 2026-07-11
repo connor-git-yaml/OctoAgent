@@ -70,6 +70,7 @@ markers = [
     "e2e_smoke: F087 smoke 5 域集成层 e2e（不真打 LLM，DI stub 驱动；pre-commit hook 自动跑，≤ 180s。F137 gate 下保持 deny——smoke 漏网真调用必炸）",
     "e2e_full: F087 full 8 域真实 LLM e2e（真打 LLM；手动 / octo e2e full，≤ 10min。F137 gate 按此 marker 自动开闸——e2e_full = 声明真 LLM 意图的单一信号）",
     "e2e_live: F087 e2e_live 套件正交标记（与 e2e_smoke / e2e_full 共存）",
+    "e2e_scripted: F138 脚本化决策环确定性 e2e（零真 LLM / 零宿主 OAuth，CI-runnable；F141 归入 pr lane）",
 ]
 # Feature 083 P3+P4+P5+P6：xdist **不默认启用**——长尾 timing race 超 F083 scope。
 # - P1+P2：thread shutdown hang 修复 + os.environ 改 monkeypatch（已治本）

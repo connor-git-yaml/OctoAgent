@@ -30,6 +30,9 @@ from typing import TYPE_CHECKING, Any
 from ..services.frontdoor_auth import FrontDoorGuard
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+    from datetime import datetime
+
     from fastapi import FastAPI
     from octoagent.core.store import StoreGroup
     from octoagent.provider import (
@@ -39,6 +42,20 @@ if TYPE_CHECKING:
         ProviderRouter,
     )
     from octoagent.provider.dx.credential_store import CredentialStore
+    from octoagent.skills import StructuredModelClientProtocol
+
+
+def _utc_now() -> datetime:
+    """F138 clock seam 默认时钟（``clock`` override 全 None 时的 ``app.state.clock``）。
+
+    与既有裸写 ``datetime.now(UTC)`` 逐值等价；抽成具名函数便于测试断言
+    "None 时默认时钟就是本函数"。延迟 import 保持模块 import 面不变
+    （本文件惯例：段内 lazy import；返回注解经 ``from __future__ import
+    annotations`` 惰性求值，不需要运行时 import datetime）。
+    """
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC)
 
 
 async def _final_drain_background_tasks(
@@ -110,10 +127,17 @@ class OctoHarness:
     DI 钩子状态（**P2 全部启用**）：
       * ``credential_store`` → ``_bootstrap_llm`` 替换 ProviderRouter 凭据来源
       * ``llm_adapter`` → ``_bootstrap_llm`` 替换 FallbackManager.primary
+        （**路径 A**：FallbackManager 纯文本补全，不进 SkillRunner）
       * ``mcp_servers_dir`` → ``_bootstrap_mcp`` / ``_bootstrap_runtime_services``
         替换 McpInstallerService 安装目录与 mkdir 路径
       * ``data_dir`` → ``_bootstrap_stores`` / ``_bootstrap_capability_pack``
         替换 DB / artifacts / user_pipelines 默认根
+      * ``plugins_dir``（F106）→ ``_bootstrap_user_plugins`` 替换 plugin 装载目录
+      * ``model_client``（F138）→ ``_bootstrap_executors`` 替换 SkillRunner 的
+        决策环 model_client（**路径 B**：非 None 时无条件建 SkillRunner，与
+        ``OCTOAGENT_LLM_MODE`` 解耦、不要求 provider 凭证——脚本化决策环 L3 入口）
+      * ``clock``（F138）→ ``app.state.clock`` seam + watchdog 构造注入
+        （确定性时钟；None 默认 ``datetime.now(UTC)`` 等价）
 
     所有 override 默认 ``None``：byte-for-byte 等价生产路径（SC-6）。
     e2e 注入: 整条 bootstrap 不回退宿主 ``~/.octoagent``（Codex P087-P1 high
@@ -129,11 +153,18 @@ class OctoHarness:
         mcp_servers_dir: Path | None = None,
         data_dir: Path | None = None,
         plugins_dir: Path | None = None,
+        model_client: StructuredModelClientProtocol | None = None,
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         # F087 P2 T-P2-8：4 个 DI 全部接入，fail-fast 全部移除。
         # 任一 override 全 None 时 byte-for-byte 等价（生产路径行为不变）。
         # e2e 注入时彻底隔离宿主 ~/.octoagent。Codex P1 high finding 闭环。
         # F106：plugins_dir DI（None=生产 ~/.octoagent/plugins，非 None=hermetic tmp 隔离）。
+        # F138：model_client DI（None=生产 SkillRunner 硬连 ProviderModelClient 原路；
+        #   非 None=脚本化决策环——无条件建 SkillRunner，与 OCTOAGENT_LLM_MODE 解耦，
+        #   不要求 provider 凭证。Constitution #9：生产 main.py 不传 → 构造性不可达）。
+        # F138：clock DI（None=datetime.now(UTC) 等价默认；非 None=确定性时钟注入，
+        #   app.state.clock seam + watchdog 消费，其余 datetime.now 调用点归 F142）。
 
         self._project_root = project_root
         self._credential_store_override = credential_store
@@ -141,6 +172,8 @@ class OctoHarness:
         self._mcp_servers_dir = mcp_servers_dir
         self._data_dir = data_dir
         self._plugins_dir = plugins_dir
+        self._model_client_override = model_client
+        self._clock_override = clock
 
         # bootstrap 期间填充，commit_to_app 时统一搬到 app.state
         self._state: dict[str, Any] = {}
@@ -167,6 +200,11 @@ class OctoHarness:
         T-P1-3..T-P1-5 实现各段；T-P1-6 在 ``commit_to_app`` 内统一挂
         ``app.state.*``。
         """
+        # F138 clock seam：app 级注入点（additive inert——clock=None 时默认与裸写
+        # datetime.now(UTC) 逐值等价，且现存零消费者直读 app.state.clock；
+        # watchdog 段（_bootstrap_optional_routines）作为唯一 demonstrating
+        # consumer 以构造参数拿到同一 callable。其余 datetime.now 调用点归 F142。
+        app.state.clock = self._clock_override or _utc_now
         await self._bootstrap_paths(app)
         await self._bootstrap_stores(app)
         await self._bootstrap_tool_registry_and_snapshot(app)
@@ -1131,7 +1169,35 @@ class OctoHarness:
                     result_json, task_id=task_id, trace_id=trace_id,
                 )
 
-        if _llm_mode_env != "echo":
+        if self._model_client_override is not None:
+            # F138：脚本化决策环 DI——override 存在即无条件建 SkillRunner，与
+            # OCTOAGENT_LLM_MODE 解耦（spec §2.3 拍板③子决策：echo-skip 门不得
+            # 挡住测试注入的脚本脑；echo 的离线语义由"不构造 ProviderModelClient、
+            # 不要求 provider 凭证"继续成立）。除 model_client 换 override 外，
+            # SkillRunner / LLMService 构造与下方非 echo 分支完全同构（同 hooks /
+            # 同 on_tool_search_result / 同 skill_discovery / 同 _llm_service_ref
+            # + AgentContextService 接线）——保证脚本化路径跑的就是真决策环。
+            # Constitution #9：生产 main.py 只传 project_root，本分支构造性不可达。
+            skill_runner = SkillRunner(
+                model_client=self._model_client_override,
+                tool_broker=tool_broker,
+                event_store=store_group.event_store,
+                hooks=[AgentSessionTurnHook(store_group)],
+                on_tool_search_result=_on_tool_search_result,
+            )
+            app.state.llm_service = LLMService(
+                fallback_manager=fallback_manager,
+                alias_registry=alias_registry,
+                skill_runner=skill_runner,
+                skill_discovery=app.state.skill_discovery,
+            )
+            _llm_service_ref.append(app.state.llm_service)
+            AgentContextService.set_llm_service(app.state.llm_service)
+            _log.info(
+                "skill_runner_model_client_override",
+                model_client_type=type(self._model_client_override).__name__,
+            )
+        elif _llm_mode_env != "echo":
             # Feature 080 Phase 3+5：SkillRunner 用 ProviderModelClient + ProviderRouter 直连
             skill_runner = SkillRunner(
                 model_client=ProviderModelClient(
