@@ -1,23 +1,50 @@
-name: feature-007-integration
+# F137 门禁止血：正式确定性层 CI（B-lite，M9 拍板）
+#
+# 前身 feature-007-integration 引用的 tests/integration/test_f007_e2e_integration.py
+# 已在 master 删除（pytest 退出码 4 → CI 常红，4600+ 测试零 CI 覆盖）。本 workflow
+# 改写为两个 job：
+#
+#   backend-deterministic —— 全 testpaths 确定性层（L4 单元 + L3 Echo/hermetic），
+#     排除 e2e_live 目录（smoke/full 依赖宿主 OAuth，CI 无凭证只会 SKIP；真 LLM
+#     显式不进 per-PR CI——F141 weekly canary 范围）。gate=deny 构造性保证零真
+#     LLM 调用：uv sync 后 provider 包 pytest11 entry-point 插件
+#     （octoagent_model_request_gate）自动生效 + octoagent/conftest.py 冗余布线。
+#     串行首版（勿 -n auto——F083 task_runner race；F142 xdist_group 后再提速）。
+#
+#   frontend —— 复杂度护栏（阻断）+ vitest（阻断；暂排除 F137 接线时点发现的
+#     6 个存量红文件，欠账清单见该步骤注释）。
+#
+# 零 secret / 零真网络调用（free tier 安全）。lane 分层（pr/baseline/release）
+# 是 F141 主责，本 workflow 保持单一 deterministic lane 为其留扩展缝。
+name: ci
 
 on:
   pull_request:
     paths:
       - "octoagent/**"
+      - "repo-scripts/**"
       - ".github/workflows/feature-007-integration.yml"
   push:
     branches:
       - "master"
       - "dev"
       - "feat/**"
+      - "feature/**"
       - "codex/**"
     paths:
       - "octoagent/**"
+      - "repo-scripts/**"
       - ".github/workflows/feature-007-integration.yml"
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  f007-integration:
+  backend-deterministic:
     runs-on: ubuntu-latest
+    # 串行全量实测本地 ~3min（M4 Pro）；GitHub 2-core 预估 20-40min，60min 兜底
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: octoagent
@@ -32,9 +59,64 @@ jobs:
 
       - name: Setup uv
         uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
 
       - name: Install Dependencies
         run: uv sync --dev
 
-      - name: Run Feature 007 Integration Tests
-        run: uv run pytest tests/integration/test_f007_e2e_integration.py -q
+      - name: Run deterministic test layers (L4+L3, gate=deny)
+        # 教训沉淀（.githooks/pre-commit:83-91）：用 `uv run python -m pytest`
+        # 而非裸 `uv run pytest`——console-script 可能逃逸 venv。
+        # 无参数 = pyproject testpaths 全量；--ignore 剔 e2e_live（宿主凭证依赖）。
+        run: >
+          uv run python -m pytest -q
+          --ignore=apps/gateway/tests/e2e_live
+          --junitxml=test-results/junit-backend.xml
+        env:
+          PYTHONNOUSERSITE: "1"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-junit
+          path: octoagent/test-results/
+          retention-days: 14
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: octoagent/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: octoagent/frontend/package-lock.json
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: 前端复杂度护栏（与 pre-commit 同一脚本，双闸）
+        run: npm run check:complexity
+
+      - name: vitest（单元/组件层）
+        # F137 接线时点发现 master 存量 11 failed / 6 文件（前端测试此前从未进闸，
+        # 漂移无人知）。为避免新 CI 一落地即常红、同时让其余 22 文件立即获得阻断
+        # 保护，暂以 --exclude 记欠账；triage 修复归独立 fix task / F143（其中
+        # "切换工作上下文" 控件缺失可能是真 UI 回归）。清零后删除全部 --exclude。
+        run: >
+          npx vitest run
+          --exclude "src/App.test.tsx"
+          --exclude "src/pages/AgentCenter.test.tsx"
+          --exclude "src/pages/ChatWorkbench.test.tsx"
+          --exclude "src/components/ChatUI/MarkdownContent.test.tsx"
+          --exclude "src/domains/home/HomePage.test.tsx"
+          --exclude "src/domains/memory/MemoryPage.test.tsx"

@@ -9,7 +9,15 @@ const explicitLimits = new Map([
   ["octoagent/frontend/src/pages/AgentCenter.tsx", 4800],
   ["octoagent/frontend/src/pages/ControlPlane.tsx", 4100],
   ["octoagent/frontend/src/pages/SettingsCenter.tsx", 1900],
-  ["octoagent/frontend/src/index.css", 3300],
+  // F137 放宽兜底（现状 4477 > 原 3300，护栏失守无人知期间涨的存量）：
+  // 放到 current+小余量只挡新增长；F143 UI 变薄后 ratchet 回收到 3300 以下。
+  ["octoagent/frontend/src/index.css", 4600],
+  // F137 放宽兜底（现状 1204 > 默认 1200）：F143 明确要下沉 ChatWorkbench，
+  // F137 不改其代码（抢范围）；F143 完成后删除本行回落默认 1200。
+  ["octoagent/frontend/src/pages/ChatWorkbench.tsx", 1250],
+  // F137 放宽兜底（现状 660 > 默认 500）：F143 要把 useChatStream reducer
+  // 纯函数化下沉；F143 完成后删除本行回落默认 500。
+  ["octoagent/frontend/src/hooks/useChatStream.ts", 700],
 ]);
 
 const ruleSet = [

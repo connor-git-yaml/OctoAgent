@@ -42,6 +42,27 @@ if [[ "${SKIP_SYNC_CHECK:-0}" != "1" ]]; then
   fi
 fi
 
+# ---- F137: 前端复杂度检查（亚秒级 node 脚本；先于 SKIP_E2E——前端护栏与 e2e
+#      环境是独立关注点，SKIP_E2E=1 不应顺带跳过前端闸）----
+# bypass: SKIP_FRONTEND_CHECK=1 git commit（照 SKIP_E2E 范式，紧急逃生门）
+# node 缺失 → 降级 SKIP 不阻断 commit（Constitution #6；CI 侧仍会跑到）
+if [[ "${SKIP_FRONTEND_CHECK:-0}" != "1" ]]; then
+  FE_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+  FE_CHECK_SCRIPT="${FE_REPO_ROOT}/repo-scripts/check-frontend-complexity.mjs"
+  if ! command -v node >/dev/null 2>&1; then
+    echo "[FRONTEND SKIP] node 不可用，复杂度检查降级跳过（CI 会兜底）"
+  elif [[ -f "${FE_CHECK_SCRIPT}" ]]; then
+    if ! node "${FE_CHECK_SCRIPT}" >/dev/null 2>&1; then
+      echo "[FRONTEND FAIL] 前端复杂度检查未通过"
+      echo "  详情:   node repo-scripts/check-frontend-complexity.mjs"
+      echo "  修复:   拆分超限文件，或（F143 ratchet 范围内）调整 explicitLimits"
+      echo "  bypass: SKIP_FRONTEND_CHECK=1 git commit"
+      exit 1
+    fi
+    echo "[FRONTEND PASS] 复杂度检查通过"
+  fi
+fi
+
 # ---- bypass 路径 ----
 if [[ "${SKIP_E2E:-0}" == "1" ]]; then
   echo "[E2E] skipped via SKIP_E2E=1"
