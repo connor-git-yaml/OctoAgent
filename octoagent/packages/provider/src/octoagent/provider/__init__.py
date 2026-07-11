@@ -65,6 +65,7 @@ from .fallback import FallbackManager
 from .model_request_gate import (
     ModelRequestsNotAllowedError,
     allow_model_requests,
+    apply_test_default_deny,
     check_model_requests_allowed,
     model_requests_allowed,
     set_allow_model_requests,
@@ -108,6 +109,7 @@ __all__ = [
     # F137：真 LLM 调用许可 gate
     "ModelRequestsNotAllowedError",
     "allow_model_requests",
+    "apply_test_default_deny",
     "check_model_requests_allowed",
     "model_requests_allowed",
     "set_allow_model_requests",

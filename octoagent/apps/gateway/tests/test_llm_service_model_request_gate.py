@@ -11,7 +11,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.provider import (
     FallbackManager,

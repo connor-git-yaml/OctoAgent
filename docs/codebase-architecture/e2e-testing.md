@@ -11,9 +11,13 @@ F087 之前的 e2e 测试集中在 `apps/gateway/tests/e2e/test_acceptance_scena
 （5 域 5x 循环），已在 P5 删除。新方案围绕 4 条主轴：
 
 1. **OctoHarness 抽离**：`OctoHarness.bootstrap()` 是真实启动路径的统一入口，
-   `gateway/harness/octo_harness.py` 暴露 4 个 DI 钩子（`credential_store` /
-   `secret_store` / `transport_factory` / `clock`）供 e2e 注入 stub 替换；
-   生产路径不感知测试存在。
+   `gateway/harness/octo_harness.py` 构造签名实际暴露 5 个 DI 钩子
+   （`credential_store` / `llm_adapter` / `mcp_servers_dir` / `data_dir` /
+   `plugins_dir`）供 e2e 注入 stub / 隔离目录；生产路径不感知测试存在
+   （全 None 时 byte-for-byte 等价）。
+   > F137 勘误：本节旧文案宣称的 `secret_store` / `transport_factory` / `clock`
+   > 三钩子从未存在（M9 审计确认）；决策环 `model_client` 与 `clock` DI 由
+   > F138 补齐。
 2. **Hermetic 隔离**：双 autouse fixture（`tests/e2e_live/conftest.py`）每个测试
    重置 5 类凭证 env、重定向 4 个 `OCTOAGENT_*` 路径 env 到 tmp 目录、按
    `helpers/MODULE_SINGLETONS.md` 清单逐条 reset 5 项 module 级单例
@@ -29,6 +33,11 @@ F087 之前的 e2e 测试集中在 `apps/gateway/tests/e2e/test_acceptance_scena
 4. **OctoHarness 内置 120s ProviderRouter timeout**：单测内不会无限挂在网络上。
    外加 30s SIGALRM 单场景 watchdog（`signal.alarm(30)` 包 e2e 函数体；仅主线程
    生效，pytest-asyncio "auto" 模式下 e2e 在主线程）。
+5. **F137 真 LLM 调用许可硬闸**：测试会话默认 gate=deny（provider 包 pytest11
+   插件 + `octoagent/conftest.py` 双布线），漏网真调用抛
+   `ModelRequestsNotAllowedError` 而非被 FallbackManager 静默降级 Echo 假成功；
+   `e2e_live/conftest.py` 的 autouse fixture 按 **e2e_full marker** 自动翻
+   allow（e2e_smoke 保持 deny——smoke 的「不打 LLM」从约定升级为构造性保证）。
 
 ## 2. 13 能力域清单
 

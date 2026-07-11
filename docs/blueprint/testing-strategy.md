@@ -11,24 +11,37 @@
 
 ### 13.1 测试基础设施（Test Infrastructure）
 
-- **框架**：pytest + anyio（async 测试）+ pytest-asyncio
-- **全局 LLM 安全锁**：测试环境设置 `ALLOW_MODEL_REQUESTS = False`，防止意外调用真实 LLM API
-- **conftest.py 核心 fixture**：
-  - `InMemoryEventStore`：内存实现的 Event Store，替代 SQLite 加速单元测试
-  - `TestModel` / `FunctionModel`：Pydantic AI 提供的确定性 LLM mock（零成本、类型安全）
-  - `dirty-equals`：处理非确定性字段（`IsStr()`、`IsDatetime()`），用于事件断言
-  - `inline-snapshot`：结构化输出断言，自动更新预期值
-- **VCR 录制回放**：pytest-recording + vcrpy 录制真实 LiteLLM 请求，集成测试回放时无需网络
-- **Logfire 测试隔离**：每个测试后 `logfire.shutdown(flush=False)`，防止 OTel span 跨测试泄漏
-- **测试目录结构**：
-  ```
-  tests/
-    unit/           # 纯逻辑、无 IO
-    integration/    # 真实 SQLite + Docker + SSE
-    replay/         # golden test 事件流回放
-    evals/          # LLM 输出质量评估（预留）
-    conftest.py     # 全局 fixture + 安全锁
-  ```
+> 本节原为设计愿景（写于 M0 期，部分从未落地且术语过时）。M9（质量保证体系）
+> 起逐项落地/校正为实况，落地状态标注如下。
+
+- **框架**：pytest + pytest-asyncio（`asyncio_mode = "auto"`）✅ 已落地
+- **全局 LLM 安全锁** ✅ **F137 已落地**（原愿景 `ALLOW_MODEL_REQUESTS` 的实际形态）：
+  - `octoagent.provider.model_request_gate`——env `OCTOAGENT_ALLOW_MODEL_REQUESTS`
+    缺省 allow（生产零感知）；测试布线（provider 包 pytest11 entry-point 插件
+    `octoagent_model_request_gate` + `octoagent/conftest.py` 冗余布线）默认置 deny。
+  - 闸点在 `ProviderClient.call()` / `embed()` 入口第一行（早于 auth resolver 的
+    preemptive refresh 网络副作用）；漏网真调用抛 `ModelRequestsNotAllowedError`
+    （`RuntimeError` 子类），FallbackManager / llm_service / SkillRunner /
+    memory bridge 各 swallow 站点对其先行 re-raise——**漏网必炸、合法 Echo
+    降级不误伤**（异常类型区分，照 401/403 skip-fallback 先例）。
+  - opt-in：e2e_full marker（e2e_live conftest 自动开闸）/ `allow_model_requests()`
+    context / 显式 env `=1`（布线尊重显式 env）。
+- **确定性 LLM mock**（原愿景 TestModel/FunctionModel 的等价物）⏳ **F138 落地中**：
+  脚本化 model_client（上提 skills/tests `QueueModelClient`）+ SchemaTestAdapter（Phase 2）。
+- **事件断言便利件**（dirty-equals / inline-snapshot）📋 规划 **F142**（尚未引入）。
+- **VCR 录制回放** 📋 规划 **F139**（已收窄：仅 provider transport 层 wire 真样本
+  回归，不承担 agent-loop 用例降层；LiteLLM 已于 F081 退役，录制对象为 provider
+  直连三 transport）。
+- **CI 门禁** ✅ **F137 已落地**：`.github/workflows/feature-007-integration.yml`
+  （workflow 名 `ci`）跑确定性层（全 testpaths 排除 e2e_live，gate=deny 构造性
+  零真调用，串行 + junit artifact）+ 前端 job（complexity 阻断 + vitest 阻断，
+  存量红 6 文件以 `--exclude` 记欠账归 F143/独立 fix task）；pre-commit hook 挂
+  前端 complexity 检查（`SKIP_FRONTEND_CHECK=1` bypass）。lane 分层
+  （pr/baseline/release）📋 规划 **F141**。
+- **测试目录结构**（实况；原愿景的 replay/evals 独立目录从未建立）：测试分布在
+  各包 `packages/*/tests` + `apps/gateway/tests`（含 `e2e_live/` 真 LLM 套件）+
+  顶层 `tests/integration`（Echo 全栈），由 `octoagent/pyproject.toml` testpaths
+  统一编排；评估能力由 OctoBench（仓库根 `benchmarks/`）承担。
 
 #### 13.1.1 测试并发优化（Feature 083）
 

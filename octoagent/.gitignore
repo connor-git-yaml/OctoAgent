@@ -47,6 +47,8 @@ frontend/pnpm-lock.yaml
 .pytest_cache/
 .coverage
 htmlcov/
+# F137 CI junit 产物（本地跑 CI 同款命令时生成，勿入版本管理）
+test-results/
 
 # ruff
 .ruff_cache/

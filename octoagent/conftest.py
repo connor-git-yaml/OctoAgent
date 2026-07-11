@@ -24,7 +24,9 @@ def pytest_configure(config: pytest.Config) -> None:
     主布线是 provider 包的 pytest11 entry-point 插件（安装态 venv 内所有
     pytest 会话构造性生效）；本处为**冗余次选**——覆盖 worktree PYTHONPATH
     锁模式（禁 uv sync）下 entry point 未注册进共享 venv 的窗口。两处布线
-    幂等（同置 False）。
+    幂等（同走 ``apply_test_default_deny``：env 未设置 → deny；**显式 env
+    优先**——``OCTOAGENT_ALLOW_MODEL_REQUESTS=1`` 整进程放行是公开 opt-in
+    通道③，布线不得让它失效，Codex re-review P2-2）。
 
     防御式 import（仅本处，插件侧 strict）：pre-commit hook 在 worktree 收集
     本 conftest 但 import master src（memory ``project_precommit_hook_execution_model``）
@@ -36,10 +38,10 @@ def pytest_configure(config: pytest.Config) -> None:
     """
     del config
     try:
-        from octoagent.provider.model_request_gate import set_allow_model_requests
+        from octoagent.provider.model_request_gate import apply_test_default_deny
     except ImportError:
         return  # pre-merge 窗口：master src 尚无 gate 模块
-    set_allow_model_requests(False)
+    apply_test_default_deny()
 
 
 @pytest_asyncio.fixture

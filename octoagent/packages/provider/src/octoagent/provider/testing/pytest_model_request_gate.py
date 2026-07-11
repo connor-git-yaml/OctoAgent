@@ -34,9 +34,14 @@ if TYPE_CHECKING:
     import pytest
 
 
-def pytest_configure(config: "pytest.Config") -> None:
-    """会话起点置 gate=deny（幂等；与根 conftest 冗余布线同值）。"""
-    del config
-    from octoagent.provider.model_request_gate import set_allow_model_requests
+def pytest_configure(config: pytest.Config) -> None:
+    """会话起点置 gate 测试默认（幂等；与根 conftest 冗余布线同值）。
 
-    set_allow_model_requests(False)
+    经 ``apply_test_default_deny``：env 未设置 → deny；**显式 env 优先**
+    （``OCTOAGENT_ALLOW_MODEL_REQUESTS=1`` 整进程放行是异常 message 公开
+    承诺的 opt-in 通道③，布线不得让它失效——Codex re-review P2-2）。
+    """
+    del config
+    from octoagent.provider.model_request_gate import apply_test_default_deny
+
+    apply_test_default_deny()

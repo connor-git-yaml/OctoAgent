@@ -14,7 +14,6 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
-
 from octoagent.provider import model_request_gate as mrg
 from octoagent.provider.auth_resolver import ResolvedAuth
 from octoagent.provider.exceptions import ProviderError
@@ -272,13 +271,65 @@ class TestDenyWiring:
         """
         assert model_requests_allowed() is False
 
-    def test_plugin_configure_sets_deny(self) -> None:
+    def test_plugin_configure_sets_deny(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """插件 pytest_configure 直调翻 deny（无需 metadata 注册即可验证插件逻辑）。"""
         from octoagent.provider.testing import pytest_model_request_gate as plugin
 
+        monkeypatch.delenv(mrg.ALLOW_MODEL_REQUESTS_ENV, raising=False)
         set_allow_model_requests(True)
         plugin.pytest_configure(config=None)  # type: ignore[arg-type]
         assert model_requests_allowed() is False
+
+    def test_apply_test_default_deny_env_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """env 未设置（常态）→ deny。"""
+        monkeypatch.delenv(mrg.ALLOW_MODEL_REQUESTS_ENV, raising=False)
+        set_allow_model_requests(True)
+        mrg.apply_test_default_deny()
+        assert model_requests_allowed() is False
+
+    def test_apply_test_default_deny_respects_explicit_env_allow(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Codex re-review P2-2：显式 env=1 是公开 opt-in 通道③——布线必须尊重。"""
+        monkeypatch.setenv(mrg.ALLOW_MODEL_REQUESTS_ENV, "1")
+        set_allow_model_requests(False)
+        mrg.apply_test_default_deny()
+        assert model_requests_allowed() is True
+
+    def test_apply_test_default_deny_respects_explicit_env_deny(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(mrg.ALLOW_MODEL_REQUESTS_ENV, "0")
+        set_allow_model_requests(True)
+        mrg.apply_test_default_deny()
+        assert model_requests_allowed() is False
+
+    def test_plugin_respects_env_allow_in_subprocess(
+        self, pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """端到端：env=1 + 插件加载 → 子进程会话 allow（opt-in ③ 穿透布线）。"""
+        monkeypatch.setenv(mrg.ALLOW_MODEL_REQUESTS_ENV, "1")
+        pytester.makepyfile(
+            """
+            from octoagent.provider.model_request_gate import (
+                check_model_requests_allowed,
+                model_requests_allowed,
+            )
+
+            def test_gate_allows_via_env():
+                assert model_requests_allowed() is True
+                check_model_requests_allowed()
+            """
+        )
+        result = pytester.runpytest_subprocess(
+            "-p",
+            "no:octoagent_model_request_gate",
+            "-p",
+            "octoagent.provider.testing.pytest_model_request_gate",
+            "-p",
+            "no:cacheprovider",
+        )
+        result.assert_outcomes(passed=1)
 
     def test_plugin_explicit_load_denies(
         self, pytester: pytest.Pytester, monkeypatch: pytest.MonkeyPatch

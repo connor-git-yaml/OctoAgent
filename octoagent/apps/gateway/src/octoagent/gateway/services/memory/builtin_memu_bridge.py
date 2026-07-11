@@ -700,6 +700,11 @@ class BuiltinMemUBridge:
                     [query], target_alias=resolved_target.proxy_alias, is_query=True,
                 )
                 return vecs[0] if vecs else None
+            except ModelRequestsNotAllowedError:
+                # F137 硬闸（Codex re-review P2-1）：_fetch_embeddings 的守卫
+                # re-raise 到这里若被吞成 None，就退化成 FTS-only 假绿——漏网
+                # embedding 调用信号被掩埋。同款先行 re-raise。
+                raise
             except Exception:
                 return None
         if resolved_target.uses_qwen:

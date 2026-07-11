@@ -99,10 +99,29 @@ def check_model_requests_allowed() -> None:
     )
 
 
+def apply_test_default_deny() -> None:
+    """测试布线统一入口（pytest11 插件 / 根 conftest 调用）：默认置 deny，
+    但**显式 env 优先**（Codex re-review P2-2）。
+
+    - env 未设置（常态）→ deny：测试默认不许真 LLM。
+    - env 显式设置 → 按 env 值：``OCTOAGENT_ALLOW_MODEL_REQUESTS=1`` 整进程
+      放行——异常 message 公开承诺的 opt-in 通道③（排障/临时 e2e 场景），
+      布线不得让它失效；``=0`` 显式 deny 同样尊重。
+
+    生产不受影响：生产进程不跑 pytest，本函数只被测试布线调用。
+    """
+    raw = os.environ.get(ALLOW_MODEL_REQUESTS_ENV, "").strip()
+    if raw:
+        set_allow_model_requests(_env_default())
+        return
+    set_allow_model_requests(False)
+
+
 __all__ = [
     "ALLOW_MODEL_REQUESTS_ENV",
     "ModelRequestsNotAllowedError",
     "allow_model_requests",
+    "apply_test_default_deny",
     "check_model_requests_allowed",
     "model_requests_allowed",
     "set_allow_model_requests",

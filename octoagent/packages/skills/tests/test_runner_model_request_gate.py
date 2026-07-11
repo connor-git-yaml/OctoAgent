@@ -8,7 +8,6 @@ REPEAT_ERROR failed result（掩埋信号）。
 from __future__ import annotations
 
 import pytest
-
 from octoagent.provider import ModelRequestsNotAllowedError
 from octoagent.skills.models import SkillOutputEnvelope, SkillRunStatus
 from octoagent.skills.runner import SkillRunner
