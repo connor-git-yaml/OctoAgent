@@ -12,7 +12,8 @@ describe("MarkdownContent", () => {
 
     const code = container.querySelector("pre code");
     expect(code).not.toBeNull();
-    expect(code?.textContent).toBe("const first = 1;\n\nconst second = 2;");
+    // marked 按 CommonMark 规范保留 code block 末尾换行（<pre> 内不可见）
+    expect(code?.textContent).toBe("const first = 1;\n\nconst second = 2;\n");
     expect(container.textContent ?? "").not.toContain("```");
   });
 });

@@ -632,7 +632,7 @@ export default function ChatWorkbench() {
       setChatActionNotice({
         tone: "error",
         title: "这条历史会话还没有重置成功",
-        message: "你可以再试一次，或直接新开一条 新会话。",
+        message: "你可以再试一次，或直接新开一条会话。",
       });
       return;
     }
@@ -936,7 +936,7 @@ export default function ChatWorkbench() {
               void resetConversation();
             }}
           >
-            新开 新会话
+            新开会话
           </button>
         </div>
       </div>

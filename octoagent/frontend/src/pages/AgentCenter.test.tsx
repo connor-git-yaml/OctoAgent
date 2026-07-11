@@ -1078,7 +1078,7 @@ describe("AgentCenter", () => {
         expect.objectContaining({
           publish: true,
           set_as_default: true,
-          change_summary: "通过 Agents 页面更新主 Agent",
+          change_summary: "通过智能体页面更新主 Agent",
         })
       );
     });

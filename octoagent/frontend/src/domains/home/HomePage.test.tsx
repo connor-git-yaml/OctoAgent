@@ -24,7 +24,6 @@ function buildSnapshot(options?: {
   sessions?: Array<Record<string, unknown>>;
   channelSummary?: Record<string, unknown>;
   availableProjects?: Array<Record<string, unknown>>;
-  availableWorkspaces?: Array<Record<string, unknown>>;
 }) {
   const setupReady = options?.setupReady ?? false;
   const diagnosticsStatus = options?.diagnosticsStatus ?? "degraded";
@@ -44,24 +43,12 @@ function buildSnapshot(options?: {
         name: "Default Project",
       },
     ];
-  const availableWorkspaces =
-    options?.availableWorkspaces ??
-    [
-      {
-        workspace_id: "workspace-default",
-        project_id: "project-default",
-        name: "Primary",
-      },
-    ];
-
   return {
     resources: {
       project_selector: {
         current_project_id: "project-default",
-        current_workspace_id: "workspace-default",
         fallback_reason: "",
         available_projects: availableProjects,
-        available_workspaces: availableWorkspaces,
       },
       diagnostics: {
         overall_status: diagnosticsStatus,
@@ -249,15 +236,13 @@ describe("HomePage", () => {
         setupReady: true,
         diagnosticsStatus: "ready",
         llmMode: "litellm",
-        availableWorkspaces: [
+        availableProjects: [
           {
-            workspace_id: "workspace-default",
             project_id: "project-default",
-            name: "Primary",
+            name: "Default Project",
           },
           {
-            workspace_id: "workspace-focus",
-            project_id: "project-default",
+            project_id: "project-focus",
             name: "Focus",
           },
         ],
@@ -273,7 +258,7 @@ describe("HomePage", () => {
     );
 
     expect(screen.getByText("切换工作上下文")).toBeInTheDocument();
-    expect(screen.getByLabelText("切换 Workspace")).toBeInTheDocument();
+    expect(screen.getByLabelText("切换 Project")).toBeInTheDocument();
   });
 
   it("最近一次对话会展示用户上次输入，而不是冒充处理结果", () => {

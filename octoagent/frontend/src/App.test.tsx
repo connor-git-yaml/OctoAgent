@@ -955,7 +955,7 @@ describe("App workbench routing", () => {
     ).toBe(true);
   });
 
-  it("设置页会先执行 setup.review，再通过 setup.apply 提交并按 resource_refs 回刷", async () => {
+  it("设置页保存配置直接提交 setup.apply（review 由后端内部执行）并按 resource_refs 回刷", async () => {
     window.history.pushState({}, "", "/settings");
 
     const nextSnapshot = buildSnapshot();
@@ -979,35 +979,6 @@ describe("App workbench routing", () => {
         return Promise.resolve(jsonResponse(buildSnapshot()));
       }
       if (url.includes("/api/control/actions")) {
-        const body = String((_init as RequestInit | undefined)?.body ?? "");
-        if (body.includes('"action_id":"setup.review"')) {
-          return Promise.resolve(
-            jsonResponse({
-              contract_version: "1.0.0",
-              result: {
-                contract_version: "1.0.0",
-                request_id: "req-setup-review",
-                correlation_id: "req-setup-review",
-                action_id: "setup.review",
-                status: "completed",
-                code: "SETUP_REVIEW_READY",
-                message: "配置检查已完成。",
-                data: {
-                  review: nextSnapshot.resources.setup_governance.review,
-                },
-                resource_refs: [
-                  {
-                    resource_type: "setup_governance",
-                    resource_id: "setup:governance",
-                    schema_version: 1,
-                  },
-                ],
-                target_refs: [],
-                handled_at: "2026-03-09T10:01:00Z",
-              },
-            })
-          );
-        }
         return Promise.resolve(
           jsonResponse({
             contract_version: "1.0.0",
@@ -1084,7 +1055,7 @@ describe("App workbench routing", () => {
       expect(
         fetchMock.mock.calls.filter((call) =>
           String((call as FetchArgs)[0]).includes("/api/control/actions")
-        ).length >= 2
+        ).length >= 1
       ).toBe(true)
     );
 
@@ -1092,9 +1063,6 @@ describe("App workbench routing", () => {
       .filter((call) => String((call as FetchArgs)[0]).includes("/api/control/actions"))
       .map((call) => String((call as FetchArgs)[1]?.body ?? ""));
 
-    expect(
-      actionBodies.some((body) => body.includes('"action_id":"setup.review"'))
-    ).toBe(true);
     expect(
       actionBodies.some((body) => body.includes('"action_id":"setup.apply"'))
     ).toBe(true);
@@ -1539,6 +1507,8 @@ describe("App workbench routing", () => {
         return Promise.resolve(jsonResponse(snapshot));
       }
       if (url.includes("/api/control/actions") && init?.method === "POST") {
+        // Feature 079 Phase 2：连接按钮走原子化 setup.oauth_and_apply（后端先
+        // OAuth 再 setup.apply 一次完成），不再单独发 provider.oauth.openai_codex。
         return Promise.resolve(
           jsonResponse({
             contract_version: "1.0.0",
@@ -1546,16 +1516,32 @@ describe("App workbench routing", () => {
               contract_version: "1.0.0",
               request_id: "req-oauth",
               correlation_id: "req-oauth",
-              action_id: "provider.oauth.openai_codex",
+              action_id: "setup.oauth_and_apply",
               status: "completed",
-              code: "OPENAI_OAUTH_CONNECTED",
-              message: "OpenAI Auth 已连接，已写入本地凭证。",
+              code: "SETUP_OAUTH_AND_APPLIED",
+              message: "授权已完成，配置已保存。",
               data: {
-                provider_id: "openai-codex",
-                profile_name: "openai-codex-default",
-                env_name: "OPENAI_API_KEY",
+                oauth: {
+                  provider_id: "openai-codex",
+                  profile_name: "openai-codex-default",
+                  env_name: "OPENAI_API_KEY",
+                },
+                apply: {
+                  review: refreshedSetup.review,
+                },
+                apply_blocked: false,
               },
               resource_refs: [
+                {
+                  resource_type: "config_schema",
+                  resource_id: "config:octoagent",
+                  schema_version: 1,
+                },
+                {
+                  resource_type: "diagnostics_summary",
+                  resource_id: "diagnostics:runtime",
+                  schema_version: 1,
+                },
                 {
                   resource_type: "setup_governance",
                   resource_id: "setup:governance",
@@ -1567,6 +1553,12 @@ describe("App workbench routing", () => {
             },
           })
         );
+      }
+      if (url.includes("/api/control/resources/config")) {
+        return Promise.resolve(jsonResponse(snapshot.resources.config));
+      }
+      if (url.includes("/api/control/resources/diagnostics")) {
+        return Promise.resolve(jsonResponse(snapshot.resources.diagnostics));
       }
       if (url.includes("/api/control/resources/setup-governance")) {
         return Promise.resolve(jsonResponse(refreshedSetup));
@@ -1584,7 +1576,7 @@ describe("App workbench routing", () => {
       expect(
         fetchMock.mock.calls.some((call) => {
           const body = String((call as FetchArgs)[1]?.body ?? "");
-          return body.includes('"action_id":"provider.oauth.openai_codex"');
+          return body.includes('"action_id":"setup.oauth_and_apply"');
         })
       ).toBe(true)
     );

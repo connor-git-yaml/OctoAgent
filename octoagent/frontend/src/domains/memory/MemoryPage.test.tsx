@@ -20,7 +20,6 @@ function buildMemorySnapshot(): any {
     resources: {
       memory: {
         active_project_id: "project-default",
-        active_workspace_id: "workspace-default",
         retrieval_backend: "sqlite-metadata",
         backend_state: "healthy",
         backend_id: "memory-local",
@@ -110,7 +109,6 @@ function buildMemorySnapshot(): any {
             record_id: "record-alice",
             layer: "sor",
             project_id: "project-default",
-            workspace_id: "workspace-default",
             scope_id: "scope-contact",
             partition: "contact",
             subject_key: "Alice",
@@ -133,7 +131,6 @@ function buildMemorySnapshot(): any {
             record_id: "record-bob",
             layer: "fragment",
             project_id: "project-default",
-            workspace_id: "workspace-default",
             scope_id: "scope-contact",
             partition: "contact",
             subject_key: "Bob",
@@ -155,7 +152,6 @@ function buildMemorySnapshot(): any {
             record_id: "record-fact",
             layer: "sor",
             project_id: "project-default",
-            workspace_id: "workspace-default",
             scope_id: "scope-contact",
             partition: "work",
             subject_key: "user.name",
@@ -242,7 +238,6 @@ describe("MemoryPage", () => {
     await waitFor(() =>
       expect(submitAction).toHaveBeenCalledWith("memory.query", {
         project_id: "project-default",
-        workspace_id: "workspace-default",
         scope_id: "",
         query: "Alice",
         layer: "sor",
@@ -285,7 +280,6 @@ describe("MemoryPage", () => {
     await waitFor(() =>
       expect(submitAction).toHaveBeenCalledWith("memory.query", {
         project_id: "project-default",
-        workspace_id: "workspace-default",
         scope_id: "memory/private/worker-ops/runtime:abc",
         query: "",
         layer: "",
@@ -351,7 +345,6 @@ describe("MemoryPage", () => {
     await waitFor(() =>
       expect(submitAction).toHaveBeenCalledWith("memory.query", {
         project_id: "project-default",
-        workspace_id: "workspace-default",
         scope_id: "",
         query: "",
         layer: "",
@@ -428,7 +421,6 @@ describe("MemoryPage", () => {
       record_id: "record-derived",
       layer: "derived",
       project_id: "project-default",
-      workspace_id: "workspace-default",
       scope_id: "scope-contact",
       partition: "contact",
       subject_key: "Alice 协作偏好",
@@ -521,7 +513,6 @@ describe("MemoryPage", () => {
     snapshot.resources.retrieval_platform = {
       resource_type: "retrieval_platform",
       active_project_id: "project-default",
-      active_workspace_id: "workspace-default",
       profiles: [],
       corpora: [
         {
@@ -630,7 +621,6 @@ describe("MemoryPage", () => {
     expect(submitAction).toHaveBeenCalledWith("retrieval.index.cutover", {
       generation_id: "gen-memory-next",
       project_id: "project-default",
-      workspace_id: "workspace-default",
     });
   });
 

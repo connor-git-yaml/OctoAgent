@@ -900,7 +900,7 @@ describe("ChatWorkbench", () => {
     expect(await screen.findByText("这条历史会话建议先重置再继续")).toBeInTheDocument();
     expect(screen.getByText("这是一条旧会话里的消息。")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "重置 continuity" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "新开 Butler 会话" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新开会话" })).toBeInTheDocument();
   });
 
   it("会在消息区内展示当前参与处理的 Agent，并移除旧侧栏模块", async () => {
@@ -1381,7 +1381,7 @@ describe("ChatWorkbench", () => {
     const dispatchTrigger = screen.getAllByText("委派目标")[0]!;
     await userEvent.hover(dispatchTrigger);
     expect(await screen.findByText("输入")).toBeInTheDocument();
-    expect(screen.getByText("Butler 已经把这轮问题改写成内部执行目标。")).toBeInTheDocument();
+    expect(screen.getByText("Agent 已经把这轮问题改写成内部执行目标。")).toBeInTheDocument();
     expect(
       screen.getByText("核实外部事实，优先使用受治理的 Web 工具，再把可直接回复用户的结论带回主助手。")
     ).toBeInTheDocument();

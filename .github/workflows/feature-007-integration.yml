@@ -115,15 +115,6 @@ jobs:
         run: npm run check:complexity
 
       - name: vitest（单元/组件层）
-        # F137 接线时点发现 master 存量 11 failed / 6 文件（前端测试此前从未进闸，
-        # 漂移无人知）。为避免新 CI 一落地即常红、同时让其余 22 文件立即获得阻断
-        # 保护，暂以 --exclude 记欠账；triage 修复归独立 fix task / F143（其中
-        # "切换工作上下文" 控件缺失可能是真 UI 回归）。清零后删除全部 --exclude。
-        run: >
-          npx vitest run
-          --exclude "src/App.test.tsx"
-          --exclude "src/pages/AgentCenter.test.tsx"
-          --exclude "src/pages/ChatWorkbench.test.tsx"
-          --exclude "src/components/ChatUI/MarkdownContent.test.tsx"
-          --exclude "src/domains/home/HomePage.test.tsx"
-          --exclude "src/domains/memory/MemoryPage.test.tsx"
+        # F137 接线时点发现的 master 存量 11 failed / 6 文件欠账已由后续 fix task
+        # 全部 triage 清零（11 处均为测试断言漂移，无真 UI 回归）——全量阻断。
+        run: npx vitest run
