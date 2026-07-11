@@ -72,6 +72,34 @@ _SINGLE_SCENARIO_TIMEOUT_FULL_S = 240
 
 
 @pytest.fixture(autouse=True)
+def _allow_model_requests_for_e2e_full(
+    request: pytest.FixtureRequest,
+) -> Iterator[None]:
+    """F137 硬闸 opt-in：e2e_full marker 驱动开闸——真 LLM e2e 测试临时翻 allow。
+
+    - e2e_full = 「声明真打 LLM 意图」的单一信号（spec §7 岔路②拍板）；
+      e2e_smoke（集成层不打 LLM）**保持 deny**——smoke 漏网真调用同样必炸。
+    - autouse fixture 在同 scope 内先于显式请求的 fixture 实例化 → 早于
+      ``octo_harness_e2e``，测试全程（含 harness 生命周期）处于 allow context。
+    - 防御式 import：pre-merge 窗口 pre-commit hook import master src 无 gate
+      模块 → no-op（照根 conftest 同款注释）。
+    - 宿主无凭证时 ``real_codex_credential_store`` 照常 SKIP，本 fixture 不改变
+      SKIP 语义。
+    """
+    markers = {m.name for m in request.node.iter_markers()}
+    if "e2e_full" not in markers:
+        yield
+        return
+    try:
+        from octoagent.provider.model_request_gate import allow_model_requests
+    except ImportError:
+        yield  # pre-merge 窗口：master src 尚无 gate 模块
+        return
+    with allow_model_requests():
+        yield
+
+
+@pytest.fixture(autouse=True)
 def _hermetic_environment(
     tmp_path: pytest.TempPathFactory,
     monkeypatch: pytest.MonkeyPatch,

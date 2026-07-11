@@ -51,6 +51,11 @@ from .models import (
 # ProviderModelClient（Feature 080 主 model_client）抛的也是 ProviderLLMCallError，
 # 这里 alias 为 LLMCallError 与现有签名兼容。
 from octoagent.provider import ProviderLLMCallError as LLMCallError
+
+# F137 硬闸：gate=deny 下漏网真调用的专用异常——在 runner 的模型调用宽捕获
+# 之前 re-raise，不得进入 retry/backoff/failed-result 转换链（否则闸异常被
+# 拖慢成多轮退避重试后转 REPEAT_ERROR failed result，信号被掩埋）。
+from octoagent.provider import ModelRequestsNotAllowedError
 from .protocols import StructuredModelClientProtocol
 
 logger = structlog.get_logger(__name__)
@@ -173,6 +178,12 @@ class SkillRunner:
                     )
                 if hasattr(raw_output, "cost_usd"):
                     tracker.cost_usd += float(raw_output.cost_usd or 0.0)
+            except ModelRequestsNotAllowedError:
+                # F137 硬闸：gate=deny 下漏网的真 LLM 调用直接向上炸——
+                # 不 retry（重试同样撞闸只会退避拖时间）、不转 failed result
+                # （REPEAT_ERROR 会掩埋"漏网真调用"这一信号）。上游
+                # llm_service._try_call_with_tools 有同款 re-raise 守卫。
+                raise
             except Exception as exc:
                 # 观测性兜底：部分上游异常（httpx stream 中断、空响应、取消等）
                 # 的 str(exc) 为空字符串。直接写入会让 MODEL_CALL_FAILED 事件的

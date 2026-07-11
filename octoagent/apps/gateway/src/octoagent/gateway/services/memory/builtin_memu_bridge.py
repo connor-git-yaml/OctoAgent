@@ -47,6 +47,7 @@ from octoagent.memory import (
 )
 
 from octoagent.gateway.services.config.config_wizard import load_config
+from octoagent.provider import ModelRequestsNotAllowedError
 
 _log = structlog.get_logger()
 
@@ -1039,8 +1040,11 @@ class BuiltinMemUBridge:
         分支已删除——Feature 080 后 router 在 main.py 启动时就已注入到所有
         AgentContextService → CapabilityPackService → MemoryRuntimeService 链路。
         """
+        # F137 A.4 sweep 顺带修复：本方法四处 logger 原写作 ``log.warning``，
+        # 但本模块只定义了 ``_log``（:52）——这些降级分支一触发即 NameError，
+        # 反而把优雅降级砸成崩溃（Constitution #6；与 F107 抓的 _log F821 同族）。
         if self._provider_router is None:
-            log.warning(
+            _log.warning(
                 "memory_embedding_router_unavailable",
                 alias=target_alias,
                 hint="ProviderRouter 未注入；调用方应通过 capability_pack 注入。",
@@ -1052,7 +1056,7 @@ class BuiltinMemUBridge:
                 target_alias, task_scope=None,
             )
         except Exception as exc:
-            log.warning(
+            _log.warning(
                 "memory_embedding_router_resolve_failed",
                 alias=target_alias,
                 error_type=type(exc).__name__,
@@ -1064,15 +1068,21 @@ class BuiltinMemUBridge:
             )
         except NotImplementedError as exc:
             # transport 不支持 embed（如 ANTHROPIC_MESSAGES）
-            log.warning(
+            _log.warning(
                 "memory_embedding_transport_unsupported",
                 alias=target_alias,
                 transport=resolved.client.runtime.transport.value,
                 note=str(exc),
             )
             return None
+        except ModelRequestsNotAllowedError:
+            # F137 硬闸：embed 是第二网络出口——gate=deny 下漏网的真 embedding
+            # 调用必须向上炸，不得静默降级 FTS-only 假绿（与 FallbackManager
+            # Echo swallow 同族）。合法降级（真请求发出后失败/凭证缺失等普通
+            # 异常）不受影响，仍走下方 return None 兜底。
+            raise
         except Exception as exc:
-            log.warning(
+            _log.warning(
                 "memory_embedding_provider_call_failed",
                 alias=target_alias,
                 error_type=type(exc).__name__,

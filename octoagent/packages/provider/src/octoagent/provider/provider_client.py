@@ -27,6 +27,7 @@ import httpx
 import structlog
 
 from .auth_resolver import ResolvedAuth
+from .model_request_gate import check_model_requests_allowed
 from .provider_runtime import ProviderRuntime
 from .transport import ProviderTransport
 
@@ -346,6 +347,10 @@ class ProviderClient:
         Returns:
             ``(content, tool_calls, metadata)`` triple
         """
+        # F137 硬闸：入口第一行检查（早于瞬态 retry 外壳 + 早于
+        # ``auth_resolver.resolve()`` 的 preemptive refresh 网络副作用——
+        # gate=deny 带过期凭证也不得打真 OAuth token 端点）。
+        check_model_requests_allowed()
         last_exc: Exception | None = None
         for attempt in range(_TRANSIENT_MAX_RETRIES + 1):
             try:
@@ -932,6 +937,9 @@ class ProviderClient:
             与 ``texts`` 等长的 vector list；调用失败时抛 LLMCallError
             （memory 调用方可以捕获后回退到 zero vector）
         """
+        # F137 硬闸：embed 是第二网络入口（不走 call()），入口第一行同点检查
+        # （同样早于下方 auth_resolver.resolve()）。
+        check_model_requests_allowed()
         if self._runtime.transport != ProviderTransport.OPENAI_CHAT:
             raise NotImplementedError(
                 f"embed() 仅支持 OPENAI_CHAT transport，当前 {self._runtime.transport}",

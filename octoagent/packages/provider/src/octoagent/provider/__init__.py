@@ -60,6 +60,15 @@ from .exceptions import (
     ProxyUnreachableError,
 )
 from .fallback import FallbackManager
+
+# F137：真 LLM 网络调用许可 gate（构造性硬闸，测试布线置 deny / 生产缺省 allow）
+from .model_request_gate import (
+    ModelRequestsNotAllowedError,
+    allow_model_requests,
+    check_model_requests_allowed,
+    model_requests_allowed,
+    set_allow_model_requests,
+)
 from .models import ModelCallResult, ReasoningConfig, TokenUsage
 
 # Feature 080 Phase 1：Provider 直连抽象层（已成为唯一 LLM 调用层）
@@ -96,6 +105,12 @@ __all__ = [
     "CredentialExpiredError",
     "CredentialValidationError",
     "OAuthFlowError",
+    # F137：真 LLM 调用许可 gate
+    "ModelRequestsNotAllowedError",
+    "allow_model_requests",
+    "check_model_requests_allowed",
+    "model_requests_allowed",
+    "set_allow_model_requests",
     # Auth 子系统
     "AuthAdapter",
     "ApiKeyAuthAdapter",

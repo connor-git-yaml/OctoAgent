@@ -8,6 +8,7 @@ Lazy probe 策略：每次调用时先尝试 primary，失败则切换到 fallba
 import structlog
 
 from .exceptions import ProviderError
+from .model_request_gate import ModelRequestsNotAllowedError
 from .models import ModelCallResult
 from .provider_client import LLMCallError
 
@@ -71,6 +72,16 @@ class FallbackManager:
             return result
         except Exception as e:
             primary_error = e
+            if isinstance(e, ModelRequestsNotAllowedError):
+                # F137 硬闸：gate=deny 下漏网的真 LLM 调用必须向上炸，不得降级
+                # Echo 假成功掩盖（与下方 401/403 同族同理由——Echo 假成功会把
+                # 事故掩盖成正常回复，bench TLS 事故形态）。合法降级（真请求
+                # 发出后失败的任意普通异常）不受影响，仍走下方 Echo 兜底。
+                log.warning(
+                    "primary_model_requests_not_allowed_skip_fallback",
+                    model_alias=model_alias,
+                )
+                raise
             if isinstance(e, LLMCallError) and e.status_code in (401, 403):
                 # 凭证失效（provider_client 内部已 force_refresh 失败）：
                 # fallback（Echo）无法恢复凭证，且 Echo 假成功会把事故掩盖成

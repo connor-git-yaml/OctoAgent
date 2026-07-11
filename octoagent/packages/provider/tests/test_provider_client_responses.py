@@ -22,6 +22,11 @@ from octoagent.provider.provider_client import LLMCallError, ProviderClient
 from octoagent.provider.provider_runtime import ProviderRuntime
 from octoagent.provider.transport import ProviderTransport
 
+# F137 硬闸 opt-in：本套件直测 ProviderClient dispatch 机器本身（fake http +
+# stub resolver 驱动 call()/embed() 植闸入口），按文件显式声明放行——
+# fixture 定义见本目录 conftest.py。
+pytestmark = pytest.mark.usefixtures("allow_model_requests_for_dispatch_tests")
+
 
 # ────────────────────── 测试辅助 ──────────────────────
 

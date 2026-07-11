@@ -18,6 +18,7 @@ from octoagent.provider import (
     EchoMessageAdapter,
     FallbackManager,
     ModelCallResult,
+    ModelRequestsNotAllowedError,
     TokenUsage,
 )
 from octoagent.skills import (
@@ -453,6 +454,11 @@ class LLMService:
             # 凭证失效必须向上传播（与下方 AUTH_ERROR 分支同语义）：
             # 落进宽捕获会变成 return None → FallbackManager(Echo) 假成功。
             raise
+        except ModelRequestsNotAllowedError:
+            # F137 硬闸：gate=deny 下漏网的真 LLM 调用必须向上传播（同上
+            # SkillAuthError 理由）——落进宽捕获会变成 return None →
+            # FallbackManager(Echo) 假成功，完全复现 bench TLS 事故形态。
+            raise
         except Exception:
             return None
 
@@ -617,6 +623,10 @@ class LLMService:
                                 fallback_reason="degraded_retry",
                             )
                     except SkillAuthError:
+                        raise
+                    except ModelRequestsNotAllowedError:
+                        # F137 硬闸：降级重试期间的漏网真调用同样必须向上炸
+                        # （同上 SkillAuthError 理由），不得落进"返回原始错误"分支。
                         raise
                     except Exception:
                         pass  # 降级重试失败，返回原始错误

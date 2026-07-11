@@ -4,6 +4,8 @@ Feature 083 P1：
 - 移除 session-scope ``event_loop`` fixture——与 ``asyncio_mode = "auto"`` 冲突，
   pytest-asyncio 自动按 fixture loop scope 管理（默认 function-scope，更安全）
 - 新增 ``pytest_sessionfinish`` hook 修 thread shutdown hang
+
+F137：``pytest_configure`` 置真 LLM 调用 gate=deny（冗余布线，见函数 docstring）。
 """
 
 import asyncio
@@ -12,7 +14,32 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 import aiosqlite
+import pytest
 import pytest_asyncio
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """F137 硬闸冗余布线：测试会话默认 deny 真 LLM 网络调用。
+
+    主布线是 provider 包的 pytest11 entry-point 插件（安装态 venv 内所有
+    pytest 会话构造性生效）；本处为**冗余次选**——覆盖 worktree PYTHONPATH
+    锁模式（禁 uv sync）下 entry point 未注册进共享 venv 的窗口。两处布线
+    幂等（同置 False）。
+
+    防御式 import（仅本处，插件侧 strict）：pre-commit hook 在 worktree 收集
+    本 conftest 但 import master src（memory ``project_precommit_hook_execution_model``）
+    ——F137 合入 master 前的窗口内 master src 无 gate 模块，ImportError →
+    no-op（该窗口 deny 不生效属预期，不得炸 hook）。
+
+    opt-in：e2e_full marker（e2e_live conftest 自动开闸）/
+    ``allow_model_requests()`` context / env ``OCTOAGENT_ALLOW_MODEL_REQUESTS=1``。
+    """
+    del config
+    try:
+        from octoagent.provider.model_request_gate import set_allow_model_requests
+    except ImportError:
+        return  # pre-merge 窗口：master src 尚无 gate 模块
+    set_allow_model_requests(False)
 
 
 @pytest_asyncio.fixture

@@ -35,6 +35,13 @@ packages = ["src/octoagent"]
 [project.scripts]
 octo = "octoagent.provider.dx.cli:main"
 
+# F137 硬闸 deny 主布线：安装本包的 venv 内所有 pytest 会话自动加载本插件，
+# 测试默认拒绝真 LLM 网络调用（octoagent/conftest.py 为冗余次选布线，覆盖
+# worktree PYTHONPATH 锁模式下 entry point 未注册的窗口）。
+# 旧 worktree 逃生门：-p no:octoagent_model_request_gate
+[project.entry-points.pytest11]
+octoagent_model_request_gate = "octoagent.provider.testing.pytest_model_request_gate"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
