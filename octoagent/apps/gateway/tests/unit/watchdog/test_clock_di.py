@@ -27,7 +27,11 @@ from octoagent.gateway.services.watchdog.detectors import (
     RepeatedFailureDetector,
     StateMachineDriftDetector,
 )
-from octoagent.gateway.services.watchdog.models import utc_now
+
+# 注意：utc_now 是 F138 新增符号，本文件在 pre-merge 窗口可能被 pre-commit hook
+# 以非本 worktree 的 src 收集（spec §3.5）——models 模块本身 master 已存在
+# （importorskip 探不到符号缺失），故 utc_now 采用函数内 import（runtime-only，
+# 收集安全）；本文件其余 module 级 import 均为 master 已有符号。
 from octoagent.gateway.services.watchdog.scanner import WatchdogScanner
 
 _FROZEN = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
@@ -164,6 +168,8 @@ async def test_scanner_emit_stamps_injected_clock() -> None:
 
 def test_all_components_default_to_utc_now() -> None:
     """None 行为等价看护：clock 未注入时全组件回退 utc_now（== baseline 语义）。"""
+    from octoagent.gateway.services.watchdog.models import utc_now
+
     assert NoProgressDetector()._clock is utc_now
     assert StateMachineDriftDetector()._clock is utc_now
     assert RepeatedFailureDetector()._clock is utc_now
