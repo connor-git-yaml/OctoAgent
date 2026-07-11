@@ -11,13 +11,14 @@ F087 之前的 e2e 测试集中在 `apps/gateway/tests/e2e/test_acceptance_scena
 （5 域 5x 循环），已在 P5 删除。新方案围绕 4 条主轴：
 
 1. **OctoHarness 抽离**：`OctoHarness.bootstrap()` 是真实启动路径的统一入口，
-   `gateway/harness/octo_harness.py` 构造签名实际暴露 5 个 DI 钩子
-   （`credential_store` / `llm_adapter` / `mcp_servers_dir` / `data_dir` /
-   `plugins_dir`）供 e2e 注入 stub / 隔离目录；生产路径不感知测试存在
-   （全 None 时 byte-for-byte 等价）。
-   > F137 勘误：本节旧文案宣称的 `secret_store` / `transport_factory` / `clock`
-   > 三钩子从未存在（M9 审计确认）；决策环 `model_client` 与 `clock` DI 由
-   > F138 补齐。
+   `gateway/harness/octo_harness.py` 暴露 7 个 DI 钩子供 e2e 注入替换（全部默认
+   None = 生产行为等价）：`credential_store` / `llm_adapter`（路径 A：
+   FallbackManager 纯文本）/ `mcp_servers_dir` / `data_dir` / `plugins_dir`（F106）/
+   `model_client`（F138，路径 B：SkillRunner 决策环脚本化——非 None 时无条件建
+   SkillRunner、与 `OCTOAGENT_LLM_MODE` 解耦、不要求 provider 凭证）/ `clock`
+   （F138，`app.state.clock` seam + watchdog 构造注入）。生产路径不感知测试存在。
+   （F138 前本节曾宣称存在 `secret_store` / `transport_factory` 两个 DI——
+   从未落地，已按实况修正。）
 2. **Hermetic 隔离**：双 autouse fixture（`tests/e2e_live/conftest.py`）每个测试
    重置 5 类凭证 env、重定向 4 个 `OCTOAGENT_*` 路径 env 到 tmp 目录、按
    `helpers/MODULE_SINGLETONS.md` 清单逐条 reset 5 项 module 级单例
@@ -61,6 +62,24 @@ smoke = 5 域（#1 #2 #3 #11 #12）；full = 8 域（其余）。注册表权威
 `tests/e2e_live/helpers/domain_runner.py::DOMAIN_REGISTRY` 与
 `gateway/cli/e2e_command.py::_DOMAIN_REGISTRY` 双源（CLI 单跑用 `-k` keyword 匹配，
 pytest 不支持 prefix node ID）；改 13 域必须同步两处。
+
+### 2.0 F138 脚本化决策环套件（marker `e2e_scripted`，独立于 13 域注册表）
+
+`test_e2e_scripted_decision_loop.py`（+ `test_octo_harness_model_client_di.py`）
+是 M9 F138 引入的 **L3 确定性决策环层**——与上表 13 域正交，不进
+DOMAIN_REGISTRY：
+
+- **打通的缺口**：13 域中 smoke 从 `tool_broker.execute()` 切进（跳过"LLM 决定
+  调哪个工具"），决策环**前半段**此前 L3 零覆盖。本套件用
+  `octoagent.skills.testing.ScriptedModelClient`（脚本脑）经
+  `OctoHarness(model_client=...)` DI 驱动**真** SkillRunner 多步循环 → 真
+  tool_broker 派发 → 真回写（USER.md / MEMORY_ENTRY_ADDED），断言完整事件链。
+- **零真 LLM / 零宿主 OAuth**：空 tmp `CredentialStore` + `provider_router.
+  resolve_for_alias` bomb（路径 A/B 共同咽喉点）双保证——不依赖
+  `real_codex_credential_store`，宿主无 OAuth 也恒可跑 → **CI-runnable**
+  （M9 "L2/L3 只能宿主机跑" 洞的第一条补口）。
+- **成本画像**：4 case 全 11 段 bootstrap + 决策环 < 3s（真 LLM 单 call 60-120s）。
+- 是否升 e2e_smoke / 归入 F141 pr lane：合入后主 session 决定。
 
 ### 2.1 域 #10（A2A）e2e 边界说明
 

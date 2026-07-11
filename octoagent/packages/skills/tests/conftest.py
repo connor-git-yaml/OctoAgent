@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from collections import deque
 from typing import Any
 
 import pytest
 from octoagent.core.models.event import Event
 from octoagent.skills.manifest import SkillManifest
-from octoagent.skills.models import SkillExecutionContext, SkillOutputEnvelope
+from octoagent.skills.models import SkillExecutionContext
+
+# F138：QueueModelClient 上提为 octoagent.skills.testing.ScriptedModelClient
+# （单一事实源，随包发布供跨包消费）；此处 re-export 别名保 test_runner.py 等
+# 8 个既有消费文件零改动（AC-5）。
+from octoagent.skills.testing import ScriptedModelClient as QueueModelClient  # noqa: F401
 from octoagent.tooling.models import ToolMeta, ToolResult, SideEffectLevel
 from pydantic import BaseModel
 
@@ -75,32 +79,6 @@ class MockToolBroker:
             tool_name=tool_name,
             truncated=False,
         )
-
-
-class QueueModelClient:
-    """按队列返回输出/异常的模型客户端。"""
-
-    def __init__(self, items: list[SkillOutputEnvelope | Exception]) -> None:
-        self._queue = deque(items)
-        self.calls = 0
-
-    async def generate(
-        self,
-        *,
-        manifest: SkillManifest,
-        execution_context: SkillExecutionContext,
-        prompt: str,
-        feedback: list[Any],
-        attempt: int,
-        step: int,
-    ) -> SkillOutputEnvelope:
-        self.calls += 1
-        if not self._queue:
-            return SkillOutputEnvelope(content="default", complete=True)
-        item = self._queue.popleft()
-        if isinstance(item, Exception):
-            raise item
-        return item
 
 
 @pytest.fixture

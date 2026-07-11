@@ -26,8 +26,13 @@
     降级不误伤**（异常类型区分，照 401/403 skip-fallback 先例）。
   - opt-in：e2e_full marker（e2e_live conftest 自动开闸）/ `allow_model_requests()`
     context / 显式 env `=1`（布线尊重显式 env）。
-- **确定性 LLM mock**（原愿景 TestModel/FunctionModel 的等价物）⏳ **F138 落地中**：
-  脚本化 model_client（上提 skills/tests `QueueModelClient`）+ SchemaTestAdapter（Phase 2）。
+- **确定性 LLM 脚本件**（原愿景 TestModel/FunctionModel 的等价物）✅ **F138 已落地
+  FunctionModel 半边**：
+  - `octoagent.skills.testing.ScriptedModelClient`（FunctionModel 等价）：按队列返回预置
+    `SkillOutputEnvelope`（含 tool_calls），经 `OctoHarness(model_client=...)` DI 驱动**真**
+    决策环（SkillRunner → tool_broker → 回写），零真 LLM / 零宿主 OAuth（marker `e2e_scripted`）
+  - TestModel 等价件（`SchemaTestAdapter`，按工具 JSON schema 自动填参扫 63 工具广度）：
+    **deferred**（F138 Phase 2，见 `.specify/features/138-scripted-llm-harness/spec.md` §2.2）
 - **事件断言便利件**（dirty-equals / inline-snapshot）📋 规划 **F142**（尚未引入）。
 - **VCR 录制回放** 📋 规划 **F139**（已收窄：仅 provider transport 层 wire 真样本
   回归，不承担 agent-loop 用例降层；LiteLLM 已于 F081 退役，录制对象为 provider
@@ -86,13 +91,20 @@ Feature 083 采用实用主义策略：
 
 > Agent 系统最核心也最难测的部分。借鉴 Pydantic AI 的 TestModel / FunctionModel 模式。
 
-- **TestModel override**：自动调用所有注册工具，生成 schema 兼容参数，验证工具调用链路正确
-- **FunctionModel**：精确控制 LLM 响应，适用于测试 Orchestrator 多轮决策路径、Worker 分支逻辑
-- **LiteLLM alias 路由**：测试环境通过 alias 将请求路由到 mock 后端，验证 Provider 抽象层
+- **FunctionModel 等价件（✅ F138 已落地）**：`octoagent.skills.testing.ScriptedModelClient`
+  按序脚本精确控制 LLM 决策输出（含多步 tool_call 链），经 `OctoHarness(model_client=...)`
+  DI 进真决策环——keystone 套件
+  `apps/gateway/tests/e2e_live/test_e2e_scripted_decision_loop.py` 验证
+  "脚本 LLM 决定调工具 → tool_broker 真派发 → USER.md/事件真回写" 全链确定性（L3，
+  此前决策环前半段 L3 零覆盖）
+- **TestModel 等价件（deferred，F138 Phase 2）**：`SchemaTestAdapter` 按注册工具
+  schema 自动生成合法参数、扫全工具广度——见 F138 spec §2.2 deferred 范围
+- **Provider 抽象层路由**：ProviderRouter alias 解析 + 三 transport（LiteLLM 已于
+  F081 退役）；wire 层真样本回归归 F139
 - **非确定性输出策略**：
   - 验证输出结构 / 必填字段 / 类型，而非精确字符串
-  - 使用 dirty-equals（`IsStr(regex=...)`）做模糊匹配
-  - 关键路径使用 FunctionModel 保证确定性
+  - 使用 dirty-equals（`IsStr(regex=...)`）做模糊匹配（愿景）
+  - 关键路径使用 ScriptedModelClient 保证确定性
 - **预留：LLM-as-Judge 评估**：pydantic-evals 或自定义 judge 函数，评判 Agent 输出质量（后续迭代）
 
 ### 13.4 集成测试（Integration）
@@ -169,7 +181,7 @@ Feature 083 采用实用主义策略：
   - 所有未完成任务在 UI 中可见，且能 resume 或 cancel（对齐 S1）
 - **Provider 不可用**：
   - 模拟 LLM Provider 返回 429 / 500 / 超时
-  - 验证 LiteLLM fallback 机制触发，切换到备选模型
+  - 验证 FallbackManager 降级机制触发（LiteLLM 已于 F081 退役），切换到备选路径
   - 验证事件记录失败原因（对齐 C6）
 - **插件崩溃隔离**：
   - 单个插件 / 工具抛异常不导致整体系统不可用
