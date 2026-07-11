@@ -98,8 +98,9 @@
 | Final #1 | 已知 timing race（~72 处 sleep 断言）进阻断 CI 会间歇红 | **P1** | ✅ CI lane 加 `--reruns 1 --reruns-delay 2` 显式过渡桥（junit 可见 rerun；本地不加；F142 治本/F141 quarantine 后删）|
 | Final #2 | `_try_embed_query` 上层 broad catch 吞 embed 闸异常→FTS-only 假绿 | P2 | ✅ 同款 re-raise + 2 测试锁定两级贯通 |
 | Final #2 | 布线无条件 deny 使公开 env opt-in（通道③）失效 | P2 | ✅ `apply_test_default_deny`：env 未设→deny；显式 env 优先 + 4 测试 |
+| Final #3 | entry point 经 provider `__init__` 反向拉 gateway——仅装 octoagent-provider（无 gateway）的 venv 里 pytest 启动即 ModuleNotFoundError | P2 | ✅ **根治**：删除 provider `__init__:47` 对 gateway 的 vestigial 兼容 re-export（`load_project_dotenv`，Feature 003 时代产物，grep 证实顶层 re-export 零消费者——main.py 与 provider/dx 均走 gateway 直接路径）+ `__all__` 同删。gateway-less venv 以 meta_path 阻断器模拟复现：修后插件 import + `pytest_configure` deny 全链路 OK（1.03s）。顺带消除一处「provider 包依赖 gateway 应用」的倒置依赖坏味道 |
 
-**0 HIGH / 0 P1 残留**；全部 finding 接受修复（无带理由拒绝项）。
+**0 HIGH / 0 P1 残留**；全部 finding 接受修复（无带理由拒绝项）。第 4 轮确认见下。
 
 **Opus 式对抗自审（宪法 + AC 机械验收）**：
 - **#6**：生产（env 未设）gate 恒 allow → 植闸=一次布尔判断，`FallbackManager→Echo` 真故障降级语义逐字节不变；全部守卫只捕获生产不可能出现的异常类型（构造性死代码）。唯一生产行为变更 = `log`→`_log` 修复（严格恢复 #6）。CI/前端闸均为 commit/build-time。✓

@@ -43,8 +43,12 @@ from .refresh_coordinator import TokenRefreshCoordinator
 # 现在配置通过 OctoAgentConfig + ProviderRouter 直读 yaml。
 from .cost import CostTracker
 
-# Feature 003: DX 工具（已迁移到 gateway/services/config/）
-from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
+# F137 移除 Feature 003 时代的 vestigial 兼容 re-export（load_project_dotenv）：
+# 它让 provider 包 __init__ 反向依赖 gateway 应用——grep 证实顶层 re-export 零
+# 消费者（gateway/main.py 与 provider/dx 均直接从 gateway 路径 import），却使
+# 「仅装 octoagent-provider 的 venv」在加载 pytest11 entry-point 插件时因缺
+# gateway 而 pytest 启动即炸（Codex Final P2）。需要该函数请从
+# octoagent.gateway.services.config.dotenv_loader 直接 import。
 from .echo_adapter import EchoMessageAdapter
 
 # 异常
@@ -150,6 +154,4 @@ __all__ = [
     "ResolvedAlias",
     "ResolvedAuth",
     "StaticApiKeyResolver",
-    # DX 工具
-    "load_project_dotenv",
 ]
