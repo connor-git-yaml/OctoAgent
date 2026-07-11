@@ -226,7 +226,7 @@ class TestNoSelfCommitRedLine:
         """
         from octoagent.gateway.services import consolidation_discovery as _svc_anchor
 
-        # 从被测模块 __file__ 派生源码目录（CI/任何 checkout 均可移植——F137 CI 首跑抓出原硬编码绝对路径）
+        # 从被测模块 __file__ 派生源码目录（可移植——F137 CI 首跑抓出硬编码绝对路径）
         base = Path(_svc_anchor.__file__).resolve().parent
 
         def _call_lines(src: str) -> list[str]:

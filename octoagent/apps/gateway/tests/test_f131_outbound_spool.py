@@ -6,10 +6,9 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
-
-import os
 
 import pytest
 from octoagent.core.store import create_store_group
@@ -210,7 +209,7 @@ async def test_spool_survives_process_restart(tmp_path: Path) -> None:
 
 @pytest.mark.skipif(
     os.environ.get("CI") == "true",
-    reason="时序/性能断言在 CI 共享 runner 不稳定——F137 首跑 triage 记欠账，F142 quarantine/根因治理；本地照跑",
+    reason="CI 共享 runner 时序/性能断言不稳（F137 triage 记欠账，归 F142 治理；本地照跑）",
 )
 @pytest.mark.asyncio
 async def test_startup_drains_spool(tmp_path: Path) -> None:

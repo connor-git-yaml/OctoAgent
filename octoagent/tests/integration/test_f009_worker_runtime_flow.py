@@ -126,7 +126,7 @@ async def cancel_client(cancel_app):
 class TestFeature009WorkerRuntimeFlow:
     @pytest.mark.skipif(
         os.environ.get("CI") == "true",
-        reason="时序/性能断言在 CI 共享 runner 不稳定——F137 首跑 triage 记欠账，F142 quarantine/根因治理；本地照跑",
+        reason="CI 共享 runner 时序/性能断言不稳（F137 triage 记欠账，归 F142 治理；本地照跑）",
     )
     async def test_timeout_path_generates_worker_timeout_result(
         self, timeout_client: AsyncClient
