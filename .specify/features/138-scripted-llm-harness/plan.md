@@ -32,7 +32,7 @@
 
 ### Phase C — keystone L3 e2e（验收锚）
 - fake credential_store fixture（`CredentialStore(空 tmp 路径)`，load 返回空 store，无宿主 OAuth 依赖）+ scripted_harness fixture（`model_client=ScriptedModelClient([...])`）。
-- `apps/gateway/tests/e2e_live/test_e2e_scripted_decision_loop.py`：driven via `llm_service.call(..., metadata={"selected_tools_json": [...], "permission_preset": "full"})` → 断言决策→broker 派发→回写全链 + provider_router bomb 证零真调用（spec §4）。
+- `apps/gateway/tests/e2e_live/test_e2e_scripted_decision_loop.py`：driven via `llm_service.call(..., metadata={"selected_tools_json": [...], "permission_preset": "full"})` → 断言决策→broker 派发→回写全链 + `provider_router.resolve_for_alias` bomb 证零真调用（两路径共同咽喉点，spec §4 / Codex P2-2）。
 - 新 marker `e2e_scripted`（pyproject.toml markers 登记一行——**F137 合并交点，报告显式列出**）+ 文件顶部 `pytest.importorskip("octoagent.skills.testing")` + **不标 e2e_smoke**。
 - **AC-3【keystone】, AC-8（CI-runnable）**。Phase C 绿即证 keystone 打通。
 
@@ -46,7 +46,7 @@
 
 ### Phase F — 文档漂移修 + conftest 翻转 + verify（living-docs 闸）
 - `docs/codebase-architecture/e2e-testing.md` DI 清单诚实化（删从未存在的 `secret_store/transport_factory/clock` 旧文案，写真实 6 DI：credential_store/llm_adapter/mcp_servers_dir/data_dir/plugins_dir/model_client + clock）。
-- `docs/blueprint/testing-strategy.md` §"Agent 决策环测试" TestModel/FunctionModel 从"愿景"改"已落地"（指向 `skills/testing/scripted_model.py`）+ 清 LiteLLM 残留引用。
+- `docs/blueprint/testing-strategy.md` §"Agent 决策环测试" **仅 FunctionModel 等价件改"已落地"**（指向 `skills/testing/scripted_model.py`）；TestModel/SchemaTestAdapter 明确标 deferred（Codex P2-1，防文档承诺不存在的 API）+ 清 LiteLLM 残留引用。
 - `docs/blueprint/milestones.md` M9 表 F138 标 ✅。
 - `docs/codebase-architecture/harness-and-context.md` DI 段同步（若有相应段）。
 - **conftest 翻转 commit（尾部独立）**：`packages/skills/tests/conftest.py:80-104` 类删除 → `from octoagent.skills.testing import ScriptedModelClient as QueueModelClient`；该 commit 起 `SKIP_E2E=1` + 以 PYTHONPATH 锁定 `pytest -m e2e_smoke` 8/8 作补偿 gate（spec §3.5）。

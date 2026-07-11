@@ -36,7 +36,7 @@
 2. **`QueueModelClient` 上提**为可发布的 `octoagent.skills.testing` 子模块共享件，改名 `ScriptedModelClient`（拍板②的可编程脚本脑，已存在）。
 3. **clock DI**（同动构造签名，`app.state.clock` seam + 默认 `datetime.now(UTC)` + watchdog 单一 demonstrating consumer 子系统）。
 4. **keystone L3 e2e**：脚本化 adapter 驱动真决策环走完一次 tool_call 派发（§4）。
-5. **文档漂移修**：e2e-testing.md DI 清单诚实化 + testing-strategy.md TestModel/FunctionModel 从"愿景"改"已落地"。
+5. **文档漂移修**：e2e-testing.md DI 清单诚实化 + testing-strategy.md **仅 FunctionModel 等价件（ScriptedModelClient）改"已落地"**；TestModel 等价件（SchemaTestAdapter）明确标 deferred，不得提前宣称（Codex spec review P2-1）。
 
 ### 1.3 Out of scope（显式退出）
 
@@ -151,8 +151,11 @@ async def test_scripted_adapter_drives_real_decision_loop(scripted_harness):
     #      SkillOutputEnvelope(tool_calls=[ToolCallSpec("user_profile.update", {偏好写入})]),
     #      SkillOutputEnvelope(content="已记录", complete=True),
     #    ]))
-    # 1b. 防御断言装置：app.state.provider_router.call 替换为 raise AssertionError 的 bomb
-    #     （测试侧 patch，证明全程零真 provider 调用；F137 硬闸落地后是第二重兜底）
+    # 1b. 防御断言装置：app.state.provider_router.resolve_for_alias 替换为 raise AssertionError
+    #     的 bomb——它是路径 A（router_message_adapter.py:66）与路径 B
+    #     （provider_model_client.py:548）通往真 provider 的共同咽喉点（Codex spec review
+    #     P2-2：ProviderRouter 无 call()，bomb 挂错点会假阳性）。叠加空凭证 + 末尾
+    #     content 断言（防 FallbackManager 吞 bomb 落 Echo）三重防御。
     # 2. 驱动真决策环（keystone MVP 走 direct 入口；selected_tools 经
     #    extract_mounted_tool_names 的 metadata["selected_tools_json"] 通道；
     #    permission_preset=full 让 IRREVERSIBLE 的 user_profile.update 直放——
@@ -167,7 +170,7 @@ async def test_scripted_adapter_drives_real_decision_loop(scripted_harness):
     assert "简洁" in USER_md_content                          # 回写真落盘（后半段）
     assert MEMORY_ENTRY_ADDED in events                     # 事件真产
     assert result.content == "已记录"                        # 脚本脑输出贯穿到 ModelCallResult（没落 Echo fallback）
-    # 零真 provider HTTP：由 1b bomb + 空凭证双重构造性保证
+    # 零真 provider HTTP：1b resolve_for_alias bomb + 空凭证 + content 断言三重保证
 ```
 
 **为什么这是 keystone**：它与 `test_e2e_basic_tool_context.py` 的**唯一差别**——后者从 `tool_broker.execute()` 切进（跳过决策），本测试让**脚本化 LLM 决定**调 `user_profile.update`，**完整跑决策环前半段**。这就是 L3 此前零覆盖的那一跳。
