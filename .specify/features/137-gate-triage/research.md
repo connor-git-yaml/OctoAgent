@@ -159,3 +159,42 @@
 2. **grep 漏 swallow 站点**：B.4 已知 2 处，但可能有第三处 broad-catch→Echo/None。→ plan 含 grep sweep（`except Exception` 邻近 Echo/`return None`/fallback）。
 3. **CI 全量 4600 测试时长**：GH hosted runner 跑全量可能超时/慢。→ 岔路①里定 CI 跑哪些子集（deterministic 层，非全量真 LLM）。
 4. **前端阈值放宽 vs 修代码撞 F143**：F143 明确要下沉 ChatWorkbench/useChatStream——F137 若改这俩代码会抢 F143 范围（违「严格执行要求范围」）。→ 岔路③推荐放宽阈值 + 留 F143 ratchet 注释。
+
+---
+
+## I. 收窄期实测补遗（2026-07-11，rebase a1e4ca15 后勘察）
+
+### I.1 ★ auth-refresh 时机实测（Fable 复审收窄注 a 的证据，决定闸点从 `_dispatch` 改 `call()`）
+
+- `_dispatch_with_auth_refresh`（`provider_client.py:404-406`）：`return await self._dispatch(auth=await self._runtime.auth_resolver.resolve(), ...)`——auth resolve 在 `_dispatch` **之前**求值。
+- `AuthResolver` 协议 docstring（`auth_resolver.py:44-51`）：「``resolve()``：**preemptive 检查 + 必要时刷新**（OAuth）」——**主动式**，非仅反应式 401 后刷新。
+- `OAuthResolver` 类 docstring（`:115`）：「复用 Feature 078 的 ``is_expired()`` **5 分钟 preemptive buffer**」；`_resolve(force=False)` → `TokenRefreshCoordinator.refresh_if_needed` → `PkceOAuthAdapter.resolve(force_refresh=False)`——token 进 5 分钟过期窗即打真 OAuth token 端点（网络副作用）。
+- 另有**反应式**路径：`_dispatch_with_auth_refresh:414-450` 收到 401/403 后 `force_refresh()` 再 `_dispatch` 一次。
+- **结论**：闸在 `_dispatch` 太晚（preemptive refresh 已发生）；闸必须在 `call()`（`:315`）入口第一行。`grep -rn "_dispatch_with_auth_refresh\|\._dispatch("` 证实两私有方法仅被 `call()` 链路调用（`provider_client.py:352/405/442` 三处），production 无旁路。`embed()`（`:912`）不走 `call()` 且 `:942` 同有 `auth_resolver.resolve()` → 入口第一行同点加闸。
+- **测试可从 `_dispatch` 直入**（如有直调私有方法的单测）——但那类测试用 fake http、无 auth 副作用，且属「直测 dispatch 机器」类（A.6 triage 规则②），不构成生产旁路。
+
+### I.2 llm_service.py 额外 broad-catch 站点（A.4 sweep 已知候选）
+
+`grep "except Exception"` 命中 `:456`（B.4 已知）外另有 `:619-621`（邻 `except SkillAuthError: raise`，同款结构候选）、`:690`、`:903`——Phase A.4 逐处人工核。
+
+### I.3 benchmarks 调用形态（FR-9b 依据）
+
+- OctoBench 真调用入口 = `benchmarks/runner/cli.py:297` argparse CLI（`octo-bench`），**非 pytest 进程** → pytest11 deny 插件构造性不触及；env 缺省 allow 保留。
+- `benchmarks/tests/`（pytest 单测）自带独立 conftest（`benchmarks/tests/conftest.py` sys.path 注入 + `benchmarks/conftest.py` hermetic autouse），不在 octoagent testpaths 内；rootdir 独立 → 根 conftest 布线不触及，但 entry-point 插件（安装后）会触及 → 纳入 A.6 triage。
+- bench runner 的 hermetic 协议（`benchmarks/conftest.py`）清凭证 env 但**不清 `OCTOAGENT_ALLOW_MODEL_REQUESTS`**（该 env 非凭证、非 `_API_KEY`/`_TOKEN` 后缀）→ CLI 真跑不受影响。
+
+### I.4 baseline（AC-9 锚点）
+
+- 选择器：`octoagent/apps octoagent/packages octoagent/tests --ignore=octoagent/apps/gateway/tests/e2e_live`，PYTHONPATH 锁 worktree + `--no-sync` + `-p no:cacheprovider`。
+- 实测：**4846 passed / 11 skipped / 1 xfailed / 1 xpassed，168s**（e2e marker 实测只存在于 e2e_live 目录内——目录 ignore 即可保证回归跑零真 LLM，宿主有真凭证）。
+
+### I.5 pre-commit hook 执行模型对本 Feature 的两个约束（防御依据）
+
+- hook（`.githooks/pre-commit:95`）在 worktree 内跑 `uv run python -m pytest -m e2e_smoke`（cwd=worktree octoagent/，**无 `--no-sync`**）：收集 worktree conftest / 测试文件，但 venv editable 指 master src → 新 conftest 布线 import 新 gate 模块必须防御式（pre-merge 窗口 ImportError → no-op）。
+- 同因（无 `--no-sync`）：worktree 内 pyproject 变更（新增 entry-points）可能触发 hook 的 uv 对共享 venv 重同步——与 F109/F110 改 optional deps 同型，非新风险；`uv lock --check` 核对 lock 是否需一并 commit（6543de0b 教训）。
+
+### I.6 provider/__init__.py 反向依赖 gateway（插件模块选址依据）
+
+`provider/__init__.py` 顶层 `from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv`——provider 包 `__init__` import 会拉起 gateway。任何 in-package 插件模块 import 都无法绕过包 `__init__`（importlib 直载文件会产生第二份模块实例、`_allowed` 全局分裂→闸失效，**禁止**）。**实测**：`import octoagent.provider` 冷启动 1.10s（gateway 随之 0s 增量）——插件在 pytest 启动期加载的一次性成本可接受（全量跑本来就要 import；小范围包级跑 +1.1s）。**设计**：插件模块顶层零 import（stdlib 除外），gate import 放 `pytest_configure` 内（strict，不 try/except——插件与 gate 同包，插件可见 ⟹ gate 存在；缺失时响亮失败是正确行为）。
+
+**跨 worktree 窗口 hazard（归档 + 逃生门）**：F137 合入 master 且主 venv `uv sync` 注册 entry point 后，基于 pre-F137 master 的旧 worktree（如并行中的 F138）PYTHONPATH 锁跑 pytest 时，插件模块经 PYTHONPATH 解析到旧 worktree 的 provider 包（无 `testing` 子模块）→ pytest 启动期 ImportError 响亮失败。**自愈路径 = rebase master**（旧 worktree 收尾前本来必做）；**临时逃生门** = `-p no:octoagent_model_request_gate`。窗口窄（合并串行 + rebase 常规化）、错误响亮非静默，接受并进 completion-report 提示 F138。

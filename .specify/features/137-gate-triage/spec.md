@@ -4,11 +4,11 @@
 **Slug**: gate-triage
 **Milestone**: M9（质量保证体系：四层测试金字塔 + 门禁改造）— **P0**，波次 1（F137 止血 ∥ F138 keystone 并行）
 **规模**: **S-M**（复核见 §8）
-**Status**: **设计先行草案 v0.1**（研究闭环；spec/plan 待用户拍板 §7 三设计岔路后进入实施）
-**Base**: master 8fb1386e / 分支 `feature/137-gate-triage`（worktree `.claude/worktrees/F137-gate-triage/`）
-**上游依据**: `CLAUDE.local.md` §M9 + `docs/blueprint/milestones.md` M9 节（line 613-639）+ 本目录 `research.md`（含 file:line 证据）+ `scratchpad/qa_audit_survivors.md`
+**Status**: **收窄版 v1.0**（三岔路已拍板 + Fable 5 复审三收窄注锁入；§7 从「待拍板」转为「拍板决策记录」；实施中）
+**Base**: master a1e4ca15（rebase 自 8fb1386e，增量纯 docs）/ 分支 `feature/137-gate-triage`（worktree `.claude/worktrees/F137-gate-triage/`）
+**上游依据**: `CLAUDE.local.md` §M9「首波设计先行完成 + 六岔路拍板」+「Fable 5 复审调整」+ `docs/blueprint/milestones.md` M9 节（line 613-639）+ 本目录 `research.md`（含 file:line 证据）+ `scratchpad/qa_audit_survivors.md`
 
-> ⚠️ 命中「重大架构变更」节点（触碰 CI / provider 分发 `_dispatch` / gateway 测试基础设施）→ spec/plan 大改后回主 session 走 **Codex + Opus 双评审 panel**。本 spec 设计阶段先自查对齐宪法 #6/#9/#10（§6）。
+> ⚠️ 命中「重大架构变更」节点（触碰 CI / provider 调用入口 `call()`/`embed()` / gateway 测试基础设施）→ spec/plan 大改后走 **Codex + Opus 双评审 panel**。本 spec 设计阶段先自查对齐宪法 #6/#9/#10（§6）。
 
 ---
 
@@ -27,10 +27,11 @@
 - **硬结论**（非偏好，是约束）：硬闸异常必须是**专用类型** `ModelRequestsNotAllowedError`，且两站点（+ grep 出的同类）必须**先 re-raise**——与已存在的 401/403（`fallback.py:74-85`）/ `SkillAuthError`（`llm_service.py:452`）skip-fallback **同一家族、同一理由**（「Echo 假成功掩盖事故」）。
 - **信号 = 异常类型**：合法降级 = 请求已到线后真失败（任意普通 Exception，Echo 兜底不变）；漏网 = gate 声明不许发却发了（专用异常，必炸）。
 
-### 0.3 ★ 单一分发点 `_dispatch` = 硬闸落点（比 pydantic-ai 7 处便宜）
+### 0.3 ★ 硬闸落点 = `call()` 入口 + `embed()` 入口（Fable 复审收窄 + 实测修正原 `_dispatch` 方案）
 
-- `provider_client.py:452` `_dispatch` 是唯一 fan-out 点（在 3 transport 分叉前、网络 I/O 前）。pydantic-ai 要植 6-7 处 request 入口；我们**一处 = 全覆盖 chat**。
-- `embed()`（`:912`）是第二网络入口（不走 `_dispatch`）→ 推荐同点加闸（2 处 = 全部出口，仍远比 7 处便宜）。§7 岔路②确认。
+- **实测修正（2026-07-11 收窄时勘察）**：`_dispatch_with_auth_refresh`（`provider_client.py:404-406`）在进 `_dispatch` **之前**先 `await self._runtime.auth_resolver.resolve()`；而 `OAuthResolver.resolve()` 是**主动 preemptive 刷新**（`auth_resolver.py:44-53` 协议 docstring「preemptive 检查 + 必要时刷新」+ `:115`「is_expired() 5 分钟 preemptive buffer」→ `TokenRefreshCoordinator.refresh_if_needed` → `PkceOAuthAdapter.resolve(force_refresh=False)`，token 进 5 分钟过期窗即**打真 OAuth token 端点**）。
+- **结论**：闸若植 `_dispatch`，deny 模式带过期凭证仍会在闸前打真 auth 端点——Fable 复审的担忧实测成立。**硬闸植 `call()`（`:315`）入口第一行**（早于 retry 外壳 + 早于 auth resolve），一处覆盖全部 3 transport chat 路径（grep 证实 `_dispatch`/`_dispatch_with_auth_refresh` 仅被 `call()` 链路调用，无旁路）。
+- `embed()`（`:912`）是第二网络入口（不走 `call()`，且 `:942` 同样先 `auth_resolver.resolve()`）→ **入口第一行同点加闸**（2 处 = 全部网络出口，仍远比 pydantic-ai 6-7 处便宜）。
 
 ### 0.4 实测核实的可复用资产（勿重造，research.md §A/§F）
 
@@ -65,7 +66,7 @@
 - **CI 从常红回到真跑**：修断链 workflow，让确定性层（L4 单元 + L3 无 LLM）在每次 PR/push 真跑，4600+ 测试重获 CI 覆盖底盘。
 - **前端护栏进闸**：complexity 检查 + vitest 接进自动闸——护栏 FAIL 时**闸会失败**，不再「失守无人知」。
 - **marker 名实相符**：改矛盾描述，测试选择/文档引用不再被误导。
-- **漏网真调用必炸**：provider `_dispatch`（+`embed`）加构造性硬闸——测试声明「不打真 LLM」时漏网的真调用**炸**而非被 Echo 静默吞（堵 bench TLS 事故根源），**且不误伤合法降级**。
+- **漏网真调用必炸**：provider `call()` + `embed()` 入口加构造性硬闸——测试声明「不打真 LLM」时漏网的真调用**炸**而非被 Echo 静默吞（堵 bench TLS 事故根源），**且不误伤合法降级**。
 
 **用户可感知的改变**：
 - 打开 GitHub PR → 看到 CI check 真跑确定性测试并给绿/红（不再是断链常红）。
@@ -81,7 +82,7 @@
 1. **修断链 CI**（`.github/workflows/feature-007-integration.yml`）：换掉引用已删文件的步骤，跑确定性层（§7 岔路①定范围）。
 2. **修 marker 矛盾**（`octoagent/pyproject.toml:70`）：改 `e2e_smoke` 描述文案为「集成层，不真打 LLM」；顺手核对 `e2e_full`/`e2e_live` 描述与实现一致。
 3. **前端门禁进闸**：`check:complexity` + `vitest run` 接进自动闸（pre-commit / CI，§7 岔路③定落点）；处置当前 3 个 complexity FAIL（§7 岔路③定「放宽 vs 修代码」）。
-4. **provider 硬闸**：新增 `ModelRequestsNotAllowedError` + 模块级 gate（默认 allow / env `OCTOAGENT_ALLOW_MODEL_REQUESTS`）+ 植 `_dispatch`（+`embed`）入口 + 两 Echo swallow 站点加 re-raise 守卫 + 顶层 conftest 置 deny 默认 + e2e_live ALLOW opt-in。
+4. **provider 硬闸**：新增 `ModelRequestsNotAllowedError` + 模块级 gate（默认 allow / env `OCTOAGENT_ALLOW_MODEL_REQUESTS`）+ 植 `call()`+`embed()` 入口 + Echo swallow 站点加 re-raise 守卫 + pytest11 插件/根 conftest 置 deny 默认 + e2e_full marker ALLOW opt-in。
 
 ### OUT（明确不做，归下游）
 
@@ -95,26 +96,32 @@
 
 ### 硬闸（核心）
 
-- **FR-1**：新增专用异常 `ModelRequestsNotAllowedError`（provider 包，建议继承 `RuntimeError` 或 provider `ProviderError`——§7 岔路②确认基类；message 含「如何 opt-in」指引）。
-- **FR-2**：新增模块级 gate（如 `provider/model_request_gate.py`）：`check_model_requests_allowed()`（deny 时 raise FR-1）+ `allow_model_requests(bool)` 上下文管理器/setter + 初始默认从 env `OCTOAGENT_ALLOW_MODEL_REQUESTS` 读（缺省 = allow=True，**生产不受影响**）。
-- **FR-3**：`ProviderClient._dispatch`（`provider_client.py:452`）入口第一行调 `check_model_requests_allowed()`（在 auth resolve 之后、transport 分叉之前均可；确保在网络 I/O 前）。
-- **FR-4**：`ProviderClient.embed`（`:912`）入口同样调 `check_model_requests_allowed()`（§7 岔路②确认是否纳入；推荐纳入）。
-- **FR-5**：`FallbackManager.call_with_fallback`（`fallback.py:72` 之前）加 `except ModelRequestsNotAllowedError: raise` 守卫（**先于** broad `except Exception`），照 401/403 先例（`:74-85`）。
+- **FR-1**：新增专用异常 `ModelRequestsNotAllowedError`（provider 包，**继承 `RuntimeError`**——已拍板，勿继承 `ProviderError` 防被现有 `except ProviderError` 链误吞；message 含「如何 opt-in」指引）。
+- **FR-2**：新增模块级 gate `provider/model_request_gate.py`：`check_model_requests_allowed()`（deny 时 raise FR-1）+ `allow_model_requests()` 上下文管理器 + `set_allow_model_requests(bool)` setter + 初始默认从 env `OCTOAGENT_ALLOW_MODEL_REQUESTS` 读（缺省 = allow=True，**生产不受影响**）。gate 为进程内全局；子进程回落 env 默认（limitation 归档 §8）。
+- **FR-3**：`ProviderClient.call`（`provider_client.py:315`）**入口第一行**调 `check_model_requests_allowed()`——早于瞬态 retry 外壳与 `auth_resolver.resolve()` 的 preemptive refresh 副作用（§0.3 实测：deny 带过期凭证不得打真 auth 端点）。
+- **FR-4**：`ProviderClient.embed`（`:912`）入口第一行同样调 `check_model_requests_allowed()`（`:942` 同有 auth resolve，同理须在其前）。
+- **FR-5**：`FallbackManager.call_with_fallback`（`fallback.py:72` `except Exception` 块内）加 `isinstance(e, ModelRequestsNotAllowedError) → raise` 守卫（**先于**降级到 Echo），照 401/403 先例（`:74-85`）。
 - **FR-6**：`LLMService._try_call_with_tools`（`llm_service.py:456` 之前）加 `except ModelRequestsNotAllowedError: raise`，照 `SkillAuthError`（`:452`）先例。
-- **FR-7**：grep sweep 全仓「broad `except Exception` 邻近 Echo / `return None` / fallback」站点，凡会把 provider 失败 mask 成 Echo/假成功的，均加 FR-5/6 同款守卫（防第三处漏网）。
-- **FR-8**：顶层 `octoagent/conftest.py` 加 session autouse，将 gate 置 **deny**（测试默认不许真 LLM）；对齐 pydantic-ai `conftest.py:72`。
-- **FR-9**：`e2e_live/conftest.py` 加 ALLOW opt-in（真 LLM 测试——e2e_full marker / `octo_harness_e2e` 依赖链——翻 gate=allow）；确保 e2e_full 真 LLM 测试不被 FR-8 误炸。
+- **FR-7**：grep sweep 全仓「broad `except Exception` 邻近 Echo / `return None` / fallback」站点（已知候选：`llm_service.py:619-621` / `:690` / `:903`），凡会把 provider 失败 mask 成 Echo/假成功的，均加 FR-5/6 同款守卫（防第三处漏网）；sweep 清单进 completion-report。
+- **FR-8**（已拍板：**pytest11 entry-point 插件优先 + 根 conftest 冗余次选**）：
+  - a) provider 包新增 pytest 插件模块（如 `provider/testing/pytest_model_request_gate.py`），`pytest_configure` 置 gate=**deny**；`packages/provider/pyproject.toml` 注册 `[project.entry-points.pytest11]`——已安装 venv 内**构造性全局生效**（含 per-package rootdir 直跑 / benchmarks tests），免 9 个 tests 目录 conftest 多点同步。
+  - b) 顶层 `octoagent/conftest.py` 同置 deny 作**冗余布线**（幂等）——覆盖「worktree PYTHONPATH 锁模式下 entry point 未注册进共享 venv」的窗口（禁 uv sync 铁律的副作用）。
+  - c) **两处布线均防御式 import**（`try/except ImportError → no-op + 注释`）：pre-commit hook 在 worktree 收集 worktree conftest 但 import master src（memory `project_precommit_hook_execution_model`），F137 合入 master 前的窗口内 master src 无 gate 模块，hook 不得因此炸。
+  - d) 测试断言两种布线各自生效：插件经 `-p` 显式加载可置 deny（worktree 无 metadata 也可验）；根 conftest 布线在标准全量跑下生效。
+- **FR-9**（已拍板：**e2e_full marker 驱动开闸**）：`e2e_live/conftest.py` 加 autouse fixture——测试带 `e2e_full` marker 时以 `allow_model_requests()` context 包裹（autouse 同 scope 先于显式 fixture 实例化，早于 `octo_harness_e2e`）；e2e_smoke（不打 LLM）保持 deny。宿主无凭证时照常 SKIP 语义不变。
+- **FR-9b**（Fable 复审：**benchmarks 勿误杀**）：OctoBench 真调用走 `octo-bench` argparse CLI（`benchmarks/runner/cli.py:297`，非 pytest 进程）→ pytest 层 deny **构造性不触及**，env 缺省 allow 语义保留；`benchmarks/tests/`（pytest 单测）纳入 A.6 triage——若有用 fake http 直测 dispatch 机器的用例，按 triage 规则补显式 allow，**不**给 benchmarks 目录整体开闸。
 
-### CI
+### CI（已拍板：B-lite）
 
-- **FR-10**：`feature-007-integration.yml` 的测试步骤（`:40`）改为跑确定性层（§7 岔路①定具体命令/marker 选择）；job 名/触发保持或按岔路①升级为正式 CI。
-- **FR-11**：CI 环境显式设 gate=deny（或依赖 FR-8 conftest），使 CI 中任何漏网真调用 FAIL（构造性保证 CI 不烧钱不打网络）。
+- **FR-10**：改写 `feature-007-integration.yml` 为正式确定性层 CI：clean checkout + `uv sync --dev` + `uv run python -m pytest`（照 hook `:83-91` 教训用 `python -m`）跑 L4+L3 确定性层（testpaths 全量、`--ignore` e2e_live 目录），**串行**（Fable 复审：勿 `-n auto`，F083 race；接受 ~20-40min）+ junit artifact；真 LLM（L2）显式不进 per-PR CI（F141 weekly canary 范围）。
+- **FR-11**：CI 中 gate=deny 生效（uv sync 后 entry-point 插件构造性激活 + 根 conftest 冗余），任何漏网真调用 FAIL；CI 零 secret 零真网络（free tier）。
+- **FR-11b**：CI 加前端 job：setup-node + `npm ci` + `check:complexity` + `vitest run`（FR-12/13 的 CI 侧落点）。
 
-### 前端门禁
+### 前端门禁（已拍板）
 
-- **FR-12**：`check:complexity` 接进自动闸（§7 岔路③定 pre-commit / CI / 两者）。
-- **FR-13**：`vitest run` 接进 CI（§7 岔路③；推荐 CI-only）。
-- **FR-14**：处置当前 3 个 complexity FAIL（§7 岔路③：推荐放宽 3 阈值 + F143 ratchet 注释）。
+- **FR-12**：`check:complexity` 进 **pre-commit + CI** 双闸（node 亚秒级）；pre-commit 段带 `SKIP_FRONTEND_CHECK=1` bypass（照 SKIP_E2E 范式）+ node 缺失降级 SKIP（Constitution #6）。
+- **FR-13**：`vitest run` 进 **CI-only**（不进 pre-commit，避免拖慢已 180s 的 commit 环）。
+- **FR-14**：3 个 complexity FAIL 处置 = **放宽阈值 + F143 ratchet 注释**（ChatWorkbench.tsx→1250 / useChatStream.ts→700 进 explicitLimits；index.css 3300→4600），**不改这三个文件的代码**（F143 范围）。
 
 ### marker
 
@@ -124,15 +131,15 @@
 
 ## 4. 验收标准（AC，AC↔test 显式绑定见 plan）
 
-- **AC-1**（硬闸炸漏网）：在 gate=deny 下，构造一个走 provider_direct 且触发 `_dispatch` 的调用 → 抛 `ModelRequestsNotAllowedError`，**不返回 Echo 结果**。绑定：新增 `test_model_request_gate.py`。
+- **AC-1**（硬闸炸漏网）：在 gate=deny 下，构造一个走 provider_direct 且进入 `ProviderClient.call()` 的调用 → 抛 `ModelRequestsNotAllowedError`，**不返回 Echo 结果**、**不触发 auth resolve**（deny 带过期凭证零 auth 端点调用）。绑定：新增 `test_model_request_gate.py`。
 - **AC-2**（不误伤合法降级）：gate=allow（或未设 = 生产默认）下，primary 抛普通 `Exception`（如模拟 transport error）→ FallbackManager 仍降级 Echo（`is_fallback=True`），行为与 master 逐字节一致。绑定：`test_fallback.py` 补例 + 现有降级测试 0 regression。
 - **AC-3**（两 swallow 站点 re-raise）：gate=deny 下，经 `FallbackManager.call_with_fallback` 与 `LLMService._try_call_with_tools` 两路径的漏网调用，均 propagate `ModelRequestsNotAllowedError`（不 mask 成 Echo/None）。
 - **AC-4**（e2e_full opt-in 不误炸）：宿主有真 OAuth 时，e2e_full 真 LLM 测试（gate opt-in allow）正常真跑；宿主无凭证时照常 SKIP。
-- **AC-5**（CI 真跑）：修后的 workflow 在 clean checkout（`uv sync --dev`）下确定性层测试真跑并可给绿/红（不再退出码 4）；CI 中 gate=deny 生效（漏网真调用会 FAIL）。
-- **AC-6**（前端护栏进闸失效即拦）：故意让某前端文件超阈值 → 闸 FAIL；vitest 挂 → CI FAIL（按岔路③落点）。
-- **AC-7**（现 3 FAIL 收敛）：complexity 检查在 master 现状（ChatWorkbench 1204/useChatStream 660/index.css 4477）下 PASS（按岔路③处置后）。
+- **AC-5**（CI 真跑）：修后的 workflow 在 clean checkout（`uv sync --dev`）下确定性层测试真跑并可给绿/红（不再退出码 4）；CI 中 gate=deny 生效（漏网真调用会 FAIL）。本地无法真跑 GitHub Actions → workflow YAML 机械校验 + 首跑预期失败清单进 completion-report（Fable 复审：预算一轮环境敏感 triage，~72 处 sleep 断言慢 runner 可能抖）。
+- **AC-6**（前端护栏进闸失效即拦）：故意让某前端文件超阈值 → pre-commit 段 FAIL（本地实测）；vitest 挂 → CI FAIL（workflow 步骤存在性 + 本地 `npm run test` 等价验证）。
+- **AC-7**（现 3 FAIL 收敛）：complexity 检查在 master 现状（ChatWorkbench 1204/useChatStream 660/index.css 4477）下 PASS（放宽阈值后本地实测）。
 - **AC-8**（marker 名实相符）：`pyproject.toml` marker 描述与 `e2e-testing.md`/conftest 实现一致（人工核对 + grep）。
-- **AC-9**（0 regression）：全量回归 vs master 8fb1386e baseline 0 净回归；e2e_smoke 8/8。
+- **AC-9**（0 regression）：全量回归 vs master a1e4ca15 baseline 0 净回归（实测 baseline：**4846 passed / 11 skipped / 1 xfailed / 1 xpassed，168s**，选择器 = apps+packages+tests、--ignore e2e_live、PYTHONPATH 锁 worktree）；e2e_smoke 8/8。
 - **AC-10**（生产零感知）：生产路径（不设 `OCTOAGENT_ALLOW_MODEL_REQUESTS`）gate=allow，Agent 决策/真实 LLM 调用行为无任何变化（#9/#6 守界）。
 
 ---
@@ -154,52 +161,52 @@
 
 ---
 
-## 7. ★ 设计岔路（必须回用户拍板，本 Feature 交付核心）
+## 7. ★ 设计岔路拍板决策记录（2026-07-09 拍板 + Fable 5 复审收窄，本节为最终锁定）
 
-### 岔路① 「修 CI」到什么程度？
+### 岔路① 「修 CI」程度 = **B-lite**（用户拍板）
 
-| 选项 | 内容 | 成本 | 收益 | 风险 |
-|------|------|------|------|------|
-| A 最小止血 | 只把断链步骤指向现存确定性测试子集（如 `pytest -m "not e2e_full and not e2e_live"` 或指定 tests/integration 的 Echo 全栈），保 CI 绿 | 极小（改 1 行 workflow）| 恢复部分 CI 覆盖，不烧钱 | 覆盖仍窄；未来还要重做成正式 CI |
-| **B-lite（推荐）** | 换成正式 GitHub Actions CI：clean checkout + `uv sync --dev` + 跑**确定性层**（L4 单元 + L3 Echo/hermetic，gate=deny 保证零真调用）on PR/push；真 LLM（L2）**显式不进**（留 weekly/F141）| 中（写一个像样 workflow，选 marker 子集，验证 4600 测试时长可控）| 4600+ 测试主体重获 CI 底盘，free tier 零 secret 零网络；硬闸使「CI 不打真 LLM」构造性成立；为 F141 lane 留 deterministic 接口 | CI 时长/shared-runner 资源（需选子集 + 可能分 job）；shared-venv 污染在 clean checkout 不复现 |
-| C 正式全 lane | 直接上 pr/baseline/release 三模式 + 真 LLM job + OIDC/secret | 大 | 完整 | **越界 F141**（违「严格执行范围」）；真 LLM 进 CI 违 DeepResearch 共识 |
+正式 GitHub Actions CI：clean checkout + `uv sync --dev` + 跑**确定性层**（L4 单元 + L3 Echo/hermetic，gate=deny 构造性保证零真调用）on PR/push；真 LLM（L2）**显式不进** per-PR CI（F141 weekly canary 范围）。依据：DeepResearch 共识「真 agent E2E 不能做二元 CI 门」（tau-bench SOTA <50%）+ 真 LLM 进 GH runner 需 secret + ToS/成本顾虑。lane 编排（pr/baseline/release）是 F141 主责，F137 建成「单一 deterministic lane」为 F141 留扩展缝。
 
-- **推荐 B-lite**。依据：DeepResearch 共识「真 agent E2E 不能做二元 CI 门」（tau-bench SOTA <50%）+ 真 LLM 进 GH runner 需 secret + 有 ToS/成本顾虑（同 benchmark DeepSeek 决策）。CI 范围 = 确定性层；硬闸让「CI 零真调用」从「靠没配 key 侥幸」升级为构造性保证。lane 编排（pr/baseline/release）是 F141 主责，F137 不 front-run，但把 CI 建成「单一 deterministic lane」为 F141 留扩展缝。
-- **子问题（请拍板）**：CI 跑**全量 `-m "not e2e_full and not e2e_live"`** 还是更窄子集（如仅 L4 + tests/integration Echo）？是否接受 CI 单 job 跑数千测试的时长，还是要分 job/并行？
+**子问题收窄（Fable 复审 ③/⑦）**：
+- 范围 = testpaths 全量 `--ignore` e2e_live 目录（e2e_live 内 smoke/full 均依赖宿主凭证，CI 无凭证只会 SKIP，剔除目录更省收集成本 + 更显式；e2e marker 实测只存在于该目录内）。
+- **串行首版**（勿 `-n auto`——F083 task_runner race 会炸），接受 GitHub 2-core ~20-40min；F142 xdist_group 落地后减半。
+- 首跑预算一轮环境敏感失败 triage（~72 处 sleep 断言慢 runner 可能抖）；后端 job + 前端 job 分开（前端亚分钟级不受后端时长拖累）。
 
-### 岔路② `ALLOW_MODEL_REQUESTS` 式硬闸的确切形态
+### 岔路② 硬闸形态（主节点按 agent 推荐拍板 + Fable 复审收窄 a/b）
 
-| 决策点 | 选项 | 推荐 |
-|--------|------|------|
-| env 变量名 | `OCTOAGENT_ALLOW_MODEL_REQUESTS` | **采用**（对齐 pydantic-ai 命名直觉 + `OCTOAGENT_*` 前缀惯例）|
-| 默认值 | allow（生产不受影响）vs deny | **allow**（生产从不设 = allow；deny 只在测试 conftest 置，pydantic-ai 同）|
-| 植入点 | 仅 `_dispatch` vs `_dispatch`+`embed` | **两者**（embed 是第二网络出口，同 leak 类；2 处仍远比 pydantic-ai 7 处便宜）|
-| 异常基类 | `RuntimeError` 子类 vs provider `ProviderError` 子类 | **待拍板**：`RuntimeError` 子类更贴 pydantic-ai（且明确「非可恢复运行时故障，是配置断言」）；`ProviderError` 子类更贴本仓异常体系但可能被现有 `except ProviderError` 意外捕获——**推荐 `RuntimeError` 子类**（避免被 provider 异常处理链吞，语义也更准）|
-| e2e_live 开闸 | ①autouse fixture 按 e2e_full marker 翻 allow ②绑定 `real_codex_credential_store`/`octo_harness_e2e` 进 allow context ③显式 `allow_model_requests` fixture 由真 LLM 测试依赖 | **待拍板**：推荐 ①（marker 驱动，最少改测试；e2e_full = 声明真 LLM 意图的单一信号）；②耦合凭证与许可两关注点；③最显式但要改每个真 LLM 测试签名 |
-| **不误伤 Echo（关键）** | 专用异常 + 两 swallow 站点 re-raise（FR-5/6/7）| **硬约束，非选项**（§0.2）——照 401/403 先例。请确认接受此约束 |
+| 决策点 | 锁定 |
+|--------|------|
+| env 变量名 | `OCTOAGENT_ALLOW_MODEL_REQUESTS`（缺省 allow，生产零感知）|
+| 默认值 | **allow**；deny 只由测试布线置（pytest11 插件 + 根 conftest）|
+| 植入点 | **`call()` 入口 + `embed()` 入口**（Fable 收窄 a + §0.3 实测：`_dispatch` 太晚，preemptive auth refresh 在其前；`call()` 是唯一 chat 入口 grep 证实无旁路）|
+| 异常基类 | **`RuntimeError` 子类**（勿入 `ProviderError` 链防 `except ProviderError` 误吞；语义=配置断言非运行时故障）|
+| deny 布线 | **provider 包 pytest11 entry-point 插件优先**（构造性全 venv 生效，免 9 tests 目录多点同步）+ `octoagent/` 根 conftest 冗余次选（覆盖 worktree PYTHONPATH 锁模式 entry point 未注册窗口）；两处均防御式 import（pre-merge hook 窗口）|
+| e2e_live 开闸 | **e2e_full marker 驱动**（autouse fixture 按 marker 翻 allow context；e2e_full = 声明真 LLM 意图的单一信号，最少改测试）|
+| benchmarks | **勿误杀**：OctoBench 真调用走 argparse CLI 非 pytest → 构造性不受 deny 影响；bench pytest 单测进 A.6 triage 按例处置 |
+| 不误伤 Echo | **硬约束**：专用异常 + swallow 站点 re-raise（FR-5/6/7），照 401/403 先例 |
 
-- **核心请拍板**：异常基类（RuntimeError vs ProviderError）+ e2e_live 开闸机制（marker vs fixture）+ 确认「不误伤 Echo」= 专用异常 + 两站点 re-raise 的路线。
+### 岔路③ 前端门禁（主节点按 agent 推荐拍板）
 
-### 岔路③ 前端门禁落点 + 现 3 FAIL 处置
-
-| 决策点 | 选项 | 推荐 |
-|--------|------|------|
-| complexity 落点 | pre-commit / CI / 两者 | **pre-commit + CI**（node 脚本亚秒级，够便宜进 pre-commit；且 complexity 正是「失守无人知」最需要快本地闸的项）|
-| vitest 落点 | pre-commit / CI / 两者 | **CI-only**（28 文件 ~195 例，秒~十几秒级；进 pre-commit 会拖慢已 180s 的 commit 环。放 CI 每 PR 跑不拖 commit）|
-| pre-commit bypass | 有 vs 无 | **有**（照 `SKIP_E2E` 范式加 `SKIP_FRONTEND_CHECK=1`；单人仓紧急 commit 需要逃生门）|
-| 现 3 FAIL | A 先修代码 vs **B 放宽阈值 + F143 ratchet** | **B**：把 3 阈值放宽到 current+小余量（index.css 4600 / ChatWorkbench 1250 / useChatStream 700）+ 代码注释「F143 会 ratchet 回收」。理由：F143 明确要下沉 ChatWorkbench/useChatStream——F137 改这俩代码**抢 F143 范围**（违「严格执行范围/别画蛇添足」）；gate 的价值是**挡新增长**不是逼重构。cc-haha ratchet 哲学的最小应用 |
-
-- **请拍板**：complexity 是否进 pre-commit（会让 commit 更慢一点点）？vitest CI-only 可否？3 FAIL 走「放宽 + F143 回收」可否（vs 现在就修代码）？
+| 决策点 | 锁定 |
+|--------|------|
+| complexity 落点 | **pre-commit + CI**（node 亚秒级；complexity 正是「失守无人知」最需要快本地闸的项）|
+| vitest 落点 | **CI-only**（不拖慢已 180s 的 commit 环）|
+| pre-commit bypass | `SKIP_FRONTEND_CHECK=1`（照 SKIP_E2E 范式）+ node 缺失降级 SKIP |
+| 现 3 FAIL | **放宽阈值 + F143 ratchet 注释**（ChatWorkbench 1250 / useChatStream 700 / index.css 4600），**不改三文件代码**（F143 范围；gate 价值=挡新增长非逼重构）|
 
 ---
 
 ## 8. 规模复核（原估 S-M）
 
 **维持 S-M**，偏 M。分解：
-- 硬闸（FR-1~9）：新建 1 小模块（~40 行）+ 2 处植闸 + 2-3 处 re-raise 守卫 + 2 处 conftest + 一组单测 ≈ **S**（代码量小，但**翻 deny 默认后全量 triage 存量假绿**是真工作量 + 双评审最微妙点）。
-- CI（FR-10/11）：改/写 1 workflow ≈ **S**（岔路①选 B-lite 时需验证时长/子集，稍涨）。
+- 硬闸（FR-1~9b）：新建 1 小模块 + 插件模块 + 2 处植闸 + 2-3 处 re-raise 守卫 + 2 处布线 + 一组单测 ≈ **S**（代码量小，但**翻 deny 默认后全量 triage 存量假绿**是真工作量 + 双评审最微妙点）。
+- CI（FR-10/11/11b）：改写 1 workflow ≈ **S**。
 - 前端门禁（FR-12~14）：接线 pre-commit/CI + 放宽 3 阈值 ≈ **S**。
 - marker（FR-15）：文案 ≈ **XS**。
 - **风险溢价**：硬闸翻 deny 可能抖出未知数量存量假绿（research.md §H.1）——若 >少数几个需逐个 triage/补 opt-in，规模上探 M 上界。
+
+**已知 limitation（归档）**：
+- gate 是**进程内**全局：测试若 spawn 子进程发起 LLM 调用，子进程回落 env 缺省（allow）。现状无此形态（e2e 全 in-process harness；MCP 子进程是 node 工具服务不经我们的 provider），与 pydantic-ai 同边界；F141 lane 若引入子进程真跑再收紧。
+- entry-point 插件注册进共享 venv 依赖 master 合入后 `uv sync`；worktree PYTHONPATH 锁窗口内由根 conftest 冗余布线兜住（FR-8b/d 显式测试断言两种布线）。
 
 **Phase 拆分见 plan.md**（硬闸独立先做 → CI → 前端 → marker → 双评审 → 文档）。
