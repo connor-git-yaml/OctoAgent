@@ -1450,18 +1450,24 @@ class OctoHarness:
         await self._platform_registry.startup_all()
 
         # Feature 011: 注册 WatchdogScanner APScheduler job
+        # F138: watchdog 是 clock DI 的唯一 demonstrating consumer——与
+        # app.state.clock 同一 callable 构造注入（clock override 为 None 时是
+        # _utc_now 默认，与 baseline 裸写 datetime.now(UTC) 逐值等价）。
+        # 其余 datetime.now 调用点归 F142。
+        _clock = app.state.clock
         watchdog_config = WatchdogConfig.from_env()
-        cooldown_registry = CooldownRegistry()
+        cooldown_registry = CooldownRegistry(clock=_clock)
 
         watchdog_scanner = WatchdogScanner(
             store_group=store_group,
             config=watchdog_config,
             cooldown_registry=cooldown_registry,
             detectors=[
-                NoProgressDetector(),
-                StateMachineDriftDetector(),  # T035: Phase 4 追加（FR-011 状态机漂移）
-                RepeatedFailureDetector(),  # T039: Phase 5 追加（FR-012 重复失败）
+                NoProgressDetector(clock=_clock),
+                StateMachineDriftDetector(clock=_clock),  # T035: Phase 4 追加（FR-011 状态机漂移）
+                RepeatedFailureDetector(clock=_clock),  # T039: Phase 5 追加（FR-012 重复失败）
             ],
+            clock=_clock,
         )
         await watchdog_scanner.startup()  # 重建 cooldown 注册表（FR-006 跨重启一致性）
 

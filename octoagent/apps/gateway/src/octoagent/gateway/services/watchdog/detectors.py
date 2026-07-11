@@ -6,6 +6,7 @@ StateMachineDriftDetector: 状态机驻留检测（P1，FR-011）
 RepeatedFailureDetector: 重复失败检测（P1，FR-012）
 """
 
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
@@ -15,7 +16,7 @@ from octoagent.core.models.task import Task
 from octoagent.core.store.event_store import SqliteEventStore
 
 from .config import WatchdogConfig
-from .models import DriftResult
+from .models import DriftResult, utc_now
 
 log = structlog.get_logger()
 
@@ -72,6 +73,11 @@ class NoProgressDetector:
     - task.updated_at 作为 last_event_ts 降级（边界情况 4）
     """
 
+    def __init__(self, clock: Callable[[], datetime] | None = None) -> None:
+        # F138 clock DI：None 默认 utc_now（与原裸写 datetime.now(UTC) 逐值等价）；
+        # 注入固定时钟即可确定性测时间窗判断。
+        self._clock = clock or utc_now
+
     async def check(
         self,
         task: Task,
@@ -84,7 +90,7 @@ class NoProgressDetector:
             return None
 
         threshold = config.no_progress_threshold_seconds
-        now = datetime.now(UTC)
+        now = self._clock()
         since_ts = now - timedelta(seconds=threshold)
 
         # 查询时间窗口内的进展事件
@@ -149,6 +155,10 @@ class StateMachineDriftDetector:
     使用内部完整 TaskStatus 枚举（Constitution 原则 14）。
     """
 
+    def __init__(self, clock: Callable[[], datetime] | None = None) -> None:
+        # F138 clock DI（同 NoProgressDetector）。
+        self._clock = clock or utc_now
+
     async def check(
         self,
         task: Task,
@@ -164,7 +174,7 @@ class StateMachineDriftDetector:
 
         # 阈值复用 no_progress_threshold_seconds
         threshold = config.no_progress_threshold_seconds
-        now = datetime.now(UTC)
+        now = self._clock()
 
         updated_at = task.updated_at
         if updated_at.tzinfo is None:
@@ -211,6 +221,10 @@ class RepeatedFailureDetector:
     超过 repeated_failure_threshold 时返回 repeated_failure 漂移。
     """
 
+    def __init__(self, clock: Callable[[], datetime] | None = None) -> None:
+        # F138 clock DI（同 NoProgressDetector）。
+        self._clock = clock or utc_now
+
     async def check(
         self,
         task: Task,
@@ -224,7 +238,7 @@ class RepeatedFailureDetector:
         if task_status in TERMINAL_STATES:
             return None
 
-        now = datetime.now(UTC)
+        now = self._clock()
         since_ts = now - timedelta(seconds=config.failure_window_seconds)
 
         # 查询失败事件

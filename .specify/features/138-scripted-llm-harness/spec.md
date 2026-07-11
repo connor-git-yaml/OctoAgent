@@ -183,12 +183,12 @@ async def test_scripted_adapter_drives_real_decision_loop(scripted_harness):
 
 | AC | 断言 | 绑定测试（SDD AC↔test 显式绑定）|
 |----|------|--------------------------------|
-| AC-1 | `OctoHarness(model_client=X)` 时 SkillRunner 用 X（不用 ProviderModelClient），且**与 llm_mode 解耦**（echo 模式也建 SkillRunner）| `apps/gateway/tests/test_octo_harness_model_client_di.py` |
-| AC-2 | `model_client=None AND clock=None` 时行为与 master 等价（§3.2 None 等价语义：非 echo 建 ProviderModelClient-SkillRunner / echo 跳过 / `app.state.clock` 为 inert 默认）| `apps/gateway/tests/test_octo_harness_di_none_equivalence.py` |
+| AC-1 | `OctoHarness(model_client=X)` 时 SkillRunner 用 X（不用 ProviderModelClient），且**与 llm_mode 解耦**（echo 模式也建 SkillRunner）| `apps/gateway/tests/e2e_live/test_octo_harness_model_client_di.py`（放 e2e_live 目录以获得 hermetic autouse fixture——全 11 段 bootstrap 需要 env 重定向 + 单例 reset，同 `test_hermetic_isolation.py` 先例）|
+| AC-2 | `model_client=None AND clock=None` 时行为与 master 等价（§3.2 None 等价语义：非 echo 建 ProviderModelClient-SkillRunner / echo 跳过 / `app.state.clock` 为 inert 默认）| 同上文件（None 等价对账 case 与 DI case 同 fixture 族）|
 | AC-3【keystone】| 脚本化 adapter 驱动真 SkillRunner → 真 tool_broker.execute → 真回写（USER.md + MEMORY_ENTRY_ADDED），零真 provider HTTP | `apps/gateway/tests/e2e_live/test_e2e_scripted_decision_loop.py` |
 | AC-4 | `ScriptedModelClient` 多步链：第 1 轮 tool_call A、第 2 轮 tool_call B、第 3 轮 complete，决策环按序消费 | `packages/skills/tests/test_scripted_model_multistep.py` |
 | AC-5 | `QueueModelClient` 上提后 `test_runner.py` 等 8 个既有消费文件零改动通过（re-export 兼容）| `packages/skills/tests/test_runner.py` 等（既有）|
-| AC-6 | clock DI：注入固定时钟后 watchdog 时间判断确定性可测（F103d offset-naive 类 bug 在 L4 可抓）| `apps/gateway/tests/test_watchdog_clock_di.py` |
+| AC-6 | clock DI：注入固定时钟后 watchdog 时间判断确定性可测（F103d offset-naive 类 bug 在 L4 可抓）| `apps/gateway/tests/unit/watchdog/test_clock_di.py`（跟随 unit/watchdog 既有布局）|
 | AC-7 | ~~SchemaTestAdapter~~ **Phase 2 deferred（拍板②，§2.2）**，本次不实施不验收 | —— |
 | AC-8 | keystone L3 测试**不依赖宿主 OAuth**（空 tmp CredentialStore 即可跑）→ CI-runnable | `test_e2e_scripted_decision_loop.py`（fake cred fixture，不依赖 `real_codex_credential_store`）|
 | AC-9 | 0 regression vs 本 worktree rebase 后 baseline（4919 passed / 14 skipped / 1 xfailed / 1 xpassed），e2e_smoke 8/8 | 全量回归 |

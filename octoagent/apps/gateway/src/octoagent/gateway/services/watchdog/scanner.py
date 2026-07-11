@@ -10,7 +10,8 @@ APScheduler job 主体：周期扫描活跃任务，运行漂移检测策略，
 """
 
 import time
-from datetime import UTC, datetime
+from collections.abc import Callable
+from datetime import datetime
 
 import structlog
 from octoagent.core.models.enums import ActorType, EventType
@@ -21,7 +22,7 @@ from octoagent.core.store import StoreGroup
 from .config import WatchdogConfig
 from .cooldown import CooldownRegistry
 from .detectors import DriftDetectionStrategy
-from .models import NON_TERMINAL_STATUSES, DriftResult
+from .models import NON_TERMINAL_STATUSES, DriftResult, utc_now
 
 log = structlog.get_logger()
 
@@ -53,11 +54,14 @@ class WatchdogScanner:
         config: WatchdogConfig,
         cooldown_registry: CooldownRegistry,
         detectors: list[DriftDetectionStrategy],
+        clock: Callable[[], datetime] | None = None,
     ) -> None:
         self._store_group = store_group
         self._config = config
         self._cooldown = cooldown_registry
         self._detectors = detectors
+        # F138 clock DI：None 默认 utc_now（与原裸写 datetime.now(UTC) 逐值等价）
+        self._clock = clock or utc_now
 
     async def startup(self) -> None:
         """进程启动：重建 cooldown 注册表（FR-006 跨重启一致性）
@@ -198,7 +202,7 @@ class WatchdogScanner:
         构建 TaskDriftDetectedPayload，写入 EventStore，
         更新 CooldownRegistry 防止重复告警（FR-006）。
         """
-        now = datetime.now(UTC)
+        now = self._clock()
         detected_at_iso = result.detected_at.isoformat()
         last_progress_iso = result.last_progress_ts.isoformat() if result.last_progress_ts else None
 

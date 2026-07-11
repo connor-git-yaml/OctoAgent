@@ -23,7 +23,7 @@
 - `_bootstrap_executors` 拦截硬连（`:1134-1157`）：override 非 None → 无条件建 SkillRunner（拍板③子决策，与 llm_mode 解耦，**不要求 provider 凭证**）；None 分支**原 `if` 改 `elif`、块体逐行不动**（最小 diff 形状，spec §3.2）。
 - `bootstrap()` 入口 `app.state.clock` seam（默认 `lambda: datetime.now(UTC)`，additive inert）。
 - **AC-1, AC-2**。gate：None 行为等价对账（spec §3.2 精确语义）+ focused 回归。
-- 产物：`apps/gateway/tests/test_octo_harness_model_client_di.py` + `test_octo_harness_di_none_equivalence.py`。
+- 产物：`apps/gateway/tests/e2e_live/test_octo_harness_model_client_di.py`（DI + None 等价对账同文件，hermetic autouse fixture 先例见 `test_hermetic_isolation.py`）。
 
 ### Phase B — QueueModelClient 上提（脚本脑主力）
 - 新建 `packages/skills/src/octoagent/skills/testing/{__init__.py,scripted_model.py}`：`ScriptedModelClient`（QueueModelClient 改名+上提，实现零逻辑变更；只依赖 skills 自身模型 + stdlib）。
@@ -42,7 +42,7 @@
 ### Phase E — clock DI consumer（坐实 bug 价值）
 - watchdog `detectors.py:87,167,227` + `cooldown.py:44,79` + `scanner.py:201` 共 6 处 `datetime.now(UTC)` 改读构造注入 clock（构造参数默认 None → 行为等价）；harness `_bootstrap_optional_routines` 传入与 `app.state.clock` 同一 callable。
 - **AC-6**：固定时钟确定性测 watchdog 时间判断（F103d offset-naive 类 bug 在 L4 可抓）。
-- 其余 ~67 处 `datetime.now` 不动（F142）。产物：`apps/gateway/tests/test_watchdog_clock_di.py`。
+- 其余 ~67 处 `datetime.now` 不动（F142）。产物：`apps/gateway/tests/unit/watchdog/test_clock_di.py`。
 
 ### Phase F — 文档漂移修 + conftest 翻转 + verify（living-docs 闸）
 - `docs/codebase-architecture/e2e-testing.md` DI 清单诚实化（删从未存在的 `secret_store/transport_factory/clock` 旧文案，写真实 6 DI：credential_store/llm_adapter/mcp_servers_dir/data_dir/plugins_dir/model_client + clock）。

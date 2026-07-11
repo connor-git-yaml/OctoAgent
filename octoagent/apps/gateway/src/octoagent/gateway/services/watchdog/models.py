@@ -6,10 +6,20 @@ TaskJournalEntry: Task Journal API 返回单元
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from octoagent.core.models.enums import TaskStatus
+
+
+def utc_now() -> datetime:
+    """watchdog 默认时钟（F138 clock DI 的 None 缺省）。
+
+    与既有裸写 ``datetime.now(UTC)`` 逐值等价；detectors / cooldown / scanner
+    构造参数 ``clock`` 未注入时统一回退到本函数，注入固定时钟即可确定性测
+    时间判断（F103d offset-naive 类 bug 的 L4 可测缝）。
+    """
+    return datetime.now(UTC)
 
 # Watchdog 扫描的非终态状态集合（排除终态，scanner.py 和 task_journal.py 共用）
 NON_TERMINAL_STATUSES: list[TaskStatus] = [
