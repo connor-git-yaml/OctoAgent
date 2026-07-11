@@ -24,7 +24,7 @@
 **新建**：
 - `octoagent/packages/provider/src/octoagent/provider/model_request_gate.py` — gate 模块（env 缺省 allow / `ModelRequestsNotAllowedError(RuntimeError)` / context manager / `apply_test_default_deny` 显式-env-优先布线入口）
 - `octoagent/packages/provider/src/octoagent/provider/testing/{__init__,pytest_model_request_gate}.py` — pytest11 插件（deny 主布线）
-- 测试 4 文件（37 用例）：`packages/provider/tests/test_model_request_gate.py`（27）/ `apps/gateway/tests/test_llm_service_model_request_gate.py`（2）/ `apps/gateway/tests/test_memu_bridge_model_request_gate.py`（2）/ `packages/skills/tests/test_runner_model_request_gate.py`（2）+ provider tests conftest 的 `allow_model_requests_for_dispatch_tests` fixture
+- 测试 4 文件（38 用例）：`packages/provider/tests/test_model_request_gate.py`（32，含 env 语义 4 例 + 空批次 no-op 1 例 + pytester 激活 3 例）/ `apps/gateway/tests/test_llm_service_model_request_gate.py`（2）/ `apps/gateway/tests/test_memu_bridge_model_request_gate.py`（2）/ `packages/skills/tests/test_runner_model_request_gate.py`（2）+ provider tests conftest 的 `allow_model_requests_for_dispatch_tests` fixture
 - `.specify/features/137-gate-triage/completion-report.md`（本文件）
 
 **修改**：
@@ -99,8 +99,9 @@
 | Final #2 | `_try_embed_query` 上层 broad catch 吞 embed 闸异常→FTS-only 假绿 | P2 | ✅ 同款 re-raise + 2 测试锁定两级贯通 |
 | Final #2 | 布线无条件 deny 使公开 env opt-in（通道③）失效 | P2 | ✅ `apply_test_default_deny`：env 未设→deny；显式 env 优先 + 4 测试 |
 | Final #3 | entry point 经 provider `__init__` 反向拉 gateway——仅装 octoagent-provider（无 gateway）的 venv 里 pytest 启动即 ModuleNotFoundError | P2 | ✅ **根治**：删除 provider `__init__:47` 对 gateway 的 vestigial 兼容 re-export（`load_project_dotenv`，Feature 003 时代产物，grep 证实顶层 re-export 零消费者——main.py 与 provider/dx 均走 gateway 直接路径）+ `__all__` 同删。gateway-less venv 以 meta_path 阻断器模拟复现：修后插件 import + `pytest_configure` deny 全链路 OK（1.03s）。顺带消除一处「provider 包依赖 gateway 应用」的倒置依赖坏味道 |
+| Final #4（确认轮）| `embed(texts=[])` 零网络 no-op（契约返回 `[]`）被入口第一行的闸误判成漏网 | P2 | ✅ 闸移到两个零网络 no-op 分支之后、auth resolve 之前（闸语义=拦真网络调用，不改无副作用路径契约）+ 空批次 deny 不误拦测试锁定。「其余改动未发现阻断性问题」（Codex 原话）|
 
-**0 HIGH / 0 P1 残留**；全部 finding 接受修复（无带理由拒绝项）。第 4 轮确认见下。
+**0 HIGH / 0 P1 残留**；全部 finding 接受修复（无带理由拒绝项）。确认轮首跑因 Codex CLI 10min 超时被杀，后台重试完成即 Final#4；5 轮 severity 单调收敛（2P2→2P1→2P2→1P2→1P2 且末轮为 no-op 语义细节），Final#4 修复为 3 行顺序调整 + 直接测试锁定，据此闭环不再追加轮次（0 HIGH 门槛 5 轮全满足）。
 
 **Opus 式对抗自审（宪法 + AC 机械验收）**：
 - **#6**：生产（env 未设）gate 恒 allow → 植闸=一次布尔判断，`FallbackManager→Echo` 真故障降级语义逐字节不变；全部守卫只捕获生产不可能出现的异常类型（构造性死代码）。唯一生产行为变更 = `log`→`_log` 修复（严格恢复 #6）。CI/前端闸均为 commit/build-time。✓
@@ -113,7 +114,7 @@
 | 项 | 结果 |
 |----|------|
 | baseline（a1e4ca15，改动前实测）| 4846 passed / 11 skipped / 1 xfailed / 1 xpassed（168s）|
-| 终态全量（deny 生效 + 全部 opt-in）| **4883 passed / 11 skipped / 1 xfailed / 1 xpassed = baseline + 37 新增，0 净回归** |
+| 终态全量（deny 生效 + 全部 opt-in + Final#4 后）| **4884 passed / 11 skipped / 1 xfailed / 1 xpassed = baseline + 38 新增，0 净回归**（过程锚点：Phase A 后 4877 / P2 闭环后 4883 / re-export 移除后 4883 逐项一致）|
 | e2e_smoke（worktree src + deny）| 8/8 PASS（两次：Phase A 后 + Phase D 后）|
 | e2e_full opt-in 真跑 | domain_1 真打 GPT-5.5 PASS（25.4s）|
 | benchmarks 对照 | 插件开/关一致（350 passed / 6 tau-bench 依赖缺失失败，与闸无关）|

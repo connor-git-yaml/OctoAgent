@@ -99,7 +99,7 @@
 - **FR-1**：新增专用异常 `ModelRequestsNotAllowedError`（provider 包，**继承 `RuntimeError`**——已拍板，勿继承 `ProviderError` 防被现有 `except ProviderError` 链误吞；message 含「如何 opt-in」指引）。
 - **FR-2**：新增模块级 gate `provider/model_request_gate.py`：`check_model_requests_allowed()`（deny 时 raise FR-1）+ `allow_model_requests()` 上下文管理器 + `set_allow_model_requests(bool)` setter + 初始默认从 env `OCTOAGENT_ALLOW_MODEL_REQUESTS` 读（缺省 = allow=True，**生产不受影响**）。gate 为进程内全局；子进程回落 env 默认（limitation 归档 §8）。
 - **FR-3**：`ProviderClient.call`（`provider_client.py:315`）**入口第一行**调 `check_model_requests_allowed()`——早于瞬态 retry 外壳与 `auth_resolver.resolve()` 的 preemptive refresh 副作用（§0.3 实测：deny 带过期凭证不得打真 auth 端点）。
-- **FR-4**：`ProviderClient.embed`（`:912`）入口第一行同样调 `check_model_requests_allowed()`（`:942` 同有 auth resolve，同理须在其前）。
+- **FR-4**：`ProviderClient.embed`（`:912`）同样调 `check_model_requests_allowed()`——位置在两个零网络 no-op 分支（transport 不支持 raise NotImplementedError / 空批次契约返回 `[]`）**之后**、auth resolve（同有 preemptive refresh 副作用）**之前**（Codex 确认轮 P2 修正：闸语义=拦真网络调用，不改无副作用路径既有契约）。
 - **FR-5**：`FallbackManager.call_with_fallback`（`fallback.py:72` `except Exception` 块内）加 `isinstance(e, ModelRequestsNotAllowedError) → raise` 守卫（**先于**降级到 Echo），照 401/403 先例（`:74-85`）。
 - **FR-6**：`LLMService._try_call_with_tools`（`llm_service.py:456` 之前）加 `except ModelRequestsNotAllowedError: raise`，照 `SkillAuthError`（`:452`）先例。
 - **FR-7**：grep sweep 全仓「broad `except Exception` 邻近 Echo / `return None` / fallback」站点（已知候选：`llm_service.py:619-621` / `:690` / `:903`），凡会把 provider 失败 mask 成 Echo/假成功的，均加 FR-5/6 同款守卫（防第三处漏网）；sweep 清单进 completion-report。

@@ -168,6 +168,14 @@ class TestProviderClientGate:
             await client.embed(model_name="emb", texts=["a"])
         assert resolver.resolve_count == 0
 
+    async def test_embed_empty_batch_noop_unaffected_by_deny(self) -> None:
+        """Codex 确认轮 P2：空批次是零网络 no-op（契约返回 []），deny 不误拦。"""
+        set_allow_model_requests(False)
+        resolver = _CountingResolver()
+        client = ProviderClient(_runtime(resolver), http_client=_ExplodingHttp())  # type: ignore[arg-type]
+        assert await client.embed(model_name="emb", texts=[]) == []
+        assert resolver.resolve_count == 0
+
     async def test_call_allowed_proceeds_to_transport(self) -> None:
         """allow 下 call() 照常走到 transport 层（用 fake http 断言到达）。"""
         set_allow_model_requests(True)
