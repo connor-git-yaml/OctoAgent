@@ -451,11 +451,9 @@ class TestLLMDrivenNoHardRules:
 
     async def test_no_keyword_rules_in_source(self):
         """AC-2：发现端源码无关键词/相似度硬规则判重（冗余判断全交 LLM）。"""
-        src = Path(
-            "/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/"
-            "F127-sleep-time/octoagent/apps/gateway/src/octoagent/gateway/services/"
-            "consolidation_discovery.py"
-        ).read_text(encoding="utf-8")
+        from octoagent.gateway.services import consolidation_discovery as _disc_mod
+
+        src = Path(_disc_mod.__file__).read_text(encoding="utf-8")
         # 不得出现相似度/编辑距离/关键词匹配判重的硬编码（C9）
         forbidden = ["difflib", "SequenceMatcher", "levenshtein", "jaccard", "cosine_sim"]
         for token in forbidden:

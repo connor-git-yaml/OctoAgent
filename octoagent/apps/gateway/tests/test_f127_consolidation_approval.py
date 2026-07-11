@@ -224,10 +224,10 @@ class TestNoSelfCommitRedLine:
         grep 源码：consolidation_discovery.py / memory_consolidation.py 不得有
         `.commit_memory(` 调用（只 propose+validate / 只编排 spawn+发现端 runner）。
         """
-        base = (
-            "/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/"
-            "F127-sleep-time/octoagent/apps/gateway/src/octoagent/gateway/services/"
-        )
+        from octoagent.gateway.services import consolidation_discovery as _svc_anchor
+
+        # 从被测模块 __file__ 派生源码目录（CI/任何 checkout 均可移植——F137 CI 首跑抓出原硬编码绝对路径）
+        base = Path(_svc_anchor.__file__).resolve().parent
 
         def _call_lines(src: str) -> list[str]:
             """返回含 `.commit_memory(` 调用的非注释/非 docstring 代码行。
@@ -250,14 +250,14 @@ class TestNoSelfCommitRedLine:
                     hits.append(line)
             return hits
 
-        discovery_src = Path(base + "consolidation_discovery.py").read_text(
+        discovery_src = (base / "consolidation_discovery.py").read_text(
             encoding="utf-8"
         )
         assert _call_lines(discovery_src) == [], (
             "发现端不得**调用** commit_memory——合并 commit 唯一入口是 Phase D 人审（C4 红线）；"
             f"实际命中：{_call_lines(discovery_src)}"
         )
-        consolidation_src = Path(base + "memory_consolidation.py").read_text(
+        consolidation_src = (base / "memory_consolidation.py").read_text(
             encoding="utf-8"
         )
         assert _call_lines(consolidation_src) == [], (
@@ -265,7 +265,7 @@ class TestNoSelfCommitRedLine:
             f"实际命中：{_call_lines(consolidation_src)}"
         )
         # 正向：approval 服务确实有 commit_memory 调用（accept 路径）
-        approval_src = Path(base + "consolidation_approval.py").read_text(
+        approval_src = (base / "consolidation_approval.py").read_text(
             encoding="utf-8"
         )
         assert _call_lines(approval_src), (
@@ -274,11 +274,9 @@ class TestNoSelfCommitRedLine:
 
     async def test_approval_accept_is_only_commit_caller(self):
         """approval 服务里 commit_memory 只在 accept 方法体内（人审触发的唯一 commit）。"""
-        src = Path(
-            "/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/"
-            "F127-sleep-time/octoagent/apps/gateway/src/octoagent/gateway/services/"
-            "consolidation_approval.py"
-        ).read_text(encoding="utf-8")
+        from octoagent.gateway.services import consolidation_approval as _appr_mod
+
+        src = Path(_appr_mod.__file__).read_text(encoding="utf-8")
         # commit_memory 出现且仅在 accept 上下文（reject 路径不得 commit）
         assert "commit_memory" in src
         # reject 方法不得含 commit_memory（粗粒度：reject 方法体到下个方法之间无 commit_memory）

@@ -9,6 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import os
+
 import pytest
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.config.config_schema import (
@@ -206,6 +208,10 @@ async def test_spool_survives_process_restart(tmp_path: Path) -> None:
     await store_group_2.close()
 
 
+@pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="时序/性能断言在 CI 共享 runner 不稳定——F137 首跑 triage 记欠账，F142 quarantine/根因治理；本地照跑",
+)
 @pytest.mark.asyncio
 async def test_startup_drains_spool(tmp_path: Path) -> None:
     """AC-7 补充：startup() 重启后后台 drain 首轮立即补发（Codex P2：非阻塞，

@@ -9,6 +9,7 @@ Feature 084 Phase 5 验收：
 
 from __future__ import annotations
 
+import os
 import time
 import unicodedata
 
@@ -175,6 +176,10 @@ class TestPerformanceBenchmark:
             f"恶意内容短路扫描平均耗时 {avg_ms:.4f}ms，超过 1ms 上限"
         )
 
+    @pytest.mark.skipif(
+        os.environ.get("CI") == "true",
+        reason="时序/性能断言在 CI 共享 runner 不稳定——F137 首跑 triage 记欠账，F142 quarantine/根因治理；本地照跑",
+    )
     def test_long_content_scan_under_1ms(self) -> None:
         """长文本（5000 字符）扫描平均耗时 < 1ms。"""
         # 构造 5000 字符的合法长文本
