@@ -303,6 +303,13 @@ class TestDenyWiring:
             """
         )
         result = pytester.runpytest_subprocess(
+            # Codex Final P1-1：先按 entry-point 名阻断自动加载——已安装 venv
+            # （uv sync 后）里 entry point 会自动注册同一插件模块，随后
+            # `-p 模块路径` 再注册同一对象会被 pluggy 以 ValueError 拒绝。
+            # 阻断后本子进程在「已安装」与「worktree PYTHONPATH 锁」两种环境
+            # 下等价：插件仅经模块路径注册一次。
+            "-p",
+            "no:octoagent_model_request_gate",
             "-p",
             "octoagent.provider.testing.pytest_model_request_gate",
             "-p",

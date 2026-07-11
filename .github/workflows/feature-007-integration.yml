@@ -69,9 +69,16 @@ jobs:
         # 教训沉淀（.githooks/pre-commit:83-91）：用 `uv run python -m pytest`
         # 而非裸 `uv run pytest`——console-script 可能逃逸 venv。
         # 无参数 = pyproject testpaths 全量；--ignore 剔 e2e_live（宿主凭证依赖）。
+        #
+        # --reruns 1（Codex Final P1-2，仅 CI lane）：全仓 ~72 处 single-sleep
+        # timing 断言（octoagent/pyproject.toml F083 归档的已知债）在 GitHub
+        # 2-core 慢 runner 上会间歇抖红。单次 rerun 是显式过渡桥（junit 可见
+        # rerun 计数，持续失败仍红）——F142 sleep→轮询治本 / F141 quarantine
+        # manifest 落地后删除本参数。本地跑保持无 rerun，开发者仍看得见 flake。
         run: >
           uv run python -m pytest -q
           --ignore=apps/gateway/tests/e2e_live
+          --reruns 1 --reruns-delay 2
           --junitxml=test-results/junit-backend.xml
         env:
           PYTHONNOUSERSITE: "1"
