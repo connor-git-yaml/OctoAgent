@@ -39,14 +39,15 @@
 |------|------|------|
 | Codex spec 评审（收窄后）| 0 HIGH + 2 P2 | P2-1（TestModel 勿提前宣称已落地）/ P2-2（bomb 挂 `resolve_for_alias` 非不存在的 `provider_router.call`）均接受，`9d781fa8` 闭环 |
 | Codex 全量 review（实施后，--base origin/master）| **零 finding**（"未发现会破坏现有行为或新增功能的明确缺陷"）| 无待处理 |
+| Codex re-review（Phase F 翻转 + 自审修复增量后，F099"修复后必 re-review"铁律）| **再次零 finding** | 无待处理 |
 | Opus 式对抗自审 | 抓 1 真洞：`test_clock_di.py` module 级 import master 不存在的 `utc_now` 符号 → pre-merge 窗口 hook 收集会 ImportError（importorskip 探不到符号级缺失）| 已修：utc_now 改函数内 import（runtime-only 收集安全）|
 | 自审其余挑战面 | #9 构造性不可达（生产零 import `skills.testing` + 唯一构造点 main.py:425 不传 override + 无 env/yaml 开关）/ keystone 无假通过窗口（落 Echo 则 content/calls 断言必炸）/ testing 子模块零新第三方依赖 / clock 只加不改（123 watchdog 域测试零改全绿）| 全部成立 |
 
 ## 5. 改动清单 + 回归数
 
-- **19 文件，+1567 / −61**（vs origin/master a1e4ca15）。生产 src：`octo_harness.py`（DI+拦截+seam）、watchdog 4 文件（clock 构造注入）、`skills/testing/` 新模块（2 文件）；测试：4 新文件 + conftest 翻转；文档 3 + spec 制品 3 + pyproject markers 1 行。
+- **20 文件，+1639 / −61**（vs origin/master a1e4ca15，含本报告）。生产 src：`octo_harness.py`（DI+拦截+seam；存量行改动恰 5 行 = 1 行 if→elif + 4 行 watchdog 构造加 clock 参数，其余纯新增）、watchdog 4 文件（clock 构造注入）、`skills/testing/` 新模块（2 文件）；测试：4 新文件（18 case）+ conftest 翻转；文档 3 + spec 制品 4 + pyproject markers 1 行。
 - **Baseline**（rebase 后未改动 worktree）：4919 passed / 14 skipped / 1 xfailed / 1 xpassed（379s）。
-- **最终门**：全量 4936 passed / 14 skipped / 1 xfailed / 1 xpassed（+17 = 新增测试净数，0 regression）；e2e_smoke 8/8（PYTHONPATH 锁定跑法）；e2e_scripted 全绿；ruff 逐文件对账零新增（octo_harness 20=20，conftest 2=2 且错误码逐条一致）。
+- **最终门（双确认）**：全量 **4937 passed / 14 skipped / 1 xfailed / 1 xpassed**——两次独立全量（380.16s + HEAD `5ca81170` 收口跑 345.04s）逐项一致；+18 = 新增测试净数恰等于 5 DI + 3 multistep + 4 keystone + 6 clock，skipped/xfailed/xpassed 与 baseline 逐项相同，**0 regression**。HEAD 上 e2e_smoke 8/8（PYTHONPATH 锁定跑法，2.38s）；e2e_scripted 全绿；ruff 逐文件对账零新增（octo_harness 20=20，conftest 2=2 且错误码逐条一致）。
 - **首跑全量插曲**（非代码回归）：与并行 F137 会话竞态——其 provider 包 pytest11 entry-point（`octoagent_model_request_gate`）被 sync 进共享 venv 的窗口内，任何 pytest 启动都会 import `octoagent.provider.testing`，被本 worktree PYTHONPATH 劫持到无该子模块的 provider → 启动即炸。重跑加免疫 flag `-p no:octoagent_model_request_gate`（插件缺席时零副作用）。见 §7。
 
 ## 6. Deferred 清单
