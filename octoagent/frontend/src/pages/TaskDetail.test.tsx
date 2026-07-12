@@ -2,8 +2,9 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { installFakeEventSource } from "../test/fakeEventSource";
 import TaskDetail from "./TaskDetail";
-import type { Artifact, SSEEventData, TaskDetailResponse, TaskEvent } from "../types";
+import type { Artifact, TaskDetailResponse, TaskEvent } from "../types";
 
 function jsonResponse(payload: unknown, status = 200): Response {
   return new Response(JSON.stringify(payload), {
@@ -84,59 +85,6 @@ function renderTaskDetail(taskId = "task-1"): void {
   );
 }
 
-function installFakeEventSource() {
-  class FakeEventSource {
-    static CLOSED = 2;
-    static instances: FakeEventSource[] = [];
-    readyState = 1;
-    onopen: ((this: EventSource, ev: Event) => void) | null = null;
-    onerror:
-      | ((this: EventSource, ev: Event) => void)
-      | null = null;
-    onmessage:
-      | ((this: EventSource, ev: MessageEvent) => void)
-      | null = null;
-    listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
-
-    constructor(public readonly url: string) {
-      FakeEventSource.instances.push(this);
-    }
-
-    addEventListener(type: string, listener: (ev: MessageEvent) => void): void {
-      const current = this.listeners.get(type) ?? [];
-      current.push(listener);
-      this.listeners.set(type, current);
-    }
-
-    removeEventListener(type: string, listener: (ev: MessageEvent) => void): void {
-      const current = this.listeners.get(type) ?? [];
-      this.listeners.set(
-        type,
-        current.filter((item) => item !== listener),
-      );
-    }
-
-    emit(type: string, payload: SSEEventData): void {
-      const event = {
-        data: JSON.stringify(payload),
-      } as MessageEvent;
-      for (const listener of this.listeners.get(type) ?? []) {
-        listener(event);
-      }
-      if (type === "message") {
-        this.onmessage?.call(this as unknown as EventSource, event);
-      }
-    }
-
-    close(): void {
-      this.readyState = FakeEventSource.CLOSED;
-    }
-  }
-
-  vi.stubGlobal("EventSource", FakeEventSource);
-  return FakeEventSource;
-}
-
 describe("TaskDetail", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -144,33 +92,7 @@ describe("TaskDetail", () => {
   });
 
   it("REJECTED 任务不会建立 SSE 连接", async () => {
-    const eventSourceCalls: string[] = [];
-
-    class FakeEventSource {
-      static CLOSED = 2;
-      readyState = 1;
-      onopen: ((this: EventSource, ev: Event) => void) | null = null;
-      onerror:
-        | ((this: EventSource, ev: Event) => void)
-        | null = null;
-      onmessage:
-        | ((this: EventSource, ev: MessageEvent) => void)
-        | null = null;
-
-      constructor(url: string) {
-        eventSourceCalls.push(url);
-      }
-
-      addEventListener(): void {}
-
-      removeEventListener(): void {}
-
-      close(): void {
-        this.readyState = FakeEventSource.CLOSED;
-      }
-    }
-
-    vi.stubGlobal("EventSource", FakeEventSource);
+    const FakeEventSource = installFakeEventSource();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse(
         makeTaskDetailResponse({
@@ -197,7 +119,7 @@ describe("TaskDetail", () => {
     renderTaskDetail("task-rejected");
 
     await screen.findByText("Rejected Task");
-    expect(eventSourceCalls).toHaveLength(0);
+    expect(FakeEventSource.instances).toHaveLength(0);
   });
 
   it("子任务终态和旧状态回放不会覆盖当前任务 badge", async () => {
@@ -308,28 +230,7 @@ describe("TaskDetail", () => {
   });
 
   it("标题优先使用 session alias，而不是 task.title", async () => {
-    vi.stubGlobal(
-      "EventSource",
-      class FakeEventSource {
-        static CLOSED = 2;
-        readyState = FakeEventSource.CLOSED;
-        onopen: ((this: EventSource, ev: Event) => void) | null = null;
-        onerror:
-          | ((this: EventSource, ev: Event) => void)
-          | null = null;
-        onmessage:
-          | ((this: EventSource, ev: MessageEvent) => void)
-          | null = null;
-
-        constructor() {}
-
-        addEventListener(): void {}
-
-        removeEventListener(): void {}
-
-        close(): void {}
-      }
-    );
+    installFakeEventSource({ initialReadyState: 2 });
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({
         task: {

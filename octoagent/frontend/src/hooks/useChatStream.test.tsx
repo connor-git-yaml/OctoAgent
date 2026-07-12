@@ -1,5 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { installFakeEventSource } from "../test/fakeEventSource";
 import { useChatStream } from "./useChatStream";
 
 const frontDoorRequestMock = vi.fn();
@@ -21,56 +22,6 @@ describe("useChatStream", () => {
     vi.unstubAllGlobals();
     window.sessionStorage.clear();
   });
-
-  function installFakeEventSource() {
-    class FakeEventSource {
-      static CLOSED = 2;
-      static instances: FakeEventSource[] = [];
-      readyState = 1;
-      onopen: ((this: EventSource, ev: Event) => void) | null = null;
-      onerror:
-        | ((this: EventSource, ev: Event) => void)
-        | null = null;
-      onmessage:
-        | ((this: EventSource, ev: MessageEvent) => void)
-        | null = null;
-      listeners = new Map<string, Array<(ev: MessageEvent) => void>>();
-
-      constructor() {
-        FakeEventSource.instances.push(this);
-      }
-
-      addEventListener(type: string, listener: (ev: MessageEvent) => void): void {
-        const current = this.listeners.get(type) ?? [];
-        current.push(listener);
-        this.listeners.set(type, current);
-      }
-
-      removeEventListener(type: string, listener: (ev: MessageEvent) => void): void {
-        const current = this.listeners.get(type) ?? [];
-        this.listeners.set(
-          type,
-          current.filter((item) => item !== listener)
-        );
-      }
-
-      emit(type: string, payload: unknown): void {
-        const event = {
-          data: JSON.stringify(payload),
-        } as MessageEvent;
-        for (const listener of this.listeners.get(type) ?? []) {
-          listener(event);
-        }
-      }
-
-      close(): void {
-        this.readyState = FakeEventSource.CLOSED;
-      }
-    }
-
-    vi.stubGlobal("EventSource", FakeEventSource);
-    return FakeEventSource;
-  }
 
   it("可以开始新对话并阻止旧会话被立即恢复", async () => {
     window.sessionStorage.setItem("octoagent.chat.activeTaskId", "task-old");
