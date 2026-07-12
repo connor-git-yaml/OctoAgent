@@ -252,9 +252,13 @@ async function apiRequest(path: string, init?: RequestInit): Promise<Response> {
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
+  // F140 L1 场景②抓出的真 bug：原来是 `{ headers, ...init }`——调用方传了
+  // 自己的 init.headers（如 useChatStream / useApprovals 的 Content-Type）时，
+  // 后展开的 init.headers 会整体覆盖掉已注入 Authorization 的合并 headers，
+  // bearer 模式下 /api/chat/send 必 401。init 必须先展开、合并后的 headers 收尾。
   return fetch(`${BASE_URL}${path}`, {
-    headers,
     ...init,
+    headers,
   });
 }
 

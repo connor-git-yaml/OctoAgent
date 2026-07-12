@@ -7,11 +7,15 @@
  *
  * 刻意用字面 grep 而非渲染断言：锚点可能分布在多个页面/条件分支，渲染全部
  * 场景成本高且脆；契约只保证「锚点存在于源码」，运行期可达性由 L1 场景自证。
+ *
+ * 位置在 frontend/testing/（src 外）：本测试用 node API（fs/path/process），
+ * 而 `tsc -b`（tsconfig include=["src"]）无 node types——放 src 内会破坏
+ * `npm run build`。vitest 默认 include 覆盖本目录（esbuild 转译，不走 tsc）。
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { L1_TESTIDS } from "../../e2e/selectors";
+import { L1_TESTIDS } from "../e2e/selectors";
 
 function collectTsxSources(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {

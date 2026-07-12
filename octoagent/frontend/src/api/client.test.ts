@@ -33,6 +33,30 @@ describe("api client front-door auth", () => {
     expect(headers.get("Authorization")).toBe("Bearer frontdoor-secret");
   });
 
+  it("调用方自带 init.headers 时 Authorization 不被覆盖（F140 L1 抓出的回归）", async () => {
+    // 真 bug 形态：apiRequest 原来 `{ headers, ...init }` 后展开 init，
+    // useChatStream/useApprovals 传 headers: {Content-Type} 时整体覆盖掉
+    // Authorization → bearer 模式 /api/chat/send 必 401。
+    saveFrontDoorToken("frontdoor-secret");
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 200 }));
+
+    const { frontDoorRequest } = await import("./client");
+    await frontDoorRequest("/api/chat/send", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: "hi" }),
+    });
+
+    const [, init] = fetchMock.mock.calls[0];
+    const headers = new Headers(init?.headers);
+    expect(headers.get("Authorization")).toBe("Bearer frontdoor-secret");
+    expect(headers.get("Content-Type")).toBe("application/json");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBe(JSON.stringify({ message: "hi" }));
+  });
+
   it("默认只把 token 保存到 sessionStorage", () => {
     saveFrontDoorToken("frontdoor-secret");
 

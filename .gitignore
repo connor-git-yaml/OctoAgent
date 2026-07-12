@@ -81,3 +81,7 @@ node_modules/
 
 # ScheduleWakeup runtime artifact（不应进版本控制）
 .claude/scheduled_tasks.lock
+
+# ===== F140 L1 Playwright runtime =====
+octoagent/frontend/e2e/.l1-runtime/
+octoagent/frontend/playwright-report/
