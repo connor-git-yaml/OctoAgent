@@ -333,6 +333,38 @@ class TestAttestRemoteHttpChain:
         by_name = {c.name: c for c in report.checks}
         assert by_name["sse_channel"].ok is False
 
+    def test_sse_token_with_url_special_chars_survives(self) -> None:
+        """Codex final P2 回归钉住：token 含 ``+``/``&``/``#``/``=`` 等 URL 特殊
+        字符时，SSE query 必须 percent-encoding——服务端解码后与原值逐字相等
+        （裸拼 query 会把 ``+`` 解码成空格 / ``&``、``#`` 截断参数 → 有效配置
+        误报 SSE fail）。"""
+        special_token = "attest+special&chars#2026/=="
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            path = request.url.path
+            if path == "/api/control/snapshot":
+                if (
+                    request.headers.get("authorization")
+                    == f"Bearer {special_token}"
+                ):
+                    return httpx.Response(200, json={"ok": True})
+                return httpx.Response(401)
+            if path == "/api/tasks":
+                return httpx.Response(200, json={"tasks": []})
+            if path.startswith("/api/stream/task/"):
+                # httpx 会解码 query——服务端视角必须拿到逐字原值
+                if request.url.params.get("access_token") == special_token:
+                    return httpx.Response(404, json={"error": "TASK_NOT_FOUND"})
+                return httpx.Response(401)
+            return _happy_remote_handler(request)
+
+        _, kwargs = _remote_kwargs(handler, token=special_token)
+        report = run_remote_probe(**kwargs)
+
+        assert report.status == "pass", _report_text(report)
+        by_name = {c.name: c for c in report.checks}
+        assert by_name["sse_channel"].ok is True
+
 
 class TestAttestRemoteRedlines:
     @pytest.mark.parametrize(

@@ -462,10 +462,12 @@ def _probe_sse_handshake(
 ) -> tuple[bool, str]:
     """真 SSE 握手：200 + text/event-stream + 首块到达即断开。
 
-    detail 只含路径不含 query（token 零泄漏）。"""
-    url = f"{base}/api/stream/task/{task_id}?access_token={token}"
+    detail 只含路径不含 query（token 零泄漏）。token 经 ``params=`` 传入由
+    httpx percent-encoding（Codex final P2：裸拼 query 会让含 ``+``/``&``/``#``
+    的合法 token 被解码损坏 → 有效配置误报 SSE fail）。"""
+    url = f"{base}/api/stream/task/{task_id}"
     try:
-        with client.stream("GET", url) as resp:
+        with client.stream("GET", url, params={"access_token": token}) as resp:
             if resp.status_code != 200:
                 return False, f"SSE 握手失败（{resp.status_code}，task={task_id}）"
             content_type = resp.headers.get("content-type", "")
@@ -479,10 +481,12 @@ def _probe_sse_handshake(
 
 
 def _probe_sse_auth_only(client: Any, base: str, token: str) -> tuple[bool, str]:
-    """无历史任务的退化判别：合成 task id 预期 404（认证已通过后才查 task）。"""
-    url = f"{base}/api/stream/task/attest-probe-nonexistent?access_token={token}"
+    """无历史任务的退化判别：合成 task id 预期 404（认证已通过后才查 task）。
+
+    token 同样走 ``params=``（percent-encoding，Codex final P2）。"""
+    url = f"{base}/api/stream/task/attest-probe-nonexistent"
     try:
-        resp = client.get(url)
+        resp = client.get(url, params={"access_token": token})
     except Exception as exc:  # noqa: BLE001
         return False, f"SSE 认证判别异常（{type(exc).__name__}）"
     if resp.status_code == 404:
