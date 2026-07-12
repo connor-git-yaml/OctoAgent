@@ -186,4 +186,5 @@ Codex final（全 diff vs origin/master）：**0 HIGH / 1 P2 / 0 LOW**。
   （F138「Echo 管路径 A 文本、脚本件管路径 B tool_calls」既定并存设计——
   model_client override 与 echo 模式解耦），后台辅助 call 直连 Echo 零解析，
   bomb 恢复严格语义（任何 resolve 尝试=真异常）。修后终态三连绿。
-- 末次 re-review 结论见 §9 末行回填。
+- **末次（第 4 轮）re-review：0 finding**——「未发现会破坏现有行为或新增 L1
+  Playwright 流程的离散缺陷」。双评审 0 HIGH 收敛闭环。
