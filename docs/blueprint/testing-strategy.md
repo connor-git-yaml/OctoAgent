@@ -33,13 +33,29 @@
     决策环（SkillRunner → tool_broker → 回写），零真 LLM / 零宿主 OAuth（marker `e2e_scripted`）
   - TestModel 等价件（`SchemaTestAdapter`，按工具 JSON schema 自动填参扫 63 工具广度）：
     **deferred**（F138 Phase 2，见 `.specify/features/138-scripted-llm-harness/spec.md` §2.2）
-- **事件断言便利件**（dirty-equals / inline-snapshot）📋 规划 **F142**（尚未引入）。
+- **事件断言便利件** ✅ **F142 已落地 dirty-equals 半边**：dev-dep `dirty-equals`
+  + 3 处范式样例（`test_us4_llm_echo.py` STATE_TRANSITION full-shape /
+  `test_control_plane_api.py` action data 契约 / `packages/policy/tests/test_models.py`
+  `IsNow(delta)` 治时间窗断言），样例注释标「F142 范式样例」供后续增量套用；
+  inline-snapshot **defer**（需 ruff 写回流程 + xdist 惰性 stub + fix/review
+  约定三件配套，F141 lane 稳定后独立评估）。
+- **确定性护栏 family（F142）** ✅：①第三方库语义钉住 `octoagent/tests/lib_semantics/`
+  （anyio/httpx 真本地 TLS server 钉「流中断异常 ∈ 瞬态重试 family」+ bench 事故
+  空 message ReadError 签名；APScheduler 真 CronTrigger 钉 Monday=0；piper
+  importorskip 真库签名；aiosqlite 已真库覆盖显式略过）；②prompt token 预算护栏
+  `apps/gateway/tests/e2e_live/test_prompt_budget_guard.py`（system 面硬 cap 10300 +
+  工具 schema 面 13000 + 关键短语在场 + 退役内容负向扫描，cap 实测校准记录见文件
+  docstring）；③provider wire 边界用例族 `test_provider_client_wire_boundaries.py`
+  （malformed JSON ×3 transport + 真 httpx LineDecoder 粘包/半包穿透 + U+2028
+  切行静默丢 delta 行为钉住 + 2MB 行现状钉住；行缓冲无上限评估归档=不动生产）；
+  ④xdist_group 18 文件分组 + CI backend job 翻 `-n auto --dist=loadgroup`
+  （本地全量串行 378s → ~26s）；F137 CI-skip 4 欠账处置=2 治根因移除 + 2 永久豁免。
 - **VCR 录制回放** 📋 规划 **F139**（已收窄：仅 provider transport 层 wire 真样本
   回归，不承担 agent-loop 用例降层；LiteLLM 已于 F081 退役，录制对象为 provider
   直连三 transport）。
 - **CI 门禁** ✅ **F137 已落地**：`.github/workflows/feature-007-integration.yml`
   （workflow 名 `ci`）跑确定性层（全 testpaths 排除 e2e_live，gate=deny 构造性
-  零真调用，串行 + junit artifact）+ 前端 job（complexity 阻断 + vitest 阻断，
+  零真调用，`-n auto --dist=loadgroup` 并行【F142 翻转，时序敏感文件 xdist_group 分组钉同 worker】+ junit artifact）+ 前端 job（complexity 阻断 + vitest 阻断，
   存量红 6 文件以 `--exclude` 记欠账归 F143/独立 fix task）；pre-commit hook 挂
   前端 complexity 检查（`SKIP_FRONTEND_CHECK=1` bypass）。lane 分层
   （pr/baseline/release）📋 规划 **F141**。
@@ -103,7 +119,7 @@ Feature 083 采用实用主义策略：
   F081 退役）；wire 层真样本回归归 F139
 - **非确定性输出策略**：
   - 验证输出结构 / 必填字段 / 类型，而非精确字符串
-  - 使用 dirty-equals（`IsStr(regex=...)`）做模糊匹配（愿景）
+  - 使用 dirty-equals（`IsStr` / `IsNow(delta)` / `IsPartialDict`）做模糊匹配（✅ F142 已引入，范式样例 ×3 处）
   - 关键路径使用 ScriptedModelClient 保证确定性
 - **预留：LLM-as-Judge 评估**：pydantic-evals 或自定义 judge 函数，评判 Agent 输出质量（后续迭代）
 
