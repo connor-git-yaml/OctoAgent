@@ -333,6 +333,49 @@ class TestAttestRemoteHttpChain:
         by_name = {c.name: c for c in report.checks}
         assert by_name["sse_channel"].ok is False
 
+    def test_sse_guard_missing_detected_by_negative_probe(self) -> None:
+        """Codex re-review P2 回归钉住：stream 路由 guard 丢失（任意 token 都
+        404）时，正向 404-判别会被骗过——负向「错 token 必须 401」专抓这种回归。"""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.startswith("/api/stream/task/"):
+                # 模拟 guard 丢失：不看 token，直接走 task 查询 → 404
+                return httpx.Response(404, json={"error": "TASK_NOT_FOUND"})
+            if request.url.path == "/api/tasks":
+                return httpx.Response(200, json={"tasks": []})
+            return _happy_remote_handler(request)
+
+        _, kwargs = _remote_kwargs(handler)
+        report = run_remote_probe(**kwargs)
+
+        assert report.status == "fail"
+        by_name = {c.name: c for c in report.checks}
+        assert by_name["sse_channel"].ok is False
+        assert "未被拒" in by_name["sse_channel"].detail
+
+    def test_sse_zero_chunk_stream_is_fail(self) -> None:
+        """Codex re-review P2 回归钉住：200 + event-stream 但零字节即断流
+        （代理不支持流式/立即关闭）不得报 pass。"""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.startswith("/api/stream/task/"):
+                if request.url.params.get("access_token") != _SENTINEL_TOKEN:
+                    return httpx.Response(401)
+                return httpx.Response(
+                    200,
+                    headers={"content-type": "text/event-stream"},
+                    content=iter([]),  # 零 chunk
+                )
+            return _happy_remote_handler(request)
+
+        _, kwargs = _remote_kwargs(handler)
+        report = run_remote_probe(**kwargs)
+
+        assert report.status == "fail"
+        by_name = {c.name: c for c in report.checks}
+        assert by_name["sse_channel"].ok is False
+        assert "零字节" in by_name["sse_channel"].detail
+
     def test_sse_token_with_url_special_chars_survives(self) -> None:
         """Codex final P2 回归钉住：token 含 ``+``/``&``/``#``/``=`` 等 URL 特殊
         字符时，SSE query 必须 percent-encoding——服务端解码后与原值逐字相等
@@ -450,6 +493,23 @@ class TestDefaultTokenReader:
         monkeypatch.setenv("MY_CUSTOM_FRONT_TOKEN", _SENTINEL_TOKEN)
         (tmp_path / ".env").write_text("OTHER=1\n", encoding="utf-8")
         assert _default_token_reader(tmp_path, "MY_CUSTOM_FRONT_TOKEN") is None
+
+    def test_env_litellm_overrides_env_like_source_order(self, tmp_path: Path) -> None:
+        """Codex re-review P2 回归钉住：run-octo-home.sh 先 source .env 再
+        source .env.litellm（后者覆盖）——两文件同时定义时必须取 .env.litellm
+        的值（遇 .env 即 return 会拿旧 token 误报 fail）。"""
+        from octoagent.provider.dx.attest_commands import _default_token_reader
+
+        (tmp_path / ".env").write_text(
+            "OCTOAGENT_FRONTDOOR_TOKEN=stale-old-token\n", encoding="utf-8"
+        )
+        (tmp_path / ".env.litellm").write_text(
+            f"OCTOAGENT_FRONTDOOR_TOKEN={_SENTINEL_TOKEN}\n", encoding="utf-8"
+        )
+        assert (
+            _default_token_reader(tmp_path, "OCTOAGENT_FRONTDOOR_TOKEN")
+            == _SENTINEL_TOKEN
+        )
 
 
 # ---------------------------------------------------------------------------

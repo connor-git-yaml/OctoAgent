@@ -153,7 +153,13 @@ def _default_token_reader(root: Path, token_env: str) -> str | None:
     """token **值**只从实例 ``.env`` / ``.env.litellm`` 读（spec §D-4，Codex
     spec 评审 P2-2）：自定义非 ``OCTOAGENT_`` 前缀变量的 shell-only 值会被
     ``read_instance_effective_env`` 合入进程 env——若用它取值，探针会拿
-    shell-only token 假通过，而托管服务重启后并不继承 → 实际 503。"""
+    shell-only token 假通过，而托管服务重启后并不继承 → 实际 503。
+
+    **按 source 顺序取最后的非空值**（Codex re-review P2）：run-octo-home.sh
+    先 source ``.env`` 再 source ``.env.litellm``（后者覆盖）——两文件同时定义
+    同一变量时服务实际生效的是 ``.env.litellm`` 的值，遇 ``.env`` 非空即 return
+    会拿旧 token 误报 fail。"""
+    resolved: str | None = None
     try:
         from dotenv import dotenv_values
 
@@ -162,10 +168,10 @@ def _default_token_reader(root: Path, token_env: str) -> str | None:
             if env_path.exists():
                 value = dotenv_values(env_path).get(token_env)
                 if value is not None and value.strip():
-                    return value.strip()
+                    resolved = value.strip()
     except Exception:  # pragma: no cover - dotenv 缺失/读失败降级为「未设」
-        pass
-    return None
+        return None
+    return resolved
 
 
 def _default_http_client_factory() -> Any:
@@ -424,25 +430,29 @@ def _run_remote_http_checks(
     if not token_ok:
         return  # SSE 检查依赖 token 有效
 
-    # 4e. SSE 半边：优先真握手（借最近历史任务，只读）；无任务退化为
-    #     404-判别（TASK_NOT_FOUND = query-token 认证已通过；401 才是 token 不通）。
-    #     绝不 POST 造任务（探针零副作用）。
-    task_id: str | None = None
-    resp, err = _http_get(
-        client, f"{base}/api/tasks", headers={"Authorization": f"Bearer {token}"}
-    )
-    if resp is not None and resp.status_code == 200:
-        try:
-            tasks = resp.json().get("tasks", [])
-            if tasks:
-                task_id = tasks[0].get("task_id")
-        except Exception:  # noqa: BLE001
-            task_id = None
+    # 4e. SSE 半边（负向 + 正向两段，Codex re-review P2）：
+    #     负向——错 token 必须 401：防 stream 路由 guard 丢失/query-token 校验
+    #     回归时「任意请求都 404」被 4e 正向的 404-判别误当认证通过；
+    #     正向——优先真握手（借最近历史任务，只读；零 chunk 视为失败），无任务
+    #     退化 404-判别。绝不 POST 造任务（探针零副作用）。
+    sse_ok, sse_detail = _probe_sse_negative(client, base, token)
+    if sse_ok:
+        task_id: str | None = None
+        resp, err = _http_get(
+            client, f"{base}/api/tasks", headers={"Authorization": f"Bearer {token}"}
+        )
+        if resp is not None and resp.status_code == 200:
+            try:
+                tasks = resp.json().get("tasks", [])
+                if tasks:
+                    task_id = tasks[0].get("task_id")
+            except Exception:  # noqa: BLE001
+                task_id = None
 
-    if task_id:
-        sse_ok, sse_detail = _probe_sse_handshake(client, base, token, task_id)
-    else:
-        sse_ok, sse_detail = _probe_sse_auth_only(client, base, token)
+        if task_id:
+            sse_ok, sse_detail = _probe_sse_handshake(client, base, token, task_id)
+        else:
+            sse_ok, sse_detail = _probe_sse_auth_only(client, base, token)
     report.checks.append(
         AttestCheck(
             "sse_channel",
@@ -457,10 +467,32 @@ def _run_remote_http_checks(
     )
 
 
+def _probe_sse_negative(client: Any, base: str, token: str) -> tuple[bool, str]:
+    """负向断言：错 token 访问 SSE 路径必须 401（Codex re-review P2）。
+
+    guard 丢失/query-token 校验回归时 stream 路由对任意请求都会先走 404
+    （task 查询），正向 404-判别会被骗过——负向请求专抓这种回归。错 token 由
+    真 token 加后缀派生（长度必不同 → compare_digest 必 False），同样经
+    ``params=`` 编码。"""
+    wrong_token = f"{token}-attest-negative"
+    url = f"{base}/api/stream/task/attest-probe-nonexistent"
+    try:
+        resp = client.get(url, params={"access_token": wrong_token})
+    except Exception as exc:  # noqa: BLE001
+        return False, f"SSE 负向判别异常（{type(exc).__name__}）"
+    if resp.status_code == 401:
+        return True, "SSE 负向通过（错 token → 401）"
+    return False, (
+        f"SSE 错 token 未被拒（预期 401 实际 {resp.status_code}）——"
+        "stream 路由认证可能回归/未挂 guard"
+    )
+
+
 def _probe_sse_handshake(
     client: Any, base: str, token: str, task_id: str
 ) -> tuple[bool, str]:
-    """真 SSE 握手：200 + text/event-stream + 首块到达即断开。
+    """真 SSE 握手：200 + text/event-stream + **至少读到一个 chunk** 才算通过
+    （Codex re-review P2：零次迭代落到成功返回会把「代理立即断流」标成 pass）。
 
     detail 只含路径不含 query（token 零泄漏）。token 经 ``params=`` 传入由
     httpx percent-encoding（Codex final P2：裸拼 query 会让含 ``+``/``&``/``#``
@@ -473,8 +505,12 @@ def _probe_sse_handshake(
             content_type = resp.headers.get("content-type", "")
             if "text/event-stream" not in content_type:
                 return False, f"SSE content-type 异常：{content_type}"
+            got_chunk = False
             for _ in resp.iter_raw():
+                got_chunk = True
                 break  # 首块（历史事件或心跳）到达即证明流式经 serve 可用
+            if not got_chunk:
+                return False, f"SSE 握手 200 但零字节即断流（task={task_id}）"
             return True, f"SSE 真握手通过（task={task_id}，首块已到达）"
     except Exception as exc:  # noqa: BLE001
         return False, f"SSE 握手异常（{type(exc).__name__}）"
