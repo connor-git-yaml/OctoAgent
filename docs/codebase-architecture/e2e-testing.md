@@ -132,10 +132,11 @@ make install-hooks
 worktree-aware：linked worktree 只写 `--worktree` 配置（不污染主仓 `.git/config`）。
 之后 `git commit` 自动跑 `pytest -m "e2e_smoke or e2e_scripted"`（F141 起纳入脚本化
 决策环，实测 24 用例 ~8s），180s portable watchdog（python3 SIGTERM→SIGKILL 升级，
-不依赖 macOS 上需 `brew install coreutils` 的 `timeout`）。F141 change-policy 路由：
-staged 全部 ∈ {docs/**, *.md, .specify/**} → 跳过 e2e + 前端检查（sync-check 恒跑）；
-gate 机器资产（`octoagent/tests/quarantine.json` / `attestation-checklist.md`）staged
-时附跑对应校验器；生产 src 改动无伴随测试 → WARNING 不阻断。三模式 lane 编排
+不依赖 macOS 上需 `brew install coreutils` 的 `timeout`）。F141 门禁扩展：
+quarantine 过期强制**恒跑**（`check-quarantine.py --enforce-review-date`，过期条目阻断
+commit）；change-policy 路由——staged 全部 ∈ {docs/**, *.md, .specify/**} → 跳过 e2e +
+前端检查（sync-check 恒跑）；`attestation-checklist.md` staged 时附跑解析校验；
+生产 src 改动无伴随测试 → WARNING 不阻断。三模式 lane 编排
 （pr/baseline/release，release 强制 live）见 `repo-scripts/lane.py` +
 `octoagent/tests/AGENTS.md` §3。
 

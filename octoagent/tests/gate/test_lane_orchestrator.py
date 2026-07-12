@@ -106,14 +106,19 @@ class TestSkipValidation:
         rc = lane_mod.main(["release", "--skip", "live-real-llm"])
         assert rc == 2
 
-    def test_dry_run_exit_3_not_zero(self, lane_mod, monkeypatch) -> None:
+    def test_dry_run_exit_3_not_zero(self, lane_mod, monkeypatch, tmp_path) -> None:
         """Codex final H2：--dry-run 有 planned lane → exit 3（彩排非通过）。
 
         pr 模式 dry-run：quarantine 治理真跑（PASS），其余 planned →
         必须非 0——任何把 lane.py 当 gate 的脚本只认 exit 0。
+        HOME 重定向 tmp：write_report 落 ~/.octoagent/logs/lane/，不许碰宿主实例
+        （hermetic 红线，octoagent/tests/AGENTS.md §6）。
         """
+        monkeypatch.setenv("HOME", str(tmp_path))
         rc = lane_mod.main(["pr", "--dry-run"])
         assert rc == 3
+        reports = list((tmp_path / ".octoagent" / "logs" / "lane").glob("pr-*.json"))
+        assert reports, "报告应落重定向后的 HOME"
 
 
 # ---------------------------------------------------------------------------
