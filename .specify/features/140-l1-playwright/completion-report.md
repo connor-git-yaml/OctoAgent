@@ -176,4 +176,14 @@ Codex final（全 diff vs origin/master）：**0 HIGH / 1 P2 / 0 LOW**。
   `ModelRequestsNotAllowedError`（fallback.py:75 等 swallow 站点对该类型先行
   re-raise，「漏网必炸、合法降级不误伤」既有硬约束的复用）。修后 L1 终态
   三连绿（3 passed ×4）。
+- **re-review 第 3 轮再抓 1 P2（已修，且 sentinel 当场自证）**：
+  SessionMemoryExtractor 等后台路径是宽 `except Exception`（只记日志推进
+  cursor），异常类型防线也会被吞。修法两件套：①bomb 先落 sentinel 文件
+  `L1_BOMB_TRIPPED`（含触发栈）再 raise，每场景末尾 `assertBombNotTripped`
+  文件系统断言（外部断言通道，与吞噬层解耦）——**该断言上线第一跑就抓到
+  后台 memory-extraction 真实触发 resolve 的现场**（此前 AssertionError 版
+  完全不可见）；②给路径 A 确定性出口：launcher 设 `OCTOAGENT_LLM_MODE=echo`
+  （F138「Echo 管路径 A 文本、脚本件管路径 B tool_calls」既定并存设计——
+  model_client override 与 echo 模式解耦），后台辅助 call 直连 Echo 零解析，
+  bomb 恢复严格语义（任何 resolve 尝试=真异常）。修后终态三连绿。
 - 末次 re-review 结论见 §9 末行回填。

@@ -137,6 +137,14 @@ def main() -> None:
     # 零真 LLM 防御 #1：F137 gate=deny（漏网真调用 → ModelRequestsNotAllowedError 炸，
     # 不会被 FallbackManager 吞成 Echo 假成功）。spike S5 实测 deny 下全链路通。
     os.environ["OCTOAGENT_ALLOW_MODEL_REQUESTS"] = "0"
+    # 路径 A 确定性出口（Codex re-review 第 3 轮 P2 闭环）：后台辅助 call
+    # （SessionMemoryExtractor 等）走 FallbackManager 纯文本路径，若留生产默认
+    # 会尝试 provider 解析（宽 except 只记日志）。设 echo 让路径 A 直连
+    # EchoMessageAdapter 零解析；路径 B 决策环不受影响——F138 已把
+    # model_client override 与 OCTOAGENT_LLM_MODE 解耦（「Echo 管路径 A 文本、
+    # 脚本件管路径 B 结构化 tool_calls」的既定并存设计）。由此 resolve bomb
+    # 保持严格语义：任何 provider 解析尝试都是真异常。
+    os.environ["OCTOAGENT_LLM_MODE"] = "echo"
 
     _clean_env()
     _redirect_paths(root)
@@ -154,12 +162,24 @@ def main() -> None:
     sys.path.insert(0, str(_HERE.parent))
     from scenario_brain import L1ScenarioModelClient  # noqa: PLC0415
 
+    bomb_sentinel = root / "L1_BOMB_TRIPPED"
+
     def _resolve_for_alias_bomb(*_a: object, **_k: object) -> object:
-        # Codex re-review P2 闭环：不能用 AssertionError——FallbackManager 会把它
-        # 当普通 primary failure 吞掉切 Echo（后台 memory-extraction 等辅助 call
-        # 触发时防线退化成日志噪音）。改抛 F137 的 ModelRequestsNotAllowedError：
-        # 各 swallow 站点（fallback/llm_service/runner）对该类型**先行 re-raise**
-        # ——「漏网必炸、合法降级不误伤」的既有硬约束，任何路径触发都硬失败。
+        # Codex re-review 两轮 P2 闭环（防线不可被任何吞噬层消音）：
+        # ① 不用 AssertionError——FallbackManager 把它当普通 primary failure 吞掉
+        #    切 Echo；改抛 F137 的 ModelRequestsNotAllowedError（fallback/
+        #    llm_service/runner 各 swallow 站点对该类型先行 re-raise）。
+        # ② 但 SessionMemoryExtractor 等后台路径是宽 `except Exception`（只记日志
+        #    推进 cursor）——异常类型防不住，故**先落 sentinel 文件再 raise**：
+        #    Playwright 每场景末尾做文件系统断言（外部断言通道），任何路径命中
+        #    bomb 都必红，与吞噬层无关。
+        import traceback  # noqa: PLC0415
+
+        bomb_sentinel.write_text(
+            "F140 L1: resolve_for_alias 被触发（零真 LLM 防线击穿）\n"
+            + "".join(traceback.format_stack()[-8:]),
+            encoding="utf-8",
+        )
         raise ModelRequestsNotAllowedError(
             "F140 L1: 真 provider 解析被触发——脚本化 L1 服务器不允许任何真 LLM 调用"
         )

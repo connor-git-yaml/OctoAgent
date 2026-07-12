@@ -17,6 +17,7 @@ import {
   L1_WRITE_FILE_RELPATH,
   L1_WRITE_MARKER,
   L1_WRITE_REPLY,
+  assertBombNotTripped,
   eventsOfType,
   l1ServerUrl,
   pollTaskSucceeded,
@@ -86,6 +87,9 @@ test("chat 输入驱动脚本决策环：真工具写盘 + 事件链外部断言
     ...L1_WRITE_FILE_RELPATH.split("/"),
   ]);
   expect(written).toBe(L1_WRITE_FILE_CONTENT);
+
+  // 3) AC-3 终局：零真 LLM 防线未被任何路径击穿（含后台 memory-extraction）
+  assertBombNotTripped("loopback");
 });
 
 // 【会话连续性约束——实测发现并显式归档】每个 L1 server 的 web 会话由服务端

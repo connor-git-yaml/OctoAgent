@@ -137,3 +137,17 @@ export function readInstanceFile(mode: L1Mode, relParts: string[]): string {
   }
   return readFileSync(full, "utf-8");
 }
+
+/**
+ * 零真 LLM 防线终局断言（AC-3；Codex re-review P2 闭环）：launcher 的
+ * resolve bomb 任何路径命中（含被宽 except 吞掉异常的后台 memory-extraction）
+ * 都会先落 sentinel 文件——每场景末尾调用本断言，防线与吞噬层解耦。
+ */
+export function assertBombNotTripped(mode: L1Mode): void {
+  const sentinel = join(l1InstanceRoot(mode), "L1_BOMB_TRIPPED");
+  if (existsSync(sentinel)) {
+    throw new Error(
+      `L1 零真 LLM 防线击穿：resolve bomb 被触发。现场：\n${readFileSync(sentinel, "utf-8")}`
+    );
+  }
+}
