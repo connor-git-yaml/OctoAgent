@@ -49,7 +49,10 @@ export const MessageBubble = memo(function MessageBubble({
   const content = hasContent ? message.content : message.isStreaming ? "" : "暂无回复内容";
 
   return (
-    <div className={`wb-message ${isUser ? "is-user" : "is-agent"}`}>
+    <div
+      className={`wb-message ${isUser ? "is-user" : "is-agent"}`}
+      data-testid={isUser ? "chat-message-user" : "chat-message-assistant"}
+    >
       <div className={`wb-message-card ${isUser ? "is-user" : "is-agent"}`}>
         <div className="wb-message-role">{roleLabel}</div>
         <div className="wb-message-content">

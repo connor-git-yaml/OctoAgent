@@ -1028,6 +1028,7 @@ export default function ChatWorkbench() {
             {legacyResetCallout}
             <form className="wb-chat-form is-empty" onSubmit={handleSubmit}>
               <textarea
+                data-testid="chat-input"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={handleInputKeyDown}
@@ -1037,6 +1038,7 @@ export default function ChatWorkbench() {
               />
               <button
                 type="submit"
+                data-testid="chat-send"
                 className="wb-button wb-button-primary"
                 disabled={streaming || !input.trim()}
               >
@@ -1152,6 +1154,7 @@ export default function ChatWorkbench() {
             <form className="wb-chat-form" onSubmit={handleSubmit}>
               <textarea
                 ref={inputRef}
+                data-testid="chat-input"
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={handleInputKeyDown}
@@ -1161,6 +1164,7 @@ export default function ChatWorkbench() {
               />
               <button
                 type="submit"
+                data-testid="chat-send"
                 className="wb-button wb-button-primary"
                 disabled={restoring || steeringBusy || !input.trim()}
               >

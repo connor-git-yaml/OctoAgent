@@ -101,6 +101,7 @@ export default function FrontDoorGate({
         >
           <input
             type="password"
+            data-testid="frontdoor-token-input"
             value={tokenInput}
             onChange={(event) => setTokenInput(event.target.value)}
             placeholder="输入 front-door bearer token"
@@ -125,6 +126,7 @@ export default function FrontDoorGate({
           >
             <input
               type="checkbox"
+              data-testid="frontdoor-persist-checkbox"
               checked={persistToken}
               onChange={(event) => setPersistToken(event.target.checked)}
             />
@@ -133,6 +135,7 @@ export default function FrontDoorGate({
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
             <button
               type="submit"
+              data-testid="frontdoor-submit"
               disabled={submitting || !tokenInput.trim()}
               style={{
                 padding: "10px 14px",
