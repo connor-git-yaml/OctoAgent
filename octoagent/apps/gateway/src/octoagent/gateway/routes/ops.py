@@ -263,18 +263,22 @@ _FRONTEND_VERSION_CACHE: dict[str, Any] = {
 
 
 def _resolve_frontend_index_path() -> Any:
-    """定位 frontend/dist/index.html；未构建时返回 None。"""
-    from pathlib import Path
+    """定位 frontend/dist/index.html；未构建时返回 None。
 
-    # 与 main.py SpaStaticFiles 的挂载逻辑对齐
-    gateway_root = Path(__file__).resolve()
-    for candidate in (
-        gateway_root.parents[4] / "frontend" / "dist" / "index.html",
-        gateway_root.parents[5] / "frontend" / "dist" / "index.html",
-    ):
-        if candidate.exists():
-            return candidate
-    return None
+    复用 ``main._resolve_frontend_dist`` 单一事实源（与 SpaStaticFiles 挂载同一
+    dist 解析），避免独立维护脆弱的 ``parents[]`` 索引——此前本函数用错的
+    ``parents[4]/[5]`` 恒 miss 真实 ``octoagent/frontend/dist``，build-id 漂移
+    诊断永远误判"前端未构建"。lazy import 规避与 ``main`` 的模块级循环依赖
+    （``main`` 顶层 import 本模块；本函数仅在请求期调用，此时 ``main`` 已完成
+    加载），与 ``harness.octo_harness`` 对 ``main`` 的 lazy 锚点解析同一范式。
+    """
+    from ..main import _resolve_frontend_dist
+
+    dist = _resolve_frontend_dist()
+    if dist is None:
+        return None
+    index = dist / "index.html"
+    return index if index.exists() else None
 
 
 def _parse_build_id(html: str) -> str:
