@@ -161,7 +161,7 @@ Channels (Telegram/Web) -> OctoGateway -> OctoKernel -> Workers -> ProviderRoute
 - 类型注解：所有公共函数必须有完整类型注解
 - 数据模型：使用 Pydantic BaseModel
 - 异步优先：IO 操作使用 async/await
-- 测试：每个模块需有 unit test，关键路径需有 integration test
+- 测试：每个模块需有 unit test，关键路径需有 integration test；分层判定/调用纪律/flaky 处置/lane 门禁契约见 `octoagent/tests/AGENTS.md`（F141 单一事实源）
 - 架构整洁优先：任何改动都要检查是否引入坏味道（职责漂移、临时分支、重复状态、命名失真、兼容层叠加、概念泄漏）
 - 不要把"最小改动"当作默认目标；先从长期演进视角判断更合理的整体架构
 - 去掉功能时直接删除所有相关代码，不要注释掉或保留死代码；需要时从 git 历史恢复

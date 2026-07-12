@@ -79,7 +79,9 @@ DOMAIN_REGISTRY：
   `real_codex_credential_store`，宿主无 OAuth 也恒可跑 → **CI-runnable**
   （M9 "L2/L3 只能宿主机跑" 洞的第一条补口）。
 - **成本画像**：4 case 全 11 段 bootstrap + 决策环 < 3s（真 LLM 单 call 60-120s）。
-- 是否升 e2e_smoke / 归入 F141 pr lane：合入后主 session 决定。
+- **已归入 pr lane（F141 兑现）**：pre-commit 跑 `-m "e2e_smoke or e2e_scripted"`；
+  CI backend job 另有 e2e_scripted 专属步（e2e_live 目录内 CI-runnable 子集，
+  含 F142 prompt 预算护栏）。
 - **F144 扩展**：`test_e2e_scripted_write_approval.py`（同 marker）——脚本脑驱动
   `behavior.write_file` × **F136 服务端审批全链**（真 ApprovalGate/Manager +
   真 REST `POST /api/approve/{id}`，approve/reject 双路径），吸收 F135 gap-1
@@ -119,7 +121,7 @@ worker_runtime 起 SkillRunner → WorkerResult → `orchestrator._persist_a2a_t
 
 ## 3. 跑法
 
-### 3.1 pre-commit hook（自动跑 smoke）
+### 3.1 pre-commit hook（自动跑 smoke + scripted）
 
 一次性安装：
 
@@ -128,8 +130,14 @@ make install-hooks
 ```
 
 worktree-aware：linked worktree 只写 `--worktree` 配置（不污染主仓 `.git/config`）。
-之后 `git commit` 自动跑 `pytest -m e2e_smoke`，180s portable watchdog（python3
-SIGTERM→SIGKILL 升级，不依赖 macOS 上需 `brew install coreutils` 的 `timeout`）。
+之后 `git commit` 自动跑 `pytest -m "e2e_smoke or e2e_scripted"`（F141 起纳入脚本化
+决策环，实测 24 用例 ~8s），180s portable watchdog（python3 SIGTERM→SIGKILL 升级，
+不依赖 macOS 上需 `brew install coreutils` 的 `timeout`）。F141 change-policy 路由：
+staged 全部 ∈ {docs/**, *.md, .specify/**} → 跳过 e2e + 前端检查（sync-check 恒跑）；
+gate 机器资产（`octoagent/tests/quarantine.json` / `attestation-checklist.md`）staged
+时附跑对应校验器；生产 src 改动无伴随测试 → WARNING 不阻断。三模式 lane 编排
+（pr/baseline/release，release 强制 live）见 `repo-scripts/lane.py` +
+`octoagent/tests/AGENTS.md` §3。
 
 ### 3.2 `octo e2e` CLI
 

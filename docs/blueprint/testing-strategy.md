@@ -64,8 +64,34 @@
   （workflow 名 `ci`）跑确定性层（全 testpaths 排除 e2e_live，gate=deny 构造性
   零真调用，`-n auto --dist=loadgroup` 并行【F142 翻转，时序敏感文件 xdist_group 分组钉同 worker】+ junit artifact）+ 前端 job（complexity 阻断 + vitest 阻断，
   存量红 6 文件以 `--exclude` 记欠账归 F143/独立 fix task）；pre-commit hook 挂
-  前端 complexity 检查（`SKIP_FRONTEND_CHECK=1` bypass）。lane 分层
-  （pr/baseline/release）📋 规划 **F141**。
+  前端 complexity 检查（`SKIP_FRONTEND_CHECK=1` bypass）。
+- **三模式 lane 门禁** ✅ **F141 已落地**（操作契约与判定表的单一事实源 =
+  `octoagent/tests/AGENTS.md`，本节只记策略骨架不复制表格）：
+  - `repo-scripts/lane.py`（pr / baseline / release）——pr 的 canonical 执行点
+    仍是 pre-commit hook（F141 起 pytest 面扩为 `-m "e2e_smoke or e2e_scripted"`
+    + change-policy staged 路由：纯 docs fastpath 跳 e2e/前端、gate 机器资产
+    staged 附跑校验器、生产 src 无伴随测试 WARNING）；baseline = 合 master 前
+    本地全量编排；**release = 真机部署前强制 live**——`-m real_llm` live lane
+    （skip 即 FAIL：exit 0 且 passed≥1 且 unexpected_skip=0）+ `octo attest
+    service→remote` 探针（解析 --json status 字段；service not_enabled 恒
+    FAIL，remote not_enabled 默认 FAIL、`--allow-not-enabled` 降 WARN）+
+    attestation 清单签署核对（`--require-signed`）；`SKIP_E2E` 在 release
+    无效、`--skip` 拒 live/attestation lanes。
+  - 新 marker **`real_llm`**：真发起 LLM 调用的**事实**子集（现 2 个文件）；
+    `e2e_full` 保持**意图**信号（gate 开闸键）——lane 切分不复用 e2e_full，
+    防 7 个确定性 e2e_full 域文件的 PASS 掩护 live lane 假绿。
+  - **flaky quarantine manifest**：`octoagent/tests/quarantine.json`（六字段）
+    + `check-quarantine.py`（过期即门禁 FAIL，CI/lane 全模式）+ 根 conftest
+    定向 `flaky(reruns=1)`。blanket rerun 全部退役：CI `--reruns 1` 过渡桥已删
+    （F137 预留 F141 回收）；e2e_live conftest blanket 收窄 e2e_full-only
+    （live 变异性政策）；F142 两个绝对时长性能断言保 `skipif` 不入册（永久
+    豁免无 exit criteria，入册会把「过期强制复查」污染成例行盖章）。
+  - **changed-lines coverage 门**（CI backend job）：裸 `--cov`（source =
+    pyproject `[tool.coverage.run]` 9 个 src 目录）产 lcov ∩ git diff 新增行，
+    ≥90% 否则 FAIL（`check-changed-lines-coverage.py` 机械计算；存量不背债；
+    escape hatch = HEAD commit message `[cov-exempt]` 大声记录）；scope 底线/
+    棘轮两重门显式 defer。门禁脚本自身在 `octoagent/tests/gate/` 有单测
+    （cc-haha 教义：门禁脚本必须被测试）。
 - **测试目录结构**（实况；原愿景的 replay/evals 独立目录从未建立）：测试分布在
   各包 `packages/*/tests` + `apps/gateway/tests`（含 `e2e_live/` 真 LLM 套件）+
   顶层 `tests/integration`（Echo 全栈），由 `octoagent/pyproject.toml` testpaths
