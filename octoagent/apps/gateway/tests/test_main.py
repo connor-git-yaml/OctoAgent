@@ -532,3 +532,56 @@ def test_enforce_exposure_argv_host_triggers_fail_fast(tmp_path, monkeypatch) ->
     with pytest.raises(SystemExit) as exc_info:
         gateway_main._enforce_front_door_exposure(tmp_path)
     assert exc_info.value.code == 78
+
+
+# ---------------------------------------------------------------------------
+# F140 D1：create_app harness_factory DI 缝
+# ---------------------------------------------------------------------------
+
+
+class _FakeL1Harness:
+    """duck-typed 最小 harness：只记录三步调用顺序（免全 11 段 bootstrap 成本）。"""
+
+    def __init__(self) -> None:
+        self.steps: list[str] = []
+
+    async def bootstrap(self, app) -> None:
+        self.steps.append("bootstrap")
+
+    def commit_to_app(self, app) -> None:
+        self.steps.append("commit")
+        app.state.l1_fake_committed = True
+
+    async def shutdown(self, app) -> None:
+        self.steps.append("shutdown")
+
+
+def test_create_app_harness_factory_lifespan(tmp_path, monkeypatch) -> None:
+    """F140 AC-5 支撑：显式 factory 时 lifespan 用注入 harness 走三步同构编排。"""
+    gateway_main = _import_gateway_main_safely(monkeypatch)
+    monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+
+    fake = _FakeL1Harness()
+    app = gateway_main.create_app(harness_factory=lambda: fake)
+    with TestClient(app) as client:
+        # lifespan startup 已跑：bootstrap → commit
+        assert fake.steps == ["bootstrap", "commit"]
+        assert client.app.state.l1_fake_committed is True
+    # with 退出触发 lifespan shutdown
+    assert fake.steps == ["bootstrap", "commit", "shutdown"]
+
+
+def test_create_app_default_path_uses_module_lifespan(tmp_path, monkeypatch) -> None:
+    """F140 AC-5：缺省（不传 factory）不构造参数化 lifespan——生产路径零变更锚点。"""
+    gateway_main = _import_gateway_main_safely(monkeypatch)
+    monkeypatch.setenv("OCTOAGENT_PROJECT_ROOT", str(tmp_path))
+    called = {"n": 0}
+    original = gateway_main._make_harness_lifespan
+
+    def _spy(factory):
+        called["n"] += 1
+        return original(factory)
+
+    monkeypatch.setattr(gateway_main, "_make_harness_lifespan", _spy)
+    gateway_main.create_app()
+    assert called["n"] == 0

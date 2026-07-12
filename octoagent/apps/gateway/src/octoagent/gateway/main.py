@@ -431,8 +431,36 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await harness.shutdown(app)
 
 
-def create_app() -> FastAPI:
-    """创建 FastAPI 应用实例"""
+def _make_harness_lifespan(harness_factory: Any) -> Any:
+    """F140 D1：用注入的 harness factory 构造 lifespan（三步与生产 ``lifespan`` 同构）。
+
+    仅 ``create_app(harness_factory=...)`` 显式传入时使用——L1 UI E2E 用它把
+    脚本化 ``OctoHarness``（空凭证 + model_client 脚本脑）装进**完整路由 + SPA
+    mount 的真 app**。生产路径不传 → 本函数构造性不可达（Constitution #9，
+    与 F087 4 DI 钩子 / F138 model_client 同一「默认 None」范式）。
+    """
+
+    @asynccontextmanager
+    async def _lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+        harness = harness_factory()
+        await harness.bootstrap(app)
+        harness.commit_to_app(app)
+        try:
+            yield
+        finally:
+            await harness.shutdown(app)
+
+    return _lifespan
+
+
+def create_app(*, harness_factory: Any | None = None) -> FastAPI:
+    """创建 FastAPI 应用实例
+
+    Args:
+        harness_factory: F140 D1 可选 DI 缝——返回 ``OctoHarness`` 实例的零参
+            callable。``None``（生产缺省）= 模块级 ``lifespan`` 原样，行为
+            byte-for-byte 等价。
+    """
     # Feature 003: 自动加载 .env（override=False，不覆盖已有环境变量）
     project_root = _resolve_project_root()
     load_project_dotenv(project_root=project_root, override=False)
@@ -445,7 +473,11 @@ def create_app() -> FastAPI:
         title="OctoAgent Gateway",
         version="0.1.0",
         description="OctoAgent M0 基础底座 API",
-        lifespan=lifespan,
+        lifespan=(
+            _make_harness_lifespan(harness_factory)
+            if harness_factory is not None
+            else lifespan
+        ),
     )
 
     # 注册中间件（顺序：先 Trace 后 Logging）
