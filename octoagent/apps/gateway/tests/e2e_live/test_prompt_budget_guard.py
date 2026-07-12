@@ -294,7 +294,8 @@ async def test_tool_schema_wire_surface_within_hard_token_cap(
     """AC-4 工具 schema 面：全量注册工具按 wire 同构 payload（OpenAI 嵌套格式，
     与 ``provider_model_client._get_tool_schemas`` 同形）度量 ≤ 硬 cap。
 
-    这一面不进 system 文本但同样吃上下文预算——63 工具的 schema 膨胀此前无人
+    这一面不进 system 文本但同样吃上下文预算——全量工具（2026-07-12 实测 68 个）
+    的 schema 膨胀此前无人
     看守（F126 只治了 KV-cache 前缀稳定性，不治体积）。
     """
     from octoagent.gateway.services.context_compaction import (

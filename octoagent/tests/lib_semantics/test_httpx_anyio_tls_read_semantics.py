@@ -36,6 +36,7 @@ import ipaddress
 import socket
 import ssl
 import struct
+import sys
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 
@@ -266,6 +267,15 @@ async def test_tls_midstream_abort_raises_within_transient_family(
     )
 
 
+@pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason=(
+        "空 message 签名按 macOS 校准（bench 事故发生环境 + 2026-07-12 实证）；"
+        "Linux 上 RST 常携带 'Connection reset by peer' 等非空 message，精确签名"
+        "断言会平台性假红（Opus 评审 F2）。跨平台承重语义由上面的 family 成员"
+        "资格 parametrize 测试覆盖（CI 照跑），本格是 macOS 专属精度哨兵"
+    ),
+)
 async def test_rst_face_matches_bench_incident_signature(_busy_loop: None) -> None:
     """RST 面精确复现 bench 事故签名：``httpx.ReadError`` 且 message 为空。
 

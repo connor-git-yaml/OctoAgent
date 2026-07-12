@@ -96,18 +96,29 @@ cjk_aware 更精确。docstring 注明降级语义（tiktoken 缺失 → CJK 计
 | 门 | 结果 |
 |----|------|
 | baseline（origin/master 6972ddc7，串行） | 4975 passed / 14 skipped / 1 xfailed / 1 xpassed（378s） |
-| 终门全量（改后，串行含 e2e_live） | 见 §终值（本报告 commit 前回填） |
-| e2e_smoke | 8/8（每次 commit pre-commit hook 实跑 PASS；终门再显式跑一轮） |
-| `-n auto --dist=loadgroup` ×3（CI scope） | 3 轮全绿 4894 passed（25.79/27.18/25.84s） |
+| **终门全量**（改后，串行含 e2e_live） | **5002 passed / 15 skipped / 1 xfailed / 1 xpassed**（374s）——+27 passed（9 lib_semantics + 13 wire + 5 budget）+1 skipped（piper 模块 importorskip），**账目精确对齐，0 regression** |
+| e2e_smoke | **8 passed**（+1 skipped=piper 模块 collection skip，不在 smoke 选集内、-m 过滤不及 collection-skip，属预期噪声——Opus P3 已归档接受）；每次 commit pre-commit hook 亦实跑 PASS |
+| `-n auto --dist=loadgroup` ×3（CI scope） | 3 轮全绿 4894 passed（25.79/27.18/25.84s）+ rebase/评审修复后加跑 1 轮全绿 |
 | ruff 对账 | 全部改动文件 baseline→now 零上涨（新文件 0 违规） |
-| 生产代码 | **零改动**（`git diff origin/master --stat` 中 `src/` 路径仅 0 行；wire 上限评估结论=不修） |
+| 生产代码 | **零改动**（diff 零 `src/` 路径——Opus ⑨ 独立核实；pyproject 仅 dev-dep；wire 上限评估结论=不修） |
 | Codex spec review | 0 HIGH / 1 P2 + 1 P3 已闭环（importorskip 收窄 / piper unbound 签名） |
-| Codex final + Opus 对抗自审 | 见 §6（双评审结果回填） |
+| Codex final review | **0 finding**（「未发现会破坏现有行为或 CI 的明确缺陷」；带挑战面：真库/cap 校准/分组完整性/欠账治根/生产零改/CI 翻转全查） |
+| Opus 对抗自审 | **PASS（0 HIGH / 0 P1）+ 2 P2 + 3 P3**，处置见 §6 |
 
-## 6. 双评审闭环（回填）
+## 6. 双评审闭环
 
-- Codex final review：（待跑）
-- Opus 对抗自审：（待跑）
+- **Codex final review：0 finding**。
+- **Opus 对抗自审：PASS（0 HIGH / 0 P1），2 P2 + 3 P3 全处置**：
+
+| # | severity | finding | 处置 |
+|---|----------|---------|------|
+| F1 | P2 | 分支基线落后 origin/master（`2bd8679b` F144 立项 + M9 验证吸收原则为用户拍板内容），diff 伪删有静默回退风险 | ✅ **已 rebase 到 2bd8679b**（11 commits 零冲突），复核 F144 行(629)/验证吸收原则(635)/F142 ✅ 行(627) 三者共存 |
+| F2 | P2 | TLS 空 message 精确签名断言（`str(exc)==""`）仅 macOS 实证；Linux RST 常携带非空 message → CI 平台性假红风险 | ✅ **该格加 `sys.platform != "darwin"` skipif**（macOS 专属精度哨兵）；跨平台承重语义由 family 成员资格 parametrize 测试覆盖（CI 照跑） |
+| F3 | P3 | completion-report 终值/双评审占位未回填 | ✅ 本节即回填 |
+| F3b | P3 | budget guard 注释 "63 工具" 与实测 68 不一致 | ✅ 已改「全量工具（2026-07-12 实测 68 个）」 |
+| — | P3 | pre-commit smoke 输出多 1 条 piper collection skip 噪声 | 接受（reason 明确、不触 maxfail、不影响 8/8 判定） |
+
+- Opus 独立复核通过项：生产零改（⑨）/ 账目 +27/+1 构成（⑩）/ APScheduler 参考时刻与时区（②）/ attach_input 修复真治根因（⑥）/ 欠账处置（⑦）/ 分组无 clobber + sorted 全覆盖（⑥）/ CI 只动 backend job 且 loadgroup 语义与 worker 数无关（⑧）。
 
 ## 7. 遗留与 handoff
 
