@@ -57,9 +57,19 @@
   切行静默丢 delta 行为钉住 + 2MB 行现状钉住；行缓冲无上限评估归档=不动生产）；
   ④xdist_group 18 文件分组 + CI backend job 翻 `-n auto --dist=loadgroup`
   （本地全量串行 378s → ~26s）；F137 CI-skip 4 欠账处置=2 治根因移除 + 2 永久豁免。
-- **VCR 录制回放** 📋 规划 **F139**（已收窄：仅 provider transport 层 wire 真样本
-  回归，不承担 agent-loop 用例降层；LiteLLM 已于 F081 退役，录制对象为 provider
-  直连三 transport）。
+- **Wire 真样本录制回放** ✅ **F139 已落地**（收窄版：仅 provider transport 层，
+  不承担 agent-loop 用例降层）：`packages/provider/tests/wire_replay/`——自研极简
+  recorder/replay（stdlib JSON cassette + httpx transport 注入缝，**零新依赖**，
+  vcrpy 显式不引入：零依赖处处默认可跑 + 无全局 monkeypatch 与 xdist 零互扰）；
+  8 盘 cassette（siliconflow 4 真录含 U+2028 探针与 embeddings / codex 2 真录 /
+  anthropic 2 手写 golden 显式标注）；secret 过滤六道管线（请求头 allowlist +
+  已知凭证禁串逐字比对 + 身份字段定点洗刷 [scrubbed] + fail-closed 事务式落盘）
+  + committed cassette 永久扫描 + 完整消费护栏（pydantic-ai fail_partially_used
+  范式）。**重录路径**：`OCTOAGENT_ALLOW_MODEL_REQUESTS=1 uv run --no-sync python
+  packages/provider/tests/wire_replay/record_cassettes.py [chat|responses|anthropic]`
+  → secret 扫描 → 人眼 review → 更新回放精确断言（详见脚本 docstring）。
+  U+2028 评估结论（F142 输入闭环）：探针实测 SiliconFlow 对 line-separator 特判
+  转义（CJK 则 ensure_ascii=False 原样）→ wire 无未转义原始字节，归档不动生产。
 - **CI 门禁** ✅ **F137 已落地**：`.github/workflows/feature-007-integration.yml`
   （workflow 名 `ci`）跑确定性层（全 testpaths 排除 e2e_live，gate=deny 构造性
   零真调用，`-n auto --dist=loadgroup` 并行【F142 翻转，时序敏感文件 xdist_group 分组钉同 worker】+ junit artifact）+ 前端 job（complexity 阻断 + vitest 阻断，
@@ -150,7 +160,8 @@ Feature 083 采用实用主义策略：
 - **TestModel 等价件（deferred，F138 Phase 2）**：`SchemaTestAdapter` 按注册工具
   schema 自动生成合法参数、扫全工具广度——见 F138 spec §2.2 deferred 范围
 - **Provider 抽象层路由**：ProviderRouter alias 解析 + 三 transport（LiteLLM 已于
-  F081 退役）；wire 层真样本回归归 F139
+  F081 退役）；wire 层真样本回归 ✅ F139（`packages/provider/tests/wire_replay/`，
+  见上方「Wire 真样本录制回放」）
 - **非确定性输出策略**：
   - 验证输出结构 / 必填字段 / 类型，而非精确字符串
   - 使用 dirty-equals（`IsStr` / `IsNow(delta)` / `IsPartialDict`）做模糊匹配（✅ F142 已引入，范式样例 ×3 处）
