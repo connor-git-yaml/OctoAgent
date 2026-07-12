@@ -72,8 +72,11 @@ exit code：pass=0 / not_enabled=0 / fail=1
 
 ### D-4 remote 探针检查链（enabled 信号 + 检查项 + token 零泄漏）
 
-- **enabled 信号** = `probe_tailscale_status()` READY **且** 实例生效 mode == bearer（`read_instance_effective_env` + `_effective_mode` 同款语义——`octo remote enable` 只在 serve 成功后才持久化 bearer，故 bearer 即用户启用过远程触达）。非 READY 或非 bearer → `not_enabled` + 指引。
-- **token**：按 `_bearer_token_env_name` 语义解析变量名（尊重自定义），值只从实例 `.env` 读（`read_instance_effective_env` 权威键语义）。enabled 但 token 未设 → `fail`（坏配置）。**token 值只存内存传给 HTTP header/query，绝不进 report/stdout/日志/异常文本**（Constitution #5；report 只含布尔「已设」）。
+- **enabled 信号 = 实例生效 mode == bearer（单独作信号，Codex spec 评审 P2-1 修正）**：`octo remote enable` 只在 serve 成功后才持久化 bearer，故 bearer 是「用户启用过远程触达」的持久信号。三态映射：
+  - mode ≠ bearer → `not_enabled` + 指引（tailscale 三态只作 next_steps 参考）；
+  - mode == bearer 且 tailscale 非 READY → **`fail`**（已启用但链路断——正是 F130 回归信号，绝不能归 not_enabled 被 lane 忽略）；
+  - mode == bearer 且 READY → 进入 HTTP 检查链。
+- **token**：按 `_bearer_token_env_name` 语义解析**变量名**（`read_instance_effective_env` 只用于 mode/变量名/port 解析）；token **值**只从实例 `.env`/`.env.litellm` 经 `dotenv_values` 读（同 `remote_commands._token_set_in_instance_env` 语义，Codex spec 评审 P2-2 修正——防自定义非 OCTOAGENT_ 前缀变量的 shell-only 值让探针假通过、服务重启后 503）。enabled 但 token 未设 → `fail`（坏配置）。**token 值只存内存传给 HTTP header/query，绝不进 report/stdout/日志/异常文本**（Constitution #5；report 只含布尔「已设」）。
 - **HTTP 检查链**（httpx client DI；base = `https://<dns_name>/`）：
   1. `GET /ready` 无 token → 200 + status ready/ok（health.router 未挂 front_door protected——先证 serve 反代链 + gateway 活）；
   2. `GET /` → 200 + HTML（SPA index 可取；mount `/` 绕过 front_door 是 F130 已知 limitation，探针如实按此语义测）；
@@ -129,12 +132,12 @@ exit code：pass=0 / not_enabled=0 / fail=1
 
 ### FR-B `octo attest remote`（交付②a）`[@test octoagent/packages/provider/tests/dx/test_attest_commands.py::TestAttestRemote*]`
 
-- FR-B1 三态：tailscale 非 READY 或生效 mode≠bearer → `not_enabled` + 指引，exit 0。
+- FR-B1 三态（§D-4 修正后）：mode≠bearer → `not_enabled`（exit 0）；mode==bearer 且 tailscale 非 READY → `fail`（exit 1，已启用链路断）；mode==bearer 且 READY → 进 HTTP 检查链。
 - FR-B2 检查链 §D-4 五项，全过 → `pass` + 打印 published URL。
 - FR-B3 token 零泄漏：report/stdout/JSON 任何字段不含 token 值（机械断言：以高熵 sentinel token 跑 fake 链路，扫描全部输出无命中）。
 - FR-B4 优雅降级：httpx 异常/超时 → 对应 check `fail` + hint，探针不抛未捕获异常（Constitution #6）。
 - FR-B5 只读红线：探针全程无 `serve`/`up`/写配置命令、零 sudo（机械断言 FakeCommandRunner 记录）。
-- **AC-B**：hermetic 单测覆盖 pass/not_enabled(两分支)/fail(缺 token、/ready 非 200、snapshot 无 token 非 401、SSE 401) + FR-B3/B5 机械断言。
+- **AC-B**：hermetic 单测覆盖 pass / not_enabled(mode≠bearer) / fail(bearer+tailscale 断链、缺 token、shell-only token 不采信、/ready 非 200、snapshot 无 token 非 401、SSE 401) + FR-B3/B5 机械断言。
 
 ### FR-C `octo attest service`（交付②b）`[@test …::TestAttestService*]`
 
