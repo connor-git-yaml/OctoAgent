@@ -128,3 +128,67 @@ jobs:
         # F137 接线时点发现的 master 存量 11 failed / 6 文件欠账已由后续 fix task
         # 全部 triage 清零（11 处均为测试断言漂移，无真 UI 回归）——全量阻断。
         run: npx vitest run
+
+  # F140 L1 UI E2E：Playwright 薄输入 + 外部断言（真浏览器 → 真 gateway →
+  # 脚本决策环 → 真工具执行 → event_store/文件系统断言）。零真 LLM / 零凭证
+  # secret（gate=deny + 空凭证 store + resolve bomb 三重防御），free tier 安全。
+  # 独立 job：不影响 backend-deterministic / frontend 两个既有 job。
+  l1-playwright:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install backend dependencies（L1 gateway 启动器依赖）
+        working-directory: octoagent
+        run: uv sync --dev
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: octoagent/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: octoagent/frontend
+        run: npm ci
+
+      - name: Build frontend（gateway serve 的 SPA dist）
+        working-directory: octoagent/frontend
+        run: npm run build
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('octoagent/frontend/package-lock.json') }}
+
+      - name: Install chromium
+        working-directory: octoagent/frontend
+        run: npx playwright install --with-deps chromium
+
+      - name: Run L1 UI E2E
+        working-directory: octoagent/frontend
+        run: npx playwright test
+
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: l1-playwright-traces
+          path: |
+            octoagent/frontend/e2e/.l1-runtime/test-results/
+            octoagent/frontend/playwright-report/
+          retention-days: 14
