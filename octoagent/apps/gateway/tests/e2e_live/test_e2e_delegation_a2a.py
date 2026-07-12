@@ -110,6 +110,8 @@ async def _count_a2a_messages(sg: Any, task_id: str | None = None) -> int:
     return 0
 
 
+@pytest.mark.real_llm  # F141 D9（Codex final H1）：本函数经 /api/message 真打 LLM——
+# 函数级事实标记（同文件域#9/#10 是直调确定性，函数名 real_llm 属化石命名，不标）
 async def test_domain_8_real_llm_delegate_task(
     harness_real_llm: dict[str, Any],
 ) -> None:

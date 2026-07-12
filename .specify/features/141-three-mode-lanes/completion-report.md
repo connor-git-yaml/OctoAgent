@@ -17,7 +17,7 @@
 
 新增：`repo-scripts/{lane,check-quarantine,check-attestation,check-changed-lines-coverage}.py`、
 `octoagent/tests/quarantine.json`、`octoagent/tests/AGENTS.md`、`octoagent/tests/gate/`（4 文件
-98 用例）、`.specify/features/141-three-mode-lanes/`。
+99 用例）、`.specify/features/141-three-mode-lanes/`。
 修改：`.githooks/pre-commit`、`.github/workflows/feature-007-integration.yml`（backend job；
 frontend / l1-playwright 零触碰）、`octoagent/conftest.py`、`octoagent/pyproject.toml`
 （markers + [tool.coverage.run]）、`e2e_live/conftest.py`（blanket 收窄）、
@@ -31,7 +31,7 @@ frontend / l1-playwright 零触碰）、`octoagent/conftest.py`、`octoagent/pyp
   语义漂移并阻断（改后放行）；docs commit 走 docs-only fastpath（跳 e2e/前端，秒过）；
   `lane.py pr` 手动重放 4 lane 全 PASS（backend-smoke-scripted 6.7s）。
 - **baseline**（组合验证，避免真打 LLM）：backend 全量 `-m "not real_llm"`（见 §4）+
-  frontend vitest 204 passed + complexity PASS。8 个 real_llm 用例是 release live 半边，
+  frontend vitest 204 passed + complexity PASS。9 个 real_llm 用例是 release live 半边，
   按任务边界不在本 agent 侧点火。
 - **release**：`lane.py release --dry-run` 彩排——quarantine PASS；**attestation-signed 如实
   FAIL**（ATT-129-BOOT `last_attested: null` 从未签署 → 机制咬人即设计）；其余 planned；
@@ -47,9 +47,13 @@ frontend / l1-playwright 零触碰）、`octoagent/conftest.py`、`octoagent/pyp
   191s**。xfail/xpass 均为 F124 存量 strict=False 站点（test_threat_scanner.py 中文
   pattern），非 F141 触碰。vs master 组合态基线 5060 passed：+98 gate 测试 + 其余
   对账为 real_llm 移出/既有 skip 波动，0 failed 即 0 regression。
+  注（诚实记录）：该跑发生在 Codex final H1 修复前，domain#8（当时未标 real_llm）
+  被包含——可能真打了 ≤1 次 LLM，恰证明 H1 的洞真实；补标后 delegation 文件
+  定向复验 `-m "not real_llm"` = 2 passed 1 deselected，其余 5156 结果不受影响。
+  H2/M1 修复后 gate 套件 102 passed + flaky_marker 3 passed 重验。
 - pr lane 集（`-m "e2e_smoke or e2e_scripted"`）：24 passed + 1 skipped（piper importorskip
   模块级门，F142 设计）~4.6s。
-- gate 新测试：98 passed。
+- gate 新测试：99 passed（final H2 修复补 1 条 exit-3 用例）。
 - CI e2e_scripted 步预演（scrubbed HOME 模拟无凭证 CI）：16 passed / 26s（含 coverage）。
 - frontend vitest：204 passed。
 
@@ -64,6 +68,15 @@ frontend / l1-playwright 零触碰）、`octoagent/conftest.py`、`octoagent/pyp
 | M2 lane --no-sync 与 hook sync 漂移窗口 | 接受 | lane.py pytest/attest 子进程 PYTHONPATH 锁本树（build_pytest_env，单测钉 8+1 src） |
 | L1 docs fastpath 跳过 tests/AGENTS.md | **拒绝带理由** | AGENTS.md 非机器解析资产；机器消费的 gate 资产（json/yaml）有 staged-trigger 校验 |
 
+## 5b. Codex final 评审闭环（2H + 1M + 1L，见 codex-review-final.md）
+
+| # | 结论 | 处置 |
+|---|------|------|
+| H1 real_llm 漏标 delegation 域#8（层2 真打藏在代码里，审计+grep 双漏） | 接受已修 | 函数级补标；-m real_llm 8→9 用例；各文档「2 文件」表述修正 |
+| H2 release --dry-run 可 exit 0 冒充通过 | 接受已修 | exit 语义 fail=1 > planned=3 > 0；彩排恒非 0 + stderr 明示 |
+| M1 quarantine 过期 canonical pr 入口不拦 | 接受已修 | hook 恒跑 --enforce-review-date（fastpath 前，<100ms）；staged schema-only 分支删除 |
+| L1 hook case glob 只匹配单层 | **拒绝（实证推翻）** | bash case `*` 跨 `/`（fnmatch 非 pathname）；三类深路径实测全命中 |
+
 ## 6. release live 半边——主 session 执行指引（本 agent 不真打 LLM）
 
 在部署机（本机）主仓（合入后）执行：
@@ -73,9 +86,10 @@ uv run --project octoagent --no-sync python repo-scripts/lane.py release
 ```
 
 预期与决策点：
+0. （彩排可选）`... lane.py release --dry-run` → exit 3 = 彩排非通过（H2 语义）。
 1. `attestation-signed` 会 FAIL 直到 ATT-129-BOOT 首次签署（重启 Mac → `octo service status`
    运行中 + /ready 绿 → 在 attestation-checklist.md 回填 `last_attested: "YYYY-MM-DD"`）。
-2. `live-real-llm` 真打 GPT-5.5（8 用例，~5-10min，消耗 ChatGPT Pro 配额）；判定 = exit 0 且
+2. `live-real-llm` 真打 GPT-5.5（9 用例，~5-10min，消耗 ChatGPT Pro 配额）；判定 = exit 0 且
    passed≥1 且 unexpected_skip=0（deviation/manual-gate skip 记录不阻断）。
 3. `attest-service` 会 SIGKILL 真实例（秒级闪断后自愈）；`attest-remote` 当前本机未部署
    Tailscale → not_enabled → 默认 FAIL——确认暂不部署远程则 `--allow-not-enabled` 显式降 WARN。

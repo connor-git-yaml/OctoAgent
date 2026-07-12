@@ -29,7 +29,7 @@
 | `e2e_smoke` | F087 smoke 5 域集成层（不打 LLM，DI stub） | 保持 deny | pre-commit hook / lane pr |
 | `e2e_scripted` | F138 脚本化决策环确定性 e2e（零真 LLM/零 OAuth） | 保持 deny | pre-commit hook / lane pr / CI 专属步 |
 | `e2e_full` | F087 full 套件——声明真 LLM **意图**（9 个域文件仅 2 个真打） | e2e_live conftest 按此 marker 自动开闸 + 240s timeout + rerun 政策 | `octo e2e full` / baseline 全量（凭证在场） |
-| `real_llm` | 真发起 LLM/外部网络调用的**事实**子集（F141 D9；现 = `test_e2e_smoke_real_llm.py` + `test_e2e_mcp_skill_pipeline.py`） | 同 e2e_full（叠加标记） | release lane `live-real-llm`（skip 即 FAIL） |
+| `real_llm` | 真发起 LLM/外部网络调用的**事实**子集（F141 D9；现 = `test_e2e_smoke_real_llm.py` + `test_e2e_mcp_skill_pipeline.py` 两文件级 + `test_e2e_delegation_a2a.py::test_domain_8_real_llm_delegate_task` 函数级——同文件域#9/#10 是直调确定性，函数名 real_llm 属化石命名） | 同 e2e_full（叠加标记） | release lane `live-real-llm`（skip 即 FAIL） |
 | `e2e_live` | e2e_live 套件正交标记 | — | 与上共存 |
 
 纪律：**新增真打 LLM 的测试必须同时标 `e2e_full + real_llm`**（意图 + 事实）；确定性
@@ -42,6 +42,9 @@ pre-existing sloppiness：确定性 e2e_full 文件拿到不必要的 gate=allow
 ```
 uv run --project octoagent --no-sync python repo-scripts/lane.py <pr|baseline|release> [--dry-run]
 ```
+
+exit code：0 = 通过；1 = FAIL；2 = 参数错误；**3 = 彩排**（`--dry-run` 有 planned 未执行
+lane——彩排非通过，gate 消费方只认 0）。
 
 | lane | pr | baseline | release | 说明 |
 |------|----|----|----|------|
@@ -100,7 +103,7 @@ cd <worktree>/octoagent && env PYTHONNOUSERSITE=1 \
 
 | 类型 | 处置 | 机制 |
 |------|------|------|
-| **真 flaky**（时序/环境间歇，可治但未治） | 入册 `octoagent/tests/quarantine.json`（六字段 `id/path/reason/owner/review_after/exit_criteria`） | 根 conftest 给命中 path 前缀的用例加 `flaky(reruns=1)`；`check-quarantine.py --enforce-review-date` 在 CI/lane 全模式跑，**过期即门禁 FAIL**——复查后要么治好删条目、要么带新证据续期 |
+| **真 flaky**（时序/环境间歇，可治但未治） | 入册 `octoagent/tests/quarantine.json`（六字段 `id/path/reason/owner/review_after/exit_criteria`） | 根 conftest 给命中 path 前缀的用例加 `flaky(reruns=1)`；`check-quarantine.py --enforce-review-date` 在 **pre-commit 恒跑** + CI + lane 全模式，**过期即门禁 FAIL**——复查后要么治好删条目、要么带新证据续期 |
 | **环境永久不适用**（绝对时长性能断言 vs 共享 runner） | 测试内 `skipif(CI)` + 完整理由（F142 两例样板：`test_finalize_result_offload.py` / `test_threat_scanner_boundary.py`） | **不入 quarantine**——无 exit criteria 的永久豁免入册会把「过期即 FAIL」污染成例行盖章（反狼来了）；须有确定性伴测在 CI 照跑 |
 | **真 LLM 固有变异性**（e2e_full） | e2e_live conftest 对 `e2e_full` marker 自动 `flaky(reruns=1)` | live 变异性政策（主机制是 GATE_P3_DEVIATION 结构化 SKIP），非 flake 掩盖 |
 

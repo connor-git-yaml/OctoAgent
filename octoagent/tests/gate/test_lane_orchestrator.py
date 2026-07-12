@@ -106,6 +106,15 @@ class TestSkipValidation:
         rc = lane_mod.main(["release", "--skip", "live-real-llm"])
         assert rc == 2
 
+    def test_dry_run_exit_3_not_zero(self, lane_mod, monkeypatch) -> None:
+        """Codex final H2：--dry-run 有 planned lane → exit 3（彩排非通过）。
+
+        pr 模式 dry-run：quarantine 治理真跑（PASS），其余 planned →
+        必须非 0——任何把 lane.py 当 gate 的脚本只认 exit 0。
+        """
+        rc = lane_mod.main(["pr", "--dry-run"])
+        assert rc == 3
+
 
 # ---------------------------------------------------------------------------
 # live lane 判定（AC-3①⑥）

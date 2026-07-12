@@ -26,7 +26,8 @@ venv 漂移防护（spec D1v2 / Codex M2）：pytest 子进程显式 PYTHONPATH 
 报告：stdout 摘要表 + JSON 全文落 ``~/.octoagent/logs/lane/<mode>-<ts>.json``
 （attest JSON 原样归档——F144 保证 token 零泄漏）。
 
-exit code：0 = 全部 lane 通过；1 = 至少 1 个 lane FAIL；2 = 参数错误。
+exit code：0 = 全部 lane 通过；1 = 至少 1 个 lane FAIL；2 = 参数错误；
+3 = 彩排（--dry-run 有 planned 未执行 lane）——**非通过**，gate 消费方只认 0。
 """
 
 from __future__ import annotations
@@ -561,7 +562,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("mode", choices=MODES)
     parser.add_argument("--dry-run", action="store_true",
-                        help="只跑文件级治理校验，其余 lane 列计划不执行（release 彩排）")
+                        help="只跑文件级治理校验，其余 lane 列计划不执行（release 彩排；"
+                             "有 planned 即 exit 3——彩排非通过）")
     parser.add_argument("--skip", action="append", default=[], metavar="LANE_ID",
                         help="显式跳过某 lane（记录在案；release 拒绝 live/attestation）")
     parser.add_argument("--allow-not-enabled", action="store_true",
@@ -600,13 +602,22 @@ def main(argv: list[str] | None = None) -> int:
     )
     results = orchestrator.run(lanes)
 
-    exit_code = 1 if any(r.blocking for r in results) else 0
+    # exit code 语义（Codex final H2）：fail=1 > planned=3 > pass=0。
+    # --dry-run 彩排下未执行的 lane 是 planned——**彩排绝不可冒充通过**：
+    # 任何把 lane.py 当 gate 的脚本只认 exit 0，planned 存在即非 0。
+    has_fail = any(r.blocking for r in results)
+    has_planned = any(r.status == "planned" for r in results)
+    exit_code = 1 if has_fail else (3 if has_planned else 0)
     print_summary(args.mode, results)
     report_path = write_report(args.mode, args, results, exit_code)
     if report_path:
         print(f"[lane] 报告: {report_path}")
     if exit_code == 0:
         print(f"[lane] {args.mode} 全部通过")
+    elif exit_code == 3:
+        planned = [r.id for r in results if r.status == "planned"]
+        print(f"[lane] {args.mode} 彩排完成（exit 3，非通过）：未执行 lane {planned}",
+              file=sys.stderr)
     else:
         failed = [r.id for r in results if r.blocking]
         print(f"[lane] {args.mode} FAIL: {failed}", file=sys.stderr)

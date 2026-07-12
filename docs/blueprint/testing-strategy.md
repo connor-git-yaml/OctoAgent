@@ -77,7 +77,8 @@
     FAIL，remote not_enabled 默认 FAIL、`--allow-not-enabled` 降 WARN）+
     attestation 清单签署核对（`--require-signed`）；`SKIP_E2E` 在 release
     无效、`--skip` 拒 live/attestation lanes。
-  - 新 marker **`real_llm`**：真发起 LLM 调用的**事实**子集（现 2 个文件）；
+  - 新 marker **`real_llm`**：真发起 LLM 调用的**事实**子集（现 2 文件级 +
+    delegation 域#8 函数级——Codex final H1 抓漏补标）；
     `e2e_full` 保持**意图**信号（gate 开闸键）——lane 切分不复用 e2e_full，
     防 7 个确定性 e2e_full 域文件的 PASS 掩护 live lane 假绿。
   - **flaky quarantine manifest**：`octoagent/tests/quarantine.json`（六字段）

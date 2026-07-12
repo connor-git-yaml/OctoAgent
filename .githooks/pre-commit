@@ -8,10 +8,12 @@
 # F141（pr lane）：
 #   - pytest 表达式 e2e_smoke → "e2e_smoke or e2e_scripted"（脚本化决策环 +
 #     审批全链 + prompt 预算护栏进 commit 反馈环；实测 +~4s，远低于 180s 预算）
+#   - quarantine 过期强制恒跑（Codex final M1）：pr 是 canonical 门禁入口，
+#     过期条目 commit 时即咬人（schema 或过期 → 阻断）
 #   - change-policy 路由（保守两条）：①纯 docs 提速——staged 全部 ∈
 #     {docs/**, **/*.md, .specify/**} 时跳过 e2e 与前端检查（sync-check 恒跑）；
-#     staged 含 gate 机器资产（quarantine.json / attestation-checklist.md）时附跑
-#     对应校验器 ②生产 src 改动无伴随测试 → WARNING（不阻断，保守起步）
+#     staged 含 attestation-checklist.md 时附跑解析校验
+#     ②生产 src 改动无伴随测试 → WARNING（不阻断，保守起步）
 #
 # 行为：
 #   - SKIP_E2E=1 git commit ...      → 跳过 e2e（sync/前端/路由校验仍跑）
@@ -52,6 +54,21 @@ if [[ "${SKIP_SYNC_CHECK:-0}" != "1" ]]; then
   fi
 fi
 
+# ---- F141: quarantine 过期强制（恒跑，先于 docs fastpath——Codex final M1）----
+# pr 是 canonical 门禁入口：过期条目必须在 commit 时就咬人，而不是等 CI / lane。
+# stdlib python3 + 空 manifest <100ms；schema 损坏或过期 → 阻断 commit。
+Q_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+Q_SCRIPT="${Q_REPO_ROOT}/repo-scripts/check-quarantine.py"
+Q_MANIFEST="${Q_REPO_ROOT}/octoagent/tests/quarantine.json"
+if [[ -f "${Q_SCRIPT}" && -f "${Q_MANIFEST}" ]]; then
+  if ! python3 "${Q_SCRIPT}" --manifest "${Q_MANIFEST}" --enforce-review-date; then
+    echo "[QUARANTINE FAIL] quarantine manifest 校验未过（schema 或过期条目需复查）"
+    echo "  详情: python3 repo-scripts/check-quarantine.py --enforce-review-date"
+    echo "  处置: 治好删条目，或带新证据更新 review_after（见 octoagent/tests/AGENTS.md §5）"
+    exit 1
+  fi
+fi
+
 # ---- F141: change-policy 路由（git diff --cached --name-only 前缀路由）----
 # 保守两条（spec 件3；不做复杂 area 矩阵）：
 #   ① 纯 docs 提速：staged 全部 ∈ {docs/**, **/*.md, .specify/**} → 跳过
@@ -84,14 +101,8 @@ if [[ -n "${STAGED_FILES}" ]]; then
         HAS_PROD_SRC=1 ;;
     esac
     # gate 机器资产附加校验（staged 触发；fastpath 下同样生效）
+    # 注：quarantine.json 无需 staged 分支——上方恒跑段已含 schema+过期全量校验
     case "${f}" in
-      octoagent/tests/quarantine.json)
-        if ! python3 "${CP_REPO_ROOT}/repo-scripts/check-quarantine.py" \
-             --manifest "${CP_REPO_ROOT}/octoagent/tests/quarantine.json"; then
-          echo "[QUARANTINE FAIL] quarantine.json schema 校验未过（六字段/唯一性/日期）"
-          exit 1
-        fi
-        ;;
       docs/codebase-architecture/attestation-checklist.md)
         if ! (cd "${CP_REPO_ROOT}/octoagent" && uv run --no-sync python \
              "${CP_REPO_ROOT}/repo-scripts/check-attestation.py" \
