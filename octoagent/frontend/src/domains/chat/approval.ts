@@ -285,3 +285,148 @@ export function readPendingApprovalEvent(events: TaskEvent[]): TaskEvent | null 
   });
   return pendingEvents[0] ?? null;
 }
+
+// ---------------------------------------------------------------------------
+// ChatWorkbench 派生：活跃审批横幅（F143 件 2 块 C 下沉）
+// ---------------------------------------------------------------------------
+
+export interface ApprovalContextSnapshot {
+  approvalId?: string;
+  toolName?: string;
+  argsSummary?: string;
+  summary?: string;
+  createdAt?: string;
+  expiresAt?: string | null;
+}
+
+export interface ExpiredApprovalContextSnapshot {
+  approvalId?: string;
+  toolName?: string;
+  argsSummary?: string;
+  expiredAt?: string;
+}
+
+/** useChatStream liveApproval 的结构面（避免 domains → hooks 反向依赖） */
+export interface LiveApprovalSnapshotLike {
+  approvalId: string;
+  taskId: string;
+  toolName: string;
+  toolArgsSummary: string;
+  riskExplanation: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export interface ActiveApprovalPresentationOptions {
+  taskId: string | null;
+  operatorItems: OperatorInboxItem[];
+  /** activeSession?.thread_id ?? "" */
+  activeSessionThreadId: string;
+  /** taskDetail?.events（无 taskDetail 时 null/undefined） */
+  taskDetailEvents: TaskEvent[] | null | undefined;
+  /** activeWork?.work_id || activeSessionWorkId */
+  approvalWorkId: string;
+  pendingApprovals: ApprovalListItem[];
+  /** executionSession?.pending_approval_id ?? "" */
+  executionSessionPendingApprovalId: string;
+  liveApproval: LiveApprovalSnapshotLike | null;
+  /** 倒计时锚点（组件每秒 tick 的 Date.now()，显式入参保持纯函数） */
+  approvalNow: number;
+}
+
+export interface ActiveApprovalPresentation {
+  activeApprovalItem: OperatorInboxItem | null;
+  latestApprovalContext: ApprovalContextSnapshot | null;
+  latestExpiredApprovalContext: ExpiredApprovalContextSnapshot | null;
+  activeApprovalRemainingSeconds: number | null;
+  shouldShowApprovalBanner: boolean;
+}
+
+export function deriveActiveApprovalPresentation(
+  options: ActiveApprovalPresentationOptions
+): ActiveApprovalPresentation {
+  const {
+    taskId,
+    operatorItems,
+    activeSessionThreadId,
+    taskDetailEvents,
+    approvalWorkId,
+    pendingApprovals,
+    executionSessionPendingApprovalId,
+    liveApproval,
+    approvalNow,
+  } = options;
+
+  const activeTaskOperatorItems = operatorItems.filter((item) => {
+    if (item.state && String(item.state).trim().toLowerCase() !== "pending") {
+      return false;
+    }
+    if (taskId && item.task_id === taskId) {
+      return true;
+    }
+    if (activeSessionThreadId && item.thread_id === activeSessionThreadId) {
+      return true;
+    }
+    return false;
+  });
+  const activeApprovalItemFromInbox =
+    activeTaskOperatorItems.find((item) =>
+      item.quick_actions.some((action) =>
+        ["approve_once", "approve_always", "deny"].includes(action.kind)
+      )
+    ) ?? null;
+  const latestApprovalContext =
+    taskDetailEvents && taskId ? readLatestApprovalContext(taskDetailEvents, approvalWorkId) : null;
+  const latestExpiredApprovalContext =
+    taskDetailEvents && taskId
+      ? readLatestExpiredApprovalContext(taskDetailEvents, approvalWorkId)
+      : null;
+  const syntheticApprovalItem =
+    taskId && pendingApprovals.length > 0 ? buildSyntheticApprovalItem(pendingApprovals[0]!) : null;
+  const executionSessionApprovalItem =
+    taskId && (executionSessionPendingApprovalId || latestApprovalContext?.approvalId)
+      ? buildExecutionSessionApprovalItem(
+          executionSessionPendingApprovalId || latestApprovalContext?.approvalId || "",
+          {
+            taskId,
+            toolName: latestApprovalContext?.toolName,
+            argsSummary: latestApprovalContext?.argsSummary,
+            summary: latestApprovalContext?.summary,
+            createdAt: latestApprovalContext?.createdAt,
+            expiresAt: latestApprovalContext?.expiresAt,
+          }
+        )
+      : null;
+  // SSE 直通审批项：从 useChatStream 的 liveApproval 直接构造，不依赖 REST 轮询
+  const liveApprovalItem =
+    liveApproval && liveApproval.approvalId
+      ? buildExecutionSessionApprovalItem(liveApproval.approvalId, {
+          taskId: liveApproval.taskId || taskId || "",
+          toolName: liveApproval.toolName,
+          argsSummary: liveApproval.toolArgsSummary,
+          summary: liveApproval.riskExplanation,
+          createdAt: liveApproval.createdAt,
+          expiresAt: liveApproval.expiresAt || null,
+        })
+      : null;
+  const activeApprovalItem =
+    activeApprovalItemFromInbox ?? syntheticApprovalItem ?? executionSessionApprovalItem ?? liveApprovalItem;
+  const activeApprovalExpiresAtMs = activeApprovalItem?.expires_at
+    ? Date.parse(activeApprovalItem.expires_at)
+    : Number.NaN;
+  const activeApprovalRemainingSeconds = Number.isFinite(activeApprovalExpiresAtMs)
+    ? Math.max(0, Math.ceil((activeApprovalExpiresAtMs - approvalNow) / 1000))
+    : null;
+  const shouldShowApprovalBanner = Boolean(
+    activeApprovalItem &&
+      (activeApprovalRemainingSeconds == null || activeApprovalRemainingSeconds > 0)
+  );
+
+  return {
+    activeApprovalItem,
+    latestApprovalContext,
+    latestExpiredApprovalContext,
+    activeApprovalRemainingSeconds,
+    shouldShowApprovalBanner,
+  };
+}

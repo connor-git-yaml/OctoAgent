@@ -1,7 +1,13 @@
 import type { TaskEvent, WorkProjectionItem } from "../../types";
-import { readPayloadString } from "./approval";
+import { payloadMatchesWork, readPayloadString } from "./approval";
 import { formatAgentRoleLabel } from "./presentation";
-import { ensureArray, resolveWorkActor, resolveWorkStatus, isAgentDirectExecution } from "./session";
+import {
+  ensureArray,
+  isAgentDirectExecution,
+  resolveWorkActor,
+  resolveWorkStatus,
+  sortWorksByUpdate,
+} from "./session";
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -678,4 +684,182 @@ export function buildWorkerActivity(
     tone: formatActivityTone(status, fallbackLatestMessageType),
     summary: formatActorSummary(actor, work.title, status, fallbackLatestMessageType),
   };
+}
+
+// ---------------------------------------------------------------------------
+// ChatWorkbench 派生：活动视图（F143 件 2 块 B 下沉）
+// ---------------------------------------------------------------------------
+
+export interface ChatActivityViewOptions {
+  delegationWorks: WorkProjectionItem[];
+  activeWork: WorkProjectionItem | null;
+  /** ensureArray(taskDetail?.events) */
+  taskDetailEvents: TaskEvent[];
+  activeConversationLatestType: string;
+  /** activeA2AConversationRecord?.target_agent ?? "" */
+  activeA2ATargetAgent: string;
+  hasInternalCollaboration: boolean;
+}
+
+export interface ChatActivityView {
+  relatedWorks: WorkProjectionItem[];
+  workEvents: TaskEvent[];
+  latestRuntimeEvidenceMs: number;
+  workerActivities: ChatActivityItem[];
+  fallbackWorkerActivity: ChatActivityItem[];
+}
+
+export function deriveChatActivityView(options: ChatActivityViewOptions): ChatActivityView {
+  const {
+    delegationWorks,
+    activeWork,
+    taskDetailEvents,
+    activeConversationLatestType,
+    activeA2ATargetAgent,
+    hasInternalCollaboration,
+  } = options;
+
+  const relatedWorks = sortWorksByUpdate(
+    delegationWorks.filter((item) => {
+      if (!activeWork?.work_id) {
+        return false;
+      }
+      if (item.work_id === activeWork.work_id) {
+        return true;
+      }
+      if (item.parent_work_id === activeWork.work_id) {
+        return true;
+      }
+      return false;
+    })
+  );
+  const workEvents = taskDetailEvents.filter((event) =>
+    activeWork?.work_id ? payloadMatchesWork(event, activeWork.work_id) : false
+  );
+  const latestRuntimeEvidenceMs = taskDetailEvents.reduce((latest, event) => {
+    const parsed = Date.parse(String(event.ts ?? ""));
+    return Number.isFinite(parsed) ? Math.max(latest, parsed) : latest;
+  }, 0);
+  const workerActivities: ChatActivityItem[] = relatedWorks.reduce<ChatActivityItem[]>(
+    (items, work) => {
+      const activity = buildWorkerActivity(work, activeConversationLatestType);
+      if (!activity) {
+        return items;
+      }
+      items.push({
+        ...activity,
+        traceTitle: `${activity.actor} 的处理轨迹`,
+        traceEntries: buildWorkerTraceEntries(
+          work,
+          workEvents.filter((event) => payloadMatchesWork(event, work.work_id))
+        ),
+      });
+      return items;
+    },
+    []
+  );
+  const fallbackWorkerActor = activeA2ATargetAgent
+    ? formatAgentRoleLabel(activeA2ATargetAgent)
+    : activeWork
+      ? formatAgentRoleLabel(resolveWorkActor(activeWork))
+      : "";
+  const fallbackWorkerActivity: ChatActivityItem[] =
+    hasInternalCollaboration &&
+    workerActivities.length === 0 &&
+    fallbackWorkerActor !== "主助手" &&
+    fallbackWorkerActor
+      ? [
+          {
+            id: "worker-fallback",
+            actor: fallbackWorkerActor,
+            stateLabel: formatActivityStateLabel(
+              activeWork ? resolveWorkStatus(activeWork) : "",
+              activeConversationLatestType || "TASK"
+            ),
+            tone: formatActivityTone(
+              activeWork ? resolveWorkStatus(activeWork) : "",
+              activeConversationLatestType || "TASK"
+            ),
+            summary: formatActorSummary(
+              fallbackWorkerActor,
+              activeWork?.title ?? "",
+              activeWork ? resolveWorkStatus(activeWork) : "",
+              activeConversationLatestType || "TASK"
+            ),
+          },
+        ]
+      : [];
+
+  return {
+    relatedWorks,
+    workEvents,
+    latestRuntimeEvidenceMs,
+    workerActivities,
+    fallbackWorkerActivity,
+  };
+}
+
+/** 新一轮消息刚发出、旧任务事件尚未追上时的占位活动 */
+export function buildFreshTurnActivityItems(): ChatActivityItem[] {
+  return [
+    {
+      id: "agent-fresh-turn",
+      actor: "主助手",
+      stateLabel: "进行中",
+      tone: "running" as const,
+      summary: "主助手正在开始处理这条新消息，稍后会替换成这轮真实的工具链和处理阶段。",
+      traceTitle: "主助手的直连处理轨迹",
+      traceEntries: [],
+    },
+  ];
+}
+
+export interface ChatActivityItemsOptions {
+  normalizedTaskStatus: string;
+  streaming: boolean;
+  hasInternalCollaboration: boolean;
+  activeConversationLatestType: string;
+  isDirectExecution: boolean;
+  activeWork: WorkProjectionItem | null;
+  workEvents: TaskEvent[];
+  workerActivities: ChatActivityItem[];
+  fallbackWorkerActivity: ChatActivityItem[];
+}
+
+/** 主助手 + worker（至多 2 条）+ 兜底活动的最终展示序列 */
+export function buildChatActivityItems(options: ChatActivityItemsOptions): ChatActivityItem[] {
+  const {
+    normalizedTaskStatus,
+    streaming,
+    hasInternalCollaboration,
+    activeConversationLatestType,
+    isDirectExecution,
+    activeWork,
+    workEvents,
+    workerActivities,
+    fallbackWorkerActivity,
+  } = options;
+  return [
+    {
+      ...buildAgentActivity(
+        normalizedTaskStatus,
+        streaming,
+        hasInternalCollaboration,
+        activeConversationLatestType,
+        isDirectExecution
+      ),
+      traceTitle: isDirectExecution ? "主助手的直连处理轨迹" : "主助手的委派轨迹",
+      traceEntries: activeWork
+        ? buildAgentTraceEntries(
+            activeWork,
+            workEvents,
+            activeConversationLatestType,
+            normalizedTaskStatus,
+            isDirectExecution
+          )
+        : [],
+    },
+    ...workerActivities.slice(0, 2),
+    ...fallbackWorkerActivity,
+  ];
 }

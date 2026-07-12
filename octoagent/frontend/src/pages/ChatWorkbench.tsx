@@ -4,47 +4,39 @@ import {
   ApiError,
   attachExecutionInput,
 } from "../api/client";
-import { TERMINAL_TASK_STATUSES } from "../domains/chat/constants";
+import { TERMINAL_TASK_STATUSES, matchSlashCommands } from "../domains/chat/constants";
 import { MessageBubble, type MessageBubbleActivityItem } from "../components/ChatUI/MessageBubble";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import {
-  buildAgentActivity,
-  buildAgentTraceEntries,
-  buildWorkerActivity,
-  buildWorkerTraceEntries,
-  formatActivityStateLabel,
-  formatActivityTone,
-  formatActorSummary,
+  buildChatActivityItems,
+  buildFreshTurnActivityItems,
+  deriveChatActivityView,
 } from "../domains/chat/activity";
 import type { ChatActivityItem } from "../domains/chat/activity";
 import {
   buildExecutionSessionApprovalItem,
   buildSyntheticApprovalItem,
+  deriveActiveApprovalPresentation,
   formatCountdown,
   mapOperatorQuickAction,
   parseApprovalCommand,
-  payloadMatchesWork,
   readLatestApprovalContext,
-  readLatestExpiredApprovalContext,
 } from "../domains/chat/approval";
-import { formatAgentRoleLabel, formatTaskStatusLabel, formatTaskStatusTone } from "../domains/chat/presentation";
 import {
+  deriveChatHeaderPresentation,
+  formatTaskStatusLabel,
+  formatTaskStatusTone,
+} from "../domains/chat/presentation";
+import {
+  deriveActiveWorkContext,
   ensureArray,
-  isAgentDirectExecution,
-  readSummaryString,
-  resolveProjectName,
   resolveRestorableTaskIds,
-  resolveSessionOwnerProfileId,
-  resolveWorkActor,
-  resolveWorkStatus,
-  sortWorksByUpdate,
 } from "../domains/chat/session";
 import { useChatStream } from "../hooks/useChatStream";
 import { readStoredTaskId } from "../hooks/chatStreamHelpers";
 import { useTaskLiveState } from "../hooks/useTaskLiveState";
 import { useAutoScroll } from "../hooks/useAutoScroll";
 import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
-import { formatSessionDisplayTitle } from "../workbench/utils";
 import type {
   ControlPlaneResourceRef,
   OperatorActionKind,
@@ -53,24 +45,6 @@ import type {
 
 // 稳定引用：避免每次渲染创建新空数组破坏 MessageBubble 的 memo
 const EMPTY_ACTIVITY: MessageBubbleActivityItem[] = [];
-
-const CHAT_SLASH_COMMANDS = [
-  {
-    value: "/approve",
-    description: "批准一次当前审批",
-    action: "approve_once",
-  },
-  {
-    value: "/approve always",
-    description: "总是批准当前审批",
-    action: "approve_always",
-  },
-  {
-    value: "/deny",
-    description: "拒绝当前审批",
-    action: "deny",
-  },
-] as const;
 
 export default function ChatWorkbench() {
   const { sessionId: routeSessionId } = useParams<{ sessionId?: string }>();
@@ -195,174 +169,65 @@ export default function ChatWorkbench() {
   const [freshTurnStartedAt, setFreshTurnStartedAt] = useState<number | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const sessionAliasInputRef = useRef<HTMLInputElement | null>(null);
-  const defaultRootAgentId = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_id");
-  const defaultRootAgent = workerProfiles.find((profile) => profile.profile_id === defaultRootAgentId);
-  // default_profile_name 由后端解析（包含 AgentProfile 回退），用于无会话时的名称降级
-  const defaultRootAgentName = readSummaryString(workerProfilesDocument?.summary ?? {}, "default_profile_name");
-  const activeSession = sessions.find((item) => item.task_id === taskId) ?? null;
-  const currentSession =
-    taskId != null
-      ? activeSession ?? (routeSessionId ? routeSession : webSessions[0] || null)
-      : routeSessionId
-        ? routeSession
-        : restoreChoice === "continue"
-          ? webSessions[0] || null
-          : null;
-  const activeExecutionSummary =
-    activeSession?.execution_summary &&
-    typeof activeSession.execution_summary === "object" &&
-    !Array.isArray(activeSession.execution_summary)
-      ? (activeSession.execution_summary as Record<string, unknown>)
-      : null;
-  const activeWorkId = typeof activeExecutionSummary?.work_id === "string" ? activeExecutionSummary.work_id : "";
-  const latestTaskWork =
-    sortWorksByUpdate(delegationWorks.filter((item) => item.task_id === taskId))[0] ?? null;
-  const activeWork = delegationWorks.find((item) => item.work_id === activeWorkId) ?? latestTaskWork;
-  const activeContextFrame =
-    contextFrames.find((item) => item.task_id === taskId) ??
-    (activeSession ? contextFrames.find((item) => item.session_id === activeSession.session_id) ?? null : null);
-  const activeSessionOwnerProfileId = resolveSessionOwnerProfileId(activeSession);
-  const activeCompatibilityFlags = ensureArray(currentSession?.compatibility_flags);
-  const legacyResetRecommended = Boolean(currentSession?.reset_recommended);
-  const compatibilityMessage =
-    currentSession?.compatibility_message?.trim() ||
-    (activeCompatibilityFlags.includes("legacy_context_polluted")
-      ? "这条历史会话仍沿用旧版 owner/profile 继承语义，建议先重置 continuity，再继续新的对话。"
-      : "");
-  const isDirectExecution = isAgentDirectExecution(activeWork);
-  const activeConversationId =
-    readSummaryString(activeWork?.runtime_summary ?? {}, "research_a2a_conversation_id") ||
-    activeWork?.a2a_conversation_id ||
-    "";
-  const activeA2AConversationRecord =
-    (activeConversationId
-      ? a2aConversations.find((item) => item.a2a_conversation_id === activeConversationId) ?? null
-      : null) ??
-    (activeWork?.work_id
-      ? a2aConversations.find((item) => item.work_id === activeWork.work_id) ?? null
-      : null) ??
-    (taskId ? a2aConversations.find((item) => item.task_id === taskId) ?? null : null);
+  // 块 A：活跃 work / 会话 / A2A 协作上下文（纯派生，逻辑在 domains/chat/session）
+  const {
+    activeSession,
+    currentSession,
+    activeSessionWorkId,
+    activeWork,
+    activeContextFrame,
+    activeSessionOwnerProfileId,
+    legacyResetRecommended,
+    compatibilityMessage,
+    isDirectExecution,
+    activeConversationId,
+    activeA2AConversationRecord,
+    hasInternalCollaboration,
+    activeConversationLatestType,
+    activeConversationWorkerSessionId,
+    normalizedTaskStatus,
+    hasLoadedTaskStatus,
+  } = deriveActiveWorkContext({
+    sessions,
+    webSessions,
+    routeSessionId,
+    routeSession,
+    restoreChoice,
+    taskId,
+    delegationWorks,
+    contextFrames,
+    a2aConversations,
+    taskDetailStatus: taskDetail?.task?.status,
+  });
 
-  const hasInternalCollaboration =
-    !isDirectExecution &&
-    (activeA2AConversationRecord != null ||
-      Boolean(activeConversationId || readSummaryString(activeWork?.runtime_summary ?? {}, "research_worker_id")));
-  const activeConversationLatestType = activeA2AConversationRecord?.latest_message_type || "";
-  const activeConversationWorkerSessionId =
-    activeA2AConversationRecord?.target_agent_session_id ||
-    readSummaryString(activeWork?.runtime_summary ?? {}, "research_worker_agent_session_id") ||
-    activeWork?.worker_agent_session_id ||
-    "";
-  const normalizedTaskStatus = String(taskDetail?.task?.status ?? activeSession?.status ?? "").trim().toUpperCase();
-  const hasLoadedTaskStatus = normalizedTaskStatus.length > 0;
-
-  const relatedWorks = sortWorksByUpdate(
-    delegationWorks.filter((item) => {
-      if (!activeWork?.work_id) {
-        return false;
-      }
-      if (item.work_id === activeWork.work_id) {
-        return true;
-      }
-      if (item.parent_work_id === activeWork.work_id) {
-        return true;
-      }
-      return false;
-    })
-  );
-  const workEvents = ensureArray(taskDetail?.events).filter((event) =>
-    activeWork?.work_id ? payloadMatchesWork(event, activeWork.work_id) : false
-  );
-  const latestRuntimeEvidenceMs = ensureArray(taskDetail?.events).reduce((latest, event) => {
-    const parsed = Date.parse(String(event.ts ?? ""));
-    return Number.isFinite(parsed) ? Math.max(latest, parsed) : latest;
-  }, 0);
+  // 块 B：worker 活动 + 运行时证据（纯派生，逻辑在 domains/chat/activity）
+  const { workEvents, latestRuntimeEvidenceMs, workerActivities, fallbackWorkerActivity } =
+    deriveChatActivityView({
+      delegationWorks,
+      activeWork,
+      taskDetailEvents: ensureArray(taskDetail?.events),
+      activeConversationLatestType,
+      activeA2ATargetAgent: activeA2AConversationRecord?.target_agent ?? "",
+      hasInternalCollaboration,
+    });
   const suppressHistoricalActivity =
     freshTurnStartedAt != null && latestRuntimeEvidenceMs < freshTurnStartedAt - 500;
-  const workerActivities: ChatActivityItem[] = relatedWorks.reduce<ChatActivityItem[]>((items, work) => {
-      const activity = buildWorkerActivity(work, activeConversationLatestType);
-      if (!activity) {
-        return items;
-      }
-      items.push({
-        ...activity,
-        traceTitle: `${activity.actor} 的处理轨迹`,
-        traceEntries: buildWorkerTraceEntries(
-          work,
-          workEvents.filter((event) => payloadMatchesWork(event, work.work_id))
-        ),
-      });
-      return items;
-    }, []);
-  const fallbackWorkerActor = activeA2AConversationRecord?.target_agent
-    ? formatAgentRoleLabel(activeA2AConversationRecord.target_agent)
-    : activeWork
-      ? formatAgentRoleLabel(resolveWorkActor(activeWork))
-      : "";
-  const fallbackWorkerActivity: ChatActivityItem[] =
-    hasInternalCollaboration &&
-    workerActivities.length === 0 &&
-    fallbackWorkerActor !== "主助手" &&
-    fallbackWorkerActor
-      ? [
-          {
-            id: "worker-fallback",
-            actor: fallbackWorkerActor,
-            stateLabel: formatActivityStateLabel(
-              activeWork ? resolveWorkStatus(activeWork) : "",
-              activeConversationLatestType || "TASK"
-            ),
-            tone: formatActivityTone(
-              activeWork ? resolveWorkStatus(activeWork) : "",
-              activeConversationLatestType || "TASK"
-            ),
-            summary: formatActorSummary(
-              fallbackWorkerActor,
-              activeWork?.title ?? "",
-              activeWork ? resolveWorkStatus(activeWork) : "",
-              activeConversationLatestType || "TASK"
-            ),
-          },
-        ]
-      : [];
   const activityItems: ChatActivityItem[] = useMemo(() => {
     if (taskId && suppressHistoricalActivity) {
-      return [
-        {
-          id: "agent-fresh-turn",
-          actor: "主助手",
-          stateLabel: "进行中",
-          tone: "running" as const,
-          summary: "主助手正在开始处理这条新消息，稍后会替换成这轮真实的工具链和处理阶段。",
-          traceTitle: "主助手的直连处理轨迹",
-          traceEntries: [],
-        },
-      ];
+      return buildFreshTurnActivityItems();
     }
     if (!taskId) return EMPTY_ACTIVITY;
-    return [
-      {
-        ...buildAgentActivity(
-          normalizedTaskStatus,
-          streaming,
-          hasInternalCollaboration,
-          activeConversationLatestType,
-          isDirectExecution
-        ),
-        traceTitle: isDirectExecution ? "主助手的直连处理轨迹" : "主助手的委派轨迹",
-        traceEntries: activeWork
-          ? buildAgentTraceEntries(
-              activeWork,
-              workEvents,
-              activeConversationLatestType,
-              normalizedTaskStatus,
-              isDirectExecution
-            )
-          : [],
-      },
-      ...workerActivities.slice(0, 2),
-      ...fallbackWorkerActivity,
-    ];
+    return buildChatActivityItems({
+      normalizedTaskStatus,
+      streaming,
+      hasInternalCollaboration,
+      activeConversationLatestType,
+      isDirectExecution,
+      activeWork,
+      workEvents,
+      workerActivities,
+      fallbackWorkerActivity,
+    });
   }, [
     taskId, suppressHistoricalActivity, normalizedTaskStatus, streaming,
     hasInternalCollaboration, activeConversationLatestType, isDirectExecution,
@@ -387,146 +252,62 @@ export default function ChatWorkbench() {
     !isEmptyConversation;
   const taskStatusLabel = formatTaskStatusLabel(normalizedTaskStatus);
   const taskStatusTone = formatTaskStatusTone(normalizedTaskStatus);
-  const conversationTitle =
-    taskDetail?.task?.title ||
-    activeSession?.title ||
-    activeSession?.latest_message_summary ||
-    (taskId ? "这轮对话正在处理中" : "开始一段对话");
-  const techRefs = [
-    taskId ? { label: "任务 ID", value: taskId } : null,
-    activeSession?.session_id ? { label: "会话 ID", value: activeSession.session_id } : null,
-    activeWork?.work_id ? { label: "Work ID", value: activeWork.work_id } : null,
-    activeConversationId ? { label: "协作链路 ID", value: activeConversationId } : null,
-    activeConversationWorkerSessionId ? { label: "执行会话", value: activeConversationWorkerSessionId } : null,
-    activeContextFrame?.context_frame_id ? { label: "上下文帧 ID", value: activeContextFrame.context_frame_id } : null,
-  ].filter((item): item is { label: string; value: string } => Boolean(item));
-  const activeSessionProjectId = activeSession?.project_id ?? "";
-  const activeSessionWorkId = readSummaryString(
-    (activeSession?.execution_summary ?? {}) as Record<string, unknown>,
-    "work_id"
-  );
-  const pendingConversationProjectId = sessionDocument?.new_conversation_project_id ?? "";
-  const pendingConversationAgentProfileId =
-    sessionDocument?.new_conversation_agent_profile_id ?? "";
-  const effectiveProjectId =
-    activeSessionProjectId || pendingConversationProjectId || (projectSelector?.current_project_id ?? "");
-  const effectiveProjectLabel = effectiveProjectId
-    ? resolveProjectName(availableProjects, effectiveProjectId)
-    : "";
-  const operatorItems = ensureArray(sessionDocument?.operator_items);
-  const activeTaskOperatorItems = operatorItems.filter((item) => {
-    if (item.state && String(item.state).trim().toLowerCase() !== "pending") {
-      return false;
-    }
-    if (taskId && item.task_id === taskId) {
-      return true;
-    }
-    if (activeSession?.thread_id && item.thread_id === activeSession.thread_id) {
-      return true;
-    }
-    return false;
+  // 块 C：活跃审批横幅四源合一 + 倒计时（纯派生，逻辑在 domains/chat/approval；
+  // approvalNow 每秒 tick，故沿 baseline 不包 useMemo、每渲染直调）
+  const {
+    activeApprovalItem,
+    latestApprovalContext,
+    latestExpiredApprovalContext,
+    activeApprovalRemainingSeconds,
+    shouldShowApprovalBanner,
+  } = deriveActiveApprovalPresentation({
+    taskId,
+    operatorItems: ensureArray(sessionDocument?.operator_items),
+    activeSessionThreadId: activeSession?.thread_id ?? "",
+    taskDetailEvents: taskDetail?.events,
+    approvalWorkId: activeWork?.work_id || activeSessionWorkId,
+    pendingApprovals,
+    executionSessionPendingApprovalId: executionSession?.pending_approval_id ?? "",
+    liveApproval,
+    approvalNow,
   });
-  const activeApprovalItemFromInbox =
-    activeTaskOperatorItems.find((item) =>
-      item.quick_actions.some((action) =>
-        ["approve_once", "approve_always", "deny"].includes(action.kind)
-      )
-    ) ?? null;
-  const latestApprovalContext =
-    taskDetail?.events && taskId
-      ? readLatestApprovalContext(
-          taskDetail.events,
-          activeWork?.work_id || activeSessionWorkId
-        )
-      : null;
-  const latestExpiredApprovalContext =
-    taskDetail?.events && taskId
-      ? readLatestExpiredApprovalContext(
-          taskDetail.events,
-          activeWork?.work_id || activeSessionWorkId
-        )
-      : null;
-  const syntheticApprovalItem =
-    taskId && pendingApprovals.length > 0 ? buildSyntheticApprovalItem(pendingApprovals[0]!) : null;
-  const executionSessionApprovalItem =
-    taskId && (executionSession?.pending_approval_id || latestApprovalContext?.approvalId)
-      ? buildExecutionSessionApprovalItem(
-          executionSession?.pending_approval_id || latestApprovalContext?.approvalId || "",
-          {
-            taskId,
-            toolName: latestApprovalContext?.toolName,
-            argsSummary: latestApprovalContext?.argsSummary,
-            summary: latestApprovalContext?.summary,
-            createdAt: latestApprovalContext?.createdAt,
-            expiresAt: latestApprovalContext?.expiresAt,
-          }
-        )
-      : null;
-  // SSE 直通审批项：从 useChatStream 的 liveApproval 直接构造，不依赖 REST 轮询
-  const liveApprovalItem =
-    liveApproval && liveApproval.approvalId
-      ? buildExecutionSessionApprovalItem(liveApproval.approvalId, {
-          taskId: liveApproval.taskId || taskId || "",
-          toolName: liveApproval.toolName,
-          argsSummary: liveApproval.toolArgsSummary,
-          summary: liveApproval.riskExplanation,
-          createdAt: liveApproval.createdAt,
-          expiresAt: liveApproval.expiresAt || null,
-        })
-      : null;
-  const activeApprovalItem =
-    activeApprovalItemFromInbox ?? syntheticApprovalItem ?? executionSessionApprovalItem ?? liveApprovalItem;
-  const activeApprovalExpiresAtMs = activeApprovalItem?.expires_at
-    ? Date.parse(activeApprovalItem.expires_at)
-    : Number.NaN;
-  const activeApprovalRemainingSeconds = Number.isFinite(activeApprovalExpiresAtMs)
-    ? Math.max(0, Math.ceil((activeApprovalExpiresAtMs - approvalNow) / 1000))
-    : null;
-  const shouldShowApprovalBanner = Boolean(
-    activeApprovalItem &&
-      (activeApprovalRemainingSeconds == null || activeApprovalRemainingSeconds > 0)
-  );
-  const slashCommandMatches = useMemo(() => {
-    const normalized = input.trim().toLowerCase();
-    if (!normalized.startsWith("/")) {
-      return [];
-    }
-    return CHAT_SLASH_COMMANDS.filter((item) => item.value.startsWith(normalized));
-  }, [input]);
+  const slashCommandMatches = useMemo(() => matchSlashCommands(input), [input]);
   const canSteerCurrentRun =
     Boolean(taskId) &&
     normalizedTaskStatus === "WAITING_INPUT" &&
     executionSession?.can_attach_input !== false;
-  // 会话 owner = 用户首先选择与之对话的 Agent；不是本轮执行 target。
-  const currentSessionOwnerProfileId =
-    activeSessionOwnerProfileId ||
-    resolveSessionOwnerProfileId(currentSession) ||
-    pendingConversationAgentProfileId ||
-    defaultRootAgentId;
-  const conversationOwnerName =
-    (activeSession ?? currentSession)?.session_owner_name?.trim() ||
-    workerProfiles.find((p) => p.profile_id === currentSessionOwnerProfileId)?.name ||
-    defaultRootAgent?.name ||
-    defaultRootAgentName ||
-    "OctoAgent";
-  const currentSessionAlias =
-    currentSession?.alias?.trim() || activeSession?.alias?.trim() || "";
-  const sessionTitleBase =
-    (currentSession?.title?.trim()) ||
-    (activeSession?.title?.trim()) ||
-    effectiveProjectLabel ||
-    "";
-  const sessionDisplayName = formatSessionDisplayTitle({
-    alias: currentSessionAlias,
-    title: sessionTitleBase,
-    fallbackTitle: conversationTitle,
+  // 块 D：会话头部展示（标题/技术引用/owner 名/别名，逻辑在 domains/chat/presentation）
+  const {
+    conversationTitle,
+    techRefs,
+    currentSessionOwnerProfileId,
+    conversationOwnerName,
+    currentSessionAlias,
+    sessionTitleBase,
+    sessionDisplayName,
+    editableSessionId,
+    editableThreadId,
+    canEditSessionAlias,
+  } = deriveChatHeaderPresentation({
+    taskId,
+    routeSessionId,
+    taskDetailTitle: taskDetail?.task?.title,
+    activeSession,
+    currentSession,
+    routeSessionThreadId: routeSession?.thread_id,
+    activeWork,
+    activeConversationId,
+    activeConversationWorkerSessionId,
+    activeContextFrameId: activeContextFrame?.context_frame_id,
+    activeSessionOwnerProfileId,
+    workerProfiles,
+    workerProfilesSummary: workerProfilesDocument?.summary ?? {},
+    availableProjects,
+    currentProjectId: projectSelector?.current_project_id ?? "",
+    pendingConversationProjectId: sessionDocument?.new_conversation_project_id ?? "",
+    pendingConversationAgentProfileId: sessionDocument?.new_conversation_agent_profile_id ?? "",
   });
   const sessionTitleLabel = sessionDisplayName;
-  const editableSessionId =
-    currentSession?.session_id || activeSession?.session_id || routeSessionId || "";
-  const editableThreadId =
-    currentSession?.thread_id || activeSession?.thread_id || routeSession?.thread_id || "";
-  const canEditSessionAlias = Boolean(editableSessionId);
   const isSavingSessionAlias = busyActionId === "session.set_alias";
   const inputPlaceholder = canSteerCurrentRun
     ? executionSession?.requested_input?.trim() || "直接补充当前这轮需要的信息"

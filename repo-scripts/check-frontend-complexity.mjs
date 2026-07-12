@@ -9,12 +9,11 @@ const explicitLimits = new Map([
   ["octoagent/frontend/src/pages/AgentCenter.tsx", 4800],
   ["octoagent/frontend/src/pages/ControlPlane.tsx", 4100],
   ["octoagent/frontend/src/pages/SettingsCenter.tsx", 1900],
-  // F137 放宽兜底（现状 4477 > 原 3300，护栏失守无人知期间涨的存量）：
-  // 放到 current+小余量只挡新增长；F143 UI 变薄后 ratchet 回收到 3300 以下。
-  ["octoagent/frontend/src/index.css", 4600],
-  // F137 放宽兜底（现状 1204 > 默认 1200）：F143 明确要下沉 ChatWorkbench，
-  // F137 不改其代码（抢范围）；F143 完成后删除本行回落默认 1200。
-  ["octoagent/frontend/src/pages/ChatWorkbench.tsx", 1250],
+  // F137 放宽兜底（原 3300 失守期间涨到 4477 的存量）。F143 收紧到
+  // current+小余量继续只挡增长：F143 五件范围（reducer 化/编排下沉/补测/
+  // 删死代码/杂项）均不含 CSS 拆分，且被删的 ApprovalPanel 无任何样式
+  // 陪葬——回收到 3300 需要独立的样式拆分工作（follow-up）。
+  ["octoagent/frontend/src/index.css", 4480],
 ]);
 
 const ruleSet = [
