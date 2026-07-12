@@ -5157,6 +5157,19 @@ class TestControlPlaneApi:
         profile_id = create_payload["profile_id"]
         assert create_payload["status"] == "draft"
         assert create_payload["draft_revision"] == 1
+        # F142 范式样例（dirty-equals）：action data 的 full-shape 契约钉住——
+        # worker_service 往 data 加/删顶层字段时本断言会红（逐字段断言静默放过）；
+        # 不稳定 id 用 IsStr 打洞、嵌套 review 用 IsPartialDict()（任意 dict）
+        # 打洞（其结构有独立 review 测试覆盖）。函数级 importorskip 防御共享
+        # venv 未装窗口（Codex spec P2：上面的既有断言已执行，只 SKIP 增强段）。
+        dirty_equals = pytest.importorskip("dirty_equals")
+        assert create_payload == {
+            "profile_id": dirty_equals.IsStr(),
+            "status": "draft",
+            "draft_revision": 1,
+            "active_revision": 0,
+            "review": dirty_equals.IsPartialDict(),
+        }
 
         worker_profiles_resp = await control_plane_client.get(
             "/api/control/resources/worker-profiles"

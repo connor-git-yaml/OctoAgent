@@ -10,6 +10,7 @@ import asyncio
 import os
 from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from octoagent.core.store import create_store_group
@@ -177,7 +178,19 @@ class TestLLMEcho:
 
         state_events = [e for e in events if e.type == "STATE_TRANSITION"]
         assert len(state_events) == 2
-        assert state_events[0].payload["from_status"] == "CREATED"
-        assert state_events[0].payload["to_status"] == "RUNNING"
-        assert state_events[1].payload["from_status"] == "RUNNING"
-        assert state_events[1].payload["to_status"] == "SUCCEEDED"
+        # F142 范式样例（dirty-equals）：full-shape 相等替代逐字段断言——payload
+        # 新增字段时整 dict 相等会红（契约漂移可见），逐字段断言则静默放过；
+        # 不稳定字段用 matcher 打洞。函数级 importorskip 防御共享 venv 未装
+        # dirty-equals 的窗口（Codex spec P2：只 SKIP 本增强段不殃及全文件——
+        # 上面的 len 断言已执行）。
+        dirty_equals = pytest.importorskip("dirty_equals")
+        assert state_events[0].payload == {
+            "from_status": "CREATED",
+            "to_status": "RUNNING",
+            "reason": dirty_equals.IsStr(),
+        }
+        assert state_events[1].payload == {
+            "from_status": "RUNNING",
+            "to_status": "SUCCEEDED",
+            "reason": dirty_equals.IsStr(),
+        }

@@ -28,6 +28,10 @@ dev = [
     "pytest-xdist>=3.8.0",
     "pytest-rerunfailures>=14.0",
     "psutil>=5.9",
+    # F142 件4：payload 断言便利件（pydantic-ai 范式）——整 dict 相等 + 不稳定
+    # 字段（id/时间戳）matcher 打洞；样例改造见 test_us4_llm_echo.py /
+    # test_control_plane_api.py 标「F142 范式样例」处
+    "dirty-equals>=0.9",
 ]
 
 [tool.uv.sources]
