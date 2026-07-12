@@ -387,7 +387,7 @@ def quota_skip_sanity_marker() -> str:
 
 
 # ---------------------------------------------------------------------------
-# T-P2-14: 自动给 e2e_smoke / e2e_full 测试加 flaky marker
+# T-P2-14（F141 收窄）: 自动给 e2e_full 测试加 flaky marker——live 变异性政策
 # ---------------------------------------------------------------------------
 
 
@@ -395,15 +395,22 @@ def pytest_collection_modifyitems(
     config: pytest.Config,
     items: list[pytest.Item],
 ) -> None:
-    """给 e2e_smoke / e2e_full 测试自动加 ``@pytest.mark.flaky(reruns=1, reruns_delay=2)``。
+    """给 e2e_full 测试自动加 ``@pytest.mark.flaky(reruns=1, reruns_delay=2)``。
 
-    单测 / 不带 e2e marker 的测试不加（原行为不变，不引入意外重试开销）。
+    F141 收窄（原 T-P2-14 blanket 覆盖 e2e_smoke + e2e_full）：
+    - **e2e_full 保留**：真 LLM / 外部网络的固有变异性是属性不是 bug——rerun 是
+      live 变异性政策的次级缓冲（主机制是 GATE_P3_DEVIATION 结构化 SKIP），
+      不属于 flake 掩盖；
+    - **e2e_smoke 移出**：smoke 是确定性集成层（DI stub、不打 LLM）——它抖动
+      即真 bug 或该进 quarantine manifest（``octoagent/tests/quarantine.json``，
+      六字段 + 过期强制复查），blanket rerun 属掩盖。
+    三分处置边界见 ``octoagent/tests/AGENTS.md``。
     """
     # FR-23: rerun 一次 + 2s delay
     flaky_marker = pytest.mark.flaky(reruns=1, reruns_delay=2)
     for item in items:
         markers = {m.name for m in item.iter_markers()}
-        if markers & {"e2e_smoke", "e2e_full"}:
+        if "e2e_full" in markers:
             item.add_marker(flaky_marker)
 
 
