@@ -337,12 +337,16 @@ class TestAttestRemoteHttpChain:
 class TestAttestRemoteRedlines:
     @pytest.mark.parametrize(
         "scenario",
-        ["happy", "sse_401", "connect_error"],
-        ids=["pass 全链", "SSE 拒绝", "连接异常"],
+        ["happy", "sse_401", "connect_error", "sse_raises"],
+        ids=["pass 全链", "SSE 拒绝", "连接异常", "SSE 流中异常"],
     )
     def test_token_never_leaks_into_report(self, scenario: str) -> None:
         """FR-B3 机械断言：sentinel token 在 report JSON 全文零命中——
-        含 SSE 检查（URL 带 query token 的唯一位置）与异常回显路径。"""
+        含 SSE 检查（URL 带 query token 的唯一位置）与异常回显路径。
+
+        ``sse_raises`` 是泄漏最高危路径（Opus 自审补格）：异常发生在**带
+        access_token query 的 SSE 请求上**，真实 httpx 异常 str 会回显完整
+        URL——connect_error 场景在 /ready 就短路，压不到这条。"""
 
         def sse_401_handler(request: httpx.Request) -> httpx.Response:
             if request.url.path.startswith("/api/stream/task/"):
@@ -353,10 +357,17 @@ class TestAttestRemoteRedlines:
             # 真实 httpx 异常文本会含完整 URL（可能带 access_token query）
             raise httpx.ConnectTimeout(f"timeout for {request.url}")
 
+        def sse_raises_handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.startswith("/api/stream/task/"):
+                # 模拟真实 httpx 异常回显：message 里带上含 token 的完整 URL
+                raise httpx.ReadTimeout(f"read timeout for {request.url}")
+            return _happy_remote_handler(request)
+
         handler = {
             "happy": _happy_remote_handler,
             "sse_401": sse_401_handler,
             "connect_error": connect_error_handler,
+            "sse_raises": sse_raises_handler,
         }[scenario]
         _, kwargs = _remote_kwargs(handler)
         report = run_remote_probe(**kwargs)
@@ -364,6 +375,9 @@ class TestAttestRemoteRedlines:
         assert _SENTINEL_TOKEN not in _report_text(report), (
             f"token 泄漏进 report（scenario={scenario}）"
         )
+        if scenario == "sse_raises":
+            by_name = {c.name: c for c in report.checks}
+            assert by_name["sse_channel"].ok is False, "流中异常应判 SSE fail"
 
     def test_probe_does_not_touch_instance_files(self, tmp_path: Path) -> None:
         """FR-B5：探针只读——实例根 octoagent.yaml / .env 前后字节不变。"""

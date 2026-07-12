@@ -68,6 +68,18 @@
   软化 + `shutdown(wait=False)` 不 join 卡死线程）+ pid + `/ready` +
   last_error_line（脱敏后截断）。
 
+### 4b. `octo attest service` 崩溃自愈探针（F144，`attest_commands.py`）
+
+F129 AC-1「崩溃自愈」的可重复化（user-guide §6 手工脚本吸收进命令）：status 健康
+→ **SIGKILL** 真 pid（上面 stop 语义即证据：SIGTERM 优雅 exit 0 **不**触发自动重启，
+SIGKILL 才被 supervisor 判异常立即拉起——故探针必须 SIGKILL）→ poll `status()`
+恢复 → 断言新 pid ≠ 旧 pid（+ ready==True，无 verify_url 时降级 pid 判定）。
+`--dry-run` 只检不杀；真跑先声明「服务秒级闪断」（`--json` 时声明走 stderr）。
+三态 `pass/not_enabled/fail`（exit 0/0/1）。**不进 CI**（真副作用）；探针逻辑由
+`packages/provider/tests/dx/test_attest_commands.py` hermetic 守（fake manager /
+kill 记录 / 虚拟时钟）。开机自启半边物理不可自动化 →
+`docs/codebase-architecture/attestation-checklist.md` ATT-129-BOOT。
+
 ## 5. 日志双层模型
 
 ```

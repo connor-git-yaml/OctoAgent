@@ -80,6 +80,13 @@ DOMAIN_REGISTRY：
   （M9 "L2/L3 只能宿主机跑" 洞的第一条补口）。
 - **成本画像**：4 case 全 11 段 bootstrap + 决策环 < 3s（真 LLM 单 call 60-120s）。
 - 是否升 e2e_smoke / 归入 F141 pr lane：合入后主 session 决定。
+- **F144 扩展**：`test_e2e_scripted_write_approval.py`（同 marker）——脚本脑驱动
+  `behavior.write_file` × **F136 服务端审批全链**（真 ApprovalGate/Manager +
+  真 REST `POST /api/approve/{id}`，approve/reject 双路径），吸收 F135 gap-1
+  「USER.md 初始化引导闭环」手工验证。注意两点范式差异：①须绑真
+  `ExecutionRuntimeContext`（生产由 task_service.py:745 绑，misc_tools 裸调
+  `get_current_execution_context` 未绑即 raise）；②`permission_preset=full`
+  下审批仍触发 = 服务端审批不可被 policy 放宽绕过的最强断言。
 
 ### 2.1 域 #10（A2A）e2e 边界说明
 
@@ -270,11 +277,33 @@ create_app 构造期注册，遮蔽 lifespan 期 harness 挂载的 telegram webh
 - **OAuth profile 失效自然 SKIP**：`tests/fixtures/local-instance/auth-profiles*`
   无真实 token 时 e2e_full 真实 LLM 测自然 SKIP，不阻断 commit。
 
-## 11. 相关文档
+## 11. 本机 live 验收探针（`octo attest`，F144）
+
+测试金字塔之外的**第五层**：跑在用户真实托管实例上的验收探针（验证吸收原则——
+「请用户手工验证」必须被分层吸收，探针吸收的是 hermetic 测试物理够不到的
+「真机链路」半边）。
+
+| 命令 | 吸收对象 | 副作用 |
+|------|---------|--------|
+| `octo attest remote [--json]` | F130 AC-1 链路半边（tailscale→serve→/ready+SPA+bearer+SSE 验活） | 零（只读 GET） |
+| `octo attest service [--dry-run] [--json]` | F129 AC-1 崩溃自愈（SIGKILL 真 pid → poll 恢复 → 新 pid） | 服务秒级闪断 |
+
+- **三态协议**：`pass / not_enabled / fail`（exit 0/0/1）——`not_enabled` 是
+  「能力未启用」不是失败；`fail` 才是回归信号（含「已启用但 tailscale 断链」）。
+- **绝不进 CI**：真副作用 + 依赖真实实例。探针逻辑回归由 hermetic 单测
+  `packages/provider/tests/dx/test_attest_commands.py` 在 CI 守（DI 全 fake：
+  零真 tailscale / 零真 HTTP / 零真 kill / 虚拟时钟）。
+- **F141 消费**：release lane 跑两探针 `--json` + attestation 清单签署
+  （`docs/codebase-architecture/attestation-checklist.md`，物理不可自动化残余，
+  首版仅 2 项）。契约细节见
+  `.specify/features/144-attestation-absorb/handoff-to-F141.md`。
+
+## 12. 相关文档
 
 - `MODULE_SINGLETONS.md`（reset 清单实证）
 - `docs/codebase-architecture/harness-and-context.md`（OctoHarness / SnapshotStore /
   ApprovalGate / DelegationManager 架构）
 - `docs/codebase-architecture/testing-concurrency.md`（F083 并发加速、xdist 提速）
+- `docs/codebase-architecture/attestation-checklist.md`（人工验收残余清单，F144）
 - `.specify/features/087-agent-e2e-live-test-suite/spec.md` / `plan.md`（F087
   原始 spec / 实施 plan / Codex review 决策）
