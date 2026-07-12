@@ -61,6 +61,41 @@ RESPONSE_HEADER_ALLOWLIST = frozenset({"content-type"})
 #: 录制侧存解码后 body，这三个头必须剥除（否则回放时 httpx 二次解压失败）。
 _CONTENT_TRANSFER_HEADERS = frozenset({"content-encoding", "content-length", "transfer-encoding"})
 
+#: codex Responses 后端在 response.created/in_progress/completed 事件里回显的
+#: 身份/请求内容字段——录制时定点洗刷（string 值 → "[scrubbed]"）：
+#: - safety_identifier / prompt_cache_key：账户关联标识（真录实锤 user-xxx / UUID）；
+#: - instructions：请求内容经响应回流（spec review H1 同面——重录换输入时宿主
+#:   内容会经此回显落盘，结构上必须堵死）；
+#: - user：现值 null（null 不动），若未来变 string 一并洗。
+#: 用 JSON string 字面量精确正则（``(?:[^"\\]|\\.)*`` 是 JSON string 完整词法），
+#: 替换后行内 JSON 仍合法、其余字节保真。刻意不整行 parse/re-serialize——那会
+#: 重排 key/空白，为洗 4 个字段破坏整个 body 的字节保真（结构化 redaction 用在
+#: body_summary；SSE body 的正确工具是定点字面量手术）。
+IDENTITY_SCRUB_FIELDS: tuple[str, ...] = (
+    "instructions",
+    "safety_identifier",
+    "prompt_cache_key",
+    "user",
+)
+_SCRUBBED_MARK = "[scrubbed]"
+_IDENTITY_SCRUB_PATTERNS: dict[str, re.Pattern[str]] = {
+    field: re.compile(rf'"{field}":\s*"(?:[^"\\]|\\.)*"') for field in IDENTITY_SCRUB_FIELDS
+}
+#: 扫描侧强制不变量：这些字段若以 string 值出现，必须已是 "[scrubbed]"
+#: （容忍序列化后的 \" 转义形态——scan 跑在最终 serialized JSON 上）。
+_IDENTITY_VIOLATION_PATTERNS: dict[str, re.Pattern[str]] = {
+    field: re.compile(rf'\\?"{field}\\?":\s*\\?"(?!\[scrubbed\])')
+    for field in IDENTITY_SCRUB_FIELDS
+}
+
+
+def scrub_identity_fields(text: str) -> str:
+    """响应 body 身份/回显字段定点洗刷（录制管线第 4b 道）。"""
+    for field, pattern in _IDENTITY_SCRUB_PATTERNS.items():
+        text = pattern.sub(f'"{field}":"{_SCRUBBED_MARK}"', text)
+    return text
+
+
 #: 落盘前全文扫描的 secret 形状（与 AC-2 的人工 grep 模式一致）。
 SECRET_SCAN_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
@@ -234,18 +269,29 @@ class CassetteRecorder:
     def __init__(self, meta: dict[str, Any]) -> None:
         self.meta = dict(meta)
         self.interactions: list[RecordedInteraction] = []
-        self._forbidden: set[str] = set()
+        self._forbidden: dict[str, str] = {}  # value -> label（label 仅诊断用）
 
     # ---------------------------------------------------------------- 禁串
-    def register_forbidden_secret(self, *values: str | None) -> None:
-        """登记已知凭证明文为禁串（ResolvedAuth.bearer_token / extra_headers 值 /
-        相关 env 值）。落盘前全文逐字比对，命中即拒绝（spec D3 第 5 道 b）。"""
+    def register_forbidden_secret(self, *values: str | None, label: str = "credential") -> None:
+        """登记已知凭证明文为禁串（ResolvedAuth.bearer_token / 身份类 header 值 /
+        相关 env 值）。落盘前全文逐字比对，命中即拒绝（spec D3 第 5 道 b）。
+        label 仅用于命中时的诊断输出（值本身永不出现在任何输出里）。
+
+        短值（<8 字符）不登记：子串比对对短值有大面积误伤（如 ``pi``），
+        且真实凭证不会这么短；持久化侧的头 allowlist 仍兜底。"""
         for value in values:
-            if value and value.strip():
-                self._forbidden.add(value.strip())
+            if value and len(value.strip()) >= 8:
+                self._forbidden[value.strip()] = label
 
     def register_resolved_auth(self, auth: ResolvedAuth) -> None:
-        self.register_forbidden_secret(auth.bearer_token, *auth.extra_headers.values())
+        """登记现役凭证。extra_headers 只登记**不在**请求头持久化 allowlist 里的
+        值——allowlist 内的是良性协议头（OpenAI-Beta / originator 等），其值本就
+        允许出现在 cassette（真录实测：blanket 登记会让协议头值假阳性拒绝落盘）；
+        身份类头（chatgpt-account-id 等）不在 allowlist → 照常登记。"""
+        self.register_forbidden_secret(auth.bearer_token, label="bearer_token")
+        for name, value in auth.extra_headers.items():
+            if name.lower() not in REQUEST_HEADER_ALLOWLIST:
+                self.register_forbidden_secret(value, label=f"auth-header:{name}")
 
     # ---------------------------------------------------------------- 录制
     def record(
@@ -268,7 +314,8 @@ class CassetteRecorder:
         if not (200 <= status_code < 300):
             raise CassetteRecordError(
                 f"非 2xx 响应（{status_code}）拒绝录制：provider 错误 body 可能"
-                "回显请求内容/身份信息，本套件只钉 happy-path 真样本（spec D2）。",
+                "回显请求内容/身份信息，本套件只钉 happy-path 真样本（spec D2）。"
+                f"调试摘要（console-only，不落盘）: {body_text[:300]!r}",
             )
         headers_obj = (
             response_headers
@@ -293,7 +340,7 @@ class CassetteRecorder:
                     for k, v in headers_obj.items()
                     if k.lower() in RESPONSE_HEADER_ALLOWLIST
                 },
-                body_text=redact_sensitive_text(body_text),
+                body_text=scrub_identity_fields(redact_sensitive_text(body_text)),
             )
         )
 
@@ -305,11 +352,31 @@ class CassetteRecorder:
             for pattern in SECRET_SCAN_PATTERNS
             if pattern.search(serialized)
         ]
-        for value in self._forbidden:
+        findings.extend(
+            f"identity-field-unscrubbed:{field}"
+            for field, pattern in _IDENTITY_VIOLATION_PATTERNS.items()
+            if pattern.search(serialized)
+        )
+        for value, label in self._forbidden.items():
             escaped = json.dumps(value, ensure_ascii=True)[1:-1]
             if value in serialized or escaped in serialized:
-                findings.append("forbidden-literal:<registered credential>")
+                findings.append(f"forbidden-literal:{label}")
         return findings
+
+    def debug_locate_forbidden(self, serialized: str, *, window: int = 70) -> list[str]:
+        """定位禁串命中上下文（诊断用，console-only）：值本身以 <SECRET:label>
+        掩码呈现，绝不回显。"""
+        contexts: list[str] = []
+        for value, label in self._forbidden.items():
+            for needle in (value, json.dumps(value, ensure_ascii=True)[1:-1]):
+                idx = serialized.find(needle)
+                if idx < 0:
+                    continue
+                before = serialized[max(0, idx - window) : idx]
+                after = serialized[idx + len(needle) : idx + len(needle) + window]
+                contexts.append(f"{label}: ...{before}<SECRET:{label}>{after}...")
+                break
+        return contexts
 
     def serialize(self) -> str:
         meta = dict(self.meta)
@@ -453,6 +520,8 @@ __all__ = [
     "ReplayTransport",
     "REQUEST_HEADER_ALLOWLIST",
     "RESPONSE_HEADER_ALLOWLIST",
+    "IDENTITY_SCRUB_FIELDS",
     "SECRET_SCAN_PATTERNS",
     "replay_client",
+    "scrub_identity_fields",
 ]

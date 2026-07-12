@@ -12,10 +12,15 @@ from __future__ import annotations
 from typing import Any
 
 #: 演示工具（三 transport 通用 OpenAI Chat 嵌套格式；ProviderClient 内部各自翻译）。
+#: 名字刻意用无点形态 ``demo_weather``：chat transport 的调用方契约是 tools 名字
+#: 已为 fn（``__``）形态（``_call_openai_chat`` 透传 tools、仅转换 tool_choice，
+#: 带点名会造成 tools/tool_choice 不一致 → provider 400，真录实测）；无点名在三
+#: transport 的转换下全部自恒等且对 Anthropic 命名约束合法。点↔双下划线转换
+#: 语义本身由既有 23 个 wire shape 用例钉，非本套件维度。
 WEATHER_TOOL: dict[str, Any] = {
     "type": "function",
     "function": {
-        "name": "demo.weather",
+        "name": "demo_weather",
         "description": "查询指定城市当天天气（演示用假工具）",
         "parameters": {
             "type": "object",
@@ -31,7 +36,7 @@ WEATHER_TOOL: dict[str, Any] = {
 #: responses/anthropic 由 ProviderClient 内部翻译）。
 WEATHER_TOOL_CHOICE: dict[str, Any] = {
     "type": "function",
-    "function": {"name": "demo.weather"},
+    "function": {"name": "demo_weather"},
 }
 
 # ---------------------------------------------------------------- openai_chat

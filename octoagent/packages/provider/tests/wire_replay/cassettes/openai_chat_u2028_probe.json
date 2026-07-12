@@ -1,0 +1,47 @@
+{
+  "format_version": 1,
+  "meta": {
+    "provider_id": "siliconflow",
+    "transport": "openai_chat",
+    "model": "deepseek-ai/DeepSeek-V3.2",
+    "source": "live-recording",
+    "scenario": "u2028_probe",
+    "note": "spec \u00a75 U+2028 \u8bc1\u636e\u63a2\u9488\uff1a\u6a21\u578b\u88ab\u8981\u6c42\u539f\u6837\u590d\u8bfb\u542b U+2028 \u7684\u4e32",
+    "recorded_at": "2026-07-12T17:27:46+00:00"
+  },
+  "interactions": [
+    {
+      "request": {
+        "method": "POST",
+        "scheme": "https",
+        "host": "api.siliconflow.cn",
+        "path": "/v1/chat/completions",
+        "headers": {
+          "host": "api.siliconflow.cn",
+          "accept": "*/*",
+          "accept-encoding": "gzip, deflate",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "content-length": "333"
+        },
+        "body_summary": {
+          "body_sha256": "2bbe3883294ea4857e9d9269ca10bfcfb404fcb7eb8da3ae629ccaea8b38b0ea",
+          "model": "deepseek-ai/DeepSeek-V3.2",
+          "stream": true,
+          "messages_count": 2,
+          "message_roles": [
+            "system",
+            "user"
+          ]
+        }
+      },
+      "response": {
+        "status_code": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body_text": "data: {\"id\":\"019f575ee6880f785883623670a6811b\",\"object\":\"chat.completion.chunk\",\"created\":1783877265,\"model\":\"deepseek-ai/DeepSeek-V3.2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\",\"role\":\"assistant\"},\"finish_reason\":null}],\"system_fingerprint\":\"\",\"usage\":{\"prompt_tokens\":49,\"completion_tokens\":0,\"total_tokens\":49,\"completion_tokens_details\":{\"reasoning_tokens\":0},\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":49}}\n\ndata: {\"id\":\"019f575ee6880f785883623670a6811b\",\"object\":\"chat.completion.chunk\",\"created\":1783877265,\"model\":\"deepseek-ai/DeepSeek-V3.2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"A\"},\"finish_reason\":null}],\"system_fingerprint\":\"\",\"usage\":{\"prompt_tokens\":49,\"completion_tokens\":1,\"total_tokens\":50,\"completion_tokens_details\":{\"reasoning_tokens\":0},\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":49}}\n\ndata: {\"id\":\"019f575ee6880f785883623670a6811b\",\"object\":\"chat.completion.chunk\",\"created\":1783877265,\"model\":\"deepseek-ai/DeepSeek-V3.2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"\\u2028\"},\"finish_reason\":null}],\"system_fingerprint\":\"\",\"usage\":{\"prompt_tokens\":49,\"completion_tokens\":3,\"total_tokens\":52,\"completion_tokens_details\":{\"reasoning_tokens\":0},\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":49}}\n\ndata: {\"id\":\"019f575ee6880f785883623670a6811b\",\"object\":\"chat.completion.chunk\",\"created\":1783877265,\"model\":\"deepseek-ai/DeepSeek-V3.2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"B\"},\"finish_reason\":null}],\"system_fingerprint\":\"\",\"usage\":{\"prompt_tokens\":49,\"completion_tokens\":4,\"total_tokens\":53,\"completion_tokens_details\":{\"reasoning_tokens\":0},\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":49}}\n\ndata: {\"id\":\"019f575ee6880f785883623670a6811b\",\"object\":\"chat.completion.chunk\",\"created\":1783877265,\"model\":\"deepseek-ai/DeepSeek-V3.2\",\"choices\":[{\"index\":0,\"delta\":{\"content\":null},\"finish_reason\":\"stop\"}],\"system_fingerprint\":\"\",\"usage\":{\"prompt_tokens\":49,\"completion_tokens\":4,\"total_tokens\":53,\"completion_tokens_details\":{\"reasoning_tokens\":0},\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":49}}\n\ndata: {\"id\":\"019f575ee6880f785883623670a6811b\",\"object\":\"chat.completion.chunk\",\"created\":1783877265,\"model\":\"deepseek-ai/DeepSeek-V3.2\",\"choices\":[],\"system_fingerprint\":\"\",\"usage\":{\"prompt_tokens\":49,\"completion_tokens\":4,\"total_tokens\":53,\"completion_tokens_details\":{\"reasoning_tokens\":0},\"prompt_tokens_details\":{\"cached_tokens\":0},\"prompt_cache_hit_tokens\":0,\"prompt_cache_miss_tokens\":49}}\n\ndata: [DONE]\n\n"
+      }
+    }
+  ]
+}

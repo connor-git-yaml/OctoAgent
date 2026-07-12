@@ -1,0 +1,46 @@
+{
+  "format_version": 1,
+  "meta": {
+    "provider_id": "anthropic-claude",
+    "transport": "anthropic_messages",
+    "model": "claude-sonnet-4-5",
+    "source": "handwritten-golden",
+    "recorded_at": "2026-07-13T00:00:00+00:00",
+    "scenario": "tool_call",
+    "note": "\u624b\u5199 golden\uff08\u975e wire \u771f\u6837\u672c\uff09\uff1a\u5bbf\u4e3b\u65e0\u53ef\u7528 anthropic \u51ed\u8bc1\uff08spec \u00a72 \u5f52\u6863\uff0cauth-profiles \u7684 anthropic-claude-default token \u5224\u5b9a stale\uff0c\u4efb\u52a1\u7eaa\u5f8b\u4e0d\u4e3a\u5f55\u5236\u7533\u8bf7\u65b0 key\uff09\u3002\u5f62\u6001=Anthropic Messages API \u516c\u5f00\u6587\u6863 SSE \u4e8b\u4ef6\u5e8f\u5217\uff0c\u542b event: \u884c/ping/SSE \u6ce8\u91ca\u884c\u7b49\u771f wire \u5143\u7d20\u3002\u62ff\u5230\u51ed\u8bc1\u540e\u8dd1 record_cassettes.py anthropic \u771f\u5f55\u66ff\u6362\uff08docstring \u6709\u6b65\u9aa4\uff09\u3002"
+  },
+  "interactions": [
+    {
+      "request": {
+        "method": "POST",
+        "scheme": "https",
+        "host": "api.anthropic.com",
+        "path": "/v1/messages",
+        "headers": {
+          "content-type": "application/json",
+          "anthropic-version": "2023-06-01"
+        },
+        "body_summary": {
+          "body_sha256": "handwritten-golden-no-recorded-request",
+          "model": "claude-sonnet-4-5",
+          "stream": true,
+          "messages_count": 1,
+          "message_roles": [
+            "user"
+          ],
+          "has_system": true,
+          "tool_names": [
+            "demo_weather"
+          ]
+        }
+      },
+      "response": {
+        "status_code": 200,
+        "headers": {
+          "content-type": "text/event-stream"
+        },
+        "body_text": "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_golden_tool_001\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-sonnet-4-5\",\"content\":[],\"stop_reason\":null,\"stop_sequence\":null,\"usage\":{\"input_tokens\":89,\"output_tokens\":2}}}\n\nevent: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_golden_001\",\"name\":\"demo_weather\",\"input\":{}}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"city\\\"\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\": \\\"Shang\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"hai\\\"}\"}}\n\nevent: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\nevent: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},\"usage\":{\"output_tokens\":24}}\n\nevent: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"
+      }
+    }
+  ]
+}

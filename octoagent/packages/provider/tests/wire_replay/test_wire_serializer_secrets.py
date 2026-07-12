@@ -203,6 +203,58 @@ async def test_scan_catches_pattern_shapes_without_registration() -> None:
 
 
 # ---------------------------------------------------------------------------
+# 身份/回显字段定点洗刷（真录实锤：codex 后端回显 safety_identifier=user-xxx /
+# prompt_cache_key=UUID / instructions 请求内容回流——spec review H1 同面）
+# ---------------------------------------------------------------------------
+
+PLANTED_SAFETY_ID = "user-PLANTEDID1234567890abcd"
+PLANTED_CACHE_KEY = "11111111-2222-3333-4444-555555555555"
+PLANTED_INSTRUCTIONS = "secret host prompt that must not persist"
+
+
+async def test_identity_fields_scrubbed_in_response_body(tmp_path: Path) -> None:
+    """回显身份字段 string 值 → "[scrubbed]"；null 值不动；其余字节保真。"""
+    echo_event = json.dumps(
+        {
+            "type": "response.completed",
+            "response": {
+                "instructions": PLANTED_INSTRUCTIONS,
+                "safety_identifier": PLANTED_SAFETY_ID,
+                "prompt_cache_key": PLANTED_CACHE_KEY,
+                "user": None,
+                "model": "fake-model",
+            },
+        }
+    )
+    body = _sse('{"choices":[{"delta":{"content":"ok"}}]}') + _sse(echo_event) + b"data: [DONE]\n\n"
+    client, recorder = _recording_setup(body)
+    await _drive_chat(client)
+    target = tmp_path / "identity.json"
+    recorder.dump(target)
+    text = target.read_text(encoding="utf-8")
+    for planted in (PLANTED_SAFETY_ID, PLANTED_CACHE_KEY, PLANTED_INSTRUCTIONS):
+        assert planted not in text
+    stored = json.loads(text)["interactions"][0]["response"]["body_text"]
+    assert '"instructions":"[scrubbed]"' in stored
+    assert '"safety_identifier":"[scrubbed]"' in stored
+    assert '"prompt_cache_key":"[scrubbed]"' in stored
+    assert '"user": null' in stored  # null 非 string，不动
+    assert '"content":"ok"' in stored  # 其余字节保真
+
+
+def test_scan_enforces_identity_scrub_invariant() -> None:
+    """扫描不变量：身份字段以非 [scrubbed] string 值出现（含序列化转义形态）
+    → finding。防未来绕过 record() 管线直接拼 cassette。"""
+    recorder = CassetteRecorder(meta={})
+    raw = '"safety_identifier":"user-sneaky1234567890"'
+    escaped = json.dumps({"body_text": '{"safety_identifier":"user-sneaky1234567890"}'})
+    assert any("identity-field-unscrubbed" in f for f in recorder.scan_serialized(raw))
+    assert any("identity-field-unscrubbed" in f for f in recorder.scan_serialized(escaped))
+    clean = '"safety_identifier":"[scrubbed]" and "user":null'
+    assert recorder.scan_serialized(clean) == []
+
+
+# ---------------------------------------------------------------------------
 # 非 2xx / query / token 端点（spec D2/D3 管线守卫）
 # ---------------------------------------------------------------------------
 

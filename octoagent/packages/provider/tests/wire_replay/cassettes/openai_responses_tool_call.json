@@ -1,0 +1,49 @@
+{
+  "format_version": 1,
+  "meta": {
+    "provider_id": "openai-codex",
+    "transport": "openai_responses",
+    "model": "gpt-5.5",
+    "source": "live-recording",
+    "scenario": "tool_call",
+    "recorded_at": "2026-07-12T17:31:43+00:00"
+  },
+  "interactions": [
+    {
+      "request": {
+        "method": "POST",
+        "scheme": "https",
+        "host": "chatgpt.com",
+        "path": "/backend-api/codex/responses",
+        "headers": {
+          "host": "chatgpt.com",
+          "accept": "*/*",
+          "accept-encoding": "gzip, deflate",
+          "connection": "keep-alive",
+          "content-type": "application/json",
+          "openai-beta": "responses=experimental",
+          "originator": "pi",
+          "content-length": "530"
+        },
+        "body_summary": {
+          "body_sha256": "c1b3a0d7f8578b2936d553fa3f496a6873e62a77913f6695481c0f115b8fd4c8",
+          "model": "gpt-5.5",
+          "stream": true,
+          "input_count": 1,
+          "message_roles": [
+            "user"
+          ],
+          "has_instructions": true,
+          "tool_names": [
+            "demo_weather"
+          ]
+        }
+      },
+      "response": {
+        "status_code": 200,
+        "headers": {},
+        "body_text": "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_0c73909f9f01d106016a53cf7dfd80819ab27bbb68ecdff7ce\",\"object\":\"response\",\"created_at\":1783877502,\"status\":\"in_progress\",\"background\":false,\"completed_at\":null,\"error\":null,\"frequency_penalty\":0.0,\"incomplete_details\":null,\"instructions\":\"[scrubbed]\",\"max_output_tokens\":null,\"max_tool_calls\":null,\"model\":\"gpt-5.5\",\"moderation\":null,\"output\":[],\"parallel_tool_calls\":true,\"presence_penalty\":0.0,\"previous_response_id\":null,\"prompt_cache_key\":\"[scrubbed]\",\"prompt_cache_retention\":\"24h\",\"reasoning\":{\"context\":\"current_turn\",\"effort\":\"medium\",\"mode\":\"standard\",\"summary\":null},\"safety_identifier\":\"[scrubbed]\",\"service_tier\":\"auto\",\"store\":false,\"temperature\":1.0,\"text\":{\"format\":{\"type\":\"text\"},\"verbosity\":\"medium\"},\"tool_choice\":{\"type\":\"function\",\"name\":\"demo_weather\"},\"tool_usage\":{\"image_gen\":{\"input_tokens\":0,\"input_tokens_details\":{\"image_tokens\":0,\"text_tokens\":0},\"output_tokens\":0,\"output_tokens_details\":{\"image_tokens\":0,\"text_tokens\":0},\"total_tokens\":0},\"web_search\":{\"num_requests\":0}},\"tools\":[{\"type\":\"function\",\"description\":\"\u67e5\u8be2\u6307\u5b9a\u57ce\u5e02\u5f53\u5929\u5929\u6c14\uff08\u6f14\u793a\u7528\u5047\u5de5\u5177\uff09\",\"name\":\"demo_weather\",\"output_schema\":null,\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"description\":\"\u57ce\u5e02\u540d\"}},\"required\":[\"city\"],\"additionalProperties\":false},\"strict\":true}],\"top_logprobs\":0,\"top_p\":0.98,\"truncation\":\"disabled\",\"usage\":null,\"user\":null,\"metadata\":{}},\"sequence_number\":0}\n\nevent: response.in_progress\ndata: {\"type\":\"response.in_progress\",\"response\":{\"id\":\"resp_0c73909f9f01d106016a53cf7dfd80819ab27bbb68ecdff7ce\",\"object\":\"response\",\"created_at\":1783877502,\"status\":\"in_progress\",\"background\":false,\"completed_at\":null,\"error\":null,\"frequency_penalty\":0.0,\"incomplete_details\":null,\"instructions\":\"[scrubbed]\",\"max_output_tokens\":null,\"max_tool_calls\":null,\"model\":\"gpt-5.5\",\"moderation\":null,\"output\":[],\"parallel_tool_calls\":true,\"presence_penalty\":0.0,\"previous_response_id\":null,\"prompt_cache_key\":\"[scrubbed]\",\"prompt_cache_retention\":\"24h\",\"reasoning\":{\"context\":\"current_turn\",\"effort\":\"medium\",\"mode\":\"standard\",\"summary\":null},\"safety_identifier\":\"[scrubbed]\",\"service_tier\":\"auto\",\"store\":false,\"temperature\":1.0,\"text\":{\"format\":{\"type\":\"text\"},\"verbosity\":\"medium\"},\"tool_choice\":{\"type\":\"function\",\"name\":\"demo_weather\"},\"tool_usage\":{\"image_gen\":{\"input_tokens\":0,\"input_tokens_details\":{\"image_tokens\":0,\"text_tokens\":0},\"output_tokens\":0,\"output_tokens_details\":{\"image_tokens\":0,\"text_tokens\":0},\"total_tokens\":0},\"web_search\":{\"num_requests\":0}},\"tools\":[{\"type\":\"function\",\"description\":\"\u67e5\u8be2\u6307\u5b9a\u57ce\u5e02\u5f53\u5929\u5929\u6c14\uff08\u6f14\u793a\u7528\u5047\u5de5\u5177\uff09\",\"name\":\"demo_weather\",\"output_schema\":null,\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"description\":\"\u57ce\u5e02\u540d\"}},\"required\":[\"city\"],\"additionalProperties\":false},\"strict\":true}],\"top_logprobs\":0,\"top_p\":0.98,\"truncation\":\"disabled\",\"usage\":null,\"user\":null,\"metadata\":{}},\"sequence_number\":1}\n\nevent: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"item\":{\"id\":\"fc_0c73909f9f01d106016a53cf7ebe2c819a8442dc558cffa0ef\",\"type\":\"function_call\",\"status\":\"in_progress\",\"arguments\":\"\",\"call_id\":\"call_5AQIUKrRUKtSXKgTQlukG1ou\",\"name\":\"demo_weather\"},\"output_index\":0,\"sequence_number\":2}\n\nevent: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"{\\\"\",\"item_id\":\"fc_0c73909f9f01d106016a53cf7ebe2c819a8442dc558cffa0ef\",\"obfuscation\":\"NFu3UPL5BSZ1mW\",\"output_index\":0,\"sequence_number\":3}\n\nevent: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"city\",\"item_id\":\"fc_0c73909f9f01d106016a53cf7ebe2c819a8442dc558cffa0ef\",\"obfuscation\":\"pfH3wUZoKz1w\",\"output_index\":0,\"sequence_number\":4}\n\nevent: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"\\\":\\\"\",\"item_id\":\"fc_0c73909f9f01d106016a53cf7ebe2c819a8442dc558cffa0ef\",\"obfuscation\":\"8tKScPSTlu0gO\",\"output_index\":0,\"sequence_number\":5}\n\nevent: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"Shanghai\",\"item_id\":\"fc_0c73909f9f01d106016a53cf7ebe2c819a8442dc558cffa0ef\",\"obfuscation\":\"mr90U8xW\",\"output_index\":0,\"sequence_number\":6}\n\nevent: response.function_call_arguments.delta\ndata: {\"type\":\"response.function_call_arguments.delta\",\"delta\":\"\\\"}\",\"item_id\":\"fc_0c73909f9f01d106016a53cf7ebe2c819a8442dc558cffa0ef\",\"obfuscation\":\"OqdcZcUkDCST0W\",\"output_index\":0,\"sequence_number\":7}\n\nevent: response.function_call_arguments.done\ndata: {\"type\":\"response.function_call_arguments.done\",\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\",\"item_id\":\"fc_0c73909f9f01d106016a53cf7ebe2c819a8442dc558cffa0ef\",\"output_index\":0,\"sequence_number\":8}\n\nevent: response.output_item.done\ndata: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"fc_0c73909f9f01d106016a53cf7ebe2c819a8442dc558cffa0ef\",\"type\":\"function_call\",\"status\":\"completed\",\"arguments\":\"{\\\"city\\\":\\\"Shanghai\\\"}\",\"call_id\":\"call_5AQIUKrRUKtSXKgTQlukG1ou\",\"name\":\"demo_weather\"},\"output_index\":0,\"sequence_number\":9}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_0c73909f9f01d106016a53cf7dfd80819ab27bbb68ecdff7ce\",\"object\":\"response\",\"created_at\":1783877502,\"status\":\"completed\",\"background\":false,\"completed_at\":1783877502,\"error\":null,\"frequency_penalty\":0.0,\"incomplete_details\":null,\"instructions\":\"[scrubbed]\",\"max_output_tokens\":null,\"max_tool_calls\":null,\"model\":\"gpt-5.5\",\"moderation\":null,\"output\":[],\"parallel_tool_calls\":true,\"presence_penalty\":0.0,\"previous_response_id\":null,\"prompt_cache_key\":\"[scrubbed]\",\"prompt_cache_retention\":\"24h\",\"reasoning\":{\"context\":\"current_turn\",\"effort\":\"medium\",\"mode\":\"standard\",\"summary\":null},\"safety_identifier\":\"[scrubbed]\",\"service_tier\":\"default\",\"store\":false,\"temperature\":1.0,\"text\":{\"format\":{\"type\":\"text\"},\"verbosity\":\"medium\"},\"tool_choice\":{\"type\":\"function\",\"name\":\"demo_weather\"},\"tool_usage\":{\"image_gen\":{\"input_tokens\":0,\"input_tokens_details\":{\"image_tokens\":0,\"text_tokens\":0},\"output_tokens\":0,\"output_tokens_details\":{\"image_tokens\":0,\"text_tokens\":0},\"total_tokens\":0},\"web_search\":{\"num_requests\":0}},\"tools\":[{\"type\":\"function\",\"description\":\"\u67e5\u8be2\u6307\u5b9a\u57ce\u5e02\u5f53\u5929\u5929\u6c14\uff08\u6f14\u793a\u7528\u5047\u5de5\u5177\uff09\",\"name\":\"demo_weather\",\"output_schema\":null,\"parameters\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\",\"description\":\"\u57ce\u5e02\u540d\"}},\"required\":[\"city\"],\"additionalProperties\":false},\"strict\":true}],\"top_logprobs\":0,\"top_p\":0.98,\"truncation\":\"disabled\",\"usage\":{\"input_tokens\":77,\"input_tokens_details\":{\"cache_write_tokens\":0,\"cached_tokens\":0},\"output_tokens\":18,\"output_tokens_details\":{\"reasoning_tokens\":0},\"total_tokens\":95},\"user\":null,\"metadata\":{}},\"sequence_number\":10}\n\n"
+      }
+    }
+  ]
+}
