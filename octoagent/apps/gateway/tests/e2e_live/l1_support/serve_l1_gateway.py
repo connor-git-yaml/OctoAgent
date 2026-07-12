@@ -30,7 +30,13 @@ import sys
 from pathlib import Path
 
 _HERE = Path(__file__).resolve()
-_OCTOAGENT_ROOT = _HERE.parents[4]  # <octoagent>/
+# parents: [0]=l1_support [1]=e2e_live [2]=tests [3]=gateway [4]=apps [5]=<octoagent>
+# Codex final review P2 闭环：原 parents[4] 差一层（解析到 apps/），致
+# local-instance 模板复制静默 no-op（fixture 目录不存在 → if 分支跳过）。
+_OCTOAGENT_ROOT = _HERE.parents[5]  # <octoagent>/
+assert (_OCTOAGENT_ROOT / "pyproject.toml").exists(), (
+    f"L1 launcher 根目录解析漂移：{_OCTOAGENT_ROOT} 下无 pyproject.toml"
+)
 
 
 def _clean_env() -> None:

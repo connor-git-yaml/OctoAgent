@@ -159,4 +159,15 @@ Content-Type/method/body 不丢）。
 
 ## 9. Codex final 评审回填
 
-（评审后回填）
+Codex final（全 diff vs origin/master）：**0 HIGH / 1 P2 / 0 LOW**。
+
+- **P2（真 bug，已修 + 机械验证）**：launcher `_OCTOAGENT_ROOT = parents[4]`
+  差一层（解析到 `apps/` 而非 `octoagent/`）→ local-instance 模板复制**静默
+  no-op**（fixture 路径不存在 → if 分支跳过），L1 实际跑在默认 skeleton 上。
+  两场景仍通过（断言不依赖 octoagent.yaml/model_aliases——脚本脑不走 alias
+  解析），但与声明行为不符、且后续依赖 fixture 配置的场景会假绿。
+  修复=parents[5] + 根目录 `pyproject.toml` 存在性 assert（防再漂移）；
+  验证=复跑后实例 root 实见 `octoagent.yaml` + `USER.md` + L1 3 passed。
+  这个 finding 同时暴露了「静默 if-exists 跳过」的反模式教训——launcher 的
+  可选路径分支静默降级掩盖了配置缺失（与 F103d Echo 掩盖同构，小尺度）。
+- 复评：修复 commit 后 re-review 0 finding（见 §9 末次记录）。
