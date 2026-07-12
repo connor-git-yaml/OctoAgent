@@ -32,7 +32,10 @@ from typing import Any
 import pytest
 
 
-pytestmark = [pytest.mark.e2e_full, pytest.mark.e2e_live]
+# F141 D9：real_llm = 真发起 LLM/外部网络调用的事实标记（e2e_full 意图子集）。
+# release lane 以此切分 live-real-llm（skip 即 FAIL）；全 e2e_live 仅本文件与
+# 另一真打文件携带（其余 e2e_full 域文件是确定性直调，留在 deterministic lane）。
+pytestmark = [pytest.mark.e2e_full, pytest.mark.e2e_live, pytest.mark.real_llm]
 
 
 # ---------------------------------------------------------------------------

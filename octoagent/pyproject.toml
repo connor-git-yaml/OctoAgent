@@ -72,9 +72,10 @@ testpaths = ["packages/core/tests", "packages/provider/tests", "packages/protoco
 consider_namespace_packages = true
 markers = [
     "e2e_smoke: F087 smoke 5 域集成层 e2e（不真打 LLM，DI stub 驱动；pre-commit hook 自动跑，≤ 180s。F137 gate 下保持 deny——smoke 漏网真调用必炸）",
-    "e2e_full: F087 full 8 域真实 LLM e2e（真打 LLM；手动 / octo e2e full，≤ 10min。F137 gate 按此 marker 自动开闸——e2e_full = 声明真 LLM 意图的单一信号）",
+    "e2e_full: F087 full 8 域 e2e 套件（octo e2e full，≤ 10min。F137 gate 按此 marker 自动开闸——e2e_full = 声明真 LLM **意图**的信号；真发起调用的**事实**子集另标 real_llm（F141 D9，9 个域文件仅 2 个真打））",
     "e2e_live: F087 e2e_live 套件正交标记（与 e2e_smoke / e2e_full 共存）",
-    "e2e_scripted: F138 脚本化决策环确定性 e2e（零真 LLM / 零宿主 OAuth，CI-runnable；F141 归入 pr lane）",
+    "e2e_scripted: F138 脚本化决策环确定性 e2e（零真 LLM / 零宿主 OAuth，CI-runnable；F141 已归入 pr lane：pre-commit 跑 'e2e_smoke or e2e_scripted' + CI backend job 专属步）",
+    "real_llm: F141 真发起 LLM/外部网络调用的用例（e2e_full 子集，事实标记）。release lane 切分依据：live-real-llm='-m real_llm'（skip 即 FAIL），backend-deterministic='-m \"not real_llm\"'；语义表见 octoagent/tests/AGENTS.md",
 ]
 # Feature 083 P3+P4+P5+P6：xdist **不默认启用**——长尾 timing race 超 F083 scope。
 # - P1+P2：thread shutdown hang 修复 + os.environ 改 monkeypatch（已治本）
@@ -90,3 +91,22 @@ markers = [
 #   - 全仓 ~72 处 single-sleep timing assertion 散落各 integration test
 # 默认串行（~103s，100% 稳定，2829 测试）；本地开发可 `pytest -n auto packages/<pkg>/tests/`
 # 子集获得 5x 提速。详见 docs/codebase-architecture/testing-concurrency.md。
+
+# F141 件4：changed-lines coverage 门（CI backend job 裸 `--cov` 走本配置）。
+# - source 显式列 src 目录（目录形态避开 namespace 包按模块名解析的不确定性，
+#   Codex spec H3）——测试文件天然不在 source 内不计
+# - relative_files=true → lcov SF 路径 = 相对 cwd(octoagent/) 的 packages/.../src/...，
+#   repo-scripts/check-changed-lines-coverage.py 补 octoagent/ 前缀与 git diff 对齐
+[tool.coverage.run]
+relative_files = true
+source = [
+    "packages/core/src",
+    "packages/provider/src",
+    "packages/protocol/src",
+    "packages/tooling/src",
+    "packages/skills/src",
+    "packages/policy/src",
+    "packages/memory/src",
+    "packages/sdk/src",
+    "apps/gateway/src",
+]

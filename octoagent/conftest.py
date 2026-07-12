@@ -6,10 +6,14 @@ Feature 083 P1：
 - 新增 ``pytest_sessionfinish`` hook 修 thread shutdown hang
 
 F137：``pytest_configure`` 置真 LLM 调用 gate=deny（冗余布线，见函数 docstring）。
+F141：``pytest_collection_modifyitems`` 加载 flaky quarantine manifest
+（``tests/quarantine.json``），给命中条目 path 前缀的测试加 ``flaky(reruns=1)``——
+替代 blanket rerun 的定向处置（三分处置边界见 ``octoagent/tests/AGENTS.md``）。
 """
 
 import asyncio
 import gc
+import importlib.util
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -42,6 +46,65 @@ def pytest_configure(config: pytest.Config) -> None:
     except ImportError:
         return  # pre-merge 窗口：master src 尚无 gate 模块
     apply_test_default_deny()
+
+
+# ---------------------------------------------------------------------------
+# F141：flaky quarantine manifest → 定向 flaky(reruns=1) 标记
+# ---------------------------------------------------------------------------
+
+_QUARANTINE_MANIFEST = Path(__file__).resolve().parent / "tests" / "quarantine.json"
+_CHECK_QUARANTINE_SCRIPT = (
+    Path(__file__).resolve().parent.parent / "repo-scripts" / "check-quarantine.py"
+)
+
+
+def _load_quarantine_module():
+    """按路径加载 repo-scripts/check-quarantine.py（校验逻辑单一事实源，不复制）。
+
+    conftest 与脚本按 ``__file__`` 相对定位——同一棵树内自洽（pre-commit hook
+    跨 worktree 收集场景下，conftest 与 manifest/脚本恒来自同一 worktree；数据
+    文件非 import，与共享 venv editable 指向漂移正交）。
+    """
+    spec = importlib.util.spec_from_file_location(
+        "octoagent_check_quarantine", _CHECK_QUARANTINE_SCRIPT
+    )
+    if spec is None or spec.loader is None:  # pragma: no cover - 加载器构造异常护栏
+        raise pytest.UsageError(
+            f"[F141] 无法加载 quarantine 校验器: {_CHECK_QUARANTINE_SCRIPT}"
+        )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
+    """给 quarantine manifest 命中 path 前缀的测试加 ``flaky(reruns=1)``。
+
+    - manifest / 校验器缺失或 schema 损坏 → 硬错（治理资产完整性，fail-fast）；
+    - **过期不在此处拦**（本地迭代不炸；gate 层 ``check-quarantine.py
+      --enforce-review-date`` 在 CI / lane 全模式拦，cc-haha 同款分工）；
+    - 匹配规则：``item.nodeid.startswith(entry["path"])``——支持文件级
+      （``apps/gateway/tests/test_x.py``）与用例级
+      （``...test_x.py::test_y``）两种粒度。
+    """
+    del config
+    try:
+        quarantine = _load_quarantine_module()
+        manifest = quarantine.load_manifest(_QUARANTINE_MANIFEST)
+    except Exception as exc:
+        raise pytest.UsageError(f"[F141] quarantine manifest 校验失败: {exc}") from exc
+
+    entries = manifest["quarantined"]
+    if not entries:
+        return
+    flaky_marker = pytest.mark.flaky(reruns=1, reruns_delay=2)
+    for item in items:
+        for entry in entries:
+            if item.nodeid.startswith(entry["path"]):
+                item.add_marker(flaky_marker)
+                break
 
 
 @pytest_asyncio.fixture
