@@ -324,6 +324,16 @@ class CassetteRecorder:
                 "回显请求内容/身份信息，本套件只钉 happy-path 真样本（spec D2）。"
                 f"调试摘要（console-only，不落盘）: {body_text[:300]!r}",
             )
+        # Opus final LOW-1：禁串逐字比对必须跑在 redact **之前**的 raw body 上
+        # ——shaped 凭证（sk-/JWT）会被 redact 掩成 6+4 形态，dump 时的扫描拿
+        # 不到全串；「已知凭证出现在响应体」是高危回显信号，直接硬 raise
+        # （redact/scrub/dump-scan 仍在其后作为纵深后网）。
+        for value, label in self._forbidden.items():
+            if value in body_text:
+                raise CassetteSecretError(
+                    f"响应 body 逐字命中已登记凭证（{label}）——拒绝录制"
+                    "（spec D3 第 5 道 b：真硬 stop 在 raw 层）。",
+                )
         headers_obj = (
             response_headers
             if isinstance(response_headers, httpx.Headers)
@@ -381,6 +391,15 @@ class CassetteRecorder:
                     continue
                 before = serialized[max(0, idx - window) : idx]
                 after = serialized[idx + len(needle) : idx + len(needle) + window]
+                # Opus final LOW-4：上下文窗口里可能出现**相邻的另一个**禁串，
+                # 全部登记值一并掩码后才可打印（值永不回显）。
+                for other_value, other_label in self._forbidden.items():
+                    for form in (
+                        other_value,
+                        json.dumps(other_value, ensure_ascii=True)[1:-1],
+                    ):
+                        before = before.replace(form, f"<SECRET:{other_label}>")
+                        after = after.replace(form, f"<SECRET:{other_label}>")
                 contexts.append(f"{label}: ...{before}<SECRET:{label}>{after}...")
                 break
         return contexts

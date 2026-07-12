@@ -151,11 +151,19 @@ transport 语义风险低）：
    redact_sensitive_text`（规则源复用：sk- / tskey- / Bearer / JWT / ENV 赋值 / JSON
    字段 / Telegram / 连接串）。
 5. **落盘前机械断言（fail-closed）**：序列化全文扫描——
-   a) 模式类：`sk-[A-Za-z0-9_-]{8,}` / `tskey-` / JWT 三段式 `eyJ*.*.*`；
-   b) **已知凭证逐字匹配**：录制器登记当次所有 `ResolvedAuth.bearer_token` +
-      `extra_headers` 值 + 相关 env 值（如 `SILICONFLOW_API_KEY`）为禁串，全文比对；
-   命中任意一条 → raise 拒绝落盘（宁可不产出 cassette）。这是 vcrpy 做不到的一层：
-   录制进程内拿得到真凭证明文，逐字匹配比模式匹配更硬。
+   a) 模式类：`sk-[A-Za-z0-9_-]{8,}` / `tskey-` / JWT 三段式 `eyJ*.*.*` +
+      无歧义身份键洗刷不变量（`safety_identifier`/`prompt_cache_key` 若以 string
+      值出现必须已是 `[scrubbed]`）；
+   b) **已知凭证逐字匹配（raw 层硬 stop）**：录制器登记当次现役凭证
+      （`ResolvedAuth.bearer_token` + 身份类 header 值 + 相关 env 值）为禁串；
+      **record() 在 redact 之前对 raw 响应 body 逐字比对**，命中即硬 raise
+      （Opus final LOW-1：redact 会把 shaped 凭证掩成 6+4 形态，dump 时扫描拿
+      不到全串——「已知凭证出现在响应体」是高危回显信号，宁可不录）；dump 时
+      对序列化全文再比对一次作为最终后网（防绕过 record 直接拼交互）。
+   这是 vcrpy 做不到的一层：录制进程内拿得到真凭证明文，逐字匹配比模式匹配更硬。
+   注：良性协议头（OpenAI-Beta/originator 等，已在请求头 allowlist）的值不登记
+   禁串——其值本就允许落盘，blanket 登记会假阳性（真录实测）；短值（<8 字符）
+   不做子串禁串（误伤面大，allowlist 兜底）。
 6. **事务式原子落盘**（Codex spec review H2）：序列化 + 第 5 道扫描全部通过后，先写
    同目录临时文件再 `os.replace` 原子提交到目标路径——任何一道失败都**不产生**目标
    文件，半成品 cassette 结构性不可能存在。

@@ -24,6 +24,7 @@ from ._wire_recorder import (
     CassetteRecorder,
     CassetteRecordError,
     CassetteSecretError,
+    RecordedInteraction,
     RecordingTransport,
     ReplayAuthResolver,
     replay_client,
@@ -121,10 +122,12 @@ async def _drive_chat(client: ProviderClient) -> tuple[str, list[dict], dict]:
 
 
 async def test_planted_secrets_never_reach_disk(tmp_path: Path) -> None:
-    """请求侧（Authorization / chatgpt-account-id）+ 响应侧（sk- / Bearer / JWT）
-    的假 secret 全部不出现在落盘文件里。"""
+    """请求侧（Authorization / chatgpt-account-id 头，值为**已登记**凭证）走
+    allowlist 面；响应侧种**未登记**的 shaped secrets（sk- / Bearer / JWT）走
+    redact 管线——两面产物全不出现在落盘文件里。（已登记凭证若逐字出现在
+    body 是 raw 层硬 raise 的高危信号，另测：test_fail_closed_on_raw_credential_echo。）"""
     body = _chat_sse_body(
-        f"leak {PLANTED_SK} and Bearer {FAKE_BEARER} and {PLANTED_JWT}",
+        f"leak {PLANTED_SK} and Bearer sk-unregistered-bearer-9876543210 and {PLANTED_JWT}",
     )
     client, recorder = _recording_setup(
         body,
@@ -140,7 +143,13 @@ async def test_planted_secrets_never_reach_disk(tmp_path: Path) -> None:
     recorder.dump(target)
     text = target.read_text(encoding="utf-8")
 
-    for secret in (FAKE_BEARER, FAKE_ACCOUNT_ID, PLANTED_SK, PLANTED_JWT):
+    for secret in (
+        FAKE_BEARER,  # 已登记：只出现在请求头，被 allowlist 挡
+        FAKE_ACCOUNT_ID,  # 已登记：同上（chatgpt-account-id 头）
+        PLANTED_SK,  # 未登记 shaped：被 redact 掩码
+        "sk-unregistered-bearer-9876543210",
+        PLANTED_JWT,
+    ):
         assert secret not in text, f"secret 泄漏进 cassette: {secret[:12]}..."
     assert "secret-cookie-value" not in text  # 响应头 allowlist（仅 content-type）
     assert "authorization" not in text.lower()
@@ -178,15 +187,50 @@ async def test_request_body_not_persisted_only_summary(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def test_fail_closed_on_residual_secret(tmp_path: Path) -> None:
-    """redact 规则抓不住的『无形状』禁串（已知凭证逐字登记）→ dump 拒绝落盘，
-    目标文件与 temp 文件都不存在。"""
+async def test_fail_closed_on_raw_credential_echo(tmp_path: Path) -> None:
+    """已登记凭证逐字出现在**raw** 响应 body → record 时即硬 raise（Opus final
+    LOW-1：比对必须在 redact 之前——shaped 凭证会被掩码削弱 dump 时扫描），
+    交互不入册、目标文件与 temp 文件都不存在。"""
     body = _chat_sse_body(f"credential echo: {PLANTED_PLAIN}")
     client, recorder = _recording_setup(body)
     recorder.register_forbidden_secret(PLANTED_PLAIN)
-    await _drive_chat(client)
+    with pytest.raises(CassetteSecretError, match="逐字命中"):
+        await _drive_chat(client)
+    assert recorder.interactions == []
 
     target = tmp_path / "refused.json"
+    recorder.dump(target)  # 空 cassette 可落盘（无交互）——泄漏体从未入册
+    assert PLANTED_PLAIN not in target.read_text(encoding="utf-8")
+
+
+async def test_shaped_credential_raw_echo_also_hard_stops() -> None:
+    """shaped 凭证（sk- bearer）逐字回显在 raw body：redact 本可掩码，但 raw
+    层禁串比对仍硬 raise——「已知凭证出现在响应体」是高危信号，宁可不录。"""
+    body = _chat_sse_body(f"echo {FAKE_BEARER}")
+    client, _recorder = _recording_setup(body)  # FAKE_BEARER 已在 setup 登记
+    with pytest.raises(CassetteSecretError, match="逐字命中"):
+        await _drive_chat(client)
+
+
+def test_dump_scan_remains_final_net(tmp_path: Path) -> None:
+    """dump 时扫描仍是最终后网：绕过 record() 直接拼交互（模拟手写 golden 失误）
+    时，落盘前扫描照样拒绝且无半成品。"""
+    recorder = CassetteRecorder(meta={})
+    recorder.register_forbidden_secret(PLANTED_PLAIN)
+    recorder.interactions.append(
+        RecordedInteraction(
+            method="POST",
+            scheme="https",
+            host="fake.invalid",
+            path="/v1/chat/completions",
+            request_headers={},
+            body_summary={},
+            status_code=200,
+            response_headers={},
+            body_text=f"data: {PLANTED_PLAIN}\n\n",
+        )
+    )
+    target = tmp_path / "netted.json"
     with pytest.raises(CassetteSecretError):
         recorder.dump(target)
     assert not target.exists()
