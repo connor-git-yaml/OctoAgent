@@ -243,8 +243,9 @@ async def test_identity_fields_scrubbed_in_response_body(tmp_path: Path) -> None
 
 
 def test_scan_enforces_identity_scrub_invariant() -> None:
-    """扫描不变量：身份字段以非 [scrubbed] string 值出现（含序列化转义形态）
-    → finding。防未来绕过 record() 管线直接拼 cassette。"""
+    """扫描不变量：**无歧义**身份键（safety_identifier/prompt_cache_key）以非
+    [scrubbed] string 值出现（含序列化转义形态）→ finding。防未来绕过 record()
+    管线直接拼 cassette。"""
     recorder = CassetteRecorder(meta={})
     raw = '"safety_identifier":"user-sneaky1234567890"'
     escaped = json.dumps({"body_text": '{"safety_identifier":"user-sneaky1234567890"}'})
@@ -252,6 +253,52 @@ def test_scan_enforces_identity_scrub_invariant() -> None:
     assert any("identity-field-unscrubbed" in f for f in recorder.scan_serialized(escaped))
     clean = '"safety_identifier":"[scrubbed]" and "user":null'
     assert recorder.scan_serialized(clean) == []
+
+
+def test_scan_does_not_flag_generic_keys_in_model_output() -> None:
+    """Codex final P2-1 钉住：通用键（user/instructions）在模型输出里合法出现
+    （JSON 示例/代码片段），扫描不得误判为身份泄漏拒绝落盘；录制侧
+    scrub_identity_fields 仍会洗顶层回显（保守面保持）。"""
+    recorder = CassetteRecorder(meta={})
+    model_output = json.dumps({"body_text": '{"user":"alice","instructions":"press the button"}'})
+    assert recorder.scan_serialized(model_output) == []
+
+
+async def test_recording_transport_forwards_aclose() -> None:
+    """Codex final P2-2 钉住：aclose 转发到被包装的真 transport（基类是 no-op）。"""
+
+    class _ClosableTransport(httpx.AsyncBaseTransport):
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"ok", request=request)
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    inner = _ClosableTransport()
+    client = httpx.AsyncClient(transport=RecordingTransport(CassetteRecorder(meta={}), inner=inner))
+    await client.aclose()
+    assert inner.closed
+
+
+def test_query_refusal_does_not_echo_query_value() -> None:
+    """Codex final P2-3 钉住：query 拒录报错不回显 query 值（可能含签名/token）。"""
+    recorder = CassetteRecorder(meta={})
+    with pytest.raises(CassetteRecordError) as excinfo:
+        recorder.record(
+            request=_make_request(
+                "https://fake.invalid/v1/chat/completions?sig=SECRET-QUERY-VALUE"
+            ),
+            status_code=200,
+            response_headers={},
+            body_text="data: [DONE]\n\n",
+        )
+    message = str(excinfo.value)
+    assert "SECRET-QUERY-VALUE" not in message
+    assert "sig=" not in message
+    assert "<redacted>" in message
 
 
 # ---------------------------------------------------------------------------

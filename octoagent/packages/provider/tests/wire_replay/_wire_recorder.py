@@ -81,11 +81,16 @@ _SCRUBBED_MARK = "[scrubbed]"
 _IDENTITY_SCRUB_PATTERNS: dict[str, re.Pattern[str]] = {
     field: re.compile(rf'"{field}":\s*"(?:[^"\\]|\\.)*"') for field in IDENTITY_SCRUB_FIELDS
 }
-#: 扫描侧强制不变量：这些字段若以 string 值出现，必须已是 "[scrubbed]"
+#: 扫描侧强制不变量：**无歧义**身份键若以 string 值出现，必须已是 "[scrubbed]"
 #: （容忍序列化后的 \" 转义形态——scan 跑在最终 serialized JSON 上）。
+#: 刻意只含 safety_identifier / prompt_cache_key（Codex final P2-1）：
+#: ``user`` / ``instructions`` 是通用词，模型输出里合法出现（JSON 示例/代码），
+#: 放进违规检查会把正常输出误判成泄漏拒绝落盘；这两个通用键的回显面由录制侧
+#: scrub_identity_fields 处理（handwritten golden 另有人眼 review 兜底）。
+IDENTITY_VIOLATION_FIELDS: tuple[str, ...] = ("safety_identifier", "prompt_cache_key")
 _IDENTITY_VIOLATION_PATTERNS: dict[str, re.Pattern[str]] = {
     field: re.compile(rf'\\?"{field}\\?":\s*\\?"(?!\[scrubbed\])')
-    for field in IDENTITY_SCRUB_FIELDS
+    for field in IDENTITY_VIOLATION_FIELDS
 }
 
 
@@ -307,9 +312,11 @@ class CassetteRecorder:
             # 防御深度：token 交换整条丢弃（正常构造下根本不经注入 client）。
             return
         if url.query:
+            # 报错只给 scheme://host/path——query 可能含签名/token，错误文本
+            # 打到 console/日志同样不得回显（Codex final P2-3）。
             raise CassetteRecordError(
-                f"请求带 query string（{url}）——cassette 永久不持久化 query"
-                "（spec D2 / Codex L1），出现即人工裁决。",
+                f"请求带 query string（{url.scheme}://{url.host}{url.path}?<redacted>）"
+                "——cassette 永久不持久化 query（spec D2 / Codex L1），出现即人工裁决。",
             )
         if not (200 <= status_code < 300):
             raise CassetteRecordError(
@@ -450,6 +457,11 @@ class RecordingTransport(httpx.AsyncBaseTransport):
             request=request,
         )
 
+    async def aclose(self) -> None:
+        """转发关闭到被包装的真 transport（Codex final P2-2：基类 aclose 是
+        no-op，不转发会让录制脚本的连接池悬空）。"""
+        await self._inner.aclose()
+
 
 class ReplayTransport(httpx.AsyncBaseTransport):
     """回放 transport：顺序 pop cassette 交互，松匹配 method/host/path。
@@ -521,6 +533,7 @@ __all__ = [
     "REQUEST_HEADER_ALLOWLIST",
     "RESPONSE_HEADER_ALLOWLIST",
     "IDENTITY_SCRUB_FIELDS",
+    "IDENTITY_VIOLATION_FIELDS",
     "SECRET_SCAN_PATTERNS",
     "replay_client",
     "scrub_identity_fields",
