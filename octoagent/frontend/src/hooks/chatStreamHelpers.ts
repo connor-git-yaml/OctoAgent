@@ -1,8 +1,97 @@
+import { fetchTaskDetail } from "../api/client";
 import type { Artifact, SSEEventData, TaskDetailResponse, TaskEvent } from "../types";
-import type { ChatMessage, ChatRestoreTarget } from "./chatStreamTypes";
+import type {
+  ChatMessage,
+  ChatRestoreTarget,
+  ChatSessionScopeSnapshot,
+  PendingConversationScope,
+} from "./chatStreamTypes";
 
 export const ACTIVE_CHAT_TASK_STORAGE_KEY = "octoagent.chat.activeTaskId";
 export const AGENT_STREAM_PLACEHOLDER = "主助手已接手，正在处理这条消息…";
+
+const RESTORE_TASK_DETAIL_TIMEOUT_MS = 3_000;
+
+/** 流式占位消息 id 生成（非纯，归 helpers 侧；reducer 只收注入值） */
+export function makePlaceholderId(): string {
+  return `agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+/** 带超时的任务详情拉取（restore 路径专用，超时即放弃该候选） */
+export async function fetchTaskDetailWithTimeout(
+  taskId: string,
+  timeoutMs: number = RESTORE_TASK_DETAIL_TIMEOUT_MS
+): Promise<TaskDetailResponse> {
+  let timer: number | null = null;
+  try {
+    return await Promise.race([
+      fetchTaskDetail(taskId),
+      new Promise<TaskDetailResponse>((_, reject) => {
+        timer = window.setTimeout(() => {
+          reject(new Error("RESTORE_TIMEOUT"));
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer != null) {
+      window.clearTimeout(timer);
+    }
+  }
+}
+
+/** 构造 control plane action 请求体（web surface 固定 actor） */
+export function makeControlActionRequest(
+  actionId: string,
+  params: Record<string, unknown>
+) {
+  return {
+    request_id:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `req-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    action_id: actionId,
+    surface: "web" as const,
+    actor: {
+      actor_id: "user:web",
+      actor_label: "Owner",
+    },
+    params,
+  };
+}
+
+export function buildPendingConversationScope(
+  snapshot: ChatSessionScopeSnapshot | null | undefined
+): PendingConversationScope | null {
+  const token = String(snapshot?.newConversationToken ?? "").trim();
+  if (!token) {
+    return null;
+  }
+  return {
+    token,
+    projectId: String(snapshot?.newConversationProjectId ?? "").trim(),
+    agentProfileId: String(snapshot?.newConversationAgentProfileId ?? "").trim(),
+  };
+}
+
+/**
+ * closeStream 兜底填充：目标消息仍是占位/流式态时以 content 收尾，
+ * 已有实内容则原样保留（与 SSE 正常完成路径的语义一致）。
+ */
+export function fillPendingAgentMessage(
+  messages: ChatMessage[],
+  messageId: string,
+  content: string
+): ChatMessage[] {
+  return messages.map((msg) => {
+    if (msg.id !== messageId) {
+      return msg;
+    }
+    if (msg.isStreaming || msg.content === AGENT_STREAM_PLACEHOLDER) {
+      return { ...msg, content, isStreaming: false };
+    }
+    return msg;
+  });
+}
 
 export function readStoredTaskId(): string | null {
   if (typeof window === "undefined") {
@@ -23,7 +112,7 @@ export function persistTaskId(taskId: string | null): void {
   window.sessionStorage.removeItem(ACTIVE_CHAT_TASK_STORAGE_KEY);
 }
 
-function normalizeTaskId(taskId: string | null | undefined): string | null {
+export function normalizeTaskId(taskId: string | null | undefined): string | null {
   if (!taskId) {
     return null;
   }

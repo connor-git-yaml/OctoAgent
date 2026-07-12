@@ -4,6 +4,9 @@
  * SSE EventSource 订阅 message:chunk/message:complete + 流式内容拼接
  * + 审批通知检测 + 重连逻辑
  * 对齐 FR-024
+ *
+ * F143：事件分支逻辑下沉到 chatStreamReducer.ts 纯函数，本文件只剩接线
+ * （SSE 连接生命周期 / REST 调用 / state 原子应用）。
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -13,34 +16,38 @@ import {
   fetchTaskDetail,
   frontDoorRequest,
 } from "../api/client";
-import type { SSEEventData, TaskDetailResponse } from "../types";
 import {
-  AGENT_STREAM_PLACEHOLDER,
   buildMessagesFromTaskDetail,
+  buildPendingConversationScope,
   buildRestoreCandidateTaskIds,
-  extractAgentMessage,
-  extractFailureMessage,
+  fetchTaskDetailWithTimeout,
+  fillPendingAgentMessage,
   findLastAgentContentInCurrentTurn,
-  isUserVisibleModelEvent,
+  makeControlActionRequest,
+  makePlaceholderId,
+  normalizeTaskId,
   persistTaskId,
   readStoredTaskId,
 } from "./chatStreamHelpers";
-import type { ChatMessage, ChatRestoreTarget, ChatSendOptions } from "./chatStreamTypes";
-export type { ChatMessage, ChatRestoreTarget, ChatSendOptions, MessageRole } from "./chatStreamTypes";
-
-const RESTORE_TASK_DETAIL_TIMEOUT_MS = 3_000;
-
-/** SSE 推送的审批事件快照（直接从事件 payload 构造，不依赖 REST 轮询） */
-export interface SSEApprovalSnapshot {
-  approvalId: string;
-  taskId: string;
-  toolName: string;
-  toolArgsSummary: string;
-  riskExplanation: string;
-  sideEffectLevel: string;
-  createdAt: string;
-  expiresAt: string;
-}
+import {
+  CHAT_STREAM_EVENT_TYPES,
+  applyMessageOps,
+  deriveChatStreamEventOutcome,
+  deriveStreamClosedOutcome,
+  makeAgentPlaceholderMessage,
+  parseChatStreamEvent,
+  type ChatStreamEventOutcome,
+} from "./chatStreamReducer";
+import type {
+  ChatMessage,
+  ChatRestoreTarget,
+  ChatSendOptions,
+  ChatSessionScopeSnapshot,
+  PendingConversationScope,
+  SSEApprovalSnapshot,
+} from "./chatStreamTypes";
+// prettier-ignore
+export type { ChatMessage, ChatRestoreTarget, ChatSendOptions, ChatSessionScopeSnapshot, MessageRole, SSEApprovalSnapshot } from "./chatStreamTypes";
 
 /** Hook 返回值 */
 export interface UseChatStreamReturn {
@@ -68,82 +75,6 @@ interface UseChatStreamOptions {
   deferStoredTaskIdRestore?: boolean;
   /** 跳过发消息后的全局 session.focus 同步（在特定 Worker 会话路由下使用，避免抢走 focus） */
   skipSessionFocus?: boolean;
-}
-
-export interface ChatSessionScopeSnapshot {
-  activeProjectId?: string | null;
-  /** @deprecated workspace 概念已移除，保留字段仅为兼容 */
-  activeWorkspaceId?: string | null;
-  newConversationToken?: string | null;
-  newConversationProjectId?: string | null;
-  /** @deprecated workspace 概念已移除，保留字段仅为兼容 */
-  newConversationWorkspaceId?: string | null;
-  newConversationAgentProfileId?: string | null;
-}
-
-interface PendingConversationScope {
-  token: string;
-  projectId: string;
-  agentProfileId: string;
-}
-
-function makeControlActionRequest(
-  actionId: string,
-  params: Record<string, unknown>
-) {
-  return {
-    request_id:
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `req-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    action_id: actionId,
-    surface: "web" as const,
-    actor: {
-      actor_id: "user:web",
-      actor_label: "Owner",
-    },
-    params,
-  };
-}
-
-function normalizeTaskId(taskId: string | null | undefined): string | null {
-  if (!taskId) {
-    return null;
-  }
-  const normalized = taskId.trim();
-  return normalized ? normalized : null;
-}
-
-function buildPendingConversationScope(
-  snapshot: ChatSessionScopeSnapshot | null | undefined
-): PendingConversationScope | null {
-  const token = String(snapshot?.newConversationToken ?? "").trim();
-  if (!token) {
-    return null;
-  }
-  return {
-    token,
-    projectId: String(snapshot?.newConversationProjectId ?? "").trim(),
-    agentProfileId: String(snapshot?.newConversationAgentProfileId ?? "").trim(),
-  };
-}
-
-async function fetchTaskDetailWithTimeout(taskId: string): Promise<TaskDetailResponse> {
-  let timer: number | null = null;
-  try {
-    return await Promise.race([
-      fetchTaskDetail(taskId),
-      new Promise<TaskDetailResponse>((_, reject) => {
-        timer = window.setTimeout(() => {
-          reject(new Error("RESTORE_TIMEOUT"));
-        }, RESTORE_TASK_DETAIL_TIMEOUT_MS);
-      }),
-    ]);
-  } finally {
-    if (timer != null) {
-      window.clearTimeout(timer);
-    }
-  }
 }
 
 export function useChatStream(
@@ -210,15 +141,9 @@ export function useChatStream(
   }, [restoreTaskIdSignature, taskId]);
 
   const spawnAgentPlaceholder = useCallback(() => {
-    const placeholderId = `agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+    const placeholderId = makePlaceholderId();
     activeAgentMessageIdRef.current = placeholderId;
-    const agentMsg: ChatMessage = {
-      id: placeholderId,
-      role: "agent",
-      content: AGENT_STREAM_PLACEHOLDER,
-      isStreaming: true,
-    };
-    setMessages((prev) => [...prev, agentMsg]);
+    setMessages((prev) => [...prev, makeAgentPlaceholderMessage(placeholderId)]);
     setStreaming(true);
     return placeholderId;
   }, []);
@@ -258,22 +183,38 @@ export function useChatStream(
         if (!lastAgentContent) {
           return;
         }
-        setMessages((prev) =>
-          prev.map((msg) => {
-            if (msg.id !== msgId) {
-              return msg;
-            }
-            if (msg.isStreaming || msg.content === AGENT_STREAM_PLACEHOLDER) {
-              return { ...msg, content: lastAgentContent, isStreaming: false };
-            }
-            return msg;
-          })
-        );
+        setMessages((prev) => fillPendingAgentMessage(prev, msgId, lastAgentContent));
       })
       .catch(() => {
         // 兜底失败保持当前状态即可，不再冒泡错误
       });
   }, []);
+
+  /** reducer outcome 应用到分布式 state 原子（messages 走函数式更新防 stale） */
+  const applyStreamOutcome = useCallback(
+    (outcome: ChatStreamEventOutcome) => {
+      activeAgentMessageIdRef.current = outcome.nextActiveAgentMessageId;
+      if (outcome.messageOps.length > 0) {
+        setMessages((prev) => applyMessageOps(prev, outcome.messageOps));
+      }
+      if (outcome.streaming !== undefined) {
+        setStreaming(outcome.streaming);
+      }
+      if (outcome.error !== undefined) {
+        setError(outcome.error);
+      }
+      if (outcome.liveApproval !== undefined) {
+        setLiveApproval(outcome.liveApproval);
+      }
+      if (outcome.approvalBump) {
+        setApprovalSignal((n) => n + 1);
+      }
+      if (outcome.shouldCloseStream) {
+        closeStream();
+      }
+    },
+    [closeStream]
+  );
 
   const requestSessionFocus = useCallback(async (nextTaskId: string) => {
     const normalized = normalizeTaskId(nextTaskId);
@@ -370,145 +311,30 @@ export function useChatStream(
         const es = new EventSource(streamUrl);
         eventSourceRef.current = es;
 
-        // 监听消息事件
+        // 事件分支逻辑全部在 chatStreamReducer（纯函数），这里只做接线
         const handleEvent = (e: MessageEvent) => {
-          try {
-            const eventData = JSON.parse(e.data) as Omit<SSEEventData, "type"> & {
-              type: string;
-            };
-
-            if (eventData.type === "MODEL_CALL_STARTED" && isUserVisibleModelEvent(eventData)) {
-              ensureActiveAgentPlaceholder();
-            }
-
-            // 检查是否是模型回复事件
-            if (eventData.type === "MODEL_CALL_COMPLETED" && isUserVisibleModelEvent(eventData)) {
-              const content = extractAgentMessage(eventData);
-              const currentAgentMsgId = activeAgentMessageIdRef.current ?? ensureActiveAgentPlaceholder();
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === currentAgentMsgId
-                    ? {
-                        ...msg,
-                        content: content || "已收到回复，但没有可显示的正文。",
-                        isStreaming: false,
-                      }
-                    : msg
-                )
-              );
-              activeAgentMessageIdRef.current = null;
-              setStreaming(false);
-            }
-
-            if (
-              (eventData.type === "MODEL_CALL_FAILED" && isUserVisibleModelEvent(eventData)) ||
-              eventData.type === "ERROR"
-            ) {
-              const failureMessage = extractFailureMessage(eventData);
-              const currentAgentMsgId = activeAgentMessageIdRef.current ?? ensureActiveAgentPlaceholder();
-              setError(failureMessage);
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === currentAgentMsgId
-                    ? {
-                        ...msg,
-                        content:
-                          msg.isStreaming || msg.content === AGENT_STREAM_PLACEHOLDER
-                            ? failureMessage
-                            : msg.content || failureMessage,
-                        isStreaming: false,
-                      }
-                    : msg
-                )
-              );
-              activeAgentMessageIdRef.current = null;
-              setStreaming(false);
-            }
-
-            // 检查审批请求——直接从 SSE payload 构造审批快照，不依赖 REST 轮询
-            if (
-              eventData.type === "approval:requested" ||
-              eventData.type === "APPROVAL_REQUESTED"
-            ) {
-              const currentAgentMsgId = activeAgentMessageIdRef.current ?? ensureActiveAgentPlaceholder();
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === currentAgentMsgId
-                    ? { ...msg, hasApproval: true, isStreaming: true }
-                    : msg
-                )
-              );
-              setStreaming(true);
-              // 从 SSE 事件 payload 直接构造审批快照
-              const p = (eventData.payload ?? {}) as Record<string, unknown>;
-              const approvalId = typeof p.approval_id === "string" ? p.approval_id : "";
-              if (approvalId) {
-                setLiveApproval({
-                  approvalId,
-                  taskId: typeof p.task_id === "string" ? p.task_id : "",
-                  toolName: typeof p.tool_name === "string" ? p.tool_name : "",
-                  toolArgsSummary: typeof p.tool_args_summary === "string" ? p.tool_args_summary : "",
-                  riskExplanation: typeof p.risk_explanation === "string" ? p.risk_explanation : "",
-                  sideEffectLevel: typeof p.side_effect_level === "string" ? p.side_effect_level : "",
-                  createdAt: typeof p.created_at === "string" ? p.created_at : "",
-                  expiresAt: typeof p.expires_at === "string" ? p.expires_at : "",
-                });
-                setApprovalSignal((n) => n + 1);
-              }
-            }
-
-            // 审批已解决/过期——清除 liveApproval
-            if (
-              eventData.type === "APPROVAL_EXPIRED" ||
-              eventData.type === "APPROVAL_APPROVED" ||
-              eventData.type === "APPROVAL_REJECTED" ||
-              eventData.type === "approval:resolved" ||
-              eventData.type === "approval:expired"
-            ) {
-              setLiveApproval(null);
-              setApprovalSignal((n) => n + 1);
-            }
-
-            // 终态检测
-            if (eventData.final) {
-              closeStream();
-            }
-          } catch {
-            // 忽略解析错误（心跳等）
+          const event = parseChatStreamEvent(e.data);
+          if (!event) {
+            return; // 心跳 / malformed，忽略
           }
+          applyStreamOutcome(
+            deriveChatStreamEventOutcome(
+              event,
+              activeAgentMessageIdRef.current,
+              makePlaceholderId()
+            )
+          );
         };
 
         // 监听各类事件（含审批全生命周期）
-        const eventTypes = [
-          "MODEL_CALL_COMPLETED",
-          "MODEL_CALL_STARTED",
-          "MODEL_CALL_FAILED",
-          "STATE_TRANSITION",
-          "APPROVAL_REQUESTED",
-          "APPROVAL_EXPIRED",
-          "APPROVAL_APPROVED",
-          "APPROVAL_REJECTED",
-          "approval:requested",
-          "approval:resolved",
-          "approval:expired",
-          "ERROR",
-        ];
-        for (const type of eventTypes) {
+        for (const type of CHAT_STREAM_EVENT_TYPES) {
           es.addEventListener(type, handleEvent);
         }
         es.onmessage = handleEvent;
 
         es.onerror = () => {
           if (es.readyState === EventSource.CLOSED) {
-            setStreaming(false);
-            setMessages((prev) =>
-              prev.map((msg) =>
-                msg.id === activeAgentMessageIdRef.current
-                  ? { ...msg, isStreaming: false }
-                  : msg
-              )
-            );
-            activeAgentMessageIdRef.current = null;
+            applyStreamOutcome(deriveStreamClosedOutcome(activeAgentMessageIdRef.current));
           }
         };
       } catch (err) {
@@ -518,6 +344,7 @@ export function useChatStream(
     },
     [
       taskId,
+      applyStreamOutcome,
       closeStream,
       ensureActiveAgentPlaceholder,
       pendingConversationScope,
