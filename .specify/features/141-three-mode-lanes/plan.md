@@ -1,7 +1,8 @@
 # F141 实施 Plan
 
-> 对应 spec.md。零生产代码改动；文件面 = repo-scripts / .githooks / CI workflow / 测试配置与
-> conftest / 测试治理资产 / 文档。
+> 对应 spec.md（已按 Codex spec 评审修订：D4v2 skip 三分类 / D5v2 coverage source 配置 /
+> D1v2 lane PYTHONPATH 锁 / D9 real_llm marker，见 codex-review-spec.md）。零生产代码改动；
+> 文件面 = repo-scripts / .githooks / CI workflow / 测试配置与 conftest / 测试治理资产 / 文档。
 
 ## Phase A — 门禁脚本四件 + 单测
 
@@ -25,8 +26,9 @@
 
 | # | 文件 | 内容 |
 |---|------|------|
-| C1 | `repo-scripts/lane.py`（新） | LANES 注册表（spec §3 全表）+ 模式过滤 + 顺序执行 + release 强制语义（SKIP_E2E 无效告警 / --skip 拒 live / live lane passed≥1 / attest JSON status 解析 / --allow-not-enabled / attestation --require-signed）+ `--dry-run` + 报告写 `~/.octoagent/logs/lane/<mode>-<ts>.json` + stdout 摘要表；pytest 子进程用 `uv run --no-sync python -m pytest`（cwd=octoagent，PYTHONNOUSERSITE=1，照 hook 教训） |
-| C2 | `octoagent/tests/gate/test_lane_orchestrator.py`（新） | lane 组合按模式过滤正确；release 语义 AC-3 各条（用 fake runner 注入，不真跑子进程） |
+| C1 | `repo-scripts/lane.py`（新） | LANES 注册表（spec §3 全表）+ 模式过滤 + 顺序执行 + release 强制语义（SKIP_E2E 无效告警 / --skip 拒 live / live lane passed≥1 且 unexpected_skip=0【junit skip reason 三分类，D4v2】/ attest JSON status 解析 / --allow-not-enabled / attestation --require-signed）+ `--dry-run` + 报告写 `~/.octoagent/logs/lane/<mode>-<ts>.json` + stdout 摘要表；pytest 子进程用 `uv run --no-sync python -m pytest`（cwd=octoagent，PYTHONNOUSERSITE=1 + **PYTHONPATH 锁自身 repo 树 9 个 src 目录**，D1v2/Codex M2） |
+| C2 | `octoagent/tests/gate/test_lane_orchestrator.py`（新） | lane 组合按模式过滤正确；release 语义 AC-3 各条含 skip 三分类（用 fake runner 注入，不真跑子进程） |
+| C3 | `real_llm` marker（D9）：pyproject 注册 + pytestmark 加 `test_e2e_smoke_real_llm.py` / `test_e2e_mcp_skill_pipeline.py`（先 grep 复核真打面没有第三个文件） | |
 
 ## Phase D — pr lane（hook 改造：change-policy + scripted）
 
@@ -40,9 +42,9 @@
 |---|------|
 | E1 | checkout `fetch-depth: 0`（changed-lines 需历史） |
 | E2 | governance 步：check-quarantine（--enforce-review-date）+ check-attestation（解析校验，uv sync 后） |
-| E3 | 主跑加 `--cov=octoagent --cov-report=`（空报告，只积累数据）；e2e_scripted 步 `apps/gateway/tests/e2e_live -m e2e_scripted --cov-append --cov-report=lcov:coverage.lcov` + 独立 junit |
-| E4 | changed-lines 门步：base 决议（PR base.sha / push before / 全零回退 merge-base）+ 跑 A3 脚本 |
-| E5 | `octoagent/pyproject.toml`：`[tool.coverage.run] relative_files = true`；e2e_scripted marker 文案更新 |
+| E3 | 主跑加裸 `--cov --cov-report=`（source 走 config，D5v2）；e2e_scripted 步 `apps/gateway/tests/e2e_live -m e2e_scripted --cov --cov-append --cov-report=lcov:coverage.lcov` + 独立 junit |
+| E4 | changed-lines 门步：base 决议（PR base.sha / push before / 全零回退 merge-base）+ 跑 A3 脚本；exempt 时大声记录 HEAD sha+subject |
+| E5 | `octoagent/pyproject.toml`：`[tool.coverage.run] relative_files = true + source 9 个 src 目录`（D5v2）；注册 `real_llm` marker（D9）；e2e_scripted marker 文案更新 |
 
 ## Phase F — tests/AGENTS.md + 文档收敛
 
