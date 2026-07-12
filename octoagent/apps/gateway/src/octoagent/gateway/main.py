@@ -121,6 +121,39 @@ class SpaStaticFiles(StaticFiles):
         return response
 
 
+def _resolve_frontend_dist() -> Path | None:
+    """解析前端构建产物目录（``frontend/dist``）。存在返回该路径，否则 ``None``。
+
+    路径相对 gateway 包锚定（``<repo>/octoagent/frontend/dist``）。抽成独立函数
+    是为了把 SPA 挂载点收敛到单一事实源 + 让回归测试可注入（避免依赖真实
+    ``npm run build`` 产物）。
+    """
+    gateway_root = Path(__file__).resolve().parent
+    frontend_dist = gateway_root.parents[4] / "frontend" / "dist"
+    return frontend_dist if frontend_dist.exists() else None
+
+
+def _mount_frontend_spa(app: FastAPI) -> None:
+    """把前端 SPA catch-all（``Mount("/")``）挂成**最后一条路由**。
+
+    必须在 lifespan bootstrap 完成后调用。F105 v0.2 把 telegram 等 inbound
+    router 从构造期迁进 lifespan bootstrap（``octo_harness._bootstrap_runtime_services``）；
+    Starlette 按注册序匹配，``Mount("/")`` 全前缀匹配一切。若 SPA 在构造期挂载，
+    会排在所有 lifespan 期 include 的路由**之前**把它们全部遮蔽——``POST
+    /api/telegram/webhook`` 落到 StaticFiles（只收 GET/HEAD）→ 405。故 SPA 挂载
+    改由 ``lifespan`` / ``_make_harness_lifespan`` 在 ``harness.commit_to_app``
+    之后调用，保证恒为最后一条路由。
+
+    幂等：已存在名为 ``frontend`` 的挂载时直接返回（防 lifespan 重入时重复挂载）。
+    """
+    frontend_dist = _resolve_frontend_dist()
+    if frontend_dist is None:
+        return
+    if any(getattr(route, "name", None) == "frontend" for route in app.router.routes):
+        return
+    app.mount("/", SpaStaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+
+
 def _resolve_project_root() -> Path:
     """解析 Gateway 使用的 project root。"""
     return Path(os.environ.get("OCTOAGENT_PROJECT_ROOT", str(Path.cwd())))
@@ -425,6 +458,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     harness = OctoHarness(project_root=_resolve_project_root())
     await harness.bootstrap(app)
     harness.commit_to_app(app)
+    # SPA catch-all 必须在 bootstrap（含 lifespan 期挂载的 inbound router）之后
+    # 挂载，恒为最后一条路由——否则 Mount("/") 遮蔽 webhook（详见 _mount_frontend_spa）。
+    _mount_frontend_spa(app)
     try:
         yield
     finally:
@@ -445,6 +481,9 @@ def _make_harness_lifespan(harness_factory: Any) -> Any:
         harness = harness_factory()
         await harness.bootstrap(app)
         harness.commit_to_app(app)
+        # 与生产 lifespan 同构：SPA catch-all 在 bootstrap 之后挂载，恒为最后一条路由
+        # ——F140 L1 需要「完整路由 + SPA mount 的真 app」，同样经此路径获得 SPA。
+        _mount_frontend_spa(app)
         try:
             yield
         finally:
@@ -528,13 +567,10 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
     app.include_router(notifications.router, tags=["notifications"], dependencies=protected)
     pipelines.include_pipeline_routers(app, tags=["pipelines"], dependencies=protected)
 
-    # 挂载前端静态文件（frontend/dist/ -> /）
-    # 在所有 API 路由之后挂载，确保 API 优先匹配
-    gateway_root = Path(__file__).resolve().parent
-    frontend_dist = gateway_root.parents[4] / "frontend" / "dist"
-    if frontend_dist.exists():
-        app.mount("/", SpaStaticFiles(directory=str(frontend_dist), html=True), name="frontend")
-
+    # 前端 SPA catch-all（Mount("/")）**不在此构造期挂载**：F105 v0.2 把 telegram
+    # 等 inbound router 迁进 lifespan bootstrap，构造期挂 Mount("/") 会遮蔽它们
+    # （POST /api/telegram/webhook → 405）。改由 lifespan / _make_harness_lifespan
+    # 在 bootstrap 完成后调 _mount_frontend_spa，保证 SPA 恒为最后一条路由。
     return app
 
 
