@@ -9,7 +9,8 @@
 #     显式不进 per-PR CI——F141 weekly canary 范围）。gate=deny 构造性保证零真
 #     LLM 调用：uv sync 后 provider 包 pytest11 entry-point 插件
 #     （octoagent_model_request_gate）自动生效 + octoagent/conftest.py 冗余布线。
-#     串行首版（勿 -n auto——F083 task_runner race；F142 xdist_group 后再提速）。
+#     F142 起并行（-n auto --dist=loadgroup；时序敏感文件已标 xdist_group 钉
+#     同 worker，F137 串行首版注释的 F083 race 已按分组+治根因解锁）。
 #
 #   frontend —— 复杂度护栏（阻断）+ vitest（阻断；暂排除 F137 接线时点发现的
 #     6 个存量红文件，欠账清单见该步骤注释）。
@@ -43,7 +44,8 @@ concurrency:
 jobs:
   backend-deterministic:
     runs-on: ubuntu-latest
-    # 串行全量实测本地 ~3min（M4 Pro）；GitHub 2-core 预估 20-40min，60min 兜底
+    # F137 串行首跑实测 6m25s；F142 翻并行（本地 -n auto 串行 378s→~26s，
+    # 2-core 预期显著缩短）；60min 兜底不动
     timeout-minutes: 60
     defaults:
       run:
@@ -70,14 +72,22 @@ jobs:
         # 而非裸 `uv run pytest`——console-script 可能逃逸 venv。
         # 无参数 = pyproject testpaths 全量；--ignore 剔 e2e_live（宿主凭证依赖）。
         #
-        # --reruns 1（Codex Final P1-2，仅 CI lane）：全仓 ~72 处 single-sleep
-        # timing 断言（octoagent/pyproject.toml F083 归档的已知债）在 GitHub
-        # 2-core 慢 runner 上会间歇抖红。单次 rerun 是显式过渡桥（junit 可见
-        # rerun 计数，持续失败仍红）——F142 sleep→轮询治本 / F141 quarantine
-        # manifest 落地后删除本参数。本地跑保持无 rerun，开发者仍看得见 flake。
+        # F142 件5a：翻并行 `-n auto --dist=loadgroup`——18 个时序敏感文件已标
+        # xdist_group 钉同 worker 串行（分组清单见各文件模块注释）；收集不确定
+        # 性（set 参数化）与 attach_input 次生窗口两类根因已治；本地同参连跑
+        # 3 轮全绿（4894 passed，串行 378s → ~26s）。GitHub 2-core 上 `-n auto`
+        # =2 worker，预期 6m25s 显著缩短。
+        #
+        # --reruns 1（Codex Final P1-2，仅 CI lane）：全仓剩余 single-sleep
+        # timing 断言（octoagent/pyproject.toml F083 归档的已知债，F142 已治
+        # 最热的 task_runner/f009/f131 三处）在 GitHub 2-core 慢 runner 上仍可能
+        # 间歇抖红。单次 rerun 是显式过渡桥（junit 可见 rerun 计数，持续失败
+        # 仍红）——F141 quarantine manifest 落地后删除本参数。本地跑保持无
+        # rerun，开发者仍看得见 flake。
         run: >
           uv run python -m pytest -q
           --ignore=apps/gateway/tests/e2e_live
+          -n auto --dist=loadgroup
           --reruns 1 --reruns-delay 2
           --junitxml=test-results/junit-backend.xml
         env:
