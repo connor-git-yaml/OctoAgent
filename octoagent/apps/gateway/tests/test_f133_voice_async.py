@@ -32,6 +32,11 @@ from .test_telegram_voice import (
     _voice_update,
 )
 
+# F142 件5a：xdist 分组——本文件含时序敏感断言（固定 sleep 窗口/性能阈值/状态机
+# 竞态，F083 归档债），`--dist=loadgroup` 下同组钉同一 worker 串行执行，
+# 解锁其余测试 `-n auto` 并行（本地全量与 CI 双提速）。
+pytestmark = pytest.mark.xdist_group("voice_async_timing")
+
 
 def _write_config(project_root: Path, *, mode: str = "webhook") -> None:
     save_config(

@@ -6,6 +6,7 @@ import asyncio
 from pathlib import Path
 
 import octoagent.gateway.services.task_service as task_service_module
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from octoagent.core.models import (
@@ -27,6 +28,11 @@ from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
+
+# F142 件5a：xdist 分组——本文件含时序敏感断言（固定 sleep 窗口/性能阈值/状态机
+# 竞态，F083 归档债），`--dist=loadgroup` 下同组钉同一 worker 串行执行，
+# 解锁其余测试 `-n auto` 并行（本地全量与 CI 双提速）。
+pytestmark = pytest.mark.xdist_group("chat_send_timing")
 
 
 @pytest_asyncio.fixture

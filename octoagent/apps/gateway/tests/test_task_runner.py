@@ -28,6 +28,11 @@ from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalDecision
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
+# F142 件5a：xdist 分组——本文件含时序敏感断言（固定 sleep 窗口/性能阈值/状态机
+# 竞态，F083 归档债），`--dist=loadgroup` 下同组钉同一 worker 串行执行，
+# 解锁其余测试 `-n auto` 并行（本地全量与 CI 双提速）。
+pytestmark = pytest.mark.xdist_group("task_runner_state_machine")
+
 
 class SlowLLMService:
     def __init__(self, delay_s: float = 0.3) -> None:
@@ -894,22 +899,33 @@ class TestTaskRunner:
         await runner.enqueue(task_id, msg.text)
 
         # Feature 083 P4：等更全的状态——task.status=WAITING_INPUT + session.state +
-        # session.can_attach_input 三者齐 + 5s 窗口（原 1s 在 xdist 下偶发不够）
-        for _ in range(100):
+        # session.can_attach_input 三者齐 + 5s 窗口（原 1s 在 xdist 下偶发不够）。
+        # F142 件5a：job.status 折进等待条件——task/session 达 WAITING_INPUT 与
+        # job 行更新非原子，原来 poll 断开后独立断言 job 状态踩的正是 F083 归档
+        # 的「次生窗口」（loadgroup 首跑实证间歇红）；窗口 100→200 迭代（迭代
+        # 计数制 deadline 在高负载下随 sleep 实际时长自动扩张）。
+        job = None
+        for _ in range(200):
             task = await task_service.get_task(task_id)
             session = await runner.get_execution_session(task_id)
+            job = await store_group.task_job_store.get_job(task_id)
             if (
                 task is not None
                 and task.status == TaskStatus.WAITING_INPUT
                 and session is not None
                 and session.state == ExecutionSessionState.WAITING_INPUT
                 and session.can_attach_input is True
+                and job is not None
+                and job.status == "WAITING_INPUT"
             ):
                 break
             await asyncio.sleep(0.05)
         else:
             raise AssertionError(
-                "task did not reach WAITING_INPUT + session.can_attach_input within 5s"
+                "task/session/job 未在窗口内齐达 WAITING_INPUT："
+                f"task={getattr(task, 'status', None)} "
+                f"session={getattr(session, 'state', None)} "
+                f"job={getattr(job, 'status', None)}"
             )
 
         assert session is not None
@@ -918,26 +934,37 @@ class TestTaskRunner:
         assert session.backend == ExecutionBackend.INLINE
         assert session.can_attach_input is True
 
-        job = await store_group.task_job_store.get_job(task_id)
         assert job is not None
         assert job.status == "WAITING_INPUT"
 
         result = await runner.attach_input(task_id, "live-confirmed")
         assert result.delivered_live is True
 
-        for _ in range(20):
+        # F142 件5a：同上——job.status 折进等待条件（task→SUCCEEDED 与 job 行
+        # 更新之间同样存在次生窗口）+ 窗口 20→100 迭代。
+        for _ in range(100):
             task = await task_service.get_task(task_id)
-            if task is not None and task.status == TaskStatus.SUCCEEDED:
+            job = await store_group.task_job_store.get_job(task_id)
+            if (
+                task is not None
+                and task.status == TaskStatus.SUCCEEDED
+                and job is not None
+                and job.status == "SUCCEEDED"
+            ):
                 break
             await asyncio.sleep(0.05)
         else:
-            raise AssertionError("task did not reach SUCCEEDED")
+            raise AssertionError(
+                "task/job 未在窗口内齐达 SUCCEEDED："
+                f"task={getattr(task, 'status', None)} job={getattr(job, 'status', None)}"
+            )
 
-        job = await store_group.task_job_store.get_job(task_id)
         assert job is not None
         assert job.status == "SUCCEEDED"
 
-        for _ in range(20):
+        # F142 件5a：事件链落齐窗口 20→100 迭代（TASK_HEARTBEAT 等异步落库，
+        # 高负载下 1s 窗口不够）。
+        for _ in range(100):
             events = await store_group.event_store.get_events_for_task(task_id)
             event_types = [event.type.value for event in events]
             if {

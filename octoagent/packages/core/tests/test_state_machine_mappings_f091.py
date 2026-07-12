@@ -89,7 +89,9 @@ class TestMappingCompleteness:
 class TestUnsafeMappingRaisesValueError:
     """work_status_to_task_status 对前置依赖状态必 raise。"""
 
-    @pytest.mark.parametrize("status", list(WORK_STATUSES_REQUIRING_CONTEXT))
+    # F142：sorted 而非 list——set 迭代序随 hash 随机化跨进程漂移，xdist 多 worker
+    # 收集顺序不一致会直接 ERROR（loadgroup 首跑实证）；确定性参数化。
+    @pytest.mark.parametrize("status", sorted(WORK_STATUSES_REQUIRING_CONTEXT))
     def test_raises_for_merged_escalated_deleted(self, status: WorkStatus) -> None:
         with pytest.raises(ValueError, match="需要前置状态上下文"):
             work_status_to_task_status(status)
@@ -108,7 +110,8 @@ class TestUnsafeMappingRaisesValueError:
 class TestTerminalPreservation:
     """终态 → 终态：状态机的关键不变量。"""
 
-    @pytest.mark.parametrize("status", list(TERMINAL_STATES))
+    # F142：同上——set 参数化必须 sorted 保证 xdist 收集确定性。
+    @pytest.mark.parametrize("status", sorted(TERMINAL_STATES))
     def test_task_terminal_maps_to_work_terminal(self, status: TaskStatus) -> None:
         mapped = task_status_to_work_status(status)
         assert mapped in WORK_TERMINAL_STATUSES, (

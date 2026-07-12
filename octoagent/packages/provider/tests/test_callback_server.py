@@ -18,6 +18,11 @@ import pytest
 from octoagent.provider.auth.callback_server import CallbackResult, wait_for_callback
 from octoagent.provider.exceptions import OAuthFlowError
 
+# F142 件5a：xdist 分组——本文件含时序敏感断言（固定 sleep 窗口/性能阈值/状态机
+# 竞态，F083 归档债），`--dist=loadgroup` 下同组钉同一 worker 串行执行，
+# 解锁其余测试 `-n auto` 并行（本地全量与 CI 双提速）。
+pytestmark = pytest.mark.xdist_group("oauth_callback_timing")
+
 
 async def _send_http_request(port: int, request_line: str) -> str:
     """发送原始 HTTP 请求并返回响应"""
