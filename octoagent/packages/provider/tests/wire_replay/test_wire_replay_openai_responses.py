@@ -96,9 +96,5 @@ async def test_identity_fields_scrubbed_on_committed_cassettes(
         assert '"prompt_cache_key":"[scrubbed]"' in body
         # 完整消费：洗刷检查后回放一遍
         client = _replay_client(cassette)
-        scenario = (
-            scenarios.RESPONSES_SIMPLE
-            if "simple" in name
-            else scenarios.RESPONSES_TOOL_CALL
-        )
+        scenario = scenarios.RESPONSES_SIMPLE if "simple" in name else scenarios.RESPONSES_TOOL_CALL
         await client.call(model_name=MODEL, **scenario)

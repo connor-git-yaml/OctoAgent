@@ -46,9 +46,7 @@ async def test_simple_completion_replay(
 ) -> None:
     cassette = wire_cassette("openai_chat_simple.json")
     client = _replay_client(cassette)
-    content, tool_calls, metadata = await client.call(
-        model_name=MODEL, **scenarios.CHAT_SIMPLE
-    )
+    content, tool_calls, metadata = await client.call(model_name=MODEL, **scenarios.CHAT_SIMPLE)
     assert content == (
         "SSE（Server-Sent Events）是一种允许服务器主动向客户端推送实时数据的长连接技术。"
     )
@@ -65,9 +63,7 @@ async def test_simple_completion_replay(
 async def test_tool_call_replay(wire_cassette: Callable[[str], Cassette]) -> None:
     cassette = wire_cassette("openai_chat_tool_call.json")
     client = _replay_client(cassette)
-    content, tool_calls, metadata = await client.call(
-        model_name=MODEL, **scenarios.CHAT_TOOL_CALL
-    )
+    content, tool_calls, metadata = await client.call(model_name=MODEL, **scenarios.CHAT_TOOL_CALL)
     assert content == ""
     assert tool_calls == [
         {
@@ -95,9 +91,7 @@ async def test_u2028_probe_replay_provider_escapes_line_separator(
     # （探针响应无 CJK；ensure_ascii=False 的 CJK 证据由 simple cassette 钉）
 
     client = _replay_client(cassette)
-    content, _, metadata = await client.call(
-        model_name=MODEL, **scenarios.CHAT_U2028_PROBE
-    )
+    content, _, metadata = await client.call(model_name=MODEL, **scenarios.CHAT_U2028_PROBE)
     assert content == scenarios.U2028_PROBE_TEXT  # 还原为原始字符，delta 未丢
     assert metadata["token_usage"]["total_tokens"] == 53
 
@@ -129,9 +123,7 @@ async def test_embeddings_replay(wire_cassette: Callable[[str], Cassette]) -> No
     """embed() 非流式路径的真样本回放（Qwen3-Embedding-0.6B，1024 维）。"""
     cassette = wire_cassette("openai_chat_embeddings.json")
     client = _replay_client(cassette)
-    vectors = await client.embed(
-        model_name=scenarios.EMBED_MODEL, texts=scenarios.EMBED_TEXTS
-    )
+    vectors = await client.embed(model_name=scenarios.EMBED_MODEL, texts=scenarios.EMBED_TEXTS)
     assert len(vectors) == 1
     assert len(vectors[0]) == 1024
     assert vectors[0][0] == pytest.approx(0.020675694569945335)

@@ -67,9 +67,7 @@ def test_cassette_has_zero_secret_shapes(filename: str) -> None:
     # AC-2 人工 grep 的机械等价（双查的常绿半边）
     assert not re.search(r"sk-[A-Za-z0-9_\-]{8,}", text)
     assert "tskey-" not in text
-    assert not re.search(
-        r"eyJ[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}", text
-    )
+    assert not re.search(r"eyJ[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}", text)
 
 
 @pytest.mark.parametrize("filename", EXPECTED_CASSETTES)
