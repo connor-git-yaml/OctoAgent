@@ -30,9 +30,9 @@
   - `ChatStreamEventState`：`{ messages, streaming, error, liveApproval, approvalSignal, activeAgentMessageId }`——handleEvent 触碰的全部状态原子 + 原 `activeAgentMessageIdRef` 收编为 state 字段（reducer 视角）。
   - `parseChatStreamEvent(raw: string)`：JSON 解析 + 形状收敛；malformed（心跳）返回 null → 忽略，等价现 try/catch。
   - `deriveChatStreamEventOutcome(event, activeAgentMessageId, nextPlaceholderId)`：**事件分支唯一事实源**。按现 374-479 行相同顺序的 sequential-if 复刻六类分支（STARTED 可见 / COMPLETED 可见 / FAILED 可见或 ERROR / APPROVAL_REQUESTED / APPROVAL 终态五型 / final），输出 `{ nextActiveAgentMessageId, messageOps, streaming?, error?, liveApproval?, approvalBump, shouldCloseStream }`。占位消息 id 由调用方预生成注入（`nextPlaceholderId`），保持函数纯。
-  - `applyMessageOps(messages, ops)`：消息数组纯变换。op 语义封闭枚举：`appendPlaceholder` / `complete`（content 替换 + isStreaming false）/ `markFailed`（isStreaming 或占位文案时替换为失败文案，否则 content||失败文案——复刻现 410-423 行三元）/ `markApproval`（hasApproval + isStreaming true）/ `clearStreaming`。
+  - `applyMessageOps(messages, ops)`：消息数组纯变换。op 语义封闭枚举：`appendPlaceholder` / `complete`（content 替换 + isStreaming false；**空正文兜底文案"已收到回复，但没有可显示的正文。"在 derive 阶段已折算进 op.content**，复刻现 393 行——Codex spec 评审 MED-1 闭环）/ `markFailed`（isStreaming 或占位文案时替换为失败文案，否则 content||失败文案——复刻现 410-423 行三元）/ `markApproval`（hasApproval + isStreaming true）/ `clearStreaming`。
   - `reduceChatStreamEvent(state, raw, nextPlaceholderId) → { state, shouldCloseStream }`：parse→derive→apply 的组合形态，供 L4 直接按事件序列折叠测试；内部完全复用 derive/applyMessageOps，不允许第二份分支实现。
-  - `deriveStreamClosedOutcome(activeAgentMessageId)`：onerror CLOSED 分支的纯化（清 streaming + 清活跃消息 isStreaming）。
+  - `deriveStreamClosedOutcome(activeAgentMessageId)`：onerror CLOSED 分支的纯化（清 streaming + 清活跃消息 isStreaming）。**显式声明的行为修复（Codex spec 评审 HIGH 闭环）**：现实现在 updater 闭包内读 `activeAgentMessageIdRef.current`、随后同步清 null——React 18 批处理下 updater 实际执行时 ref 已为 null，map 沦为 no-op（占位消息 isStreaming 残留 true）。纯化后先快照 id 再派 op，确定性清掉 isStreaming——这是**有意修复该时序竞态**（代码明显意图即清 flag），非静默漂移；无任何既有测试依赖竞态旧行为，commit message 单列。
   - `CHAT_STREAM_EVENT_TYPES` 常量、`makeAgentPlaceholderMessage(id)`、审批快照构造（payload → SSEApprovalSnapshot）。
 - Hook 侧只剩接线：handleEvent = parse → derive（读 `activeAgentMessageIdRef.current`，同步写回 `nextActiveAgentMessageId`）→ 各原子 setState（messages 走 `setMessages(prev => applyMessageOps(prev, ops))` 函数式更新，与现状同语义，杜绝 stale 快照）→ `shouldCloseStream && closeStream()`。
 - **为何不整体 useReducer**：closeStream 兜底依赖 activeAgentMessageId 的**同步读**（COMPLETED+final 同事件时 ref 已清 → 不触发兜底拉取）；改 useReducer 后该读取变异步会改变兜底行为。保 ref + 纯 derive 是行为零变更的最小面。
@@ -49,7 +49,7 @@
 |----|--------|------|---------|
 | A. work/会话/A2A 上下文解析 | 202-257 | domains/chat/session.ts | `deriveActiveWorkContext(options)` |
 | B. worker 活动 + 兜底活动构建 | 259-327 | domains/chat/activity.ts | `buildWorkerActivityItems(...)` / `buildFallbackWorkerActivity(...)` |
-| C. 审批横幅解析（inbox/synthetic/executionSession/live 四源合一 + 倒计时） | 416-488 | domains/chat/approval.ts | `deriveActiveApprovalPresentation(options)` |
+| C. 审批横幅解析（inbox/synthetic/executionSession/live 四源合一 + 倒计时） | 416-488 | domains/chat/approval.ts | `deriveActiveApprovalPresentation(options)`——`approvalNow` 作显式入参；**沿现状不包 useMemo、每渲染直调**（现代码本就内联无 memo，避免引入 deps 冻结倒计时——Codex spec 评审 MED-2 闭环） |
 | D. 会话头部展示（techRefs/owner 名/别名/占位符文案） | 388-415, 500-533 | domains/chat/presentation.ts | `deriveChatHeaderPresentation(options)` |
 | E. slash 命令表 + 匹配 | 57-73, 489-495 | domains/chat/constants.ts | `CHAT_SLASH_COMMANDS` / `matchSlashCommands(input)` |
 
@@ -119,3 +119,16 @@
 1. reducer 落 `chatStreamReducer.ts` 而非并入 chatStreamHelpers.ts（避免击穿 500 行闸，见件 1）。
 2. index.css 3300 ratchet 不在本 Feature 兑现（无 CSS 工作项），收紧至 4480 只挡增长 + F137 注释改写；完整回收留独立 follow-up。
 3. 审计 ":75-180 内联交互编排" 行号漂移，实抽 202-533 纯派生块（交互编排本体 useState/handler 留组件，符合"UI 变薄=逻辑下沉"本意）。
+
+## 7. Codex spec 评审闭环（2026-07-13，gpt-5.4 high）
+
+第一轮 `codex review --base origin/master`：docs-only diff，0 finding。补充 `codex exec` 设计对抗（读 spec + 现码交叉）：
+
+| Finding | 处理 |
+|---------|------|
+| HIGH：onerror CLOSED 纯化改变时序语义（现实现 updater 执行时 ref 已 null → map no-op） | **接受为显式修复**——spec 件 1 已改写声明（有意修复竞态，代码意图即清 flag，无测试依赖旧竞态），commit message 单列 |
+| MED-1：complete op 缺空正文兜底文案 | **接受**——spec 已补：兜底在 derive 折算进 op.content |
+| MED-2：审批横幅提炼若包 useMemo 漏 approvalNow deps 会冻结倒计时 | **接受**——spec 已改：沿现状不 memo、approvalNow 显式入参 |
+| LOW×3（提炼块读 ref / 删码动态引用 / L1 testid 风险） | Codex 自证**顾虑不成立**（202-533 无 ref 读取；无动态 import/字符串路由；锚点原位） |
+
+0 HIGH 残留，进入实施。
