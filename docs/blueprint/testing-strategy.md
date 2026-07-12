@@ -33,6 +33,13 @@
     决策环（SkillRunner → tool_broker → 回写），零真 LLM / 零宿主 OAuth（marker `e2e_scripted`）
   - TestModel 等价件（`SchemaTestAdapter`，按工具 JSON schema 自动填参扫 63 工具广度）：
     **deferred**（F138 Phase 2，见 `.specify/features/138-scripted-llm-harness/spec.md` §2.2）
+- **L1 UI E2E** ✅ **F140 已落地**（Playwright 薄输入 + 外部断言，仿 cc-haha
+  desktop-smoke）：`octoagent/frontend/e2e/` 两场景（chat→脚本决策环→真工具写盘
+  →SSE 渲染 / bearer FrontDoorGate token 流程 + SSE query 鉴权），UI 仅输入通道，
+  断言走 REST 事件链 + 文件系统 + storage 取值；`create_app(harness_factory=...)`
+  DI 缝起 hermetic 真 gateway（gate=deny + 空凭证 + resolve bomb 零真 LLM）；
+  data-testid 契约由 vitest 机械校验；CI `l1-playwright` job（零 secret）。
+  详见 `docs/codebase-architecture/e2e-testing.md` §9b。
 - **事件断言便利件** ✅ **F142 已落地 dirty-equals 半边**：dev-dep `dirty-equals`
   + 3 处范式样例（`test_us4_llm_echo.py` STATE_TRANSITION full-shape /
   `test_control_plane_api.py` action data 契约 / `packages/policy/tests/test_models.py`

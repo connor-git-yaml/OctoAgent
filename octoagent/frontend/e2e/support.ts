@@ -87,17 +87,6 @@ function authHeaders(mode: L1Mode): Record<string, string> {
   return mode === "bearer" ? { Authorization: `Bearer ${L1_FD_TOKEN_VALUE}` } : {};
 }
 
-/** GET /api/tasks 列表取最新 task_id（每 run 实例干净，最新即本场景）。 */
-export async function fetchLatestTaskId(mode: L1Mode): Promise<string> {
-  const resp = await fetch(`${l1ServerUrl(mode)}/api/tasks`, {
-    headers: authHeaders(mode),
-  });
-  if (!resp.ok) throw new Error(`GET /api/tasks ${resp.status}`);
-  const data = (await resp.json()) as { tasks: { task_id: string }[] };
-  if (!data.tasks.length) throw new Error("L1: /api/tasks 为空——UI 发送未产生 task");
-  return data.tasks[0].task_id;
-}
-
 export async function fetchTaskDetail(mode: L1Mode, taskId: string): Promise<TaskDetail> {
   const resp = await fetch(`${l1ServerUrl(mode)}/api/tasks/${taskId}`, {
     headers: authHeaders(mode),
@@ -147,8 +136,4 @@ export function readInstanceFile(mode: L1Mode, relParts: string[]): string {
     throw new Error(`L1: 期望的写盘产物不存在：${full}`);
   }
   return readFileSync(full, "utf-8");
-}
-
-export function instanceFileExists(mode: L1Mode, relParts: string[]): boolean {
-  return existsSync(join(l1InstanceRoot(mode), ...relParts));
 }

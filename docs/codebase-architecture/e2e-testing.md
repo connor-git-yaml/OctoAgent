@@ -216,6 +216,51 @@ DoD 不可达。Codex P4 review 接受 GATE_P3_DEVIATION 决策——
 代价：13 域不全是端到端"真实跑"。收益：5x 循环 0 regression（P5 实测 4s/iter），
 pre-commit hook 可用、可信、不阻断开发节奏。
 
+## 9b. L1 UI E2E（F140，Playwright 薄输入 + 外部断言）
+
+M9 四层金字塔的 L1 层，位于 `octoagent/frontend/e2e/`（@playwright/test，
+chromium）。此前 L1 绝对零（前端 vitest 全 `vi.mock` 屏蔽 API）。
+
+**形态**：build 一次 frontend dist → gateway 单进程 serve（`main.create_app`
+的 SPA mount）→ Playwright 直打 gateway 端口，不起独立 vite server。后端由
+`apps/gateway/tests/e2e_live/l1_support/serve_l1_gateway.py` 拉起：
+`create_app(harness_factory=...)`（F140 D1 DI 缝，生产不传构造性不可达）+
+hermetic 实例 root + **零真 LLM 三重防御**（F137 gate=deny env / 空凭证
+CredentialStore / bootstrap 后 `resolve_for_alias` bomb——F138 keystone 同款）。
+脚本脑 `l1_support/scenario_brain.py` 按 prompt-marker 路由（长驻 server 跨
+测试消费，队列版会 desync）。
+
+**薄输入纪律**：UI 内只做 ①输入（fill/click）②等稳定信号（testid 定位回复
+气泡/gate，Playwright auto-wait，禁裸 sleep）。**断言全在 UI 外**（node）：
+REST 事件链（`GET /api/tasks/{id}` 的 TOOL_CALL_*/MODEL_CALL_*）+ 文件系统
+（工具写盘产物逐字节全等）+ wire 级 task_id（waitForResponse）。等待超时前
+扫 UI 已知失败文案降级成定性失败（cc-haha desktop-smoke 范式）。
+
+**场景（v0.1 两条）**：①chat 输入 → 脚本决策环 → `filesystem.write_text`
+真执行 → SSE 回复渲染（真 EventSource 路径，jsdom 测不到）；②bearer 模式
+FrontDoorGate 输 token 解锁 → 发消息全链路（SSE `access_token` query 鉴权）
++ storage 持久化模式断言。场景②首跑即抓出 api/client.ts Authorization 被
+init.headers 覆盖的真 production bug（bearer 聊天必 401）。
+
+**selector 契约**：锚点单一事实源 `frontend/e2e/selectors.ts`；
+`frontend/testing/l1SelectorsContract.test.ts`（vitest）机械校验每锚点在
+src/**.tsx 字面存在——删锚点 vitest 先红，不等 CI Playwright 炸。
+
+**跑法**：`cd octoagent/frontend && npm run build && npm run test:e2e`
+（webServer 自动拉起/复用两台 L1 gateway：loopback 8151 / bearer 8152）。
+CI：`.github/workflows/feature-007-integration.yml` 的 `l1-playwright` job
+（零 secret，free tier 安全）。
+
+**已知约束**：①每个 L1 server 每 run 只承载一条发消息对话链（服务端会话恢复
+使 marker 跨测试泄漏进决策环 prompt）；新增发消息测试走「+ 新建对话」UI 流
+（v0.2）或独立 server。②审批点击场景 deferred——chat 主路径无确定性审批触发
+器（F136 绑 execution session 而 chat inline 不绑；IRREVERSIBLE `cron.delete`
+实测 broker 默认放行），见 F140 spec §0/§6。③**dist 存在时跑全量 backend 会
+挂 f023 两测试**（master 存量潜伏 bug，F140 实测坐实：SPA `Mount("/")` 在
+create_app 构造期注册，遮蔽 lifespan 期 harness 挂载的 telegram webhook 路由
+→ POST 405；已派独立修复 task）——本地跑全量回归前 `rm -rf frontend/dist`，
+或接受这 2 个与 F140 无关的失败；CI 不受影响（backend job 从不 build dist）。
+
 ## 10. 已知工程债
 
 - **memory_candidates audit task 字段缺失**：F084 P5 spawn task 待修；当前

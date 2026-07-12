@@ -4,8 +4,8 @@
  * 规则（spec D6）：
  * - Playwright specs 只经本清单引用锚点，禁止散落字面量；
  * - 每个锚点必须在 src/**.tsx 源码中字面出现（`data-testid="<value>"`），
- *   由 vitest 契约测试 `src/testing/l1SelectorsContract.test.ts` 机械校验——
- *   组件重构删锚点时 vitest 先红，不等 Playwright 在 CI 才炸；
+ *   由 vitest 契约测试 `frontend/testing/l1SelectorsContract.test.ts` 机械校验
+ *   ——组件重构删锚点时 vitest 先红，不等 Playwright 在 CI 才炸；
  * - 新增场景需要新锚点：先加组件属性，再登记此处，两侧同一 commit。
  */
 export const L1_TESTIDS = {
@@ -15,7 +15,8 @@ export const L1_TESTIDS = {
   chatSend: "chat-send",
   /** assistant 侧消息气泡根节点（等待回复的稳定信号锚点） */
   chatMessageAssistant: "chat-message-assistant",
-  /** 用户侧消息气泡根节点 */
+  /** 用户侧消息气泡根节点（MessageBubble 三元的另一臂；v0.1 spec 未消费，
+   *  登记以保持「源码内 L1 锚点 ↔ 清单」双向完整——删除会留孤儿属性） */
   chatMessageUser: "chat-message-user",
   /** FrontDoorGate token 输入框 */
   frontdoorTokenInput: "frontdoor-token-input",

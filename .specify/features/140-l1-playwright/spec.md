@@ -139,8 +139,9 @@ UI 内**只允许**两类操作：
   只渲染一个）/ `chat-message-assistant`（MessageBubble agent 侧）/
   `frontdoor-token-input` / `frontdoor-submit`
 - 单一事实源：`frontend/e2e/selectors.ts` 导出 `L1_TESTIDS` 清单；specs 只经它引用
-- 契约测试：vitest 一条（`e2e/selectors.contract.test.ts` 放 src 侧
-  `src/testing/l1SelectorsContract.test.ts`——vitest 只扫 src）遍历清单，机械校验
+- 契约测试：vitest 一条（`frontend/testing/l1SelectorsContract.test.ts`——放
+  src 外因其用 node API 而 `tsc -b` include=["src"] 无 node types，vitest
+  esbuild 转译不受影响；实施期修正）遍历清单，机械校验
   每个 testid 在 src/**.tsx 源码中字面出现 ≥1 次；防「组件重构删锚点，Playwright
   在 CI 才炸」
 
@@ -163,7 +164,7 @@ UI 内**只允许**两类操作：
 | AC-1 | 场景①：真浏览器输入触发脚本决策环 + 真工具执行；文件逐字节命中 + 事件链含 `TOOL_CALL_STARTED/COMPLETED(filesystem.write_text)` + `MODEL_CALL_*`≥2 对；断言全在 UI 外 | `frontend/e2e/chat-scripted-loop.spec.ts` |
 | AC-2 | 场景②：bearer 模式 gate 渲染 → 输 token 解锁 → 发消息全链路成功（SSE query 鉴权路径）→ storage 持久化模式正确（默认 session / 勾选 persistent） | `frontend/e2e/front-door-token.spec.ts` |
 | AC-3 | 零真 LLM：L1 服务器 gate=deny + 空凭证 + resolve bomb 下两场景全绿 | launcher env + spec 内断言（回复 content=脚本值） |
-| AC-4 | testid 契约机器可校验：删除任一锚点 → vitest 契约测试红 | `frontend/src/testing/l1SelectorsContract.test.ts` |
+| AC-4 | testid 契约机器可校验：删除任一锚点 → vitest 契约测试红 | `frontend/testing/l1SelectorsContract.test.ts` |
 | AC-5 | 生产零行为变更：`create_app()` 不传 factory 路径 byte-for-byte；后端全量 0 regression | 后端全量回归 + gateway app 冒烟（现有测试隐式覆盖 create_app） |
 | AC-6 | 反 flaky 出生：本地 L1 套件连跑 3 次全绿 | 终门执行记录（completion-report） |
 | AC-7 | CI job 语法正确 + 不改既有 job 行为 | workflow diff review（既有 job 区块零改动） |

@@ -34,7 +34,13 @@ _OCTOAGENT_ROOT = _HERE.parents[4]  # <octoagent>/
 
 
 def _clean_env() -> None:
-    """清凭证 env（与 e2e_live conftest ``_CRED_ENV_KEYS_TO_CLEAR`` 同清单）。"""
+    """清凭证 env（与 e2e_live conftest 对齐：静态清单 + 通配 sweep）。
+
+    Opus 评审 MED-2 闭环：conftest ``_hermetic_environment`` 除静态清单外还有
+    ``endswith("_API_KEY"/"_TOKEN")`` 通配兜底——launcher 独立于 pytest 跑，
+    须搬全两层，否则宿主非标准 provider key（GEMINI/GROQ/HF_TOKEN 等）会
+    进 bootstrap（真调用虽被三重防御挡住，但 hermetic 纯度要名实相符）。
+    """
     for key in (
         "OPENAI_API_KEY",
         "SILICONFLOW_API_KEY",
@@ -46,6 +52,17 @@ def _clean_env() -> None:
         "DISCORD_BOT_TOKEN",
     ):
         os.environ.pop(key, None)
+    for key in list(os.environ):
+        if (
+            (key.endswith("_API_KEY") or key.endswith("_TOKEN"))
+            and key != "L1_FD_TOKEN"  # bearer 场景自身的测试假 token（非真凭证）
+        ):
+            os.environ.pop(key, None)
+
+    # Opus 评审 MED-1 闭环：中和宿主可能残留的 host/暴露 env——launcher 硬编码
+    # bind 127.0.0.1，但 create_app 的 _enforce_front_door_exposure 读 env
+    # OCTOAGENT_HOST 判定裸奔组合；宿主 export 过 0.0.0.0 会误 exit(78) 全挂。
+    os.environ["OCTOAGENT_HOST"] = "127.0.0.1"
 
 
 def _redirect_paths(root: Path) -> None:
@@ -74,7 +91,19 @@ def _apply_mode(mode: str) -> None:
 
 
 def _build_instance(root: Path) -> None:
-    """wipe 重建实例骨架 + local-instance 模板。"""
+    """wipe 重建实例骨架 + local-instance 模板。
+
+    rmtree 前缀守卫（Opus 评审 LOW 闭环）：本脚本 docstring 允许手跑，
+    误设 ``L1_ROOT=$HOME`` 不能变成删家目录——只允许删 ``.l1-runtime``
+    下的实例目录。
+    """
+    if ".l1-runtime" not in root.parts:
+        print(
+            f"[L1-FATAL] L1_ROOT 必须位于 .l1-runtime/ 下（拒绝对 {root} 做 wipe）",
+            file=sys.stderr,
+            flush=True,
+        )
+        raise SystemExit(2)
     if root.exists():
         shutil.rmtree(root)
     (root / "behavior" / "system").mkdir(parents=True, exist_ok=True)
