@@ -207,14 +207,15 @@ async def test_spool_survives_process_restart(tmp_path: Path) -> None:
     await store_group_2.close()
 
 
-@pytest.mark.skipif(
-    os.environ.get("CI") == "true",
-    reason="CI 共享 runner 时序/性能断言不稳（F137 triage 记欠账，归 F142 治理；本地照跑）",
-)
 @pytest.mark.asyncio
 async def test_startup_drains_spool(tmp_path: Path) -> None:
     """AC-7 补充：startup() 重启后后台 drain 首轮立即补发（Codex P2：非阻塞，
-    走独立 _spool_drain_loop 首轮，不在 startup 主路径同步等待）。"""
+    走独立 _spool_drain_loop 首轮，不在 startup 主路径同步等待）。
+
+    F142 治根因（原 F137 CI skipif 欠账）：固定 ``sleep(0.05)`` 赌后台 drain
+    首轮完成窗口 → 改条件轮询完成信号（``ok_bot.sent`` 非空），慢 runner 只是
+    等得久不会假红，skipif 已移除。
+    """
     import asyncio as _aio
 
     from octoagent.provider.dx.telegram_pairing import TelegramStateStore
@@ -237,8 +238,10 @@ async def test_startup_drains_spool(tmp_path: Path) -> None:
         state_store=TelegramStateStore(tmp_path), bot_client=ok_bot,
     )
     await service_2.startup()  # 起后台 drain loop（首轮立即 drain）+ polling task
-    # 让后台 drain 首轮跑完（非阻塞，故需 yield 给事件循环）
-    await _aio.sleep(0.05)
+    # 条件轮询后台 drain 首轮完成信号（deadline 5s，确定性等待而非赌固定窗口）
+    deadline = _aio.get_running_loop().time() + 5.0
+    while not ok_bot.sent and _aio.get_running_loop().time() < deadline:
+        await _aio.sleep(0.01)
     await service_2.shutdown()
     assert ok_bot.sent and ok_bot.sent[0]["text"] == "startup补发"
     await store_group_2.close()

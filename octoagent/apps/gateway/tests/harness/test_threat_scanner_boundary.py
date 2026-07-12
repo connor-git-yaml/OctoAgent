@@ -178,7 +178,13 @@ class TestPerformanceBenchmark:
 
     @pytest.mark.skipif(
         os.environ.get("CI") == "true",
-        reason="CI 共享 runner 时序/性能断言不稳（F137 triage 记欠账，归 F142 治理；本地照跑）",
+        reason=(
+            "永久 CI 豁免（F142 拍板，非待治欠账）：本条是绝对时长性能断言——"
+            "FR-3 的 1ms 均值上限按开发机单核性能校准，5000 字符输入是同族三个"
+            "基准里机器敏感度最高的一格，2-core 共享 runner 上稳定超标（F137 "
+            "首跑实证，rerun 救不了）；同族短文本/恶意短路两条基准 CI 已稳绿"
+            "继续跑（性能语义仍有 CI 哨兵），本条保留为本地性能护栏"
+        ),
     )
     def test_long_content_scan_under_1ms(self) -> None:
         """长文本（5000 字符）扫描平均耗时 < 1ms。"""

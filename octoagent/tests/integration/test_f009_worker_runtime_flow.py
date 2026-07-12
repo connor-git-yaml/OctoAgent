@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 
 import pytest
@@ -124,13 +123,13 @@ async def cancel_client(cancel_app):
 
 
 class TestFeature009WorkerRuntimeFlow:
-    @pytest.mark.skipif(
-        os.environ.get("CI") == "true",
-        reason="CI 共享 runner 时序/性能断言不稳（F137 triage 记欠账，归 F142 治理；本地照跑）",
-    )
     async def test_timeout_path_generates_worker_timeout_result(
         self, timeout_client: AsyncClient
     ) -> None:
+        """F142 治根因（原 F137 CI skipif 欠账）：固定 ``sleep(0.4)`` 赌 watchdog
+        超时链（worker 起跑 → max_exec 0.05s 超时 → FAILED 落库）完成窗口 →
+        改轮询任务至终态再断言，慢 runner 只是等得久不会假红，skipif 已移除。
+        """
         resp = await timeout_client.post(
             "/api/message",
             json={"text": "f009 timeout", "idempotency_key": "f009-timeout-001"},
@@ -138,11 +137,17 @@ class TestFeature009WorkerRuntimeFlow:
         assert resp.status_code == 201
         task_id = resp.json()["task_id"]
 
-        await asyncio.sleep(0.4)
-        detail = await timeout_client.get(f"/api/tasks/{task_id}")
-        assert detail.status_code == 200
-        data = detail.json()
-        assert data["task"]["status"] == "FAILED"
+        terminal = {"SUCCEEDED", "FAILED", "CANCELLED"}
+        deadline = asyncio.get_running_loop().time() + 10.0
+        data: dict = {}
+        while asyncio.get_running_loop().time() < deadline:
+            detail = await timeout_client.get(f"/api/tasks/{task_id}")
+            assert detail.status_code == 200
+            data = detail.json()
+            if data["task"]["status"] in terminal:
+                break
+            await asyncio.sleep(0.05)
+        assert data and data["task"]["status"] == "FAILED"
 
         returned = [
             event for event in data["events"] if event["type"] == "WORKER_RETURNED"

@@ -144,7 +144,14 @@ class TestEventLoopNotBlocked:
 
     @pytest.mark.skipif(
         os.environ.get("CI") == "true",
-        reason="CI 共享 runner 时序/性能断言不稳（F137 triage 记欠账，归 F142 治理；本地照跑）",
+        reason=(
+            "永久 CI 豁免（F142 拍板，非待治欠账）：本条是绝对时长性能断言——"
+            "130ms 阈值按开发机单核性能校准（卸载后最慢单条 pattern ~54ms vs "
+            "同步全程 200-325ms），2-core 共享 runner 单核更慢且负载不可控，"
+            "裕量会被环境噪声吞掉，rerun 救不了；「扫描真的卸载到线程」这一"
+            "机制属性已由同文件 TestScanOffloadedToThread 确定性覆盖（CI 照跑），"
+            "本条保留为本地性能护栏"
+        ),
     )
     def test_eventloop_not_blocked_by_large_scan(self) -> None:
         async def _scenario() -> float:
