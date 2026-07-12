@@ -35,7 +35,7 @@ describe("api client front-door auth", () => {
 
   it("调用方自带 init.headers 时 Authorization 不被覆盖（F140 L1 抓出的回归）", async () => {
     // 真 bug 形态：apiRequest 原来 `{ headers, ...init }` 后展开 init，
-    // useChatStream/useApprovals 传 headers: {Content-Type} 时整体覆盖掉
+    // useChatStream 传 headers: {Content-Type} 时整体覆盖掉
     // Authorization → bearer 模式 /api/chat/send 必 401。
     saveFrontDoorToken("frontdoor-secret");
     const fetchMock = vi
