@@ -205,7 +205,6 @@ async def guard_app(tmp_path: Path):
     用例 monkeypatch——与全栈 fixture 同一条 config 解析路径。
     """
     from fastapi import Depends, FastAPI
-
     from octoagent.gateway.services.frontdoor_auth import FrontDoorGuard
 
     guard = FrontDoorGuard(tmp_path)

@@ -13,6 +13,7 @@ import click
 from octoagent.core.models import ControlPlaneActionStatus
 from rich.console import RenderableType
 
+from .attest_commands import attest_group  # F144 本机 live 验收探针
 from .auth_commands import auth
 from .backup_commands import backup, export, restore
 from .behavior_commands import behavior_group
@@ -102,6 +103,7 @@ main.add_command(memory)  # F094 E1: octo memory migrate-094 命令组
 main.add_command(service_group)  # F129: octo service install/uninstall/status
 main.add_command(logs_command)  # F129: octo logs
 main.add_command(remote_group)  # F130: octo remote enable/disable/status
+main.add_command(attest_group)  # F144: octo attest remote/service 本机验收探针
 
 # Feature 087 P4 T-P4-10：octo e2e CLI（懒加载，避免 gateway 包 import 循环）
 try:
