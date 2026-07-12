@@ -26,7 +26,7 @@
 |-------|------|------|------|
 | spec/plan | 收窄 spec → Codex 评审 | ✅ `codex review --base origin/master`：0 HIGH + 2 P2 全接受闭环 | 无 |
 | A 矩阵 | 17 格 + guard 轻量 fixture | ✅ 26 passed（8 既有零修改 + 17 格 + 1 契约钉住）2s | 无 |
-| B 探针 | attest_commands + 单测 | ✅ `octo attest remote/service` + 32 hermetic 单测 | json 模式闪断声明走 stderr（保 stdout 纯 JSON，实施期补强）|
+| B 探针 | attest_commands + 单测 | ✅ `octo attest remote/service` + 36 hermetic 单测 | json 模式闪断声明走 stderr（保 stdout 纯 JSON，实施期补强）|
 | C gap-1 | scripted × F136 审批全链 | ✅ approve/reject 双路径 2 case 1.4s | **补生产同款 ctx 绑定**（见 §4 发现 1）|
 | D 文档 | 清单 + living-docs + handoff | ✅ attestation-checklist / e2e-testing §11 / remote-access §5b / service-and-logging §4b / milestones F144 行 / handoff-to-F141 | 无 |
 | E 终门 | 全量 + 双评审 | ✅ 见 §5/§6 | 无 |
@@ -70,7 +70,7 @@
 |------|------|------|
 | `packages/provider/src/octoagent/provider/dx/attest_commands.py` | 新 +793 | 探针主体（纯逻辑 DI + Click 呈现分离）|
 | `packages/provider/src/octoagent/provider/dx/cli.py` | 改 +2 | 挂 attest_group（master 既有 I001 保留 0 新增）|
-| `packages/provider/tests/dx/test_attest_commands.py` | 新 +680 | 32 hermetic 单测 |
+| `packages/provider/tests/dx/test_attest_commands.py` | 新 +800 | 36 hermetic 单测（4 轮评审回归钉住累计）|
 | `apps/gateway/tests/test_frontdoor_auth.py` | 改 +201 | 矩阵 17 格 + 契约钉住（既有 8 格零修改）|
 | `apps/gateway/tests/e2e_live/test_e2e_scripted_write_approval.py` | 新 +337 | gap-1 scripted 双路径 |
 | `docs/codebase-architecture/attestation-checklist.md` | 新 | 机器可读残余清单（2 项）|
@@ -86,32 +86,40 @@ remote_commands 全部只读复用）。**红线核对**：未触碰 frontend/**
 
 **回归**（PYTHONPATH 锁本 worktree + `uv run --no-sync python -m pytest`）：
 - baseline（实施前实测）：`-m "not e2e_live"` **4872 passed / 11 skipped / 106 deselected / 1 xfailed / 1 xpassed**（173s）
-- 终门（实施后）：**4922 passed / 11 skipped / 108 deselected / 1 xfailed / 1 xpassed（0 failed）** = baseline + 50 新增（矩阵 18 + 探针 32），**0 regression**（deselected +2 = 本 Feature 两个 e2e_live 标记的 gap-1 case，单独跑全绿）
+- 终门（实施后，评审闭环全部落定后复跑）：**4926 passed / 11 skipped / 108 deselected / 1 xfailed / 1 xpassed（0 failed）** = baseline + 54 新增（矩阵 18 + 探针 36），**0 regression**（deselected +2 = 本 Feature 两个 e2e_live 标记的 gap-1 case，单独跑全绿）
 - e2e_smoke：8/8（每 commit pre-commit hook 实跑全绿）
 - scripted 域组合验证：F138 keystone + 新 gap-1 2 case + F136 单测 = 17 passed
 - ruff：新增/触碰文件全 clean（cli.py 保留 master 既有 1 I001，0 新增）
 
-## 6. 双评审闭环
+## 6. 双评审闭环（4 轮 Codex + Opus 自审，0 HIGH 残留）
 
-- **Codex spec 评审**（`codex review --base origin/master`，spec/plan commit 后）：
-  **0 HIGH + 2 P2，全接受闭环**（P2-1 enabled 信号错置 / P2-2 token 读取面），
-  修正进 spec §D-4 + 实现 + 各自回归测试
-  （`test_fail_when_bearer_but_tailscale_not_ready` / `TestDefaultTokenReader`）。
-- **Codex final 评审**（全量 diff）：见 `codex-review-final.md`——0 HIGH，
-  1 P2 接受闭环（SSE 真握手 `client.stream` 异常可能回显含 token URL →
-  `_scrub` 兜底 + sentinel 用例加压）+ 1 P3 采纳（`--json` fail 时 hint 保留）。
-- **Opus 对抗自审**（评审挑战面逐项）：
-  - 「矩阵是否真补了 bearer×XFF 缺格」——A2 5 格直接命中（bearer+valid token+
-    各转发头→200），且用生产 `_PROXY_HINT_HEADERS` 常量参数化 + 集合契约钉住；
-  - 「探针 token 是否零泄漏」——值只入 header/query；report 只含布尔；异常路径
-    只回显异常类名 + `_scrub` 兜底；sentinel 扫描 3 场景参数化机械断言；
-  - 「gap-1 是否真走了 F136 审批没绕过」——批准前断言不落盘 + REST 真路由
-    双 resolve + 记录终态 + `permission_preset=full` 反向加压；
-  - 「探针 fake 是否掩盖真命令语义」——fake 只替执行层（CommandRunner 契约与
-    F130 同款 / httpx MockTransport / kill 记录 / 虚拟时钟），断言面全是真参数
-    （SIGKILL 常量、URL 路径、pid 值）；SIGKILL 语义由 F129/F130 文档证据链
-    支撑非 fake 推断；SSE mock 修正为迭代器流式语义（发现 2）。
-  - **0 HIGH 残留**。
+**Codex（`codex review --base origin/master` CLI 同步，4 轮收敛）：0 HIGH / 0 P1，6 P2 全接受闭环**
+
+| 轮 | finding | 处理 |
+|----|---------|------|
+| spec 评审 | 2 P2：①enabled 信号错置（bearer+tailscale 断链会被 not_enabled 吞掉）②token 值读取面（shell-only 自定义变量假通过）| 全修进 spec §D-4 + 实现 + 回归钉住（`test_fail_when_bearer_but_tailscale_not_ready` / `TestDefaultTokenReader`）|
+| final | 1 P2：SSE query token 裸拼 URL——含 `+`/`&`/`#` 的合法 token 被解码损坏 → 有效配置误报 SSE fail | 改 `params=` percent-encoding + 特殊字符 token 回归用例（修复前必红）|
+| re-review | 3 P2：①token 双文件顺序（.env.litellm 后 source 覆盖，遇 .env 即 return 拿旧值）②SSE 缺负向断言（guard 丢失时「任意 404」骗过正向判别）③零 chunk 也报「首块已到达」| 全修：source 顺序 last-wins / `_probe_sse_negative`（错 token 必须 401）/ got_chunk 标志；3 新回归用例 |
+| re-re-review | **0 finding**（「未发现会破坏现有功能或新增探针/测试语义的明确缺陷」）| 收敛 |
+
+**Opus 对抗自审**（任务书评审挑战面逐项 + 主动补格）：
+- 「矩阵是否真补了 bearer×XFF 缺格」——A2 5 格直接命中（bearer+valid token+
+  各转发头→200），生产 `_PROXY_HINT_HEADERS` 常量参数化 + 集合契约钉住；
+  同 fixture 的 A3（错 token→401）证明 200 非 vacuous（guard 真在执行）；
+- 「探针 token 是否零泄漏」——值只入 header/query；report 只含布尔；异常路径
+  只回显异常类名 + `_scrub` 兜底；**自审抓 1 真缺口**：sentinel 泄漏矩阵原缺
+  「SSE 流阶段抛异常」场景（URL 带 token 的唯一高危路径，connect_error 场景在
+  /ready 即短路压不到）→ 补 `sse_raises` 第 4 场景机械断言；
+- 「gap-1 是否真走了 F136 审批没绕过」——批准前断言不落盘 + REST 真路由双
+  resolve + 记录终态 + `permission_preset=full` 反向加压（最宽 preset 下仍拦）；
+- 「探针 fake 是否掩盖真命令语义」——fake 只替执行层（真 ServiceStatus 模型 /
+  真 `_effective_mode`/`_bearer_token_env_name` 生产函数 / httpx MockTransport /
+  kill 记录 / 虚拟时钟），断言面全是真参数（SIGKILL 常量、URL 路径、pid 值）；
+  SIGKILL 语义由 F129/F130 文档证据链支撑非 fake 推断；SSE mock 修正为迭代器
+  流式语义（httpx 预载 content 的 `StreamConsumed` 陷阱，见 §4.2）；
+  attestation 清单 YAML 以脚本机械解析验证（F141 消费前提）。
+- **Codex↔Opus 分歧**：无实质分歧（Codex 集中探针运维可信度，Opus 集中泄漏面/
+  语义忠实度，一处交叠——SSE 异常回显——两席结论一致均已修）。
 
 ## 7. 已知 limitations
 
@@ -120,7 +128,7 @@ remote_commands 全部只读复用）。**红线核对**：未触碰 frontend/**
 - **恢复预算 90s 固定**：慢机器可能贴边；`run_service_probe(recovery_budget_s=…)`
   有参数缝，CLI flag 留给 F141 按需加（S 级）。
 - **探针不进 CI 是设计而非欠账**：真副作用 + 依赖真实实例；探针逻辑回归由
-  31 hermetic 单测在 CI 守。
+  36 hermetic 单测在 CI 守。
 - **两 handler ctx 获取风格不一致**（misc_tools 裸调 vs user_profile try/except）：
   非本 Feature 缺陷（生产路径恒绑定），记录见 §4.1。
 

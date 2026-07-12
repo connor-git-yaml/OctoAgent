@@ -82,7 +82,7 @@ exit code：pass=0 / not_enabled=0 / fail=1
   2. `GET /` → 200 + HTML（SPA index 可取；mount `/` 绕过 front_door 是 F130 已知 limitation，探针如实按此语义测）；
   3. `GET /api/control/snapshot` **无 token** → 401（bearer 纵深真在挡——防「serve 通了但认证裸奔」）；
   4. 同路径带 `Authorization: Bearer <token>` → 200（token 有效）;
-  5. **SSE 半边**：`GET /api/tasks`（带 token）取最近 task_id → 存在则 `GET /api/stream/task/<id>?access_token=<token>` 流式握手（200 + `text/event-stream` + 首块到达即断开）；无任务则退化为 `GET /api/stream/task/attest-probe-nonexistent?access_token=<token>` 断言 **404**（TASK_NOT_FOUND = 认证已通过；401 才是 token 不通）——无副作用，绝不 POST 造任务。
+  5. **SSE 半边**（实施期经 Codex final/re-review 加固为「负向 + 正向」两段）：**负向**先行——错 token（真 token 派生后缀）访问 stream 路径必须 401（防 guard 丢失/query-token 校验回归时「任意 404」骗过正向判别）；**正向**——`GET /api/tasks`（带 token）取最近 task_id → 存在则流式握手（200 + `text/event-stream` + **至少读到一个 chunk**，零字节断流判失败）；无任务则退化为合成 id 断言 **404**（TASK_NOT_FOUND = 认证已通过）。token 一律经 `params=` percent-encoding（防 `+`/`&`/`#` 损坏）。无副作用，绝不 POST 造任务。
 - 任一检查不符 → `fail` + 每项 check 的结构化结果 + fix_hint。
 
 ### D-5 service 探针检查链
