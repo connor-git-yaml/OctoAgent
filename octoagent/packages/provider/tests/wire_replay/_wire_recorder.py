@@ -91,8 +91,8 @@ _IDENTITY_VIOLATION_PATTERNS: dict[str, re.Pattern[str]] = {
 
 def scrub_identity_fields(text: str) -> str:
     """响应 body 身份/回显字段定点洗刷（录制管线第 4b 道）。"""
-    for field, pattern in _IDENTITY_SCRUB_PATTERNS.items():
-        text = pattern.sub(f'"{field}":"{_SCRUBBED_MARK}"', text)
+    for field_name, pattern in _IDENTITY_SCRUB_PATTERNS.items():
+        text = pattern.sub(f'"{field_name}":"{_SCRUBBED_MARK}"', text)
     return text
 
 

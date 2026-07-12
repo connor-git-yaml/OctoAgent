@@ -157,7 +157,7 @@ async def _record_scenario(
         # U+2028 证据分析（spec §5）
         if scenario_name == "u2028_probe":
             body = recorder.interactions[0].body_text
-            raw_hit = "\u2028" in body  # noqa: 显式转义（防编辑器吞字符）
+            raw_hit = "\u2028" in body  # 显式转义（防编辑器吞字符）
             print(f"  [U+2028 探针] wire 上未转义原始字符出现 = {raw_hit}")
             print(
                 f"  [U+2028 探针] 未转义 CJK 出现（ensure_ascii=False 证据）= "
