@@ -6,17 +6,21 @@
 #
 #   backend-deterministic —— 全 testpaths 确定性层（L4 单元 + L3 Echo/hermetic），
 #     排除 e2e_live 目录（smoke/full 依赖宿主 OAuth，CI 无凭证只会 SKIP；真 LLM
-#     显式不进 per-PR CI——F141 weekly canary 范围）。gate=deny 构造性保证零真
-#     LLM 调用：uv sync 后 provider 包 pytest11 entry-point 插件
+#     显式不进 per-PR CI——release lane / weekly canary 范围）。gate=deny 构造性
+#     保证零真 LLM 调用：uv sync 后 provider 包 pytest11 entry-point 插件
 #     （octoagent_model_request_gate）自动生效 + octoagent/conftest.py 冗余布线。
 #     F142 起并行（-n auto --dist=loadgroup；时序敏感文件已标 xdist_group 钉
 #     同 worker，F137 串行首版注释的 F083 race 已按分组+治根因解锁）。
+#     F141 追加：①gate 治理步（quarantine 过期即 FAIL + attestation 清单解析）
+#     ②e2e_scripted 专属步（e2e_live 目录内 CI-runnable 确定性子集，回收 F142
+#     「budget guard 待纳入 CI」遗留）③changed-lines coverage 门（新增可执行行
+#     覆盖 ≥90%，escape hatch = HEAD commit message 含 [cov-exempt]）。
 #
 #   frontend —— 复杂度护栏（阻断）+ vitest（阻断；暂排除 F137 接线时点发现的
 #     6 个存量红文件，欠账清单见该步骤注释）。
 #
-# 零 secret / 零真网络调用（free tier 安全）。lane 分层（pr/baseline/release）
-# 是 F141 主责，本 workflow 保持单一 deterministic lane 为其留扩展缝。
+# 零 secret / 零真网络调用（free tier 安全）。CI = push 触发的 deterministic
+# lane；pr/baseline/release 三模式编排入口是 repo-scripts/lane.py（F141）。
 name: ci
 
 on:
@@ -53,6 +57,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # F141 changed-lines coverage 门需要完整历史（git diff base...HEAD）
+          fetch-depth: 0
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -64,13 +71,26 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Gate governance（quarantine 过期即 FAIL）
+        # stdlib-only，deps 安装前即可跑（最便宜先败）；schema/唯一性/日期 +
+        # --enforce-review-date 过期强制复查（cc-haha quarantine.ts 范式）
+        working-directory: .
+        run: python3 repo-scripts/check-quarantine.py --enforce-review-date
+
       - name: Install Dependencies
         run: uv sync --dev
+
+      - name: Gate governance（attestation 清单解析校验）
+        # 防 F144 机器可读 yaml block 格式腐化（签署核对是 release lane 的事，
+        # CI 只验可解析性；需 PyYAML → uv sync 后跑）
+        working-directory: .
+        run: uv run --project octoagent --no-sync python repo-scripts/check-attestation.py
 
       - name: Run deterministic test layers (L4+L3, gate=deny)
         # 教训沉淀（.githooks/pre-commit:83-91）：用 `uv run python -m pytest`
         # 而非裸 `uv run pytest`——console-script 可能逃逸 venv。
-        # 无参数 = pyproject testpaths 全量；--ignore 剔 e2e_live（宿主凭证依赖）。
+        # 无参数 = pyproject testpaths 全量；--ignore 剔 e2e_live（宿主凭证依赖；
+        # 其中 CI-runnable 的 e2e_scripted 子集由下一步显式纳入）。
         #
         # F142 件5a：翻并行 `-n auto --dist=loadgroup`——18 个时序敏感文件已标
         # xdist_group 钉同 worker 串行（分组清单见各文件模块注释）；收集不确定
@@ -78,20 +98,70 @@ jobs:
         # 3 轮全绿（4894 passed，串行 378s → ~26s）。GitHub 2-core 上 `-n auto`
         # =2 worker，预期 6m25s 显著缩短。
         #
-        # --reruns 1（Codex Final P1-2，仅 CI lane）：全仓剩余 single-sleep
-        # timing 断言（octoagent/pyproject.toml F083 归档的已知债，F142 已治
-        # 最热的 task_runner/f009/f131 三处）在 GitHub 2-core 慢 runner 上仍可能
-        # 间歇抖红。单次 rerun 是显式过渡桥（junit 可见 rerun 计数，持续失败
-        # 仍红）——F141 quarantine manifest 落地后删除本参数。本地跑保持无
-        # rerun，开发者仍看得见 flake。
+        # F141：删除 F137 的 `--reruns 1` blanket 过渡桥（其注释预留「F141
+        # quarantine manifest 落地后删除本参数」）——flake 处置改为 manifest
+        # 定向：octoagent/tests/quarantine.json 命中条目由根 conftest 加
+        # flaky(reruns=1)，六字段 + 过期强制复查，不再 blanket 掩盖。
+        # 首跑预期：若 F083 归档的 ~72 处 single-sleep 断言在 2-core 慢 runner
+        # 偶发抖红 → 逐条入册（quarantine 机制生效方式，非回归）。
+        #
+        # F141 件4：裸 `--cov`（source 走 pyproject [tool.coverage.run]，9 个
+        # src 目录 + relative_files）；本步只积累数据（--cov-report= 空报告），
+        # lcov 由 e2e_scripted 步 --cov-append 后统一产出。
         run: >
           uv run python -m pytest -q
           --ignore=apps/gateway/tests/e2e_live
           -n auto --dist=loadgroup
-          --reruns 1 --reruns-delay 2
+          --cov --cov-report=
           --junitxml=test-results/junit-backend.xml
         env:
           PYTHONNOUSERSITE: "1"
+
+      - name: Run e2e_scripted deterministic e2e（e2e_live 内 CI-runnable 子集）
+        # F138 keystone（脚本化决策环）+ F144 gap-1（审批全链）+ F142 件2
+        # （prompt 预算护栏）共 16 用例：零真 LLM / 零宿主 OAuth（gate=deny
+        # 全程在位——e2e_scripted 不触发 e2e_full 开闸 fixture）。
+        # 回收 F142 completion-report §F141 回收点：「budget guard 在 e2e_live
+        # 目录，待 F141 lane 显式纳入 CI」。串行跑（16 用例本地 ~8s，无需 xdist）。
+        run: >
+          uv run python -m pytest -q
+          apps/gateway/tests/e2e_live
+          -m e2e_scripted
+          --cov --cov-append --cov-report=lcov:coverage.lcov
+          --junitxml=test-results/junit-scripted.xml
+        env:
+          PYTHONNOUSERSITE: "1"
+
+      - name: Resolve diff base（changed-lines 门）
+        id: diffbase
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          # 新分支首推（全零）/ force-push 后不可解析 → 回退 merge-base origin/master
+          if [[ -z "${BASE}" || "${BASE}" =~ ^0+$ ]] || ! git cat-file -e "${BASE}" 2>/dev/null; then
+            git fetch origin master --quiet || true
+            BASE="$(git merge-base origin/master HEAD)"
+            echo "diff base 回退 merge-base origin/master: ${BASE}"
+          fi
+          echo "base=${BASE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Changed-lines coverage gate（新增可执行行 ≥90%）
+        # F141 件4（cc-haha coverage.ts 范式）：git diff 新增行 ∩ lcov DA 记录
+        # 机械计算；存量不背债（只算本次 push 新增行）；范围 = packages/*/src +
+        # apps/gateway/src 的 .py。escape hatch = HEAD commit message 含
+        # [cov-exempt]（脚本内大声记录 sha+subject）。
+        working-directory: .
+        run: >
+          python3 repo-scripts/check-changed-lines-coverage.py
+          --lcov octoagent/coverage.lcov
+          --base "${{ steps.diffbase.outputs.base }}"
+          --min-percent 90
 
       - name: Upload test results
         if: always()
