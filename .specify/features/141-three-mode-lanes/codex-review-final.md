@@ -67,3 +67,10 @@
   import 文件可能无记录（gate 按 0 计，fail-closed）；均记录于 AGENTS.md / report。
 
 **收敛：2 HIGH + 1 MED 全修复，1 LOW 实证拒绝——0 HIGH 残留。**
+
+## Codex re-review（fix commits d07a0869 + aba41d93，F099 教训「修复可能引新问题」）
+
+四点定向核验全通过、0 新 finding：①exit 语义 skipped_explicit 不误算 planned、
+非 dry-run 全跑仍 0/1、报告 exit_code 与返回值同源；②hook 恒跑段短路正确、旧分支缺
+脚本不误 FAIL、变量不冲突；③real_llm 函数级仅排域#8，#9/#10 不受累；④HOME
+monkeypatch 对 Path.home() 有效（Codex 实测 CPython 路径解析）。**双评审最终收敛。**
