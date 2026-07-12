@@ -18,8 +18,11 @@
   字段、SiliconFlow usage chunk 的落点、`ensure_ascii` 策略）、真实 finish 语义，全部
   基于我们对文档的理解手搓。F103d 的 double `/v1` 404 真 bug 正是「手搓假设 ≠ 真 wire」
   的实证（靠 instance workaround 掩盖过）。
-- **本 Feature 的 cassette 价值** = 真实 provider 响应样本回放穿透解析栈，做成默认跑
-  （无 key 无网络）的确定性回归；wire **请求** shape 正确性仍由既有 23 用例钉，不重复。
+- **本 Feature 的 cassette 价值** = **真实 provider 响应文本快照**回放穿透解析栈
+  （事件序列 / 字段形状 / usage 落点 / finish 语义），做成默认跑（无 key 无网络）的
+  确定性回归。诚实边界：回放是 buffered 快照，**不复刻 chunk 边界**——字节级粘包/半包
+  重组维度归 F142 边界族（受控字节切片比任何真实分块更对抗）；wire **请求** shape
+  正确性仍由既有 23 用例钉，不重复。
 
 ## 2. 范围（4 件）
 
@@ -62,20 +65,31 @@
 ### D1 自研极简 recorder/replay（stdlib JSON cassette），不引入 vcrpy
 
 照 pydantic-ai 范式移植**设计**（serializer 过滤 / fail_partially_used / 重录文档化 /
-松 matcher），不移植**依赖**。理由：
+松 matcher），不移植**依赖**。核心理由收窄为两条（Codex spec review M1：不暗示
+transport 语义风险低）：
 
 1. **零新依赖 → 回放测试立即处处可跑**：主仓 venv / pre-commit hook / CI 无需 uv sync
    协调，无 `pytest.importorskip` 静默 SKIP 假绿窗口（三 agent 并行波次中 hook uv-sync
-   改写共享 venv 指向是已知坑，memory `project_precommit_hook_execution_model`）。
-2. **注入缝天然匹配**：`ProviderClient.__init__(runtime, http_client)`（provider_client.py:304-310）
-   是唯一 HTTP 出口，httpx `AsyncBaseTransport` 自定义 transport 即录制/回放挂点——
-   不需要 vcrpy 的全局 monkeypatch（vcrpy patch httpcore 全局栈，与 F142 刚翻转的 CI
+   改写共享 venv 指向是已知坑，memory `project_precommit_hook_execution_model`）；
+   **pyproject 零改动**，与 F141 的 union 冲突面归零。
+2. **无全局 monkeypatch 的并行隔离**：`ProviderClient.__init__(runtime, http_client)`
+   （provider_client.py:304-310）是唯一 HTTP 出口，httpx `AsyncBaseTransport` 自定义
+   transport 即录制/回放挂点——vcrpy patch httpcore 全局栈，与 F142 刚翻转的 CI
    `-n auto --dist=loadgroup` 并行存在互扰风险面；pydantic-ai conftest 自己都要
-   monkeypatch `vcr.stubs.aiohttp_stubs` 绕 vcrpy#927）。
-3. **secret 过滤单一代码路径可机械测试**：自研 serializer 是唯一落盘口，「录含假 token
-   交互 → cassette 文件 grep 零命中」的专项断言直接钉在这条路径上。
-4. 代价：放弃 vcrpy 的 record-mode 矩阵 / matcher registry——我们只有一条录制路径
-   （显式脚本）+ 一种 matcher 策略，不需要那套机器。实现预算 ~250 行（recorder +
+   monkeypatch `vcr.stubs.aiohttp_stubs` 绕 vcrpy#927。
+3. 附带收益：secret 过滤单一代码路径可机械测试（自研 serializer 是唯一落盘口）。
+4. **显式承认的自研成本**（transport 语义坑不低估，列入自证矩阵，绑定
+   `test_wire_serializer_secrets.py` / `test_wire_replay_guards.py`）：
+   - 压缩响应：录制侧存**解码后**文本 + 剥 `content-encoding/content-length/
+     transfer-encoding` 三头（否则回放二次解压失败）——自证用例=inner transport 回
+     gzip 编码 body，录→回放全链路绿；
+   - 头大小写归一（lower）；
+   - 非 2xx 交互拒绝落盘（见 D3）；
+   - URL query 断言为空（见 D3）；
+   - 解析器早停（chat 遇 `[DONE]` break）后 buffered body 剩余未读——回放交互一经
+     取出即计 played，消费护栏语义按「交互」计不按「字节」计（显式定义）。
+5. 代价：放弃 vcrpy 的 record-mode 矩阵 / matcher registry——我们只有一条录制路径
+   （显式脚本）+ 一种 matcher 策略，不需要那套机器。实现预算 ~300 行（recorder +
    replayer + serializer 合计）。
 
 ### D2 cassette 格式（JSON / stdlib）
@@ -91,8 +105,13 @@
   },
   "interactions": [
     {
-      "request":  {"method": "POST", "url": "https://host/path",
-                   "headers": {"<allowlist 后>": "..."}, "body_json": {}},
+      "request":  {"method": "POST", "scheme": "https", "host": "<host>",
+                   "path": "/v1/chat/completions",
+                   "headers": {"<allowlist 后>": "..."},
+                   "body_summary": {"model": "...", "stream": true,
+                                     "message_roles": ["system", "user"],
+                                     "tool_names": ["..."],
+                                     "body_sha256": "<hex>"}},
       "response": {"status_code": 200, "headers": {"content-type": "..."},
                    "body_text": "<解码后完整 body，SSE framing 逐字符保真>"}
     }
@@ -100,17 +119,26 @@
 }
 ```
 
+- **request 不落完整 body**（Codex spec review H1）：录制管线记录的是 ProviderClient
+  实际发出的 body，天然含 instructions / history / tool schema——即使本次场景全合成，
+  结构上不该给「重录时换了输入就把宿主内容落盘」留缝。只存**结构摘要**
+  `body_summary`（model / stream / message_roles / tool_names / body_sha256），
+  由 recorder 从 parsed body **结构化构造**（不走文本正则，无 JSON-safe 灰故障面，
+  Codex L1）；sha256 供「重录后请求是否漂移」的人工参考。
+- **URL 拆存 scheme/host/path，永久不持久化 query string**（Codex L1）：当前三
+  transport URL 构造无 query；recorder 断言 query 为空，非空即 raise（人裁）。
 - `response.body_text` 存**内容解码后**（gzip/br 解开）的完整文本；`content-encoding` /
   `content-length` / `transfer-encoding` 头剥除——否则回放时 httpx 会二次解压失败
   （pydantic-ai serializer 同款处理）。
+- **仅 2xx 响应可落盘**（Codex H1）：非 2xx（provider 错误可能回显请求内容/身份信息）
+  recorder 直接 raise 拒绝——本 Feature 只钉 happy-path 真样本。
 - `body_text` 单字符串保 SSE framing 逐字符保真（`\r\n` vs `\n`、未转义 U+2028 原样
-  保留——这正是 wire 真样本的价值）。落盘 `json.dumps(ensure_ascii=True)`：U+2028 存成
-  ` ` 转义、load 后还原为原字符，保真不受影响且文件 ASCII 安全、diff 可读。
-- `request.body_json` 存 parsed 请求体，仅供人工 review（不参与 match）。
+  保留——这正是真样本的价值）。落盘 `json.dumps(ensure_ascii=True)`：U+2028 存成
+  `\u2028` 转义、load 后还原为原字符，保真不受影响且文件 ASCII 安全、diff 可读。
 
 ### D3 secret 过滤（比 pydantic-ai 更严：请求头 allowlist + 已知凭证禁串扫描）
 
-落盘管线五道，顺序固定：
+落盘管线六道，顺序固定：
 
 1. **drop token 端点交互**：URL path 含 `/token` / `/oauth` 或 host 以 `auth.` 开头 →
    整条交互丢弃（防御深度；正常构造下 token 交换根本不经注入 client）。
@@ -128,10 +156,21 @@
       `extra_headers` 值 + 相关 env 值（如 `SILICONFLOW_API_KEY`）为禁串，全文比对；
    命中任意一条 → raise 拒绝落盘（宁可不产出 cassette）。这是 vcrpy 做不到的一层：
    录制进程内拿得到真凭证明文，逐字匹配比模式匹配更硬。
+6. **事务式原子落盘**（Codex spec review H2）：序列化 + 第 5 道扫描全部通过后，先写
+   同目录临时文件再 `os.replace` 原子提交到目标路径——任何一道失败都**不产生**目标
+   文件，半成品 cassette 结构性不可能存在。
+
+**录制期 console 暴露面归档**（Codex H2 剩余半条）：录制脚本跑真调用时，
+provider_client 既有 error 日志（`body=error_body[:500]`）可能把 4xx 回显打到操作者
+终端——该暴露面与日常跑 `octo` 生产进程完全同面（stdout 落盘侧已有 F129
+log_redaction），且录制是人监督一次性动作、console 输出不被脚本持久化；叠加第 6 道
+「非 2xx 拒绝落盘」，错误回显不可能进 cassette。归档为接受现状，脚本 docstring 提醒
+操作者勿把录制终端输出粘贴外发。
 
 **三重验证**：①专项单测——假 token（各形状）经全管线录到 tmp_path，读文件 grep 零命中
-+ fail-closed 分支触发验证；②committed cassette 扫描测试——遍历仓内 cassettes/*.json
-全文断言零 secret 形状（永久回归，CI 每次跑）；③合入前人眼 + 命令行 grep 双查（流程门）。
++ fail-closed 分支触发验证（含「失败不留半成品文件」断言）；②committed cassette 扫描
+测试——遍历仓内 cassettes/*.json 全文断言零 secret 形状（永久回归，CI 每次跑）；
+③合入前人眼 + 命令行 grep 双查（流程门）。
 
 ### D4 回放机制
 
@@ -139,7 +178,11 @@
   method + host + path 一致（松 matcher），mismatch → 带 expected/actual 的 AssertionError；
   交互耗尽后再有请求 → 显式报错。
 - 回放响应：`httpx.Response(status_code, headers=stored, content=body_text.encode())`——
-  `aiter_lines()` 在 buffered content 上照常走 LineDecoder，解析栈全路径穿透。
+  `aiter_lines()` 在 buffered content 上照常走 LineDecoder + 三 transport 解析循环。
+  诚实定位（Codex spec review M2）：这是「真实响应文本快照回放」，验证**事件形状/字段/
+  finish 语义**维度；chunk 边界/增量重组维度不在此（F142 受控字节切片已钉，比真实
+  分块更对抗）。不采用「录 chunk 边界 + AsyncByteStream 回放」：SSE 响应常带
+  content-encoding 压缩，解码后文本的 chunk 边界不是忠实 wire 产物，复刻它是伪保真。
 - 回放测试自建 `ProviderRuntime`（api_base 与录制一致以对齐 URL 构造）+ 假 resolver
   （`bearer_token="replay-token"`），**hermetic：不读宿主 ~/.octoagent、不要求任何 env**。
 - F137 gate：回放测试按 F142 先例以
@@ -216,8 +259,11 @@ F142 已把「data 行内未转义 U+2028 → 该 delta 静默丢、流继续」
 | 证据 | 结论 | 动作 |
 |------|------|------|
 | wire 上出现未转义 U+2028（探针命中） | 真生产 bug 实锤（真 provider + 真模型输出可触发 delta 静默丢失） | 实施最小修：`_iter_sse_lines()` 模块级 helper（SSE 规范切行，仅 `\r\n`/`\n`/`\r`，含跨 chunk trailing-CR 处理），三 transport 的 `resp.aiter_lines()` 换成它（~25 行 + 3 处调用点）；F142 钉住测试翻转断言（其 docstring 预告的「已修复」分支）；真样本 cassette 钉修复后行为 |
-| CJK 原样（ensure_ascii=False 实锤）但探针字符未 round-trip | 条件性真 bug：serializer 面实锤，触发概率 = 模型 emit U+2028 的概率（网页抓取文本常见，非零） | 同上实施最小修（触发面真实存在，修复极小且被 F142 边界族 + 本 cassette 双保险）——或若实现发现超出「极小」预算，归档不动生产，写明差距 |
+| CJK 原样（ensure_ascii=False 实锤）但探针字符未 round-trip | 条件性风险：serializer 面实锤，但 **U+2028 本身是否会被 provider 单独转义未证实**（不少实现对 line-separator 特判转义），且模型 emit 概率未量化 | **归档不动生产**（Codex spec review M3：无 wire 实锤不改三条生产热路径——与 F142 原判「自管 framing 非极小改动」保持一致）；结论写明证据链与残余风险，修复候选保持归档状态（如需前摄 hardening 另立 Feature 人裁） |
 | CJK 也被转义（SiliconFlow ensure_ascii=True） | 当前配置的 provider 集合无触发面 | 归档结论不动生产；F142 钉住测试保持现状断言 |
+
+**收紧后的唯一动生产条件**（Codex M3）：wire 上抓到**未转义 U+2028 原始字节**出现在
+SSE data 行内（探针命中，cassette 即证据）。其余一律归档。
 
 修复若实施，属「生产改动」显式报告；行为面 = 仅 SSE 行切分语义从 splitlines 全集收窄到
 SSE 规范集，其余逐字节等价（F142 边界族 16 用例 + 既有 23 wire 用例 + 本 cassette 三重
@@ -237,7 +283,9 @@ SSE 规范集，其余逐字节等价（F142 边界族 16 用例 + 既有 23 wir
 | FR-8 | committed cassettes 永久 secret 扫描（模式类全集） | `test_cassette_secret_scan.py` |
 | FR-9 | 录制脚本 gate opt-in（env 通道③），未开闸退出；重录路径文档化 | `record_cassettes.py` docstring + 人工验证（脚本非测试） |
 | FR-10 | anthropic golden 显式标注 `handwritten-golden` 且回放测试注明非真 wire | `test_wire_replay_anthropic.py` docstring + cassette meta |
-| FR-11 | U+2028 评估按 §5 决策表闭环，结论归档；若修，F142 钉住测试同步翻转 + cassette 钉修复后行为 | `test_provider_client_wire_boundaries.py`（翻转或维持）+ completion-report |
+| FR-11 | U+2028 评估按 §5 决策表闭环（唯一动生产条件=探针抓到未转义原始字节），结论归档；若修，F142 钉住测试同步翻转 + cassette 钉修复后行为 | `test_provider_client_wire_boundaries.py`（翻转或维持）+ completion-report |
+| FR-12 | 事务式原子落盘：扫描失败不产生目标文件（无半成品）；非 2xx 响应拒绝落盘 | `test_wire_serializer_secrets.py`（fail-closed 无残留断言 + 非 2xx 拒绝用例） |
+| FR-13 | request 仅存结构摘要（无完整 body）；URL 无 query 断言（非空 raise） | `test_wire_serializer_secrets.py` + `test_cassette_secret_scan.py`（committed cassette 无 `body_json`/query 字段） |
 
 **AC（验收门）**：
 - AC-1 回放套件在 `env -i`（或等价 unset 全凭证 env）下全绿 —— FR-4 绑定文件。
@@ -252,7 +300,7 @@ SSE 规范集，其余逐字节等价（F142 边界族 16 用例 + 既有 23 wir
 
 | 风险 | 缓解 |
 |------|------|
-| 真录响应含个人身份信息（codex 后端可能回显账户相关字段） | 录制场景 prompt 全部中性合成内容；落盘前人眼 review 全文；response body 也过 redact + 禁串扫描 |
+| 真录响应含个人身份信息（codex 后端可能回显账户相关字段） | 录制场景 prompt 全部中性合成内容；request 不落完整 body（仅结构摘要）；非 2xx 拒绝落盘；response body 过 redact + 禁串扫描；落盘前人眼 review 全文 |
 | cassette 随 provider 演进腐化（真实 API 改版后样本过时） | 本来就是快照定位：钉「解析栈能处理**已见过的**真实形状」，不承诺追新；重录路径文档化，腐化成本=跑一次脚本 |
 | anthropic golden 非真 wire，可能与真实 API 有出入 | 显式标注 + 归档；它钉的是解析器对文档形状的正确性（与既有 fake 测试同级），真样本待未来有凭证时重录替换 |
 | 自研 recorder 自身有 bug（如解码/headers 处理错） | recorder 只在录制脚本用（人监督下跑）；replay 路径被回放测试本身验证（能解析出合理结构=端到端自证）；护栏/serializer 各有独立单测 |

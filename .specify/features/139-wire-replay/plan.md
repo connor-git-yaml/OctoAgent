@@ -8,12 +8,13 @@
 ## Phase A 地基（零网络，纯代码）
 
 1. `tests/wire_replay/_wire_recorder.py`：
-   - cassette 数据模型（dataclass + JSON round-trip，format_version=1）
-   - secret 过滤 serializer（D3 五道管线：drop-token-endpoint / 请求头 allowlist /
+   - cassette 数据模型（dataclass + JSON round-trip，format_version=1；request 仅
+     结构摘要 body_summary，URL 拆 scheme/host/path 禁 query）
+   - secret 过滤 serializer（D3 六道管线：drop-token-endpoint / 请求头 allowlist /
      响应头 allowlist / body redact（复用 core.log_redaction）/ 落盘前 fail-closed
-     禁串+模式扫描）
+     禁串+模式扫描 / 事务式原子落盘 temp+os.replace）
    - `RecordingTransport`（wrap 真 transport：缓冲响应、剥 content-encoding 等三头、
-     登记 ResolvedAuth 禁串）
+     登记 ResolvedAuth 禁串、非 2xx 拒绝）
    - `ReplayTransport`（顺序 pop + method/host/path 松匹配 + 耗尽报错 + played 计数）
 2. `tests/wire_replay/conftest.py`：makereport hookwrapper + `wire_cassette` loader
    fixture + 完整消费 autouse 护栏（D5；判定核心纯函数）。
@@ -50,9 +51,11 @@
 
 ## Phase D U+2028 决断（基于 Phase B 证据）
 
-按 spec §5 决策表：三分支之一。若实施最小修——`provider_client.py` 加
-`_iter_sse_lines()` helper + 3 处调用点替换 + F142 钉住测试翻转 + cassette/边界用例
-钉修复后行为；若归档——completion-report 写明证据与不修理由，F142 测试维持现状断言。
+按 spec §5 决策表（收紧后唯一动生产条件=探针在 wire 上抓到未转义 U+2028 原始字节）。
+命中→最小修：`provider_client.py` 加 `_iter_sse_lines()` helper + 3 处调用点替换 +
+F142 钉住测试翻转 + cassette/边界用例钉修复后行为；未命中→归档：completion-report
+写明证据链与残余风险，F142 测试维持现状断言，修复候选保持归档（前摄 hardening 另立
+Feature 人裁）。
 
 **Gate D**：全量回归 0 regression（修复分支时重点跑 provider + gateway SSE 相关面）。
 commit。
