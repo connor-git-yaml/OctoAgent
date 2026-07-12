@@ -5,10 +5,19 @@
 # F087 P3 fixup#3 (Codex finding-3): portable timeout——不依赖 macOS 上需要
 # brew install coreutils 才有的 timeout 命令；改用内嵌 python3 watchdog（标准库
 # subprocess + signal，跨 macOS / Linux 一致行为）。
+# F141（pr lane）：
+#   - pytest 表达式 e2e_smoke → "e2e_smoke or e2e_scripted"（脚本化决策环 +
+#     审批全链 + prompt 预算护栏进 commit 反馈环；实测 +~4s，远低于 180s 预算）
+#   - change-policy 路由（保守两条）：①纯 docs 提速——staged 全部 ∈
+#     {docs/**, **/*.md, .specify/**} 时跳过 e2e 与前端检查（sync-check 恒跑）；
+#     staged 含 gate 机器资产（quarantine.json / attestation-checklist.md）时附跑
+#     对应校验器 ②生产 src 改动无伴随测试 → WARNING（不阻断，保守起步）
 #
 # 行为：
-#   - SKIP_E2E=1 git commit ...      → 立即 exit 0，输出 [E2E] skipped via SKIP_E2E=1
-#   - 否则                            → cd octoagent && uv run pytest -m e2e_smoke -q
+#   - SKIP_E2E=1 git commit ...      → 跳过 e2e（sync/前端/路由校验仍跑）
+#   - 纯 docs staged                  → 跳过 e2e + 前端（输出 fastpath 行）
+#   - 否则                            → cd octoagent && uv run python -m pytest
+#                                        -m "e2e_smoke or e2e_scripted" -q
 #                                        --maxfail=1 总 timeout 180s
 #
 # 失败输出（FR-31）：3 行核心 + 日志路径，不刷屏；不全量 dump LLM 响应。
@@ -16,7 +25,8 @@
 # bypass 文档：
 #   - agent-config 同步失败 → 跑 ./repo-scripts/sync-agent-config.sh 再 git add；
 #     紧急可 SKIP_SYNC_CHECK=1 git commit
-#   - 紧急 commit 用 SKIP_E2E=1 git commit -m "..."
+#   - 紧急 commit 用 SKIP_E2E=1 git commit -m "..."（注意：release lane 中无效，
+#     `lane.py release` 不消费该 env——F141 D4）
 #   - 网络不可用 / OAuth profile 失效时 e2e 自然 SKIP（不阻断 commit）
 #
 # 安装：在 worktree 根执行 `make install-hooks` 或
@@ -39,6 +49,70 @@ if [[ "${SKIP_SYNC_CHECK:-0}" != "1" ]]; then
       echo "  bypass: SKIP_SYNC_CHECK=1 git commit"
       exit 1
     fi
+  fi
+fi
+
+# ---- F141: change-policy 路由（git diff --cached --name-only 前缀路由）----
+# 保守两条（spec 件3；不做复杂 area 矩阵）：
+#   ① 纯 docs 提速：staged 全部 ∈ {docs/**, **/*.md, .specify/**} → 跳过
+#      e2e_smoke + 前端检查（sync-check 已在上方恒跑——CLAUDE.md/AGENTS.md 本身
+#      是 .md，模板漂移由它兜底）；
+#      gate 机器资产例外：staged 含 octoagent/tests/quarantine.json → 附跑
+#      check-quarantine（stdlib python3 直调）；含 attestation-checklist.md →
+#      附跑 check-attestation 解析校验（须 venv PyYAML，经 uv run --no-sync）
+#   ② missing-test 警告：staged 含生产 src（packages/*/src / apps/gateway/src /
+#      frontend/src，排除测试文件）且无任何 staged 测试文件 → WARNING 不阻断
+CP_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+STAGED_FILES="$(git diff --cached --name-only 2>/dev/null || true)"
+DOCS_ONLY=0
+
+if [[ -n "${STAGED_FILES}" ]]; then
+  DOCS_ONLY=1
+  HAS_PROD_SRC=0
+  HAS_TEST_FILE=0
+  while IFS= read -r f; do
+    [[ -z "${f}" ]] && continue
+    # ① docs-only 判定
+    case "${f}" in
+      docs/*|.specify/*|*.md) ;;
+      *) DOCS_ONLY=0 ;;
+    esac
+    # ② missing-test 信号采集
+    case "${f}" in
+      *.test.*|*/tests/*|*/test_*|*_test.*) HAS_TEST_FILE=1 ;;
+      octoagent/packages/*/src/*|octoagent/apps/gateway/src/*|octoagent/frontend/src/*)
+        HAS_PROD_SRC=1 ;;
+    esac
+    # gate 机器资产附加校验（staged 触发；fastpath 下同样生效）
+    case "${f}" in
+      octoagent/tests/quarantine.json)
+        if ! python3 "${CP_REPO_ROOT}/repo-scripts/check-quarantine.py" \
+             --manifest "${CP_REPO_ROOT}/octoagent/tests/quarantine.json"; then
+          echo "[QUARANTINE FAIL] quarantine.json schema 校验未过（六字段/唯一性/日期）"
+          exit 1
+        fi
+        ;;
+      docs/codebase-architecture/attestation-checklist.md)
+        if ! (cd "${CP_REPO_ROOT}/octoagent" && uv run --no-sync python \
+             "${CP_REPO_ROOT}/repo-scripts/check-attestation.py" \
+             --checklist "${CP_REPO_ROOT}/docs/codebase-architecture/attestation-checklist.md" \
+             >/dev/null 2>&1); then
+          echo "[ATTESTATION FAIL] attestation-checklist.md yaml block 解析/schema 校验未过"
+          echo "  详情: uv run --no-sync python repo-scripts/check-attestation.py"
+          exit 1
+        fi
+        ;;
+    esac
+  done <<< "${STAGED_FILES}"
+
+  if [[ ${HAS_PROD_SRC} -eq 1 && ${HAS_TEST_FILE} -eq 0 ]]; then
+    echo "[MISSING-TEST WARN] 本次 staged 含生产 src 改动但无伴随测试文件"
+    echo "  （警告不阻断；CI changed-lines coverage 门会按新增行 ≥90% 机械把关）"
+  fi
+
+  if [[ ${DOCS_ONLY} -eq 1 ]]; then
+    echo "[LANE] docs-only fastpath: staged 均为 docs/**、*.md、.specify/** → 跳过 e2e + 前端检查"
+    exit 0
   fi
 fi
 
@@ -84,7 +158,8 @@ mkdir -p "${LOG_DIR}"
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="${LOG_DIR}/pre-commit-${TIMESTAMP}.log"
 
-# ---- 跑 e2e_smoke（180s portable watchdog）----
+# ---- 跑 e2e_smoke + e2e_scripted（180s portable watchdog）----
+# F141：纳入 e2e_scripted（脚本化决策环，F138 marker 预留「F141 归入 pr lane」）。
 # 用 python3 标准库实现 watchdog（subprocess + SIGTERM/SIGKILL 升级），
 # 不依赖 macOS 默认无的 timeout / gtimeout 命令。
 TIMEOUT_SECONDS=180
@@ -113,7 +188,7 @@ octoagent_dir, log_file, timeout_s = sys.argv[1], sys.argv[2], int(sys.argv[3])
 hermetic_env = {**os.environ, "PYTHONNOUSERSITE": "1"}
 with open(log_file, "wb") as logf:
     proc = subprocess.Popen(
-        ["uv", "run", "python", "-m", "pytest", "-m", "e2e_smoke", "--maxfail=1", "-q"],
+        ["uv", "run", "python", "-m", "pytest", "-m", "e2e_smoke or e2e_scripted", "--maxfail=1", "-q"],
         cwd=octoagent_dir,
         stdout=logf,
         stderr=subprocess.STDOUT,
@@ -161,7 +236,7 @@ fi
 if [[ ${EXIT_CODE} -eq 124 ]]; then
   # watchdog 超时（与 GNU timeout 一致语义）
   echo "[E2E FAIL] timeout=${TIMEOUT_SECONDS}s (portable watchdog)"
-  echo "  expected: smoke 全 PASS 且 ≤ ${TIMEOUT_SECONDS}s 内完成"
+  echo "  expected: smoke + scripted 全 PASS 且 ≤ ${TIMEOUT_SECONDS}s 内完成"
   echo "  actual:   pytest 子进程超时被 SIGKILL（process group 树清理）"
   echo "  log: ${LOG_FILE}"
   echo "  bypass: SKIP_E2E=1 git commit"
@@ -175,7 +250,7 @@ DOMAIN_NAME="$(basename "${FAILED_NODE}" 2>/dev/null | cut -d':' -f1 || echo "<u
 EXPECTED_LINE="$(grep -E "AssertionError|assert " "${LOG_FILE}" | head -1 | sed 's/^[[:space:]]*//' | cut -c1-200 || echo "<no assertion captured>")"
 
 echo "[E2E FAIL] domain=${DOMAIN_NAME}"
-echo "  expected: smoke 5 域全 PASS"
+echo "  expected: smoke + scripted 全 PASS"
 echo "  actual:   ${EXPECTED_LINE}"
 echo "  log: ${LOG_FILE}"
 echo "  bypass: SKIP_E2E=1 git commit"
