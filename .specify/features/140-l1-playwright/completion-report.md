@@ -170,4 +170,10 @@ Codex final（全 diff vs origin/master）：**0 HIGH / 1 P2 / 0 LOW**。
   验证=复跑后实例 root 实见 `octoagent.yaml` + `USER.md` + L1 3 passed。
   这个 finding 同时暴露了「静默 if-exists 跳过」的反模式教训——launcher 的
   可选路径分支静默降级掩盖了配置缺失（与 F103d Echo 掩盖同构，小尺度）。
-- 复评：修复 commit 后 re-review 0 finding（见 §9 末次记录）。
+- **re-review 第 2 轮又抓 1 P2（已修）**：resolve bomb 原抛 `AssertionError`
+  会被 FallbackManager 当普通 primary failure 吞掉切 Echo（后台
+  memory-extraction 类辅助 call 触发时防线退化成日志噪音）——改抛 F137 的
+  `ModelRequestsNotAllowedError`（fallback.py:75 等 swallow 站点对该类型先行
+  re-raise，「漏网必炸、合法降级不误伤」既有硬约束的复用）。修后 L1 终态
+  三连绿（3 passed ×4）。
+- 末次 re-review 结论见 §9 末行回填。

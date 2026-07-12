@@ -147,12 +147,20 @@ def main() -> None:
     import octoagent.gateway.main as gateway_main  # noqa: PLC0415
     from octoagent.gateway.harness.octo_harness import OctoHarness  # noqa: PLC0415
     from octoagent.provider.auth.store import CredentialStore  # noqa: PLC0415
+    from octoagent.provider.model_request_gate import (  # noqa: PLC0415
+        ModelRequestsNotAllowedError,
+    )
 
     sys.path.insert(0, str(_HERE.parent))
     from scenario_brain import L1ScenarioModelClient  # noqa: PLC0415
 
     def _resolve_for_alias_bomb(*_a: object, **_k: object) -> object:
-        raise AssertionError(
+        # Codex re-review P2 闭环：不能用 AssertionError——FallbackManager 会把它
+        # 当普通 primary failure 吞掉切 Echo（后台 memory-extraction 等辅助 call
+        # 触发时防线退化成日志噪音）。改抛 F137 的 ModelRequestsNotAllowedError：
+        # 各 swallow 站点（fallback/llm_service/runner）对该类型**先行 re-raise**
+        # ——「漏网必炸、合法降级不误伤」的既有硬约束，任何路径触发都硬失败。
+        raise ModelRequestsNotAllowedError(
             "F140 L1: 真 provider 解析被触发——脚本化 L1 服务器不允许任何真 LLM 调用"
         )
 
