@@ -191,7 +191,14 @@ def lanes_for_mode(mode: str, *, with_l1: bool = False) -> list[LaneSpec]:
             modes=frozenset({"release"}),
             kind="pytest-live",
             live=True,
-            pytest_args=["-m", "real_llm", "-q", "-r", "s"],
+            # 收集路径限定 e2e_live/——所有 real_llm 用例都在此域（守卫测试
+            # test_all_real_llm_cases_under_live_path 锚定该不变量）。不限定会让
+            # rootdir 收集触发无关 module 的 collection-skip（如 tests/lib_semantics/
+            # 的 piper importorskip 在宿主缺可选依赖时 module 级 skip），该 skip 先于
+            # -m 过滤进 junit → 被误判 unexpected_skip → live lane 假 FAIL。
+            pytest_args=[
+                "-m", "real_llm", "-q", "-r", "s", "apps/gateway/tests/e2e_live",
+            ],
         ),
         # F144 handoff §2 顺序：service 先（闪断恢复后再跑 remote，避免撞闪断窗口）
         LaneSpec(

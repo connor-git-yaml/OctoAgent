@@ -8,6 +8,22 @@
       "owner": "connorlu",
       "review_after": "2026-08-13",
       "exit_criteria": "照 F142 范式把窗口等待改为条件轮询（poll 第二次调用记录出现，带 deadline 上限）治根因后删条目；或连续两周 CI junit 零 rerun 记录后删"
+    },
+    {
+      "id": "task-runner-state-machine-xdist-race",
+      "path": "apps/gateway/tests/test_task_runner.py",
+      "reason": "F083 已知 task_runner 状态机异步时序 race（~20% 失败率，CLAUDE.md 记载治本超 F083 scope）；CI 2-core `-n auto` 资源争抢放大异步终态窗口，F141 删 blanket --reruns 桥后诚实暴露（run 29220837662：enqueue/startup_recovery/attach_input/ask_back 4 例断言未在窗口内达 SUCCEEDED）。本地组合态 5214 passed 恒绿=环境 race 非回归",
+      "owner": "connorlu",
+      "review_after": "2026-08-13",
+      "exit_criteria": "F083 根因治理：状态机测试注入受控 clock / 改条件轮询等待终态（替时序窗口断言），治好删条目；或迁移到确定性 harness。reruns=1 仅护偶发 race，确定性回归仍会红（不掩盖真 bug）"
+    },
+    {
+      "id": "pipeline-tool-terminal-state-timing",
+      "path": "packages/skills/tests/test_pipeline_tool.py::test_terminal_state_sync_on_success",
+      "reason": "同族 pipeline 状态机时序 race（CREATED != SUCCEEDED，@pipeline_timing xdist_group）；CI `-n auto` 放大，本地恒绿；F141 删桥后暴露（run 29220837662）",
+      "owner": "connorlu",
+      "review_after": "2026-08-13",
+      "exit_criteria": "同 task-runner-state-machine：条件轮询代时序窗口断言治根因后删"
     }
   ]
 }

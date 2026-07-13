@@ -337,6 +337,20 @@ class TestOrchestration:
         assert results[0].status == "fail" and "工具缺失" in results[0].detail
 
 
+class TestLiveLaneCollectScope:
+    def test_live_lane_collect_path_pinned_to_e2e_live(self, lane_mod) -> None:
+        """live-real-llm 收集路径必须限定 e2e_live/——防 rootdir 收集触发无关 module
+        的 collection-skip（如 lib_semantics piper importorskip 缺可选依赖时 module
+        级 skip）先于 -m 过滤进 junit 被误判 unexpected_skip → 假 FAIL（release 首跑
+        run 29220837662 实证）。所有 real_llm 用例都在 e2e_live 域，此限定不漏真跑。
+        """
+        lanes = {lane.id: lane for lane in lane_mod.lanes_for_mode("release")}
+        args = lanes["live-real-llm"].pytest_args
+        assert "apps/gateway/tests/e2e_live" in args, (
+            f"live lane 收集范围须限定 e2e_live，实际 pytest_args={args}"
+        )
+
+
 class TestPytestEnvPin:
     def test_pythonpath_locks_repo_tree(self, lane_mod) -> None:
         """D1v2：PYTHONPATH 锁本 repo 树 9 个 src 目录 + PYTHONNOUSERSITE。"""
