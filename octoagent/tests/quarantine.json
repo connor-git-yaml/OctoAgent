@@ -1,4 +1,13 @@
 {
   "_comment": "F141 flaky quarantine manifest（六字段：id/path/reason/owner/review_after/exit_criteria）。语义与三分处置边界见 octoagent/tests/AGENTS.md；校验器 repo-scripts/check-quarantine.py（gate 模式 --enforce-review-date 过期即 FAIL）。命中 path 前缀的测试由 octoagent/conftest.py 自动加 flaky(reruns=1)。初始为空：F142 已治根因已知最热 flaky；新 flake 抖红一条入册一条，不许 blanket rerun。",
-  "quarantined": []
+  "quarantined": [
+    {
+      "id": "context-compaction-continue-timing",
+      "path": "apps/gateway/tests/test_context_compaction.py::TestContextCompaction::test_chat_continue_request_reuses_prior_history",
+      "reason": "2-core CI runner 上第二次 LLM 调用未在断言窗口内发生（assert len(calls)>=2 实得 1）；本地与组合态验收恒绿；此前被 blanket --reruns 1 掩盖，F141 删桥后首次诚实暴露（CI run 29220527783）",
+      "owner": "connorlu",
+      "review_after": "2026-08-13",
+      "exit_criteria": "照 F142 范式把窗口等待改为条件轮询（poll 第二次调用记录出现，带 deadline 上限）治根因后删条目；或连续两周 CI junit 零 rerun 记录后删"
+    }
+  ]
 }
