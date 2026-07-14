@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, Protocol
 import structlog
 from octoagent.core.behavior_workspace import (
     COMPACT_ELIGIBLE_FILE_IDS,
+    SHARED_BEHAVIOR_FILE_IDS,
     PlaceholderCollision,
     ProtectedSectionMalformed,
     ProtectedSectionViolation,
@@ -202,6 +203,13 @@ class BehaviorCompactDiscoveryService:
             return await self._skip(
                 run_id, file_id, root_task_id, reason="not_eligible"
             )
+
+        # slug 按 scope 归零（Codex round11 P2，`behavior_version_key_for` 同款
+        # 原则）：SHARED 文件的落盘路径不含 slug——不归零则同一物理文件会因
+        # 调用方传不同 project_slug 裂成多路候选（幂等账本 key 含 slug）。
+        if file_id in SHARED_BEHAVIOR_FILE_IDS:
+            agent_slug = "main"
+            project_slug = "default"
 
         # 读盘（写路径解析同款——与 behavior.write_file / restore 一致的落盘位）
         try:
@@ -490,16 +498,21 @@ class BehaviorCompactDiscoveryService:
            单个 fenced block 文件的场景），不剥。
         判定不剥时若 LLM 真加了包装：多出的栅栏行体现在 H4 人审 diff 可见可拒
         ——失败模式恒为"可见加行"，绝不"静默删行"。
+
+        Codex round11 P2：**不剥时原样返回**（不再 strip("\\n")）——首尾空行属
+        用户内容，无条件剥会把回显变"更小"产生纯格式垃圾候选；契约自身的边界
+        换行由 ``_parse_contract`` 单个剥除。剥包装时空行判定用局部 strip 副本，
+        返回内层行（包装场景下边界即栅栏行，无内容空行损失）。
         """
-        stripped = text.strip("\n")
-        if not self._looks_fence_wrapped(stripped):
-            return stripped
+        detection = text.strip("\n")
+        if not self._looks_fence_wrapped(detection):
+            return text
         if self._looks_fence_wrapped(original_masked):
-            return stripped
-        first_line = stripped.split("\n", 1)[0].strip().lower()
+            return text
+        first_line = detection.split("\n", 1)[0].strip().lower()
         if first_line not in self._LLM_WRAPPER_FENCE_OPENERS:
-            return stripped
-        return "\n".join(stripped.split("\n")[1:-1])
+            return text
+        return "\n".join(detection.split("\n")[1:-1])
 
     def _parse_contract(
         self, text: str, *, original_masked: str
@@ -517,9 +530,15 @@ class BehaviorCompactDiscoveryService:
         end = rest.find(RATIONALE_DELIMITER)
         if end == -1:
             return None  # 截断守卫
-        compacted = self._strip_code_fence(
-            rest[:end], original_masked=original_masked
-        )
+        segment = rest[:end]
+        # 只剥契约自身的**单个**边界换行（分隔符行与内容之间的那一个）——
+        # 更多的首尾空行属用户内容原样保留（Codex round11 P2：无条件 strip
+        # 会把回显变"更小"产生纯格式垃圾候选）。
+        if segment.startswith("\n"):
+            segment = segment[1:]
+        if segment.endswith("\n"):
+            segment = segment[:-1]
+        compacted = self._strip_code_fence(segment, original_masked=original_masked)
         rationale = rest[end + len(RATIONALE_DELIMITER):].strip()
         # Codex round10 P2：模型在正文中间自发产出分隔符 → 首个 ===RATIONALE===
         # 处早截断，被切走的正文尾巴落进 rationale——三个歧义信号任一命中即

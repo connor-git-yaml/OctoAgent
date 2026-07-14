@@ -658,6 +658,55 @@ async def test_persist_failure_downgrades_no_ghost(env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_shared_file_slug_canonicalized(env):
+    """Codex round11 P2 闭环：SHARED 文件带非 default slug 触发 → 候选按 scope
+    归零（main/default），同一物理文件不因调用方 slug 裂成多路候选。"""
+    store_group, project_root = env
+    _write_behavior_file(project_root, "AGENTS.md", _ORIGINAL)
+    llm = _ScriptedLLM(_contract(_COMPACTED_SMALLER))
+    svc = _service(store_group, project_root, llm)
+
+    first = await svc.discover_file(
+        run_id="run-1",
+        file_id="AGENTS.md",
+        root_task_id=_ROOT_TASK,
+        project_slug="foo",  # 调用方误传
+    )
+    assert first.status == "proposed"
+    cand = await store_group.behavior_compact_store.get_candidate(first.candidate_id)
+    assert cand is not None
+    assert cand.project_slug == "default"
+    assert cand.agent_slug == "main"
+    # 换个 slug 再触发 → 输入幂等账本命中（同一物理文件不裂多路）
+    second = await svc.discover_file(
+        run_id="run-2",
+        file_id="AGENTS.md",
+        root_task_id=_ROOT_TASK,
+        project_slug="bar",
+    )
+    assert second.status == "skipped"
+    assert second.reason == "duplicate"
+
+
+@pytest.mark.asyncio
+async def test_user_blank_lines_preserved_no_junk_candidate(env):
+    """Codex round11 P2 闭环：文件首尾空行属用户内容——回显不被 strip 变'更小'
+    产生纯格式垃圾候选（no_change 正常命中）。"""
+    store_group, project_root = env
+    content_with_blanks = "\n\n" + _ORIGINAL + "\n\n"
+    _write_behavior_file(project_root, "AGENTS.md", content_with_blanks)
+    svc = _service(
+        store_group, project_root, _ScriptedLLM(_contract(content_with_blanks))
+    )
+
+    outcome = await svc.discover_file(
+        run_id="run-1", file_id="AGENTS.md", root_task_id=_ROOT_TASK
+    )
+    assert outcome.status == "skipped"
+    assert outcome.reason == "no_change"
+
+
+@pytest.mark.asyncio
 async def test_missing_file_read_error(env):
     store_group, project_root = env
     svc = _service(store_group, project_root, _ScriptedLLM(_contract("x")))
