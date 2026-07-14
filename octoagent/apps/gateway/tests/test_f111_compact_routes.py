@@ -189,6 +189,21 @@ class TestTrigger:
         resp = client.post("/api/behavior/compact/trigger", json={})
         assert resp.status_code == 503
 
+    def test_trigger_project_file_requires_explicit_slug(self, client):
+        """Codex round18 P2：PROJECT scope 文件缺省 project_slug → 422（服务端
+        不猜选中 project，静默 default 会读/写错文件）。"""
+
+        class _NeverCalled:
+            async def run_manual(self, **kwargs):
+                raise AssertionError("缺 project_slug 不该走到 run_manual")
+
+        client.app.state.behavior_compaction_service = _NeverCalled()
+        resp = client.post(
+            "/api/behavior/compact/trigger", json={"file_id": "PROJECT.md"}
+        )
+        assert resp.status_code == 422
+        assert "project_slug" in resp.json()["detail"]
+
     def test_trigger_409_when_already_running(self, client):
         class _BusyService:
             async def run_manual(self, **kwargs):

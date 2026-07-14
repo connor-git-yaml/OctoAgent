@@ -226,6 +226,41 @@ async def test_non_user_md_accept_skips_live_state(env):
 
 
 @pytest.mark.asyncio
+async def test_snapshot_record_failure_restores_file(env, monkeypatch):
+    """Codex round18 P1 闭环：F107 快照记录失败 → 还原文件 + 候选回 pending +
+    诚实失败——绝不在'无快照可回退'状态下宣称成功。"""
+    store_group, project_root = env
+    resolved = _write_file(project_root, "AGENTS.md", _ORIGINAL)
+    await _insert_candidate(store_group)
+    svc = _service(store_group, project_root)
+
+    async def _boom_record(*args, **kwargs):
+        raise RuntimeError("version store busy")
+
+    monkeypatch.setattr(
+        "octoagent.gateway.services.behavior_versioning.record_behavior_version",
+        _boom_record,
+    )
+    result = await svc.accept("cand-1")
+
+    assert result.ok is False
+    assert result.status == "pending"
+    assert "快照" in result.detail
+    # 文件已还原为原字节（覆写被撤销）
+    assert resolved.read_text(encoding="utf-8") == _ORIGINAL
+    # 无 APPLIED 事件 + 候选回 pending
+    assert await _events(store_group, EventType.BEHAVIOR_COMPACT_APPLIED) == []
+    cand = await store_group.behavior_compact_store.get_candidate("cand-1")
+    assert cand is not None
+    assert cand.status is BehaviorCompactCandidateStatus.PENDING
+    # 恢复后重试干净成功（文件已还原 → source_hash 复配）
+    monkeypatch.undo()
+    retry = await svc.accept("cand-1")
+    assert retry.ok is True
+    assert resolved.read_text(encoding="utf-8") == _COMPACTED
+
+
+@pytest.mark.asyncio
 async def test_reject_leaves_file_untouched(env):
     store_group, project_root = env
     resolved = _write_file(project_root, "AGENTS.md", _ORIGINAL)

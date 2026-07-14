@@ -74,11 +74,18 @@ class BehaviorCompactCandidatesListResponse(BaseModel):
 
 
 class BehaviorCompactTriggerRequest(BaseModel):
-    """手动触发请求：file_id 为空 → 扫默认 SHARED eligible 集。"""
+    """手动触发请求：file_id 为空 → 扫默认 SHARED eligible 集。
+
+    ``project_slug``（Codex round18 P2）：PROJECT scope 文件（PROJECT.md/
+    KNOWLEDGE.md）**必须显式提供**（缺省 → 422）——服务端不猜"当前选中
+    project"（选中态是 CLI 侧概念），静默落到 default 会让非 default 工作区的
+    直连 REST 调用读/写错文件。SHARED 文件忽略本字段（发现端按 scope 归零）。
+    """
 
     file_id: str = Field(default="", description="目标文件短名（空=默认集）")
     project_slug: str = Field(
-        default="default", description="PROJECT scope 文件的 project slug"
+        default="",
+        description="PROJECT scope 文件的 project slug（该 scope 下必填）",
     )
 
 
@@ -297,13 +304,26 @@ async def trigger_behavior_compact(
             status_code=503,
             detail="behavior compaction 服务不可用（gateway 降级启动）",
         )
-    await _ensure_root_task_or_500(store_group)
 
     file_ids: list[str] | None = None
-    if body.file_id.strip():
-        file_ids = [body.file_id.strip()]
+    target = body.file_id.strip()
+    if target:
+        file_ids = [target]
+        # Codex round18 P2：PROJECT scope 文件必须显式给 project_slug——服务端
+        # 不猜选中 project，静默 default 会让非 default 工作区读/写错文件。
+        from octoagent.core.behavior_workspace import PROJECT_SHARED_BEHAVIOR_FILE_IDS
+
+        if target in PROJECT_SHARED_BEHAVIOR_FILE_IDS and not body.project_slug.strip():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"{target} 是 PROJECT scope 文件，必须显式提供 project_slug"
+                    "（CLI 会自动解析当前选中 project；直连 REST 请带上）"
+                ),
+            )
+    await _ensure_root_task_or_500(store_group)
     result = await service.run_manual(
-        file_ids=file_ids, project_slug=body.project_slug or "default"
+        file_ids=file_ids, project_slug=body.project_slug.strip() or "default"
     )
     if result.skipped_reason == "already_running":
         raise HTTPException(

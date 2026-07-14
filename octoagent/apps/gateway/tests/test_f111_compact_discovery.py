@@ -531,7 +531,7 @@ async def test_user_md_active_hours_drift_rejected(env):
     store_group, project_root = env
     original = (
         "# USER\n\n- 称呼：Connor\n- active_hours: 08:00-23:00\n"
-        + "- 喜好：简洁回复，不要客套\n" * 8
+        + "- 喜好：简洁回复，不要客套（测试填充行，多写几个字保证过资源闸）\n" * 8
     )
     _write_behavior_file(project_root, "USER.md", original)
     drifted = "# USER\n\n- 称呼：Connor\n- 简洁回复\n"  # active_hours 被合并掉

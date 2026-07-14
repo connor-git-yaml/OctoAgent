@@ -242,18 +242,60 @@ class BehaviorCompactApprovalService:
                 ),
             )
 
-        # F107 版本记录（best-effort，写已 durable；old_content=验证步重读的盘内容）
+        # F107 版本记录（**strict**，Codex round18 P1）：可回滚快照是本破坏性
+        # 整文件重写的成功前置条件——记录失败时**还原文件**（内存持有验证步读到
+        # 的原字节）+ 候选回 PENDING + 诚实失败，绝不在"无快照可回退"状态下宣称
+        # 成功。还原自身再失败（双重故障）→ CRITICAL log，文件保持新内容 + 候选
+        # 回 PENDING（重 accept 走 CONFLICT 收敛），是无损选项耗尽后的诚实残余。
         from .behavior_versioning import record_behavior_version
 
-        await record_behavior_version(
-            stores=self._stores,
-            project_root=self._project_root,
-            resolved_path=pending_write.resolved,
-            new_content=candidate.compacted_content,
-            old_content=current_content,
-            task_id="",
-            source="compact",
-        )
+        try:
+            await record_behavior_version(
+                stores=self._stores,
+                project_root=self._project_root,
+                resolved_path=pending_write.resolved,
+                new_content=candidate.compacted_content,
+                old_content=current_content,
+                task_id="",
+                source="compact",
+                strict=True,
+            )
+        except Exception:
+            logger.exception(
+                "behavior_compact_version_record_failed_restoring",
+                candidate_id=candidate_id,
+            )
+            try:
+                if current_content is not None:
+                    pending_write.resolved.write_text(
+                        current_content, encoding="utf-8"
+                    )
+            except Exception:
+                logger.critical(
+                    "behavior_compact_file_restore_failed_after_snapshot_failure",
+                    candidate_id=candidate_id,
+                    file_id=candidate.file_id,
+                )
+            try:
+                await self._compact_store.mark_candidate_status(
+                    candidate_id,
+                    status=BehaviorCompactCandidateStatus.PENDING,
+                    expected_status=BehaviorCompactCandidateStatus.APPLIED,
+                )
+                await self._commit_tx()
+            except Exception:
+                logger.exception(
+                    "behavior_compact_snapshot_fail_compensate_failed",
+                    candidate_id=candidate_id,
+                )
+            return CompactApprovalResult(
+                ok=False, status="pending", candidate_id=candidate_id,
+                file_id=candidate.file_id,
+                detail=(
+                    "F107 可回滚快照记录失败（数据库临时故障），已还原文件、"
+                    "候选回 pending 可重试——绝不在无快照状态下落盘"
+                ),
+            )
 
         # 缓存失效：运行中 agent 立即用上精简后内容（F107 Opus M1 同款）
         try:

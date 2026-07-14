@@ -45,18 +45,27 @@ async def record_behavior_version(
     old_content: str | None,
     task_id: str = "",
     source: str = "",
+    strict: bool = False,
 ) -> None:
-    """写盘成功后记录 behavior 版本 + emit 审计事件（best-effort，绝不抛）。
+    """写盘成功后记录 behavior 版本 + emit 审计事件（默认 best-effort，绝不抛）。
 
     版本 key 从**实际 resolved 磁盘路径**派生（Opus H1 修正）——保证写 key 与前端读 key
     （同从 `behavior/agents/<slug>/` 路径段派生）逐字一致，AGENT_PRIVATE 历史对自定义 Worker 命中。
+
+    ``strict=True``（F111 Codex round18 P1）：版本记录失败**上抛**——供把"可回滚
+    快照"当作成功前置条件的调用方（compact accept：快照失败即还原文件），默认
+    False 保持既有调用方（misc_tools / restore）行为零变更。审计事件仍恒 best-effort。
     """
     store = getattr(stores, "behavior_version_store", None)
     if store is None:
+        if strict:
+            raise RuntimeError("behavior_version_store 不可用，无法记录可回滚快照")
         return
     try:
         key = behavior_version_key_from_path(project_root, resolved_path)
     except (ValueError, OSError):
+        if strict:
+            raise
         # 路径不在 project_root 下 / 解析失败：写盘已成功，版本记录是 best-effort，静默跳过。
         return
     file_id = key.file_id
@@ -71,6 +80,8 @@ async def record_behavior_version(
             scope=key.scope,
             reason=f"{type(exc).__name__}: {exc}",
         )
+        if strict:
+            raise
         return
 
     # 审计事件（best-effort，需 task_id —— Event 模型要求 task_id）。
