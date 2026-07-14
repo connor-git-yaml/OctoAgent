@@ -392,6 +392,26 @@ async def test_code_fence_stripped(env):
 
 
 @pytest.mark.asyncio
+async def test_language_fenced_output_not_stripped(env):
+    """Codex round7 P2 闭环：模型合法产出单个带语言 info string 的 fenced block
+    （```yaml 等）不被当 LLM 包装剥掉——只有 ```/```markdown/```md 典型包装
+    形态才剥。"""
+    store_group, project_root = env
+    _write_behavior_file(project_root, "AGENTS.md", _ORIGINAL)  # 原文非 fence 包裹
+    fenced_yaml = "```yaml\n- 合并后规则 A\n- 合并后规则 B\n```"
+    svc = _service(store_group, project_root, _ScriptedLLM(_contract(fenced_yaml)))
+
+    outcome = await svc.discover_file(
+        run_id="run-1", file_id="AGENTS.md", root_task_id=_ROOT_TASK
+    )
+    assert outcome.status == "proposed"
+    cand = await store_group.behavior_compact_store.get_candidate(outcome.candidate_id)
+    assert cand is not None
+    assert cand.compacted_content.startswith("```yaml")
+    assert cand.compacted_content.rstrip("\n").endswith("```")
+
+
+@pytest.mark.asyncio
 async def test_legitimate_fence_wrapped_content_not_stripped(env):
     """Codex round2 P2 闭环：原文自身首尾就是栅栏行（合法 fenced 内容）时，
     LLM 原样保留的首尾栅栏**不得**被当外包装剥掉（静默删行=内容损坏）。"""

@@ -149,6 +149,27 @@ class TestDecide:
         assert result.exit_code != 0
         assert "重新 octo behavior compact" in result.output
 
+    def test_apply_409_pending_guides_retry(self, runner, monkeypatch):
+        """Codex round7 P3：临时故障回滚（status=pending）引导重试同一命令，
+        不与候选失效（conflict）混为一谈送错恢复路径。"""
+        fake = _FakeRequest(
+            [
+                (
+                    409,
+                    {
+                        "ok": False,
+                        "status": "pending",
+                        "detail": "落盘失败已回滚：OSError",
+                    },
+                )
+            ]
+        )
+        monkeypatch.setattr(bc, "_compact_request", fake)
+        result = runner.invoke(bc.behavior_group, ["compact", "--apply", "cand-1"])
+        assert result.exit_code != 0
+        assert "重试同一命令" in result.output
+        assert "重新 octo behavior compact" not in result.output
+
     def test_apply_404(self, runner, monkeypatch):
         fake = _FakeRequest([(404, {"detail": "不存在"})])
         monkeypatch.setattr(bc, "_compact_request", fake)

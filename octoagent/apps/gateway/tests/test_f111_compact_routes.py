@@ -106,6 +106,19 @@ class TestCandidatesList:
         assert resp.status_code == 200
         assert resp.json() == {"candidates": [], "pending_count": 0}
 
+    @pytest.mark.asyncio
+    async def test_list_limit_param(self, client, store_group, project_root):
+        """Codex round7 P2：limit 参数可调（bounded ≤1000），顶到默认上限的旧
+        候选可达。"""
+        _write_file(project_root, "AGENTS.md", _ORIGINAL)
+        for i in range(3):
+            await _seed_candidate(store_group, candidate_id=f"cand-{i}")
+        resp = client.get("/api/behavior/compact/candidates?limit=2")
+        assert resp.status_code == 200
+        assert len(resp.json()["candidates"]) == 2
+        resp_all = client.get("/api/behavior/compact/candidates?limit=1000")
+        assert len(resp_all.json()["candidates"]) == 3
+
 
 class TestAcceptReject:
     @pytest.mark.asyncio

@@ -205,13 +205,19 @@ def _approval_result_to_http(result: Any) -> JSONResponse:
 @router.get("/api/behavior/compact/candidates")
 async def list_behavior_compact_candidates(
     request: Request,
+    limit: int = 200,
     store_group=Depends(get_store_group),
 ) -> BehaviorCompactCandidatesListResponse:
-    """列出 pending 精简候选（含服务端 unified diff 供人审）。"""
+    """列出 pending 精简候选（含服务端 unified diff 供人审）。
+
+    ``limit``（默认 200，上限 1000，Codex round7 P2）：单用户 nightly ≤3 提议 +
+    输入幂等去重下 200 实际难以触顶，但顶到时旧候选不可达是硬伤——调 limit 可达。
+    """
     from octoagent.core.models.behavior_compact import BehaviorCompactCandidateStatus
 
+    bounded = max(1, min(limit, 1000))
     pending = await store_group.behavior_compact_store.list_candidates(
-        status=BehaviorCompactCandidateStatus.PENDING, limit=200
+        status=BehaviorCompactCandidateStatus.PENDING, limit=bounded
     )
     items = [
         BehaviorCompactCandidateItem(

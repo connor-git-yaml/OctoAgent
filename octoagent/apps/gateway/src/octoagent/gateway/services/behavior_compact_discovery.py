@@ -472,22 +472,34 @@ class BehaviorCompactDiscoveryService:
             and lines[-1].strip() == "```"
         )
 
-    def _strip_code_fence(self, text: str, *, original_masked: str) -> str:
-        """剥 LLM 包的**外层** code fence（G-lite 实测怪癖）。
+    #: LLM 外包装的典型开栅栏形态（在"呈现一份 markdown 文档"时的常见 info string）。
+    #: 其他 info string（```yaml/```python 等）视为内容自身的栅栏，绝不剥。
+    _LLM_WRAPPER_FENCE_OPENERS: frozenset[str] = frozenset(
+        {"```", "```markdown", "```md"}
+    )
 
-        Codex round2 P2 闭环：无条件剥离会吃掉**合法内容自身**的首尾栅栏行
-        （文件本身以 fenced block 开头且结尾时）——静默删行是内容损坏。判据 =
-        对照原文：仅当**原文自身不是**栅栏包裹形态而 LLM 输出是，才判定为
-        LLM 外包装并剥离；原文本就是该形态时不剥（歧义保守——若 LLM 真加了
-        包装，多出的栅栏行会体现在 H4 人审 diff 里可见可拒，失败模式从
-        "静默删行"降级为"可见加行"）。
+    def _strip_code_fence(self, text: str, *, original_masked: str) -> str:
+        """剥 LLM 包的**外层** code fence（G-lite 实测怪癖），三重收窄判定。
+
+        Codex round2 P2 + round7 P2 闭环：静默剥错行=内容损坏，判定必须收窄到
+        "几乎确定是 LLM 包装"才剥——三个条件全满足：
+        1. 输出呈整体包裹形态（首行栅栏开、末行 ``` 收）；
+        2. **原文自身不是**该形态（原文是 → 栅栏属内容，不剥）；
+        3. 开栅栏是 LLM 呈现 markdown 文档的典型形态（``` / ```markdown / ```md）
+           ——```yaml 等带语言 info string 的视为内容栅栏（round7：模型合法产出
+           单个 fenced block 文件的场景），不剥。
+        判定不剥时若 LLM 真加了包装：多出的栅栏行体现在 H4 人审 diff 可见可拒
+        ——失败模式恒为"可见加行"，绝不"静默删行"。
         """
         stripped = text.strip("\n")
-        if self._looks_fence_wrapped(stripped) and not self._looks_fence_wrapped(
-            original_masked
-        ):
-            return "\n".join(stripped.split("\n")[1:-1])
-        return stripped
+        if not self._looks_fence_wrapped(stripped):
+            return stripped
+        if self._looks_fence_wrapped(original_masked):
+            return stripped
+        first_line = stripped.split("\n", 1)[0].strip().lower()
+        if first_line not in self._LLM_WRAPPER_FENCE_OPENERS:
+            return stripped
+        return "\n".join(stripped.split("\n")[1:-1])
 
     def _parse_contract(
         self, text: str, *, original_masked: str

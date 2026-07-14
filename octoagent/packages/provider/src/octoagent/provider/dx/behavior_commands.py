@@ -994,6 +994,14 @@ def _compact_decide(candidate_id: str, *, decision: str) -> None:
     if status == 404:
         raise click.ClickException(f"候选 {candidate_id} 不存在")
     if status == 409:
+        # Codex round7 P3：409 分两类——body.status=pending 是临时故障回滚
+        # （候选仍 pending，重试同一命令即可）；conflict 才是候选失效终态
+        # （引导重新触发）。混为一谈会把用户送上错误恢复路径。
+        if body.get("status") == "pending":
+            raise click.ClickException(
+                f"临时故障已回滚：{body.get('detail', '')}\n"
+                "（候选仍待审，直接重试同一命令即可）"
+            )
         raise click.ClickException(
             f"候选已失效或已被处理：{body.get('detail', '')}\n"
             "（源文件可能在提议后被编辑——重新 octo behavior compact 产生新提议）"
