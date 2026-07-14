@@ -521,6 +521,20 @@ class BehaviorCompactDiscoveryService:
             rest[:end], original_masked=original_masked
         )
         rationale = rest[end + len(RATIONALE_DELIMITER):].strip()
+        # Codex round10 P2：模型在正文中间自发产出分隔符 → 首个 ===RATIONALE===
+        # 处早截断，被切走的正文尾巴落进 rationale——三个歧义信号任一命中即
+        # fallback（宁缺毋滥）：①rationale 里再现任一分隔符（真分隔符在更后面）；
+        # ②rationale 里出现 PROTECTED 占位符（占位符只属于正文）。残余不可判定
+        # 场景（模型恰好只产一次中缝分隔符且此后无任何信号）诚实归档：H1/H2 先
+        # 兜（截掉占位符即 protected_violation），最终 H4 人审 diff 的大段删除
+        # 可见可拒。输入侧碰撞守卫（delimiter_collision）已挡"原文含分隔符"向量。
+        if (
+            RATIONALE_DELIMITER in rationale
+            or COMPACTED_DELIMITER in rationale
+            or "<<<PROTECTED_" in rationale
+        ):
+            logger.warning("behavior_compact_ambiguous_delimiter_in_rationale")
+            return None
         return compacted, rationale
 
     # ============================================================

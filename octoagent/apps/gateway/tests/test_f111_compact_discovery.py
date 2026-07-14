@@ -375,6 +375,45 @@ async def test_truncated_output_fallback(env):
 
 
 @pytest.mark.asyncio
+async def test_midbody_delimiter_emission_fallback(env):
+    """Codex round10 P2 闭环：模型在正文中间自发产出 ===RATIONALE===（早截断，
+    正文尾巴落进 rationale）→ 歧义信号命中 → fallback，绝不产截断候选。"""
+    store_group, project_root = env
+    _write_behavior_file(project_root, "AGENTS.md", _ORIGINAL)
+    # 模型把分隔符写进了正文中间；真正的分隔符+理由在更后面
+    ambiguous = (
+        f"{COMPACTED_DELIMITER}\n# AGENTS\n- 前半段规则\n"
+        f"{RATIONALE_DELIMITER}\n- 其实这还是正文后半段\n"
+        f"{RATIONALE_DELIMITER}\n真正的合并理由"
+    )
+    svc = _service(store_group, project_root, _ScriptedLLM(ambiguous))
+
+    outcome = await svc.discover_file(
+        run_id="run-1", file_id="AGENTS.md", root_task_id=_ROOT_TASK
+    )
+    assert outcome.status == "fallback"
+    assert outcome.reason == "contract_parse_failed"
+    assert await store_group.behavior_compact_store.list_candidates() == []
+
+
+@pytest.mark.asyncio
+async def test_placeholder_in_rationale_fallback(env):
+    """歧义信号②：rationale 尾巴含 PROTECTED 占位符（占位符只属正文）→ fallback。"""
+    store_group, project_root = env
+    _write_behavior_file(project_root, "AGENTS.md", _ORIGINAL_WITH_PROTECTED)
+    ambiguous = (
+        f"{COMPACTED_DELIMITER}\n# AGENTS\n- 前半段\n"
+        f"{RATIONALE_DELIMITER}\n<<<PROTECTED_0>>>\n- 被切走的正文\n"
+    )
+    svc = _service(store_group, project_root, _ScriptedLLM(ambiguous))
+
+    outcome = await svc.discover_file(
+        run_id="run-1", file_id="AGENTS.md", root_task_id=_ROOT_TASK
+    )
+    assert outcome.status == "fallback"
+
+
+@pytest.mark.asyncio
 async def test_code_fence_stripped(env):
     """LLM 包 code fence 的常见怪癖（F127 G-lite 实测）→ 剥离后正常提议。"""
     store_group, project_root = env
