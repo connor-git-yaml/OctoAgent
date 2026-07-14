@@ -778,11 +778,21 @@ def _compact_gateway_settings() -> tuple[str, dict[str, str]]:
     port = _resolve_port(env)
     base_url = f"http://127.0.0.1:{port}"
     headers: dict[str, str] = {}
-    if _effective_mode(cfg, env) == "bearer":
+    mode = _effective_mode(cfg, env)
+    if mode == "bearer":
         token_env = _bearer_token_env_name(cfg, env)
         token = _read_instance_dotenv_value(root, token_env)
         if token:
             headers["Authorization"] = f"Bearer {token}"
+    elif mode == "trusted_proxy":
+        # Codex round6 P2：trusted_proxy 模式下 FrontDoorGuard 会拒绝无代理凭证的
+        # 本机直连（403）——显式 fail-fast 优于让每个子命令神秘 403。与 attest/
+        # remote CLI 现有支持面一致（均只覆盖 loopback/bearer）。
+        raise click.ClickException(
+            "octo behavior compact 暂不支持 front_door.mode=trusted_proxy——"
+            "请经反向代理侧调用 REST /api/behavior/compact/*，"
+            "或临时切换 bearer/loopback 模式后重试"
+        )
     return base_url, headers
 
 

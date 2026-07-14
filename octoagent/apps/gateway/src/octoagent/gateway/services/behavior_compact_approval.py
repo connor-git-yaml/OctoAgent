@@ -397,7 +397,37 @@ class BehaviorCompactApprovalService:
             expected_status=BehaviorCompactCandidateStatus.APPLYING,
             decided_at=datetime.now(UTC),
         )
-        await self._commit_tx()
+        if not await self._commit_tx():
+            # Codex round6 P1：CONFLICT 终态未 durable 时绝不宣称终态（与 APPLIED/
+            # REJECTED 分支同款语义）。补偿回 PENDING（先试 CONFLICT→PENDING，
+            # mark 未命中时再试 APPLYING→PENDING）+ 诚实"可重试"——验证判定是
+            # 确定性的，重试 accept 会再次验证并收敛到 durable CONFLICT。
+            try:
+                reverted = await self._compact_store.mark_candidate_status(
+                    candidate.candidate_id,
+                    status=BehaviorCompactCandidateStatus.PENDING,
+                    expected_status=BehaviorCompactCandidateStatus.CONFLICT,
+                )
+                if not reverted:
+                    await self._compact_store.mark_candidate_status(
+                        candidate.candidate_id,
+                        status=BehaviorCompactCandidateStatus.PENDING,
+                        expected_status=BehaviorCompactCandidateStatus.APPLYING,
+                    )
+                await self._commit_tx()
+            except Exception:
+                logger.exception(
+                    "behavior_compact_conflict_compensate_failed",
+                    candidate_id=candidate.candidate_id,
+                )
+            return CompactApprovalResult(
+                ok=False, status="pending", candidate_id=candidate.candidate_id,
+                file_id=candidate.file_id,
+                detail=(
+                    f"候选验证失败（{reason}）但状态提交失败（数据库临时故障）；"
+                    "候选回 pending，重试 accept 将再次验证并收敛"
+                ),
+            )
         if not marked:
             logger.warning(
                 "behavior_compact_mark_conflict_cas_failed",

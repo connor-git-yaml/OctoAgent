@@ -390,6 +390,58 @@ async def test_accept_commit_failure_honest_failure(env, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_conflict_commit_failure_honest_retry(env, monkeypatch):
+    """Codex round6 P1 闭环：CONFLICT 终态提交失败 → 不宣称终态不 emit，
+    候选补偿回 pending 可重试（验证判定确定性，重试收敛到 durable CONFLICT）。"""
+    store_group, project_root = env
+    resolved = _write_file(project_root, "AGENTS.md", _ORIGINAL)
+    await _insert_candidate(store_group)
+    resolved.write_text(_ORIGINAL + "- 半夜新规则\n", encoding="utf-8")  # 源已变更
+    svc = _service(store_group, project_root)
+
+    async def _fail_commit() -> bool:
+        return False
+
+    monkeypatch.setattr(svc, "_commit_tx", _fail_commit)
+    result = await svc.accept("cand-1")
+
+    assert result.ok is False
+    assert result.status == "pending"
+    assert "提交失败" in result.detail
+    assert await _events(store_group, EventType.BEHAVIOR_COMPACT_CONFLICTED) == []
+    cand = await store_group.behavior_compact_store.get_candidate("cand-1")
+    assert cand is not None
+    assert cand.status is BehaviorCompactCandidateStatus.PENDING
+    # 恢复后重试收敛到 durable CONFLICT
+    monkeypatch.undo()
+    retry = await svc.accept("cand-1")
+    assert retry.status == "conflict"
+    cand2 = await store_group.behavior_compact_store.get_candidate("cand-1")
+    assert cand2 is not None
+    assert cand2.status is BehaviorCompactCandidateStatus.CONFLICT
+
+
+@pytest.mark.asyncio
+async def test_ensure_root_commit_failure_raises(env, monkeypatch):
+    """Codex round6 P2 闭环：root 占位 commit 失败必须上抛（半初始化状态下运行
+    会让事件 FK 静默丢 + spawn lineage 断——路由据此 500 保护 C2 不变量）。"""
+    store_group, _ = env
+
+    from octoagent.gateway.services.behavior_compact_root import (
+        ensure_behavior_compact_root,
+    )
+
+    async def _boom() -> None:
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(store_group.conn, "commit", _boom)
+    with pytest.raises(RuntimeError, match="disk full"):
+        await ensure_behavior_compact_root(
+            store_group.task_store, store_group.work_store
+        )
+
+
+@pytest.mark.asyncio
 async def test_reject_commit_failure_honest_failure(env, monkeypatch):
     """Codex P1 同族：reject 状态提交失败 → 不报成功不 emit，候选仍 pending 可重试。"""
     store_group, project_root = env

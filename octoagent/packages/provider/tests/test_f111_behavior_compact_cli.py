@@ -223,6 +223,27 @@ class TestGuards:
         assert result.exit_code != 0
         assert "互斥" in result.output
 
+    def test_trusted_proxy_mode_fails_fast(self, runner, monkeypatch, tmp_path):
+        """Codex round6 P2 闭环：trusted_proxy 模式显式 fail-fast（优于每个
+        子命令神秘 403），与 attest/remote CLI 支持面一致。"""
+        from octoagent.provider.dx import remote_commands as rc
+
+        monkeypatch.setattr(rc, "_load_config_and_root", lambda: (None, tmp_path))
+        monkeypatch.setattr(rc, "_effective_mode", lambda cfg, env: "trusted_proxy")
+        import octoagent.gateway.services.frontdoor_exposure as fde
+
+        monkeypatch.setattr(fde, "read_instance_effective_env", lambda root: {})
+
+        def _passthrough(method: str, path: str, payload: dict | None = None):
+            # 真走 _compact_gateway_settings（不打真 HTTP——settings 阶段就该炸）
+            bc._compact_gateway_settings()
+            raise AssertionError("trusted_proxy 应在 settings 阶段 fail-fast")
+
+        monkeypatch.setattr(bc, "_compact_request", _passthrough)
+        result = runner.invoke(bc.behavior_group, ["compact", "--list"])
+        assert result.exit_code != 0
+        assert "trusted_proxy" in result.output
+
     def test_gateway_down_guides_service(self, runner, monkeypatch):
         def _boom(method: str, path: str, payload: dict | None = None):
             raise click.ClickException(

@@ -85,13 +85,18 @@ async def ensure_behavior_compact_root(
     else:
         root_work = existing_work
 
-    # 提交事务（FK 引用立即可见，沿用 F102/F127 ensure commit 范式）
+    # 提交事务（FK 引用立即可见，沿用 F102/F127 ensure commit 范式）。
+    # Codex round6 P2：commit 失败**上抛**——本函数存在的目的就是保证 root 占位
+    # durable（events FK / spawn parent lineage），吞掉失败会让后续 compact 动作
+    # 在"半初始化"状态下运行（事件 FK 静默丢 + lineage 断）。调用方语义：路由
+    # 捕获 → 500 保护 C2 不变量；服务 startup 捕获 → 降级不阻塞 gateway。
     conn = getattr(task_store, "_conn", None)
     if conn is not None and hasattr(conn, "commit"):
         try:
             await conn.commit()
         except Exception:
             logger.exception("behavior_compact_root_commit_failed")
+            raise
 
     return root_task, root_work
 
