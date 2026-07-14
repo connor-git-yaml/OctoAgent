@@ -164,11 +164,16 @@ class BehaviorCompactDiscoveryService:
         root_task_id: str,
         agent_slug: str = "main",
         project_slug: str = "default",
+        respect_rejected: bool = False,
     ) -> CompactDiscoveryOutcome:
         """逐文件跑发现端并聚合结果。
 
         **C4**：只产 PENDING 候选，**绝不落盘**——覆写在用户 accept 后由
         ``BehaviorCompactApprovalService`` 执行。
+
+        ``respect_rejected``（Opus 自审精化）：True = 同源已有 REJECTED 也跳过
+        （cron 路径——文件不变时不为同一被拒源反复提议+通知；文件一编辑即自然
+        重提）；手动路径 False（用户主动=显式重新决定）。
         """
         outcome = CompactDiscoveryOutcome()
         for file_id in file_ids:
@@ -178,6 +183,7 @@ class BehaviorCompactDiscoveryService:
                 root_task_id=root_task_id,
                 agent_slug=agent_slug,
                 project_slug=project_slug,
+                respect_rejected=respect_rejected,
             )
             outcome.outcomes.append(file_outcome)
             outcome.files_reviewed += 1
@@ -196,6 +202,7 @@ class BehaviorCompactDiscoveryService:
         root_task_id: str,
         agent_slug: str = "main",
         project_slug: str = "default",
+        respect_rejected: bool = False,
     ) -> FileCompactOutcome:
         """单文件发现：读全文 → 占位 → LLM → 护栏 → 写候选（不落盘）。"""
         # FR-6 禁区第一层（根治）：非 eligible 不读不送 LLM 不产候选
@@ -268,6 +275,7 @@ class BehaviorCompactDiscoveryService:
                 agent_slug=agent_slug,
                 project_slug=project_slug,
                 source_hash=source_hash,
+                include_rejected=respect_rejected,
             )
         except Exception:
             logger.exception("behavior_compact_dup_check_failed", file_id=file_id)

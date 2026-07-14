@@ -335,7 +335,12 @@ class BehaviorCompactionService:
             )
 
             await self._run_discovery(
-                run_id=run_id, file_ids=file_ids, config=config
+                run_id=run_id,
+                file_ids=file_ids,
+                config=config,
+                # Opus 自审精化：cron 尊重同源 REJECTED（文件不变不为被拒源
+                # 反复提议+通知；文件一编辑 hash 变即自然重提）
+                respect_rejected=True,
             )
         except asyncio.CancelledError:
             raise
@@ -394,6 +399,7 @@ class BehaviorCompactionService:
                 config=self._read_config(),
                 project_slug=project_slug,
                 notify=False,  # 用户在场（CLI 响应含全部结果），不推通知
+                respect_rejected=False,  # 用户主动=显式重新决定（spec §0.2 语义保留）
             )
             if outcome is None:
                 # Codex round3 P2：发现端异常（FAILED 已审计）→ 显式失败通道，
@@ -418,6 +424,7 @@ class BehaviorCompactionService:
         config: BehaviorCompactConfig,
         project_slug: str = "default",
         notify: bool = True,
+        respect_rejected: bool = False,
     ) -> CompactDiscoveryOutcome | None:
         """跑发现端 + 写 COMPLETED/FAILED + （cron 路径）通知。
 
@@ -436,6 +443,7 @@ class BehaviorCompactionService:
                 file_ids=file_ids,
                 root_task_id=BEHAVIOR_COMPACT_ROOT_TASK_ID,
                 project_slug=project_slug,
+                respect_rejected=respect_rejected,
             )
         except asyncio.CancelledError:
             raise

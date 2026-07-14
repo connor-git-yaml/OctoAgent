@@ -205,13 +205,24 @@ class SqliteBehaviorCompactStore:
         agent_slug: str,
         project_slug: str,
         source_hash: str,
+        include_rejected: bool = False,
     ) -> bool:
-        """输入幂等账本：同文件同源 hash 是否已有 {PENDING, APPLYING} 候选。
+        """输入幂等账本：同文件同源 hash 是否已有阻断态候选。
+
+        基础阻断 = {PENDING, APPLYING}（白名单式，F127 handoff 坑 4）。
+        ``include_rejected=True``（Opus 自审精化）：把同源 REJECTED 也计入——
+        **cron 路径专用**：输入级幂等下"同源重提"是完全重复输入，文件不变时
+        nightly 会为同一被拒源反复提议+通知（重复打扰）；文件一编辑 hash 即变、
+        自然放行重提。手动触发不传（用户主动=显式要求重新决定，保留 spec §0.2
+        "REJECTED 可重试"语义）。
 
         查询失败语义由调用方定（发现端捕获后放行——宁可能产重复也不阻断 compact，
         同 F127 ``_is_duplicate_candidate`` 降级方向）。
         """
-        placeholders = ", ".join("?" for _ in _INPUT_DUP_BLOCKING_STATUSES)
+        statuses = set(_INPUT_DUP_BLOCKING_STATUSES)
+        if include_rejected:
+            statuses.add(BehaviorCompactCandidateStatus.REJECTED)
+        placeholders = ", ".join("?" for _ in statuses)
         cursor = await self._conn.execute(
             "SELECT 1 FROM behavior_compact_candidates "
             "WHERE file_id = ? AND agent_slug = ? AND project_slug = ? "
@@ -221,7 +232,7 @@ class SqliteBehaviorCompactStore:
                 agent_slug,
                 project_slug,
                 source_hash,
-                *[s.value for s in _INPUT_DUP_BLOCKING_STATUSES],
+                *[s.value for s in statuses],
             ),
         )
         row = await cursor.fetchone()

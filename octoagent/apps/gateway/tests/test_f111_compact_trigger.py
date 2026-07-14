@@ -445,6 +445,48 @@ class TestNotification:
         await svc._run_compaction()
         assert notification.calls == []
 
+    async def test_cron_skips_rejected_same_source_manual_does_not(
+        self, store_group, project_root
+    ):
+        """Opus 自审精化：文件不变时 cron 不为同一被拒源反复提议（duplicate skip）；
+        手动触发保留 spec §0.2 'REJECTED 可重试'语义。"""
+        _write_shared_file(project_root, "AGENTS.md", _ORIGINAL)
+        svc = _build_service(
+            store_group,
+            project_root,
+            user_md=_USER_MD_ACTIVE,
+            llm=_ScriptedLLM(_COMPACTED),
+        )
+        # 第一轮手动产候选 → 用户拒绝
+        first = await svc.run_manual(file_ids=["AGENTS.md"])
+        assert first.outcomes[0].status == "proposed"
+        from octoagent.core.models.behavior_compact import (
+            BehaviorCompactCandidateStatus,
+        )
+
+        await store_group.behavior_compact_store.mark_candidate_status(
+            first.outcomes[0].candidate_id,
+            status=BehaviorCompactCandidateStatus.REJECTED,
+        )
+        await store_group.conn.commit()
+
+        # cron 路径：同源已 REJECTED → 跳过（不再打扰）
+        await svc._run_compaction()
+        events = await store_group.event_store.get_events_for_task(
+            BEHAVIOR_COMPACT_ROOT_TASK_ID
+        )
+        cron_skips = [
+            e.payload
+            for e in events
+            if e.type == EventType.BEHAVIOR_COMPACT_SKIPPED
+            and e.payload.get("file_id") == "AGENTS.md"
+            and e.payload.get("reason") == "duplicate"
+        ]
+        assert cron_skips, "cron 应对同源 REJECTED 跳过"
+        # 手动路径：显式重新决定 → 允许重提
+        manual_again = await svc.run_manual(file_ids=["AGENTS.md"])
+        assert manual_again.outcomes[0].status == "proposed"
+
     async def test_manual_never_notifies(self, store_group, project_root):
         _write_shared_file(project_root, "AGENTS.md", _ORIGINAL)
         notification = _FakeNotification()
