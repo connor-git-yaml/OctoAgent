@@ -101,6 +101,27 @@ class EventType(StrEnum):
     MEMORY_CONSOLIDATION_APPROVED = "MEMORY_CONSOLIDATION_APPROVED"
     MEMORY_CONSOLIDATION_REJECTED = "MEMORY_CONSOLIDATION_REJECTED"
     MEMORY_CONSOLIDATION_CONFLICTED = "MEMORY_CONSOLIDATION_CONFLICTED"
+    # F111 Behavior Compactor（行为文件 LLM 智能合并去冗余，8 事件对称 F127）：
+    # 运行级（一次 cron/手动 compact run 生命周期）：
+    #   TRIGGERED：run 启动（cron spawn 成功 / 手动触发；payload 含 trigger 来源）。
+    #   COMPLETED：发现端跑完（files_reviewed / proposals_made / fallback）。
+    #   FAILED：发现端异常（C6 不崩，事件审计）。
+    #   SKIPPED：compact_active=False / 单飞 / capacity / spawn 异常（含 reason）。
+    # 候选级（单文件精简提议人审生命周期，C4 Two-Phase）：
+    #   PROPOSED：LLM 产精简提议过护栏写候选（payload 用 id/hash/计数引用，不含原文）。
+    #   APPLIED：用户 accept → 落盘 + F107 版本记录成功（命名取 APPLIED 非 F127 的
+    #     APPROVED——behavior 域"写入落地"比"批准"更准确，spec FR-9 归档）。
+    #   REJECTED：用户拒绝 → 候选 rejected，行为文件零触碰。
+    #   CONFLICTED：accept 时系统检测候选失效（源文件 hash 失配 / 禁区漏网 / H2 复验
+    #     不过）→ conflict 终态，**不落盘**（actor=SYSTEM，非用户决策）。
+    BEHAVIOR_COMPACT_TRIGGERED = "BEHAVIOR_COMPACT_TRIGGERED"
+    BEHAVIOR_COMPACT_COMPLETED = "BEHAVIOR_COMPACT_COMPLETED"
+    BEHAVIOR_COMPACT_FAILED = "BEHAVIOR_COMPACT_FAILED"
+    BEHAVIOR_COMPACT_SKIPPED = "BEHAVIOR_COMPACT_SKIPPED"
+    BEHAVIOR_COMPACT_PROPOSED = "BEHAVIOR_COMPACT_PROPOSED"
+    BEHAVIOR_COMPACT_APPLIED = "BEHAVIOR_COMPACT_APPLIED"
+    BEHAVIOR_COMPACT_REJECTED = "BEHAVIOR_COMPACT_REJECTED"
+    BEHAVIOR_COMPACT_CONFLICTED = "BEHAVIOR_COMPACT_CONFLICTED"
     STATE_TRANSITION = "STATE_TRANSITION"
     ARTIFACT_CREATED = "ARTIFACT_CREATED"
     # F104 文件工作台 v0.1：versionable artifact 版本 append 失败（durable 失败信号）

@@ -21,6 +21,8 @@ from ._types import (
     BEHAVIOR_OVERLAY_ORDER,
     BOOTSTRAP_COMPLETED_MARKER,
     BehaviorLoadProfile,
+    COMPACT_ELIGIBLE_FILE_IDS,
+    COMPACT_EXCLUDED_FILE_IDS,
     CORE_BEHAVIOR_FILE_IDS,
     INSTRUCTION_BOOTSTRAP_FILE_IDS,
     PROJECT_AGENT_BOOTSTRAP_TEMPLATE_IDS,
@@ -72,6 +74,17 @@ from .paths import (
     behavior_version_key_from_path,
     resolve_behavior_agent_slug,
     resolve_write_path_by_file_id,
+)
+from .protected import (
+    PROTECTED_CLOSE_MARKER,
+    PROTECTED_OPEN_MARKER,
+    PlaceholderCollision,
+    ProtectedExtraction,
+    ProtectedSectionError,
+    ProtectedSectionMalformed,
+    ProtectedSectionViolation,
+    extract_protected_sections,
+    verify_and_reinsert,
 )
 from .resolver import (
     _ResolvedBehaviorSource,

@@ -216,6 +216,11 @@ from .control_plane import (
     WorkerProfilesDocument,
     WorkProjectionItem,
 )
+from .behavior_compact import (
+    BEHAVIOR_COMPACT_TERMINAL_STATUSES,
+    BehaviorCompactCandidate,
+    BehaviorCompactCandidateStatus,
+)
 from .conversation_binding import ConversationBinding, ConversationBindingKind
 from .delegation import (
     TASK_TO_WORK_STATUS,
@@ -638,6 +643,9 @@ __all__ = [
     "ArtifactCreatedPayload",
     "ArtifactVersionAppendFailedPayload",
     "BackupLifecyclePayload",
+    "BEHAVIOR_COMPACT_TERMINAL_STATUSES",
+    "BehaviorCompactCandidate",
+    "BehaviorCompactCandidateStatus",
     "ChatImportLifecyclePayload",
     "ErrorPayload",
     "ExecutionStatusChangedPayload",

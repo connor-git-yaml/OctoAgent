@@ -60,6 +60,27 @@ PROJECT_AGENT_BOOTSTRAP_TEMPLATE_IDS = tuple(
 # Feature 063: Bootstrap 完成标记
 BOOTSTRAP_COMPLETED_MARKER = "<!-- COMPLETED -->"
 
+# ---------------------------------------------------------------------------
+# F111 Behavior Compactor: compact 范围单一事实源（fail-closed 白名单）
+# ---------------------------------------------------------------------------
+# 主源是**正向白名单**（spec §0.1.4 归档偏离设计稿的排除表命名）：未来新增第 10 个
+# behavior 文件时默认**不可** compact，直到显式加入本表（fail-closed）。排除集从
+# ALL - eligible 派生（非独立常量，防两处漂移）。
+# 排除理由：SOUL/IDENTITY 人格核心（LLM 重写自己人格有自我漂移风险）；BOOTSTRAP
+# 一次性引导脚本（compact 无意义且违 H1）；HEARTBEAT 短结构化（收益低不值风险）。
+COMPACT_ELIGIBLE_FILE_IDS = (
+    "AGENTS.md",
+    "TOOLS.md",
+    "USER.md",
+    "PROJECT.md",
+    "KNOWLEDGE.md",
+)
+COMPACT_EXCLUDED_FILE_IDS = tuple(
+    file_id
+    for file_id in ALL_BEHAVIOR_FILE_IDS
+    if file_id not in COMPACT_ELIGIBLE_FILE_IDS
+)
+
 # Feature 063: 行为文件总大小警告阈值（字符）
 _BEHAVIOR_SIZE_WARNING_THRESHOLD = 15000
 _BEHAVIOR_TEMPLATE_PACKAGE = "octoagent.core.behavior_templates"

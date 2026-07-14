@@ -13,6 +13,7 @@ from .a2a_store import SqliteA2AStore
 from .connection import apply_write_connection_pragmas
 from .agent_context_store import SqliteAgentContextStore
 from .artifact_store import SqliteArtifactStore
+from .behavior_compact_store import SqliteBehaviorCompactStore
 from .behavior_version_store import SqliteBehaviorVersionStore
 from .checkpoint_store import SqliteCheckpointStore
 from .conversation_binding_store import SqliteConversationBindingStore
@@ -82,6 +83,8 @@ class StoreGroup:
         self.work_store = SqliteWorkStore(conn)
         # F116：通知 dismiss/active 持久化（NotificationService rehydrate 用）
         self.notification_store = SqliteNotificationStore(conn)
+        # F111：行为文件精简提议候选（共享主连接，R4——不在方法内 commit）
+        self.behavior_compact_store = SqliteBehaviorCompactStore(conn)
         # F105：渠道会话路由绑定（OC-2 ConversationBinding + OC-6 last-route 状态）
         self.conversation_binding_store = SqliteConversationBindingStore(conn)
         # F131：Telegram 出站补偿 spool（send 失败入队 + 跨重启 drain 重试）
@@ -154,6 +157,7 @@ __all__ = [
     "SqliteTelegramOutboundSpoolStore",
     "OutboundSpoolItem",
     "SqliteArtifactStore",
+    "SqliteBehaviorCompactStore",
     "SqliteBehaviorVersionStore",
     "SqliteCheckpointStore",
     "SqliteSideEffectLedgerStore",

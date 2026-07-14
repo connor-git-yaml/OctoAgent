@@ -245,6 +245,98 @@ class BehaviorVersionRecordedPayload(BaseModel):
     source: str = Field(default="", description="写入来源（llm_tool / control_plane）")
 
 
+# ---------------------------------------------------------------------------
+# F111 Behavior Compactor 事件 payload（8 个，对称 F127；PII/体积纪律：
+# 一律 id / hash / 计数引用，**不含 behavior 原文/精简后全文**）
+# ---------------------------------------------------------------------------
+
+
+class BehaviorCompactTriggeredPayload(BaseModel):
+    """BEHAVIOR_COMPACT_TRIGGERED 事件 payload（run 启动）"""
+
+    run_id: str = Field(description="compact 运行 id（bcpt-*）")
+    trigger: str = Field(description="触发来源：cron / manual")
+    trigger_ts: str = Field(description="触发时间 ISO8601")
+    child_task_id: str = Field(
+        default="", description="cron 路径 spawn 的审计容器子任务 id（手动路径为 ''）"
+    )
+    file_ids: list[str] = Field(
+        default_factory=list, description="本次运行计划扫描的 behavior 文件短名"
+    )
+
+
+class BehaviorCompactCompletedPayload(BaseModel):
+    """BEHAVIOR_COMPACT_COMPLETED 事件 payload（发现端跑完）"""
+
+    run_id: str = Field(description="compact 运行 id")
+    files_reviewed: int = Field(description="实际回顾的文件数")
+    proposals_made: int = Field(description="过护栏写入的候选数")
+    elapsed_ms: int = Field(default=0, description="发现端耗时毫秒")
+    fallback: bool = Field(
+        default=False, description="是否有文件走 LLM 不可用/解析失败 fallback"
+    )
+
+
+class BehaviorCompactFailedPayload(BaseModel):
+    """BEHAVIOR_COMPACT_FAILED 事件 payload（发现端异常，C6 不崩）"""
+
+    run_id: str = Field(description="compact 运行 id")
+    error_type: str = Field(description="异常类型名")
+    error_msg: str = Field(default="", description="异常摘要（截断，无敏感内容）")
+
+
+class BehaviorCompactSkippedPayload(BaseModel):
+    """BEHAVIOR_COMPACT_SKIPPED 事件 payload（运行级跳过 / 单文件护栏跳过）"""
+
+    reason: str = Field(
+        description=(
+            "跳过原因：disabled / already_running / capacity / spawn_error（运行级）；"
+            "not_smaller / protected_violation / protected_malformed / "
+            "placeholder_collision / no_change / config_drift / too_small / "
+            "too_large / duplicate / not_eligible / read_error（单文件护栏级）"
+        )
+    )
+    run_id: str = Field(default="", description="compact 运行 id（有则填）")
+    file_id: str = Field(default="", description="单文件护栏跳过时的文件短名")
+
+
+class BehaviorCompactProposedPayload(BaseModel):
+    """BEHAVIOR_COMPACT_PROPOSED 事件 payload（候选写入，不含原文）"""
+
+    run_id: str = Field(description="compact 运行 id")
+    candidate_id: str = Field(description="候选 id")
+    file_id: str = Field(description="behavior 文件短名")
+    size_before: int = Field(description="原文字符数")
+    size_after: int = Field(description="精简后字符数")
+    content_hash: str = Field(description="精简后全文 sha256（审计引用）")
+
+
+class BehaviorCompactAppliedPayload(BaseModel):
+    """BEHAVIOR_COMPACT_APPLIED 事件 payload（accept 落盘成功）"""
+
+    candidate_id: str = Field(description="候选 id")
+    file_id: str = Field(description="behavior 文件短名")
+    size_before: int = Field(description="原文字符数")
+    size_after: int = Field(description="精简后字符数")
+
+
+class BehaviorCompactRejectedPayload(BaseModel):
+    """BEHAVIOR_COMPACT_REJECTED 事件 payload（用户拒绝）"""
+
+    candidate_id: str = Field(description="候选 id")
+    file_id: str = Field(description="behavior 文件短名")
+
+
+class BehaviorCompactConflictedPayload(BaseModel):
+    """BEHAVIOR_COMPACT_CONFLICTED 事件 payload（accept 时系统检测失效，不落盘）"""
+
+    candidate_id: str = Field(description="候选 id")
+    file_id: str = Field(description="behavior 文件短名")
+    reason: str = Field(
+        description="失效原因：source_changed / not_eligible / protected_reverify_failed"
+    )
+
+
 class ErrorPayload(BaseModel):
     """ERROR 事件 payload"""
 

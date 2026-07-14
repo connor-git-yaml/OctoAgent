@@ -513,6 +513,37 @@ _BEHAVIOR_VERSIONS_INDEXES = [
     "ON behavior_versions(scope, agent_slug, project_slug, file_id, version_no DESC);",
 ]
 
+# F111 Behavior Compactor：行为文件整文件精简提议候选（五态人审状态机，模式仿
+# consolidation_candidates 但字段是文件级——概念错配防治，spec §0.3）。
+# source_hash = 提议时原文 sha256（accept 新鲜度锚）；compacted_content 存待审全文
+# （候选表本就给用户看 diff，事件 payload 才受 PII/体积纪律约束）。
+_BEHAVIOR_COMPACT_CANDIDATES_DDL = """
+CREATE TABLE IF NOT EXISTS behavior_compact_candidates (
+    candidate_id       TEXT PRIMARY KEY,
+    run_id             TEXT NOT NULL,
+    file_id            TEXT NOT NULL,
+    agent_slug         TEXT NOT NULL DEFAULT 'main',
+    project_slug       TEXT NOT NULL DEFAULT 'default',
+    source_hash        TEXT NOT NULL,
+    compacted_content  TEXT NOT NULL,
+    rationale          TEXT NOT NULL DEFAULT '',
+    size_before        INTEGER NOT NULL DEFAULT 0,
+    size_after         INTEGER NOT NULL DEFAULT 0,
+    content_hash       TEXT NOT NULL DEFAULT '',
+    status             TEXT NOT NULL DEFAULT 'pending',
+    created_at         TEXT NOT NULL,
+    decided_at         TEXT
+);
+"""
+
+_BEHAVIOR_COMPACT_CANDIDATES_INDEXES = [
+    # 审批面按状态列 pending + 发现端输入幂等账本按 (file, source_hash) 查阻断态
+    "CREATE INDEX IF NOT EXISTS idx_behavior_compact_status "
+    "ON behavior_compact_candidates(status, created_at DESC);",
+    "CREATE INDEX IF NOT EXISTS idx_behavior_compact_file_source "
+    "ON behavior_compact_candidates(file_id, agent_slug, project_slug, source_hash);",
+]
+
 # F107 W2-C：workspace 回滚请求（durable，#1 / Codex C-HIGH-A）。
 # 回滚审批 ApprovalGate 仅在内存（_pending_handles）→ 进程重启丢失待批回滚；本表持久化
 # 请求 + 状态，启动 rehydrate pending/approved-未执行（仅文件态回滚，SD-10）。
@@ -1872,6 +1903,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_AGENT_PROFILE_REVISIONS_DDL)
     await conn.execute(_ARTIFACT_VERSIONS_DDL)
     await conn.execute(_BEHAVIOR_VERSIONS_DDL)
+    await conn.execute(_BEHAVIOR_COMPACT_CANDIDATES_DDL)
     await conn.execute(_WORKSPACE_ROLLBACK_REQUESTS_DDL)
     await conn.execute(_OWNER_PROFILES_DDL)
     await conn.execute(_OWNER_PROFILE_OVERLAYS_DDL)
@@ -1905,6 +1937,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _ARTIFACTS_INDEXES
         + _ARTIFACT_VERSIONS_INDEXES
         + _BEHAVIOR_VERSIONS_INDEXES
+        + _BEHAVIOR_COMPACT_CANDIDATES_INDEXES
         + _WORKSPACE_ROLLBACK_REQUESTS_INDEXES
         + _TASK_JOBS_INDEXES
         + _CHECKPOINTS_INDEXES
