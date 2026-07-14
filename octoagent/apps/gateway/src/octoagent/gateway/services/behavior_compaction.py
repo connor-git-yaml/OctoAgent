@@ -134,6 +134,9 @@ class ManualCompactResult:
     run_id: str
     outcomes: list[FileCompactOutcome] = field(default_factory=list)
     skipped_reason: str = ""  # "" / "already_running"
+    #: Codex round3 P2：发现端内部异常时非空（BEHAVIOR_COMPACT_FAILED 已审计）——
+    #: REST/CLI 必须呈现失败，不得与"真无提议"混淆成空成功。
+    error: str = ""
 
 
 class BehaviorCompactionService:
@@ -396,9 +399,14 @@ class BehaviorCompactionService:
                 project_slug=project_slug,
                 notify=False,  # 用户在场（CLI 响应含全部结果），不推通知
             )
-            return ManualCompactResult(
-                run_id=run_id, outcomes=outcome.outcomes if outcome else []
-            )
+            if outcome is None:
+                # Codex round3 P2：发现端异常（FAILED 已审计）→ 显式失败通道，
+                # 绝不折叠成"0 提议"空成功（否则故障对用户不可见、无从排障）。
+                return ManualCompactResult(
+                    run_id=run_id,
+                    error="发现端内部异常（已记 BEHAVIOR_COMPACT_FAILED 事件，见日志）",
+                )
+            return ManualCompactResult(run_id=run_id, outcomes=outcome.outcomes)
         finally:
             self._running = False
 

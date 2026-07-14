@@ -202,6 +202,7 @@ class TestTrigger:
                 return SimpleNamespace(
                     run_id="bcpt-run-1",
                     skipped_reason="",
+                    error="",
                     outcomes=[
                         SimpleNamespace(
                             file_id="AGENTS.md",

@@ -285,6 +285,9 @@ async def trigger_behavior_compact(
         raise HTTPException(
             status_code=409, detail="compact 正在运行中（cron 或另一次手动触发）"
         )
+    if result.error:
+        # Codex round3 P2：发现端异常显式 500——不与"真无提议"混淆成空 200
+        raise HTTPException(status_code=500, detail=result.error)
 
     outcomes = []
     for o in result.outcomes:

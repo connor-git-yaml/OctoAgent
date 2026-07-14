@@ -372,8 +372,14 @@ class BehaviorCompactApprovalService:
         except Exception:
             # hash 相等时提取必与发现端一致；异常按复验失败保守处理
             return "protected_reverify_failed", None
+        # Codex round3 P2：exact-once 复验（非仅包含）——候选行被数据侧改写成
+        # "重复 PROTECTED 区段"仍能过 `in` 检查，但 H2 语义是每区段恰好一次。
+        # 期望次数 = 该字节串在源区段列表中的出现次数（同文允许多个相同区段）。
+        expected_counts: dict[str, int] = {}
         for section in extraction.sections:
-            if section not in candidate.compacted_content:
+            expected_counts[section] = expected_counts.get(section, 0) + 1
+        for section, expected in expected_counts.items():
+            if candidate.compacted_content.count(section) != expected:
                 return "protected_reverify_failed", None
         return "", current_content
 

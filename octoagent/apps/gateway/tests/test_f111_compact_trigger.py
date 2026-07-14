@@ -364,6 +364,26 @@ class TestRunManual:
         assert result.outcomes == []
         svc._running = False
 
+    async def test_manual_discovery_failure_surfaces_error(
+        self, store_group, project_root, monkeypatch
+    ):
+        """Codex round3 P2 闭环：发现端异常 → error 通道非空成功（REST 据此 500）。"""
+        svc = _build_service(store_group, project_root)
+
+        async def _boom(**kwargs: Any):
+            raise RuntimeError("discovery crashed")
+
+        monkeypatch.setattr(
+            "octoagent.gateway.services.behavior_compact_discovery."
+            "BehaviorCompactDiscoveryService.discover_files",
+            _boom,
+        )
+        result = await svc.run_manual(file_ids=["AGENTS.md"])
+        assert result.error  # 显式失败通道
+        assert result.outcomes == []
+        failed = await _events_of_type(store_group, EventType.BEHAVIOR_COMPACT_FAILED)
+        assert len(failed) == 1
+
     async def test_manual_blocked_by_active_child(self, store_group, project_root):
         """Codex round2 P1 闭环：cron 审计 child 非终态（含重启后 _running 丢失
         场景）→ 手动同样 skip（'cron/manual 共享单飞'的持久半边）。"""

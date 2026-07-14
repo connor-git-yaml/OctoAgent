@@ -233,6 +233,34 @@ async def test_missing_file_conflicts(env):
 
 
 @pytest.mark.asyncio
+async def test_protected_duplicated_in_candidate_conflicts(env):
+    """Codex round3 P2 闭环：候选行被数据侧改写成重复 PROTECTED 区段——`in` 检查
+    过但 exact-once 复验必须拦（CONFLICT，不落盘）。"""
+    from octoagent.core.behavior_workspace import (
+        PROTECTED_CLOSE_MARKER,
+        PROTECTED_OPEN_MARKER,
+    )
+
+    store_group, project_root = env
+    section = f"{PROTECTED_OPEN_MARKER}\n- 红线\n{PROTECTED_CLOSE_MARKER}"
+    source = f"# AGENTS\n\n{section}\n\n- 冗余规则一\n- 冗余规则二\n"
+    resolved = _write_file(project_root, "AGENTS.md", source)
+    # 候选内容把 PROTECTED 区段重复了两次（模拟数据侧损坏）
+    corrupted = f"# AGENTS\n\n{section}\n{section}\n"
+    await _insert_candidate(
+        store_group, source_content=source, compacted=corrupted
+    )
+    svc = _service(store_group, project_root)
+
+    result = await svc.accept("cand-1")
+
+    assert result.status == "conflict"
+    assert resolved.read_text(encoding="utf-8") == source  # 零触碰
+    conflicted = await _events(store_group, EventType.BEHAVIOR_COMPACT_CONFLICTED)
+    assert conflicted[0].payload["reason"] == "protected_reverify_failed"
+
+
+@pytest.mark.asyncio
 async def test_not_eligible_candidate_conflicts(env):
     """禁区第二层（FR-6）：存量脏数据候选（SOUL.md）→ CONFLICT(not_eligible)。"""
     store_group, project_root = env
