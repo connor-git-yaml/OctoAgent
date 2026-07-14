@@ -484,14 +484,25 @@ class BehaviorCompactApprovalService:
 
     async def _rollback_to_pending(self, candidate_id: str) -> None:
         """自身异常回滚 APPLYING→PENDING（候选可重审，F127 handoff 坑 5——
-        claim 后任何一步异常都必须回滚，否则候选卡死 APPLYING 无人能救）。"""
+        claim 后任何一步异常都必须回滚，否则候选卡死 APPLYING 无人能救）。
+
+        Codex round14 P2：感知回滚提交结果并告警。单一提交点设计下 durable
+        卡死构造性不可达（claim 从未单独提交——回滚提交失败时事务里是净零的
+        claim+PENDING，durable 态仍是 pending；进程死 → SQLite 回滚同效），
+        但提交失败意味着共享连接遗留 open txn（写锁滞留），必须可观测。
+        """
         try:
             await self._compact_store.mark_candidate_status(
                 candidate_id,
                 status=BehaviorCompactCandidateStatus.PENDING,
                 expected_status=BehaviorCompactCandidateStatus.APPLYING,
             )
-            await self._commit_tx()
+            if not await self._commit_tx():
+                logger.warning(
+                    "behavior_compact_rollback_commit_failed_txn_open",
+                    candidate_id=candidate_id,
+                    hint="durable 态仍 pending（claim 未单独提交过）；共享连接写锁滞留待后续提交",
+                )
         except Exception:
             logger.exception(
                 "behavior_compact_rollback_failed", candidate_id=candidate_id

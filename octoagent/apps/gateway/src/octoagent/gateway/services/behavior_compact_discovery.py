@@ -367,6 +367,10 @@ class BehaviorCompactDiscoveryService:
         if not await self._commit_tx():
             try:
                 await self._compact_store.delete_candidate(candidate.candidate_id)
+                # 补偿后再尝试提交关闭事务（Codex round14 P2：净零效果落盘 +
+                # 释放共享连接写锁；两次都失败则事务留待后续提交，DELETE 已
+                # 在事务内抵销 INSERT，无幽灵候选）。
+                await self._commit_tx()
             except Exception:
                 logger.exception(
                     "behavior_compact_persist_compensate_failed", file_id=file_id
