@@ -261,6 +261,36 @@ async def test_protected_duplicated_in_candidate_conflicts(env):
 
 
 @pytest.mark.asyncio
+async def test_protected_content_repeated_in_plain_text_ok(env):
+    """Codex round8 P2 拒绝证据：PROTECTED 块的**内容文本**在非保护区重复出现时
+    （不带 🔒 标记），exact-once 复验不误伤——count 的是含标记的完整区段字符串。"""
+    from octoagent.core.behavior_workspace import (
+        PROTECTED_CLOSE_MARKER,
+        PROTECTED_OPEN_MARKER,
+    )
+
+    store_group, project_root = env
+    inner = "- 核心红线：绝不删除用户数据"
+    section = f"{PROTECTED_OPEN_MARKER}\n{inner}\n{PROTECTED_CLOSE_MARKER}"
+    # 同一段文字既在 PROTECTED 区段内、又在非保护区作为普通说明重复出现
+    source = (
+        f"# AGENTS\n\n{section}\n\n"
+        f"说明：{inner}（这行是普通文案重复）\n"
+        "- 冗余规则一\n- 冗余规则二\n- 冗余规则三\n"
+    )
+    resolved = _write_file(project_root, "AGENTS.md", source)
+    compacted = f"# AGENTS\n\n{section}\n\n说明：{inner}（这行是普通文案重复）\n- 合并后规则\n"
+    await _insert_candidate(store_group, source_content=source, compacted=compacted)
+    svc = _service(store_group, project_root)
+
+    result = await svc.accept("cand-1")
+
+    assert result.ok is True, f"合法候选被误判：{result.detail}"
+    assert result.status == "applied"
+    assert resolved.read_text(encoding="utf-8") == compacted
+
+
+@pytest.mark.asyncio
 async def test_not_eligible_candidate_conflicts(env):
     """禁区第二层（FR-6）：存量脏数据候选（SOUL.md）→ CONFLICT(not_eligible)。"""
     store_group, project_root = env

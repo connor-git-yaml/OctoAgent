@@ -40,8 +40,11 @@ from ..services.behavior_compact_root import (  # noqa: E402
     ensure_behavior_compact_root as _ensure_behavior_compact_root,
 )
 
-#: 候选列表 diff 展示上限（Web/CLI 渲染护栏；完整内容仍在 compacted_content）。
-_DIFF_MAX_CHARS = 4000
+#: diff 病理护栏上限（Codex round8 P1：截断会破坏"人审看全量改动再 apply"的
+#: 保障）。数学上不可达：发现端输入硬顶 COMPACT_INPUT_CHAR_BUDGET=8000 字符 +
+#: H1 保证候选更小 → unified diff 最坏 ~2×8000+行头 ≈ 20k，远低于本上限——
+#: 可采纳输入下 diff 恒完整，本值仅防未来演化出的病理输入撑爆响应。
+_DIFF_MAX_CHARS = 120_000
 
 
 # ---------------------------------------------------------------------------

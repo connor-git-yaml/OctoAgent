@@ -375,6 +375,11 @@ class BehaviorCompactApprovalService:
         # Codex round3 P2：exact-once 复验（非仅包含）——候选行被数据侧改写成
         # "重复 PROTECTED 区段"仍能过 `in` 检查，但 H2 语义是每区段恰好一次。
         # 期望次数 = 该字节串在源区段列表中的出现次数（同文允许多个相同区段）。
+        # Codex round8 P2 拒绝带证据：section 字符串**含 🔒 开闭标记**（提取器
+        # 保留标记），非保护区的纯文本重复不带标记不会被 count 计入；带标记的
+        # 重复在源里本身就是另一个被提取的 section、已反映在 expected_counts——
+        # 不存在"合法候选被误判"的场景（回归测试
+        # test_protected_content_repeated_in_plain_text_ok 复现该场景证明通过）。
         expected_counts: dict[str, int] = {}
         for section in extraction.sections:
             expected_counts[section] = expected_counts.get(section, 0) + 1
