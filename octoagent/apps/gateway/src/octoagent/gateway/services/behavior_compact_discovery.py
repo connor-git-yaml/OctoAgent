@@ -270,7 +270,9 @@ class BehaviorCompactDiscoveryService:
                 file_id=file_id, status="fallback", reason="llm_unavailable"
             )
 
-        parsed = self._parse_contract(llm_text)
+        parsed = self._parse_contract(
+            llm_text, original_masked=extraction.masked_content
+        )
         if parsed is None:
             logger.warning(
                 "behavior_compact_contract_parse_failed",
@@ -461,15 +463,35 @@ class BehaviorCompactDiscoveryService:
         return ""
 
     @staticmethod
-    def _strip_code_fence(text: str) -> str:
-        """剥外层 code fence（LLM 常见怪癖，F127 G-lite 实测）。"""
+    def _looks_fence_wrapped(text: str) -> bool:
+        """文本是否呈"首行 ``` 开、末行 ``` 收"的整体包裹形态。"""
+        lines = text.strip("\n").split("\n")
+        return (
+            len(lines) >= 2
+            and lines[0].startswith("```")
+            and lines[-1].strip() == "```"
+        )
+
+    def _strip_code_fence(self, text: str, *, original_masked: str) -> str:
+        """剥 LLM 包的**外层** code fence（G-lite 实测怪癖）。
+
+        Codex round2 P2 闭环：无条件剥离会吃掉**合法内容自身**的首尾栅栏行
+        （文件本身以 fenced block 开头且结尾时）——静默删行是内容损坏。判据 =
+        对照原文：仅当**原文自身不是**栅栏包裹形态而 LLM 输出是，才判定为
+        LLM 外包装并剥离；原文本就是该形态时不剥（歧义保守——若 LLM 真加了
+        包装，多出的栅栏行会体现在 H4 人审 diff 里可见可拒，失败模式从
+        "静默删行"降级为"可见加行"）。
+        """
         stripped = text.strip("\n")
-        lines = stripped.split("\n")
-        if len(lines) >= 2 and lines[0].startswith("```") and lines[-1].strip() == "```":
-            return "\n".join(lines[1:-1])
+        if self._looks_fence_wrapped(stripped) and not self._looks_fence_wrapped(
+            original_masked
+        ):
+            return "\n".join(stripped.split("\n")[1:-1])
         return stripped
 
-    def _parse_contract(self, text: str) -> tuple[str, str] | None:
+    def _parse_contract(
+        self, text: str, *, original_masked: str
+    ) -> tuple[str, str] | None:
         """解析契约 A'（spec §8）。返回 (compacted_masked, rationale) 或 None。
 
         ``===RATIONALE===`` 尾分隔符**必需**（自查③）：输出 token 截断产生的
@@ -483,7 +505,9 @@ class BehaviorCompactDiscoveryService:
         end = rest.find(RATIONALE_DELIMITER)
         if end == -1:
             return None  # 截断守卫
-        compacted = self._strip_code_fence(rest[:end])
+        compacted = self._strip_code_fence(
+            rest[:end], original_masked=original_masked
+        )
         rationale = rest[end + len(RATIONALE_DELIMITER):].strip()
         return compacted, rationale
 

@@ -391,6 +391,29 @@ async def test_code_fence_stripped(env):
     assert not cand.compacted_content.startswith("```")
 
 
+@pytest.mark.asyncio
+async def test_legitimate_fence_wrapped_content_not_stripped(env):
+    """Codex round2 P2 闭环：原文自身首尾就是栅栏行（合法 fenced 内容）时，
+    LLM 原样保留的首尾栅栏**不得**被当外包装剥掉（静默删行=内容损坏）。"""
+    store_group, project_root = env
+    # 原文整体呈 fence 包裹形态（首行 ``` 开 + 末行 ``` 收），内容够长
+    original = "```yaml\n" + "key_example: 值示例（填充行）\n" * 12 + "```\n"
+    _write_behavior_file(project_root, "KNOWLEDGE.md", original)
+    # LLM 忠实保留首尾栅栏、只精简中间
+    compacted = "```yaml\n" + "key_example: 值示例（填充行）\n" * 6 + "```"
+    svc = _service(store_group, project_root, _ScriptedLLM(_contract(compacted)))
+
+    outcome = await svc.discover_file(
+        run_id="run-1", file_id="KNOWLEDGE.md", root_task_id=_ROOT_TASK
+    )
+    assert outcome.status == "proposed"
+    cand = await store_group.behavior_compact_store.get_candidate(outcome.candidate_id)
+    assert cand is not None
+    # 首尾栅栏行完整保留（没有被剥）
+    assert cand.compacted_content.startswith("```yaml")
+    assert cand.compacted_content.rstrip("\n").endswith("```")
+
+
 # ============================================================
 # AC-6：禁区第一层
 # ============================================================

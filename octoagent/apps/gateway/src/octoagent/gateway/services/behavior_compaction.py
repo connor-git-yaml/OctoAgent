@@ -373,7 +373,15 @@ class BehaviorCompactionService:
         trigger_ts = datetime.now(UTC)
         targets = list(file_ids) if file_ids else list(BEHAVIOR_COMPACT_CRON_FILE_IDS)
         try:
-            await self._ensure_compact_root()
+            _, root_work = await self._ensure_compact_root()
+            # Codex round2 P1：手动同样过持久态单飞检查（"cron/manual 共享单飞"
+            # 契约的持久半边）——cron 审计 child 未终态期间（含重启后 _running 丢失
+            # 场景）手动触发一律 skip，与 cron 跨 tick 语义对称。代价（child 卡住时
+            # 手动被挡）与 cron 相同且可见：用户可在任务面看到/取消该 child。
+            if await self._has_active_compact_child(root_work.work_id):
+                return ManualCompactResult(
+                    run_id="", skipped_reason="already_running"
+                )
             await self._emit_triggered(
                 run_id=run_id,
                 trigger="manual",

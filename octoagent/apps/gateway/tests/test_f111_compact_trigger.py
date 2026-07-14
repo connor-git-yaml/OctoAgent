@@ -364,6 +364,30 @@ class TestRunManual:
         assert result.outcomes == []
         svc._running = False
 
+    async def test_manual_blocked_by_active_child(self, store_group, project_root):
+        """Codex round2 P1 闭环：cron 审计 child 非终态（含重启后 _running 丢失
+        场景）→ 手动同样 skip（'cron/manual 共享单飞'的持久半边）。"""
+        svc = _build_service(store_group, project_root, llm=None)
+        _, root_work = await svc._ensure_compact_root()
+        now = datetime.now(UTC)
+        await store_group.work_store.save_work(
+            Work(
+                work_id="bcpt-child-manual-block",
+                task_id=BEHAVIOR_COMPACT_ROOT_TASK_ID,
+                parent_work_id=root_work.work_id,
+                title="上一轮审计容器",
+                status=WorkStatus.RUNNING,  # 非终态
+                target_kind=DelegationTargetKind.SUBAGENT,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await store_group.conn.commit()
+
+        result = await svc.run_manual(file_ids=["AGENTS.md"])
+        assert result.skipped_reason == "already_running"
+        assert result.outcomes == []
+
 
 # ============================================================
 # 通知决策表（F127 同款）
