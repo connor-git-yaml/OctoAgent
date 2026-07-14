@@ -79,6 +79,15 @@ class SqliteBehaviorCompactStore:
             ),
         )
 
+    async def delete_candidate(self, candidate_id: str) -> None:
+        """删除候选行（**仅**发现端 persist 失败补偿路径用——抵销共享连接事务里
+        未提交的 INSERT，防后续任意 commit 落成幽灵候选，Codex P2 闭环）。
+        人审生命周期绝不物理删（终态语义靠 status）。"""
+        await self._conn.execute(
+            "DELETE FROM behavior_compact_candidates WHERE candidate_id = ?",
+            (candidate_id,),
+        )
+
     async def get_candidate(
         self, candidate_id: str
     ) -> BehaviorCompactCandidate | None:

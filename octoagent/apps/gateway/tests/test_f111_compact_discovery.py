@@ -531,6 +531,51 @@ async def test_duplicate_source_skipped(env):
 
 
 @pytest.mark.asyncio
+async def test_delimiter_collision_skipped(env):
+    """Codex P2 闭环：原文含契约分隔符字面量 → 整文件保守跳过（不送 LLM），
+    防 LLM 原样保留后 _parse_contract 在文中分隔符处截断产生破坏性候选。"""
+    store_group, project_root = env
+    content = _ORIGINAL + f"\n用户手写的怪行 {RATIONALE_DELIMITER} 嵌在正文里\n"
+    _write_behavior_file(project_root, "AGENTS.md", content)
+    llm = _ScriptedLLM(_contract(_COMPACTED_SMALLER))
+    svc = _service(store_group, project_root, llm)
+
+    outcome = await svc.discover_file(
+        run_id="run-1", file_id="AGENTS.md", root_task_id=_ROOT_TASK
+    )
+    assert outcome.status == "skipped"
+    assert outcome.reason == "delimiter_collision"
+    assert llm.calls == []
+
+
+@pytest.mark.asyncio
+async def test_persist_failure_downgrades_no_ghost(env, monkeypatch):
+    """Codex P2 闭环：候选 commit 失败 → 降级 skipped(persist_error) + 不 emit
+    PROPOSED + 补偿 DELETE（无幽灵候选可被后续 commit 落盘）。"""
+    store_group, project_root = env
+    _write_behavior_file(project_root, "AGENTS.md", _ORIGINAL)
+    svc = _service(store_group, project_root, _ScriptedLLM(_contract(_COMPACTED_SMALLER)))
+
+    async def _fail_commit() -> bool:
+        return False
+
+    monkeypatch.setattr(svc, "_commit_tx", _fail_commit)
+    outcome = await svc.discover_file(
+        run_id="run-1", file_id="AGENTS.md", root_task_id=_ROOT_TASK
+    )
+
+    assert outcome.status == "skipped"
+    assert outcome.reason == "persist_error"
+    # 不 emit PROPOSED（emit 会提交整个连接事务把幽灵行落盘）
+    events = await store_group.event_store.get_events_for_task(_ROOT_TASK)
+    assert [
+        e for e in events if e.type == EventType.BEHAVIOR_COMPACT_PROPOSED
+    ] == []
+    # 补偿 DELETE 抵销未提交 INSERT——同连接读不到候选
+    assert await store_group.behavior_compact_store.list_candidates() == []
+
+
+@pytest.mark.asyncio
 async def test_missing_file_read_error(env):
     store_group, project_root = env
     svc = _service(store_group, project_root, _ScriptedLLM(_contract("x")))

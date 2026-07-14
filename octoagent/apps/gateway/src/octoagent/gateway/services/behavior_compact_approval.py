@@ -18,13 +18,15 @@ accept 流程（Plan→Gate→Execute 的 Execute，前两步 = 发现端提议 
    - H2 复验（``protected_reverify_failed``）：candidate.compacted_content 必须含
      盘上当前内容的全部 PROTECTED 区段（hash 相等时构造上必真——belt-and-braces
      防候选行被数据侧改写）。
-3. Execute：``prepare/commit_behavior_file_write`` 覆写 + ``record_behavior_version``
-   （old=重读盘内容，source="compact"，F107 兜底：用户不满意走恢复流回退）+
-   ``invalidate_behavior_pack_cache``（运行中 agent 立即用上新内容，F107 Opus M1 同款）。
-   **不设预算硬闸**（spec DP-8 归档偏离 restore handler：盘上文件可超预算——手工编辑
-   造成——compact 恰是修它的工具，H1 已保严格变小）。
-4. APPLYING→APPLIED（CAS）+ **先 commit 状态再 emit**（F127 handoff 坑 1）。
-5. 落盘/版本自身异常 → 回滚 APPLYING→PENDING（候选可重审）。
+3. Execute：``prepare/commit_behavior_file_write`` 覆写。**不设预算硬闸**（spec
+   DP-8 归档偏离 restore handler：盘上文件可超预算——手工编辑造成——compact 恰是
+   修它的工具，H1 已保严格变小）。
+4. **单一 commit 点**（Codex P1 闭环）：APPLYING→APPLIED（CAS）后一次提交把
+   claim+APPLIED 一起落盘；提交失败 → 补偿回 PENDING + 诚实失败（绝不报成功），
+   重 accept 走 CONFLICT(source_changed) 确定性收敛。提交成功后才
+   ``record_behavior_version``（versionable 独立写连接需主连接先释放写锁）+
+   ``invalidate_behavior_pack_cache`` + emit APPLIED（F127 handoff 坑 1）。
+5. 落盘自身异常 → 回滚 APPLYING→PENDING（候选可重审）。
 
 reject：PENDING→REJECTED（CAS）+ emit REJECTED，行为文件零触碰。
 
@@ -178,16 +180,54 @@ class BehaviorCompactApprovalService:
                 detail=f"落盘失败已回滚：{type(exc).__name__}",
             )
 
-        # ★ 先提交主连接（持久化 claim 的 APPLYING + 释放 SQLite 写锁）——
-        # record_behavior_version 走 versionable **独立写连接** BEGIN IMMEDIATE，
-        # 主连接若还持有未提交写事务会把它锁到 busy_timeout（实测 database is locked）。
-        # crash 窗口语义（诚实归档）：
-        # - 盘写后、本 commit 前崩 → 候选回 PENDING（事务回滚）而文件已是新内容——
-        #   用户重 accept 会因 source_hash 失配走 CONFLICT（确定性恢复；文件写本就
+        # ★ 单一 commit 点（Codex P1 闭环重构）：claim(APPLYING) + APPLIED 标记并进
+        # **同一次提交**——消灭"claim 已提交但 APPLIED 未提交"的 APPLYING 遗留窗口。
+        # 同时该提交释放主连接写锁：record_behavior_version 走 versionable **独立写
+        # 连接** BEGIN IMMEDIATE，主连接持未提交写事务会把它锁到 busy_timeout（实测
+        # database is locked）——版本记录必须在本提交之后。
+        # crash/失败窗口语义（诚实归档）：
+        # - 盘写后、本 commit 前崩/失败 → 候选回 PENDING（事务未提交）而文件已是新
+        #   内容——重 accept 因 source_hash 失配走 CONFLICT（确定性恢复；文件写本就
         #   非事务性，此 artifact 是文件+DB 协调的固有窗口，非本序引入）。
-        # - 本 commit 后、APPLIED 标记前崩 → 候选 APPLYING 遗留（窗口极小：中间只有
-        #   best-effort 版本记录）；文件内容已正确，运维可查 APPLYING 态人工收敛。
-        await self._commit_tx()
+        marked = await self._compact_store.mark_candidate_status(
+            candidate_id,
+            status=BehaviorCompactCandidateStatus.APPLIED,
+            expected_status=BehaviorCompactCandidateStatus.APPLYING,
+            decided_at=datetime.now(UTC),
+        )
+        if not marked:
+            # 极罕见：同连接并发协程在 claim 后改了状态。文件已覆写（durable 事实），
+            # log 警告仍继续提交（同 F127 语义——不可撤事实优先）。
+            logger.warning(
+                "behavior_compact_mark_applied_cas_failed_after_write",
+                candidate_id=candidate_id,
+            )
+        if not await self._commit_tx():
+            # Codex P1：commit 失败绝不报成功——候选状态未 durable（文件已覆写）。
+            # 补偿回 PENDING（expected=APPLIED——事务内已标 APPLIED；best-effort）+
+            # 诚实失败：用户重 accept 会走 CONFLICT（source_changed，文件已是精简后
+            # 内容）→ 引导重新触发 compact 收敛。
+            try:
+                await self._compact_store.mark_candidate_status(
+                    candidate_id,
+                    status=BehaviorCompactCandidateStatus.PENDING,
+                    expected_status=BehaviorCompactCandidateStatus.APPLIED,
+                )
+                await self._commit_tx()
+            except Exception:
+                logger.exception(
+                    "behavior_compact_accept_compensate_failed",
+                    candidate_id=candidate_id,
+                )
+            return CompactApprovalResult(
+                ok=False, status="pending", candidate_id=candidate_id,
+                file_id=candidate.file_id,
+                detail=(
+                    "文件已覆写但候选状态提交失败（数据库临时故障）。"
+                    "候选回 pending；重新 accept 将因源已变更转 CONFLICT，"
+                    "届时请重新触发 compact"
+                ),
+            )
 
         # F107 版本记录（best-effort，写已 durable；old_content=验证步重读的盘内容）
         from .behavior_versioning import record_behavior_version
@@ -209,22 +249,6 @@ class BehaviorCompactApprovalService:
             invalidate_behavior_pack_cache(project_root=self._project_root)
         except Exception:
             logger.warning("behavior_compact_cache_invalidate_failed", exc_info=True)
-
-        # APPLYING→APPLIED（CAS）+ 先 commit 状态再 emit（F127 handoff 坑 1）
-        marked = await self._compact_store.mark_candidate_status(
-            candidate_id,
-            status=BehaviorCompactCandidateStatus.APPLIED,
-            expected_status=BehaviorCompactCandidateStatus.APPLYING,
-            decided_at=datetime.now(UTC),
-        )
-        await self._commit_tx()
-        if not marked:
-            # 极罕见：claim 后状态被外部改动。文件已覆写（durable 事实），log 警告
-            # 仍按成功返回，状态不一致留运维查（同 F127 语义）。
-            logger.warning(
-                "behavior_compact_mark_applied_cas_failed_after_write",
-                candidate_id=candidate_id,
-            )
 
         await self._emit(
             EventType.BEHAVIOR_COMPACT_APPLIED,
@@ -271,7 +295,26 @@ class BehaviorCompactApprovalService:
                 file_id=candidate.file_id,
                 detail=f"候选已非 pending（{candidate.status.value}），不重复拒绝",
             )
-        await self._commit_tx()
+        if not await self._commit_tx():
+            # Codex P1 同族：状态未 durable 绝不报成功/emit。补偿标记回 PENDING
+            # 抵销事务里未提交的 REJECTED（否则同连接后续读到未提交假 REJECTED，
+            # 重拒会被 CAS 挡），候选可重试。
+            try:
+                await self._compact_store.mark_candidate_status(
+                    candidate_id,
+                    status=BehaviorCompactCandidateStatus.PENDING,
+                    expected_status=BehaviorCompactCandidateStatus.REJECTED,
+                )
+            except Exception:
+                logger.exception(
+                    "behavior_compact_reject_compensate_failed",
+                    candidate_id=candidate_id,
+                )
+            return CompactApprovalResult(
+                ok=False, status="pending", candidate_id=candidate_id,
+                file_id=candidate.file_id,
+                detail="拒绝状态提交失败（数据库临时故障），候选仍 pending 可重试",
+            )
         await self._emit(
             EventType.BEHAVIOR_COMPACT_REJECTED,
             BehaviorCompactRejectedPayload(
@@ -395,13 +438,18 @@ class BehaviorCompactApprovalService:
     # 事件 emit + 事务提交
     # ============================================================
 
-    async def _commit_tx(self) -> None:
+    async def _commit_tx(self) -> bool:
+        """提交共享连接事务。False = 提交失败（accept/reject 主路径必须检查并
+        诚实降级，Codex P1；_conflict/_rollback 补偿路径 best-effort 消费）。"""
         conn = getattr(self._compact_store, "_conn", None)
-        if conn is not None and hasattr(conn, "commit"):
-            try:
-                await conn.commit()
-            except Exception:
-                logger.exception("behavior_compact_approval_commit_failed")
+        if conn is None or not hasattr(conn, "commit"):
+            return True  # 测试 stub 无连接语义时视为成功
+        try:
+            await conn.commit()
+            return True
+        except Exception:
+            logger.exception("behavior_compact_approval_commit_failed")
+            return False
 
     async def _emit(self, event_type: EventType, payload: dict[str, Any]) -> None:
         """emit 优先 committed；失败静默降级（C6）。actor=USER（人审动作）——

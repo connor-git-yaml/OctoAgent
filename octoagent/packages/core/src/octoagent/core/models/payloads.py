@@ -292,8 +292,10 @@ class BehaviorCompactSkippedPayload(BaseModel):
         description=(
             "跳过原因：disabled / already_running / capacity / spawn_error（运行级）；"
             "not_smaller / protected_violation / protected_malformed / "
-            "placeholder_collision / no_change / config_drift / too_small / "
-            "too_large / duplicate / not_eligible / read_error（单文件护栏级）"
+            "placeholder_collision / delimiter_collision / no_change / empty_output / "
+            "config_drift / too_small / too_large / duplicate / not_eligible / "
+            "read_error / persist_error（单文件护栏级；persist_error 不 emit 事件，"
+            "见发现端补偿注释）"
         )
     )
     run_id: str = Field(default="", description="compact 运行 id（有则填）")

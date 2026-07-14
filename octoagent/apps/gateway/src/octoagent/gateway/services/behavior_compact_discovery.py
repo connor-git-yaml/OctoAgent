@@ -228,6 +228,14 @@ class BehaviorCompactDiscoveryService:
         if len(original) > COMPACT_INPUT_CHAR_BUDGET:
             return await self._skip(run_id, file_id, root_task_id, reason="too_large")
 
+        # 分隔符碰撞守卫（Codex P2 闭环，与占位符碰撞同性质）：原文本身含契约
+        # 分隔符字面量时，LLM 原样保留会让 _parse_contract 在文中分隔符处截断——
+        # 截断后的"半个文件"仍可能过 H1（更小）产生破坏性候选。保守整文件跳过。
+        if COMPACTED_DELIMITER in original or RATIONALE_DELIMITER in original:
+            return await self._skip(
+                run_id, file_id, root_task_id, reason="delimiter_collision"
+            )
+
         # H2 前半：PROTECTED 占位符化（LLM 看不到受保护内容）
         try:
             extraction = extract_protected_sections(original)
@@ -332,12 +340,31 @@ class BehaviorCompactDiscoveryService:
                 "behavior_compact_insert_candidate_failed", file_id=file_id
             )
             return await self._skip(
-                run_id, file_id, root_task_id, reason="read_error"
+                run_id, file_id, root_task_id, reason="persist_error"
             )
 
         # **先 commit 候选再 emit**（F127 handoff 坑 1）：emit 走 append_event_committed，
         # 其 task_seq 冲突重试会 rollback 整个连接事务——候选必须先落。
-        await self._commit_tx()
+        # Codex P2 闭环：commit 失败 → 候选不 durable，**绝不** emit PROPOSED /
+        # 返回 proposed（否则审批面 404 幽灵候选）。补偿 DELETE 抵销共享连接事务里
+        # 未提交的 INSERT（防后续任意 commit 把半插入行落成幽灵），降级 skipped。
+        # 注意此路径**不 emit SKIPPED**——emit 的 append_event_committed 会提交整个
+        # 连接事务，把刚失败的 INSERT 一并落盘，与补偿目的相反（log 承担审计）。
+        if not await self._commit_tx():
+            try:
+                await self._compact_store.delete_candidate(candidate.candidate_id)
+            except Exception:
+                logger.exception(
+                    "behavior_compact_persist_compensate_failed", file_id=file_id
+                )
+            logger.warning(
+                "behavior_compact_persist_failed_downgraded",
+                run_id=run_id,
+                file_id=file_id,
+            )
+            return FileCompactOutcome(
+                file_id=file_id, status="skipped", reason="persist_error"
+            )
 
         await self._emit_proposed(run_id, root_task_id, candidate)
         logger.info(
@@ -515,13 +542,17 @@ class BehaviorCompactDiscoveryService:
     # 事件 emit（C2）+ 事务提交
     # ============================================================
 
-    async def _commit_tx(self) -> None:
+    async def _commit_tx(self) -> bool:
+        """提交共享连接事务。False = 提交失败（调用方必须降级，Codex P2）。"""
         conn = getattr(self._compact_store, "_conn", None)
-        if conn is not None and hasattr(conn, "commit"):
-            try:
-                await conn.commit()
-            except Exception:
-                logger.exception("behavior_compact_candidate_commit_failed")
+        if conn is None or not hasattr(conn, "commit"):
+            return True  # 测试 stub 无连接语义时视为成功
+        try:
+            await conn.commit()
+            return True
+        except Exception:
+            logger.exception("behavior_compact_candidate_commit_failed")
+            return False
 
     async def _skip(
         self, run_id: str, file_id: str, root_task_id: str, *, reason: str

@@ -328,3 +328,56 @@ async def test_not_found(env):
     svc = _service(store_group, project_root)
     assert (await svc.accept("ghost")).status == "not_found"
     assert (await svc.reject("ghost")).status == "not_found"
+
+
+@pytest.mark.asyncio
+async def test_accept_commit_failure_honest_failure(env, monkeypatch):
+    """Codex P1 闭环：状态提交失败 → 绝不报成功、绝不 emit APPLIED；
+    候选补偿回 pending，重 accept 走 CONFLICT(source_changed) 确定性收敛。"""
+    store_group, project_root = env
+    resolved = _write_file(project_root, "AGENTS.md", _ORIGINAL)
+    await _insert_candidate(store_group)
+    svc = _service(store_group, project_root)
+
+    async def _fail_commit() -> bool:
+        return False
+
+    monkeypatch.setattr(svc, "_commit_tx", _fail_commit)
+    result = await svc.accept("cand-1")
+
+    assert result.ok is False
+    assert result.status == "pending"
+    assert "提交失败" in result.detail
+    # 文件已覆写（durable 事实，诚实归档的固有窗口）
+    assert resolved.read_text(encoding="utf-8") == _COMPACTED
+    # 绝不 emit APPLIED（状态未 durable）
+    assert await _events(store_group, EventType.BEHAVIOR_COMPACT_APPLIED) == []
+    # 补偿回 pending（同连接可见）→ 重 accept 走 CONFLICT 收敛
+    cand = await store_group.behavior_compact_store.get_candidate("cand-1")
+    assert cand is not None
+    assert cand.status is BehaviorCompactCandidateStatus.PENDING
+    monkeypatch.undo()
+    retry = await svc.accept("cand-1")
+    assert retry.status == "conflict"  # 盘上已是精简后内容，source_hash 失配
+
+
+@pytest.mark.asyncio
+async def test_reject_commit_failure_honest_failure(env, monkeypatch):
+    """Codex P1 同族：reject 状态提交失败 → 不报成功不 emit，候选仍 pending 可重试。"""
+    store_group, project_root = env
+    _write_file(project_root, "AGENTS.md", _ORIGINAL)
+    await _insert_candidate(store_group)
+    svc = _service(store_group, project_root)
+
+    async def _fail_commit() -> bool:
+        return False
+
+    monkeypatch.setattr(svc, "_commit_tx", _fail_commit)
+    result = await svc.reject("cand-1")
+
+    assert result.ok is False
+    assert result.status == "pending"
+    assert await _events(store_group, EventType.BEHAVIOR_COMPACT_REJECTED) == []
+    monkeypatch.undo()
+    retry = await svc.reject("cand-1")
+    assert retry.ok is True  # 恢复后可重拒
