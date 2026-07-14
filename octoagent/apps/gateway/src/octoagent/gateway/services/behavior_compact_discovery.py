@@ -230,12 +230,6 @@ class BehaviorCompactDiscoveryService:
             )
             return await self._skip(run_id, file_id, root_task_id, reason="read_error")
 
-        # 资源护栏（C9 边界：成本闸非判重规则）
-        if len(original) < MIN_COMPACT_SOURCE_CHARS:
-            return await self._skip(run_id, file_id, root_task_id, reason="too_small")
-        if len(original) > COMPACT_INPUT_CHAR_BUDGET:
-            return await self._skip(run_id, file_id, root_task_id, reason="too_large")
-
         # 分隔符碰撞守卫（Codex P2 闭环，与占位符碰撞同性质）：原文本身含契约
         # 分隔符字面量时，LLM 原样保留会让 _parse_contract 在文中分隔符处截断——
         # 截断后的"半个文件"仍可能过 H1（更小）产生破坏性候选。保守整文件跳过。
@@ -255,6 +249,16 @@ class BehaviorCompactDiscoveryService:
             return await self._skip(
                 run_id, file_id, root_task_id, reason="protected_malformed"
             )
+
+        # 资源护栏（C9 边界：成本闸非判重规则）。基准 = **占位后**文本（Codex
+        # round12 P2）：LLM 只见 masked 内容，输入预算（prompt 体积）与输出预算
+        # （精简后 masked 全文须装进 max_tokens）的语义基准都是它——大 PROTECTED
+        # 块 + 小可编辑体的文件是 H2 明确支持的形态，不得按原文体积误拒。
+        masked_len = len(extraction.masked_content)
+        if masked_len < MIN_COMPACT_SOURCE_CHARS:
+            return await self._skip(run_id, file_id, root_task_id, reason="too_small")
+        if masked_len > COMPACT_INPUT_CHAR_BUDGET:
+            return await self._skip(run_id, file_id, root_task_id, reason="too_large")
 
         # 输入幂等账本（同源已有待审提议 → 跳过；查询失败放行，宁可重复不阻断）
         source_hash = hashlib.sha256(original.encode("utf-8")).hexdigest()

@@ -579,6 +579,32 @@ async def test_too_large_skipped_not_truncated(env):
 
 
 @pytest.mark.asyncio
+async def test_large_protected_small_body_passes_size_guard(env):
+    """Codex round12 P2 闭环：尺寸闸基准=占位后文本——大 PROTECTED 块 + 小可
+    编辑体（原文超预算但 masked 远小于）是 H2 明确支持的形态，不得误拒。"""
+    store_group, project_root = env
+    big_protected = (
+        f"{PROTECTED_OPEN_MARKER}\n"
+        + "- 受保护长内容行\n" * (COMPACT_INPUT_CHAR_BUDGET // 10)
+        + f"{PROTECTED_CLOSE_MARKER}"
+    )
+    original = f"# AGENTS\n\n{big_protected}\n\n{_ORIGINAL}"
+    assert len(original) > COMPACT_INPUT_CHAR_BUDGET  # 原文体积超预算
+    _write_behavior_file(project_root, "AGENTS.md", original)
+    compacted_masked = f"# AGENTS\n\n<<<PROTECTED_0>>>\n\n{_COMPACTED_SMALLER}"
+    llm = _ScriptedLLM(_contract(compacted_masked))
+    svc = _service(store_group, project_root, llm)
+
+    outcome = await svc.discover_file(
+        run_id="run-1", file_id="AGENTS.md", root_task_id=_ROOT_TASK
+    )
+    assert outcome.status == "proposed", f"masked 基准下不该 too_large：{outcome}"
+    cand = await store_group.behavior_compact_store.get_candidate(outcome.candidate_id)
+    assert cand is not None
+    assert big_protected in cand.compacted_content  # H2 字节级保留
+
+
+@pytest.mark.asyncio
 async def test_no_change_skipped(env):
     store_group, project_root = env
     _write_behavior_file(project_root, "AGENTS.md", _ORIGINAL)
