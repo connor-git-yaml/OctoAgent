@@ -27,9 +27,9 @@
 | marker | 语义 | gate 行为 | 谁跑 |
 |--------|------|-----------|------|
 | `e2e_smoke` | F087 smoke 5 域集成层（不打 LLM，DI stub） | 保持 deny | pre-commit hook / lane pr |
-| `e2e_scripted` | F138 脚本化决策环确定性 e2e（零真 LLM/零 OAuth） | 保持 deny | pre-commit hook / lane pr / CI 专属步 |
-| `e2e_full` | F087 full 套件——声明真 LLM **意图**（9 个域文件仅 2 个真打） | e2e_live conftest 按此 marker 自动开闸 + 240s timeout + rerun 政策 | `octo e2e full` / baseline 全量（凭证在场） |
-| `real_llm` | 真发起 LLM/外部网络调用的**事实**子集（F141 D9；现 = `test_e2e_smoke_real_llm.py` + `test_e2e_mcp_skill_pipeline.py` 两文件级 + `test_e2e_delegation_a2a.py::test_domain_8_real_llm_delegate_task` 函数级——同文件域#9/#10 是直调确定性，函数名 real_llm 属化石命名） | 同 e2e_full（叠加标记） | release lane `live-real-llm`（skip 即 FAIL） |
+| `e2e_scripted` | F138 脚本化 LLM 输出驱动的全链确定性 e2e（零真 LLM/零 OAuth）。决策环用 `ScriptedModelClient`（SkillRunner 协议）经 `OctoHarness(model_client=...)` DI；无决策环的管道用对应 LLM 协议的脚本 stub 经公开注入缝进入（F111 compact 先例：message-adapter 协议 stub 经 `BehaviorCompactionService.llm_client`） | 保持 deny | pre-commit hook / lane pr / CI 专属步 |
+| `e2e_full` | F087 full 套件——声明真 LLM **意图**（域文件多数确定性，真打见 real_llm 行） | e2e_live conftest 按此 marker 自动开闸 + 240s timeout + rerun 政策 | `octo e2e full` / baseline 全量（凭证在场） |
+| `real_llm` | 真发起 LLM/外部网络调用的**事实**子集（F141 D9；现 = `test_e2e_smoke_real_llm.py` + `test_e2e_mcp_skill_pipeline.py` + `test_e2e_behavior_compact_real_llm.py`（F111 合并质量）三文件级 + `test_e2e_delegation_a2a.py::test_domain_8_real_llm_delegate_task` 函数级——同文件域#9/#10 是直调确定性，函数名 real_llm 属化石命名） | 同 e2e_full（叠加标记） | release lane `live-real-llm`（skip 即 FAIL） |
 | `e2e_live` | e2e_live 套件正交标记 | — | 与上共存 |
 
 纪律：**新增真打 LLM 的测试必须同时标 `e2e_full + real_llm`**（意图 + 事实）；确定性
