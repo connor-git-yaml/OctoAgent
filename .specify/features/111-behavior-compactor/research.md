@@ -103,6 +103,18 @@
 
 ---
 
+## 4b. 收窄期实测补遗（2026-07-15，rebase f2081010 后）
+
+> 设计稿基线 1e64ecd3 → f2081010（133 commits：M8 后半 + M9 十 Feature）。§1/§2 资产清单逐条复核**全部仍成立**，另有新增可用件与新证据：
+
+1. **岔路③判定证据（决定性）**：`write_approval.py` 实读——`BEHAVIOR_WRITE_APPROVAL_TIMEOUT_SECONDS=300.0`(:39) + `wait_for_decision(timeout_seconds=300)`(:416) 阻塞模型；超时分支**刻意不恢复 RUNNING**(:431-434，F101 HIGH-02 v3)；审批通知 `NotificationPriority.CRITICAL`(:403) 豁免 quiet hours。三者对 nightly 无人值守批量提议全是硬冲突 → **③=候选表**（spec §0.3 全文归档）。
+2. **F127 编排细节实读**（`memory_consolidation.py`）：发现端**内联**在 cron 回调（`_run_discovery`，spawn 后跑），spawn 的 subagent 是 H2 审计容器（占位 objective）；单飞 = 进程内 bool + `_has_active_consolidation_child` 持久态双层；root 事件全挂 root task `task_seq=0` 经 `append_event_committed`；`_notify_pending_review` 用 `session_id=""` 全局桶 + `state_transition_event_id=run_id` 幂等。F111 逐项照抄。
+3. **REST Two-Phase 落盘先例**：`worker_service._handle_behavior_restore_version`(:645)——用户 REST 动作直接 `prepare/commit_behavior_file_write` + `record_behavior_version(source="restore")` + `invalidate_behavior_pack_cache`，**不过 F136 gate**（actor 是人）。F111 accept 落盘序列逐字对照此先例。注意它对超预算内容 raise `BUDGET_EXCEEDED`——F111 accept 不设此闸（spec DP-8 归档偏离：盘上文件可超预算，compact 正是修它的工具，H1 已保变小）。
+4. **M9 新件**（设计稿时不存在）：F138 `ScriptedModelClient`（skills/testing，`generate(manifest=...)` SkillRunner 协议——与发现端 `complete(messages=...)` 协议**不同**，故 AC-11 的脚本缝在编排服务 `llm_client` 公开注入缝，spec §6 AC-11 注归档）；F144 `test_e2e_scripted_write_approval.py`（真 harness+REST 全链范式，AC-11 直接仿）；`tests/AGENTS.md` 四层判定表（新测试按它归层）；CI changed-lines 90% 门。
+5. **CLI→gateway HTTP 范式**：`attest_commands.py` 实测有完整先例（实例 env 解析 mode/token 变量名/port + `httpx.Client(timeout=10, follow_redirects=False)` + `_scrub` 脱敏防异常回显 token）。Phase E 照抄。
+6. **系统占位泄漏面现状**：`SYSTEM_INTERNAL_WORK_IDS`（`control_plane/_base.py:48` frozenset 字面量 + `expand_internal_work_ids` BFS 后代排除）；task_runner:1009/1276 + orchestrator:484 按 `channel=="system"` 通用抑制（F127 finding-E）——F111 root Task 用 channel="system" 即自动被覆盖，无需新增抑制点；`test_f127_consolidation_trigger.py::TestSystemWorkExclusion` guard 测试范式照抄。
+7. **core 候选表落点**：behavior 域表进 `core/store/sqlite_init.py`（`_BEHAVIOR_VERSIONS_DDL`:493 邻接，DDL+INDEXES 常量对注册）；与 memory 域 `consolidation_candidates`（memory/store/sqlite_init.py:243）分居各自包——F111 新表进 core 侧。
+
 ## 5. Constitution / H1 合规检查（设计阶段自查）
 
 - **C4 Side-effect Two-Phase** ✅：发现端只产提议（不 commit）；落盘唯一入口 = 人审（LLM 工具走 F136 gate 服务端证据 / CLI 走用户本人 --apply）。AC-7 静态证明无自主 commit。
