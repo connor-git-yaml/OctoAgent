@@ -162,6 +162,16 @@ class BehaviorCompactApprovalService:
             )
 
         # Execute：覆写落盘 + F107 版本记录 + 缓存失效。失败 → 回滚候选到 pending。
+        #
+        # TOCTOU 残余归档（Codex round16 P1 拒绝带证据）：verify 成功路径到
+        # ``commit_behavior_file_write`` 之间**零 await 点**（_verify_for_apply /
+        # prepare / commit 全同步）——单事件循环内的一切 gateway 写者（工具写/
+        # restore/write_through）构造性无法插入本窗口。残余 = **跨进程**写者
+        # （外部编辑器 / 另一进程 CLI）在微秒级同步段内落写：非协作写者无法用
+        # check 方案排除（真 TOCTOU 消除需全体写者协作锁，behavior 写核体系无此
+        # 设施），与 F127（"无法在不动事务边界前提下消除"）/F136（DP-6）已归档
+        # 残余同类。兜底链：verify 读即 F107 版本 baseline + accept 是用户本人
+        # 主动动作（自协调）+ 不满意走恢复流回退。
         try:
             pending_write = prepare_behavior_file_write(
                 self._project_root,
