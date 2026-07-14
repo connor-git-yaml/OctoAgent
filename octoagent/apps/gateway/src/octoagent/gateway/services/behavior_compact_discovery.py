@@ -208,7 +208,8 @@ class BehaviorCompactDiscoveryService:
         # FR-6 禁区第一层（根治）：非 eligible 不读不送 LLM 不产候选
         if file_id not in COMPACT_ELIGIBLE_FILE_IDS:
             return await self._skip(
-                run_id, file_id, root_task_id, reason="not_eligible"
+                run_id, file_id, root_task_id, reason="not_eligible",
+                agent_slug=agent_slug, project_slug=project_slug,
             )
 
         # slug 按 scope 归零（Codex round11 P2，`behavior_version_key_for` 同款
@@ -228,21 +229,26 @@ class BehaviorCompactDiscoveryService:
             )
             if not resolved.exists():
                 return await self._skip(
-                    run_id, file_id, root_task_id, reason="read_error"
+                    run_id, file_id, root_task_id, reason="read_error",
+                    agent_slug=agent_slug, project_slug=project_slug,
                 )
             original = resolved.read_text(encoding="utf-8")
         except (ValueError, OSError):
             logger.warning(
                 "behavior_compact_read_failed", file_id=file_id, run_id=run_id
             )
-            return await self._skip(run_id, file_id, root_task_id, reason="read_error")
+            return await self._skip(
+                run_id, file_id, root_task_id, reason="read_error",
+                agent_slug=agent_slug, project_slug=project_slug,
+            )
 
         # 分隔符碰撞守卫（Codex P2 闭环，与占位符碰撞同性质）：原文本身含契约
         # 分隔符字面量时，LLM 原样保留会让 _parse_contract 在文中分隔符处截断——
         # 截断后的"半个文件"仍可能过 H1（更小）产生破坏性候选。保守整文件跳过。
         if COMPACTED_DELIMITER in original or RATIONALE_DELIMITER in original:
             return await self._skip(
-                run_id, file_id, root_task_id, reason="delimiter_collision"
+                run_id, file_id, root_task_id, reason="delimiter_collision",
+                agent_slug=agent_slug, project_slug=project_slug,
             )
 
         # H2 前半：PROTECTED 占位符化（LLM 看不到受保护内容）
@@ -250,11 +256,13 @@ class BehaviorCompactDiscoveryService:
             extraction = extract_protected_sections(original)
         except PlaceholderCollision:
             return await self._skip(
-                run_id, file_id, root_task_id, reason="placeholder_collision"
+                run_id, file_id, root_task_id, reason="placeholder_collision",
+                agent_slug=agent_slug, project_slug=project_slug,
             )
         except ProtectedSectionMalformed:
             return await self._skip(
-                run_id, file_id, root_task_id, reason="protected_malformed"
+                run_id, file_id, root_task_id, reason="protected_malformed",
+                agent_slug=agent_slug, project_slug=project_slug,
             )
 
         # 资源护栏（C9 边界：成本闸非判重规则）。基准 = **占位后**文本（Codex
@@ -263,9 +271,15 @@ class BehaviorCompactDiscoveryService:
         # 块 + 小可编辑体的文件是 H2 明确支持的形态，不得按原文体积误拒。
         masked_len = len(extraction.masked_content)
         if masked_len < MIN_COMPACT_SOURCE_CHARS:
-            return await self._skip(run_id, file_id, root_task_id, reason="too_small")
+            return await self._skip(
+                run_id, file_id, root_task_id, reason="too_small",
+                agent_slug=agent_slug, project_slug=project_slug,
+            )
         if masked_len > COMPACT_INPUT_CHAR_BUDGET:
-            return await self._skip(run_id, file_id, root_task_id, reason="too_large")
+            return await self._skip(
+                run_id, file_id, root_task_id, reason="too_large",
+                agent_slug=agent_slug, project_slug=project_slug,
+            )
 
         # 输入幂等账本（同源已有待审提议 → 跳过；查询失败放行，宁可重复不阻断）
         source_hash = hashlib.sha256(original.encode("utf-8")).hexdigest()
@@ -281,7 +295,10 @@ class BehaviorCompactDiscoveryService:
             logger.exception("behavior_compact_dup_check_failed", file_id=file_id)
             duplicated = False
         if duplicated:
-            return await self._skip(run_id, file_id, root_task_id, reason="duplicate")
+            return await self._skip(
+                run_id, file_id, root_task_id, reason="duplicate",
+                agent_slug=agent_slug, project_slug=project_slug,
+            )
 
         # C9：LLM 精简（判断完全归 LLM；fallback 语义 C6）
         llm_text = await self._call_llm(file_id, extraction.masked_content)
@@ -309,13 +326,15 @@ class BehaviorCompactDiscoveryService:
             final_content = verify_and_reinsert(compacted_masked, extraction.sections)
         except ProtectedSectionViolation:
             return await self._skip(
-                run_id, file_id, root_task_id, reason="protected_violation"
+                run_id, file_id, root_task_id, reason="protected_violation",
+                agent_slug=agent_slug, project_slug=project_slug,
             )
 
         # H3：非空
         if not final_content.strip():
             return await self._skip(
-                run_id, file_id, root_task_id, reason="empty_output"
+                run_id, file_id, root_task_id, reason="empty_output",
+                agent_slug=agent_slug, project_slug=project_slug,
             )
         # 尾换行规范化：契约解析剥了分隔符边界换行——原文以 \n 结尾则补回，
         # 否则"只差一个尾换行"的垃圾候选会骗过 no_change（实测抓到）。
@@ -323,12 +342,16 @@ class BehaviorCompactDiscoveryService:
             final_content += "\n"
         # H3：与原文完全相同 → 无事可提（正常空运行非 fallback）
         if final_content == original:
-            return await self._skip(run_id, file_id, root_task_id, reason="no_change")
+            return await self._skip(
+                run_id, file_id, root_task_id, reason="no_change",
+                agent_slug=agent_slug, project_slug=project_slug,
+            )
 
         # H1：合并后必须严格更小（去冗余的定义就是变小）
         if len(final_content) >= len(original):
             return await self._skip(
-                run_id, file_id, root_task_id, reason="not_smaller"
+                run_id, file_id, root_task_id, reason="not_smaller",
+                agent_slug=agent_slug, project_slug=project_slug,
             )
 
         # H6：USER.md 机器可读字段 parity（复用生产 extractors 契约级对账）
@@ -336,7 +359,8 @@ class BehaviorCompactDiscoveryService:
             original, final_content
         ):
             return await self._skip(
-                run_id, file_id, root_task_id, reason="config_drift"
+                run_id, file_id, root_task_id, reason="config_drift",
+                agent_slug=agent_slug, project_slug=project_slug,
             )
 
         # 写 PENDING 候选（C4：不落盘）
@@ -362,7 +386,8 @@ class BehaviorCompactDiscoveryService:
                 "behavior_compact_insert_candidate_failed", file_id=file_id
             )
             return await self._skip(
-                run_id, file_id, root_task_id, reason="persist_error"
+                run_id, file_id, root_task_id, reason="persist_error",
+                agent_slug=agent_slug, project_slug=project_slug,
             )
 
         # **先 commit 候选再 emit**（F127 handoff 坑 1）：emit 走 append_event_committed，
@@ -643,11 +668,22 @@ class BehaviorCompactDiscoveryService:
             return False
 
     async def _skip(
-        self, run_id: str, file_id: str, root_task_id: str, *, reason: str
+        self,
+        run_id: str,
+        file_id: str,
+        root_task_id: str,
+        *,
+        reason: str,
+        agent_slug: str = "",
+        project_slug: str = "",
     ) -> FileCompactOutcome:
         """单文件护栏跳过：emit SKIPPED(reason) + 返回 outcome（文件零触碰）。"""
         payload = BehaviorCompactSkippedPayload(
-            reason=reason, run_id=run_id, file_id=file_id
+            reason=reason,
+            run_id=run_id,
+            file_id=file_id,
+            project_slug=project_slug,
+            agent_slug=agent_slug,
         )
         await self._safe_emit(
             EventType.BEHAVIOR_COMPACT_SKIPPED, payload.model_dump(), root_task_id
@@ -667,6 +703,8 @@ class BehaviorCompactDiscoveryService:
             run_id=run_id,
             candidate_id=candidate.candidate_id,
             file_id=candidate.file_id,
+            project_slug=candidate.project_slug,
+            agent_slug=candidate.agent_slug,
             size_before=candidate.size_before,
             size_after=candidate.size_after,
             content_hash=candidate.content_hash,

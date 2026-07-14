@@ -300,6 +300,10 @@ class BehaviorCompactSkippedPayload(BaseModel):
     )
     run_id: str = Field(default="", description="compact 运行 id（有则填）")
     file_id: str = Field(default="", description="单文件护栏跳过时的文件短名")
+    project_slug: str = Field(
+        default="", description="PROJECT scope 归属（多 project 审计可归属，round20）"
+    )
+    agent_slug: str = Field(default="", description="AGENT scope 归属（供演化）")
 
 
 class BehaviorCompactProposedPayload(BaseModel):
@@ -308,6 +312,8 @@ class BehaviorCompactProposedPayload(BaseModel):
     run_id: str = Field(description="compact 运行 id")
     candidate_id: str = Field(description="候选 id")
     file_id: str = Field(description="behavior 文件短名")
+    project_slug: str = Field(default="", description="PROJECT scope 归属")
+    agent_slug: str = Field(default="", description="AGENT scope 归属（供演化）")
     size_before: int = Field(description="原文字符数")
     size_after: int = Field(description="精简后字符数")
     content_hash: str = Field(description="精简后全文 sha256（审计引用）")
@@ -318,6 +324,8 @@ class BehaviorCompactAppliedPayload(BaseModel):
 
     candidate_id: str = Field(description="候选 id")
     file_id: str = Field(description="behavior 文件短名")
+    project_slug: str = Field(default="", description="PROJECT scope 归属")
+    agent_slug: str = Field(default="", description="AGENT scope 归属（供演化）")
     size_before: int = Field(description="原文字符数")
     size_after: int = Field(description="精简后字符数")
 
@@ -327,6 +335,8 @@ class BehaviorCompactRejectedPayload(BaseModel):
 
     candidate_id: str = Field(description="候选 id")
     file_id: str = Field(description="behavior 文件短名")
+    project_slug: str = Field(default="", description="PROJECT scope 归属")
+    agent_slug: str = Field(default="", description="AGENT scope 归属（供演化）")
 
 
 class BehaviorCompactConflictedPayload(BaseModel):
@@ -334,6 +344,8 @@ class BehaviorCompactConflictedPayload(BaseModel):
 
     candidate_id: str = Field(description="候选 id")
     file_id: str = Field(description="behavior 文件短名")
+    project_slug: str = Field(default="", description="PROJECT scope 归属")
+    agent_slug: str = Field(default="", description="AGENT scope 归属（供演化）")
     reason: str = Field(
         description="失效原因：source_changed / not_eligible / protected_reverify_failed"
     )

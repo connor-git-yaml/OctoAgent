@@ -326,6 +326,8 @@ class BehaviorCompactApprovalService:
             BehaviorCompactAppliedPayload(
                 candidate_id=candidate_id,
                 file_id=candidate.file_id,
+                project_slug=candidate.project_slug,
+                agent_slug=candidate.agent_slug,
                 size_before=candidate.size_before,
                 size_after=candidate.size_after,
             ).model_dump(),
@@ -392,7 +394,10 @@ class BehaviorCompactApprovalService:
         await self._emit(
             EventType.BEHAVIOR_COMPACT_REJECTED,
             BehaviorCompactRejectedPayload(
-                candidate_id=candidate_id, file_id=candidate.file_id
+                candidate_id=candidate_id,
+                file_id=candidate.file_id,
+                project_slug=candidate.project_slug,
+                agent_slug=candidate.agent_slug,
             ).model_dump(),
         )
         logger.info("behavior_compact_rejected", candidate_id=candidate_id)
@@ -517,6 +522,8 @@ class BehaviorCompactApprovalService:
             BehaviorCompactConflictedPayload(
                 candidate_id=candidate.candidate_id,
                 file_id=candidate.file_id,
+                project_slug=candidate.project_slug,
+                agent_slug=candidate.agent_slug,
                 reason=reason,
             ).model_dump(),
         )
