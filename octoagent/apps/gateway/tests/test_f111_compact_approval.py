@@ -158,6 +158,74 @@ async def test_accept_applies_write_version_cache_event(env):
 
 
 @pytest.mark.asyncio
+async def test_user_md_accept_syncs_live_state(env):
+    """Codex round9 P2 闭环：USER.md accept 落盘后同步 SnapshotStore live state
+    ——quiet hours/daily routine/consolidation 等消费面不必等重启。"""
+    store_group, project_root = env
+    user_original = (
+        "# USER\n\n- 称呼：Connor\n- user_timezone: Asia/Shanghai\n"
+        + "- 偏好：简洁回复\n" * 10
+    )
+    user_compacted = "# USER\n\n- 称呼：Connor\n- user_timezone: Asia/Shanghai\n- 简洁回复\n"
+    _write_file(project_root, "USER.md", user_original)
+    await _insert_candidate(
+        store_group,
+        file_id="USER.md",
+        source_content=user_original,
+        compacted=user_compacted,
+    )
+
+    class _FakeSnapshot:
+        def __init__(self) -> None:
+            self.updates: list[tuple[str, str]] = []
+
+        def update_live_state(self, key: str, content: str) -> None:
+            self.updates.append((key, content))
+
+    snapshot = _FakeSnapshot()
+    svc = BehaviorCompactApprovalService(
+        project_root=project_root,
+        compact_store=store_group.behavior_compact_store,
+        event_store=store_group.event_store,
+        stores=store_group,
+        root_task_id=_ROOT_TASK,
+        snapshot_store=snapshot,
+    )
+    result = await svc.accept("cand-1")
+
+    assert result.ok is True
+    assert snapshot.updates == [("USER.md", user_compacted)]
+
+
+@pytest.mark.asyncio
+async def test_non_user_md_accept_skips_live_state(env):
+    """非 USER.md 文件 accept 不触 live state（AGENTS.md 非 snapshot 消费面）。"""
+    store_group, project_root = env
+    _write_file(project_root, "AGENTS.md", _ORIGINAL)
+    await _insert_candidate(store_group)
+
+    class _FakeSnapshot:
+        def __init__(self) -> None:
+            self.updates: list[tuple[str, str]] = []
+
+        def update_live_state(self, key: str, content: str) -> None:
+            self.updates.append((key, content))
+
+    snapshot = _FakeSnapshot()
+    svc = BehaviorCompactApprovalService(
+        project_root=project_root,
+        compact_store=store_group.behavior_compact_store,
+        event_store=store_group.event_store,
+        stores=store_group,
+        root_task_id=_ROOT_TASK,
+        snapshot_store=snapshot,
+    )
+    result = await svc.accept("cand-1")
+    assert result.ok is True
+    assert snapshot.updates == []
+
+
+@pytest.mark.asyncio
 async def test_reject_leaves_file_untouched(env):
     store_group, project_root = env
     resolved = _write_file(project_root, "AGENTS.md", _ORIGINAL)

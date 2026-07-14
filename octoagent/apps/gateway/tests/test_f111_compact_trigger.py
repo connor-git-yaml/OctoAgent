@@ -464,6 +464,30 @@ class TestNotification:
 # ============================================================
 
 
+class TestConfigDiskFirst:
+    async def test_disk_user_md_wins_over_stale_snapshot(
+        self, store_group, project_root
+    ):
+        """Codex round9 P1 闭环：盘上 USER.md（compact_active: true）优先于
+        stale snapshot live state（false）——盘外编辑对 cron 即时可见。"""
+        user_md = resolve_write_path_by_file_id(project_root, "USER.md")
+        user_md.parent.mkdir(parents=True, exist_ok=True)
+        user_md.write_text(_USER_MD_ACTIVE, encoding="utf-8")
+        svc = _build_service(
+            store_group, project_root, user_md=_USER_MD_DISABLED  # stale snapshot
+        )
+        config = svc._read_config()
+        assert config.compact_active is True  # 盘赢
+
+    async def test_snapshot_fallback_when_disk_missing(
+        self, store_group, project_root
+    ):
+        """盘上无 USER.md → snapshot live state 兜底（既有测试路径零破坏）。"""
+        svc = _build_service(store_group, project_root, user_md=_USER_MD_ACTIVE)
+        config = svc._read_config()
+        assert config.compact_active is True
+
+
 class TestGuards:
     def test_root_work_id_in_control_plane_exclusion_set(self):
         """SYSTEM_INTERNAL_WORK_IDS 必须含 compact root work id（占位泄漏防御）。"""

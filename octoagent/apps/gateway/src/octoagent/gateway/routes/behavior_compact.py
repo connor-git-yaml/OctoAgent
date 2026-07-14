@@ -136,6 +136,8 @@ def _build_approval(request: Request, store_group: Any) -> Any:
         event_store=store_group.event_store,
         stores=store_group,
         root_task_id=_BEHAVIOR_COMPACT_ROOT_TASK_ID,
+        # Codex round9 P2：USER.md accept 后同步 live state（harness 装配的真件）
+        snapshot_store=getattr(request.app.state, "snapshot_store", None),
     )
 
 

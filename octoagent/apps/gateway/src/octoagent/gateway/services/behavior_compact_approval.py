@@ -108,12 +108,15 @@ class BehaviorCompactApprovalService:
         event_store: SqliteEventStore,
         stores: Any,
         root_task_id: str,
+        snapshot_store: Any = None,
     ) -> None:
         self._project_root = project_root
         self._compact_store = compact_store
         self._event_store = event_store
         self._stores = stores
         self._root_task_id = root_task_id
+        # Codex round9 P2：USER.md 落盘后同步 live state（None 时降级跳过）
+        self._snapshot_store = snapshot_store
 
     # ============================================================
     # accept（唯一落盘入口，C4 红线核心）
@@ -249,6 +252,22 @@ class BehaviorCompactApprovalService:
             invalidate_behavior_pack_cache(project_root=self._project_root)
         except Exception:
             logger.warning("behavior_compact_cache_invalidate_failed", exc_info=True)
+
+        # Codex round9 P2：USER.md 是 SnapshotStore live-state 消费面（notifications
+        # quiet hours / daily routine / consolidation / compaction 自身配置）——本路径
+        # 绕过 write_through 直接写盘，必须同步 live state，否则这些服务到重启前都
+        # 读旧内容。best-effort（None/异常降级——盘上已 durable，live state 落后一拍
+        # 不破坏正确性底线）。F136 behavior.write_file / F107 restore 同类欠账记
+        # follow-up，不在 F111 扩面。
+        if candidate.file_id == "USER.md" and self._snapshot_store is not None:
+            try:
+                update_live = getattr(self._snapshot_store, "update_live_state", None)
+                if update_live is not None:
+                    update_live("USER.md", candidate.compacted_content)
+            except Exception:
+                logger.warning(
+                    "behavior_compact_live_state_sync_failed", exc_info=True
+                )
 
         await self._emit(
             EventType.BEHAVIOR_COMPACT_APPLIED,

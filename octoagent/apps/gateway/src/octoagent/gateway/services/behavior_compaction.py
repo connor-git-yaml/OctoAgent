@@ -551,6 +551,23 @@ class BehaviorCompactionService:
         return BehaviorCompactConfig.from_user_md(self._read_user_md())
 
     def _read_user_md(self) -> str | None:
+        """读 USER.md：**磁盘优先**（Codex round9 P1），snapshot live state 兜底。
+
+        F102/F127 姊妹服务只读 ``snapshot_store.get_live_state``（内存 dict，
+        bootstrap 填充 + write_through 更新）——``octo behavior edit`` / 直接改盘
+        等盘外编辑不刷新它，用户改 ``compact_active`` 后 cron 永远看不见。cron
+        配置读取不在 prompt 装配路径（live-state 间接层是为 prefix cache 设计的），
+        磁盘（USER.md 本就是 SoT，F084）才是语义正确的来源。读盘失败 → snapshot
+        兜底 → None（C6）。姊妹服务同类修复记 follow-up，不在 F111 扩面。
+        """
+        try:
+            from octoagent.core.behavior_workspace import resolve_write_path_by_file_id
+
+            resolved = resolve_write_path_by_file_id(self._project_root, "USER.md")
+            if resolved.exists():
+                return resolved.read_text(encoding="utf-8")
+        except Exception:
+            logger.exception("behavior_compact_read_user_md_disk_failed")
         get_live = getattr(self._snapshot_store, "get_live_state", None)
         if get_live is None:
             return None
