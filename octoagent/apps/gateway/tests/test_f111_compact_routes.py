@@ -116,6 +116,8 @@ class TestCandidatesList:
         resp = client.get("/api/behavior/compact/candidates?limit=2")
         assert resp.status_code == 200
         assert len(resp.json()["candidates"]) == 2
+        # Codex round15 P3：pending_count 报真实总数（非页大小）——截断可感知
+        assert resp.json()["pending_count"] == 3
         resp_all = client.get("/api/behavior/compact/candidates?limit=1000")
         assert len(resp_all.json()["candidates"]) == 3
 

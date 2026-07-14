@@ -949,7 +949,11 @@ def _compact_trigger(file_id: str, project_slug: str) -> None:
 
 
 def _compact_list_pending() -> None:
-    status, body = _compact_request("GET", "/api/behavior/compact/candidates")
+    # limit=1000（路由上限）——单用户 backlog（输入幂等去重 + nightly ≤3 提议）
+    # 实际到不了；Codex round15 P2：默认 200 页会让更老候选从 CLI 不可达
+    status, body = _compact_request(
+        "GET", "/api/behavior/compact/candidates?limit=1000"
+    )
     if status != 200:
         raise click.ClickException(f"查询失败（HTTP {status}）：{body.get('detail', body)}")
     candidates = body.get("candidates", [])

@@ -224,6 +224,11 @@ async def list_behavior_compact_candidates(
     pending = await store_group.behavior_compact_store.list_candidates(
         status=BehaviorCompactCandidateStatus.PENDING, limit=bounded
     )
+    # Codex round15 P3：pending_count 报**真实总数**（COUNT 查询）而非页大小——
+    # 消费方据此可知响应是否被 limit 截断。
+    total_pending = await store_group.behavior_compact_store.count_candidates(
+        status=BehaviorCompactCandidateStatus.PENDING
+    )
     items = [
         BehaviorCompactCandidateItem(
             candidate_id=c.candidate_id,
@@ -243,7 +248,7 @@ async def list_behavior_compact_candidates(
         for c in pending
     ]
     return BehaviorCompactCandidatesListResponse(
-        candidates=items, pending_count=len(items)
+        candidates=items, pending_count=total_pending
     )
 
 

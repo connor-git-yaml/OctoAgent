@@ -126,6 +126,22 @@ class SqliteBehaviorCompactStore:
         rows = await cursor.fetchall()
         return [self._row_to_candidate(row) for row in rows]
 
+    async def count_candidates(
+        self, *, status: BehaviorCompactCandidateStatus | None = None
+    ) -> int:
+        """按状态计数（审批面真实总数展示——与分页 limit 解耦，Codex round15）。"""
+        if status is not None:
+            cursor = await self._conn.execute(
+                "SELECT COUNT(*) AS n FROM behavior_compact_candidates WHERE status = ?",
+                (status.value,),
+            )
+        else:
+            cursor = await self._conn.execute(
+                "SELECT COUNT(*) AS n FROM behavior_compact_candidates"
+            )
+        row = await cursor.fetchone()
+        return int(row["n"]) if row else 0
+
     async def claim_candidate_for_apply(self, candidate_id: str) -> bool:
         """atomic claim（C4 红线）：pending → applying 条件 UPDATE。
 
