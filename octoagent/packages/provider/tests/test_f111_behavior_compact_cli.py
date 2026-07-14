@@ -82,12 +82,43 @@ class TestTrigger:
             [(200, {"run_id": "r", "proposals_made": 0, "outcomes": []})]
         )
         monkeypatch.setattr(bc, "_compact_request", fake)
+        monkeypatch.setattr(
+            bc, "_compact_resolve_project_slug", lambda ref: ref or "selected-proj"
+        )
         result = runner.invoke(
             bc.behavior_group, ["compact", "PROJECT.md", "--project", "myproj"]
         )
         assert result.exit_code == 0, result.output
         assert fake.calls[0][2] == {"file_id": "PROJECT.md", "project_slug": "myproj"}
         assert "未产生精简提议" in result.output
+
+    def test_trigger_project_file_resolves_selected_project(self, runner, monkeypatch):
+        """Codex round4 P2：PROJECT scope 文件缺省 --project 时走选中 project
+        解析（不硬编码 default）。"""
+        fake = _FakeRequest(
+            [(200, {"run_id": "r", "proposals_made": 0, "outcomes": []})]
+        )
+        monkeypatch.setattr(bc, "_compact_request", fake)
+        monkeypatch.setattr(
+            bc, "_compact_resolve_project_slug", lambda ref: "selected-proj"
+        )
+        result = runner.invoke(bc.behavior_group, ["compact", "KNOWLEDGE.md"])
+        assert result.exit_code == 0, result.output
+        assert fake.calls[0][2] == {
+            "file_id": "KNOWLEDGE.md",
+            "project_slug": "selected-proj",
+        }
+
+    def test_trigger_file_id_normalized(self, runner, monkeypatch):
+        """Codex round4 P3：agents / project.md 等拼法与 behavior show/edit 同款
+        归一化，不被白名单误判 not_eligible。"""
+        fake = _FakeRequest(
+            [(200, {"run_id": "r", "proposals_made": 0, "outcomes": []})]
+        )
+        monkeypatch.setattr(bc, "_compact_request", fake)
+        result = runner.invoke(bc.behavior_group, ["compact", "agents"])
+        assert result.exit_code == 0, result.output
+        assert fake.calls[0][2] == {"file_id": "AGENTS.md", "project_slug": "default"}
 
     def test_trigger_409_single_flight(self, runner, monkeypatch):
         fake = _FakeRequest([(409, {"detail": "busy"})])
@@ -141,17 +172,28 @@ class TestList:
                 (
                     200,
                     {
-                        "pending_count": 1,
+                        "pending_count": 2,
                         "candidates": [
                             {
                                 "candidate_id": "cand-1",
                                 "file_id": "AGENTS.md",
+                                "project_slug": "default",
                                 "size_before": 3000,
                                 "size_after": 2000,
                                 "created_at": "2026-07-15T03:30:00+00:00",
                                 "rationale": "合并了 3 组重复规则",
                                 "diff": "-旧规则\n+新规则\n",
-                            }
+                            },
+                            {
+                                "candidate_id": "cand-2",
+                                "file_id": "PROJECT.md",
+                                "project_slug": "myproj",
+                                "size_before": 900,
+                                "size_after": 700,
+                                "created_at": "2026-07-15T03:31:00+00:00",
+                                "rationale": "",
+                                "diff": "",
+                            },
                         ],
                     },
                 )
@@ -162,6 +204,8 @@ class TestList:
         assert result.exit_code == 0, result.output
         assert "cand-1" in result.output
         assert "合并了 3 组重复规则" in result.output
+        # Codex round4 P2：PROJECT scope 候选显示归属 project
+        assert "(project=myproj)" in result.output
 
     def test_list_empty(self, runner, monkeypatch):
         fake = _FakeRequest([(200, {"pending_count": 0, "candidates": []})])

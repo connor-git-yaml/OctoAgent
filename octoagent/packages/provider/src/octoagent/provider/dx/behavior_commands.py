@@ -851,15 +851,16 @@ def _print_compact_outcome_line(outcome: dict) -> None:
 
 @behavior_group.command("compact")
 @click.argument("file_id", required=False, default="")
-@click.option("--project", "project_ref", default="default", show_default=True,
-              help="PROJECT scope 文件（PROJECT.md/KNOWLEDGE.md）的 project slug")
+@click.option("--project", "project_ref", default=None,
+              help="PROJECT scope 文件（PROJECT.md/KNOWLEDGE.md）的 project id 或 slug"
+                   "（缺省=当前选中 project，同其他 behavior 子命令）")
 @click.option("--apply", "apply_id", default="", help="接受指定候选并落盘（唯一落盘入口）")
 @click.option("--reject", "reject_id", default="", help="拒绝指定候选（文件零触碰）")
 @click.option("--list", "list_pending", is_flag=True, help="列出待审精简候选（含 diff）")
 @click.option("--list-size", "list_size", is_flag=True, help="本地测量各行为文件大小（只读）")
 def compact_behavior(
     file_id: str,
-    project_ref: str,
+    project_ref: str | None,
     apply_id: str,
     reject_id: str,
     list_pending: bool,
@@ -888,7 +889,27 @@ def compact_behavior(
     if reject_id:
         _compact_decide(reject_id, decision="reject")
         return
-    _compact_trigger(file_id.strip(), project_ref)
+    # Codex round4 P3：与 behavior show/edit 同款归一化（agents / project.md 等拼法）
+    normalized = _normalize_file_id(file_id) if file_id.strip() else ""
+    # Codex round4 P2：PROJECT scope 文件经 ProjectSelectorService 解析（缺省=
+    # 当前选中 project，同其他 behavior 子命令），不再硬编码 default。
+    project_slug = "default"
+    if normalized in PROJECT_SHARED_BEHAVIOR_FILE_IDS or project_ref is not None:
+        project_slug = _compact_resolve_project_slug(project_ref)
+    _compact_trigger(normalized, project_slug)
+
+
+def _compact_resolve_project_slug(project_ref: str | None) -> str:
+    """解析目标 project slug（None=当前选中，同其他 behavior 子命令语义）。"""
+    async def _run() -> str:
+        root = Path(_resolve_project_root())
+        project = await _resolve_project(root, project_ref)
+        return project.slug
+
+    try:
+        return asyncio.run(_run())
+    except ProjectSelectorError as exc:
+        raise click.ClickException(exc.message) from exc
 
 
 def _compact_trigger(file_id: str, project_slug: str) -> None:
@@ -926,8 +947,14 @@ def _compact_list_pending() -> None:
         console.print("没有待审精简候选")
         return
     for cand in candidates:
+        # Codex round4 P2：PROJECT scope 候选显示归属 project——多 project 各有
+        # 待审 PROJECT.md 时，用户须知道 --apply 会覆写哪个文件
+        scope = ""
+        if cand["file_id"] in PROJECT_SHARED_BEHAVIOR_FILE_IDS:
+            # 圆括号非方括号——rich 会把 [xx=yy] 当 markup 吞掉
+            scope = f" (project={cand.get('project_slug', 'default')})"
         console.print(
-            f"[bold]{cand['candidate_id']}[/bold] {cand['file_id']} "
+            f"[bold]{cand['candidate_id']}[/bold] {cand['file_id']}{scope} "
             f"{cand['size_before']} → {cand['size_after']} 字符"
             f"（{cand['created_at']}）"
         )
