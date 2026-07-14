@@ -42,6 +42,7 @@ from .middleware.trace_mw import TraceMiddleware
 from .routes import (
     approvals,
     auth_callback,
+    behavior_compact,
     behavior_versions,
     cancel,
     chat,
@@ -562,6 +563,10 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
     # F127 Phase D：巩固合并候选人审 API（C7 用户面，破坏性 MERGE accept/reject）
     app.include_router(
         consolidation_candidates.router, tags=["memory"], dependencies=protected
+    )
+    # F111：行为文件精简候选人审 + 手动触发 API（C7 用户面，唯一落盘入口）
+    app.include_router(
+        behavior_compact.router, tags=["behavior"], dependencies=protected
     )
     # F101 Phase C v2 H-4：Web Notification list/dismiss API
     app.include_router(notifications.router, tags=["notifications"], dependencies=protected)
