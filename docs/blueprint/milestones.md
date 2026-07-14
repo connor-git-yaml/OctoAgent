@@ -566,7 +566,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | Feature | 一句话目的（用户视角） | 规模 | 顺序 |
 |---------|----------------------|------|------|
 | **F127 Sleep-Time Memory Consolidation**（旗舰）✅ 完成（2026-07-03）| agent 空闲 / 定时在后台"巩固记忆"——回顾近期会话、去重 / 合并 / 组织事实、强化 recall，越用越懂你。仿 Letta sleep-time compute。底层组件（F102 routine / F097 subagent / F094 AGENT_PRIVATE memory / recall）已齐，M7 编排成独立认知能力域。**v0.1 实际范围（用户拍板 5 决策收窄）**：纯 cron 深夜触发 + 事实层去重合并（复用 MERGE 写管道）+ 破坏性变更全人审（`consolidation_candidates` + CONFLICT 终态 + REST 审批）+ 敏感分区排除三层防御 + H1 守界通知；idle-detect / session 摘要 / recall 权重 / 敏感 vault-aware MERGE 推 v0.2。G-lite 真 LLM 验证 6/6 PASS（DeepSeek-V3.2）；强 model 质量评估归 M7 统一 OctoBench 方案。见 core-design §8.7.6 + `.specify/features/127-sleep-time-consolidation/` | XL | 第 1 ✅ |
-| **F111 Behavior Compactor**（LLM 智能合并）| 行为规则文件累积后用 LLM 智能合并去冗余（F063 Phase 3 推迟项），与记忆巩固同域 | M | 第 2 |
+| **F111 Behavior Compactor**（LLM 智能合并）⏳ 启动（2026-07-14，按用户 2026-07-06 拍板「接 cron 定时自动 compact」+「等 M8 落地」条件已满足）| 行为规则文件累积后用 LLM 智能合并去冗余（F063 Phase 3 推迟项）。**拍板范围**：①单文件内去冗余 ②cron 定时 + 手动 `octo behavior compact` 双触发（cron 为主诉求，后台 subagent 复用 F127 编排 + H1 守界）③审批载体收窄期实测定（优先 F136 `gate_behavior_write` 复用，若阻塞语义与 nightly 批量提议冲突则仿 F127 候选表）④确定性护栏（合并后必须更小 / PROTECTED 字节级保留）+ 质量用例接 M9 `real_llm` lane + 决策环 `e2e_scripted` 覆盖 ⑤绝不 agent 自主 commit。设计制品（1e64ecd3 基线）已备于 worktree，rebase 收窄后实施 | **L** | 第 2 ⏳ |
 | **F128 Skill Self-Improvement**（Hermes 式闭环）| agent 从失败 / 成功中改进自己的 skill（推测性，与 sleep-time 同期评估） | L | 第 3（评估） |
 
 **串行理由**：三者都触碰 memory / behavior 子系统，并行会严重 rebase 冲突。F127 旗舰**设计先行**（spec / plan 设计 → 用户拍板范围 → 再实施）。
