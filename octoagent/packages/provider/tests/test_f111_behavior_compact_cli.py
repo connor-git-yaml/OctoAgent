@@ -280,14 +280,21 @@ class TestGuards:
 
 class TestListSize:
     def test_list_size_local_measurement(self, runner, monkeypatch, tmp_path: Path):
-        """--list-size 纯本地只读（不走 HTTP），超预算标注 + eligible 列。"""
+        """--list-size 纯本地只读（不走 HTTP），按选中 project 测（round13 P2）。"""
         from octoagent.core.behavior_workspace import resolve_write_path_by_file_id
 
         root = tmp_path / "instance"
         agents = resolve_write_path_by_file_id(root, "AGENTS.md")
         agents.parent.mkdir(parents=True, exist_ok=True)
         agents.write_text("# AGENTS\n- 规则\n", encoding="utf-8")
+        # 非 default project 的 PROJECT.md（度量必须命中它）
+        proj_md = root / "projects" / "myproj" / "behavior" / "PROJECT.md"
+        proj_md.parent.mkdir(parents=True, exist_ok=True)
+        proj_md.write_text("# PROJECT myproj 专属内容\n", encoding="utf-8")
         monkeypatch.setattr(bc, "_resolve_project_root", lambda: str(root))
+        monkeypatch.setattr(
+            bc, "_compact_resolve_project_slug", lambda ref: ref or "myproj"
+        )
 
         def _no_http(*args: Any, **kwargs: Any):
             raise AssertionError("--list-size 不得发起 HTTP")
@@ -296,4 +303,19 @@ class TestListSize:
         result = runner.invoke(bc.behavior_group, ["compact", "--list-size"])
         assert result.exit_code == 0, result.output
         assert "AGENTS.md" in result.output
+        assert "project=myproj" in result.output
         assert "总计" in result.output
+
+    def test_measure_primitive_project_slug(self, tmp_path: Path):
+        """原语 project_slug 参数：非 default project 的 PROJECT.md 被正确度量。"""
+        from octoagent.core.behavior_workspace import measure_behavior_total_size
+
+        root = tmp_path / "instance"
+        proj_md = root / "projects" / "myproj" / "behavior" / "PROJECT.md"
+        proj_md.parent.mkdir(parents=True, exist_ok=True)
+        proj_md.write_text("x" * 42, encoding="utf-8")
+
+        default_sizes = measure_behavior_total_size(root)  # 既有行为零破坏
+        assert default_sizes["PROJECT.md"] == 0
+        myproj_sizes = measure_behavior_total_size(root, project_slug="myproj")
+        assert myproj_sizes["PROJECT.md"] == 42

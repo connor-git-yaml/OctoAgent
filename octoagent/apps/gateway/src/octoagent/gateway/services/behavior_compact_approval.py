@@ -317,13 +317,16 @@ class BehaviorCompactApprovalService:
         if not await self._commit_tx():
             # Codex P1 同族：状态未 durable 绝不报成功/emit。补偿标记回 PENDING
             # 抵销事务里未提交的 REJECTED（否则同连接后续读到未提交假 REJECTED，
-            # 重拒会被 CAS 挡），候选可重试。
+            # 重拒会被 CAS 挡），候选可重试。补偿后再尝试提交关闭事务（Codex
+            # round13 P1：不提交会让共享主连接遗留 open write txn 持 SQLite 写锁，
+            # 阻塞 versionable 独立连接等无关写者；与 accept/conflict 补偿路径对称）。
             try:
                 await self._compact_store.mark_candidate_status(
                     candidate_id,
                     status=BehaviorCompactCandidateStatus.PENDING,
                     expected_status=BehaviorCompactCandidateStatus.REJECTED,
                 )
+                await self._commit_tx()
             except Exception:
                 logger.exception(
                     "behavior_compact_reject_compensate_failed",

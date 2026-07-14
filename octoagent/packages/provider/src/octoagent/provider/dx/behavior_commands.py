@@ -888,7 +888,7 @@ def compact_behavior(
         )
 
     if list_size:
-        _compact_list_size()
+        _compact_list_size(project_ref)
         return
     if list_pending:
         _compact_list_pending()
@@ -1009,8 +1009,12 @@ def _compact_decide(candidate_id: str, *, decision: str) -> None:
     raise click.ClickException(f"操作失败（HTTP {status}）：{body.get('detail', body)}")
 
 
-def _compact_list_size() -> None:
-    """本地只读测量（FR-10：F063 P3 遗留原语首个消费者）。只提示不自动 compact（C9）。"""
+def _compact_list_size(project_ref: str | None) -> None:
+    """本地只读测量（FR-10：F063 P3 遗留原语首个消费者）。只提示不自动 compact（C9）。
+
+    PROJECT scope 文件按选中/指定 project 测（Codex round13 P2——原语此前硬编码
+    projects/default，非 default 工作区会报错误尺寸）。
+    """
     from octoagent.core.behavior_workspace import (
         _BEHAVIOR_SIZE_WARNING_THRESHOLD,
         BEHAVIOR_FILE_BUDGETS,
@@ -1019,8 +1023,9 @@ def _compact_list_size() -> None:
     )
 
     root = Path(_resolve_project_root())
-    sizes = measure_behavior_total_size(root)
-    table = Table(title="行为文件大小")
+    project_slug = _compact_resolve_project_slug(project_ref)
+    sizes = measure_behavior_total_size(root, project_slug=project_slug)
+    table = Table(title=f"行为文件大小（project={project_slug}）")
     table.add_column("文件")
     table.add_column("字符数", justify="right")
     table.add_column("预算", justify="right")

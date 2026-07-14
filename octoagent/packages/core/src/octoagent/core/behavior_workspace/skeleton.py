@@ -44,8 +44,16 @@ log = structlog.get_logger(__name__)
 def measure_behavior_total_size(
     project_root: Path,
     agent_slug: str = "main",
+    project_slug: str = "default",
 ) -> dict[str, int]:
     """测量所有行为文件的字符总量。
+
+    Args:
+        project_root: 实例根。
+        agent_slug: AGENT_PRIVATE 文件的 agent 目录。
+        project_slug: PROJECT scope 文件（PROJECT.md/KNOWLEDGE.md）的 project
+            目录（F111 Codex round13 P2：非 default project 下按选中 project 测，
+            默认值保持既有行为零破坏）。
 
     Returns:
         {"file_id": char_count, ..., "__total__": total_chars}
@@ -65,8 +73,9 @@ def measure_behavior_total_size(
         if file_id in AGENT_PRIVATE_BEHAVIOR_FILE_IDS:
             candidates.append(agent_dir_path / file_id)
         if file_id in PROJECT_SHARED_BEHAVIOR_FILE_IDS:
-            # 默认 project
-            candidates.append(root / "projects" / "default" / "behavior" / file_id)
+            candidates.append(
+                root / "projects" / project_slug / "behavior" / file_id
+            )
 
         char_count = 0
         for path in candidates:
