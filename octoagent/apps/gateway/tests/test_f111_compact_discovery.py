@@ -525,6 +525,26 @@ async def test_user_md_config_drift_rejected(env):
 
 
 @pytest.mark.asyncio
+async def test_user_md_active_hours_drift_rejected(env):
+    """Codex round17 P1 闭环：active_hours（quiet hours 语义）被精简丢失 →
+    SKIPPED(config_drift)。"""
+    store_group, project_root = env
+    original = (
+        "# USER\n\n- 称呼：Connor\n- active_hours: 08:00-23:00\n"
+        + "- 喜好：简洁回复，不要客套\n" * 8
+    )
+    _write_behavior_file(project_root, "USER.md", original)
+    drifted = "# USER\n\n- 称呼：Connor\n- 简洁回复\n"  # active_hours 被合并掉
+    svc = _service(store_group, project_root, _ScriptedLLM(_contract(drifted)))
+
+    outcome = await svc.discover_file(
+        run_id="run-1", file_id="USER.md", root_task_id=_ROOT_TASK
+    )
+    assert outcome.status == "skipped"
+    assert outcome.reason == "config_drift"
+
+
+@pytest.mark.asyncio
 async def test_user_md_config_preserved_proposes(env):
     store_group, project_root = env
     _write_behavior_file(project_root, "USER.md", _USER_MD_ORIGINAL)

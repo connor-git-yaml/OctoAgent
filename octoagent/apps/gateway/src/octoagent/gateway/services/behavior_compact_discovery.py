@@ -593,12 +593,15 @@ class BehaviorCompactDiscoveryService:
             extract_summary_channels_from_user_md,
             extract_user_timezone_from_user_md,
         )
+        from .notification import extract_active_hours_from_user_md
 
         extractors = (
             extract_user_timezone_from_user_md,
             extract_daily_summary_time_from_user_md,
             extract_routine_active_from_user_md,
             extract_summary_channels_from_user_md,
+            # Codex round17 P1：quiet hours 语义字段（NotificationService 消费）
+            extract_active_hours_from_user_md,
             extract_consolidation_active_from_user_md,
             extract_consolidation_time_from_user_md,
             extract_consolidation_window_days_from_user_md,
