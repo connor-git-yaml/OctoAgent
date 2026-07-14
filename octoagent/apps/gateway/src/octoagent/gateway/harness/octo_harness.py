@@ -284,6 +284,15 @@ class OctoHarness:
                 await app.state.memory_consolidation_service.shutdown()
             except Exception:
                 _log.exception("memory_consolidation_shutdown_failed")
+        # F111：compact routine 同样在 automation_scheduler.shutdown() 前 remove 自己的 cron job
+        if (
+            hasattr(app.state, "behavior_compaction_service")
+            and app.state.behavior_compaction_service
+        ):
+            try:
+                await app.state.behavior_compaction_service.shutdown()
+            except Exception:
+                _log.exception("behavior_compaction_shutdown_failed")
         if hasattr(app.state, "automation_scheduler") and app.state.automation_scheduler:
             await app.state.automation_scheduler.shutdown()
 
@@ -1689,6 +1698,46 @@ class OctoHarness:
             # Constitution C6：巩固 routine 不可用不阻塞 gateway 启动
             _log.exception("memory_consolidation_bootstrap_failed")
             app.state.memory_consolidation_service = None
+
+        # F111 Behavior Compactor：BehaviorCompactionService 同 F127 bootstrap 点
+        # 构造（cron 双触发编排 + 发现端 llm_client 注入）。REST trigger 路由经
+        # app.state.behavior_compaction_service 消费（routes/behavior_compact.py）。
+        try:
+            from octoagent.provider.router_message_adapter import (
+                ProviderRouterMessageAdapter as _CompactMessageAdapter,
+            )
+
+            from ..services.behavior_compaction import (
+                BehaviorCompactionService as _BehaviorCompactionService,
+            )
+
+            _compact_provider_router = getattr(app.state, "provider_router", None)
+            _compact_llm = (
+                _CompactMessageAdapter(_compact_provider_router)
+                if _compact_provider_router is not None
+                else None
+            )
+            _behavior_compaction = _BehaviorCompactionService(
+                scheduler=app.state.automation_scheduler,
+                task_store=store_group.task_store,
+                work_store=store_group.work_store,
+                event_store=store_group.event_store,
+                snapshot_store=app.state.snapshot_store,
+                delegation_plane=app.state.delegation_plane_service,
+                compact_store=store_group.behavior_compact_store,
+                project_root=project_root,
+                # 公开注入缝：e2e 脚本化测试 bootstrap 后替换为脚本 stub（spec AC-11 注）
+                llm_client=_compact_llm,
+                notification_service=getattr(
+                    app.state, "notification_service", None
+                ),
+            )
+            app.state.behavior_compaction_service = _behavior_compaction
+            await _behavior_compaction.startup()
+        except Exception:
+            # Constitution C6：compact routine 不可用不阻塞 gateway 启动
+            _log.exception("behavior_compaction_bootstrap_failed")
+            app.state.behavior_compaction_service = None
 
         _log.info(
             "watchdog_scheduler_started",

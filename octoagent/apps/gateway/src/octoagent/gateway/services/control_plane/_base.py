@@ -45,7 +45,12 @@ log = structlog.get_logger()
 #: apscheduler 等重依赖拉进 control_plane import 图；test_f127_consolidation_trigger 有守卫
 #: 断言两者一致防漂移）。类比 F102 _daily_routine_audit task 是系统占位（但 F102 只建 task
 #: 不建 work 故不进 works 视图）。
-SYSTEM_INTERNAL_WORK_IDS: frozenset[str] = frozenset({"_memory_consolidation_root_work"})
+#: F111 追加 `_behavior_compact_root_work`（行为文件精简 root Work，同 F127 占位性质；
+#: 值与 behavior_compaction.BEHAVIOR_COMPACT_ROOT_WORK_ID 对齐，字面量原因同上，
+#: test_f111_compact_trigger 有守卫断言防漂移）。
+SYSTEM_INTERNAL_WORK_IDS: frozenset[str] = frozenset(
+    {"_memory_consolidation_root_work", "_behavior_compact_root_work"}
+)
 
 
 def expand_internal_work_ids(works: Any) -> set[str]:

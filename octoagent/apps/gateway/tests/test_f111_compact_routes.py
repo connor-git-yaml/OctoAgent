@@ -19,9 +19,7 @@ import pytest_asyncio
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from octoagent.core.behavior_workspace import resolve_write_path_by_file_id
-from octoagent.core.models import RequesterInfo, Task
 from octoagent.core.models.behavior_compact import BehaviorCompactCandidate
-from octoagent.core.models.enums import TaskStatus
 from octoagent.core.store import StoreGroup, create_store_group
 from octoagent.gateway.routes import behavior_compact as route_mod
 
