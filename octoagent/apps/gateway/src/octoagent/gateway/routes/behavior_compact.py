@@ -30,9 +30,15 @@ log = structlog.get_logger(__name__)
 
 router = APIRouter()
 
-# compact root task（与 BehaviorCompactionService.BEHAVIOR_COMPACT_ROOT_TASK_ID 一致——
-# 字面量避免 import apscheduler 链；trigger 测试有守卫断言两者一致防漂移，同 F127 范式）。
-_BEHAVIOR_COMPACT_ROOT_TASK_ID = "_behavior_compact_root"
+# Codex round5 P3：root 占位常量/ensure 单一事实源在 behavior_compact_root.py
+# （零 apscheduler 依赖，路由可直接 import）——路由与编排服务共用同一创建路径，
+# 降级启动期也不会落下通用形态 root task 歪斜后续 spawn 的 audit lineage。
+from ..services.behavior_compact_root import (  # noqa: E402
+    BEHAVIOR_COMPACT_ROOT_TASK_ID as _BEHAVIOR_COMPACT_ROOT_TASK_ID,
+)
+from ..services.behavior_compact_root import (  # noqa: E402
+    ensure_behavior_compact_root as _ensure_behavior_compact_root,
+)
 
 #: 候选列表 diff 展示上限（Web/CLI 渲染护栏；完整内容仍在 compacted_content）。
 _DIFF_MAX_CHARS = 4000
@@ -95,23 +101,25 @@ class BehaviorCompactTriggerResponse(BaseModel):
 
 
 async def _ensure_root_task_or_500(store_group: Any) -> None:
-    """副作用前 ensure compact root task（FK 安全，C2 审计不变量保护，同 F127）。"""
-    from octoagent.core.store.audit_task import ensure_system_audit_task
+    """副作用前 ensure compact root（FK 安全，C2 审计不变量保护）。
 
-    ok = await ensure_system_audit_task(
-        getattr(store_group, "task_store", None),
-        _BEHAVIOR_COMPACT_ROOT_TASK_ID,
-        title="F111 行为文件精简根任务占位",
-    )
-    if not ok:
-        log.error(
+    与编排服务共用 ``ensure_behavior_compact_root`` 单一创建路径（Codex round5
+    P3）——不再走通用 ``ensure_system_audit_task``（其 thread_id/status 形态与
+    服务不同，降级期先创建会永久歪斜后续 spawn 的 parent lineage）。
+    """
+    try:
+        await _ensure_behavior_compact_root(
+            store_group.task_store, store_group.work_store
+        )
+    except Exception:
+        log.exception(
             "behavior_compact_root_task_ensure_failed",
             task_id=_BEHAVIOR_COMPACT_ROOT_TASK_ID,
         )
         raise HTTPException(
             status_code=500,
-            detail="behavior compact root task ensure 失败；操作取消以保护 C2 审计不变量",
-        )
+            detail="behavior compact root ensure 失败；操作取消以保护 C2 审计不变量",
+        ) from None
 
 
 def _build_approval(request: Request, store_group: Any) -> Any:

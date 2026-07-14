@@ -474,12 +474,35 @@ class TestGuards:
         assert BEHAVIOR_COMPACT_ROOT_WORK_ID in SYSTEM_INTERNAL_WORK_IDS
 
     def test_route_literal_root_task_id_matches(self):
-        """路由字面量与服务常量一致（避免 import apscheduler 链的字面量防漂移）。"""
+        """路由与服务共享同一 root 常量（Codex round5 P3 后为同源 re-export）。"""
         from octoagent.gateway.routes.behavior_compact import (
             _BEHAVIOR_COMPACT_ROOT_TASK_ID,
         )
 
         assert _BEHAVIOR_COMPACT_ROOT_TASK_ID == BEHAVIOR_COMPACT_ROOT_TASK_ID
+
+    async def test_route_ensure_same_shape_as_service(self, store_group, project_root):
+        """Codex round5 P3 闭环：路由先 ensure（降级启动场景）产出的 root 形态与
+        服务一致——后续服务复用不歪 spawn lineage。"""
+        from octoagent.core.models.enums import TaskStatus
+        from octoagent.gateway.services.behavior_compact_root import (
+            BEHAVIOR_COMPACT_ROOT_THREAD_ID,
+            ensure_behavior_compact_root,
+        )
+
+        # 模拟路由先创建（服务未装配的降级期请求）
+        route_task, _ = await ensure_behavior_compact_root(
+            store_group.task_store, store_group.work_store
+        )
+        assert route_task.thread_id == BEHAVIOR_COMPACT_ROOT_THREAD_ID
+        assert route_task.status == TaskStatus.SUCCEEDED
+        assert route_task.requester.channel == "system"
+        # 服务随后 ensure 复用同一行（形态天然一致，无需修复）
+        svc = _build_service(store_group, project_root)
+        svc_task, _ = await svc._ensure_compact_root()
+        assert svc_task.task_id == route_task.task_id
+        assert svc_task.thread_id == BEHAVIOR_COMPACT_ROOT_THREAD_ID
+        assert svc_task.status == TaskStatus.SUCCEEDED
 
     def test_cron_file_ids_derived_shared_eligible(self):
         """cron 范围 = SHARED ∩ eligible（派生守卫，DP-6）。"""

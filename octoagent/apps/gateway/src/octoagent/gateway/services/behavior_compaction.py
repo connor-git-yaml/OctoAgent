@@ -46,9 +46,8 @@ from octoagent.core.models.delegation import (
     WORK_TERMINAL_STATUSES,
     DelegationTargetKind,
     Work,
-    WorkStatus,
 )
-from octoagent.core.models.enums import ActorType, EventType, TaskStatus
+from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event
 from octoagent.core.models.payloads import (
     BehaviorCompactCompletedPayload,
@@ -56,7 +55,6 @@ from octoagent.core.models.payloads import (
     BehaviorCompactSkippedPayload,
     BehaviorCompactTriggeredPayload,
 )
-from octoagent.core.models.task import RequesterInfo
 from octoagent.core.models.task import Task as TaskModel
 from ulid import ULID
 
@@ -66,6 +64,12 @@ from .behavior_compact_discovery import (
     BehaviorCompactLLMClient,
     CompactDiscoveryOutcome,
     FileCompactOutcome,
+)
+from .behavior_compact_root import (
+    BEHAVIOR_COMPACT_ROOT_TASK_ID,
+    BEHAVIOR_COMPACT_ROOT_WORK_ID,
+    BEHAVIOR_COMPACT_SPAWNED_BY,
+    ensure_behavior_compact_root,
 )
 
 if TYPE_CHECKING:
@@ -92,13 +96,8 @@ logger = structlog.get_logger(__name__)
 #: APScheduler 调度 job 唯一标识
 BEHAVIOR_COMPACT_JOB_ID: Final[str] = "_behavior_compact"
 
-#: 合成 compact root Task / Work（spawn_child 真父对象 + events FK 占位；长驻单例，
-#: 沿用 F127 范式——**自己的** id，不共用 `_memory_consolidation_root`，handoff §1.3）
-BEHAVIOR_COMPACT_ROOT_TASK_ID: Final[str] = "_behavior_compact_root"
-BEHAVIOR_COMPACT_ROOT_WORK_ID: Final[str] = "_behavior_compact_root_work"
-
-#: root Task 显式 thread_id（子 thread 命名稳定可识别）
-BEHAVIOR_COMPACT_ROOT_THREAD_ID: Final[str] = "_behavior_compact"
+# root 占位常量单一事实源在 behavior_compact_root.py（Codex round5 P3：服务与
+# 路由共用同一 ensure 路径），此处 re-export 保持既有 import 面。
 
 #: cron misfire grace（沿用 F102/F127 范式）
 BEHAVIOR_COMPACT_MISFIRE_GRACE_SEC: Final[int] = 30
@@ -108,9 +107,6 @@ BEHAVIOR_COMPACT_MISFIRE_GRACE_SEC: Final[int] = 30
 #: 被静默降级成 standard 的坑，此处沿用其修复后取值）
 BEHAVIOR_COMPACT_WORKER_TYPE: Final[str] = "general"
 BEHAVIOR_COMPACT_TOOL_PROFILE: Final[str] = "minimal"
-
-#: spawn 标识（审计 spawned_by）
-BEHAVIOR_COMPACT_SPAWNED_BY: Final[str] = "behavior_compact"
 
 #: 通知类型字符串（NotificationService 用，非 core EventType 枚举成员——审计枚举
 #: 事件是 BEHAVIOR_COMPACT_COMPLETED，通知是其用户面衍生物，同 F127 范式）
@@ -480,50 +476,8 @@ class BehaviorCompactionService:
     # ============================================================
 
     async def _ensure_compact_root(self) -> tuple[TaskModel, Work]:
-        """ensure 系统 owned 的 compact root Task+Work 对（幂等）。"""
-        now = datetime.now(UTC)
-
-        existing_task = await self._task_store.get_task(BEHAVIOR_COMPACT_ROOT_TASK_ID)
-        if existing_task is None:
-            root_task = TaskModel(
-                task_id=BEHAVIOR_COMPACT_ROOT_TASK_ID,
-                created_at=now,
-                updated_at=now,
-                status=TaskStatus.SUCCEEDED,  # 系统占位，避免被业务逻辑捡起
-                title="F111 行为文件精简根任务占位",
-                thread_id=BEHAVIOR_COMPACT_ROOT_THREAD_ID,
-                scope_id="",
-                requester=RequesterInfo(
-                    channel="system", sender_id=BEHAVIOR_COMPACT_SPAWNED_BY
-                ),
-            )
-            await self._task_store.create_task(root_task)
-        else:
-            root_task = existing_task
-
-        existing_work = await self._work_store.get_work(BEHAVIOR_COMPACT_ROOT_WORK_ID)
-        if existing_work is None:
-            root_work = Work(
-                work_id=BEHAVIOR_COMPACT_ROOT_WORK_ID,
-                task_id=BEHAVIOR_COMPACT_ROOT_TASK_ID,
-                title="F111 行为文件精简根 Work",
-                status=WorkStatus.CREATED,
-                target_kind=DelegationTargetKind.SUBAGENT,
-                created_at=now,
-                updated_at=now,
-            )
-            await self._work_store.save_work(root_work)
-        else:
-            root_work = existing_work
-
-        conn = getattr(self._task_store, "_conn", None)
-        if conn is not None and hasattr(conn, "commit"):
-            try:
-                await conn.commit()
-            except Exception:
-                logger.exception("behavior_compact_root_commit_failed")
-
-        return root_task, root_work
+        """ensure compact root Task+Work 对（委托单一事实源，Codex round5 P3）。"""
+        return await ensure_behavior_compact_root(self._task_store, self._work_store)
 
     async def _has_active_compact_child(self, root_work_id: str) -> bool:
         """root Work 下是否存在非终态 child Work（跨 tick 单飞补强，F127 同款）。
