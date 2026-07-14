@@ -741,3 +741,258 @@ def _run_async(fn) -> None:
     except ProjectSelectorError as exc:
         console.print(f"[red]{exc.message}[/red]")
         raise SystemExit(exc.exit_code) from exc
+
+
+# ---------------------------------------------------------------------------
+# F111: octo behavior compact（薄 HTTP 壳 → gateway REST，spec DP-7）
+# ---------------------------------------------------------------------------
+#
+# compact 需要 LLM + 候选表 + 审批面（全在 gateway）——CLI 本地起 provider_router
+# 会造第二条落盘/审批路径（双事实源 + TOCTOU），故走 REST（同 attest/remote 范式）。
+# 例外：--list-size 纯本地只读测量（measure_behavior_total_size），无副作用不走 HTTP。
+
+_COMPACT_HTTP_TIMEOUT_S = 120.0  # trigger 同步跑 LLM（main alias），给足余量
+
+
+def _compact_gateway_settings() -> tuple[str, dict[str, str]]:
+    """解析托管 gateway 的 base_url + 认证 header（复用 remote/attest 已验证链）。
+
+    - port：实例生效 env ``OCTOAGENT_PORT``（`.env` 权威，同 remote_commands）。
+    - front_door bearer 模式：token 值只从实例 ``.env`` / ``.env.litellm`` 读
+      （attest ``_default_token_reader`` 同款语义——shell-only 值服务不继承）；
+      loopback 模式本机直连无需 header。
+    """
+    from octoagent.gateway.services.frontdoor_exposure import (
+        read_instance_effective_env,
+    )
+
+    from .remote_commands import (
+        _bearer_token_env_name,
+        _effective_mode,
+        _load_config_and_root,
+        _resolve_port,
+    )
+
+    cfg, root = _load_config_and_root()
+    env = read_instance_effective_env(root)
+    port = _resolve_port(env)
+    base_url = f"http://127.0.0.1:{port}"
+    headers: dict[str, str] = {}
+    if _effective_mode(cfg, env) == "bearer":
+        token_env = _bearer_token_env_name(cfg, env)
+        token = _read_instance_dotenv_value(root, token_env)
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+    return base_url, headers
+
+
+def _read_instance_dotenv_value(root: Path, key: str) -> str | None:
+    """按 source 顺序取 ``.env`` → ``.env.litellm`` 最后的非空值（attest 同款）。"""
+    resolved: str | None = None
+    try:
+        from dotenv import dotenv_values
+
+        for filename in (".env", ".env.litellm"):
+            env_path = root / filename
+            if env_path.exists():
+                value = dotenv_values(env_path).get(key)
+                if value is not None and value.strip():
+                    resolved = value.strip()
+    except Exception:
+        return None
+    return resolved
+
+
+def _compact_request(method: str, path: str, payload: dict | None = None) -> tuple[int, dict]:
+    """一次 gateway REST 调用。返回 (status_code, body_dict)。
+
+    连接失败 → ClickException 引导启动服务（M8 后 gateway 是常驻服务，未运行属异常态）。
+    测试缝：monkeypatch 本函数即可脱离真 HTTP。
+    """
+    import httpx
+
+    base_url, headers = _compact_gateway_settings()
+    try:
+        with httpx.Client(
+            timeout=_COMPACT_HTTP_TIMEOUT_S, follow_redirects=False
+        ) as client:
+            resp = client.request(
+                method, f"{base_url}{path}", json=payload, headers=headers
+            )
+    except httpx.HTTPError as exc:
+        raise click.ClickException(
+            f"无法连接 gateway（{type(exc).__name__}）。"
+            "compact 需要 gateway 运行：请先 `octo service status` / `octo restart`"
+        ) from exc
+    try:
+        body = resp.json()
+    except Exception:
+        body = {"detail": resp.text[:300]}
+    return resp.status_code, body
+
+
+def _print_compact_outcome_line(outcome: dict) -> None:
+    status = outcome.get("status", "")
+    file_id = outcome.get("file_id", "")
+    if status == "proposed":
+        console.print(
+            f"[green]✓ {file_id}[/green] 产生精简提议："
+            f"{outcome.get('size_before', 0)} → {outcome.get('size_after', 0)} 字符"
+            f"（候选 {outcome.get('candidate_id', '')}）"
+        )
+        diff = outcome.get("diff", "")
+        if diff:
+            console.print(diff, markup=False, highlight=False)
+    elif status == "fallback":
+        console.print(f"[yellow]- {file_id}[/yellow] LLM 不可用/输出不合契约（fallback，未产提议）")
+    else:
+        console.print(f"[dim]- {file_id} 跳过（{outcome.get('reason', '')}）[/dim]")
+
+
+@behavior_group.command("compact")
+@click.argument("file_id", required=False, default="")
+@click.option("--project", "project_ref", default="default", show_default=True,
+              help="PROJECT scope 文件（PROJECT.md/KNOWLEDGE.md）的 project slug")
+@click.option("--apply", "apply_id", default="", help="接受指定候选并落盘（唯一落盘入口）")
+@click.option("--reject", "reject_id", default="", help="拒绝指定候选（文件零触碰）")
+@click.option("--list", "list_pending", is_flag=True, help="列出待审精简候选（含 diff）")
+@click.option("--list-size", "list_size", is_flag=True, help="本地测量各行为文件大小（只读）")
+def compact_behavior(
+    file_id: str,
+    project_ref: str,
+    apply_id: str,
+    reject_id: str,
+    list_pending: bool,
+    list_size: bool,
+) -> None:
+    """LLM 智能合并行为规则文件去冗余（F111）。
+
+    默认触发发现端扫描（FILE_ID 缺省 = AGENTS/TOOLS/USER 共享三件）并展示 diff
+    预览；落盘必须显式 --apply <候选id>（Two-Phase，宪法 #4/#7）。
+    """
+    modes = [bool(apply_id), bool(reject_id), list_pending, list_size]
+    if sum(modes) > 1:
+        raise click.ClickException(
+            "--apply / --reject / --list / --list-size 互斥，一次只能选一个"
+        )
+
+    if list_size:
+        _compact_list_size()
+        return
+    if list_pending:
+        _compact_list_pending()
+        return
+    if apply_id:
+        _compact_decide(apply_id, decision="accept")
+        return
+    if reject_id:
+        _compact_decide(reject_id, decision="reject")
+        return
+    _compact_trigger(file_id.strip(), project_ref)
+
+
+def _compact_trigger(file_id: str, project_slug: str) -> None:
+    target_desc = file_id or "AGENTS.md / TOOLS.md / USER.md（共享默认集）"
+    console.print(f"触发行为文件精简发现端：{target_desc} …")
+    status, body = _compact_request(
+        "POST",
+        "/api/behavior/compact/trigger",
+        {"file_id": file_id, "project_slug": project_slug},
+    )
+    if status == 409:
+        raise click.ClickException("compact 正在运行中（cron 或另一次手动触发），稍后再试")
+    if status != 200:
+        raise click.ClickException(f"触发失败（HTTP {status}）：{body.get('detail', body)}")
+
+    outcomes = body.get("outcomes", [])
+    for outcome in outcomes:
+        _print_compact_outcome_line(outcome)
+    proposals = body.get("proposals_made", 0)
+    if proposals:
+        console.print(
+            f"\n[bold]{proposals} 条提议待确认[/bold]——审阅上方 diff 后："
+            "octo behavior compact --apply <候选id>（或 --reject <候选id>）"
+        )
+    else:
+        console.print("\n本次未产生精简提议（行为文件零触碰）")
+
+
+def _compact_list_pending() -> None:
+    status, body = _compact_request("GET", "/api/behavior/compact/candidates")
+    if status != 200:
+        raise click.ClickException(f"查询失败（HTTP {status}）：{body.get('detail', body)}")
+    candidates = body.get("candidates", [])
+    if not candidates:
+        console.print("没有待审精简候选")
+        return
+    for cand in candidates:
+        console.print(
+            f"[bold]{cand['candidate_id']}[/bold] {cand['file_id']} "
+            f"{cand['size_before']} → {cand['size_after']} 字符"
+            f"（{cand['created_at']}）"
+        )
+        if cand.get("rationale"):
+            console.print(f"  理由：{cand['rationale']}")
+        if cand.get("diff"):
+            console.print(cand["diff"], markup=False, highlight=False)
+        console.print()
+    console.print(
+        "落盘：octo behavior compact --apply <候选id>；拒绝：--reject <候选id>"
+    )
+
+
+def _compact_decide(candidate_id: str, *, decision: str) -> None:
+    status, body = _compact_request(
+        "POST", f"/api/behavior/compact/candidates/{candidate_id}/{decision}"
+    )
+    if status == 200:
+        if decision == "accept":
+            console.print(
+                f"[green]已落盘[/green] {body.get('file_id', '')}（候选 {candidate_id}）。"
+                "已记 F107 版本历史，不满意可 octo behavior diff / 版本恢复回退"
+            )
+        else:
+            console.print(f"已拒绝候选 {candidate_id}（行为文件零触碰）")
+        return
+    if status == 404:
+        raise click.ClickException(f"候选 {candidate_id} 不存在")
+    if status == 409:
+        raise click.ClickException(
+            f"候选已失效或已被处理：{body.get('detail', '')}\n"
+            "（源文件可能在提议后被编辑——重新 octo behavior compact 产生新提议）"
+        )
+    raise click.ClickException(f"操作失败（HTTP {status}）：{body.get('detail', body)}")
+
+
+def _compact_list_size() -> None:
+    """本地只读测量（FR-10：F063 P3 遗留原语首个消费者）。只提示不自动 compact（C9）。"""
+    from octoagent.core.behavior_workspace import (
+        _BEHAVIOR_SIZE_WARNING_THRESHOLD,
+        BEHAVIOR_FILE_BUDGETS,
+        COMPACT_ELIGIBLE_FILE_IDS,
+        measure_behavior_total_size,
+    )
+
+    root = Path(_resolve_project_root())
+    sizes = measure_behavior_total_size(root)
+    table = Table(title="行为文件大小")
+    table.add_column("文件")
+    table.add_column("字符数", justify="right")
+    table.add_column("预算", justify="right")
+    table.add_column("compact", justify="center")
+    total = 0
+    for fid, count in sizes.items():
+        if fid == "__total__":
+            total = count
+            continue
+        budget = BEHAVIOR_FILE_BUDGETS.get(fid, 0)
+        eligible = "✓" if fid in COMPACT_ELIGIBLE_FILE_IDS else "—"
+        over = "[red]" if budget and count > budget else ""
+        table.add_row(f"{over}{fid}", f"{over}{count}", str(budget or "-"), eligible)
+    console.print(table)
+    console.print(f"总计：{total} 字符（警戒阈值 {_BEHAVIOR_SIZE_WARNING_THRESHOLD}）")
+    if total > _BEHAVIOR_SIZE_WARNING_THRESHOLD:
+        console.print(
+            "[yellow]总量超过警戒阈值——建议 octo behavior compact 精简"
+            "（compact 列为 ✓ 的文件可参与）[/yellow]"
+        )
