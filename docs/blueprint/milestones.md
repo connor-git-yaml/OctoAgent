@@ -557,7 +557,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 
 ---
 
-### M7（认知深化：记忆 / 学习）⏳ 启动（2026-06-27）
+### M7（认知深化：记忆 / 学习）✅ 完成（2026-07-19，F127+F111 交付 / F128 defer 带触发条件 / DeepSeek 零回归 bench 收官）
 
 > **方向（用户拍板 2026-06-27）**：M6 完成 surface 扩张后，M7 转向**让 agent 越用越懂用户**——后台记忆巩固、行为规则智能合并、skill 自改进。区别于 M5（协作对等）/ M6（功能面），M7 是**认知能力域**。
 > **验证特殊性**：本域改进 DeepSeek 控变量照不出（记忆深化 / 主动委托看不出），**需强 model 单独验证**——M6 推迟的"强 model OctoBench"在此域兑现。
@@ -571,7 +571,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 
 **串行理由**：三者都触碰 memory / behavior 子系统，并行会严重 rebase 冲突。F127 旗舰**设计先行**（spec / plan 设计 → 用户拍板范围 → 再实施）。
 
-**M7 收官（2026-07-19 用户三拍板）**：①F128 defer 带触发条件（见上行）；②收官闸=沿 M6 先例跑 **DeepSeek 控变量零回归 OctoBench**（Tier1+3/1-iter，对比 m6-v32-fix baseline 0.276，主 session 派 agent 执行中）——认知能力提升的定向真模型验证已有（F127 G-lite DeepSeek 6/6 + F111 real_llm GPT-5.5 PASS 进 release lane）；③**M10 方向 = 部署完成度收尾**：用户侧 tailscale 部署闭环（remote 探针 not_enabled→绿）+ F134 bearer 加固 + F127/F111 候选审批前端 UI（现仅 REST/Telegram）+ P2 清扫（toolsets 死配置/容器交付评估/cron 失败通知）+ F111 归档的 3 平台级 follow-ups（盘外编辑可见性/USER.md live-state 同步/cron 热重载统一）。Feature 拆解待 bench 收官后正式立项。
+**M7 收官（2026-07-19 用户三拍板）**：①F128 defer 带触发条件（见上行）；②收官闸 ✅ **已跑完判定零回归**（2026-07-19，`m7-close-20260719` 归档 benchmarks/baselines/；30 task/55min/$0.21）：pass_rate 0.200 表面 -0.076 但**归因后无生产代码回归**——2 条 tool_call regression 复跑裁定：001=SiliconFlow TPM 限流风暴基建噪声（626×429 覆盖执行窗，backoff 耗尽决策环步数；单跑无并发 PASS 1.0 ×2）、003=断言刚性 vs AmbientRuntime 冲突（prompt 已含 current_datetime，模型直接抄答不调工具，撞「必须 TOOL_CALL 事件」断言；确定性翻转但非能力损失）。三护栏域实质守住：connor 0.750=M5 口径持平（M6 的 1.000 是 TIMEOUT-skip 分母口径效应）、snapshot 0.500、tool_call 无代码回归；0% 域三代画像一致；**主 agent 决策环 0 退 Echo**（30/30 fallback 全归属 memory-extractor teardown 已知良性路径）。**两条 followup 归 bench infra 待办（不阻收官）**：T1-TOOL-CALL-003 断言收敛（接受 AmbientRuntime 路径或 prompt 明示用工具）+ bench 8 并发 TPM 风险（prompt +3-5K/轮后限流更易触发，降 semaphore/指数退避跳出步数预算）——认知能力提升的定向真模型验证已有（F127 G-lite DeepSeek 6/6 + F111 real_llm GPT-5.5 PASS 进 release lane）；③**M10 方向 = 部署完成度收尾**：用户侧 tailscale 部署闭环（remote 探针 not_enabled→绿）+ F134 bearer 加固 + F127/F111 候选审批前端 UI（现仅 REST/Telegram）+ P2 清扫（toolsets 死配置/容器交付评估/cron 失败通知）+ F111 归档的 3 平台级 follow-ups（盘外编辑可见性/USER.md live-state 同步/cron 热重载统一）。Feature 拆解待 bench 收官后正式立项。
 
 **M7 其他 carry-forward 候选**（认知深化 主线后评估）：F120 F104 versionable 收窄 + FK 诚实化；Serena 式 LSP / 符号级代码理解（先外挂 MCP dogfood）；OC-5 用户 / agent 自助 proactive cron；Hermes 文件系统 checkpoint / rollback；Agent Zero 持久交互 shell + Extensions；Companion（独立 agent 伴侣，最开放，可能独立 milestone）。
 
