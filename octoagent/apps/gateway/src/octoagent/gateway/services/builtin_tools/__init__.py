@@ -63,16 +63,3 @@ async def register_all(broker, deps: ToolDeps) -> None:
     await ask_back_tools.register(broker, deps)
     # F126 项3: artifact read-back 工具
     await artifact_tools.register(broker, deps)
-
-
-def list_for_entrypoint(entrypoint: str) -> list:
-    """返回指定入口点可见的 ToolEntry 列表（委托 ToolRegistry，Feature 084 D1 根治）。
-
-    Args:
-        entrypoint: 入口点名称，如 "web"、"agent_runtime"、"telegram"。
-
-    Returns:
-        在指定入口点可见的 ToolEntry 列表。
-    """
-    from octoagent.gateway.harness.tool_registry import get_registry
-    return get_registry().list_for_entrypoint(entrypoint)

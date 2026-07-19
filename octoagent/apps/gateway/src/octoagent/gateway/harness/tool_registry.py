@@ -26,9 +26,6 @@ from pydantic import BaseModel, ConfigDict, Field
 
 log = structlog.get_logger()
 
-# 合法的入口点集合
-VALID_ENTRYPOINTS: frozenset[str] = frozenset({"web", "agent_runtime", "telegram"})
-
 
 class SideEffectLevel(str, Enum):
     """工具副作用级别（Constitution C3 要求声明）。"""
@@ -50,10 +47,20 @@ class ToolEntry(BaseModel):
     """工具唯一标识符，如 "user_profile.update"。"""
 
     entrypoints: frozenset[str]
-    """工具可见的入口点子集，元素来自 {"web", "agent_runtime", "telegram"}。"""
+    """工具的入口点标签子集，元素来自 {"web", "agent_runtime", "telegram"}。
+
+    F147：`toolsets.yaml` 配置驱动的 entrypoint 过滤链（toolset_resolver）已退役——
+    本字段现由 `capability_pack` 读入展示 metadata（UI/日志/discovery），并作为
+    `ToolRegistry.list_for_entrypoint` 的 registry 级标签契约，**不进生产工具集过滤**
+    （工具可见性由 CapabilityPack profile 决议）。
+    """
 
     toolset: str
-    """所属 toolset，如 "core"、"agent_only"。"""
+    """所属 toolset 描述性标签，如 "core"、"agent_only"（ToolEntry/plugin schema 一部分）。
+
+    F147：这是描述性 metadata——原 `toolsets.yaml` 过滤链（会消费它的那层）已退役，
+    但字段属 `ToolEntry` 公共 schema（quickstart 与 plugin 工具仍构造它），保留不删。
+    """
 
     handler: Callable
     """可调用对象（不序列化到 JSON）。"""
@@ -155,7 +162,11 @@ class ToolRegistry:
         return entry.handler(**args)
 
     def list_for_entrypoint(self, entrypoint: str) -> list[ToolEntry]:
-        """返回指定入口点可见的工具列表（FR-1.3 entrypoints 过滤）。
+        """返回带指定入口点标签的工具列表（registry 级 entrypoint 标签查询）。
+
+        F147：`toolsets.yaml` 配置驱动的过滤层（toolset_resolver）已退役；本方法保留
+        为 registry 级 entrypoint 标签契约（被 graph_pipeline / tool_registry 测试断言），
+        读 `ToolEntry.entrypoints` 标签，**不是**生产工具集可见性决议入口。
 
         Args:
             entrypoint: 入口点名称，如 "web"、"agent_runtime"、"telegram"。
