@@ -31,7 +31,7 @@
 
 - **后端全量**（worktree PYTHONPATH 锁 + `-n auto --dist=loadgroup`）：baseline `5356 passed`（改前实测）→ 改后 `5366 passed / 0 failed`（+10 = 本 Feature 新增测试），skipped/xfailed/xpassed 完全一致，**0 regression**。
 - **pre-commit hook**：每 commit e2e_smoke + e2e_scripted 过闸（26-27 passed）。
-- **前端**：vitest 全量 412 passed / 44 文件（改前基线 377 存量 + 本 Feature 新增 34 + P2 钉住 1，含旧页 7 用例吸收迁移）；`tsc -b` 0 错误；`check:complexity` 全过（ApprovalCenterPage 449/1200，无文件超限，index.css 未动）。
+- **前端**：vitest 全量 424 passed / 45 文件（存量 377 + 本 Feature 新增 47，含旧页 7 用例吸收迁移 + Codex P2 钉住 1 + Opus MED-1 API 层 12）；`tsc -b` 0 错误；`check:complexity` 全过（ApprovalCenterPage 449/1200，无文件超限，index.css 未动）。
 - **L1**：`npx playwright test` 4 passed ×2 轮（场景①②③全绿）；场景③单跑 PASS。
 - **浏览器实景**：badge 红点 → /approvals → 折叠 diff（红删绿增）→ 点接受 → 卡移除/空态/红点消失/盘上文件精简/summary 归零，全链目视确认。
 
@@ -41,11 +41,36 @@
 |------|------|------|
 | Codex spec review（`bea3cef0` 后） | 0 finding | — |
 | Codex final review（全分支 diff，gpt-5.4） | **0 HIGH / 2 P2 / 0 low** | 2 P2 全接受修复（`57bd66e2`）：①`parseUnifiedDiff` 误吞 hunk 后 `---`/`+++` 前缀内容行（markdown 分隔线场景，审批卡少展示真实改动）→ seenHunk 门控 + 钉住用例；②summary consolidation 计数降级过宽（DB 锁等真故障被掩成 0）→ 收窄到 `no such table`，其余 500 + 钉住用例 |
-| Opus 对抗自审（8 挑战维度） | 见 §4b | 见 §4b |
+| Opus 对抗评审（8 维度全量交叉核验真实代码） | **0 HIGH / 1 MED / 4 LOW** | MED-1 接受已修；LOW×4 归档带理由（§4b） |
+| Fable 自审席（挑战者立场独立逐维 + 物理核验） | 0 HIGH / 0 MED / 3 LOW（与 Opus LOW 高度重叠） | 见 §4b |
 
-### 4b Opus 对抗自审结论
+### 4b-0 Opus 对抗评审 finding 处理（MED-1 修 + 4 LOW 归档）
 
-（结果在归总报告附上；如有 finding 在此文档 revision 补充闭环记录。）
+- **[MED-1] `postApproval` HTTP body→resultStatus 解析零单测** —— **接受已修**。D4 分流承重前半段（HTTP→status）此前被 Page 测试的模块级 mock 屏蔽：若解析误读字段，全部失败静默降级 unknown（用户对已终态 conflict 候选反复点接受）而套件仍绿。修复：新增 `api/approval-center.test.ts` 12 用例，stub 全局 fetch 回放后端真实 body 三态（409+conflict / 409+pending / 404+not_found / 原生 404 detail-only / 原生 500 / 未知 status 值 / 网络层失败）+ getJson/bulk 调用形态。
+- **[LOW-1] claim 竞态失败复用 `conflict` 使 toast「已失效」对「已被并发成功处理」情形措辞不精确** —— 归档：后端语义（两 approval 服务 claim-fail 统一报 conflict），卡片移除行为正确、无双副作用；改文案需后端区分新 status 超「零改审批语义」红线。
+- **[LOW-2] 敏感候选 `merged_content` 卡面仍显示（与 previews 置空不对称）** —— 归档（拒绝收窄带理由）：①merged_content 是 F127 REST 既有契约面（列表端点设计上就返回给用户审查），F145 只是呈现层；previews 置空针对的是 F145 **新增**的读扩展面（新面不扩大敏感暴露）；②此类候选属 shouldn't-exist 异常态且 accept 恒 CONFLICT（第三层防御），无 apply 风险；③单用户私有 UI + front-door 鉴权，展示对象即数据 owner——隐正文反而让用户无法理解这条必失效候选为何存在。若 F127 v0.2 引入敏感候选合法路径需重议。
+- **[LOW-3] bulk-reject 飞行中单卡仍可操作** —— 归档：后端 CAS 保证任意交错收敛（输者 skipped/conflict），page-level busy 门为单用户罕见 race 增复杂度不值。
+- **[LOW-4] 路由级原生 404（无 status 字段）兜底映射 not_found → 卡移除** —— 归档：正常契约下 approval 服务 404 恒带 status 字段，裸 404 仅在降级部署/路径错配出现；彼时移除卡片避免死循环重试，刷新页面可复现列表。
+
+### 4b-1 Fable 自审席结论（挑战者立场独立逐维，含物理核验）
+
+| 维度 | 结论 | 证据 |
+|------|------|------|
+| 审批语义是否被绕 | ✅ 无绕行路径 | summary 端点纯 `SELECT COUNT`；`_build_source_previews` 仅 `MemoryService.get_memory` 只读；L1 provision 全在 `tests/e2e_live/l1_support/`（launcher 脚本 + 测试树，production 零 import 面）；前端只调既有 REST |
+| 三源状态映射失真 | ✅ 全集覆盖（物理核验） | grep 两 approval 服务全部 `status="..."` 赋值：失败态恰为 {not_found, conflict, pending}，与前端 `KNOWN_FAILURE_STATUSES` 完整对齐；FastAPI 原生 HTTPException（detail-only body，如 root-task-ensure 500）→ unknown → 通用重试文案 + 保留卡片（正确保守）；404 无 status 字段兜底映射 not_found |
+| CONFLICT 终态呈现 | ✅ 与后端终态语义一致 | conflict（含双 accept 竞态被 claim 拒）→ 移除 + 「已失效」toast 不诱导重试；pending（回滚）→ 保留可重试；移除路径也 dispatch badge 刷新（服务端该候选已出 pending，计数收敛） |
+| 非技术用户 UX | ✅ | 卡面零技术字段（candidate_id/run_id/partition/hash 均不上）；失败 detail 只进 console.warn；浏览器实景验证（截图：badge→分组→diff 红删绿增→接受→空态） |
+| 红点 badge 计数一致性 | ✅（1 LOW 归档） | 三源操作全部经 `notifyApprovalChanged` → summary 重拉；操作是同步落库后才 dispatch 无脏读窗口 |
+| L1 断言真在 UI 外 | ✅ | 三通道全部 node 上下文：REST fetch（pending 归零）/ fs readFileSync（盘上逐字节）/ bomb sentinel 文件；UI 仅 goto+visible+click 薄输入 |
+| source_previews 敏感泄露 | ✅ | 候选敏感/候选分区敏感/任一源分区敏感三层全对齐 `SENSITIVE_PARTITIONS` 单一判定源；源敏感在收集中途发现时 `return []` 丢弃已收集项（构造上无先收集后泄露）；异常降级日志只含 error 类型/SQL 文本不含记忆内容 |
+| 并发/双击 | ✅（1 LOW 归档） | ProposalCard busy 双按钮禁用；极端双击穿透由服务端 atomic claim 兜底（第二发 conflict→收敛移除），无双副作用 |
+
+**自审席 3 LOW 归档（不修带理由，与 Opus LOW-1/LOW-3 主题重叠）**：
+1. F127 list 端点 `pending_count=len(items)` 被 limit=200 截断，与 summary 真实 COUNT 在 >200 pending 时不一致——**存量建模**（F111 同款已修为真 COUNT，F127 未修），单用户 nightly 量级不可达；修它超「零改三源路由行为」红线颗粒度，留给 F127 v0.2。
+2. 双击穿透时 toast 顺序为「成功→已失效」——服务端状态正确、无双副作用，纯呈现噪声（≈Opus LOW-1）。
+3. summary 500 时 badge 静默不更新（hook catch）——badge 是辅助信号（与前身 useMemoryCandidateCount 同一取舍），页面本体有按源错误呈现兜底。
+
+**评审席位说明**：本 Feature 三席评审 = Codex final（gpt-5.4 外部对抗，0 HIGH/2 P2 已修）+ Opus 对抗评审（独立 agent 交叉核验真实代码，0 HIGH/1 MED 已修/4 LOW 归档）+ Fable 自审席（挑战者立场独立逐维物理核验，结论与前两席交叉印证）。**0 HIGH/0 MED 残留**。
 
 ## 5. 关键设计决策（实施中确认/微调）
 
