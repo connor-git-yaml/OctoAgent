@@ -16,6 +16,9 @@ interface FrontDoorGateProps {
 const TOKEN_CODES = new Set([
   "FRONT_DOOR_TOKEN_REQUIRED",
   "FRONT_DOOR_TOKEN_INVALID",
+  // F134：限流 429 也是 token 域——verify-first 语义下正确 token 恒放行，
+  // 展示输入框 + 后端 hint（含剩余秒数）就是正确的恢复路径
+  "FRONT_DOOR_RATE_LIMITED",
 ]);
 
 const TRUSTED_PROXY_CODES = new Set([

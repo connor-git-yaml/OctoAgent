@@ -540,19 +540,26 @@ class TestCodexReviewFixes:
         assert "已回滚" in result.output
         assert "手动" in result.output
 
-    def test_enable_token_write_failure_bearer_gateway_alive_keeps_serve(
+    def test_enable_yaml_write_failure_bearer_working_keeps_serve(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """AC-T3c：token 写入失败 + **裸请求观测到 bearer 真在挡**（repair
-        场景：token 仍在服务进程 env、远程真 working）→ 不回滚（Codex 第四轮
-        P1：回滚会立断）+ 警告重启后 bearer 缺凭证。"""
+        """AC-T3c（十三轮后改造）：token 写失败+working 的组合已被 AC-T8 分支
+        上游拦截（working 时不写）——settle 的"保留"分支现经 **yaml 写失败**
+        路径可达：token 已设 + 服务真按 bearer 在挡（env shadow bearer 的
+        repair 形态）+ save_config 失败 → 不回滚（保 working 远程）。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
-        saved: list = []
-        _patch_config(monkeypatch, _FakeConfig(mode="bearer"), saved)
-        broken_root = tmp_path / "missing" / "instance"
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        (tmp_path / ".env").write_text(
+            "OCTOAGENT_FRONTDOOR_TOKEN=already-set-token-value\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        import octoagent.gateway.services.config.config_wizard as cw
+
         monkeypatch.setattr(
-            remote_commands, "resolve_instance_root", lambda: broken_root
+            cw,
+            "save_config",
+            lambda *_a: (_ for _ in ()).throw(OSError("read-only octoagent.yaml")),
         )
         monkeypatch.setattr(
             remote_commands,
@@ -571,10 +578,9 @@ class TestCodexReviewFixes:
 
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 1
-        assert saved == []  # 不切 mode（yaml 已 bearer 本就不写；.env 缺 token）
-        assert rollback_calls == []  # ★ bearer+Octo 活着不动 serve（保 working 远程）
+        assert rollback_calls == []  # ★ bearer 真在挡时不动 serve（保 working 远程）
         assert "保留 serve 映射" in result.output
-        assert "重启后" in result.output  # 警告 stale in-process token 的时限
+        assert "octoagent.yaml 失败" in result.output
 
     def test_enable_token_write_failure_loopback_alive_still_rolls_back(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
@@ -845,6 +851,34 @@ class TestCodexReviewFixes:
         assert (tmp_path / ".env").exists()  # token 生成了
         assert "立即" in result.output
         assert "octo restart" in result.output
+
+    def test_enable_skips_generation_when_service_holds_injected_token(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T8（Codex 十三轮 P1）：token 不在 dotenv 文件但**服务正拿着生效
+        token 在挡**（launchd/systemd/容器 env 注入形态）→ 不生成不写 .env
+        （防重启后 source 覆盖注入值 = 静默轮换使已保存客户端 token 失效）。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        saved: list = []
+        _patch_config(monkeypatch, _FakeConfig(mode="bearer"), saved)
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        monkeypatch.setattr(
+            remote_commands, "_remote_bearer_working", lambda _port: True
+        )
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 0
+        assert not (tmp_path / ".env").exists()  # ★ 不生成不写
+        assert "不自动生成" in result.output
+        assert "已生成" not in result.output
+        # 服务已持有 token → 不需要 restart 红警告
+        assert "立即" not in result.output
 
     def test_enable_litellm_nonblank_token_counts_as_set(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path

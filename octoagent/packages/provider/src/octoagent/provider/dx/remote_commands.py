@@ -453,7 +453,22 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
     # 写入失败即止（不切 mode + exit 1）——bearer 无 token 会让受保护 API 全
     # 503（_read_secret），与「serve 成功才持久化」同一"完成态才生效"原子精神。
     token_lines: list[str] = []
-    if token_missing:
+    if token_missing and _remote_bearer_working(port):
+        # Codex 十三轮 P1：token 可经 launchd/systemd/容器环境注入（不落
+        # dotenv 文件）——服务正拿着生效 token 在挡（行为观测 401）时，生成
+        # 新值写 .env 会在下次重启被 source 覆盖注入值 → 静默轮换凭证、使
+        # 所有已保存的客户端 token 失效。不生成，提示持久化路径。
+        # 注意 token_missing 置 False 兼顾下游："已设指引"分支被本分支的
+        # 提示替代（if/elif/else 三态互斥）、restart 红警告不触发（服务
+        # 已持有 token 无需重启）。
+        token_missing = False
+        token_lines = [
+            "[yellow]检测到运行中的服务已持有生效 token（来源非实例 .env，"
+            "可能经服务环境注入）——不自动生成新 token，以免重启后凭证轮换"
+            "使已保存的客户端 token 失效。[/yellow]",
+            f"  如需持久化到实例 .env：手动追加 {token_env}=<当前生效值>。",
+        ]
+    elif token_missing:
         # Codex 八轮 P2：.env.litellm 的空赋值（source 顺序靠后）会盖掉本次
         # 生成写入 .env 的值 → 重启后 bearer 仍无凭证。生成前守卫，让用户先
         # 清理该行（legacy 文件不代改）。

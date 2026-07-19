@@ -6,6 +6,7 @@ import {
   fetchControlSnapshot,
   fetchTaskDetail,
   getFrontDoorTokenStorageMode,
+  isFrontDoorApiError,
   saveFrontDoorToken,
 } from "./client";
 
@@ -109,5 +110,37 @@ describe("api client front-door auth", () => {
       message: "当前实例要求 Bearer Token。",
       hint: "请输入 token 后重试。",
     } satisfies Partial<ApiError>);
+  });
+
+  it("F134：限流 429 FRONT_DOOR_RATE_LIMITED 被识别为 front-door 错误（走 gate 而非通用错误态）", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: {
+            code: "FRONT_DOOR_RATE_LIMITED",
+            message: "认证失败次数过多，请稍后再试。",
+            hint: "该来源已被暂时限流，约 300 秒后可重试；使用正确凭证的请求不受影响。",
+          },
+        }),
+        {
+          status: 429,
+          headers: { "Content-Type": "application/json", "Retry-After": "300" },
+        }
+      )
+    );
+
+    let caught: unknown;
+    try {
+      await fetchTaskDetail("task-1");
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toMatchObject({
+      name: "ApiError",
+      status: 429,
+      code: "FRONT_DOOR_RATE_LIMITED",
+    } satisfies Partial<ApiError>);
+    // verify-first 语义：输入正确 token 即恢复 → 必须归 front-door 域渲染 gate
+    expect(isFrontDoorApiError(caught)).toBe(true);
   });
 });
