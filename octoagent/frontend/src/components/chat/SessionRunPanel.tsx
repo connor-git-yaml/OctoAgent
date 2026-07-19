@@ -42,8 +42,26 @@ function describeEvent(event: TaskEvent): { title: string; tone: "normal" | "pen
   if (type === "USER_MESSAGE") {
     return { title: "收到你的消息", tone: "normal" };
   }
-  // 兜底：把 SNAKE_CASE 类型转成可读文案
-  return { title: type ? type.toLowerCase().replace(/_/g, " ") : "运行事件", tone: "normal" };
+  if (type.startsWith("BEHAVIOR")) {
+    return { title: "加载行为配置", tone: "normal" };
+  }
+  if (type.startsWith("MEMORY_RECALL")) {
+    return { title: "回忆相关背景", tone: "normal" };
+  }
+  if (type.startsWith("MEMORY")) {
+    return { title: "更新记忆", tone: "normal" };
+  }
+  if (type.startsWith("SKILL")) {
+    return { title: "运行技能", tone: "normal" };
+  }
+  if (type.startsWith("CHECKPOINT")) {
+    return { title: "保存进度", tone: "normal" };
+  }
+  if (type.startsWith("SUBAGENT") || type.startsWith("DELEGATION") || type.startsWith("A2A")) {
+    return { title: "分工协作", tone: "normal" };
+  }
+  // 兜底：面向非技术用户不暴露原始事件类型名（原始细节在「打开任务详情」全页可查）
+  return { title: "系统处理", tone: "normal" };
 }
 
 function formatEventTime(ts: string): string {
