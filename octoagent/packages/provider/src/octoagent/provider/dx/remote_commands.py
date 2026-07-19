@@ -344,19 +344,26 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
         write_error = _write_generated_token(root, token_env)
         if write_error is not None:
             lines.append(f"[red]bearer token 写入 .env 失败：{write_error}[/red]")
-            # Codex 四轮收敛终裁（要回滚 → 反回滚 → 回滚 → 服务活时反回滚）：
-            # 回滚与否取决于「远程当下是否 working」，用 /ready 探针二分——
-            # ①服务死 ⇒ 回滚：serve 映射独立于 Octo 进程持久存在（tailscaled
-            #   配置跨重启），残留会在端口易主时把任意本地进程暴露到 tailnet
-            #   （第三轮 P1）；此时无 outage 可言（本来就没服务）。
-            # ②服务活 ⇒ 不回滚：token 可能仍在服务进程 env 里（.env 后来丢失/
-            #   锁死的 repair 场景），guard 正在挡、远程真 working——回滚会立断
-            #   （第四轮 P1）；暴露面不成立（端口被 Octo front door 占着）。
+            # Codex 六轮收敛终裁（要回滚→反回滚→回滚→服务活时反回滚→验 Octo
+            # 特征→还须已按 bearer 生效）：回滚与否取决于「远程当下是否真
+            # working」，两个条件缺一不可——
+            # ①保留（不回滚）仅当 **effective mode 已是 bearer 且端口上验出
+            #   Octo**：token 可能仍在服务进程 env 里（.env 后来丢失/锁死的
+            #   repair 场景），guard 正在挡、远程真 working，回滚会立断
+            #   （第四轮 P1）；此时暴露面不成立（端口被 Octo front door 占着）。
             #   警告"重启后 bearer 将缺 token"。
-            if _octo_gateway_on_port(port):
+            # ②其余一律回滚：普通 loopback 首次 enable 即使服务活着也不构成
+            #   working 远程（mode 未切，serve 转发带 XFF 必 403，第六轮 P2
+            #   ——保留只留隐患）；服务死/端口被非 Octo 进程占（第五轮 P1）
+            #   则残留映射会在端口易主时把任意本地进程暴露到 tailnet
+            #   （第三轮 P1）。fail-closed：判定不确定就回滚。
+            remote_effectively_working = _effective_mode(
+                cfg, env
+            ) == "bearer" and _octo_gateway_on_port(port)
+            if remote_effectively_working:
                 lines.append(
-                    "[yellow]检测到 gateway 正在运行——保留 serve 映射（若服务进程"
-                    "已载入 token，远程访问仍可用）。[/yellow]"
+                    "[yellow]检测到 gateway 正以 bearer 模式运行——保留 serve 映射"
+                    "（若服务进程已载入 token，远程访问仍可用）。[/yellow]"
                 )
                 lines.append(
                     "[yellow]注意：实例 .env 缺 token，服务**重启后** bearer 将缺"
@@ -366,7 +373,7 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
                 rollback = disable_tailscale_serve(port=port)
                 if rollback.ok:
                     lines.append(
-                        "[yellow]gateway 未运行——已回滚本次开启的 serve 映射"
+                        "[yellow]远程尚未生效——已回滚本次开启的 serve 映射"
                         "（避免残留暴露面）。[/yellow]"
                     )
                 else:

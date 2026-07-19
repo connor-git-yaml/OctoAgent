@@ -531,12 +531,46 @@ class TestCodexReviewFixes:
         assert "已回滚" in result.output
         assert "手动" in result.output
 
-    def test_enable_token_write_failure_gateway_alive_keeps_serve(
+    def test_enable_token_write_failure_bearer_gateway_alive_keeps_serve(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """AC-T3c：token 写入失败 + **gateway 正在运行** → 不回滚（token 可能
-        仍在服务进程 env 里、远程真 working，回滚会立断——Codex 第四轮 P1
-        场景）+ 警告重启后 bearer 缺凭证。"""
+        """AC-T3c：token 写入失败 + **实例已按 bearer 生效且 Octo 在端口上**
+        （repair 场景：token 仍在服务进程 env、远程真 working）→ 不回滚
+        （Codex 第四轮 P1：回滚会立断）+ 警告重启后 bearer 缺凭证。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        saved: list = []
+        _patch_config(monkeypatch, _FakeConfig(mode="bearer"), saved)
+        broken_root = tmp_path / "missing" / "instance"
+        monkeypatch.setattr(
+            remote_commands, "resolve_instance_root", lambda: broken_root
+        )
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: True)
+        rollback_calls: list = []
+        monkeypatch.setattr(
+            remote_commands,
+            "disable_tailscale_serve",
+            lambda **k: rollback_calls.append(k) or TailscaleServeResult(ok=True),
+        )
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 1
+        assert saved == []  # 不切 mode（yaml 已 bearer 本就不写；.env 缺 token）
+        assert rollback_calls == []  # ★ bearer+Octo 活着不动 serve（保 working 远程）
+        assert "保留 serve 映射" in result.output
+        assert "重启后" in result.output  # 警告 stale in-process token 的时限
+
+    def test_enable_token_write_failure_loopback_alive_still_rolls_back(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T3d（Codex 第六轮 P2 钉住）：loopback 实例首次 enable + 服务活着
+        + token 写失败 → **仍回滚**——mode 未切时远程本就不可用（serve 转发带
+        XFF 必 403），保留映射零收益纯留暴露隐患。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         saved: list = []
@@ -560,10 +594,9 @@ class TestCodexReviewFixes:
 
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 1
-        assert saved == []  # 不切 mode（.env 缺 token，重启后会 503）
-        assert rollback_calls == []  # ★ 服务活着不动 serve（保 working 远程）
-        assert "保留 serve 映射" in result.output
-        assert "重启后" in result.output  # 警告 stale in-process token 的时限
+        assert saved == []
+        assert rollback_calls  # ★ mode 非 bearer ⇒ 服务活着也回滚
+        assert "已回滚" in result.output
 
     def test_enable_token_write_failure_rollback_failure_gives_manual_hint(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
