@@ -654,7 +654,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 
 ---
 
-### M10（部署完成度收尾：从「功能就绪」到「日用无欠账」）⏳ 启动（2026-07-19）
+### M10（部署完成度收尾：从「功能就绪」到「日用无欠账」）⏳ 4 Feature 全 ✅（2026-07-19，master ee4772cf，CI 全绿）——仅剩用户侧 tailscale 部署验收
 
 > **目标（用户拍板 2026-07-19）**：把散在各 Feature 归档里的"最后一公里"欠账收齐——审批不再只能 REST/Telegram、手机远程链路真通、安全尾巴收掉、平台一致性小债清零。M7/M8/M9 全 ✅ 后的收尾型 milestone，规模小见效快。
 > **两拍板**：①照单 4 Feature 全立，首波 F145∥F134∥F146 三路并行（文件面 frontend / front_door / services+core 三不沾），F147 第二波；②用户侧 tailscale 部署放 M10 收尾（F134 加固 + F145 审批 UI 落地后装，届时手机体验完整；enable+探针主 session 陪跑）。
@@ -669,5 +669,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 **首波组合态验收（2026-07-19，本地叠加未 push 等拍板）**：F134（21c）→F146（5c）→F145（8c）串行 rebase 叠加，代码零冲突（仅 milestones 三方 ✅ 行文档冲突，含 F145 多 docs commit 同型冲突循环解）。联合验收全绿：**后端确定性全量 5409 passed / 0 failed**（`-m 'not real_llm'` F141 baseline lane 同款，xdist 并行 3min）+ e2e_smoke/scripted 26 + **frontdoor 矩阵 42 passed**（F144 17 格 + F134 限流扩格）+ 前端 vitest **428/46** + complexity/tsc 全过 + **L1 Playwright 4/4**（含 F145 新增审批点击场景，10.6s）。venv/npm/dist 三收敛惯例照做。
 
 **验收项（非 Feature，用户动作 + 主 session 陪跑）**：装 Tailscale + `octo remote enable` → `octo attest remote` 绿（手机链路真通）；某次重启 Mac 后签 ATT-129-BOOT（attestation 清单唯一残余）。**M10 完成定义**：4 Feature ✅ + remote 探针绿 + `lane.py release` 除 attestation 外全绿。
+
+**4 Feature 落地闭环（2026-07-19）**：F145 审批中心 / F134 bearer 加固 / F146 平台一致性（首波 dd88c49a）+ F147 清扫篮（58249eaa）全合入 master，CI 全绿。CI triage 两轮均非回归：①F134 remote_commands console 模块单例 width import 锁死致 CI 80 列折断 CJK 断言（超宽 console 注入根治）；②tool_index 检索延迟 <10ms 绝对性能断言 CI 慢 runner 抖到 14ms（F142 性能豁免同类，CI=true skipif；本地 0.09s 稳过，F147 未碰 tooling）。**F147 顺手治两真债**：skills/runner.py 429 退避吃 max_steps 决策步数（M7 bench 限流截断根因，改指数退避不计步数）+ 三姊妹 cron FAILED 零通知补 HIGH 级。**收官仅差用户动作**：装 Tailscale + `octo remote enable`（主 session 陪跑）→ `octo attest remote` 从 not_enabled 转绿 + 某次重启签 ATT-129-BOOT。
 
 **M10 收官（2026-07-19，功能层全 ✅）**：4 Feature 全部完成——首波 F145 审批中心 ∥ F134 bearer 加固 ∥ F146 平台一致性（本地待 push）+ 第二波 **F147 清扫篮 ✅**（5 项独立小项：toolsets 死配置清理 / cron 三姊妹失败 HIGH 通知 / bench infra 两债 / 容器交付不做归档 / console_output 窄终端 floor；5419 passed 0 regression；Codex spec 2H+5M+3L + final + Opus 双评审 0 HIGH）。**剩余 = 纯用户侧部署验收**（非代码）：用户装 Tailscale + `octo remote enable` → `octo attest remote` 绿 + 某次重启 Mac 签 ATT-129-BOOT。功能层欠账已清零。
