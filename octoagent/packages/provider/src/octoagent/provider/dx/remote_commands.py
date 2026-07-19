@@ -152,21 +152,32 @@ def _set_front_door_mode(cfg, root, mode: str) -> None:
     save_config(cfg, root)
 
 
-def _gateway_alive(port: int) -> bool:
-    """gateway 是否活着（GET /ready，2s 超时）。
+def _octo_gateway_on_port(port: int) -> bool:
+    """端口上是否跑着 **Octo gateway**（GET /ready 验响应特征，2s 超时）。
 
-    F134 Codex 四轮收敛的裁决探针：token 写失败后是否回滚 serve 映射，取决于
-    「远程访问当下是否 working」——服务活 ⇒ token 在其进程 env 里仍在挡
-    （guard 读 os.environ），回滚会立断 working 远程（第四轮 P1 场景）；服务死
-    ⇒ 映射残留会在端口易主时暴露任意本地进程（第三轮 P1 场景）。两场景对
-    「服务是否在跑」时间互斥，探一下就能同时消掉。
+    F134 Codex 五轮收敛的裁决探针：token 写失败后是否回滚 serve 映射，取决于
+    「远程访问当下是否 working」——Octo 活 ⇒ token 可能在其进程 env 里仍在挡
+    （guard 读 os.environ），回滚会立断 working 远程；Octo 不在 ⇒ 映射残留会
+    在端口易主时暴露任意本地进程。两场景对「Octo 是否在跑」时间互斥。
+
+    第五轮 P1：不能用「任意 <500 响应」当活信号——端口若被**非 Octo** 进程
+    占着（misbound/其他 dev server），宽判定会保留映射、把该进程暴露到
+    tailnet（恰是要防的残留面）。须验 Octo `/ready` 的响应特征：JSON 且
+    ``status ∈ {ready, not_ready}`` 且含 ``checks``（503 not_ready 也算
+    Octo 在——依赖降级仍是 Octo 占着端口）。判定失败一律按"不在"回滚
+    （fail-closed：宁可多关一次映射，不留暴露面）。
     """
     try:
         import httpx
 
         resp = httpx.get(f"http://127.0.0.1:{port}/ready", timeout=2.0)
-        return resp.status_code < 500
-    except Exception:  # noqa: BLE001 - 连不上/超时 = 服务不在
+        payload = resp.json()
+        return (
+            isinstance(payload, dict)
+            and payload.get("status") in ("ready", "not_ready")
+            and "checks" in payload
+        )
+    except Exception:  # noqa: BLE001 - 连不上/超时/非 JSON = 不是 Octo
         return False
 
 
@@ -342,7 +353,7 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
             #   锁死的 repair 场景），guard 正在挡、远程真 working——回滚会立断
             #   （第四轮 P1）；暴露面不成立（端口被 Octo front door 占着）。
             #   警告"重启后 bearer 将缺 token"。
-            if _gateway_alive(port):
+            if _octo_gateway_on_port(port):
                 lines.append(
                     "[yellow]检测到 gateway 正在运行——保留 serve 映射（若服务进程"
                     "已载入 token，远程访问仍可用）。[/yellow]"

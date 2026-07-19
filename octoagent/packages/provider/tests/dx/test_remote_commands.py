@@ -514,7 +514,7 @@ class TestCodexReviewFixes:
             "enable_tailscale_serve",
             lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
         )
-        monkeypatch.setattr(remote_commands, "_gateway_alive", lambda _port: False)
+        monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: False)
         rollback_calls: list = []
 
         def _fake_disable(**kwargs: object) -> TailscaleServeResult:
@@ -550,7 +550,7 @@ class TestCodexReviewFixes:
             "enable_tailscale_serve",
             lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
         )
-        monkeypatch.setattr(remote_commands, "_gateway_alive", lambda _port: True)
+        monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: True)
         rollback_calls: list = []
         monkeypatch.setattr(
             remote_commands,
@@ -583,7 +583,7 @@ class TestCodexReviewFixes:
             "enable_tailscale_serve",
             lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
         )
-        monkeypatch.setattr(remote_commands, "_gateway_alive", lambda _port: False)
+        monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: False)
         monkeypatch.setattr(
             remote_commands,
             "disable_tailscale_serve",
