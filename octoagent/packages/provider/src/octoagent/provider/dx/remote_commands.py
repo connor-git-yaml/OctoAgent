@@ -309,20 +309,26 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
         write_error = _write_generated_token(root, token_env)
         if write_error is not None:
             lines.append(f"[red]bearer token 写入 .env 失败：{write_error}[/red]")
-            # Codex final P2 + re-review P2 调和：**不自动回滚 serve**，但把
-            # 状态如实说清。自动 `--https=443 off` 会在「重跑 enable 补 token」
-            # 场景把原本 working 的映射也关掉（443 上第三方映射则在 serve 接管
-            # 时已被覆盖，回滚同样救不回）——破坏面 > 收益。半开启无安全风险：
-            # mode 仍 loopback，serve 转发带 X-Forwarded-* 必 403（F130 §2）。
+            # Codex 三轮收敛（final P2 要回滚 → re-review P2 反回滚 → re-re P1
+            # 终裁回滚）：serve 映射独立于 Octo 进程持久存在（tailscaled 配置，
+            # 跨重启），若不回滚，之后 Octo 停止/端口易主时这条失败 enable 留下
+            # 的 443→localhost:<port> 会把**任意**占该端口的本地进程暴露到
+            # tailnet（持久暴露面，P1）。反方"回滚破坏 working 映射"是伪场景：
+            # token 未设 ⇒ bearer 无 token 503 / loopback 带 XFF 403，映射必
+            # 不可用、无 working 状态可破坏；443 第三方映射在 serve 接管时已被
+            # 覆盖（F130 既有行为），off 不加剧损失。
+            rollback = disable_tailscale_serve(port=port)
+            if rollback.ok:
+                lines.append(
+                    "[yellow]已回滚本次开启的 serve 映射（避免残留暴露面）。[/yellow]"
+                )
+            else:
+                lines.append(
+                    "[yellow]serve 映射回滚失败——本次映射仍开着（443 → 本机），"
+                    "请手动 `octo remote disable` 或 `tailscale serve --https=443 off`。[/yellow]"
+                )
             lines.append(
-                "[yellow]注意：本次 serve 映射已开启（tailnet URL 已指向本机），"
-                "但 token 未配置、front_door.mode 未改动——远程访问尚不可用。[/yellow]"
-            )
-            lines.append(
-                "  如需关闭映射：`octo remote disable`（或 `tailscale serve --https=443 off`）。"
-            )
-            lines.append(
-                f"[yellow]修复方式：手动在 {root / '.env'} 设置 "
+                f"[yellow]front_door.mode 未改动——请手动在 {root / '.env'} 设置 "
                 f"{token_env}=<强随机值>（如 `python3 -c 'import secrets; "
                 "print(secrets.token_urlsafe(32))'`）后重试 `octo remote enable`。[/yellow]"
             )

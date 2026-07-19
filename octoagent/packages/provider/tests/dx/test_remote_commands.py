@@ -497,10 +497,10 @@ class TestCodexReviewFixes:
     def test_enable_token_write_failure_aborts_before_mode_switch(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """AC-T3：token 写入失败 → 红报 + exit 1 + **不切 mode** + **不自动回滚
-        serve 但如实说明**（Codex final P2 + re-review P2 调和：自动
-        `--https=443 off` 会在重跑 enable 场景关掉原本 working 的映射，破坏面
-        大于收益；半开启无安全风险——mode 仍 loopback，serve 转发必 403）。"""
+        """AC-T3：token 写入失败 → 红报 + exit 1 + **不切 mode** + **回滚本次
+        serve 映射**（Codex 三轮收敛终裁 P1：serve 映射独立于 Octo 进程持久
+        存在，不回滚会在端口易主时把任意本地进程暴露到 tailnet；"破坏 working
+        映射"是伪场景——token 未设时映射必不可用）。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         saved: list = []
@@ -526,11 +526,42 @@ class TestCodexReviewFixes:
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 1
         assert saved == []  # ★ 不切 mode
-        assert rollback_calls == []  # ★ 不自动动用户的 serve 配置（re-review P2）
+        assert rollback_calls  # ★ 本次映射被回滚（防持久残留暴露面）
         assert "写入 .env 失败" in result.output
-        assert "serve 映射已开启" in result.output  # ★ 状态如实（final P2 诉求）
-        assert "octo remote disable" in result.output  # 给关闭指引
+        assert "已回滚" in result.output
         assert "手动" in result.output
+
+    def test_enable_token_write_failure_rollback_failure_gives_manual_hint(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T3b：回滚也失败 → 如实说明映射仍开 + 手动关闭指引（不假报）。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        saved: list = []
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), saved)
+        broken_root = tmp_path / "missing" / "instance"
+        monkeypatch.setattr(
+            remote_commands, "resolve_instance_root", lambda: broken_root
+        )
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        monkeypatch.setattr(
+            remote_commands,
+            "disable_tailscale_serve",
+            lambda **k: TailscaleServeResult(
+                ok=False, error_code="permission_denied", hint="手动 sudo"
+            ),
+        )
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 1
+        assert saved == []
+        assert "回滚失败" in result.output
+        assert "仍开着" in result.output
+        assert "octo remote disable" in result.output
 
     def test_enable_token_append_preserves_existing_env_content(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
