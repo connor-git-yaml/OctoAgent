@@ -143,4 +143,26 @@ describe("api client front-door auth", () => {
     // verify-first 语义：输入正确 token 即恢复 → 必须归 front-door 域渲染 gate
     expect(isFrontDoorApiError(caught)).toBe(true);
   });
+
+  it("F134：trusted_proxy 侧限流 429（PROXY_RATE_LIMITED）同样归 front-door 域", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: {
+            code: "FRONT_DOOR_PROXY_RATE_LIMITED",
+            message: "认证失败次数过多，请稍后再试。",
+          },
+        }),
+        { status: 429, headers: { "Content-Type": "application/json" } }
+      )
+    );
+
+    let caught: unknown;
+    try {
+      await fetchTaskDetail("task-1");
+    } catch (error) {
+      caught = error;
+    }
+    expect(isFrontDoorApiError(caught)).toBe(true);
+  });
 });

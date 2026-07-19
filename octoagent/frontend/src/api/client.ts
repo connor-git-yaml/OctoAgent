@@ -45,8 +45,10 @@ const FRONT_DOOR_ERROR_CODES = new Set([
   "FRONT_DOOR_TOKEN_REQUIRED",
   "FRONT_DOOR_TOKEN_INVALID",
   // F134：认证失败限流（429）——仍属 front-door 认证域；verify-first 语义下
-  // 输入正确 token 即恢复，必须走 FrontDoorGate 而非通用错误态
+  // 提供正确凭证即恢复，必须走 FrontDoorGate 而非通用错误态。
+  // bearer 版归 token gate、proxy 版归 trusted_proxy 指引（分 code 防误导）
   "FRONT_DOOR_RATE_LIMITED",
+  "FRONT_DOOR_PROXY_RATE_LIMITED",
   "FRONT_DOOR_TOKEN_ENV_MISSING",
   "FRONT_DOOR_TRUSTED_PROXY_REQUIRED",
   "FRONT_DOOR_PROXY_TOKEN_REQUIRED",

@@ -194,19 +194,25 @@ class FrontDoorGuard:
         code: str,
         message: str,
         hint: str,
+        rate_limited_code: str,
         headers: dict[str, str] | None = None,
     ) -> HTTPException:
         """带错凭证的拒绝出口（F134 FR-1a）：计失败、lockout 中升级 429。
 
         只有「带了凭证但验证失败」走这里（缺凭证不计数，FR-1c）；正确凭证
         在调用方直接放行 + reset（FR-1b），故本方法不可能拦下合法用户。
+
+        ``rate_limited_code`` 按凭证类别区分（Codex 十四轮 P2，对称既有
+        ``TOKEN_INVALID`` / ``PROXY_TOKEN_INVALID`` 命名法）：前端把 bearer
+        版归 token gate（输对 token 即恢复），proxy 版归 trusted_proxy 指引
+        ——统一 code 会让 trusted_proxy 用户被误导去输无用的 bearer token。
         """
         retry_after = self._rate_limiter.record_failure(client_host)
         if retry_after is not None:
             retry_seconds = max(1, math.ceil(retry_after))
             return _http_error(
                 429,
-                "FRONT_DOOR_RATE_LIMITED",
+                rate_limited_code,
                 "认证失败次数过多，请稍后再试。",
                 hint=f"该来源已被暂时限流，约 {retry_seconds} 秒后可重试；"
                 "使用正确凭证的请求不受影响。",
@@ -263,6 +269,7 @@ class FrontDoorGuard:
                     code="FRONT_DOOR_TOKEN_INVALID",
                     message="Bearer Token 无效。",
                     hint="请确认本地保存的 token 与服务端环境变量一致。",
+                    rate_limited_code="FRONT_DOOR_RATE_LIMITED",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
             self._rate_limiter.reset(client_host)
@@ -299,6 +306,7 @@ class FrontDoorGuard:
                     code="FRONT_DOOR_PROXY_TOKEN_INVALID",
                     message="trusted proxy 共享鉴权 header 无效。",
                     hint="请确认代理注入的共享 token 与服务端环境变量一致。",
+                    rate_limited_code="FRONT_DOOR_PROXY_RATE_LIMITED",
                 )
             self._rate_limiter.reset(client_host)
             return

@@ -468,6 +468,15 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
             "使已保存的客户端 token 失效。[/yellow]",
             f"  如需持久化到实例 .env：手动追加 {token_env}=<当前生效值>。",
         ]
+        # Codex 十四轮 P2：注入捷径不能吞掉 litellm 空赋值事实——组合形态
+        # （env 注入 + legacy .env.litellm 留有 `TOKEN=` 空行）下，按上面提示
+        # 写 .env 仍会被 source 顺序靠后的空值覆盖 → 重启后 503。提示补准。
+        if _litellm_blank_override(root, token_env):
+            token_lines.append(
+                f"[yellow]  注意：{root / '.env.litellm'} 存在空赋值 "
+                f"`{token_env}=`（source 顺序靠后会覆盖 .env）——持久化前请先"
+                "删除该行。[/yellow]"
+            )
     elif token_missing:
         # Codex 八轮 P2：.env.litellm 的空赋值（source 顺序靠后）会盖掉本次
         # 生成写入 .env 的值 → 重启后 bearer 仍无凭证。生成前守卫，让用户先

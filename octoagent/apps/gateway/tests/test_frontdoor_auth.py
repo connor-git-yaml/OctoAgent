@@ -558,6 +558,9 @@ class TestFrontDoorRateLimitMatrix:
                 "/api/probe", headers={"X-OctoAgent-Proxy-Auth": "wrong-secret"}
             )
             assert resp.status_code == 429
+            # Codex 十四轮 P2：proxy 侧限流 code 与 bearer 版区分（前端据此
+            # 归 trusted_proxy 指引而非 bearer token 输入框）
+            assert resp.json()["detail"]["code"] == "FRONT_DOOR_PROXY_RATE_LIMITED"
 
             ok = await client.get(
                 "/api/probe", headers={"X-OctoAgent-Proxy-Auth": "proxy-secret"}

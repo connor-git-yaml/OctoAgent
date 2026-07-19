@@ -26,6 +26,8 @@ const TRUSTED_PROXY_CODES = new Set([
   "FRONT_DOOR_PROXY_TOKEN_REQUIRED",
   "FRONT_DOOR_PROXY_TOKEN_INVALID",
   "FRONT_DOOR_PROXY_TOKEN_ENV_MISSING",
+  // F134：trusted_proxy 侧限流 429 归代理指引（bearer token 输入框对它无用）
+  "FRONT_DOOR_PROXY_RATE_LIMITED",
 ]);
 
 function resolveGuidance(error: ApiError): string {

@@ -880,6 +880,34 @@ class TestCodexReviewFixes:
         # 服务已持有 token → 不需要 restart 红警告
         assert "立即" not in result.output
 
+    def test_enable_injected_token_with_litellm_blank_gets_extra_warning(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T8b（Codex 十四轮 P2）：注入捷径 × legacy .env.litellm 空赋值
+        组合——"手动追加 .env 可持久化"的提示必须补上"先删 litellm 空行"
+        （否则照提示写完重启仍 503）。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        _patch_config(monkeypatch, _FakeConfig(mode="bearer"), [])
+        (tmp_path / ".env.litellm").write_text(
+            "OCTOAGENT_FRONTDOOR_TOKEN=\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        monkeypatch.setattr(
+            remote_commands, "_remote_bearer_working", lambda _port: True
+        )
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 0
+        assert "不自动生成" in result.output
+        assert ".env.litellm" in result.output  # 组合形态提示补准
+        assert "删除该行" in result.output
+
     def test_enable_litellm_nonblank_token_counts_as_set(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
