@@ -17,6 +17,7 @@ expected_events:
   - event_type: TOOL_CALL_STARTED
     required_fields:
       tool_name_contains: "read"  # 收紧到读工具（filesystem.read_text 或类似）
+      args_summary_contains: "README.md"  # 收紧到读对的文件（防"读错文件再胡答"，Codex final MED）
   - event_type: TOOL_CALL_COMPLETED
     required_fields: {}  # 工具调用完成即可
   - event_type: MODEL_CALL_COMPLETED

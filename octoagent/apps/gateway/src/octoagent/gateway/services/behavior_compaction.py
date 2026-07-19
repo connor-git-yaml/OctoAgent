@@ -690,6 +690,7 @@ class BehaviorCompactionService:
         - 幂等键=run_id（同一 run 不双发，Codex 项2 MED）。
         - `record_when_filtered=True`：深夜 quiet hours 不推 channel，但入全局收件箱
           （session_id=""）+ F116 落盘，用户次日 Web 发现（Codex 项2 HIGH）。
+        - channels 不传（=全渠道）：失败告警广达用户，与 pending-review 同（Codex final MED-1）。
         - None 守卫 + try/except：通知失败绝不让 cron 崩（Constitution #6）。
         """
         if self._notification_service is None:

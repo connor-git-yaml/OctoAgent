@@ -516,9 +516,9 @@ Harness 是工具与执行的**硬约束基础设施层**，从 capability_pack 
 2. **`func._tool_meta` 同步**：`register(entry)` 自动从 handler 同步 `produces_write` 等元数据
 3. **WriteResult 契约 enforce**：`produces_write=True` 工具的 return type 必须是 `WriteResult` 子类（fail-fast 启动期）
 
-**§8.5.7.2 ToolsetResolver**（`toolset_resolver.py`）
+**§8.5.7.2 ToolsetResolver**（`toolset_resolver.py`，**F147 已退役删除**）
 
-按 Worker / Subagent kind 解析可用工具集；与 capability_pack 协同（capability_pack 仅提供 capability 抽象，可见性由 ToolRegistry 数据驱动）。
+> F084 Phase 1 引入的 `toolsets.yaml` + `toolset_resolver.py` entrypoint 过滤链在生产链路**从未接入**（F135 取证留档"历史冗余"），F147 已整链删除（含 `toolsets.yaml` / `VALID_ENTRYPOINTS` / `builtin_tools.list_for_entrypoint` wrapper）。工具可见性实际由 `CapabilityPackService.resolve_profile_first_tools` + `CoreToolSet` 决议（Core vs Deferred 二分）；`ToolEntry.entrypoints` 字段保留为 capability_pack 展示 metadata + registry 级 `list_for_entrypoint` 标签查询（非过滤）。
 
 **§8.5.7.3 ThreatScanner**（`threat_scanner.py`，Hermes pattern table 模式）
 

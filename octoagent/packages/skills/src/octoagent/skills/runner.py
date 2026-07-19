@@ -228,10 +228,13 @@ class SkillRunner:
                         # F147：速率限制指数退避 + 退避**不吃 max_steps 步数预算**。
                         # - 上界复用 retry_policy.max_attempts（不另立预算，调用方可从
                         #   manifest 预测总重试；Codex 项3② MED）。
-                        # - continue 前同步回滚 steps/attempts/**tracker.steps**——只减本地
-                        #   steps 不够，下一轮 while 的 check_limits 读的是 tracker.steps
-                        #   （本轮开头 :148 已写成增长值），不回滚会在 steps 接近 max 时被
+                        # - continue 前同步回滚 steps + **tracker.steps**——只减本地 steps
+                        #   不够，下一轮 while 的 check_limits 读的是 tracker.steps（本轮开头
+                        #   :148 已写成增长值），不回滚会在 steps 接近 max 时被
                         #   STEP_LIMIT_EXCEEDED 提前打死（Codex 项3② HIGH off-by-one）。
+                        # - **attempts 不回滚**：它是"真实 provider 调用数"telemetry（进
+                        #   MODEL_CALL 事件 + 前端展示），退避重试也是真调用，应单调递增
+                        #   （Codex final LOW）。步数预算只受 steps 保护。
                         rate_limit_retries += 1
                         if rate_limit_retries > manifest.retry_policy.max_attempts:
                             return await self._terminate_with_failure(
@@ -254,7 +257,6 @@ class SkillRunner:
                         )
                         await self._rate_limit_backoff(manifest, rate_limit_retries)
                         steps -= 1
-                        attempts -= 1
                         tracker.steps = steps
                         continue
                     if exc.error_type == "context_overflow":

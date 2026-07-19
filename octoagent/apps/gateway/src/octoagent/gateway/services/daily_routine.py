@@ -703,6 +703,8 @@ class DailyRoutineService:
         - 幂等键=运行日期（同一天失败去重，不用随机 event_id 刷屏，Codex 项2 MED）。
         - `record_when_filtered=True`：深夜 quiet hours 内不推 channel（不打扰），但仍进
           全局收件箱（session_id=""）+ F116 落盘，用户次日开 Web 能发现（Codex 项2 HIGH）。
+        - **channels 不传（=全渠道，故意）**：失败是**告警**应广达用户，区别于成功路径的
+          ROUTINE_DAILY_SUMMARY 摘要按 summary_channels 路由（Codex final MED-1 文档化）。
         - try/except 包裹 + None 守卫：通知失败/无 service 绝不让 cron 崩（Constitution #6）。
         """
         if self._notification_service is None:
