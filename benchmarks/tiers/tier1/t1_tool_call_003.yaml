@@ -1,15 +1,24 @@
 # Tier 1 — 工具调用域：工具调用 + 结构化输出
-# 验证 Agent 能调用工具后将结果组织成结构化格式（Markdown 表格 / JSON）
+# 验证 Agent 能调用工具读取信息后将结果组织成结构化 JSON。
+#
+# F147 断言收敛：原 prompt 问"当前时间"，但 AmbientRuntime 已把 current_datetime_local
+# + timezone 注入 system prompt（agent_context_prompt_assembly），模型可直接抄答不调
+# 工具 → 撞"必须 TOOL_CALL"断言，确定性 FAIL（非能力损失）。改为读文件行数（不在
+# prompt 上下文，必须真调读工具），去掉 AmbientRuntime 泄漏捷径，保留"工具调用 + 结构化
+# 输出"域意图；并把 TOOL_CALL_STARTED 收紧到读工具（防乱调工具也过关）。
+# 注：tier1 scorer 是 event-based（scorer.py），不校验 JSON 结构本身——结构化输出的
+# 内容验证需 tier2/专门 rubric，本 task 只保证"确定性触发读工具调用"。
 
 task_id: T1-TOOL-CALL-003
 tier: 1
 domain: tool_call
-prompt: "请查看系统当前时间，并以 JSON 格式返回：{\"current_time\": \"<ISO 格式时间>\", \"timezone\": \"<时区>\"}"
+prompt: "请用工具读取项目根目录下 README.md 的内容，统计其行数，并严格以 JSON 格式返回：{\"line_count\": <行数整数>, \"has_content\": <true 或 false>}。请务必先调用工具读取真实内容再作答，不要凭空估计。"
 expected_events:
   - event_type: TOOL_CALL_STARTED
-    required_fields: {}  # 调用时间相关工具
+    required_fields:
+      tool_name_contains: "read"  # 收紧到读工具（filesystem.read_text 或类似）
   - event_type: TOOL_CALL_COMPLETED
-    required_fields: {}
+    required_fields: {}  # 工具调用完成即可
   - event_type: MODEL_CALL_COMPLETED
     required_fields: {}
 timeout_seconds: 300
