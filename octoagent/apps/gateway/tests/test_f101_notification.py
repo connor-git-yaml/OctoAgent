@@ -167,6 +167,49 @@ async def test_notify_task_state_change_filtered_in_quiet_hours() -> None:
     )
 
 
+async def test_record_when_filtered_records_inbox_but_not_channel() -> None:
+    """F147：record_when_filtered=True 的 HIGH 通知（cron 后台失败告警）——quiet hours 内
+    **不推 channel**（不打扰深夜），但仍进全局收件箱（list_active）供 Web 次日发现；
+    record_when_filtered=False（默认）保持现状（filter 即 return，不入桶）。"""
+    quiet = datetime(2026, 1, 1, 2, 0, tzinfo=UTC)  # 09:00-23:00 之外 = quiet hours
+    active_hours_md = '## 通知偏好\n- **active_hours**: "09:00-23:00"\n'
+
+    # record_when_filtered=True：不推 channel，但入收件箱
+    svc, ch = _svc_with_channel()
+    svc._snapshot_store = MagicMock()
+    svc._snapshot_store.get_live_state.return_value = active_hours_md
+    with patch("octoagent.gateway.services.notification.datetime") as mock_dt:
+        mock_dt.now.return_value = quiet
+        await svc.notify_task_state_change(
+            task_id="cron-fail",
+            event_type="ROUTINE_FAILED",
+            payload={"summary": "每日摘要任务失败"},
+            priority=NotificationPriority.HIGH,
+            state_transition_event_id="k1",
+            session_id="",
+            record_when_filtered=True,
+        )
+    assert ch.notify.call_count == 0, "quiet hours 内不推 channel（不打扰）"
+    assert len(svc.list_active("")) == 1, "record_when_filtered=True 应入全局收件箱可发现"
+
+    # 对照：默认 record_when_filtered=False → filter 即 return，不入收件箱（现状不变）
+    svc2, ch2 = _svc_with_channel()
+    svc2._snapshot_store = MagicMock()
+    svc2._snapshot_store.get_live_state.return_value = active_hours_md
+    with patch("octoagent.gateway.services.notification.datetime") as mock_dt:
+        mock_dt.now.return_value = quiet
+        await svc2.notify_task_state_change(
+            task_id="cron-fail2",
+            event_type="ROUTINE_FAILED",
+            payload={"summary": "x"},
+            priority=NotificationPriority.HIGH,
+            state_transition_event_id="k2",
+            session_id="",
+        )
+    assert ch2.notify.call_count == 0
+    assert svc2.list_active("") == [], "默认不入收件箱（backward-compat）"
+
+
 # ============================================================
 # 测点 4 (AC-B4): USER.md active_hours 为空/None → 全时段推送
 # ============================================================

@@ -430,6 +430,13 @@ class MemoryConsolidationService:
                 run_id=run_id,
                 detail=f"{type(exc).__name__}: {exc}",
             )
+            # F147：spawn_error 是"任务根本没起起来"的异常失败（非良性 SKIPPED）——
+            # 补 HIGH 通知（Codex 项2 HIGH#1，v1 只覆盖 FAILED 会漏掉这条）。
+            await self._notify_consolidation_failed(
+                run_id=run_id,
+                error_type=type(exc).__name__,
+                error_msg=str(exc),
+            )
             logger.exception("consolidation_spawn_failed", run_id=run_id)
         finally:
             self._running = False
@@ -656,6 +663,12 @@ class MemoryConsolidationService:
                 error_type=type(exc).__name__,
                 error_msg=str(exc)[:200],
             )
+            # F147：发现端真失败 → HIGH 通知（此前失败静默，用户无感知）
+            await self._notify_consolidation_failed(
+                run_id=run_id,
+                error_type=type(exc).__name__,
+                error_msg=str(exc),
+            )
             logger.exception("consolidation_discovery_failed", run_id=run_id)
             return
 
@@ -700,8 +713,9 @@ class MemoryConsolidationService:
         **发/不发的完整决策表（FR-E1/E2 + finding-E 调和）**：
         - proposals_made > 0 → 发**一条** MEDIUM（引导用户去候选列表审批，有行动价值）
         - proposals_made == 0（事实已干净 / fallback 空运行）→ **不发**（无行动价值，纯噪声）
-        - 巩固 FAILED / SKIPPED → **不发**（调用点只在 COMPLETED 成功路径；失败静默，
-          事件已审计，Constitution C2/C8 可观测不靠推送）
+        - **F147 翻转**：巩固 genuine 失败（发现端 FAILED / orchestration spawn_error）→
+          由 `_notify_consolidation_failed` 发**一条 HIGH**（record_when_filtered，深夜入桶
+          可发现）；良性 SKIPPED（capacity/already_running/disabled）仍**不发**（优雅降级非失败）
         - notification_service 未注入 → 静默跳过（C6 降级）
 
         **与 finding-E（round4）的关系——两者互补不冲突**：finding-E 压掉的是
@@ -846,6 +860,41 @@ class MemoryConsolidationService:
         await self._safe_append_event(
             EventType.MEMORY_CONSOLIDATION_FAILED, payload.model_dump()
         )
+
+    async def _notify_consolidation_failed(
+        self, *, run_id: str, error_type: str, error_msg: str
+    ) -> None:
+        """F147：巩固 genuine 失败（发现端 FAILED / spawn_error）→ HIGH 通知。
+
+        此前失败静默（只写审计事件），M10 里程碑翻转为可感知失败告警。
+        - 幂等键=run_id（同一 run 失败不双发，Codex 项2 MED）。
+        - `record_when_filtered=True`：深夜 quiet hours 不推 channel（不打扰），但入全局
+          收件箱（session_id=""）+ F116 落盘，用户次日 Web 发现（Codex 项2 HIGH）。
+        - None 守卫 + try/except：通知失败绝不让 cron 崩（Constitution #6）。
+        """
+        if self._notification_service is None:
+            return
+        from .notification import NotificationPriority
+
+        try:
+            await self._notification_service.notify_task_state_change(
+                task_id=CONSOLIDATION_ROOT_TASK_ID,
+                event_type="MEMORY_CONSOLIDATION_FAILED",
+                payload={
+                    "summary": f"记忆巩固任务失败：{error_type}",
+                    "error_type": error_type,
+                    "error_msg": error_msg[:200],
+                    "run_id": run_id,
+                },
+                priority=NotificationPriority.HIGH,
+                state_transition_event_id=run_id,
+                session_id="",
+                record_when_filtered=True,
+            )
+        except Exception:
+            logger.warning(
+                "consolidation_failure_notify_failed", run_id=run_id, exc_info=True
+            )
 
     def _build_event(self, event_type: EventType, payload: dict[str, Any]) -> Event:
         return Event(

@@ -559,6 +559,7 @@ class NotificationService:
         state_transition_event_id: str = "",
         session_id: str | None = None,
         channels: frozenset[str] | None = None,
+        record_when_filtered: bool = False,
     ) -> None:
         """Task 状态变更通知（FR-064-32）。
 
@@ -645,6 +646,18 @@ class NotificationService:
                 notification_id=notification_id,
                 priority=priority.value,
             )
+            # F147：record_when_filtered=True 的通知（如 cron 后台失败告警）——quiet hours
+            # 内**不推 channel**（不打扰深夜），但仍 _record_active 进全局收件箱，用户次日
+            # 开 Web 能发现。默认 False 保所有现有 caller 行为不变（filter 即 return 不入桶）。
+            if record_when_filtered:
+                await self._record_active(
+                    session_id=session_id,
+                    notification_id=notification_id,
+                    task_id=task_id,
+                    notification_type=event_type,
+                    priority=priority,
+                    payload=payload,
+                )
             return
 
         # H-4：记录到 _active_notifications（供 Web list_active）

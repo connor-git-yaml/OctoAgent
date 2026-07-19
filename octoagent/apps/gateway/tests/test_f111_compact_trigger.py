@@ -270,6 +270,31 @@ class TestRunCompaction:
         skipped = await _events_of_type(store_group, EventType.BEHAVIOR_COMPACT_SKIPPED)
         assert [e.payload["reason"] for e in skipped] == ["spawn_error"]
 
+    async def test_cron_spawn_error_sends_high_notification(
+        self, store_group, project_root
+    ):
+        """F147（Codex 项2 HIGH#1）：cron spawn_error（任务没起起来的异常失败）→
+        SKIPPED(spawn_error) 事件 + 一条 HIGH 通知（record_when_filtered 深夜可发现）。"""
+        from octoagent.gateway.services.notification import NotificationPriority
+
+        plane = _FakePlane(raise_exc=RuntimeError("launch boom"))
+        notif = _FakeNotification()
+        svc = _build_service(
+            store_group,
+            project_root,
+            user_md=_USER_MD_ACTIVE,
+            plane=plane,
+            notification=notif,
+        )
+        await svc._run_compaction()
+        assert len(notif.calls) == 1, "cron spawn_error 应发一条 HIGH 通知"
+        call = notif.calls[0]
+        assert call["priority"] == NotificationPriority.HIGH
+        assert call["record_when_filtered"] is True
+        assert call["event_type"] == "BEHAVIOR_COMPACT_FAILED"
+        assert call["session_id"] == ""
+        assert call["state_transition_event_id"] == call["payload"]["run_id"]
+
     async def test_single_flight_skips_concurrent(self, store_group, project_root):
         release = asyncio.Event()
 
@@ -383,6 +408,26 @@ class TestRunManual:
         assert result.outcomes == []
         failed = await _events_of_type(store_group, EventType.BEHAVIOR_COMPACT_FAILED)
         assert len(failed) == 1
+
+    async def test_manual_discovery_failure_no_notification(
+        self, store_group, project_root, monkeypatch
+    ):
+        """F147：手动触发失败（notify=False，用户在场错误已同步回 REST）→ **不推** HIGH
+        通知（失败告警只针对无人值守 cron；手动路径不重复打扰）。"""
+        notif = _FakeNotification()
+        svc = _build_service(store_group, project_root, notification=notif)
+
+        async def _boom(**kwargs: Any):
+            raise RuntimeError("discovery crashed")
+
+        monkeypatch.setattr(
+            "octoagent.gateway.services.behavior_compact_discovery."
+            "BehaviorCompactDiscoveryService.discover_files",
+            _boom,
+        )
+        result = await svc.run_manual(file_ids=["AGENTS.md"])
+        assert result.error  # 错误同步回 CLI/REST
+        assert notif.calls == [], "手动失败不推通知（notify=False 门控）"
 
     async def test_manual_blocked_by_active_child(self, store_group, project_root):
         """Codex round2 P1 闭环：cron 审计 child 非终态（含重启后 _running 丢失

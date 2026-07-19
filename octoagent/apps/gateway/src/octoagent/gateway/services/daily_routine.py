@@ -341,6 +341,12 @@ class DailyRoutineService:
                 error_type=type(exc).__name__,
                 error_msg=str(exc),
             )
+            # F147：genuine 失败补一条 HIGH 通知（此前只写审计事件用户无感知）
+            await self._notify_routine_failed(
+                run_started_ts=run_started_ts,
+                error_type=type(exc).__name__,
+                error_msg=str(exc),
+            )
             logger.exception(
                 "daily_routine_failed",
                 error_type=type(exc).__name__,
@@ -688,6 +694,39 @@ class DailyRoutineService:
         payload = RoutineFailedPayload(error_type=error_type, error_msg=error_msg)
         event = self._build_routine_event(EventType.ROUTINE_FAILED, payload.model_dump())
         await self._safe_append_event(event)
+
+    async def _notify_routine_failed(
+        self, *, run_started_ts: datetime, error_type: str, error_msg: str
+    ) -> None:
+        """F147：daily routine 执行失败 → HIGH 通知（此前失败只写审计，用户无感知）。
+
+        - 幂等键=运行日期（同一天失败去重，不用随机 event_id 刷屏，Codex 项2 MED）。
+        - `record_when_filtered=True`：深夜 quiet hours 内不推 channel（不打扰），但仍进
+          全局收件箱（session_id=""）+ F116 落盘，用户次日开 Web 能发现（Codex 项2 HIGH）。
+        - try/except 包裹 + None 守卫：通知失败/无 service 绝不让 cron 崩（Constitution #6）。
+        """
+        if self._notification_service is None:
+            return
+        from .notification import NotificationPriority
+
+        date_key = run_started_ts.date().isoformat()
+        try:
+            await self._notification_service.notify_task_state_change(
+                task_id=DAILY_ROUTINE_AUDIT_TASK_ID,
+                event_type="ROUTINE_FAILED",
+                payload={
+                    "summary": f"每日摘要任务失败：{error_type}",
+                    "error_type": error_type,
+                    "error_msg": error_msg[:200],
+                    "date": date_key,
+                },
+                priority=NotificationPriority.HIGH,
+                state_transition_event_id=f"routine-failed:{date_key}",
+                session_id="",
+                record_when_filtered=True,
+            )
+        except Exception:
+            logger.warning("daily_routine_failure_notify_failed", exc_info=True)
 
     async def _emit_routine_skipped(self, *, reason: str) -> None:
         payload = RoutineSkippedPayload(reason=reason)

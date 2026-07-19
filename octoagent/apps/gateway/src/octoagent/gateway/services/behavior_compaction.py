@@ -379,6 +379,13 @@ class BehaviorCompactionService:
                 run_id=run_id,
                 detail=f"{type(exc).__name__}: {exc}",
             )
+            # F147：spawn_error 是"任务根本没起起来"的异常失败（非良性 SKIPPED）——
+            # cron 路径（本方法）补 HIGH 通知（Codex 项2 HIGH#1）。
+            await self._notify_compaction_failed(
+                run_id=run_id,
+                error_type=type(exc).__name__,
+                error_msg=str(exc),
+            )
             logger.exception("behavior_compact_spawn_failed", run_id=run_id)
         finally:
             self._running = False
@@ -482,6 +489,14 @@ class BehaviorCompactionService:
                 error_type=type(exc).__name__,
                 error_msg=str(exc)[:200],
             )
+            # F147：cron 路径（notify=True）真失败 → HIGH 通知；手动触发（notify=False，
+            # 用户在场，错误已同步回 CLI/REST）不重复推。
+            if notify:
+                await self._notify_compaction_failed(
+                    run_id=run_id,
+                    error_type=type(exc).__name__,
+                    error_msg=str(exc),
+                )
             logger.exception("behavior_compact_discovery_failed", run_id=run_id)
             return None
 
@@ -539,7 +554,11 @@ class BehaviorCompactionService:
         proposals_made: int,
         config: BehaviorCompactConfig,
     ) -> None:
-        """proposals>0 → 一条 MEDIUM"精简提议待确认"；0 提议/失败全静默。
+        """proposals>0 → 一条 MEDIUM"精简提议待确认"；0 提议不发。
+
+        F147：genuine 失败（发现端 FAILED / spawn_error）不再静默——由
+        `_notify_compaction_failed` 发一条 HIGH（record_when_filtered 深夜入桶可发现）；
+        良性 SKIPPED（capacity/already_running/disabled）仍不发。
 
         - quiet hours 由 NotificationService 处理（MEDIUM 受约束，深夜触发被 discard
           + NOTIFICATION_DISPATCHED(filtered=true) 审计——用户次日经 CLI/REST 主动发现）。
@@ -660,6 +679,42 @@ class BehaviorCompactionService:
         await self._safe_append_event(
             EventType.BEHAVIOR_COMPACT_FAILED, payload.model_dump()
         )
+
+    async def _notify_compaction_failed(
+        self, *, run_id: str, error_type: str, error_msg: str
+    ) -> None:
+        """F147：行为规则精简 cron genuine 失败（发现端 FAILED / spawn_error）→ HIGH 通知。
+
+        此前失败静默（只写审计），M10 里程碑翻转为可感知失败告警。仅 cron 路径调用
+        （手动触发错误已同步回 CLI/REST，调用点用 notify 门控）。
+        - 幂等键=run_id（同一 run 不双发，Codex 项2 MED）。
+        - `record_when_filtered=True`：深夜 quiet hours 不推 channel，但入全局收件箱
+          （session_id=""）+ F116 落盘，用户次日 Web 发现（Codex 项2 HIGH）。
+        - None 守卫 + try/except：通知失败绝不让 cron 崩（Constitution #6）。
+        """
+        if self._notification_service is None:
+            return
+        from .notification import NotificationPriority
+
+        try:
+            await self._notification_service.notify_task_state_change(
+                task_id=BEHAVIOR_COMPACT_ROOT_TASK_ID,
+                event_type="BEHAVIOR_COMPACT_FAILED",
+                payload={
+                    "summary": f"行为规则精简任务失败：{error_type}",
+                    "error_type": error_type,
+                    "error_msg": error_msg[:200],
+                    "run_id": run_id,
+                },
+                priority=NotificationPriority.HIGH,
+                state_transition_event_id=run_id,
+                session_id="",
+                record_when_filtered=True,
+            )
+        except Exception:
+            logger.warning(
+                "behavior_compact_failure_notify_failed", run_id=run_id, exc_info=True
+            )
 
     async def _safe_append_event(
         self, event_type: EventType, payload: dict[str, Any]

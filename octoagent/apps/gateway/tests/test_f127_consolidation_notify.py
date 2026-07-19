@@ -73,6 +73,13 @@ class _FakePlane:
         return SpawnChildResult(status="written", task_id="child-task-notify")
 
 
+class _RaisingPlane:
+    """spawn_child 抛异常 → 触发 orchestration spawn_error 路径（F147 失败通知）。"""
+
+    async def spawn_child(self, **kwargs: Any) -> SpawnChildResult:
+        raise RuntimeError("spawn boom")
+
+
 class _RecordingRunner:
     """返回可配置 DiscoveryOutcome（或抛异常）的发现端 runner。"""
 
@@ -194,6 +201,7 @@ def _build_service(
     user_md: str = _USER_MD_ACTIVE,
     runner: Any = None,
     notification_service: Any = None,
+    plane: Any = None,
 ) -> MemoryConsolidationService:
     return MemoryConsolidationService(
         scheduler=_FakeScheduler(),
@@ -201,7 +209,7 @@ def _build_service(
         work_store=store_group.work_store,
         event_store=store_group.event_store,
         snapshot_store=_FakeSnapshotStore(user_md=user_md),
-        delegation_plane=_FakePlane(),  # type: ignore[arg-type]
+        delegation_plane=plane or _FakePlane(),  # type: ignore[arg-type]
         project_root=_NO_DISK_ROOT,
         agent_context_store=store_group.agent_context_store,
         discovery_runner=runner,
@@ -332,8 +340,9 @@ class TestNoNotificationBranches:
         assert completed[0].payload["fallback"] is True
         assert notif.calls == []
 
-    async def test_discovery_failure_silent_no_notification(self, store_group):
-        """finding-E 对齐：发现端失败 → FAILED 事件（审计）但**不**推用户通知（静默降级）。"""
+    async def test_discovery_failure_sends_high_notification(self, store_group):
+        """F147（翻转 finding-E 失败静默）：发现端失败 → FAILED 事件 + 一条 HIGH 通知
+        （record_when_filtered 深夜入桶可发现；幂等键=run_id）。"""
         await _seed_main_runtime_with_namespace(store_group)
         notif = _CapturingNotificationService()
         runner = _RecordingRunner(raise_exc=RuntimeError("discovery boom"))
@@ -344,10 +353,41 @@ class TestNoNotificationBranches:
             store_group, EventType.MEMORY_CONSOLIDATION_FAILED
         )
         assert len(failed) == 1  # 事件审计不可少（C2）
-        assert notif.calls == [], "巩固失败不该打扰用户（finding-E 后台静默边界）"
+        assert len(notif.calls) == 1, "发现端失败应发一条 HIGH 通知"
+        call = notif.calls[0]
+        assert call["priority"] == NotificationPriority.HIGH
+        assert call["record_when_filtered"] is True
+        assert call["session_id"] == ""
+        assert call["event_type"] == "MEMORY_CONSOLIDATION_FAILED"
+        # 幂等键=run_id（同 run 失败不双发）
+        assert call["state_transition_event_id"] == call["payload"]["run_id"]
+        assert "记忆巩固任务失败" in call["payload"]["summary"]
+
+    async def test_spawn_error_sends_high_notification(self, store_group):
+        """F147（Codex 项2 HIGH#1）：orchestration spawn_error（任务没起起来的异常失败）
+        → SKIPPED(spawn_error) 事件 + 一条 HIGH 通知（不再漏报）。"""
+        await _seed_main_runtime_with_namespace(store_group)
+        notif = _CapturingNotificationService()
+        svc = _build_service(
+            store_group,
+            runner=_RecordingRunner(),
+            notification_service=notif,
+            plane=_RaisingPlane(),
+        )
+        await svc._run_consolidation()
+
+        skipped = await _events_of_type(
+            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
+        )
+        assert len(skipped) == 1
+        assert skipped[0].payload["reason"] == "spawn_error"
+        assert len(notif.calls) == 1, "spawn_error 应发一条 HIGH 通知"
+        assert notif.calls[0]["priority"] == NotificationPriority.HIGH
+        assert notif.calls[0]["record_when_filtered"] is True
+        assert svc._running is False  # finally 复位
 
     async def test_disabled_skip_no_notification(self, store_group):
-        """skip 路径（disabled）→ SKIPPED 事件但不发通知。"""
+        """良性 skip 路径（disabled）→ SKIPPED 事件但不发通知（F147 失败通知不误伤优雅降级）。"""
         notif = _CapturingNotificationService()
         svc = _build_service(
             store_group,

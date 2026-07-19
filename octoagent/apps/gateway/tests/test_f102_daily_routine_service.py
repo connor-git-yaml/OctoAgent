@@ -232,6 +232,50 @@ class TestRoutineDisabled:
         assert web_ch.calls == []
 
 
+class TestRoutineFailure:
+    @pytest.mark.asyncio
+    async def test_routine_failure_sends_high_notification(
+        self, store_group: StoreGroup, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """F147：daily routine 执行失败（此前只写审计用户无感知）→ ROUTINE_FAILED 事件
+        + 一条 HIGH 通知（record_when_filtered，幂等键=运行日期）。"""
+
+        class _CapturingNotif:
+            def __init__(self) -> None:
+                self.calls: list[dict[str, Any]] = []
+
+            async def notify_task_state_change(self, **kwargs: Any) -> None:
+                self.calls.append(kwargs)
+
+        notif = _CapturingNotif()
+        svc = _build_service(
+            store_group, notif, user_md='- **routine_active**: "true"'  # type: ignore[arg-type]
+        )
+        await svc.startup()
+
+        async def _boom(*a: Any, **k: Any):
+            raise RuntimeError("summary boom")
+
+        monkeypatch.setattr(store_group.task_store, "list_tasks_in_time_range", _boom)
+
+        await svc._run_daily_summary()  # 不崩
+
+        events = await store_group.event_store.get_events_for_task(
+            DAILY_ROUTINE_AUDIT_TASK_ID
+        )
+        failed = [e for e in events if e.type == EventType.ROUTINE_FAILED]
+        assert len(failed) == 1
+
+        assert len(notif.calls) == 1, "routine 失败应发一条 HIGH 通知"
+        call = notif.calls[0]
+        assert call["priority"] == NotificationPriority.HIGH
+        assert call["record_when_filtered"] is True
+        assert call["session_id"] == ""
+        assert call["event_type"] == "ROUTINE_FAILED"
+        assert call["state_transition_event_id"].startswith("routine-failed:")
+        assert "每日摘要任务失败" in call["payload"]["summary"]
+
+
 # ============================================================
 # AC-B5 / SD-8 空数据不推送
 # ============================================================
