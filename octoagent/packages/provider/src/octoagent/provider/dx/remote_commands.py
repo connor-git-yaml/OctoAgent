@@ -198,6 +198,10 @@ def _octo_gateway_on_port(port: int) -> bool:
     ``status ∈ {ready, not_ready}`` 且含 ``checks``（503 not_ready 也算
     Octo 在——依赖降级仍是 Octo 占着端口）。判定失败一律按"不在"回滚
     （fail-closed：宁可多关一次映射，不留暴露面）。
+
+    注：本探针只打 ``/ready``（不过 guard，任何 mode 都答），故用响应 shape
+    识别 Octo；与 ``_remote_bearer_working`` 的「打受保护 API 观测 guard 行为」
+    是两个不同判据，勿混。
     """
     try:
         import httpx
