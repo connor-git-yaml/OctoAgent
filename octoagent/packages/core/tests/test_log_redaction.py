@@ -143,6 +143,17 @@ class TestBearerAndTokens:
         assert "hunter2secret" not in result
         assert "postgres://octo:***@localhost:5432/octoagent" in result
 
+    def test_sse_access_token_query_masked(self) -> None:
+        """F134 FR-3c 契约钉住：SSE query 形态 ``?access_token=<urlsafe>``
+        必须命中掩码（uvicorn access log 脱敏 filter 依赖本行为——目前经
+        ``_ENV_ASSIGN_PATTERN`` 的 TOKEN 字段名命中，pattern 重构不得破坏）。"""
+        token = "Xy9_" + "a" * 39  # token_urlsafe(32) 同长（43 字符）
+        line = f'127.0.0.1:50000 - "GET /api/stream/task/t1?access_token={token} HTTP/1.1" 200'
+        result = redact_sensitive_text(line)
+        assert token not in result
+        assert "access_token=" in result  # 参数名保留（排障可读）
+        assert "/api/stream/task/t1" in result
+
 
 class TestSafetyProperties:
     """FR-E4：非密钥不误遮 / 幂等；FR-E3：import 快照。"""

@@ -76,13 +76,15 @@ _READY = TailscaleProbeResult(
 
 class TestRemoteEnable:
     def test_enable_ready_switches_bearer_and_serves(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         cfg = _FakeConfig(mode="loopback")
         saved: list = []
         _patch_config(monkeypatch, cfg, saved)
+        # F134：token 未设时 enable 会真写实例 .env → root 须真实可写目录
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
         serve_calls: list = []
 
         def _fake_serve(port: int, **kwargs: object) -> TailscaleServeResult:
@@ -160,13 +162,14 @@ class TestRemoteEnable:
         assert "bearer" in result.output
 
     def test_enable_idempotent_already_bearer(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
         """已是 bearer → 不重复写 yaml（幂等），仍跑 serve。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         saved: list = []
         _patch_config(monkeypatch, _FakeConfig(mode="bearer"), saved)
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
         monkeypatch.setattr(
             remote_commands,
             "enable_tailscale_serve",
@@ -180,13 +183,15 @@ class TestRemoteEnable:
         assert saved == []  # 已 bearer 不重复写
         assert "幂等" in result.output
 
-    def test_enable_prompts_token_when_unset(
-        self, monkeypatch: pytest.MonkeyPatch
+    def test_enable_generates_token_when_unset(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """token 未设 → 提示设 token（走 .env，不写 config）。"""
+        """F134 AC-T1（原 test_enable_prompts_token_when_unset 语义演进）：
+        token 未设 → 自动生成强随机值写入实例 .env（0600），stdout 零明文。"""
         _patch_env(monkeypatch)  # 不设 OCTOAGENT_FRONTDOOR_TOKEN
         _patch_probe(monkeypatch, _READY)
         _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
         monkeypatch.setattr(
             remote_commands,
             "enable_tailscale_serve",
@@ -197,8 +202,23 @@ class TestRemoteEnable:
 
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 0
+        # .env 真被写入：变量名 + ≥32 bytes urlsafe（43 字符）值
+        env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+        token_line = next(
+            line
+            for line in env_text.splitlines()
+            if line.startswith("OCTOAGENT_FRONTDOOR_TOKEN=")
+        )
+        token_value = token_line.split("=", 1)[1]
+        assert len(token_value) >= 43
+        # 0600 权限（仅 owner 可读写）
+        assert ((tmp_path / ".env").stat().st_mode & 0o777) == 0o600
+        # ★ FR-2a 零明文：stdout 全文不含 token 值
+        assert token_value not in result.output
+        # 用户可发现路径：生成消息 + grep 查看指引
+        assert "已生成" in result.output
         assert "OCTOAGENT_FRONTDOOR_TOKEN" in result.output
-        assert ".env" in result.output
+        assert "grep" in result.output
 
     def test_enable_serve_failure_reports_hint_and_no_yaml_write(
         self, monkeypatch: pytest.MonkeyPatch
@@ -365,9 +385,9 @@ class TestCodexReviewFixes:
         assert "覆盖" in result.output
 
     def test_enable_token_hint_respects_custom_env_name(
-        self, monkeypatch: pytest.MonkeyPatch
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """P2：token 提示用运行时实际变量名（bearer_token_env），非硬编码。"""
+        """P2：token 生成/提示用运行时实际变量名（bearer_token_env），非硬编码。"""
         _patch_env(monkeypatch)
 
         class _CfgCustomToken(_FakeConfig):
@@ -377,6 +397,7 @@ class TestCodexReviewFixes:
 
         _patch_probe(monkeypatch, _READY)
         _patch_config(monkeypatch, _CfgCustomToken(), [])
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
         monkeypatch.setattr(
             remote_commands,
             "enable_tailscale_serve",
@@ -388,6 +409,9 @@ class TestCodexReviewFixes:
         assert "OCTOAGENT_FRONTDOOR_TOKEN" not in result.output.replace(
             "MY_CUSTOM_TOKEN", ""
         )
+        # F134：.env 里写的也是自定义变量名
+        env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+        assert "MY_CUSTOM_TOKEN=" in env_text
 
     def test_enable_token_hint_skipped_when_custom_token_in_instance_env(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
@@ -417,12 +441,17 @@ class TestCodexReviewFixes:
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 0
         assert "MY_CUSTOM_TOKEN=" not in result.output  # 未提示追加
+        # F134 AC-T2：已设不覆盖（幂等）——.env 内容逐字节不变
+        assert (tmp_path / ".env").read_text(encoding="utf-8") == (
+            "MY_CUSTOM_TOKEN=already-set-value\n"
+        )
 
     def test_enable_token_hint_shown_when_custom_token_shell_only(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
         """★ Codex 第六轮 P2：自定义 token env 只在 shell 设（不在实例 .env）→
-        仍提示（托管服务不继承 shell，重启会 503）。"""
+        shell-only 不算已设（托管服务不继承 shell，重启会 503）。
+        F134 语义演进：从「仍提示」升级为「自动生成写入 .env」（治本）。"""
         _patch_env(monkeypatch, MY_CUSTOM_TOKEN="shell-only-value")
 
         class _CfgCustomToken(_FakeConfig):
@@ -441,7 +470,82 @@ class TestCodexReviewFixes:
         )
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 0
-        assert "MY_CUSTOM_TOKEN" in result.output  # 仍提示设到 .env
+        assert "MY_CUSTOM_TOKEN" in result.output  # 生成消息含变量名
+        # shell-only 值不算已设 → 实例 .env 被自动补上（值为新生成非 shell 值）
+        env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+        assert "MY_CUSTOM_TOKEN=" in env_text
+        assert "shell-only-value" not in env_text
+
+    # ------------------------------------------------------------------
+    # F134 范围二新增格（AC-T2 dry-run / AC-T3 写失败即止 / AC-T4 追加保内容）
+    # ------------------------------------------------------------------
+
+    def test_enable_dry_run_previews_token_generation_without_writing(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T2：dry-run 显示「将生成」但不落地 .env。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+
+        result = CliRunner().invoke(remote_group, ["enable", "--dry-run"])
+        assert result.exit_code == 0
+        assert "将生成" in result.output
+        assert not (tmp_path / ".env").exists()
+
+    def test_enable_token_write_failure_aborts_before_mode_switch(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T3：token 写入失败 → 红报 + exit 1 + **不切 mode**（防 bearer
+        无 token 让受保护 API 全 503 的半完成态）。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        saved: list = []
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), saved)
+        # root 指向不存在的子路径 → .env 打开必 OSError（可移植的写失败注入）
+        broken_root = tmp_path / "missing" / "instance"
+        monkeypatch.setattr(
+            remote_commands, "resolve_instance_root", lambda: broken_root
+        )
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 1
+        assert saved == []  # ★ 不切 mode
+        assert "写入 .env 失败" in result.output
+        assert "手动" in result.output
+
+    def test_enable_token_append_preserves_existing_env_content(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T4：追加写保既有内容逐字节不动 + 尾部无换行先补行。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        # 既有 .env 尾部**无换行**（用户手写常态）
+        (tmp_path / ".env").write_text("OCTOAGENT_PORT=9000", encoding="utf-8")
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        serve_ports: list = []
+
+        def _fake_serve(port: int, **kwargs: object) -> TailscaleServeResult:
+            serve_ports.append(port)
+            return TailscaleServeResult(ok=True, published_url="https://x.ts.net/")
+
+        monkeypatch.setattr(remote_commands, "enable_tailscale_serve", _fake_serve)
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 0
+        assert serve_ports == [9000]  # 既有配置仍生效（读到端口）
+        env_text = (tmp_path / ".env").read_text(encoding="utf-8")
+        lines = env_text.splitlines()
+        assert lines[0] == "OCTOAGENT_PORT=9000"  # 原行逐字节保留
+        assert lines[1].startswith("OCTOAGENT_FRONTDOOR_TOKEN=")  # 换行后追加
+        assert env_text.endswith("\n")
 
     def test_disable_serve_reset_failure_exits_1(
         self, monkeypatch: pytest.MonkeyPatch

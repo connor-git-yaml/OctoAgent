@@ -69,6 +69,48 @@ class _RedactingProcessorFormatter(structlog.stdlib.ProcessorFormatter):
         return redact_sensitive_text(super().format(record))
 
 
+class _UvicornAccessRedactionFilter(logging.Filter):
+    """F134 FR-3a：uvicorn access log 脱敏（SSE query token 泄露收敛）。
+
+    ``uvicorn.access`` logger 自带 handler 直写 stdout（``propagate=False``），
+    **不经过** root logger 的 ``_RedactingProcessorFormatter``——service 模式下
+    stdout 被 launchd/systemd fd 级落盘（``octoagent.out.log``），access 行里的
+    ``?access_token=<明文>`` 会原样进磁盘。挂 **logger 级** filter（非 handler
+    级）：无论 uvicorn CLI 何时装/换 handler 都先过本层；对 record 的 str args
+    逐个跑 ``redact_sensitive_text``（uvicorn access 的 full_path 在 args 元组
+    里）。filter 语义恒放行（返回 True），只改内容不吞日志。
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.args, tuple):
+                record.args = tuple(
+                    redact_sensitive_text(arg) if isinstance(arg, str) else arg
+                    for arg in record.args
+                )
+            elif not record.args and isinstance(record.msg, str):
+                # 无 args 的预格式化消息（防御分支：uvicorn 主线恒带 args）
+                record.msg = redact_sensitive_text(record.msg)
+        except Exception:  # noqa: S110 - 日志链路不阻塞主流程（#6）
+            pass
+        return True
+
+
+def _install_uvicorn_access_redaction() -> None:
+    """给 ``uvicorn.access`` 幂等挂脱敏 filter（多次 setup_logging 只挂一次）。
+
+    非 uvicorn 环境（pytest ASGITransport / CLI）``getLogger`` 只建空 logger，
+    filter 挂着无副作用（FR-3b）。
+    """
+    access_logger = logging.getLogger("uvicorn.access")
+    if any(
+        isinstance(existing, _UvicornAccessRedactionFilter)
+        for existing in access_logger.filters
+    ):
+        return
+    access_logger.addFilter(_UvicornAccessRedactionFilter())
+
+
 class _SecureRotatingFileHandler(RotatingFileHandler):
     """0600 权限的轮转 handler（FR-D5：日志文件属敏感，仅 owner 可读写）。
 
@@ -247,6 +289,10 @@ def setup_logging() -> None:
     root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel(getattr(logging, log_level.upper(), logging.INFO))
+
+    # F134 FR-3a：uvicorn access log（自带 handler 不走 root formatter）挂
+    # 脱敏 filter——SSE ?access_token= 不再明文进 service 落盘链。
+    _install_uvicorn_access_redaction()
 
     # F129 FR-D1/D2/D3：日志落盘 + 崩溃钩子（目录不可解析则保持 baseline）
     file_handler = _build_file_handler(formatter)

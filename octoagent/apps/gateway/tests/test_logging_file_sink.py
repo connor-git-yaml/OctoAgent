@@ -32,6 +32,9 @@ def _isolate_logging_globals(monkeypatch: pytest.MonkeyPatch):
     saved_level = root.level
     saved_excepthook = sys.excepthook
     fault_was_enabled = faulthandler.is_enabled()
+    # F134：uvicorn.access 的 logger 级 filter 也是进程全局态，一并保存/恢复
+    access_logger = logging.getLogger("uvicorn.access")
+    saved_access_filters = list(access_logger.filters)
 
     # 默认清空路径 env：单测绝不隐式落盘（各测试自行 setenv 指 tmp）
     monkeypatch.delenv("OCTOAGENT_LOG_DIR", raising=False)
@@ -64,6 +67,9 @@ def _isolate_logging_globals(monkeypatch: pytest.MonkeyPatch):
     for handler in saved_handlers:
         root.addHandler(handler)
     root.setLevel(saved_level)
+    access_logger.filters.clear()
+    for existing in saved_access_filters:
+        access_logger.addFilter(existing)
 
 
 def _file_handlers() -> list[RotatingFileHandler]:
@@ -300,3 +306,75 @@ class TestDegradeGracefully:
         setup_logging()  # 必须不抛
         assert _file_handlers() == []
         assert len(_stream_handlers()) == 1  # 降级仅 stdout
+
+
+class TestUvicornAccessRedaction:
+    """F134 FR-3a/3b（AC-S1）：uvicorn access log 的 SSE query token 脱敏。
+
+    背景：``uvicorn.access`` 自带 handler 直写 stdout（propagate=False），
+    不经过 root 的 _RedactingProcessorFormatter——service 模式下 stdout 被
+    launchd fd 级落盘，``?access_token=`` 会明文进磁盘。F134 挂 logger 级
+    filter 收敛该泄露面。
+    """
+
+    #: 拟真 uvicorn access record 参数形态：
+    #: ``%s - "%s %s HTTP/%s" %d`` % (client_addr, method, full_path, ver, status)
+    _TOKEN = "Xy9_" + "a" * 39  # 43 字符 urlsafe 形态（token_urlsafe(32) 同长）
+
+    def _make_access_record(self) -> logging.LogRecord:
+        return logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=0,
+            msg='%s - "%s %s HTTP/%s" %d',
+            args=(
+                "127.0.0.1:50000",
+                "GET",
+                f"/api/stream/task/t1?access_token={self._TOKEN}",
+                "1.1",
+                200,
+            ),
+            exc_info=None,
+        )
+
+    def test_access_token_redacted_in_rendered_line(self) -> None:
+        setup_logging()
+        access_logger = logging.getLogger("uvicorn.access")
+        record = self._make_access_record()
+        for log_filter in access_logger.filters:
+            assert log_filter.filter(record) is True  # 恒放行，只改内容
+        rendered = record.getMessage()
+        assert self._TOKEN not in rendered  # ★ 明文值不落盘
+        assert "access_token=" in rendered  # 行仍可读（排障保留路径与参数名）
+        assert "/api/stream/task/t1" in rendered
+        assert '" 200' in rendered  # 非 str args（状态码 int）原样保留
+
+    def test_filter_installed_idempotently(self) -> None:
+        """FR-3b：重复 setup_logging 只挂一个 filter。"""
+        setup_logging()
+        setup_logging()
+        access_logger = logging.getLogger("uvicorn.access")
+        installed = [
+            log_filter
+            for log_filter in access_logger.filters
+            if isinstance(log_filter, logging_config._UvicornAccessRedactionFilter)
+        ]
+        assert len(installed) == 1
+
+    def test_non_string_args_and_plain_lines_untouched(self) -> None:
+        """无 token 形状的 access 行原样保留（redaction 预检不命中）。"""
+        setup_logging()
+        access_logger = logging.getLogger("uvicorn.access")
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=0,
+            msg='%s - "%s %s HTTP/%s" %d',
+            args=("127.0.0.1:50000", "GET", "/api/tasks", "1.1", 200),
+            exc_info=None,
+        )
+        for log_filter in access_logger.filters:
+            log_filter.filter(record)
+        assert record.getMessage() == '127.0.0.1:50000 - "GET /api/tasks HTTP/1.1" 200'

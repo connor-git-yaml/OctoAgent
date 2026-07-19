@@ -11,13 +11,19 @@ tailscale_helper（DI exec，零 sudo）；host↔mode 判定走 frontdoor_expos
 
 **红线**：
 - 切模式只改 ``octoagent.yaml`` 的 ``front_door.mode``（可逆运维动作）；
-  **绝不写 token 到任何文件**（token 走 .env，只提示用户设，Constitution #5）。
+  token 值只落实例 ``.env``（0600，Constitution #5 的 secrets 分区），
+  **绝不进 octoagent.yaml / stdout / 日志**。
+  F134 翻转归档：F130 原句「绝不写 token 到任何文件（只提示用户设）」的意图
+  是防 token 进 config/版本管理面；实测「提示」路径把建议 token 明文打进
+  stdout（终端 scrollback / service 落盘），比 CLI 代写 0600 ``.env`` 更差
+  ——F134 改为自动生成写入 ``.env``，输出零明文。
 - serve 遇 permission 不自动 sudo（helper 已保证）。
 - ``--dry-run`` 预览不落地任何改动（Constitution #7）。
 """
 
 from __future__ import annotations
 
+import os
 import secrets
 
 import click
@@ -146,21 +152,43 @@ def _set_front_door_mode(cfg, root, mode: str) -> None:
     save_config(cfg, root)
 
 
-def _token_hint_lines(token_env: str, root) -> list[str]:
-    """bearer token 未设时的提示（给强 token 建议 + 强调走 .env 不落 config）。
+def _write_generated_token(root, token_env: str) -> str | None:
+    """F134 FR-2a：生成强随机 token 追加写入实例 ``.env``（0600）。
 
-    ``token_env`` 为运行时实际读取的变量名（尊重用户自定义，Codex review P2）。
-    ``root`` 为本次实际加载的实例根——Codex 第五轮 P2：非默认实例根
-    （``OCTOAGENT_PROJECT_ROOT``）下提示路径必须指向真实 root 的 .env，否则用户照
-    默认 ``~/.octoagent/.env`` 写，服务读的是别处，重启后仍 503。
+    返回错误描述（成功 None）。token 值只进 ``.env``——**绝不**出现在返回值 /
+    stdout / 日志（Constitution #5；AC-T1 capsys 全文断言钉住）。追加写保持既有
+    内容逐字节不动（尾部无换行先补 ``\\n``，FR-2d）；单行 write 远小于
+    PIPE_BUF，无半写风险。``.env`` 本就承载 secrets，无论新建还是已存在都收紧
+    0600（F129 日志文件同款权限姿势）。
+
+    ``root`` 为本次实际加载的实例根——Codex 第五轮 P2（F130）：非默认实例根下
+    路径必须指向真实 root 的 ``.env``，否则服务读的是别处，重启后仍 503。
     """
-    suggested = secrets.token_urlsafe(32)
+    token = secrets.token_urlsafe(32)
+    env_path = root / ".env"
+    try:
+        if env_path.exists():
+            existing = env_path.read_bytes()
+            needs_newline = bool(existing) and not existing.endswith(b"\n")
+            with env_path.open("a", encoding="utf-8") as fh:
+                if needs_newline:
+                    fh.write("\n")
+                fh.write(f"{token_env}={token}\n")
+        else:
+            env_path.write_text(f"{token_env}={token}\n", encoding="utf-8")
+        os.chmod(env_path, 0o600)
+    except OSError as exc:
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
+def _token_generated_lines(token_env: str, root) -> list[str]:
+    """token 生成成功后的用户提示（零明文，FR-2a/D10）。"""
     env_path = root / ".env"
     return [
-        f"[yellow]提醒：bearer 模式需要设置 token 环境变量 {token_env}[/yellow]",
-        "  手机访问 Web UI 时在页面输入此 token（SSE 用 access_token 查询参数）。",
-        f"  建议在 {env_path} 追加（强随机值，勿写进 octoagent.yaml）：",
-        f"    [dim]{token_env}={suggested}[/dim]",
+        f"[green]已生成强随机 bearer token 并写入 {env_path}（仅本机可读）[/green]",
+        "  手机首次访问 Web UI 时需输入该 token（SSE 自动带 access_token 参数）。",
+        f"  查看 token：[dim]grep {token_env} {env_path}[/dim]",
     ]
 
 
@@ -240,12 +268,20 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
     shadow_warn = _env_shadow_warning(env, intended_mode="bearer")
 
     lines: list[str] = [f"Tailscale 就绪：{probe.dns_name}"]
+    # 只看实例 .env（服务真实 source），不看 shell——自定义 token env 的 shell-only
+    # 值托管服务不继承（Codex 第六轮 P2）。
+    token_missing = not _token_set_in_instance_env(root, token_env)
     if dry_run:
         lines.append("模式: dry-run（未做任何改动）")
         if persisted != "bearer":
             lines.append(f"将把 front_door.mode: {persisted} → bearer（octoagent.yaml）")
         else:
             lines.append("front_door.mode 已是 bearer（幂等，无需改）")
+        if token_missing:
+            lines.append(
+                f"将生成强随机 bearer token 写入 {root / '.env'}"
+                f"（变量 {token_env}，不打印明文）"
+            )
         lines.append(f"将运行: tailscale serve --bg --yes {port}")
         lines.append(f"手机访问将是: https://{probe.dns_name}/")
         if shadow_warn:
@@ -265,7 +301,24 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
         console.print(render_panel("octo remote enable", lines, border_style="red"))
         raise SystemExit(1)
 
-    # serve 成功 → 幂等持久化 bearer（yaml 已 bearer 不重复写，比对持久化值）。
+    # F134 D7/D9：token 未设 → serve 成功后、mode 持久化前自动生成写入 .env。
+    # 写入失败即止（不切 mode + exit 1）——bearer 无 token 会让受保护 API 全
+    # 503（_read_secret），与「serve 成功才持久化」同一"完成态才生效"原子精神。
+    token_lines: list[str] = []
+    if token_missing:
+        write_error = _write_generated_token(root, token_env)
+        if write_error is not None:
+            lines.append(f"[red]bearer token 写入 .env 失败：{write_error}[/red]")
+            lines.append(
+                f"[yellow]front_door.mode 未改动——请手动在 {root / '.env'} 设置 "
+                f"{token_env}=<强随机值>（如 `python3 -c 'import secrets; "
+                "print(secrets.token_urlsafe(32))'`）后重试。[/yellow]"
+            )
+            console.print(render_panel("octo remote enable", lines, border_style="red"))
+            raise SystemExit(1)
+        token_lines = _token_generated_lines(token_env, root)
+
+    # serve + token 齐 → 幂等持久化 bearer（yaml 已 bearer 不重复写，比对持久化值）。
     if persisted != "bearer":
         _set_front_door_mode(cfg, root, "bearer")
         lines.append(f"front_door.mode: {persisted} → bearer（已写入 octoagent.yaml）")
@@ -274,10 +327,7 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
 
     lines.append("[green]Tailscale serve 已启用[/green]")
     lines.append(f"[bold]手机访问：{serve.published_url}[/bold]")
-    # 只看实例 .env（服务真实 source），不看 shell——自定义 token env 的 shell-only
-    # 值托管服务不继承（Codex 第六轮 P2）。
-    if not _token_set_in_instance_env(root, token_env):
-        lines.extend(_token_hint_lines(token_env, root))
+    lines.extend(token_lines)
     if shadow_warn:
         lines.append(shadow_warn)
     lines.append(

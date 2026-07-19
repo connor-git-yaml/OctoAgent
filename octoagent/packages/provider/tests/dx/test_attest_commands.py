@@ -353,6 +353,30 @@ class TestAttestRemoteHttpChain:
         assert by_name["sse_channel"].ok is False
         assert "未被拒" in by_name["sse_channel"].detail
 
+    def test_sse_negative_probe_accepts_rate_limited_429(self) -> None:
+        """F134 AC-A1：限流生效期错 token 得 429（FRONT_DOOR_RATE_LIMITED）——
+        同样证明 guard 在挡，负向探针视为通过（只认 401 会假阴性 fail）。"""
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.url.path.startswith("/api/stream/task/"):
+                if request.url.params.get("access_token") == _SENTINEL_TOKEN:
+                    return httpx.Response(404, json={"error": "TASK_NOT_FOUND"})
+                return httpx.Response(
+                    429,
+                    json={"detail": {"code": "FRONT_DOOR_RATE_LIMITED"}},
+                    headers={"Retry-After": "300"},
+                )
+            if request.url.path == "/api/tasks":
+                return httpx.Response(200, json={"tasks": []})
+            return _happy_remote_handler(request)
+
+        _, kwargs = _remote_kwargs(handler)
+        report = run_remote_probe(**kwargs)
+
+        assert report.status == "pass"
+        by_name = {c.name: c for c in report.checks}
+        assert by_name["sse_channel"].ok is True
+
     def test_sse_zero_chunk_stream_is_fail(self) -> None:
         """Codex re-review P2 回归钉住：200 + event-stream 但零字节即断流
         （代理不支持流式/立即关闭）不得报 pass。"""

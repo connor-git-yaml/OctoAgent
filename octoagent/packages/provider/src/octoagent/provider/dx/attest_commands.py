@@ -468,22 +468,26 @@ def _run_remote_http_checks(
 
 
 def _probe_sse_negative(client: Any, base: str, token: str) -> tuple[bool, str]:
-    """负向断言：错 token 访问 SSE 路径必须 401（Codex re-review P2）。
+    """负向断言：错 token 访问 SSE 路径必须被拒——401 或 429（Codex re-review P2）。
 
     guard 丢失/query-token 校验回归时 stream 路由对任意请求都会先走 404
     （task 查询），正向 404-判别会被骗过——负向请求专抓这种回归。错 token 由
     真 token 加后缀派生（长度必不同 → compare_digest 必 False），同样经
-    ``params=`` 编码。"""
+    ``params=`` 编码。
+
+    F134：认证失败限流后，该源近期错误尝试较多时错 token 会得 429
+    （``FRONT_DOOR_RATE_LIMITED``）——同样证明 guard 在挡且更强，视为通过；
+    只接受 401 会在限流生效期把探针打成假阴性。"""
     wrong_token = f"{token}-attest-negative"
     url = f"{base}/api/stream/task/attest-probe-nonexistent"
     try:
         resp = client.get(url, params={"access_token": wrong_token})
     except Exception as exc:  # noqa: BLE001
         return False, f"SSE 负向判别异常（{type(exc).__name__}）"
-    if resp.status_code == 401:
-        return True, "SSE 负向通过（错 token → 401）"
+    if resp.status_code in (401, 429):
+        return True, f"SSE 负向通过（错 token → {resp.status_code}）"
     return False, (
-        f"SSE 错 token 未被拒（预期 401 实际 {resp.status_code}）——"
+        f"SSE 错 token 未被拒（预期 401/429 实际 {resp.status_code}）——"
         "stream 路由认证可能回归/未挂 guard"
     )
 

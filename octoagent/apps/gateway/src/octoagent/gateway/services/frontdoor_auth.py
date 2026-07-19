@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import ipaddress
+import math
 import os
 import secrets
+import time
+from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 
 import structlog
@@ -24,6 +28,139 @@ _PROXY_HINT_HEADERS = (
     "x-forwarded-proto",
     "x-real-ip",
 )
+
+# ---------------------------------------------------------------------------
+# F134 认证失败限流（仿 OpenClaw auth-rate-limit，单进程内存态）
+# ---------------------------------------------------------------------------
+
+#: 滑动窗口长度（秒）：窗口内失败达阈值才进入 lockout。
+_RATE_LIMIT_WINDOW_SECONDS = 60.0
+#: 窗口内允许的「带错凭证」失败次数；达到即 lockout。
+_RATE_LIMIT_MAX_FAILURES = 10
+#: lockout 时长（秒）：期间该源的错误凭证请求一律 429。
+_RATE_LIMIT_LOCKOUT_SECONDS = 300.0
+#: 追踪的源上限（防伪造源撑爆内存；单用户私网实例足够）。
+_RATE_LIMIT_MAX_ENTRIES = 256
+
+
+class _RateLimitEntry:
+    """单个源的失败状态（时间戳滑动窗口 + lockout 截止时刻）。"""
+
+    __slots__ = ("failures", "locked_until")
+
+    def __init__(self) -> None:
+        self.failures: deque[float] = deque()
+        self.locked_until: float | None = None
+
+
+class _FailureRateLimiter:
+    """认证失败限流器（spec F134 §1）。
+
+    语义（D1，与 OpenClaw check-before-verify 的显式差异）：**验证优先**——
+    调用方先做凭证验证，只有「带了凭证但验证失败」才 ``record_failure``；
+    验证成功恒放行并 ``reset``。因此正确凭证永不被锁（Tailscale serve 场景
+    所有远程共享 127.0.0.1 一个桶，锁定式会让 tailnet 内任一失控设备把唯一
+    用户锁在门外）。缺凭证（SPA 首屏裸请求渲染 FrontDoorGate 的正常路径）
+    不经过本组件。
+
+    key = TCP 层 client_host（不可伪造；不用 XFF——直连 LAN 场景 XFF 可被
+    伪造成每请求换桶绕过限流）；loopback 源**不豁免**（D2，serve 主入口就是
+    127.0.0.1，豁免即失效）。时钟经构造注入（默认 ``time.monotonic``，测试
+    可控无 sleep）。FastAPI 单 event loop 内方法为同步段，无锁需求。
+    """
+
+    def __init__(
+        self,
+        *,
+        max_failures: int = _RATE_LIMIT_MAX_FAILURES,
+        window_seconds: float = _RATE_LIMIT_WINDOW_SECONDS,
+        lockout_seconds: float = _RATE_LIMIT_LOCKOUT_SECONDS,
+        max_entries: int = _RATE_LIMIT_MAX_ENTRIES,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._max_failures = max_failures
+        self._window_seconds = window_seconds
+        self._lockout_seconds = lockout_seconds
+        self._max_entries = max_entries
+        self._clock = clock
+        self._entries: dict[str, _RateLimitEntry] = {}
+
+    def record_failure(self, source: str) -> float | None:
+        """记录一次「带错凭证」失败；返回当前 lockout 剩余秒数（未锁 None）。
+
+        已处 lockout 时不再累计（lockout 固定时长不滑动，可预测），只回报
+        剩余秒。窗口内失败达到阈值的那一次触发 lockout 并记一条 warning
+        （只在状态转变时记，防攻击期间日志洪流；不含任何凭证字节）。
+        """
+        now = self._clock()
+        entry = self._entries.get(source)
+        if entry is None:
+            entry = self._admit_entry(source, now)
+            if entry is None:
+                # 表满且全员处于 lockout（极端态）：不为新源建条目，也不升级
+                # 响应——宁可少限流也不误伤/膨胀（可用性优先，D3）。
+                return None
+
+        remaining = self._locked_remaining(entry, now)
+        if remaining is not None:
+            return remaining
+
+        self._slide_window(entry, now)
+        entry.failures.append(now)
+        if len(entry.failures) >= self._max_failures:
+            entry.locked_until = now + self._lockout_seconds
+            entry.failures.clear()
+            log.warning(
+                "frontdoor_rate_limited",
+                source=source or "<unknown>",
+                retry_after_seconds=math.ceil(self._lockout_seconds),
+            )
+            return self._lockout_seconds
+        return None
+
+    def reset(self, source: str) -> None:
+        """凭证验证成功后清除该源全部失败状态（FR-1b）。"""
+        self._entries.pop(source, None)
+
+    def _locked_remaining(self, entry: _RateLimitEntry, now: float) -> float | None:
+        if entry.locked_until is None:
+            return None
+        if now >= entry.locked_until:
+            entry.locked_until = None
+            entry.failures.clear()
+            return None
+        return entry.locked_until - now
+
+    def _slide_window(self, entry: _RateLimitEntry, now: float) -> None:
+        cutoff = now - self._window_seconds
+        while entry.failures and entry.failures[0] <= cutoff:
+            entry.failures.popleft()
+
+    def _admit_entry(self, source: str, now: float) -> _RateLimitEntry | None:
+        """新源入表；表满先清过期、再逐最旧的未锁定条目（保住攻击者的锁）。"""
+        if len(self._entries) >= self._max_entries:
+            self._prune(now)
+        if len(self._entries) >= self._max_entries:
+            for key, candidate in self._entries.items():
+                if self._locked_remaining(candidate, now) is None:
+                    del self._entries[key]
+                    break
+            else:
+                return None
+        entry = _RateLimitEntry()
+        self._entries[source] = entry
+        return entry
+
+    def _prune(self, now: float) -> None:
+        stale = []
+        for key, entry in self._entries.items():
+            if self._locked_remaining(entry, now) is not None:
+                continue
+            self._slide_window(entry, now)
+            if not entry.failures:
+                stale.append(key)
+        for key in stale:
+            del self._entries[key]
 
 
 def _http_error(
@@ -45,6 +182,37 @@ class FrontDoorGuard:
 
     def __init__(self, project_root: Path) -> None:
         self._project_root = project_root
+        # F134：guard 经 deps.get_front_door_guard 缓存到 app.state（单例），
+        # 内存态限流状态随 app 生命周期存活。
+        self._rate_limiter = _FailureRateLimiter()
+
+    def _reject_invalid_credential(
+        self,
+        client_host: str,
+        *,
+        status_code: int,
+        code: str,
+        message: str,
+        hint: str,
+        headers: dict[str, str] | None = None,
+    ) -> HTTPException:
+        """带错凭证的拒绝出口（F134 FR-1a）：计失败、lockout 中升级 429。
+
+        只有「带了凭证但验证失败」走这里（缺凭证不计数，FR-1c）；正确凭证
+        在调用方直接放行 + reset（FR-1b），故本方法不可能拦下合法用户。
+        """
+        retry_after = self._rate_limiter.record_failure(client_host)
+        if retry_after is not None:
+            retry_seconds = max(1, math.ceil(retry_after))
+            return _http_error(
+                429,
+                "FRONT_DOOR_RATE_LIMITED",
+                "认证失败次数过多，请稍后再试。",
+                hint=f"该来源已被暂时限流，约 {retry_seconds} 秒后可重试；"
+                "使用正确凭证的请求不受影响。",
+                headers={"Retry-After": str(retry_seconds)},
+            )
+        return _http_error(status_code, code, message, hint=hint, headers=headers)
 
     async def authorize(self, request: Request) -> None:
         config = self._load_front_door_config()
@@ -89,13 +257,15 @@ class FrontDoorGuard:
                     headers={"WWW-Authenticate": "Bearer"},
                 )
             if not secrets.compare_digest(presented, expected):
-                raise _http_error(
-                    401,
-                    "FRONT_DOOR_TOKEN_INVALID",
-                    "Bearer Token 无效。",
+                raise self._reject_invalid_credential(
+                    client_host,
+                    status_code=401,
+                    code="FRONT_DOOR_TOKEN_INVALID",
+                    message="Bearer Token 无效。",
                     hint="请确认本地保存的 token 与服务端环境变量一致。",
                     headers={"WWW-Authenticate": "Bearer"},
                 )
+            self._rate_limiter.reset(client_host)
             return
 
         if config.mode == "trusted_proxy":
@@ -123,12 +293,14 @@ class FrontDoorGuard:
                     ),
                 )
             if not secrets.compare_digest(header_value, expected):
-                raise _http_error(
-                    403,
-                    "FRONT_DOOR_PROXY_TOKEN_INVALID",
-                    "trusted proxy 共享鉴权 header 无效。",
+                raise self._reject_invalid_credential(
+                    client_host,
+                    status_code=403,
+                    code="FRONT_DOOR_PROXY_TOKEN_INVALID",
+                    message="trusted proxy 共享鉴权 header 无效。",
                     hint="请确认代理注入的共享 token 与服务端环境变量一致。",
                 )
+            self._rate_limiter.reset(client_host)
             return
 
         raise _http_error(
