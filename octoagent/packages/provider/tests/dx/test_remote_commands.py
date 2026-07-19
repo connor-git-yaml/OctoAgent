@@ -715,6 +715,100 @@ class TestCodexReviewFixes:
         # token 已写成功（.env 有值）——重试幂等跳过生成
         assert (tmp_path / ".env").exists()
 
+    def test_enable_yaml_write_failure_alive_gateway_still_rolls_back(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T5b（Codex 八轮 P2 钉住）：save_config 抛后 cfg 内存态已被 mutate
+        为 bearer——若污染收尾判定，服务活着会被误判"bearer 生效"而保留悬挂
+        映射。修复=先恢复内存态再判定 → loopback 实例即使服务活着也必回滚。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        import octoagent.gateway.services.config.config_wizard as cw
+
+        monkeypatch.setattr(
+            cw,
+            "save_config",
+            lambda *_a: (_ for _ in ()).throw(OSError("read-only octoagent.yaml")),
+        )
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        # ★ 服务活着——mutated cfg 若泄漏进判定会错误走"保留"分支
+        monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: True)
+        rollback_calls: list = []
+        monkeypatch.setattr(
+            remote_commands,
+            "disable_tailscale_serve",
+            lambda **k: rollback_calls.append(k) or TailscaleServeResult(ok=True),
+        )
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 1
+        assert rollback_calls  # ★ 内存态已恢复 loopback ⇒ 回滚而非误保留
+        assert "已回滚" in result.output
+
+    def test_enable_blocked_by_litellm_blank_token_override(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T6（Codex 八轮 P2）：.env.litellm 的空赋值 `TOKEN=`（source 顺序
+        靠后）会盖掉生成写入 .env 的值 → enable 生成前守卫报错 + 收尾回滚 +
+        指引删行；.env 不被写入 token。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        saved: list = []
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), saved)
+        (tmp_path / ".env.litellm").write_text(
+            "OCTOAGENT_FRONTDOOR_TOKEN=\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: False)
+        rollback_calls: list = []
+        monkeypatch.setattr(
+            remote_commands,
+            "disable_tailscale_serve",
+            lambda **k: rollback_calls.append(k) or TailscaleServeResult(ok=True),
+        )
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 1
+        assert saved == []  # 不切 mode
+        assert rollback_calls  # 收尾回滚
+        assert ".env.litellm" in result.output
+        assert "删除" in result.output
+        assert not (tmp_path / ".env").exists()  # 未做无效写入
+
+    def test_enable_litellm_nonblank_token_counts_as_set(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T7：.env.litellm 里的**非空** token（source 后者生效）视作已设
+        → 幂等不生成不覆盖。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        (tmp_path / ".env.litellm").write_text(
+            "OCTOAGENT_FRONTDOOR_TOKEN=legacy-but-valid-token\n", encoding="utf-8"
+        )
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 0
+        assert not (tmp_path / ".env").exists()  # 已设（litellm）→ 不生成
+        assert "已生成" not in result.output
+
     def test_disable_serve_reset_failure_exits_1(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

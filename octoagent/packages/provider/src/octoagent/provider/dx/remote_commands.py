@@ -60,25 +60,57 @@ def _effective_env(root) -> dict[str, str]:
     return read_instance_effective_env(root)
 
 
-def _token_set_in_instance_env(root, token_env: str) -> bool:
-    """bearer token 是否在**实例 .env**（服务实际 source）里设了非空值。
+def _instance_env_files_merged(root) -> dict[str, str | None]:
+    """按 ``run-octo-home.sh`` 的 source 顺序合并实例 env 文件（.env →
+    .env.litellm，后者同键覆盖**含空赋值**）。
 
-    Codex 第六轮 P2：不能看 `env`（含 shell）——自定义 token env（非 OCTOAGENT_
-    前缀）的 shell-only 值不会被 read_instance_effective_env 屏蔽，会误判"已设"
-    但托管服务不继承 → 重启后 bearer 缺 token → 受保护 API 全 503。故只查 .env。
+    Codex 八轮 P2：``KEY=`` 空赋值在 ``set -a`` source 语义下同样导出覆盖——
+    只按"任一文件有非空值"判定会漏掉「.env 有生成值但 .env.litellm 的空赋值
+    把它盖掉」的组合（重启后 bearer 无凭证 → 受保护 API 全 503）。
     """
+    merged: dict[str, str | None] = {}
     try:
         from dotenv import dotenv_values
 
         for filename in (".env", ".env.litellm"):
             env_path = root / filename
             if env_path.exists():
-                value = dotenv_values(env_path).get(token_env)
-                if value is not None and value.strip():
-                    return True
-    except Exception:  # pragma: no cover - dotenv 缺失/读失败降级为"未设"
-        pass
-    return False
+                merged.update(dotenv_values(env_path))
+    except Exception:  # pragma: no cover - dotenv 缺失/读失败按空 merge
+        return {}
+    return merged
+
+
+def _token_set_in_instance_env(root, token_env: str) -> bool:
+    """bearer token 在实例 env 文件按 source 顺序**最终生效**的值是否非空。
+
+    Codex 第六轮 P2：不能看 `env`（含 shell）——shell-only 值托管服务不继承。
+    Codex 八轮 P2：须按 source 顺序 merge（.env.litellm 的空赋值会盖掉 .env
+    的值），只认最终生效值。
+    """
+    value = _instance_env_files_merged(root).get(token_env)
+    return value is not None and value.strip() != ""
+
+
+def _litellm_blank_override(root, token_env: str) -> bool:
+    """``.env.litellm`` 是否存在该 token 键的**空赋值**（会盖掉 .env 生成值）。
+
+    存在时生成写 .env 无效（source 顺序靠后的空赋值覆盖），必须让用户先清理
+    该行——自动改 ``.env.litellm``（F081 legacy 兼容文件）不在本命令职责内。
+    """
+    try:
+        from dotenv import dotenv_values
+
+        litellm_path = root / ".env.litellm"
+        if not litellm_path.exists():
+            return False
+        values = dotenv_values(litellm_path)
+        if token_env not in values:
+            return False
+        value = values.get(token_env)
+        return value is None or value.strip() == ""
+    except Exception:  # pragma: no cover
+        return False
 
 
 def _resolve_port(env: dict[str, str]) -> int:
@@ -376,6 +408,22 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
     # 503（_read_secret），与「serve 成功才持久化」同一"完成态才生效"原子精神。
     token_lines: list[str] = []
     if token_missing:
+        # Codex 八轮 P2：.env.litellm 的空赋值（source 顺序靠后）会盖掉本次
+        # 生成写入 .env 的值 → 重启后 bearer 仍无凭证。生成前守卫，让用户先
+        # 清理该行（legacy 文件不代改）。
+        if _litellm_blank_override(root, token_env):
+            lines.append(
+                f"[red]检测到 {root / '.env.litellm'} 中的空赋值 "
+                f"`{token_env}=` 会覆盖生成的 token（source 顺序靠后）。[/red]"
+            )
+            kept, settle_lines = _settle_serve_after_failure(cfg, env, port)
+            lines.extend(settle_lines)
+            lines.append(
+                f"[yellow]front_door.mode 未改动——请删除 .env.litellm 中的 "
+                f"`{token_env}=` 行后重试 `octo remote enable`。[/yellow]"
+            )
+            console.print(render_panel("octo remote enable", lines, border_style="red"))
+            raise SystemExit(1)
         write_error = _write_generated_token(root, token_env)
         if write_error is not None:
             lines.append(f"[red]bearer token 写入 .env 失败：{write_error}[/red]")
@@ -402,6 +450,11 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
         try:
             _set_front_door_mode(cfg, root, "bearer")
         except Exception as exc:  # noqa: BLE001 - save_config 的任何失败都要收尾
+            # Codex 八轮 P2：_set_front_door_mode 先改内存再 save——save 抛后
+            # cfg.front_door.mode 已是 "bearer"，直接拿去 settle 会误判
+            # "bearer 已生效" 而保留映射（真实服务仍 loopback → 403 悬挂）。
+            # 先恢复内存态再判定。
+            cfg.front_door.mode = persisted
             lines.append(
                 "[red]front_door.mode 写入 octoagent.yaml 失败："
                 f"{type(exc).__name__}: {exc}[/red]"
