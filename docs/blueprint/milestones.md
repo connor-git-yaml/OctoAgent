@@ -673,3 +673,25 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 **4 Feature 落地闭环（2026-07-19）**：F145 审批中心 / F134 bearer 加固 / F146 平台一致性（首波 dd88c49a）+ F147 清扫篮（58249eaa）全合入 master，CI 全绿。CI triage 两轮均非回归：①F134 remote_commands console 模块单例 width import 锁死致 CI 80 列折断 CJK 断言（超宽 console 注入根治）；②tool_index 检索延迟 <10ms 绝对性能断言 CI 慢 runner 抖到 14ms（F142 性能豁免同类，CI=true skipif；本地 0.09s 稳过，F147 未碰 tooling）。**F147 顺手治两真债**：skills/runner.py 429 退避吃 max_steps 决策步数（M7 bench 限流截断根因，改指数退避不计步数）+ 三姊妹 cron FAILED 零通知补 HIGH 级。**收官仅差用户动作**：装 Tailscale + `octo remote enable`（主 session 陪跑）→ `octo attest remote` 从 not_enabled 转绿 + 某次重启签 ATT-129-BOOT。
 
 **M10 收官（2026-07-19，功能层全 ✅）**：4 Feature 全部完成——首波 F145 审批中心 ∥ F134 bearer 加固 ∥ F146 平台一致性（本地待 push）+ 第二波 **F147 清扫篮 ✅**（5 项独立小项：toolsets 死配置清理 / cron 三姊妹失败 HIGH 通知 / bench infra 两债 / 容器交付不做归档 / console_output 窄终端 floor；5419 passed 0 regression；Codex spec 2H+5M+3L + final + Opus 双评审 0 HIGH）。**剩余 = 纯用户侧部署验收**（非代码）：用户装 Tailscale + `octo remote enable` → `octo attest remote` 绿 + 某次重启 Mac 签 ATT-129-BOOT。功能层欠账已清零。
+
+---
+
+### M11（Web 工作台 v2 重设计 + Cloudflare 零信任远程）⏳ 启动（2026-07-19）
+
+> **来源**：用户在 claude.ai/design 出了 Web + Mobile 两份 v2 设计稿（Spotify 深色风 · project 851e3fb2）。经全面 review 后收窄：M11 只做**桌面 Web 重设计 + 公网远程**两件相对确定的；原生 iOS 独立成 M12（见下，因用户要读 HealthKit/EventKit 喂 Agent 分析，是新数据入口+新能力域，非 UI 附属）。
+> **四项用户拍板（2026-07-19）**：①独立里程碑；②Cloudflare 与 Tailscale **并存**（不替代）；③**接受公网可达但强制 Cloudflare Access 零信任**（named tunnel + Access OTP/SSO，**排除 trycloudflare** 无认证临时隧道）；④先主工作台 + 设计系统落地，其余页面渐进。
+> **review 校正（写进各 Feature spec 硬约束）**：①**设计稿文案含已退役词**（满屏「Butler」→ 代码已改名主 Agent；「LiteLLM 正常」→ F081 已退役换 ProviderRouter）——实现=视觉/结构/交互，**文案走「设计词→代码真实词」映射，禁照抄**；②**这是完整主题反转**（现前端是浅色暖调 `--cp-*`/IBM Plex，v2 是纯黑+Spotify绿#1ed760+Figtree）——**重皮肤化现有 `styles/tokens.css` 到深色，不并造第二套 token、不进已 4476 行的 index.css**；③**Cloudflare ≠ 端到端加密**（CF 边缘终止 TLS 见明文，设计稿 1e 措辞错误；真 E2E 归 Tailscale/WireGuard）——F150 spec 描述写准；④**「纯 UI」前提部分不成立**：设计稿侧栏跨项目分组会话，现前端只有 `active_project_id` 单项目——F148 勘察必先验「跨项目列会话分组」「按 session_id 过滤任务」是否现成，缺则是隐藏后端工须拆出；⑤`#1ed760` 是 Spotify 品牌色，个人自用可、未来公开分发须换（不阻塞）。
+
+| Feature | 规模 | 一句话 | 波次 |
+|---------|------|--------|------|
+| **F148 设计系统 + Web 主工作台 v2** | L | Phase 0 设计系统先落全套（`tokens.css` 重皮肤化深色 + Figtree + octoBar/octoJelly/octoPulse 三动画 + logo）→ 主对话工作台三栏（项目分组会话+运行指示 / 对话舞台 / 「本会话运行状态」右栏，任务控制收进会话）+ 全局任务浮层 + 加载页。**复用现有数据逻辑，只换视觉/结构/交互**；交互态清单必列（右栏空态/会话几十个折叠/任务失败态/浮层与右栏同任务状态一致/多会话动画节流）。忠实还原设计稿 1a/1b/1c，文案走映射 | ① |
+| **F150 Cloudflare 零信任远程** | M | 设计先行（公网安全敏感）：front_door 加 `cloudflared` 模式与 Tailscale 并存 + named tunnel + **强制 Cloudflare Access**（OTP/SSO）+ 配对码流程 + bearer 纵深复用 F134。**排除 trycloudflare**。设计岔路回拍板（cloudflared 自动起 vs 检测指引 / 配对码语义 / Access 配置边界）| ① |
+| **F149 Web 其余页面 v2** | M | 智能体/技能/MCP/文件/记忆/审批中心/定时/设置 按 v2 设计语言渐进重皮（消费 F148 设计系统）| ② |
+
+**波次**：①F148 主工作台 ∥ F150 Cloudflare（前端/后端不冲突，F150 设计先行）→ ②F149 承 F148 设计系统。**完成定义**：F148/F149/F150 ✅ + Web v2 全站切换 + `octo attest remote` 经 Cloudflare 亦绿。
+
+### M12（原生 iOS + 健康/日程感知）📋 规划（2026-07-19 拍板独立里程碑，设计先行）
+
+> **为何独立**：用户要 Agent 读 **HealthKit（健康/运动）+ EventKit（日历）** 做分析——**Web/PWA 永久拿不到**这两类数据（苹果不给 Web 层 API，实测确认），只有原生 iOS 能读。这不是「给后端做个 iOS 壳」，而是**新增数据入口 + 新 Agent 能力域（健康/日程感知）+ 最敏感数据的隐私边界**（健康数据 Constitution #5 secrets 分区：读进来走不走 LLM 上下文、存哪、如何脱敏），比 5 个远程视图重得多。
+> **设计先行重点**（非纯还原 UI）：HealthKit/EventKit 授权 → 数据入 Octo → Agent 分析 的**新链路 + 隐私模型**才是核心；SwiftUI 5 视图（对话/任务中心/审批推送/记忆候选/远程连接）是表层。技术栈代价（Swift/Xcode 新栈 + APNs 证书 + Apple 开发者账号 + 上架审核 + 第二代码库长期同步）用户已知情接受。
+> **依赖**：M11 的 Cloudflare 远程（手机连家里 Octo 的通道）+ 设计系统 token（iOS 颜色/间距常量同源）。M11 落地后启动。
