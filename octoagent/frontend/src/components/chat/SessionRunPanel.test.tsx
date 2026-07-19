@@ -33,6 +33,17 @@ describe("SessionRunPanel（F148 右栏本会话运行状态）", () => {
     expect(screen.queryByText("打开任务详情")).not.toBeInTheDocument();
   });
 
+  it("成功终态且非流式回到就绪空态——不因残留 taskId 显示旧运行（Codex P2）", () => {
+    renderPanel({ taskId: "task-old", normalizedTaskStatus: "SUCCEEDED", streaming: false });
+    expect(screen.getByTestId("session-run-empty")).toBeInTheDocument();
+  });
+
+  it("失败终态仍显示面板 + 失败横幅（不静默消失）", () => {
+    renderPanel({ normalizedTaskStatus: "FAILED", statusLabel: "已失败", streaming: false });
+    expect(screen.queryByTestId("session-run-empty")).not.toBeInTheDocument();
+    expect(screen.getByTestId("session-run-failed")).toBeInTheDocument();
+  });
+
   it("运行态显示状态徽标 + 进度 + 打开任务链接", () => {
     renderPanel({ currentStep: "正在搜索资料" });
     expect(screen.getByText("本会话运行状态")).toBeInTheDocument();
@@ -66,11 +77,6 @@ describe("SessionRunPanel（F148 右栏本会话运行状态）", () => {
     renderPanel({ events });
     expect(screen.getByText("调用工具 · web.search")).toBeInTheDocument();
     expect(screen.getByText("生成产出文件")).toBeInTheDocument();
-  });
-
-  it("失败态显示失败横幅（交互态③）", () => {
-    renderPanel({ normalizedTaskStatus: "FAILED", statusLabel: "已失败", streaming: false });
-    expect(screen.getByTestId("session-run-failed")).toBeInTheDocument();
   });
 
   it("有工件时渲染产出文件名", () => {

@@ -12,7 +12,7 @@ import type { Artifact, TaskEvent } from "../../types";
  * 超 F148 纯前端红线，故 defer（见 spec §10 L6）。
  */
 
-const FAILURE_STATUSES = new Set(["FAILED", "CANCELLED", "TIMED_OUT"]);
+const FAILURE_STATUSES = new Set(["FAILED", "CANCELLED", "TIMED_OUT", "REJECTED"]);
 
 // 事件类型 → 面向非技术用户的友好描述 + tone
 function describeEvent(event: TaskEvent): { title: string; tone: "normal" | "pending" | "error" } {
@@ -97,9 +97,12 @@ export function SessionRunPanel({
   const [techExpanded, setTechExpanded] = useState(false);
   const isFailed = FAILURE_STATUSES.has(normalizedTaskStatus);
   const isTerminal = TERMINAL_TASK_STATUSES.has(normalizedTaskStatus);
-  const isActive = Boolean(taskId);
+  // 「本会话运行状态」= 当前这轮运行；成功终态且非流式即回到「就绪」空态
+  // （交互态①，Codex P2：不因残留的历史 taskId 一直显示旧运行）。失败终态仍
+  // 保留面板显示失败横幅，任务不能静默消失（Constitution #8 可观测）。
+  const isActive = Boolean(taskId) && (streaming || !isTerminal || isFailed);
 
-  // 空态（交互态①）：本会话还没有跑任何任务
+  // 空态（交互态①）：本会话当前没有进行中的运行
   if (!isActive) {
     return (
       <aside className="v2-run-panel" data-testid="session-run-panel" aria-label="本会话运行状态">

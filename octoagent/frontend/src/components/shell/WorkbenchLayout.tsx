@@ -14,7 +14,16 @@ import {
 import { useApprovalCenterCount } from "../../hooks/useApprovalCenterCount";
 
 const WorkbenchContext = createContext<WorkbenchDataState | null>(null);
-const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
+// 活跃 work（浮层 + 侧栏计数）——含 waiting_input/waiting_approval：任务等用户
+// 输入/审批时正是最需要被看见的时刻，不能从浮层与计数里消失（Codex P1）。
+const ACTIVE_WORK_STATUSES = new Set([
+  "created",
+  "assigned",
+  "running",
+  "escalated",
+  "waiting_input",
+  "waiting_approval",
+]);
 // 会话运行态（左栏 octoBar 运行指示）
 const RUNNING_SESSION_STATUSES = new Set(["running", "waiting_input", "waiting_approval"]);
 const UNGROUPED_PROJECT_LABEL = "其他会话";
