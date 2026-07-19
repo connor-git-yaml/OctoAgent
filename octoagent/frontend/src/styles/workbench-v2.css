@@ -1,0 +1,415 @@
+/*
+ * F148 Web v2 工作台布局层（workbench-v2）——绝不进 index.css。
+ * 三栏主工作台(1a) + 全局任务浮层(1b) + 项目分组 sidebar + octoJelly 空舞台。
+ * 全部消费 var(--cp-*)（Spotify 深色 token），随主题单一事实源。
+ */
+
+/* ══ 1a 中栏+右栏：对话页 2 列 grid ══ */
+.v2-chat-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 332px;
+  gap: var(--cp-space-3);
+  align-items: stretch;
+  min-height: 0;
+  height: 100%;
+}
+/* 无右栏（无活跃任务时可折叠为单列）——由组件加 .is-solo 控制 */
+.v2-chat-grid.is-solo {
+  grid-template-columns: minmax(0, 1fr);
+}
+.v2-chat-grid > .wb-chat-panel {
+  min-width: 0;
+}
+
+/* 窄屏：右栏下沉堆叠 */
+@media (max-width: 1080px) {
+  .v2-chat-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .v2-run-panel {
+    display: none;
+  }
+}
+
+/* ══ 右栏：本会话运行状态 SessionRunPanel ══ */
+.v2-run-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--cp-space-3);
+  min-height: 0;
+  padding: 16px;
+  border: 1px solid var(--cp-border);
+  border-radius: 18px;
+  background: var(--cp-card);
+  overflow-y: auto;
+}
+.v2-run-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.v2-run-panel-head h3 {
+  margin: 0;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--cp-ink);
+}
+.v2-run-panel-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--cp-primary-ink);
+}
+.v2-run-section {
+  display: grid;
+  gap: 8px;
+}
+.v2-run-section-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--cp-muted);
+}
+.v2-run-progress {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--cp-surface);
+  border: 1px solid var(--cp-border);
+}
+.v2-run-progress strong {
+  font-size: 0.9rem;
+  color: var(--cp-ink);
+}
+.v2-run-progress span {
+  font-size: 0.8rem;
+  color: var(--cp-muted);
+  line-height: 1.5;
+}
+
+/* 事件流（精简、技术字段折叠区外） */
+.v2-run-events {
+  display: grid;
+  gap: 2px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.v2-run-event {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+.v2-run-event:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+.v2-run-event-dot {
+  margin-top: 5px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cp-primary);
+}
+.v2-run-event.is-pending .v2-run-event-dot {
+  background: var(--cp-warning);
+}
+.v2-run-event.is-error .v2-run-event-dot {
+  background: var(--cp-danger);
+}
+.v2-run-event-copy {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+.v2-run-event-title {
+  font-size: 0.82rem;
+  color: var(--cp-ink);
+  word-break: break-word;
+}
+.v2-run-event-meta {
+  font-size: 0.72rem;
+  color: var(--cp-muted);
+}
+
+/* 工件卡 */
+.v2-run-artifact {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-surface);
+  font-size: 0.82rem;
+  color: var(--cp-ink);
+}
+.v2-run-artifact i {
+  color: var(--cp-primary);
+}
+
+/* 停止控制 */
+.v2-run-controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 右栏空态 / 失败态 */
+.v2-run-empty {
+  display: grid;
+  gap: 8px;
+  place-items: center;
+  text-align: center;
+  padding: 28px 16px;
+  color: var(--cp-muted);
+}
+.v2-run-empty .octo-jelly {
+  width: 56px;
+  height: 56px;
+  opacity: 0.85;
+}
+.v2-run-empty strong {
+  color: var(--cp-ink);
+  font-size: 0.92rem;
+}
+.v2-run-empty span {
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.v2-run-panel.is-failed {
+  border-color: var(--cp-danger-border);
+}
+.v2-run-banner-failed {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--cp-danger-soft);
+  color: var(--cp-danger);
+  font-size: 0.84rem;
+}
+
+/* ══ 左栏：项目分组会话 ══ */
+.wb-nav-project-group {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+.wb-nav-project-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--cp-muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: left;
+  border-radius: 8px;
+  transition: color var(--cp-transition-fast), background var(--cp-transition-fast);
+}
+.wb-nav-project-header:hover {
+  color: var(--cp-ink);
+  background: rgba(255, 255, 255, 0.04);
+}
+.wb-nav-project-caret {
+  display: inline-flex;
+  transition: transform var(--cp-transition-fast);
+  font-size: 0.7rem;
+}
+.wb-nav-project-header.is-collapsed .wb-nav-project-caret {
+  transform: rotate(-90deg);
+}
+.wb-nav-project-count {
+  margin-left: auto;
+  font-size: 0.7rem;
+  color: var(--cp-muted);
+}
+
+/* 会话项运行指示（octoBar 挂右侧） */
+.wb-nav-session-run {
+  position: absolute;
+  right: 34px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* ══ 侧栏就绪卡 v2 ══ */
+.v2-ready-card {
+  margin-top: auto;
+  display: grid;
+  gap: 4px;
+  padding: 14px;
+  border-radius: 14px;
+  border: 1px solid var(--cp-border);
+  background: linear-gradient(135deg, rgba(30, 215, 96, 0.08), transparent 70%), var(--cp-card);
+}
+.v2-ready-card .v2-ready-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--cp-primary);
+  box-shadow: 0 0 0 4px rgba(30, 215, 96, 0.14);
+}
+.v2-ready-card strong {
+  font-size: 0.9rem;
+  color: var(--cp-ink);
+}
+.v2-ready-card p {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--cp-muted);
+  line-height: 1.5;
+}
+
+/* ══ 1b 全局任务浮层 ══ */
+.v2-task-fab {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 40;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 18px;
+  border: 1px solid var(--cp-border);
+  border-radius: 999px;
+  background: var(--cp-card-strong);
+  color: var(--cp-ink);
+  font-weight: 600;
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.5);
+  transition: transform var(--cp-transition-normal), background var(--cp-transition-normal);
+}
+.v2-task-fab:hover {
+  transform: translateY(-2px);
+  background: #2f2f2f;
+}
+.v2-task-fab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--cp-primary);
+  color: #08130c;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+.v2-task-overlay {
+  position: fixed;
+  right: 24px;
+  bottom: 80px;
+  z-index: 41;
+  width: min(360px, calc(100vw - 48px));
+  max-height: min(60vh, 520px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--cp-border);
+  border-radius: 18px;
+  background: var(--cp-card-strong);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
+  overflow: hidden;
+}
+.v2-task-overlay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--cp-border);
+}
+.v2-task-overlay-head strong {
+  font-size: 0.94rem;
+  color: var(--cp-ink);
+}
+.v2-task-overlay-close {
+  border: none;
+  background: transparent;
+  color: var(--cp-muted);
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.v2-task-overlay-list {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  overflow-y: auto;
+}
+.v2-task-row {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px solid var(--cp-border);
+  background: var(--cp-card);
+  text-align: left;
+  transition: border-color var(--cp-transition-fast), background var(--cp-transition-fast);
+}
+.v2-task-row:hover {
+  border-color: rgba(30, 215, 96, 0.28);
+  background: #1f1f1f;
+}
+.v2-task-row-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.v2-task-row-title {
+  font-size: 0.86rem;
+  color: var(--cp-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.v2-task-row-meta {
+  font-size: 0.74rem;
+  color: var(--cp-muted);
+}
+.v2-task-overlay-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: var(--cp-muted);
+  font-size: 0.84rem;
+}
+
+/* ══ octoJelly 空对话舞台 ══ */
+.v2-empty-hero {
+  display: grid;
+  gap: 12px;
+  place-items: center;
+  padding: 8px 0 18px;
+}
+.v2-empty-hero-mark {
+  width: 72px;
+  height: 72px;
+}
+.v2-empty-hero h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--cp-ink);
+}
+.v2-empty-hero p {
+  margin: 0;
+  max-width: 40ch;
+  text-align: center;
+  color: var(--cp-muted);
+  font-size: 0.88rem;
+  line-height: 1.55;
+}

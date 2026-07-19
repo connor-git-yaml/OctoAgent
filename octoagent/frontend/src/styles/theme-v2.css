@@ -1,0 +1,230 @@
+/*
+ * F148 Web v2 主题层（theme-v2）——绝不进已冻结的 index.css。
+ * 职责：Figtree 字体落地 + 三动画（octoPulse/octoBar/octoJelly）+ 旧硬编码
+ * accent 色覆盖（token 翻转带走大部分 var(--cp-*)，本文件补硬编码残留）+
+ * 启动加载页(1c)。committed dark 用 `:root:not(.light)`（该类从不被设置，
+ * 恒匹配）与 index.css 深色媒体块同 specificity，靠 main.tsx 末位导入胜出。
+ */
+
+/* ── 字体 ── */
+body {
+  font-family:
+    "Figtree Variable", "Figtree", "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* v2 committed dark：品牌标题不再用衬线，跟随 Figtree（Spotify 无衬线体系） */
+:root .wb-sidebar-brand h1,
+:root .wb-topbar h2,
+:root .wb-hero h1,
+:root .wb-panel h3,
+:root .wb-boot-card h1,
+:root .wb-route-fallback-card h1 {
+  font-family:
+    "Figtree Variable", "Figtree", "Inter", system-ui, sans-serif;
+  letter-spacing: -0.02em;
+  font-weight: 700;
+}
+
+/* ── 三动画 keyframes ── */
+@keyframes octoPulse {
+  0%, 100% { transform: scale(1); opacity: 0.85; filter: drop-shadow(0 0 0 rgba(30, 215, 96, 0)); }
+  50% { transform: scale(1.06); opacity: 1; filter: drop-shadow(0 10px 26px rgba(30, 215, 96, 0.35)); }
+}
+
+@keyframes octoBar {
+  0%, 100% { transform: scaleY(0.35); }
+  50% { transform: scaleY(1); }
+}
+
+@keyframes octoJelly {
+  0%, 100% { transform: translateY(0) scale(1, 1); }
+  30% { transform: translateY(-4px) scale(1.02, 0.98); }
+  60% { transform: translateY(2px) scale(0.98, 1.02); }
+}
+
+/* octoBar 运行指示（仿 Spotify now-playing 均衡器竖条） */
+.octo-bar {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 12px;
+  width: 14px;
+}
+.octo-bar > i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--cp-primary);
+  transform-origin: bottom center;
+  animation: octoBar 900ms var(--cp-ease) infinite;
+}
+.octo-bar > i:nth-child(2) { animation-delay: 180ms; }
+.octo-bar > i:nth-child(3) { animation-delay: 360ms; }
+.octo-bar > i:nth-child(4) { animation-delay: 540ms; }
+
+/* octoJelly 泡泡 mark（对话空舞台） */
+.octo-jelly {
+  animation: octoJelly 3.4s var(--cp-ease) infinite;
+  filter: drop-shadow(0 14px 30px rgba(30, 215, 96, 0.22));
+}
+
+/* octoPulse 加载 logo */
+.octo-pulse {
+  animation: octoPulse 1.8s var(--cp-ease) infinite;
+}
+
+/* ── 旧 accent 硬编码色覆盖（teal/amber → Spotify 绿）── */
+
+/* 品牌 mark / logo drop-shadow + tagline */
+:root .wb-brand-mark,
+:root .wb-route-fallback-logo {
+  filter: drop-shadow(0 14px 26px rgba(30, 215, 96, 0.22));
+}
+:root .wb-brand-tagline {
+  color: rgba(30, 215, 96, 0.85);
+}
+
+/* 主按钮：Spotify 绿实底 + 黑字 */
+:root .wb-button-primary {
+  background: var(--cp-primary);
+  color: #08130c;
+  box-shadow: 0 10px 24px rgba(30, 215, 96, 0.22);
+}
+:root .wb-button-primary:hover {
+  background: #23e56a;
+}
+:root .wb-chat-form button[type="submit"] {
+  background: var(--cp-primary);
+  color: #08130c;
+}
+
+/* 次级/三级按钮在深色底 */
+:root .wb-button-secondary {
+  background: var(--cp-card-strong);
+  border-color: var(--cp-border);
+  color: var(--cp-ink);
+}
+:root .wb-button-tertiary {
+  background: var(--cp-card);
+  color: var(--cp-ink);
+}
+
+/* 导航项 hover/active：绿色 tint */
+:root .wb-nav-item:hover,
+:root .wb-nav-item.is-active {
+  border-color: rgba(30, 215, 96, 0.24);
+  background: linear-gradient(135deg, rgba(30, 215, 96, 0.14), rgba(30, 215, 96, 0.05));
+}
+
+/* 会话项 hover（覆盖 index.css 深色媒体块，故 :root:not(.light)） */
+:root:not(.light) .wb-nav-session-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: rgba(30, 215, 96, 0.18);
+}
+:root:not(.light) .wb-nav-session-item.is-active {
+  background: rgba(30, 215, 96, 0.1);
+  border-color: rgba(30, 215, 96, 0.28);
+}
+
+/* 用户消息气泡：绿色（覆盖旧 teal 渐变） */
+:root:not(.light) .wb-message-card.is-user {
+  background: linear-gradient(135deg, #16a34a, #1ed760);
+  color: #08130c;
+}
+
+/* 聊天输入框 focus + 通用输入/选择 focus */
+:root .wb-chat-form textarea:focus,
+:root .wb-input:focus,
+:root .wb-select:focus {
+  outline: none;
+  border-color: rgba(30, 215, 96, 0.5);
+}
+
+/* hover-reveal / chip 激活态绿色 */
+:root .wb-hover-reveal-trigger:hover,
+:root .wb-hover-reveal-trigger:focus-visible,
+:root .wb-hover-reveal-trigger[aria-expanded="true"] {
+  border-color: rgba(30, 215, 96, 0.28);
+  background: rgba(30, 215, 96, 0.08);
+  color: var(--cp-secondary-ink);
+}
+:root .wb-chip-button.is-active {
+  border-color: rgba(30, 215, 96, 0.28);
+  background: rgba(30, 215, 96, 0.1);
+  color: var(--cp-secondary-ink);
+}
+:root .wb-candidate-card-category {
+  background: rgba(30, 215, 96, 0.12);
+  color: var(--cp-primary);
+}
+
+/* 中性 chip/pill：深色底改浅色 rgba（原 rgba(20,32,47,x) 在黑底不可见） */
+:root .wb-chip,
+:root .wb-status-pill {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--cp-ink);
+}
+:root .wb-chip.is-muted,
+:root .wb-status-pill.is-draft {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--cp-muted);
+}
+/* 语义 pill 文字色回归本义（避免 primary-ink=绿 污染 warning） */
+:root .wb-status-pill.is-warning,
+:root .wb-status-pill.is-waiting_approval,
+:root .wb-status-pill.is-waiting_input,
+:root .wb-status-pill.is-paused,
+:root .wb-status-pill.is-escalated,
+:root .wb-chip.is-warning {
+  background: rgba(245, 166, 35, 0.16);
+  color: var(--cp-warning);
+}
+
+/* focus-visible 全局 outline → 绿 */
+:root button:focus-visible,
+:root a:focus-visible,
+:root input:focus-visible,
+:root textarea:focus-visible,
+:root select:focus-visible {
+  outline: 2px solid rgba(30, 215, 96, 0.4);
+  outline-offset: 2px;
+}
+
+/* 表单错误色（深色底可读） */
+:root .wb-form-error {
+  color: var(--cp-danger);
+}
+
+/* ── 启动加载页(1c) v2 ── */
+:root .wb-boot {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: var(--cp-space-5);
+}
+:root .wb-boot-card {
+  display: grid;
+  gap: 14px;
+  place-items: center;
+  width: min(460px, 100%);
+  padding: 40px 32px;
+  text-align: center;
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-xl);
+  background: var(--cp-card);
+  box-shadow: var(--cp-shadow);
+}
+.wb-boot-mark {
+  width: 84px;
+  height: 84px;
+}
+:root .wb-boot-card h1 {
+  font-size: 1.4rem;
+}
+.wb-route-fallback-card {
+  place-items: center;
+  text-align: center;
+}

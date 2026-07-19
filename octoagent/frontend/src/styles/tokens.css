@@ -1,33 +1,43 @@
+/*
+ * F148 Web v2：设计 token 深色重皮肤化（in place，不并造第二套）。
+ * 主题反转：浅色暖调（IBM Plex / 奶油底 / 琥珀墨绿）→ 纯黑 Spotify 深色
+ * （Figtree / #121212 底 / #1ed760 绿）。committed dark：无浅色模式，
+ * `:root` 即暗色，故删除原 `@media (prefers-color-scheme: dark)` 覆盖块。
+ * `--cp-*` 变量名/结构保持不变——630+ `var(--cp-*)` 消费方零改动即翻转。
+ */
 :root {
-  color-scheme: light;
+  color-scheme: dark;
   font-family:
-    "IBM Plex Sans",
-    "Avenir Next",
+    "Figtree Variable",
+    "Figtree",
+    "Inter",
+    system-ui,
+    -apple-system,
     "Segoe UI",
     sans-serif;
   font-size: 15px;
   line-height: 1.5;
   font-weight: 400;
-  color: #17212b;
+  color: #ffffff;
   background:
-    radial-gradient(circle at top left, rgba(183, 106, 43, 0.2), transparent 30%),
-    radial-gradient(circle at top right, rgba(31, 106, 91, 0.14), transparent 24%),
-    linear-gradient(180deg, #f4ede4 0%, #f7f5ef 38%, #edf1ec 100%);
+    radial-gradient(circle at top left, rgba(30, 215, 96, 0.07), transparent 32%),
+    radial-gradient(circle at 82% 4%, rgba(30, 215, 96, 0.04), transparent 26%),
+    linear-gradient(180deg, #0a0a0a 0%, #121212 42%, #0b0b0b 100%);
 
-  --cp-ink: #17212b;
-  --cp-muted: #62707c;
-  --cp-soft: #eef2ee;
-  --cp-border: rgba(23, 33, 43, 0.1);
-  --cp-card: rgba(255, 255, 255, 0.84);
-  --cp-card-strong: rgba(255, 255, 255, 0.96);
-  --cp-primary: #b76a2b;
-  --cp-primary-ink: #7a4318;
-  --cp-secondary: #1f6a5b;
-  --cp-secondary-ink: #0f4d43;
-  --cp-danger: #b54b2d;
-  --cp-warning: #996b1e;
-  --cp-success: #187b54;
-  --cp-shadow: 0 18px 40px rgba(23, 33, 43, 0.07);
+  --cp-ink: #ffffff;
+  --cp-muted: #a7a7a7;
+  --cp-soft: #1a1a1a;
+  --cp-border: rgba(255, 255, 255, 0.09);
+  --cp-card: #181818;
+  --cp-card-strong: #282828;
+  --cp-primary: #1ed760;
+  --cp-primary-ink: #1ed760;
+  --cp-secondary: #1ed760;
+  --cp-secondary-ink: #3be477;
+  --cp-danger: #f15e6c;
+  --cp-warning: #f5a623;
+  --cp-success: #1ed760;
+  --cp-shadow: 0 18px 40px rgba(0, 0, 0, 0.5);
   --cp-radius-xl: 22px;
   --cp-radius-lg: 16px;
   --cp-radius-md: 10px;
@@ -38,13 +48,13 @@
   --cp-space-4: 16px;
   --cp-space-5: 20px;
   --cp-space-6: 26px;
-  --cp-bg: rgba(247, 250, 251, 0.9);
-  --cp-surface: rgba(255, 255, 255, 0.72);
-  --cp-success-soft: rgba(24, 123, 84, 0.12);
-  --cp-danger-soft: rgba(181, 75, 45, 0.12);
-  --cp-warning-soft: rgba(153, 107, 30, 0.12);
-  --cp-danger-border: rgba(194, 65, 12, 0.22);
-  --cp-danger-bg: rgba(255, 240, 233, 0.92);
+  --cp-bg: #121212;
+  --cp-surface: #1a1a1a;
+  --cp-success-soft: rgba(30, 215, 96, 0.14);
+  --cp-danger-soft: rgba(241, 94, 108, 0.16);
+  --cp-warning-soft: rgba(245, 166, 35, 0.16);
+  --cp-danger-border: rgba(241, 94, 108, 0.3);
+  --cp-danger-bg: rgba(58, 22, 26, 0.55);
   --cp-ease: cubic-bezier(0.4, 0, 0.2, 1);
   --cp-duration-fast: 120ms;
   --cp-duration-normal: 160ms;
@@ -53,8 +63,8 @@
   --cp-transition-normal: var(--cp-duration-normal) var(--cp-ease);
   --cp-transition-slow: var(--cp-duration-slow) var(--cp-ease);
   --cp-scrollbar-size: 6px;
-  --cp-scrollbar-thumb: rgba(155, 155, 155, 0.4);
-  --cp-scrollbar-thumb-hover: rgba(155, 155, 155, 0.6);
+  --cp-scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --cp-scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
   --cp-scrollbar-track: transparent;
   --color-bg: var(--cp-soft);
   --color-border: var(--cp-border);
@@ -63,40 +73,4 @@
   --space-sm: var(--cp-space-2);
   --space-md: var(--cp-space-4);
   --space-lg: var(--cp-space-6);
-}
-
-/* 深色模式：跟随系统 prefers-color-scheme */
-@media (prefers-color-scheme: dark) {
-  :root:not(.light) {
-    color-scheme: dark;
-    color: #e8eaed;
-    background:
-      radial-gradient(circle at top left, rgba(183, 106, 43, 0.08), transparent 30%),
-      radial-gradient(circle at top right, rgba(31, 106, 91, 0.06), transparent 24%),
-      linear-gradient(180deg, #1a1a1a 0%, #1e1e1e 38%, #1c1f1e 100%);
-
-    --cp-ink: #e8eaed;
-    --cp-muted: #9aa0a6;
-    --cp-soft: #2d2d2d;
-    --cp-border: rgba(255, 255, 255, 0.1);
-    --cp-card: rgba(40, 40, 40, 0.84);
-    --cp-card-strong: rgba(48, 48, 48, 0.96);
-    --cp-primary: #d4915c;
-    --cp-primary-ink: #e8b88a;
-    --cp-secondary: #4db6a2;
-    --cp-secondary-ink: #7dd4c4;
-    --cp-danger: #e07860;
-    --cp-warning: #c4993a;
-    --cp-success: #3dba82;
-    --cp-shadow: 0 18px 40px rgba(0, 0, 0, 0.25);
-    --cp-bg: rgba(30, 30, 30, 0.9);
-    --cp-surface: rgba(50, 50, 50, 0.72);
-    --cp-success-soft: rgba(61, 186, 130, 0.15);
-    --cp-danger-soft: rgba(224, 120, 96, 0.15);
-    --cp-warning-soft: rgba(196, 153, 58, 0.15);
-    --cp-danger-border: rgba(224, 120, 96, 0.25);
-    --cp-danger-bg: rgba(80, 30, 20, 0.6);
-    --cp-scrollbar-thumb: rgba(255, 255, 255, 0.15);
-    --cp-scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
-  }
 }
