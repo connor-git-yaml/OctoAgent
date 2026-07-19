@@ -107,6 +107,7 @@ class ControlPlaneService(TelegramCommandMixin):
         import_workbench_service: ImportWorkbenchService | None = None,
         policy_engine: Any = None,
         notification_service: Any = None,
+        snapshot_store: Any = None,
     ) -> None:
         # 构建共享上下文
         self._ctx = ControlPlaneContext(
@@ -135,6 +136,8 @@ class ControlPlaneService(TelegramCommandMixin):
             update_service=update_service,
             automation_store=AutomationStore(project_root),
             notification_service=notification_service,
+            # F146 件②：USER.md 写点 live-state 同步（None 降级跳过 = 既有行为）
+            snapshot_store=snapshot_store,
         )
 
         self._stores = store_group

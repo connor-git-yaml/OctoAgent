@@ -37,7 +37,7 @@ def _restore_request(params: dict[str, Any]) -> ActionRequestEnvelope:
     )
 
 
-async def _make_control_plane(tmp_path: Path):
+async def _make_control_plane(tmp_path: Path, *, snapshot_store: Any = None):
     store_group = await create_store_group(
         str(tmp_path / "gateway.db"), str(tmp_path / "artifacts")
     )
@@ -49,6 +49,7 @@ async def _make_control_plane(tmp_path: Path):
         store_group=store_group,
         sse_hub=SSEHub(),
         telegram_state_store=TelegramStateStore(tmp_path),
+        snapshot_store=snapshot_store,
     )
     return control_plane, store_group
 
@@ -136,5 +137,41 @@ async def test_restore_invalid_target_version(tmp_path: Path) -> None:
             )
         )
         assert result.code == "INVALID_PARAM"
+    finally:
+        await sg.close()
+
+
+@pytest.mark.asyncio
+async def test_restore_user_md_syncs_live_state(tmp_path: Path) -> None:
+    """F146 件②：restore USER.md confirmed=true 后同步 SnapshotStore live state——
+    notifications quiet hours / user_profile.read 等读点无需重启即读到恢复内容。"""
+
+    class _RecordingSnapshotStore:
+        def __init__(self) -> None:
+            self.live: dict[str, str] = {"USER.md": "stale-live-state"}
+
+        def update_live_state(self, key: str, content: str) -> None:
+            self.live[key] = content
+
+        def get_live_state(self, key: str) -> str | None:
+            return self.live.get(key)
+
+    snapshot_store = _RecordingSnapshotStore()
+    cp, sg = await _make_control_plane(tmp_path, snapshot_store=snapshot_store)
+    try:
+        key = behavior_version_key_for("USER.md")
+        await sg.behavior_version_store.record_version(key, "v1-content")
+        await sg.behavior_version_store.record_version(key, "v2-content")
+        resolved = resolve_write_path_by_file_id(tmp_path, "USER.md")
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text("current-on-disk", encoding="utf-8")
+
+        result = await cp.execute_action(
+            _restore_request(
+                {"file_id": "USER.md", "target_version": 1, "confirmed": True}
+            )
+        )
+        assert result.code == "BEHAVIOR_RESTORED"
+        assert snapshot_store.live["USER.md"] == "v1-content"  # live state 已同步
     finally:
         await sg.close()

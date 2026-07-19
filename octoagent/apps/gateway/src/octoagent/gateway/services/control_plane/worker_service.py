@@ -560,6 +560,28 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             data={"file_path": file_path, "content": content, "exists": True},
         )
 
+    def _sync_user_md_live_state(self, file_id: str, content: str) -> None:
+        """USER.md 落盘后同步 SnapshotStore live state（F146 件②，F111 accept 范式）。
+
+        USER.md 是 live-state 消费面（notifications quiet hours / user_profile.read /
+        cron 工具时区解析）——behavior 写路径绕过 write_through 直接写盘，不同步则
+        这些读点到重启前都读旧内容。best-effort：ctx 未注入 / 异常仅 warning
+        （盘上已 durable，live state 落后一拍不破坏正确性底线，#6）。
+        """
+        if file_id != "USER.md":
+            return
+        snapshot_store = getattr(self._ctx, "snapshot_store", None)
+        if snapshot_store is None:
+            return
+        try:
+            update_live = getattr(snapshot_store, "update_live_state", None)
+            if update_live is not None:
+                update_live("USER.md", content)
+        except Exception:
+            structlog.get_logger("control_plane.behavior").warning(
+                "behavior_live_state_sync_failed", exc_info=True
+            )
+
     async def _handle_behavior_write_file(
         self, request: ActionRequestEnvelope
     ) -> ActionResultEnvelope:
@@ -631,6 +653,9 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             task_id="",
             source="control_plane",
         )
+
+        # F146 件②：USER.md live-state 同步（best-effort）
+        self._sync_user_md_live_state(file_id, content)
 
         return self._completed_result(
             request=request,
@@ -743,6 +768,8 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         )
 
         invalidate_behavior_pack_cache(project_root=self._ctx.project_root)
+        # F146 件②：USER.md live-state 同步（best-effort）
+        self._sync_user_md_live_state(file_id, target_content)
         return self._completed_result(
             request=request,
             code="BEHAVIOR_RESTORED",

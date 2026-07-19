@@ -371,6 +371,25 @@ async def register(broker, deps: ToolDeps) -> None:
 
         invalidate_behavior_pack_cache(project_root=deps.project_root)
 
+        # F146 件②：USER.md 是 SnapshotStore live-state 消费面（notifications quiet
+        # hours / user_profile.read / cron 工具时区解析）——本路径绕过 write_through
+        # 直接写盘，落盘后同步 live state（F111 accept 同款范式），否则这些读点到
+        # 重启前都读旧内容。best-effort：盘上已 durable，live state 落后一拍不破坏
+        # 正确性底线。
+        if file_id == "USER.md":
+            _bwf_snapshot_store = getattr(deps, "_snapshot_store", None)
+            if _bwf_snapshot_store is not None:
+                try:
+                    _bwf_update_live = getattr(
+                        _bwf_snapshot_store, "update_live_state", None
+                    )
+                    if _bwf_update_live is not None:
+                        _bwf_update_live("USER.md", content)
+                except Exception:
+                    _bwf_log.warning(
+                        "behavior_write_live_state_sync_failed", exc_info=True
+                    )
+
         return BehaviorWriteFileResult(
             status="written",
             target=str(resolved),

@@ -57,7 +57,7 @@ def _action_request(params: dict[str, Any]) -> ActionRequestEnvelope:
     )
 
 
-async def _make_control_plane(tmp_path: Path):
+async def _make_control_plane(tmp_path: Path, *, snapshot_store: Any = None):
     store_group = await create_store_group(
         str(tmp_path / "gateway.db"),
         str(tmp_path / "artifacts"),
@@ -71,8 +71,22 @@ async def _make_control_plane(tmp_path: Path):
         store_group=store_group,
         sse_hub=SSEHub(),
         telegram_state_store=TelegramStateStore(tmp_path),
+        snapshot_store=snapshot_store,
     )
     return control_plane, store_group
+
+
+class _RecordingSnapshotStore:
+    """F146 件②：记录 live-state 同步调用的最小替身。"""
+
+    def __init__(self) -> None:
+        self.live: dict[str, str] = {}
+
+    def update_live_state(self, key: str, content: str) -> None:
+        self.live[key] = content
+
+    def get_live_state(self, key: str) -> str | None:
+        return self.live.get(key)
 
 
 class _AutoApproveGate:
@@ -151,6 +165,32 @@ async def test_action_write_success_golden(tmp_path: Path) -> None:
         assert [(ref.resource_type, ref.resource_id) for ref in result.resource_refs] == [
             ("agent_profiles", "agent:profiles")
         ]
+    finally:
+        await store_group.close()
+
+
+@pytest.mark.asyncio
+async def test_action_write_user_md_syncs_live_state(tmp_path: Path) -> None:
+    """F146 件②：Web 编辑器保存 USER.md 后同步 SnapshotStore live state——
+    notifications quiet hours / user_profile.read 等读点无需重启即读到新内容。"""
+    snapshot_store = _RecordingSnapshotStore()
+    snapshot_store.live["USER.md"] = "# 旧内容\n"
+    control_plane, store_group = await _make_control_plane(
+        tmp_path, snapshot_store=snapshot_store
+    )
+    try:
+        new_content = "# 用户偏好\n改成早上 7 点提醒\n"
+        result = await control_plane.execute_action(
+            _action_request({"file_id": "USER.md", "content": new_content})
+        )
+        assert result.code == "BEHAVIOR_FILE_WRITTEN"
+        assert snapshot_store.live["USER.md"] == new_content  # live state 已同步
+
+        # 非 USER.md 文件不触碰 live state（live state 只有 USER.md/MEMORY.md 两键）
+        await control_plane.execute_action(
+            _action_request({"file_id": "AGENTS.md", "content": "# 规则\n"})
+        )
+        assert set(snapshot_store.live.keys()) == {"USER.md"}
     finally:
         await store_group.close()
 

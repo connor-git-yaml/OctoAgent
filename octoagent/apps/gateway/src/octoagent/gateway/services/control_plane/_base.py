@@ -171,6 +171,7 @@ class ControlPlaneContext:
         update_service: Any = None,
         automation_store: Any = None,
         notification_service: Any = None,
+        snapshot_store: Any = None,
     ) -> None:
         self.project_root = project_root
         self.store_group = store_group
@@ -189,6 +190,9 @@ class ControlPlaneContext:
         self.automation_store = automation_store
         # F132: reminder.notify action 交付用户提醒（None 时降级：job 触发但不推送）
         self.notification_service = notification_service
+        # F146 件②：behavior.write_file / restore_version 写 USER.md 后同步 live
+        # state 用（F111 accept 同款范式；None 时降级跳过同步 = 既有行为）
+        self.snapshot_store = snapshot_store
         # 跨 service 调用注册表（coordinator 构建后一次性注入）
         self.services: ControlPlaneServiceRegistry | None = None
 

@@ -90,6 +90,7 @@ async def _capture_behavior_tool(
     approval_manager: Any = None,
     notification_service: Any = None,
     console: Any = None,
+    snapshot_store: Any = None,
 ):
     """misc_tools 注册捕获 handler 直调（test_f135 同款），可注入审批三依赖。"""
     captured: dict[str, Any] = {}
@@ -109,6 +110,7 @@ async def _capture_behavior_tool(
         _approval_gate=approval_gate,
         _approval_manager=approval_manager,
         _notification_service=notification_service,
+        _snapshot_store=snapshot_store,
     )
     await misc_tools.register(_CaptureBroker(), deps)
     handler = captured.get("behavior.write_file")
@@ -514,5 +516,76 @@ async def test_allow_always_does_not_shortcircuit_next_write(tmp_path: Path) -> 
         )
         assert result2.status == "written"
         assert Path(result2.target).read_text(encoding="utf-8") == "v2\n"
+    finally:
+        await store_group.close()
+
+
+# ---------------------------------------------------------------------------
+# F146 件②：审批通过写 USER.md 后同步 SnapshotStore live state
+# ---------------------------------------------------------------------------
+
+
+async def test_approved_user_md_write_syncs_live_state(tmp_path: Path) -> None:
+    """F146 件②：LLM 工具 behavior.write_file 审批通过落盘 USER.md 后同步 live
+    state——notifications quiet hours / user_profile.read 等读点无需重启即读到新内容。"""
+
+    class _RecordingSnapshotStore:
+        def __init__(self) -> None:
+            self.live: dict[str, str] = {"USER.md": "stale-live-state"}
+
+        def update_live_state(self, key: str, content: str) -> None:
+            self.live[key] = content
+
+        def get_live_state(self, key: str) -> str | None:
+            return self.live.get(key)
+
+    store_group = await _setup(tmp_path)
+    gate = ApprovalGate(
+        event_store=store_group.event_store, task_store=store_group.task_store
+    )
+    snapshot_store = _RecordingSnapshotStore()
+    try:
+        call = await _capture_behavior_tool(
+            tmp_path, store_group, approval_gate=gate, snapshot_store=snapshot_store
+        )
+        content = "# USER\n时区 Asia/Shanghai\n"
+        result, _ = await asyncio.gather(
+            call(file_id="USER.md", content=content, confirmed=True),
+            _resolve_when_pending(gate, "approved"),
+        )
+        assert result.status == "written"
+        assert snapshot_store.live["USER.md"] == content  # live state 已同步
+    finally:
+        await store_group.close()
+
+
+async def test_rejected_user_md_write_does_not_touch_live_state(tmp_path: Path) -> None:
+    """F146 件②反向锚：审批拒绝不落盘 → live state 保持原样（同步只跟随真实落盘）。"""
+
+    class _RecordingSnapshotStore:
+        def __init__(self) -> None:
+            self.live: dict[str, str] = {"USER.md": "stale-live-state"}
+
+        def update_live_state(self, key: str, content: str) -> None:
+            self.live[key] = content
+
+        def get_live_state(self, key: str) -> str | None:
+            return self.live.get(key)
+
+    store_group = await _setup(tmp_path)
+    gate = ApprovalGate(
+        event_store=store_group.event_store, task_store=store_group.task_store
+    )
+    snapshot_store = _RecordingSnapshotStore()
+    try:
+        call = await _capture_behavior_tool(
+            tmp_path, store_group, approval_gate=gate, snapshot_store=snapshot_store
+        )
+        result, _ = await asyncio.gather(
+            call(file_id="USER.md", content="# USER\n恶意改写\n", confirmed=True),
+            _resolve_when_pending(gate, "rejected"),
+        )
+        assert result.status == "rejected"
+        assert snapshot_store.live["USER.md"] == "stale-live-state"  # 未被污染
     finally:
         await store_group.close()

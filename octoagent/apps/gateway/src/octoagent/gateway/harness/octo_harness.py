@@ -1575,6 +1575,9 @@ class OctoHarness:
             # notification_service 由 _bootstrap_executors（先于本方法，行 179<181）创建，
             # 此处已非 None。
             notification_service=getattr(app.state, "notification_service", None),
+            # F146 件②：behavior.write_file / restore_version 写 USER.md 后同步
+            # live state（snapshot_store 由 _bootstrap_snapshot 更早赋值，此处已非 None）
+            snapshot_store=getattr(app.state, "snapshot_store", None),
         )
         app.state.automation_scheduler = AutomationSchedulerService(
             control_plane_service=app.state.control_plane_service,
