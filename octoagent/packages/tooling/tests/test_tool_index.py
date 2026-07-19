@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
+import pytest
+
 from octoagent.core.models import ToolIndexQuery
 from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolTier
 from octoagent.tooling.tool_index import ToolIndex
@@ -211,6 +215,12 @@ async def test_search_for_deferred_zero_match_fallback() -> None:
     assert result.total_deferred == 0
 
 
+@pytest.mark.skipif(
+    os.environ.get("CI") == "true",
+    reason="绝对延迟阈值（<10ms）在 CI 共享 runner（2-core）不可靠——F142 性能断言"
+    "豁免同类（finalize_offload/threat_scanner 先例）；检索功能正确性由 "
+    "test_search_for_deferred_total_count 等确定性测试守，本地照跑保 SLA。",
+)
 async def test_search_for_deferred_performance() -> None:
     """SC-004: 检索延迟 <10ms"""
     index = ToolIndex(preferred_backend="in_memory")
