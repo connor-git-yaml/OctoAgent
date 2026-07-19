@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import NewSessionModal from "../ChatUI/NewSessionModal";
 import DeleteSessionModal from "../ChatUI/DeleteSessionModal";
 import FrontDoorGate from "../FrontDoorGate";
+import GlobalTaskOverlay from "./GlobalTaskOverlay";
 import { useWorkbenchData, type WorkbenchDataState } from "../../platform/queries";
 import type { ProjectOption, SessionProjectionDocument, SessionProjectionItem } from "../../types";
 import {
@@ -385,6 +386,7 @@ export default function WorkbenchLayout() {
     return (
       <div className="wb-boot">
         <div className="wb-boot-card">
+          <img className="octo-pulse wb-boot-mark" src="/octo-mark.svg" alt="" width={84} height={84} />
           <p className="wb-kicker">OctoAgent Workbench</p>
           <h1>正在整理你的工作台</h1>
           <p>我们先读取当前 project、配置、任务和记忆状态。</p>
@@ -427,6 +429,7 @@ export default function WorkbenchLayout() {
     return (
       <div className="wb-boot">
         <div className="wb-boot-card">
+          <img className="octo-pulse wb-boot-mark" src="/octo-mark.svg" alt="" width={84} height={84} />
           <p className="wb-kicker">OctoAgent Workbench</p>
           <h1>正在重新连接</h1>
           <p>系统正在重启中，请稍候…</p>
@@ -463,9 +466,10 @@ export default function WorkbenchLayout() {
     String(getValueAtPath(config.current_value, "runtime.llm_mode") ?? "echo")
       .trim()
       .toLowerCase() || "echo";
-  const activeWorkCount = (delegation?.works ?? []).filter((item) =>
+  const activeWorks = (delegation?.works ?? []).filter((item) =>
     ACTIVE_WORK_STATUSES.has(String(item.status).toLowerCase())
-  ).length;
+  );
+  const activeWorkCount = activeWorks.length;
   const operatorItems = Array.isArray(sessions.operator_items) ? sessions.operator_items : [];
   const pendingTitle = operatorItems[0]?.title?.trim() ?? "";
   const shellStatus = buildShellStatus({
@@ -708,6 +712,7 @@ export default function WorkbenchLayout() {
             onClose={() => setDeleteTarget(null)}
           />
         )}
+        <GlobalTaskOverlay activeWorks={activeWorks} resolveAgentName={resolveAgentName} />
       </div>
     </WorkbenchContext.Provider>
   );

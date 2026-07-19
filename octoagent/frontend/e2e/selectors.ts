@@ -30,6 +30,8 @@ export const L1_TESTIDS = {
   approvalCompactAccept: "approval-compact-accept",
   /** F148 右栏「本会话运行状态」面板根节点（1a 可见性锚点） */
   sessionRunPanel: "session-run-panel",
+  /** F148 全局任务浮层展开面板（1b 可见性锚点） */
+  globalTaskOverlay: "global-task-overlay",
 } as const;
 
 export type L1TestId = (typeof L1_TESTIDS)[keyof typeof L1_TESTIDS];

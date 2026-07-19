@@ -23,7 +23,7 @@ function RouteFallback() {
       <div className="wb-route-fallback-card">
         <p className="wb-kicker">OctoAgent Workbench</p>
         <img
-          className="wb-route-fallback-logo"
+          className="octo-pulse wb-route-fallback-logo"
           src="/octo-mark.svg"
           alt="OctoAgent logo"
           width={56}
