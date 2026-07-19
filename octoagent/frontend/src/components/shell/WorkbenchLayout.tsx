@@ -10,7 +10,7 @@ import {
   formatSessionDisplayTitle,
   getValueAtPath,
 } from "../../workbench/utils";
-import { useMemoryCandidateCount } from "../../hooks/useMemoryCandidateCount";
+import { useApprovalCenterCount } from "../../hooks/useApprovalCenterCount";
 
 const WorkbenchContext = createContext<WorkbenchDataState | null>(null);
 const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
@@ -106,6 +106,8 @@ function renderNavDescription(path: string): string {
       return "查看任务产出文件的版本变化";
     case "/memory":
       return "回看系统记住的背景";
+    case "/approvals":
+      return "确认 Agent 的后台提议";
     case "/automation":
       return "查看和暂停定时提醒";
     case "/settings":
@@ -237,7 +239,7 @@ function ChatNavSection({
 
 export default function WorkbenchLayout() {
   const workbench = useWorkbenchData();
-  const memoryCandidateCount = useMemoryCandidateCount();
+  const approvalCenterCount = useApprovalCenterCount();
   const [navOpen, setNavOpen] = useState(false);
   const sidebarRef = useRef<HTMLElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -437,6 +439,7 @@ export default function WorkbenchLayout() {
               { to: "/mcp", label: "MCP" },
               { to: "/files", label: "文件" },
               { to: "/memory", label: "记忆" },
+              { to: "/approvals", label: "审批" },
               { to: "/automation", label: "定时任务" },
               { to: "/settings", label: "设置" },
             ].map((item) => (
@@ -451,12 +454,12 @@ export default function WorkbenchLayout() {
               >
                 <strong>
                   {item.label}
-                  {item.to === "/memory" && memoryCandidateCount > 0 && (
+                  {item.to === "/approvals" && approvalCenterCount > 0 && (
                     <span
                       className="wb-nav-badge"
-                      aria-label={`${memoryCandidateCount} 条待确认记忆`}
+                      aria-label={`${approvalCenterCount} 条待处理提议`}
                     >
-                      {memoryCandidateCount}
+                      {approvalCenterCount}
                     </span>
                   )}
                 </strong>

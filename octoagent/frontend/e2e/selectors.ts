@@ -24,6 +24,10 @@ export const L1_TESTIDS = {
   frontdoorSubmit: "frontdoor-submit",
   /** FrontDoorGate「在此设备记住 token」勾选框 */
   frontdoorPersistCheckbox: "frontdoor-persist-checkbox",
+  /** F145 审批中心：规则精简提议卡根节点（场景③ 可见性锚点） */
+  approvalCompactCard: "approval-compact-card",
+  /** F145 审批中心：规则精简卡「接受」按钮（场景③ 点击锚点） */
+  approvalCompactAccept: "approval-compact-accept",
 } as const;
 
 export type L1TestId = (typeof L1_TESTIDS)[keyof typeof L1_TESTIDS];

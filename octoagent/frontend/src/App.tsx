@@ -14,7 +14,7 @@ const McpProviderCenter = lazy(() => import("./pages/McpProviderCenter"));
 const SettingsCenter = lazy(() => import("./pages/SettingsCenter"));
 const SkillCenter = lazy(() => import("./pages/SkillCenter"));
 const TaskDetail = lazy(() => import("./pages/TaskDetail"));
-const MemoryCandidates = lazy(() => import("./pages/MemoryCandidates"));
+const ApprovalCenter = lazy(() => import("./pages/ApprovalCenter"));
 const TaskList = lazy(() => import("./pages/TaskList"));
 
 function RouteFallback() {
@@ -71,8 +71,13 @@ export default function App() {
             <Route path="files" element={withRouteSuspense(<FilesCenter />, "文件工作台")} />
             <Route path="memory" element={withRouteSuspense(<MemoryCenter />, "记忆中心")} />
             <Route
+              path="approvals"
+              element={withRouteSuspense(<ApprovalCenter />, "审批中心")}
+            />
+            {/* F145：旧「待确认记忆」路由并入审批中心，redirect 保兼容 */}
+            <Route
               path="memory/candidates"
-              element={withRouteSuspense(<MemoryCandidates />, "待确认记忆")}
+              element={<Navigate to="/approvals" replace />}
             />
             <Route
               path="automation"
