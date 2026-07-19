@@ -31,10 +31,11 @@ class _FakeConfig:
 
 @pytest.fixture(autouse=True)
 def _hermetic_gateway_probe(monkeypatch: pytest.MonkeyPatch):
-    """F134：默认 patch 掉 `/ready` 探针（hermetic——测试机上 127.0.0.1:8000
-    可能真跑着用户托管实例，真探测会让判定漂移 + 每格 2s 超时）。
-    需要"服务活着"语义的测试自行覆盖为 True。"""
+    """F134：默认 patch 掉两个 localhost 探针（hermetic——测试机上
+    127.0.0.1:8000 可能真跑着用户托管实例，真探测会让判定漂移 + 每格 2s
+    超时）。需要"服务活着 / bearer working"语义的测试自行覆盖为 True。"""
     monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: False)
+    monkeypatch.setattr(remote_commands, "_remote_bearer_working", lambda _port: False)
 
 
 def _patch_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> None:
@@ -542,9 +543,9 @@ class TestCodexReviewFixes:
     def test_enable_token_write_failure_bearer_gateway_alive_keeps_serve(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """AC-T3c：token 写入失败 + **实例已按 bearer 生效且 Octo 在端口上**
-        （repair 场景：token 仍在服务进程 env、远程真 working）→ 不回滚
-        （Codex 第四轮 P1：回滚会立断）+ 警告重启后 bearer 缺凭证。"""
+        """AC-T3c：token 写入失败 + **裸请求观测到 bearer 真在挡**（repair
+        场景：token 仍在服务进程 env、远程真 working）→ 不回滚（Codex 第四轮
+        P1：回滚会立断）+ 警告重启后 bearer 缺凭证。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         saved: list = []
@@ -558,7 +559,9 @@ class TestCodexReviewFixes:
             "enable_tailscale_serve",
             lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
         )
-        monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: True)
+        monkeypatch.setattr(
+            remote_commands, "_remote_bearer_working", lambda _port: True
+        )
         rollback_calls: list = []
         monkeypatch.setattr(
             remote_commands,
