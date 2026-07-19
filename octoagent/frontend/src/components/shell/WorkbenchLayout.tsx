@@ -4,7 +4,7 @@ import NewSessionModal from "../ChatUI/NewSessionModal";
 import DeleteSessionModal from "../ChatUI/DeleteSessionModal";
 import FrontDoorGate from "../FrontDoorGate";
 import { useWorkbenchData, type WorkbenchDataState } from "../../platform/queries";
-import type { SessionProjectionDocument, SessionProjectionItem } from "../../types";
+import type { ProjectOption, SessionProjectionDocument, SessionProjectionItem } from "../../types";
 import {
   formatDateTime,
   formatSessionDisplayTitle,
@@ -14,6 +14,52 @@ import { useApprovalCenterCount } from "../../hooks/useApprovalCenterCount";
 
 const WorkbenchContext = createContext<WorkbenchDataState | null>(null);
 const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
+// 会话运行态（左栏 octoBar 运行指示）
+const RUNNING_SESSION_STATUSES = new Set(["running", "waiting_input", "waiting_approval"]);
+const UNGROUPED_PROJECT_LABEL = "其他会话";
+
+function isSessionRunning(session: SessionProjectionItem): boolean {
+  const status = session.status?.toLowerCase() ?? "";
+  return RUNNING_SESSION_STATUSES.has(status) || session.lane === "running";
+}
+
+// 把会话按 project_id 分组，组顺序：当前项目优先 → available_projects 顺序 → 其余
+function groupSessionsByProject(
+  sessions: SessionProjectionItem[],
+  availableProjects: ProjectOption[],
+  currentProjectId: string,
+): Array<{ projectId: string; name: string; sessions: SessionProjectionItem[] }> {
+  const buckets = new Map<string, SessionProjectionItem[]>();
+  for (const session of sessions) {
+    const pid = session.project_id || "";
+    const bucket = buckets.get(pid);
+    if (bucket) {
+      bucket.push(session);
+    } else {
+      buckets.set(pid, [session]);
+    }
+  }
+  const nameById = new Map(availableProjects.map((p) => [p.project_id, p.name]));
+  const orderedPids: string[] = [];
+  if (currentProjectId && buckets.has(currentProjectId)) {
+    orderedPids.push(currentProjectId);
+  }
+  for (const project of availableProjects) {
+    if (project.project_id !== currentProjectId && buckets.has(project.project_id)) {
+      orderedPids.push(project.project_id);
+    }
+  }
+  for (const pid of buckets.keys()) {
+    if (!orderedPids.includes(pid)) {
+      orderedPids.push(pid);
+    }
+  }
+  return orderedPids.map((pid) => ({
+    projectId: pid,
+    name: nameById.get(pid) || UNGROUPED_PROJECT_LABEL,
+    sessions: buckets.get(pid) ?? [],
+  }));
+}
 
 export function useOptionalWorkbench() {
   return useContext(WorkbenchContext);
@@ -152,8 +198,64 @@ function generateSessionName(): string {
   return `对话 ${mm}-${dd} ${hh}:${min}`;
 }
 
+function SessionNavButton({
+  session,
+  isActive,
+  ownerLabel,
+  accent,
+  onNavigate,
+  onDeleteSession,
+}: {
+  session: SessionProjectionItem;
+  isActive: boolean;
+  ownerLabel: string;
+  accent: string;
+  onNavigate: () => void;
+  onDeleteSession: (session: SessionProjectionItem) => void;
+}) {
+  const navigate = useNavigate();
+  const running = isSessionRunning(session);
+  return (
+    <button
+      type="button"
+      className={`wb-nav-session-item ${isActive ? "is-active" : ""} ${running ? "is-running" : ""}`}
+      style={{ borderLeftColor: accent }}
+      onClick={() => {
+        navigate(`/chat/${session.session_id}`);
+        onNavigate();
+      }}
+    >
+      <span className="wb-nav-session-copy">
+        <span className="wb-nav-session-title">{formatSessionTitle(session)}</span>
+        <span className="wb-nav-session-agent-name">{ownerLabel}</span>
+      </span>
+      {running ? (
+        // octoBar 运行指示（装饰，aria-hidden 不污染 accessible name）
+        <span className="wb-nav-session-run octo-bar" aria-hidden="true">
+          <i /><i /><i /><i />
+        </span>
+      ) : null}
+      <span
+        role="button"
+        tabIndex={-1}
+        aria-hidden="true"
+        className="wb-nav-session-delete"
+        title="删除对话"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDeleteSession(session);
+        }}
+      >
+        ×
+      </span>
+    </button>
+  );
+}
+
 function ChatNavSection({
   sessions,
+  availableProjects,
+  currentProjectId,
   currentPath,
   onNavigate,
   onNewSession,
@@ -162,6 +264,8 @@ function ChatNavSection({
   newSessionBusy,
 }: {
   sessions: SessionProjectionDocument;
+  availableProjects: ProjectOption[];
+  currentProjectId: string;
   currentPath: string;
   onNavigate: () => void;
   onNewSession: () => void;
@@ -169,61 +273,74 @@ function ChatNavSection({
   resolveAgentName: (agentProfileId: string) => string;
   newSessionBusy: boolean;
 }) {
-  const navigate = useNavigate();
   const sessionItems = Array.isArray(sessions.sessions) ? sessions.sessions : [];
   // 只展示 web 渠道的 session，如果没有 web session 才退化到全部
   const webSessions = sessionItems.filter((item) => item.channel === "web");
   const displaySessions = webSessions.length > 0 ? webSessions : sessionItems;
+  const groups = groupSessionsByProject(displaySessions, availableProjects, currentProjectId);
+  // 默认全部展开；用户折叠的 project_id 记入 Set（交互态②：几十个会话可收纳）
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
+
+  const resolveOwnerLabel = (session: SessionProjectionItem): string => {
+    const ownerProfileId = resolveSessionOwnerProfileId(session);
+    return (
+      session.session_owner_name?.trim() ||
+      (ownerProfileId ? resolveAgentName(ownerProfileId) : "Agent")
+    );
+  };
 
   return (
     <div className="wb-nav-group">
-      <div className="wb-nav-session-list">
-        {displaySessions.map((session) => {
-          const sessionPath = `/chat/${session.session_id}`;
-          const isActive = currentPath === sessionPath
-            || (currentPath === "/" && session === displaySessions[0]);
-          const statusNormalized = session.status?.toLowerCase() ?? "";
-          const isRunning = ["running", "waiting_input", "waiting_approval"].includes(
-            statusNormalized
-          );
-          const ownerProfileId = resolveSessionOwnerProfileId(session);
-          const ownerLabel = session.session_owner_name?.trim() || (ownerProfileId ? resolveAgentName(ownerProfileId) : "Agent");
-          const accent = sessionAccentColor(ownerProfileId);
-          return (
+      {groups.map((group) => {
+        const isCollapsed = collapsed.has(group.projectId);
+        return (
+          <div className="wb-nav-project-group" key={group.projectId || "__ungrouped__"}>
             <button
               type="button"
-              key={session.session_id}
-              className={`wb-nav-session-item ${isActive ? "is-active" : ""} ${isRunning ? "is-running" : ""}`}
-              style={{ borderLeftColor: accent }}
-              onClick={() => {
-                navigate(sessionPath);
-                onNavigate();
-              }}
+              className={`wb-nav-project-header ${isCollapsed ? "is-collapsed" : ""}`}
+              onClick={() =>
+                setCollapsed((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(group.projectId)) {
+                    next.delete(group.projectId);
+                  } else {
+                    next.add(group.projectId);
+                  }
+                  return next;
+                })
+              }
+              aria-expanded={!isCollapsed}
             >
-              <span className="wb-nav-session-copy">
-                <span className="wb-nav-session-title">
-                  {formatSessionTitle(session)}
-                </span>
-                <span className="wb-nav-session-agent-name">
-                  {ownerLabel}
-                </span>
-              </span>
-              <span
-                role="button"
-                tabIndex={-1}
-                aria-hidden="true"
-                className="wb-nav-session-delete"
-                title="删除对话"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDeleteSession(session);
-                }}
-              >
-                ×
-              </span>
+              <span className="wb-nav-project-caret" aria-hidden="true">▾</span>
+              <span>{group.name}</span>
+              <span className="wb-nav-project-count">{group.sessions.length}</span>
             </button>
-          );
-        })}
+            {isCollapsed ? null : (
+              <div className="wb-nav-session-list">
+                {group.sessions.map((session) => {
+                  const sessionPath = `/chat/${session.session_id}`;
+                  const isActive =
+                    currentPath === sessionPath ||
+                    (currentPath === "/" && session === displaySessions[0]);
+                  const ownerProfileId = resolveSessionOwnerProfileId(session);
+                  return (
+                    <SessionNavButton
+                      key={session.session_id}
+                      session={session}
+                      isActive={isActive}
+                      ownerLabel={resolveOwnerLabel(session)}
+                      accent={sessionAccentColor(ownerProfileId)}
+                      onNavigate={onNavigate}
+                      onDeleteSession={onDeleteSession}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <div className="wb-nav-session-list">
         <button
           type="button"
           className="wb-nav-session-item wb-nav-session-new"
@@ -330,6 +447,11 @@ export default function WorkbenchLayout() {
   const sessions = snapshot.resources.sessions;
   const config = snapshot.resources.config;
   const delegation = snapshot.resources.delegation;
+  const projectSelector = snapshot.resources.project_selector;
+  const availableProjects = Array.isArray(projectSelector?.available_projects)
+    ? projectSelector.available_projects
+    : [];
+  const currentProjectId = projectSelector?.current_project_id ?? "";
   const workerProfiles = snapshot.resources.worker_profiles;
   const workerProfileList = Array.isArray(workerProfiles?.profiles) ? workerProfiles.profiles : [];
   const resolveAgentName = (agentProfileId: string): string => {
@@ -426,6 +548,8 @@ export default function WorkbenchLayout() {
           <nav className="wb-nav" aria-label="Workbench Navigation">
             <ChatNavSection
               sessions={sessions}
+              availableProjects={availableProjects}
+              currentProjectId={currentProjectId}
               currentPath={location.pathname}
               onNavigate={() => setNavOpen(false)}
               onNewSession={handleNewSession}
@@ -468,8 +592,11 @@ export default function WorkbenchLayout() {
             ))}
           </nav>
 
-          <div className="wb-sidebar-card">
-            <p className="wb-card-label">当前状态</p>
+          <div className="wb-sidebar-card v2-ready-card">
+            <p className="wb-card-label">
+              <span className="v2-ready-dot" aria-hidden="true" />
+              当前状态
+            </p>
             <strong>{shellStatus.title}</strong>
             <p>{shellStatus.summary}</p>
           </div>

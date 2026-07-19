@@ -8,10 +8,10 @@
 .v2-chat-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 332px;
+  grid-template-rows: minmax(0, 1fr);
   gap: var(--cp-space-3);
   align-items: stretch;
   min-height: 0;
-  height: 100%;
 }
 /* 无右栏（无活跃任务时可折叠为单列）——由组件加 .is-solo 控制 */
 .v2-chat-grid.is-solo {
@@ -237,12 +237,16 @@
   color: var(--cp-muted);
 }
 
-/* 会话项运行指示（octoBar 挂右侧） */
+/* 会话项运行指示（octoBar 挂右侧内边距区，hover 时让位给删除 ×） */
 .wb-nav-session-run {
   position: absolute;
-  right: 34px;
+  right: 12px;
   top: 50%;
   transform: translateY(-50%);
+  transition: opacity var(--cp-transition-fast);
+}
+.wb-nav-session-item:hover .wb-nav-session-run {
+  opacity: 0;
 }
 
 /* ══ 侧栏就绪卡 v2 ══ */

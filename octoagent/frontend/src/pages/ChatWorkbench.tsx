@@ -37,6 +37,7 @@ import { readStoredTaskId } from "../hooks/chatStreamHelpers";
 import { useTaskLiveState } from "../hooks/useTaskLiveState";
 import { useAutoScroll } from "../hooks/useAutoScroll";
 import { HoverReveal, InlineCallout, StatusBadge } from "../ui/primitives";
+import { SessionRunPanel } from "../components/chat/SessionRunPanel";
 import type {
   ControlPlaneResourceRef,
   OperatorActionKind,
@@ -725,7 +726,7 @@ export default function ChatWorkbench() {
   ) : null;
 
   return (
-    <div className="wb-page wb-chat-page">
+    <div className="wb-page wb-chat-page v2-chat-grid">
       <section
         className={`wb-panel wb-chat-panel wb-chat-shell ${isEmptyConversation ? "is-empty" : ""}`}
       >
@@ -807,6 +808,17 @@ export default function ChatWorkbench() {
               </InlineCallout>
             ) : null}
             {legacyResetCallout}
+            <div className="v2-empty-hero">
+              <img
+                className="octo-jelly v2-empty-hero-mark"
+                src="/octo-mark.svg"
+                alt=""
+                width={72}
+                height={72}
+              />
+              <h2>有什么可以交给我？</h2>
+              <p>发一条消息就行——理解目标、按需分工，进度和产出会实时显示在右侧。</p>
+            </div>
             <form className="wb-chat-form is-empty" onSubmit={handleSubmit}>
               <textarea
                 data-testid="chat-input"
@@ -983,6 +995,17 @@ export default function ChatWorkbench() {
           </>
         )}
       </section>
+      <SessionRunPanel
+        taskId={taskId ?? null}
+        statusLabel={taskStatusLabel}
+        statusTone={taskStatusTone}
+        normalizedTaskStatus={normalizedTaskStatus}
+        currentStep={executionSession?.current_step ?? ""}
+        streaming={streaming}
+        events={ensureArray(taskDetail?.events)}
+        artifacts={ensureArray(taskDetail?.artifacts)}
+        techRefs={techRefs}
+      />
     </div>
   );
 }

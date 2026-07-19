@@ -28,6 +28,8 @@ export const L1_TESTIDS = {
   approvalCompactCard: "approval-compact-card",
   /** F145 审批中心：规则精简卡「接受」按钮（场景③ 点击锚点） */
   approvalCompactAccept: "approval-compact-accept",
+  /** F148 右栏「本会话运行状态」面板根节点（1a 可见性锚点） */
+  sessionRunPanel: "session-run-panel",
 } as const;
 
 export type L1TestId = (typeof L1_TESTIDS)[keyof typeof L1_TESTIDS];
