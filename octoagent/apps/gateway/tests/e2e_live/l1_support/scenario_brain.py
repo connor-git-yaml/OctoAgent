@@ -20,6 +20,7 @@ prompt-marker 让「哪条消息得到哪个脚本」与调用次序解耦（确
 
 from __future__ import annotations
 
+from datetime import UTC
 from typing import Any
 
 from octoagent.skills.manifest import SkillManifest
@@ -64,7 +65,7 @@ async def provision_approval_center_scenario(root: Any, store_group: Any) -> Non
     ``reuseExistingServer`` 下场景为一次性消费（spec 侧带已消费守卫）。
     """
     import hashlib
-    from datetime import datetime, timezone
+    from datetime import datetime
     from pathlib import Path
 
     from octoagent.core.behavior_workspace import resolve_write_path_by_file_id
@@ -83,7 +84,7 @@ async def provision_approval_center_scenario(root: Any, store_group: Any) -> Non
         rationale="合并了简洁性与中文提交两组语义重复规则（L1 场景③注入）",
         size_before=len(L1_COMPACT_ORIGINAL),
         size_after=len(L1_COMPACT_COMPACTED),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     await store_group.behavior_compact_store.insert_candidate(candidate)
 

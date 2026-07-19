@@ -10,6 +10,7 @@ ConsolidationApprovalService（C4 commit MERGE / C7 reject 不碰 SOR），并 e
 from __future__ import annotations
 
 import json
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -153,7 +154,7 @@ async def _insert_candidate_direct(
     partition: MemoryPartition = MemoryPartition.PROFILE,
 ) -> None:
     """绕过发现端直插候选（构造敏感/定向源等发现端不产的形态）。"""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from octoagent.memory.models import ConsolidationCandidate
 
@@ -166,7 +167,7 @@ async def _insert_candidate_direct(
             source_sor_ids=source_sor_ids,
             merged_content="合并后内容",
             is_sensitive=is_sensitive,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
         )
     )
 

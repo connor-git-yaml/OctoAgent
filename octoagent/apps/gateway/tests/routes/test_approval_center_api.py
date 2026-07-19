@@ -11,7 +11,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -61,7 +61,7 @@ def _client_for(sg: StoreGroup) -> TestClient:
 
 
 async def _seed_observation(sg: StoreGroup, *, status: str = "pending") -> None:
-    expires = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+    expires = (datetime.now(UTC) + timedelta(days=30)).isoformat()
     await sg.conn.execute(
         "INSERT INTO observation_candidates "
         "(id, fact_content, fact_content_hash, status, expires_at, user_id) "
@@ -87,7 +87,7 @@ async def _seed_consolidation(sg: StoreGroup, *, status: str = "pending") -> Non
         source_sor_ids=["sor-a", "sor-b"],
         merged_content="合并后的权威事实",
         status=ConsolidationCandidateStatus(status),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     await ConsolidationStore(sg.conn).insert_candidate(candidate)
 
@@ -107,7 +107,7 @@ async def _seed_compact(sg: StoreGroup, *, status: str = "pending") -> None:
         size_before=100,
         size_after=30,
         status=BehaviorCompactCandidateStatus(status),
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
     )
     await sg.behavior_compact_store.insert_candidate(candidate)
 

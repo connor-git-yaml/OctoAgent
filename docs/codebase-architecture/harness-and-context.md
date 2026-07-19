@@ -299,8 +299,8 @@ flowchart TD
     Dedupe --> Cat[_categorize: utility model<br/>打 category + confidence]
     Cat -->|confidence < 0.7| Drop[丢弃]
     Cat -->|confidence ≥ 0.7| Queue[observation_candidates 表<br/>+ OBSERVATION_OBSERVED 事件]
-    Queue --> Badge[Web UI 红点 badge<br/>useMemoryCandidateCount]
-    User[用户] --> UI[MemoryCandidates.tsx]
+    Queue --> Badge[Web UI「审批」nav 红点 badge<br/>useApprovalCenterCount<br/>GET /api/approval-center/summary 三源合计]
+    User[用户] --> UI[ApprovalCenterPage「新记忆」分组<br/>F145 吸收原 MemoryCandidates.tsx]
     UI --> Card[CandidateCard<br/>accept / edit+accept / reject]
     Card -->|POST /promote| API[/api/memory/candidates/{id}/promote]
     API -->|atomic claim<br/>UPDATE status='promoting'<br/>WHERE status='pending'| Claim[F28 防 concurrent 重复写入]
@@ -308,8 +308,12 @@ flowchart TD
     ThreatPolicy -->|PASS| AppendUM[SnapshotStore.append_entry → USER.md]
     AppendUM --> SetPromoted[UPDATE status='promoted']
     SetPromoted --> Event2[OBSERVATION_PROMOTED + MEMORY_ENTRY_ADDED 事件]
-    Event2 --> Refresh[badge 监听 'memory-candidates-changed' 事件刷新]
+    Event2 --> Refresh[badge 监听 'approval-center-changed' 事件刷新]
 ```
+
+> F145（2026-07-19）：memory 候选审批 UI 并入三源统一审批中心 `/approvals`
+> （`frontend/src/domains/approval-center/`），promote/discard REST 与本节数据流
+> 零变更；F127 记忆合并、F111 规则精简两源同页分组呈现。
 
 ## 7. F082 退役清单（Phase 4 完成）
 
