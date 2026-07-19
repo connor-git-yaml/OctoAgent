@@ -820,11 +820,34 @@ class TestCodexReviewFixes:
         assert "立即" in result.output
         assert "octo restart" in result.output
 
+    def test_enable_idempotent_bearer_with_generated_token_also_warns_restart(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Codex 十一轮 P2 钉住：yaml 已 bearer（幂等路径）+ 本次生成 token +
+        服务活着 → 同样需要「立即 restart」警告（repair 场景服务进程同样拿
+        不到刚写的 token，绿色成功不能掩盖 503 窗口）。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        _patch_config(monkeypatch, _FakeConfig(mode="bearer"), [])
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: True)
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 0
+        assert (tmp_path / ".env").exists()  # token 生成了
+        assert "立即" in result.output
+        assert "octo restart" in result.output
+
     def test_enable_litellm_nonblank_token_counts_as_set(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
         """AC-T7：.env.litellm 里的**非空** token（source 后者生效）视作已设
-        → 幂等不生成不覆盖。"""
+        → 幂等不生成不覆盖；查看指引指向 token 实际所在文件（十一轮 P2）。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
@@ -842,6 +865,8 @@ class TestCodexReviewFixes:
         assert result.exit_code == 0
         assert not (tmp_path / ".env").exists()  # 已设（litellm）→ 不生成
         assert "已生成" not in result.output
+        # 查看指引指向实际来源文件（.env.litellm 非硬编码 .env）
+        assert ".env.litellm" in result.output
 
     def test_disable_serve_reset_failure_exits_1(
         self, monkeypatch: pytest.MonkeyPatch

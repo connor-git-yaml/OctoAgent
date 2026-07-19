@@ -294,6 +294,27 @@ def _token_generated_lines(token_env: str, root) -> list[str]:
     ]
 
 
+def _token_source_file(root, token_env: str):
+    """token **最终生效**值实际所在的实例 env 文件（查看指引用）。
+
+    Codex 十一轮 P2：已设指引不能硬写 ``.env``——legacy 实例的 token 可能只
+    在 ``.env.litellm``（source 顺序靠后覆盖生效），指错文件会让用户"启用了
+    远程却拿不到要输的 token"。空赋值覆盖组合已被生成路径的
+    ``_litellm_blank_override`` 守卫排除，此处只需二分来源。
+    """
+    try:
+        from dotenv import dotenv_values
+
+        litellm_path = root / ".env.litellm"
+        if litellm_path.exists():
+            value = dotenv_values(litellm_path).get(token_env)
+            if value is not None and value.strip():
+                return litellm_path
+    except Exception:  # pragma: no cover
+        pass
+    return root / ".env"
+
+
 def _env_shadow_warning(env: dict[str, str], intended_mode: str) -> str | None:
     """若 OCTOAGENT_FRONTDOOR_MODE env 会 shadow 我们要写入的 yaml 值 → 警告。
 
@@ -445,9 +466,11 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
     else:
         # Codex 十轮 P2：已设路径也给查看指引——首次 enable 若在 token 写入
         # 成功后因 yaml 失败中止，重试会走本分支；无指引用户不知道去哪拿
-        # 手机要输的 token。
+        # 手机要输的 token。十一轮 P2：指向 token 实际所在文件（legacy 实例
+        # 可能只在 .env.litellm）。
         token_lines = [
-            f"[dim]bearer token 已配置（查看：grep {token_env} {root / '.env'}）[/dim]"
+            f"[dim]bearer token 已配置（查看：grep {token_env} "
+            f"{_token_source_file(root, token_env)}）[/dim]"
         ]
 
     # serve + token 齐 → 幂等持久化 bearer（yaml 已 bearer 不重复写，比对持久化值）。
@@ -482,21 +505,23 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
             console.print(render_panel("octo remote enable", lines, border_style="red"))
             raise SystemExit(1) from exc
         lines.append(f"front_door.mode: {persisted} → bearer（已写入 octoagent.yaml）")
-        # Codex 九轮 P1（部分接受，窗口系 F130 既有架构）：guard 每请求现场
-        # 重读 yaml → 正在跑的 gateway **立即**按 bearer 校验，但其进程 env
-        # 是启动时快照、拿不到刚写入 .env 的 token → owner-facing API 短暂
-        # 503 直到重启。窗口 F130 起即有（当时靠用户手动设 token，同样要
-        # restart 才载入）、F134 不扩大且 token 已自动就位——但服务活着时
-        # 该窗口必然发生，提示从「下一步」升级为红色「立即」。消除窗口需
-        # guard 凭证热重载（gateway 核心改动），归档 v0.2 方向。
-        if token_lines and _octo_gateway_on_port(port):
-            lines.append(
-                "[red]重要：正在运行的服务已开始要求 bearer token，但尚未载入"
-                "刚生成的 token——请**立即**运行 `octo restart`（期间 API 会"
-                "短暂 503）。[/red]"
-            )
     else:
         lines.append("front_door.mode 已是 bearer（幂等）")
+
+    # Codex 九轮 P1（部分接受，窗口系 F130 既有架构）+ 十一轮 P2（警告跟随
+    # 「本次生成 + 服务活」而非 mode 分支——yaml 已 bearer 的 repair 场景同样
+    # 命中）：guard 每请求现场重读 yaml → 正在跑的 gateway 已按 bearer 校验，
+    # 但其进程 env 是启动时快照、拿不到刚写入 .env 的 token → owner-facing
+    # API 503 直到重启。窗口 F130 起即有（当时靠用户手动设 token，同样要
+    # restart 才载入）、F134 不扩大且 token 已自动就位——但服务活着时该窗口
+    # 必然发生，提示升级红色「立即」。消除窗口需 guard 凭证热重载（gateway
+    # 核心改动），归档 v0.2 方向。
+    if token_missing and _octo_gateway_on_port(port):
+        lines.append(
+            "[red]重要：正在运行的服务按 bearer 校验时无法拿到刚生成的 token"
+            "（进程 env 是启动快照）——请**立即**运行 `octo restart`（期间"
+            " API 可能 503）。[/red]"
+        )
 
     lines.append("[green]Tailscale serve 已启用[/green]")
     lines.append(f"[bold]手机访问：{serve.published_url}[/bold]")
