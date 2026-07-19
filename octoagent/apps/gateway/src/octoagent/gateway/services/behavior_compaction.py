@@ -37,7 +37,6 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 
 import structlog
-from apscheduler.triggers.cron import CronTrigger
 from octoagent.core.behavior_workspace import (
     COMPACT_ELIGIBLE_FILE_IDS,
     SHARED_BEHAVIOR_FILE_IDS,
@@ -71,7 +70,7 @@ from .behavior_compact_root import (
     BEHAVIOR_COMPACT_SPAWNED_BY,
     ensure_behavior_compact_root,
 )
-from .user_md_cron import read_user_md_disk_first
+from .user_md_cron import read_user_md_disk_first, register_cron_job
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -171,6 +170,8 @@ class BehaviorCompactionService:
         self._notification_service = notification_service
         self._started: bool = False
         self._cron_registered: bool = False
+        # F146 件③：当前注册的 cron key (cron_expr, timezone)——tick 内比对实现热重载
+        self._registered_cron_key: tuple[str, str] | None = None
         # 单飞标志（进程内，check-then-set 在第一个 await 前 → 无 race；cron 与手动共享）
         self._running: bool = False
 
@@ -245,19 +246,41 @@ class BehaviorCompactionService:
         logger.info("behavior_compact_shutdown")
 
     def _register_cron(self, config: BehaviorCompactConfig, user_timezone: str) -> None:
-        try:
-            user_tz_zoneinfo = zoneinfo.ZoneInfo(user_timezone)
-        except (zoneinfo.ZoneInfoNotFoundError, ValueError):
-            user_tz_zoneinfo = UTC
-        self._scheduler._scheduler.add_job(
-            self._run_compaction,
-            trigger=CronTrigger.from_crontab(
-                config.to_crontab(), timezone=user_tz_zoneinfo
-            ),
-            id=BEHAVIOR_COMPACT_JOB_ID,
-            replace_existing=True,
-            misfire_grace_time=BEHAVIOR_COMPACT_MISFIRE_GRACE_SEC,
+        self._registered_cron_key = register_cron_job(
+            self._scheduler._scheduler,
+            job_id=BEHAVIOR_COMPACT_JOB_ID,
+            callback=self._run_compaction,
+            cron_expr=config.to_crontab(),
+            timezone_name=user_timezone,
+            misfire_grace_sec=BEHAVIOR_COMPACT_MISFIRE_GRACE_SEC,
         )
+
+    def _reconcile_cron(self, config: BehaviorCompactConfig) -> None:
+        """cron 时间热重载（F146 件③，闭环 Codex round5 P2 归档的 follow-up）。
+
+        语义：改 USER.md ``compact_time`` / 时区后，**下一次已排定的 cron tick
+        读盘生效**（该次仍按旧时间触发，此后按新时间）——无需重启。失败仅 log
+        （#6：热重载失败不影响本次 tick 主流程，旧调度保持，下个 tick 重试）。
+        """
+        if not self._cron_registered:
+            return
+        new_key = (
+            config.to_crontab(),
+            self._resolve_user_timezone(config.user_timezone),
+        )
+        if new_key == self._registered_cron_key:
+            return
+        old_key = self._registered_cron_key
+        try:
+            self._register_cron(config, new_key[1])
+            logger.info(
+                "behavior_compact_cron_rescheduled",
+                old_cron=old_key,
+                cron_expr=new_key[0],
+                timezone=new_key[1],
+            )
+        except Exception:
+            logger.exception("behavior_compact_cron_reschedule_failed")
 
     # ============================================================
     # cron 触发主流程
@@ -279,6 +302,11 @@ class BehaviorCompactionService:
             root_task, root_work = await self._ensure_compact_root()
 
             config = self._read_config()
+
+            # F146 件③：cron 时间热重载——改 USER.md 时间字段后下一次 tick 生效。
+            # 放在 active 检查之前：disabled 服务也跟踪时间变更，重新启用时已正确。
+            self._reconcile_cron(config)
+
             if not config.compact_active:
                 await self._emit_skipped(reason="disabled", run_id=run_id)
                 logger.info("behavior_compact_skipped_disabled")

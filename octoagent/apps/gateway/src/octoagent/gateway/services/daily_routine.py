@@ -25,7 +25,6 @@ from datetime import UTC, datetime, time, timedelta
 from typing import TYPE_CHECKING, Any, Final
 
 import structlog
-from apscheduler.triggers.cron import CronTrigger
 from octoagent.core.models import TaskStatus
 from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event
@@ -39,7 +38,7 @@ from .daily_routine_config import (
     RoutineTriggeredPayload,
 )
 from .notification import NotificationPriority
-from .user_md_cron import read_user_md_disk_first
+from .user_md_cron import read_user_md_disk_first, register_cron_job
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -124,6 +123,8 @@ class DailyRoutineService:
         self._project_root = project_root
         self._started: bool = False
         self._cron_registered: bool = False
+        # F146 件③：当前注册的 cron key (cron_expr, timezone)——tick 内比对实现热重载
+        self._registered_cron_key: tuple[str, str] | None = None
         # F115：生效时区不再在 __init__ 缓存 env-only 值，改为每次读 config 时由
         # _resolve_user_timezone(config.user_timezone) 从 USER.md 派生（降级 env → UTC）。
         # 消除了原 self._user_timezone 这个 stale 缓存（USER.md 改时区永不生效的根因）。
@@ -233,6 +234,10 @@ class DailyRoutineService:
         try:
             # Step 2：读 config
             config = self._read_config()
+
+            # F146 件③：cron 时间热重载——改 USER.md 时间字段后下一次 tick 生效。
+            # 放在 active 检查之前：disabled 服务也跟踪时间变更，重新启用时已正确。
+            self._reconcile_cron(config)
 
             # Step 3：routine_active=False → skipped
             if not config.routine_active:
@@ -604,20 +609,42 @@ class DailyRoutineService:
                 logger.exception("daily_routine_audit_task_commit_failed")
 
     def _register_cron(self, config: DailyRoutineConfig, user_timezone: str) -> None:
-        """向 AutomationSchedulerService 注册 cron job（spec FR-B1 / F115）。"""
-        cron_expr = config.to_crontab()
-        try:
-            user_tz_zoneinfo = zoneinfo.ZoneInfo(user_timezone)
-        except (zoneinfo.ZoneInfoNotFoundError, ValueError):
-            user_tz_zoneinfo = UTC
-
-        self._scheduler._scheduler.add_job(
-            self._run_daily_summary,
-            trigger=CronTrigger.from_crontab(cron_expr, timezone=user_tz_zoneinfo),
-            id=DAILY_ROUTINE_JOB_ID,
-            replace_existing=True,
-            misfire_grace_time=DAILY_ROUTINE_MISFIRE_GRACE_SEC,
+        """向 AutomationSchedulerService 注册 cron job（spec FR-B1 / F115 / F146 件③）。"""
+        self._registered_cron_key = register_cron_job(
+            self._scheduler._scheduler,
+            job_id=DAILY_ROUTINE_JOB_ID,
+            callback=self._run_daily_summary,
+            cron_expr=config.to_crontab(),
+            timezone_name=user_timezone,
+            misfire_grace_sec=DAILY_ROUTINE_MISFIRE_GRACE_SEC,
         )
+
+    def _reconcile_cron(self, config: DailyRoutineConfig) -> None:
+        """cron 时间热重载（F146 件③）：tick 内比对注册 key，变了就重注册。
+
+        语义：改 USER.md ``daily_summary_time`` / 时区后，**下一次已排定的 cron
+        tick 读盘生效**（该次仍按旧时间触发，此后按新时间）——无需重启。失败仅
+        log（#6：热重载失败不影响本次 tick 主流程，旧调度保持，下个 tick 重试）。
+        """
+        if not self._cron_registered:
+            return
+        new_key = (
+            config.to_crontab(),
+            self._resolve_user_timezone(config.user_timezone),
+        )
+        if new_key == self._registered_cron_key:
+            return
+        old_key = self._registered_cron_key
+        try:
+            self._register_cron(config, new_key[1])
+            logger.info(
+                "daily_routine_cron_rescheduled",
+                old_cron=old_key,
+                cron_expr=new_key[0],
+                timezone=new_key[1],
+            )
+        except Exception:
+            logger.exception("daily_routine_cron_reschedule_failed")
 
     # ============================================================
     # Event emit helpers (spec FR-E1/E2/E3)

@@ -591,3 +591,46 @@ class TestGuards:
         被静默降级 standard 的坑）。"""
         assert BEHAVIOR_COMPACT_TOOL_PROFILE in {"minimal", "standard", "privileged"}
         assert BEHAVIOR_COMPACT_TOOL_PROFILE == "minimal"
+
+
+# ============================================================
+# F146 件③：cron 时间热重载（下一次已排定 tick 读盘生效，无需重启）
+# ============================================================
+
+
+class TestCronHotReload:
+    def _write_user_md(self, project_root: Path, time_value: str) -> None:
+        user_md = resolve_write_path_by_file_id(project_root, "USER.md")
+        user_md.parent.mkdir(parents=True, exist_ok=True)
+        user_md.write_text(
+            "- **compact_active**: false\n"
+            f'- **compact_time**: "{time_value}"\n',
+            encoding="utf-8",
+        )
+
+    async def test_time_change_reschedules_on_next_tick(
+        self, store_group, project_root, monkeypatch
+    ):
+        """改 USER.md compact_time 后下一次 tick 重注册 cron——闭环 Codex round5
+        P2 归档的「三姊妹统一热重载」follow-up（无需重启）。"""
+        monkeypatch.delenv("OCTOAGENT_USER_TIMEZONE", raising=False)
+        self._write_user_md(project_root, "03:30")
+        svc = _build_service(store_group, project_root)
+        await svc.startup()
+        assert svc._registered_cron_key == ("30 3 * * *", "UTC")
+
+        self._write_user_md(project_root, "02:45")  # 盘外编辑改时间
+        await svc._run_compaction()  # 下一次 tick（disabled 短路在 reconcile 之后）
+        assert svc._scheduler._scheduler.add_job.call_count == 2
+        assert svc._registered_cron_key == ("45 2 * * *", "UTC")
+
+    async def test_unchanged_time_does_not_reregister(
+        self, store_group, project_root, monkeypatch
+    ):
+        """时间未变 → tick 不重注册（幂等，无调度抖动）。"""
+        monkeypatch.delenv("OCTOAGENT_USER_TIMEZONE", raising=False)
+        self._write_user_md(project_root, "03:30")
+        svc = _build_service(store_group, project_root)
+        await svc.startup()
+        await svc._run_compaction()
+        assert svc._scheduler._scheduler.add_job.call_count == 1  # 仅 startup 一次

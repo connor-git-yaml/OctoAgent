@@ -9,10 +9,10 @@ USER.md 机器可读字段（FR-14）：
 - ``compact_active``（bool，默认 **False**——compact 会改用户行为规则文件（即便人审），
   保守默认关，用户显式开）。**每次 cron tick 重读**——改 USER.md 即时生效。
 - ``compact_time``（HH:MM，默认 ``03:30``——与 F127 consolidation 默认 03:00 错峰，
-  避免同分钟两个 nightly 任务争 LLM/调度）。**startup 时注册 cron 读取一次**——
-  改时间/时区需 `octo restart` 生效（与 F102 daily_summary_time / F127
-  consolidation_time 同款既有语义；Codex round5 P2 拒绝带理由：三姊妹服务统一
-  热重载属跨服务独立 follow-up，F111 不单独偏离平台语义）。
+  避免同分钟两个 nightly 任务争 LLM/调度）。**热重载（F146 件③，三姊妹统一语义）**：
+  改时间/时区后**下一次已排定的 cron tick 读盘生效、无需重启**（该次仍按旧时间
+  触发，此后按新时间；与 F102 daily_summary_time / F127 consolidation_time 同款；
+  闭环 Codex round5 P2 归档的「三姊妹统一热重载」follow-up）。
 
 时区复用 F102 ``extract_user_timezone_from_user_md``；通知 channels 复用 F102
 ``summary_channels``（不新增专属字段——F127 handoff §1.5 纪律）。
