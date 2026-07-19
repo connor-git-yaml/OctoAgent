@@ -29,7 +29,7 @@
 
 ## 3. 验证终门
 
-- **后端全量**（worktree PYTHONPATH 锁 + `-n auto --dist=loadgroup`）：baseline `5356 passed`（改前实测）→ 改后 `5366 passed / 0 failed`（+10 = 本 Feature 新增测试），skipped/xfailed/xpassed 完全一致，**0 regression**。
+- **后端全量**（worktree PYTHONPATH 锁 + `-n auto --dist=loadgroup`）：baseline `5356 passed`（改前实测）→ 最终 HEAD `5367 passed / 0 failed`（+11 = 本 Feature 新增后端测试；1 rerun 属既有 rerun 政策），skipped/xfailed/xpassed 完全一致，**0 regression**。
 - **pre-commit hook**：每 commit e2e_smoke + e2e_scripted 过闸（26-27 passed）。
 - **前端**：vitest 全量 424 passed / 45 文件（存量 377 + 本 Feature 新增 47，含旧页 7 用例吸收迁移 + Codex P2 钉住 1 + Opus MED-1 API 层 12）；`tsc -b` 0 错误；`check:complexity` 全过（ApprovalCenterPage 449/1200，无文件超限，index.css 未动）。
 - **L1**：`npx playwright test` 4 passed ×2 轮（场景①②③全绿）；场景③单跑 PASS。
