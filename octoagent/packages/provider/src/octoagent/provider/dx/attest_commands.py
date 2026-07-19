@@ -475,17 +475,30 @@ def _probe_sse_negative(client: Any, base: str, token: str) -> tuple[bool, str]:
     真 token 加后缀派生（长度必不同 → compare_digest 必 False），同样经
     ``params=`` 编码。
 
-    F134：认证失败限流后，该源近期错误尝试较多时错 token 会得 429
-    （``FRONT_DOOR_RATE_LIMITED``）——同样证明 guard 在挡且更强，视为通过；
-    只接受 401 会在限流生效期把探针打成假阴性。"""
+    F134：认证失败限流后，该源近期错误尝试较多时错 token 会得 429——只接受
+    401 会在限流生效期把探针打成假阴性。Codex final P2：429 必须验
+    ``detail.code == FRONT_DOOR_RATE_LIMITED`` 才算"guard 在挡"——Tailscale/
+    反代/中间件的**通用**节流 429 不证明 query-token 校验还在，放行会让负向
+    探针失去"专抓 guard 丢失"的价值。"""
     wrong_token = f"{token}-attest-negative"
     url = f"{base}/api/stream/task/attest-probe-nonexistent"
     try:
         resp = client.get(url, params={"access_token": wrong_token})
     except Exception as exc:  # noqa: BLE001
         return False, f"SSE 负向判别异常（{type(exc).__name__}）"
-    if resp.status_code in (401, 429):
-        return True, f"SSE 负向通过（错 token → {resp.status_code}）"
+    if resp.status_code == 401:
+        return True, "SSE 负向通过（错 token → 401）"
+    if resp.status_code == 429:
+        try:
+            code = resp.json().get("detail", {}).get("code", "")
+        except Exception:  # noqa: BLE001
+            code = ""
+        if code == "FRONT_DOOR_RATE_LIMITED":
+            return True, "SSE 负向通过（错 token → 429 认证限流）"
+        return False, (
+            "SSE 错 token 得到非认证限流的 429（通用节流？）——无法证明 "
+            "query-token 校验在挡，请稍后重跑探针"
+        )
     return False, (
         f"SSE 错 token 未被拒（预期 401/429 实际 {resp.status_code}）——"
         "stream 路由认证可能回归/未挂 guard"

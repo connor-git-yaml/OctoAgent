@@ -309,6 +309,18 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
         write_error = _write_generated_token(root, token_env)
         if write_error is not None:
             lines.append(f"[red]bearer token 写入 .env 失败：{write_error}[/red]")
+            # Codex final P2：serve 已开而 enable 整体失败 → 回滚本功能的 serve
+            # 映射（best-effort），否则留下"用户以为失败、tailnet URL 却已转发
+            # 到本机"的半开启状态（loopback 模式下请求虽会 403，但状态与提示
+            # 不一致，remote status 也会困惑）。
+            rollback = disable_tailscale_serve(port=port)
+            if rollback.ok:
+                lines.append("[yellow]已回滚本次开启的 serve 映射。[/yellow]")
+            else:
+                lines.append(
+                    "[yellow]serve 映射回滚失败——请手动确认 "
+                    "`tailscale serve status` 并按需 `octo remote disable`。[/yellow]"
+                )
             lines.append(
                 f"[yellow]front_door.mode 未改动——请手动在 {root / '.env'} 设置 "
                 f"{token_env}=<强随机值>（如 `python3 -c 'import secrets; "

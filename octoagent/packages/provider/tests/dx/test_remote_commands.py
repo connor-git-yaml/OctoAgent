@@ -497,8 +497,9 @@ class TestCodexReviewFixes:
     def test_enable_token_write_failure_aborts_before_mode_switch(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """AC-T3：token 写入失败 → 红报 + exit 1 + **不切 mode**（防 bearer
-        无 token 让受保护 API 全 503 的半完成态）。"""
+        """AC-T3：token 写入失败 → 红报 + exit 1 + **不切 mode** + **回滚已开
+        的 serve 映射**（Codex final P2：否则留下"提示失败、tailnet URL 却已
+        转发到本机"的半开启状态）。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         saved: list = []
@@ -513,11 +514,20 @@ class TestCodexReviewFixes:
             "enable_tailscale_serve",
             lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
         )
+        rollback_calls: list = []
+
+        def _fake_disable(**kwargs: object) -> TailscaleServeResult:
+            rollback_calls.append(kwargs)
+            return TailscaleServeResult(ok=True)
+
+        monkeypatch.setattr(remote_commands, "disable_tailscale_serve", _fake_disable)
 
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 1
         assert saved == []  # ★ 不切 mode
+        assert rollback_calls  # ★ serve 映射被回滚
         assert "写入 .env 失败" in result.output
+        assert "已回滚" in result.output
         assert "手动" in result.output
 
     def test_enable_token_append_preserves_existing_env_content(
