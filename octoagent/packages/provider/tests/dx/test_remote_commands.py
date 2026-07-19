@@ -497,9 +497,10 @@ class TestCodexReviewFixes:
     def test_enable_token_write_failure_aborts_before_mode_switch(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """AC-T3：token 写入失败 → 红报 + exit 1 + **不切 mode** + **回滚已开
-        的 serve 映射**（Codex final P2：否则留下"提示失败、tailnet URL 却已
-        转发到本机"的半开启状态）。"""
+        """AC-T3：token 写入失败 → 红报 + exit 1 + **不切 mode** + **不自动回滚
+        serve 但如实说明**（Codex final P2 + re-review P2 调和：自动
+        `--https=443 off` 会在重跑 enable 场景关掉原本 working 的映射，破坏面
+        大于收益；半开启无安全风险——mode 仍 loopback，serve 转发必 403）。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         saved: list = []
@@ -525,9 +526,10 @@ class TestCodexReviewFixes:
         result = CliRunner().invoke(remote_group, ["enable"])
         assert result.exit_code == 1
         assert saved == []  # ★ 不切 mode
-        assert rollback_calls  # ★ serve 映射被回滚
+        assert rollback_calls == []  # ★ 不自动动用户的 serve 配置（re-review P2）
         assert "写入 .env 失败" in result.output
-        assert "已回滚" in result.output
+        assert "serve 映射已开启" in result.output  # ★ 状态如实（final P2 诉求）
+        assert "octo remote disable" in result.output  # 给关闭指引
         assert "手动" in result.output
 
     def test_enable_token_append_preserves_existing_env_content(

@@ -309,22 +309,22 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
         write_error = _write_generated_token(root, token_env)
         if write_error is not None:
             lines.append(f"[red]bearer token 写入 .env 失败：{write_error}[/red]")
-            # Codex final P2：serve 已开而 enable 整体失败 → 回滚本功能的 serve
-            # 映射（best-effort），否则留下"用户以为失败、tailnet URL 却已转发
-            # 到本机"的半开启状态（loopback 模式下请求虽会 403，但状态与提示
-            # 不一致，remote status 也会困惑）。
-            rollback = disable_tailscale_serve(port=port)
-            if rollback.ok:
-                lines.append("[yellow]已回滚本次开启的 serve 映射。[/yellow]")
-            else:
-                lines.append(
-                    "[yellow]serve 映射回滚失败——请手动确认 "
-                    "`tailscale serve status` 并按需 `octo remote disable`。[/yellow]"
-                )
+            # Codex final P2 + re-review P2 调和：**不自动回滚 serve**，但把
+            # 状态如实说清。自动 `--https=443 off` 会在「重跑 enable 补 token」
+            # 场景把原本 working 的映射也关掉（443 上第三方映射则在 serve 接管
+            # 时已被覆盖，回滚同样救不回）——破坏面 > 收益。半开启无安全风险：
+            # mode 仍 loopback，serve 转发带 X-Forwarded-* 必 403（F130 §2）。
             lines.append(
-                f"[yellow]front_door.mode 未改动——请手动在 {root / '.env'} 设置 "
+                "[yellow]注意：本次 serve 映射已开启（tailnet URL 已指向本机），"
+                "但 token 未配置、front_door.mode 未改动——远程访问尚不可用。[/yellow]"
+            )
+            lines.append(
+                "  如需关闭映射：`octo remote disable`（或 `tailscale serve --https=443 off`）。"
+            )
+            lines.append(
+                f"[yellow]修复方式：手动在 {root / '.env'} 设置 "
                 f"{token_env}=<强随机值>（如 `python3 -c 'import secrets; "
-                "print(secrets.token_urlsafe(32))'`）后重试。[/yellow]"
+                "print(secrets.token_urlsafe(32))'`）后重试 `octo remote enable`。[/yellow]"
             )
             console.print(render_panel("octo remote enable", lines, border_style="red"))
             raise SystemExit(1)
