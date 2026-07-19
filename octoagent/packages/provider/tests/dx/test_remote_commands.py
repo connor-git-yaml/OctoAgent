@@ -16,6 +16,7 @@ from octoagent.provider.dx.tailscale_helper import (
     TailscaleServeResult,
     TailscaleState,
 )
+from rich.console import Console
 
 
 class _FakeConfig:
@@ -41,8 +42,15 @@ def _hermetic_gateway_probe(monkeypatch: pytest.MonkeyPatch):
 def _patch_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> None:
     for key in ("OCTOAGENT_FRONTDOOR_MODE", "OCTOAGENT_FRONTDOOR_TOKEN", "OCTOAGENT_PORT"):
         monkeypatch.delenv(key, raising=False)
-    # 宽 COLUMNS：CliRunner 无 TTY 时 rich 默认 80 列会截断长中文提示行，
-    # 设宽让 result.output 保留完整文本供断言（等价真实终端）。
+    # remote_commands.console 是 import 时建的模块单例，其 rich width 在建立时
+    # 就锁死（CliRunner 无 TTY 的 CI 环境 = 80 列），测试内改 COLUMNS 已太晚、
+    # 不生效——80 列会把长中文提示行 word-wrap 折断，令「保留 serve 映射」这类
+    # 子串断言脆裂。直接注入超宽 Console 覆盖单例，宽度与 COLUMNS 时机彻底解耦。
+    monkeypatch.setattr(
+        remote_commands,
+        "console",
+        Console(width=10_000, no_color=True, emoji=False, safe_box=True),
+    )
     monkeypatch.setenv("COLUMNS", "200")
     for key, value in env.items():
         monkeypatch.setenv(key, value)
