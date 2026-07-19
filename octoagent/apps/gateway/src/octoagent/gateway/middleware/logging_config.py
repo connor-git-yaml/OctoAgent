@@ -91,8 +91,12 @@ class _UvicornAccessRedactionFilter(logging.Filter):
             elif not record.args and isinstance(record.msg, str):
                 # 无 args 的预格式化消息（防御分支：uvicorn 主线恒带 args）
                 record.msg = redact_sensitive_text(record.msg)
-        except Exception:  # noqa: S110 - 日志链路不阻塞主流程（#6）
-            pass
+        except Exception:
+            # Opus 评审 P3 硬化：异常时**宁可丢内容也不放行可能含 secret 的
+            # 原文**（与 log_redaction 的"异常返回占位符"同一姿势，#5 优先）。
+            # redact_sensitive_text 自身保证不抛，此分支理论不可达。
+            record.msg = "[access-log-redaction-error]"
+            record.args = ()
         return True
 
 

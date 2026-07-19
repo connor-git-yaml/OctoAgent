@@ -152,6 +152,24 @@ def _set_front_door_mode(cfg, root, mode: str) -> None:
     save_config(cfg, root)
 
 
+def _gateway_alive(port: int) -> bool:
+    """gateway 是否活着（GET /ready，2s 超时）。
+
+    F134 Codex 四轮收敛的裁决探针：token 写失败后是否回滚 serve 映射，取决于
+    「远程访问当下是否 working」——服务活 ⇒ token 在其进程 env 里仍在挡
+    （guard 读 os.environ），回滚会立断 working 远程（第四轮 P1 场景）；服务死
+    ⇒ 映射残留会在端口易主时暴露任意本地进程（第三轮 P1 场景）。两场景对
+    「服务是否在跑」时间互斥，探一下就能同时消掉。
+    """
+    try:
+        import httpx
+
+        resp = httpx.get(f"http://127.0.0.1:{port}/ready", timeout=2.0)
+        return resp.status_code < 500
+    except Exception:  # noqa: BLE001 - 连不上/超时 = 服务不在
+        return False
+
+
 def _write_generated_token(root, token_env: str) -> str | None:
     """F134 FR-2a：生成强随机 token 追加写入实例 ``.env``（0600）。
 
@@ -174,9 +192,15 @@ def _write_generated_token(root, token_env: str) -> str | None:
                 if needs_newline:
                     fh.write("\n")
                 fh.write(f"{token_env}={token}\n")
+            os.chmod(env_path, 0o600)  # 既有文件顺手收紧（本就承载 secrets）
         else:
-            env_path.write_text(f"{token_env}={token}\n", encoding="utf-8")
-        os.chmod(env_path, 0o600)
+            # Opus 评审 P2-1：新建须**原子 0600**（O_EXCL + mode），杜绝
+            # "先按 umask 0644 落盘含 token、再 chmod"的短暂可读窗口。
+            fd = os.open(
+                str(env_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600
+            )
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(f"{token_env}={token}\n")
     except OSError as exc:
         return f"{type(exc).__name__}: {exc}"
     return None
@@ -309,24 +333,37 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
         write_error = _write_generated_token(root, token_env)
         if write_error is not None:
             lines.append(f"[red]bearer token 写入 .env 失败：{write_error}[/red]")
-            # Codex 三轮收敛（final P2 要回滚 → re-review P2 反回滚 → re-re P1
-            # 终裁回滚）：serve 映射独立于 Octo 进程持久存在（tailscaled 配置，
-            # 跨重启），若不回滚，之后 Octo 停止/端口易主时这条失败 enable 留下
-            # 的 443→localhost:<port> 会把**任意**占该端口的本地进程暴露到
-            # tailnet（持久暴露面，P1）。反方"回滚破坏 working 映射"是伪场景：
-            # token 未设 ⇒ bearer 无 token 503 / loopback 带 XFF 403，映射必
-            # 不可用、无 working 状态可破坏；443 第三方映射在 serve 接管时已被
-            # 覆盖（F130 既有行为），off 不加剧损失。
-            rollback = disable_tailscale_serve(port=port)
-            if rollback.ok:
+            # Codex 四轮收敛终裁（要回滚 → 反回滚 → 回滚 → 服务活时反回滚）：
+            # 回滚与否取决于「远程当下是否 working」，用 /ready 探针二分——
+            # ①服务死 ⇒ 回滚：serve 映射独立于 Octo 进程持久存在（tailscaled
+            #   配置跨重启），残留会在端口易主时把任意本地进程暴露到 tailnet
+            #   （第三轮 P1）；此时无 outage 可言（本来就没服务）。
+            # ②服务活 ⇒ 不回滚：token 可能仍在服务进程 env 里（.env 后来丢失/
+            #   锁死的 repair 场景），guard 正在挡、远程真 working——回滚会立断
+            #   （第四轮 P1）；暴露面不成立（端口被 Octo front door 占着）。
+            #   警告"重启后 bearer 将缺 token"。
+            if _gateway_alive(port):
                 lines.append(
-                    "[yellow]已回滚本次开启的 serve 映射（避免残留暴露面）。[/yellow]"
+                    "[yellow]检测到 gateway 正在运行——保留 serve 映射（若服务进程"
+                    "已载入 token，远程访问仍可用）。[/yellow]"
+                )
+                lines.append(
+                    "[yellow]注意：实例 .env 缺 token，服务**重启后** bearer 将缺"
+                    "凭证（受保护 API 503）——请尽快修复 .env。[/yellow]"
                 )
             else:
-                lines.append(
-                    "[yellow]serve 映射回滚失败——本次映射仍开着（443 → 本机），"
-                    "请手动 `octo remote disable` 或 `tailscale serve --https=443 off`。[/yellow]"
-                )
+                rollback = disable_tailscale_serve(port=port)
+                if rollback.ok:
+                    lines.append(
+                        "[yellow]gateway 未运行——已回滚本次开启的 serve 映射"
+                        "（避免残留暴露面）。[/yellow]"
+                    )
+                else:
+                    lines.append(
+                        "[yellow]serve 映射回滚失败——本次映射仍开着（443 → 本机），"
+                        "请手动 `octo remote disable` 或 "
+                        "`tailscale serve --https=443 off`。[/yellow]"
+                    )
             lines.append(
                 f"[yellow]front_door.mode 未改动——请手动在 {root / '.env'} 设置 "
                 f"{token_env}=<强随机值>（如 `python3 -c 'import secrets; "

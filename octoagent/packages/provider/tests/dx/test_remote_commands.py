@@ -494,13 +494,12 @@ class TestCodexReviewFixes:
         assert "将生成" in result.output
         assert not (tmp_path / ".env").exists()
 
-    def test_enable_token_write_failure_aborts_before_mode_switch(
+    def test_enable_token_write_failure_gateway_down_rolls_back_serve(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """AC-T3：token 写入失败 → 红报 + exit 1 + **不切 mode** + **回滚本次
-        serve 映射**（Codex 三轮收敛终裁 P1：serve 映射独立于 Octo 进程持久
-        存在，不回滚会在端口易主时把任意本地进程暴露到 tailnet；"破坏 working
-        映射"是伪场景——token 未设时映射必不可用）。"""
+        """AC-T3：token 写入失败 + **gateway 未运行** → 红报 + exit 1 + 不切
+        mode + 回滚本次 serve 映射（Codex 四轮收敛：服务死时残留映射会在端口
+        易主时把任意本地进程暴露到 tailnet；此时无 outage 可言）。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         saved: list = []
@@ -515,6 +514,7 @@ class TestCodexReviewFixes:
             "enable_tailscale_serve",
             lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
         )
+        monkeypatch.setattr(remote_commands, "_gateway_alive", lambda _port: False)
         rollback_calls: list = []
 
         def _fake_disable(**kwargs: object) -> TailscaleServeResult:
@@ -531,10 +531,12 @@ class TestCodexReviewFixes:
         assert "已回滚" in result.output
         assert "手动" in result.output
 
-    def test_enable_token_write_failure_rollback_failure_gives_manual_hint(
+    def test_enable_token_write_failure_gateway_alive_keeps_serve(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """AC-T3b：回滚也失败 → 如实说明映射仍开 + 手动关闭指引（不假报）。"""
+        """AC-T3c：token 写入失败 + **gateway 正在运行** → 不回滚（token 可能
+        仍在服务进程 env 里、远程真 working，回滚会立断——Codex 第四轮 P1
+        场景）+ 警告重启后 bearer 缺凭证。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         saved: list = []
@@ -548,6 +550,40 @@ class TestCodexReviewFixes:
             "enable_tailscale_serve",
             lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
         )
+        monkeypatch.setattr(remote_commands, "_gateway_alive", lambda _port: True)
+        rollback_calls: list = []
+        monkeypatch.setattr(
+            remote_commands,
+            "disable_tailscale_serve",
+            lambda **k: rollback_calls.append(k) or TailscaleServeResult(ok=True),
+        )
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 1
+        assert saved == []  # 不切 mode（.env 缺 token，重启后会 503）
+        assert rollback_calls == []  # ★ 服务活着不动 serve（保 working 远程）
+        assert "保留 serve 映射" in result.output
+        assert "重启后" in result.output  # 警告 stale in-process token 的时限
+
+    def test_enable_token_write_failure_rollback_failure_gives_manual_hint(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T3b：（gateway 未运行）回滚也失败 → 如实说明映射仍开 + 手动
+        关闭指引（不假报）。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        saved: list = []
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), saved)
+        broken_root = tmp_path / "missing" / "instance"
+        monkeypatch.setattr(
+            remote_commands, "resolve_instance_root", lambda: broken_root
+        )
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        monkeypatch.setattr(remote_commands, "_gateway_alive", lambda _port: False)
         monkeypatch.setattr(
             remote_commands,
             "disable_tailscale_serve",
