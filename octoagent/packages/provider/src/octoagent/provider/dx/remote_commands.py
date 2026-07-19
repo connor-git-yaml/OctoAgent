@@ -310,12 +310,23 @@ def _settle_serve_after_failure(port: int) -> tuple[bool, list[str]]:
 
 
 def _token_generated_lines(token_env: str, root) -> list[str]:
-    """token 生成成功后的用户提示（零明文，FR-2a/D10）。"""
+    """token 生成成功后的用户提示（零明文，FR-2a/D10）。
+
+    Codex 十五轮 P2（披露而非行为改变）：token 若经 launchd/systemd/容器
+    ``Environment=`` 注入且服务当下未按 bearer 在挡（停着/loopback），CLI
+    本质照不到该值（独立 shell 的 os.environ 无、dotenv 无、行为探针无）——
+    与全新安装不可区分，只能默认生成。故成功面板显式披露「.env 现在是
+    token 的权威来源」，让极少数「服务 env 注入 + 有存量客户端」的高级
+    部署看到值已改、按需回填注入值到 .env（不静默）。反向不能改成「不
+    生成」：会命中 F130 防的 shell-only token 服务不继承 → 重启 503。
+    """
     env_path = root / ".env"
     return [
         f"[green]已生成强随机 bearer token 并写入 {env_path}（仅本机可读）[/green]",
         "  手机首次访问 Web UI 时需输入该 token（SSE 自动带 access_token 参数）。",
         f"  查看 token：[dim]grep {token_env} {env_path}[/dim]",
+        f"[dim]  （{env_path} 现在是 token 的权威来源；若此前经服务环境注入过"
+        f" {token_env}，重启后将以此值为准。）[/dim]",
     ]
 
 
