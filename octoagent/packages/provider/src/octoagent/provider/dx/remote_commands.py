@@ -442,6 +442,13 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
             console.print(render_panel("octo remote enable", lines, border_style="red"))
             raise SystemExit(1)
         token_lines = _token_generated_lines(token_env, root)
+    else:
+        # Codex 十轮 P2：已设路径也给查看指引——首次 enable 若在 token 写入
+        # 成功后因 yaml 失败中止，重试会走本分支；无指引用户不知道去哪拿
+        # 手机要输的 token。
+        token_lines = [
+            f"[dim]bearer token 已配置（查看：grep {token_env} {root / '.env'}）[/dim]"
+        ]
 
     # serve + token 齐 → 幂等持久化 bearer（yaml 已 bearer 不重复写，比对持久化值）。
     # Codex 七轮 P1：yaml 写失败（只读实例根/磁盘满）同样发生在 serve 已开之后
@@ -465,6 +472,10 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
                 lines.append(
                     "[yellow]注意：mode 未持久化到 yaml，服务重启后将回到原模式。[/yellow]"
                 )
+            # Codex 十轮 P2：token 本次可能已生成写入 .env（yaml 失败不撤销
+            # token）——失败面板也要给"已生成 + 查看指引"，否则重试走"已设"
+            # 路径时用户不知道去哪拿手机要输的 token。
+            lines.extend(token_lines)
             lines.append(
                 "[yellow]请确认 octoagent.yaml 可写后重试 `octo remote enable`。[/yellow]"
             )

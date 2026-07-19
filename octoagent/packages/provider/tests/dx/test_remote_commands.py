@@ -722,6 +722,8 @@ class TestCodexReviewFixes:
         assert "已回滚" in result.output
         # token 已写成功（.env 有值）——重试幂等跳过生成
         assert (tmp_path / ".env").exists()
+        # Codex 十轮 P2：失败面板也展示 token 指引（用户能找到手机要输的值）
+        assert "grep" in result.output
 
     def test_enable_yaml_write_failure_alive_gateway_still_rolls_back(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
