@@ -651,3 +651,19 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 **已确认已有别重造（对抗验证 already-have）**：UI 测试收敛到协议层（48 文件 HTTP 层 + SSE 序列断言 + 前端 FakeEventSource stub，结构上已具备，仅缺 golden snapshot 便利件）；provider double /v1 wire 回归（a6b51fc4 已治本 + 23 用例三 transport 出站 body shape 断言成体系，比 pydantic-ai SDK 层更贴 wire）。
 
 ---
+
+---
+
+### M10（部署完成度收尾：从「功能就绪」到「日用无欠账」）⏳ 启动（2026-07-19）
+
+> **目标（用户拍板 2026-07-19）**：把散在各 Feature 归档里的"最后一公里"欠账收齐——审批不再只能 REST/Telegram、手机远程链路真通、安全尾巴收掉、平台一致性小债清零。M7/M8/M9 全 ✅ 后的收尾型 milestone，规模小见效快。
+> **两拍板**：①照单 4 Feature 全立，首波 F145∥F134∥F146 三路并行（文件面 frontend / front_door / services+core 三不沾），F147 第二波；②用户侧 tailscale 部署放 M10 收尾（F134 加固 + F145 审批 UI 落地后装，届时手机体验完整；enable+探针主 session 陪跑）。
+
+| Feature | 规模 | 一句话 | 波次 |
+|---------|------|--------|------|
+| **F145 统一候选审批中心** | M | 扩展既有 MemoryCandidates 页为**三源统一审批中心**（memory 候选 + F127 记忆巩固提议 + F111 规则合并提议）：合流列表 + diff 展示 + 一键 accept/reject + 红点 badge 汇总。后端 REST 全已有（只接线不改审批语义）。M10 体验核心：每晚后台产的提议，早上 Web/手机划一划批完。可选 +1 条 L1 审批点击场景（F140 deferred 的审批场景现在有确定性触发器=F111 scripted 产候选）| ① |
+| **F134 bearer 加固** | S | M8 归档 P2 转正：认证失败限流（防爆破，仿 OpenClaw auth-rate-limit）+ `octo remote enable` 强 token 自动生成（现仅提示）+ SSE query token 泄露收敛（F130 limitation：ticket 化或评估归档）。#10 单入口内改，F144 17 格矩阵保绿+扩格 | ① |
+| **F146 平台一致性三小件** | S | F111 发现的同类问题推广：①F102/F127 `_read_user_md`"盘外编辑不可见"推广盘优先修法 ②F136/F107 写 USER.md 后 live-state 同步核查补齐 ③三姊妹（F102/F127/F111）cron 时间热重载统一 | ① |
+| **F147 清扫篮** | S-M | toolsets 死配置清理（F-CLEAN-1）+ cron 后台失败 HIGH 通知 + bench infra 两债（T1-TOOL-CALL-003 断言收敛 / 并发限流指数退避跳出步数预算）+ 容器交付评估结论归档（预期不做容器，写清理由）| ② |
+
+**验收项（非 Feature，用户动作 + 主 session 陪跑）**：装 Tailscale + `octo remote enable` → `octo attest remote` 绿（手机链路真通）；某次重启 Mac 后签 ATT-129-BOOT（attestation 清单唯一残余）。**M10 完成定义**：4 Feature ✅ + remote 探针绿 + `lane.py release` 除 attestation 外全绿。
