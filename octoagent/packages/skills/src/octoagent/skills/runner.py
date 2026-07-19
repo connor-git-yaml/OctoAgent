@@ -64,6 +64,10 @@ logger = structlog.get_logger(__name__)
 _DEFAULT_USAGE_LIMITS = UsageLimits()
 _DEFAULT_LOOP_GUARD = LoopGuardPolicy()
 
+# F147：429 速率限制指数退避天花板（毫秒）。退避 base 取 retry_policy.backoff_ms，
+# 翻倍到此上限封顶；重试次数上界复用 retry_policy.max_attempts（不另立预算）。
+_RATE_LIMIT_BACKOFF_CAP_MS = 30_000
+
 
 class SkillRunner:
     """Skill 执行器。"""
@@ -113,6 +117,8 @@ class SkillRunner:
         attempts = 0
         steps = 0
         retry_failures = 0
+        # F147：429 速率限制重试计数（与 max_steps 步数预算解耦；成功 generate 后清零）
+        rate_limit_retries = 0
         feedback: list[ToolFeedbackMessage] = []
         last_signature: str | None = None
         repeat_count = 0
@@ -159,6 +165,10 @@ class SkillRunner:
                     attempt=attempts,
                     step=steps,
                 )
+                # F147：一次成功 generate 即清零 429 计数——紧接 generate 返回置，
+                # 不等整步走完（后续 tool 失败/stop hook/complete 早退都不该让旧
+                # 限流计数泄漏进后续正常步，Codex 项3② MED）。
+                rate_limit_retries = 0
                 # feedback 是"待送给下一轮 generate 的 buffer"，模型调用成功后
                 # 视为已消费；若再保留，下一轮会把已发过的 tool_result / warning
                 # 再次送给 model_client（model_client 已做去重但 loop_guard / 错误
@@ -215,9 +225,36 @@ class SkillRunner:
                             ),
                         )
                     if exc.error_type == "rate_limit":
-                        # 速率限制：等待后重试，不消耗 retry 计数
-                        logger.warning("rate_limit_backoff", step=steps, wait_seconds=3)
-                        await asyncio.sleep(3)
+                        # F147：速率限制指数退避 + 退避**不吃 max_steps 步数预算**。
+                        # - 上界复用 retry_policy.max_attempts（不另立预算，调用方可从
+                        #   manifest 预测总重试；Codex 项3② MED）。
+                        # - continue 前同步回滚 steps/attempts/**tracker.steps**——只减本地
+                        #   steps 不够，下一轮 while 的 check_limits 读的是 tracker.steps
+                        #   （本轮开头 :148 已写成增长值），不回滚会在 steps 接近 max 时被
+                        #   STEP_LIMIT_EXCEEDED 提前打死（Codex 项3② HIGH off-by-one）。
+                        rate_limit_retries += 1
+                        if rate_limit_retries > manifest.retry_policy.max_attempts:
+                            return await self._terminate_with_failure(
+                                manifest=manifest,
+                                execution_context=execution_context,
+                                history_key=history_key,
+                                start_time=start_time,
+                                attempts=attempts,
+                                steps=steps,
+                                category=ErrorCategory.REPEAT_ERROR,
+                                error=SkillRepeatError(
+                                    f"速率限制重试耗尽（{rate_limit_retries - 1} 次退避后仍 429）: {exc}"
+                                ),
+                            )
+                        logger.warning(
+                            "rate_limit_backoff",
+                            step=steps,
+                            rate_limit_retries=rate_limit_retries,
+                        )
+                        await self._rate_limit_backoff(manifest, rate_limit_retries)
+                        steps -= 1
+                        attempts -= 1
+                        tracker.steps = steps
                         continue
                     if exc.error_type == "context_overflow":
                         # 上下文超长：不可盲目重试，直接标记失败
@@ -773,6 +810,18 @@ class SkillRunner:
     async def _backoff(self, manifest: SkillManifest) -> None:
         if manifest.retry_policy.backoff_ms > 0:
             await asyncio.sleep(manifest.retry_policy.backoff_ms / 1000)
+
+    async def _rate_limit_backoff(self, manifest: SkillManifest, retries: int) -> None:
+        """F147：429 速率限制指数退避（base=retry_policy.backoff_ms，翻倍到 cap 天花板）。
+
+        与 `_backoff` 同样尊重 backoff_ms==0（测试置 0 免真 sleep）；此退避由调用方
+        在 continue 前回滚 steps/tracker.steps，故**不计入 max_steps 步数预算**。
+        """
+        base_ms = manifest.retry_policy.backoff_ms
+        if base_ms <= 0:
+            return
+        wait_ms = min(base_ms * (2 ** (retries - 1)), _RATE_LIMIT_BACKOFF_CAP_MS)
+        await asyncio.sleep(wait_ms / 1000)
 
     async def _call_hook(self, method: str, *args: Any) -> None:
         for hook in self._hooks:

@@ -1308,3 +1308,190 @@ async def test_runner_non_auth_api_error_still_retries(
     assert result.error_category == ErrorCategory.REPEAT_ERROR
     # retry_failures 达到 max_attempts+1（4 次失败）才终止——重试语义未被 401 修复破坏
     assert client.calls == 4
+
+
+# ---------------------------------------------------------------------------
+# F147：429 速率限制指数退避 + 退避不吃步数预算
+# ---------------------------------------------------------------------------
+
+
+def _rate_limit_error():
+    """构造 provider 层 429 映射的 LLMCallError（error_type="rate_limit"）。"""
+    from octoagent.provider import ProviderLLMCallError
+
+    return ProviderLLMCallError(
+        "rate_limit", "Too Many Requests", retriable=True, status_code=429
+    )
+
+
+async def test_runner_rate_limit_backoff_does_not_consume_step_budget(
+    execution_context, tool_broker, event_store
+) -> None:
+    """F147：429 退避不吃 max_steps 步数预算（含 Codex 项3② HIGH：tracker.steps 回滚）。
+
+    max_steps=3 但注入 5 个 429——旧实现每个 429 都 `steps += 1` 且不回滚 tracker.steps，
+    第 3 个 429 就撞 STEP_LIMIT_EXCEEDED 提前截断；修复后 5 个 429 全退避、tracker.steps
+    回滚保持 pinned，唯一成功步只 1 步。
+    """
+    from octoagent.skills.models import LoopGuardPolicy, RetryPolicy
+
+    from .conftest import EchoOutput
+
+    manifest = SkillManifest(
+        skill_id="demo.echo",
+        version="0.1.0",
+        input_model=EchoInput,
+        output_model=EchoOutput,
+        model_alias="main",
+        tools_allowed=["system.echo"],
+        # backoff_ms=0 免真 sleep；max_attempts=6 容纳 5 个 429；max_steps=3 收紧步数预算
+        retry_policy=RetryPolicy(max_attempts=6, backoff_ms=0),
+        loop_guard=LoopGuardPolicy(max_steps=3),
+    )
+    client = QueueModelClient(
+        [_rate_limit_error() for _ in range(5)]
+        + [SkillOutputEnvelope(content="ok", complete=True)]
+    )
+    runner = SkillRunner(
+        model_client=client, tool_broker=tool_broker, event_store=event_store
+    )
+
+    result = await runner.run(
+        manifest=manifest,
+        execution_context=execution_context,
+        skill_input=EchoInput(text="hi"),
+        prompt="echo",
+    )
+
+    assert result.status == SkillRunStatus.SUCCEEDED, (
+        f"5 个 429（> max_steps=3）不应撞 STEP_LIMIT，实际 {result.error_category}"
+    )
+    assert result.steps == 1, f"退避不吃步数：成功步应只 1 步，实际 {result.steps}"
+    assert client.calls == 6, f"应 5 个 429 + 1 成功 = 6 次调用，实际 {client.calls}"
+
+
+async def test_runner_rate_limit_backoff_is_exponential(
+    execution_context, tool_broker, event_store, monkeypatch
+) -> None:
+    """F147：429 退避指数递增（base=retry_policy.backoff_ms，翻倍到 cap）。"""
+    from octoagent.skills import runner as runner_mod
+    from octoagent.skills.models import RetryPolicy
+
+    from .conftest import EchoOutput
+
+    waits: list[float] = []
+
+    async def _fake_sleep(secs: float) -> None:
+        waits.append(secs)
+
+    monkeypatch.setattr(runner_mod.asyncio, "sleep", _fake_sleep)
+
+    manifest = SkillManifest(
+        skill_id="demo.echo",
+        version="0.1.0",
+        input_model=EchoInput,
+        output_model=EchoOutput,
+        model_alias="main",
+        tools_allowed=["system.echo"],
+        retry_policy=RetryPolicy(max_attempts=6, backoff_ms=100),
+    )
+    client = QueueModelClient(
+        [_rate_limit_error() for _ in range(3)]
+        + [SkillOutputEnvelope(content="ok", complete=True)]
+    )
+    runner = SkillRunner(
+        model_client=client, tool_broker=tool_broker, event_store=event_store
+    )
+
+    await runner.run(
+        manifest=manifest,
+        execution_context=execution_context,
+        skill_input=EchoInput(text="hi"),
+        prompt="echo",
+    )
+
+    # base=100ms → 0.1 / 0.2 / 0.4 秒（指数翻倍）
+    assert waits == [0.1, 0.2, 0.4], f"退避应指数递增，实际 {waits}"
+
+
+async def test_runner_rate_limit_exhausts_retries_fails_repeat_error(
+    execution_context, tool_broker, event_store
+) -> None:
+    """F147：429 重试上界复用 retry_policy.max_attempts，耗尽 → FAILED/REPEAT_ERROR。"""
+    from octoagent.skills.models import RetryPolicy
+
+    from .conftest import EchoOutput
+
+    manifest = SkillManifest(
+        skill_id="demo.echo",
+        version="0.1.0",
+        input_model=EchoInput,
+        output_model=EchoOutput,
+        model_alias="main",
+        tools_allowed=["system.echo"],
+        retry_policy=RetryPolicy(max_attempts=3, backoff_ms=0),
+    )
+    # 4 个 429：retries 1/2/3 退避，第 4 个 4>3 → 终止（上界=max_attempts）
+    client = QueueModelClient([_rate_limit_error() for _ in range(4)])
+    runner = SkillRunner(
+        model_client=client, tool_broker=tool_broker, event_store=event_store
+    )
+
+    result = await runner.run(
+        manifest=manifest,
+        execution_context=execution_context,
+        skill_input=EchoInput(text="hi"),
+        prompt="echo",
+    )
+
+    assert result.status == SkillRunStatus.FAILED
+    assert result.error_category == ErrorCategory.REPEAT_ERROR
+    assert client.calls == 4, f"上界=max_attempts=3，第 4 个 429 终止，实际 {client.calls}"
+    assert "速率限制重试耗尽" in (result.error_message or "")
+
+
+async def test_runner_rate_limit_counter_resets_after_success(
+    echo_manifest, execution_context
+) -> None:
+    """F147：一次成功 generate 清零 429 计数（Codex 项3② MED）——两段限流风暴各拿满额度。
+
+    max_attempts=1（每段最多 1 次 429 退避）；两段 429 之间夹一个成功 tool_call 步。
+    若不清零：段2 的 429 会让计数 2>1 提前终止；清零后段2 拿满额度、决策环走完。
+    """
+    from octoagent.skills.models import RetryPolicy, ToolCallSpec
+
+    from .conftest import MockEventStore, MockToolBroker
+
+    tool_broker = MockToolBroker()
+    event_store = MockEventStore()
+    manifest = echo_manifest.model_copy(
+        update={"retry_policy": RetryPolicy(max_attempts=1, backoff_ms=0)}
+    )
+    client = QueueModelClient(
+        [
+            _rate_limit_error(),  # 段1 429（retries=1，1>1 False → 退避）
+            SkillOutputEnvelope(
+                content="",
+                tool_calls=[
+                    ToolCallSpec(tool_name="system.echo", arguments={"text": "step"})
+                ],
+            ),  # 成功 generate → 清零
+            _rate_limit_error(),  # 段2 429（清零后 retries=1，1>1 False → 退避）
+            SkillOutputEnvelope(content="done", complete=True),
+        ]
+    )
+    runner = SkillRunner(
+        model_client=client, tool_broker=tool_broker, event_store=event_store
+    )
+
+    result = await runner.run(
+        manifest=manifest,
+        execution_context=execution_context,
+        skill_input={"text": "x"},
+        prompt="p",
+    )
+
+    assert result.status == SkillRunStatus.SUCCEEDED, (
+        f"清零生效则段2 429 应仍可退避，实际 {result.error_category}"
+    )
+    assert client.calls == 4
