@@ -635,7 +635,7 @@ class TestCodexReviewFixes:
     def test_enable_token_append_preserves_existing_env_content(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
     ) -> None:
-        """AC-T4：追加写保既有内容逐字节不动 + 尾部无换行先补行。"""
+        """AC-T4：追加写保既有内容逐字节不动 + 尾部无换行先补行 + 收紧 0600。"""
         _patch_env(monkeypatch)
         _patch_probe(monkeypatch, _READY)
         _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
@@ -658,6 +658,62 @@ class TestCodexReviewFixes:
         assert lines[0] == "OCTOAGENT_PORT=9000"  # 原行逐字节保留
         assert lines[1].startswith("OCTOAGENT_FRONTDOOR_TOKEN=")  # 换行后追加
         assert env_text.endswith("\n")
+        # 既有文件也被收紧 0600（Codex 七轮 P2：写前收紧）
+        assert ((tmp_path / ".env").stat().st_mode & 0o777) == 0o600
+
+    def test_write_generated_token_chmod_failure_aborts_before_write(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Codex 七轮 P2 钉住（fail-closed）：既有 .env 收紧权限失败 → **不写
+        token**（宁可失败也不让 secret 落入宽权限文件）。"""
+        (tmp_path / ".env").write_text("EXISTING=1\n", encoding="utf-8")
+
+        def _deny_chmod(path: object, mode: int) -> None:
+            raise PermissionError("chmod denied")
+
+        monkeypatch.setattr(remote_commands.os, "chmod", _deny_chmod)
+        err = remote_commands._write_generated_token(
+            tmp_path, "OCTOAGENT_FRONTDOOR_TOKEN"
+        )
+        assert err is not None
+        # token 未落入未收紧的文件
+        assert (tmp_path / ".env").read_text(encoding="utf-8") == "EXISTING=1\n"
+
+    def test_enable_yaml_write_failure_settles_serve(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """AC-T5（Codex 七轮 P1）：mode 持久化（save_config）失败 → exit 1 +
+        统一收尾（loopback 场景 → 回滚 serve），不再裸崩溃留悬挂映射。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), [])
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        import octoagent.gateway.services.config.config_wizard as cw
+
+        def _fail_save(config: object, _root: object) -> None:
+            raise OSError("read-only octoagent.yaml")
+
+        monkeypatch.setattr(cw, "save_config", _fail_save)
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: False)
+        rollback_calls: list = []
+        monkeypatch.setattr(
+            remote_commands,
+            "disable_tailscale_serve",
+            lambda **k: rollback_calls.append(k) or TailscaleServeResult(ok=True),
+        )
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 1
+        assert rollback_calls  # ★ yaml 失败同样收尾回滚（不留悬挂映射）
+        assert "octoagent.yaml 失败" in result.output
+        assert "已回滚" in result.output
+        # token 已写成功（.env 有值）——重试幂等跳过生成
+        assert (tmp_path / ".env").exists()
 
     def test_disable_serve_reset_failure_exits_1(
         self, monkeypatch: pytest.MonkeyPatch

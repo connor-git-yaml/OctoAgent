@@ -197,13 +197,16 @@ def _write_generated_token(root, token_env: str) -> str | None:
     env_path = root / ".env"
     try:
         if env_path.exists():
+            # Codex 七轮 P2：**先收紧权限再写 secret**——0644 既有文件先
+            # append 会让新 token 短暂（chmod 失败则永久）对其他本地用户
+            # 可读。chmod 失败即中止（fail-closed，token 不落宽权限文件）。
+            os.chmod(env_path, 0o600)
             existing = env_path.read_bytes()
             needs_newline = bool(existing) and not existing.endswith(b"\n")
             with env_path.open("a", encoding="utf-8") as fh:
                 if needs_newline:
                     fh.write("\n")
                 fh.write(f"{token_env}={token}\n")
-            os.chmod(env_path, 0o600)  # 既有文件顺手收紧（本就承载 secrets）
         else:
             # Opus 评审 P2-1：新建须**原子 0600**（O_EXCL + mode），杜绝
             # "先按 umask 0644 落盘含 token、再 chmod"的短暂可读窗口。
@@ -215,6 +218,38 @@ def _write_generated_token(root, token_env: str) -> str | None:
     except OSError as exc:
         return f"{type(exc).__name__}: {exc}"
     return None
+
+
+def _settle_serve_after_failure(cfg, env: dict[str, str], port: int) -> tuple[bool, list[str]]:
+    """enable 在 serve 已开之后失败的统一收尾：远程真 working 则保留，否则回滚。
+
+    Codex 六/七轮收敛：保留（不回滚）须**双条件**——effective mode 已是
+    bearer **且**端口上验出 Octo（`/ready` 响应特征）：此时 token 可能仍在
+    服务进程 env、guard 正在挡、远程真 working，回滚会立断（第四轮 P1）。
+    其余一律回滚（fail-closed）：loopback 未切时远程本就不可用（serve 转发
+    带 XFF 必 403，保留零收益）；服务死/端口被非 Octo 进程占则残留映射会在
+    端口易主时把任意本地进程暴露到 tailnet（第三/五轮 P1）。
+
+    返回 ``(kept, lines)``；kept=True 表示映射被保留（调用方自行补
+    上下文特定警告）。token 写失败与 yaml 写失败两条失败路径共用本收尾
+    （第七轮 P1：此前 yaml 失败路径直接崩溃退出、serve 无人清理）。
+    """
+    if _effective_mode(cfg, env) == "bearer" and _octo_gateway_on_port(port):
+        return True, [
+            "[yellow]检测到 gateway 正以 bearer 模式运行——保留 serve 映射"
+            "（若服务进程已载入 token，远程访问仍可用）。[/yellow]"
+        ]
+    rollback = disable_tailscale_serve(port=port)
+    if rollback.ok:
+        return False, [
+            "[yellow]远程尚未生效——已回滚本次开启的 serve 映射"
+            "（避免残留暴露面）。[/yellow]"
+        ]
+    return False, [
+        "[yellow]serve 映射回滚失败——本次映射仍开着（443 → 本机），"
+        "请手动 `octo remote disable` 或 "
+        "`tailscale serve --https=443 off`。[/yellow]"
+    ]
 
 
 def _token_generated_lines(token_env: str, root) -> list[str]:
@@ -344,44 +379,13 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
         write_error = _write_generated_token(root, token_env)
         if write_error is not None:
             lines.append(f"[red]bearer token 写入 .env 失败：{write_error}[/red]")
-            # Codex 六轮收敛终裁（要回滚→反回滚→回滚→服务活时反回滚→验 Octo
-            # 特征→还须已按 bearer 生效）：回滚与否取决于「远程当下是否真
-            # working」，两个条件缺一不可——
-            # ①保留（不回滚）仅当 **effective mode 已是 bearer 且端口上验出
-            #   Octo**：token 可能仍在服务进程 env 里（.env 后来丢失/锁死的
-            #   repair 场景），guard 正在挡、远程真 working，回滚会立断
-            #   （第四轮 P1）；此时暴露面不成立（端口被 Octo front door 占着）。
-            #   警告"重启后 bearer 将缺 token"。
-            # ②其余一律回滚：普通 loopback 首次 enable 即使服务活着也不构成
-            #   working 远程（mode 未切，serve 转发带 XFF 必 403，第六轮 P2
-            #   ——保留只留隐患）；服务死/端口被非 Octo 进程占（第五轮 P1）
-            #   则残留映射会在端口易主时把任意本地进程暴露到 tailnet
-            #   （第三轮 P1）。fail-closed：判定不确定就回滚。
-            remote_effectively_working = _effective_mode(
-                cfg, env
-            ) == "bearer" and _octo_gateway_on_port(port)
-            if remote_effectively_working:
-                lines.append(
-                    "[yellow]检测到 gateway 正以 bearer 模式运行——保留 serve 映射"
-                    "（若服务进程已载入 token，远程访问仍可用）。[/yellow]"
-                )
+            kept, settle_lines = _settle_serve_after_failure(cfg, env, port)
+            lines.extend(settle_lines)
+            if kept:
                 lines.append(
                     "[yellow]注意：实例 .env 缺 token，服务**重启后** bearer 将缺"
                     "凭证（受保护 API 503）——请尽快修复 .env。[/yellow]"
                 )
-            else:
-                rollback = disable_tailscale_serve(port=port)
-                if rollback.ok:
-                    lines.append(
-                        "[yellow]远程尚未生效——已回滚本次开启的 serve 映射"
-                        "（避免残留暴露面）。[/yellow]"
-                    )
-                else:
-                    lines.append(
-                        "[yellow]serve 映射回滚失败——本次映射仍开着（443 → 本机），"
-                        "请手动 `octo remote disable` 或 "
-                        "`tailscale serve --https=443 off`。[/yellow]"
-                    )
             lines.append(
                 f"[yellow]front_door.mode 未改动——请手动在 {root / '.env'} 设置 "
                 f"{token_env}=<强随机值>（如 `python3 -c 'import secrets; "
@@ -392,8 +396,27 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
         token_lines = _token_generated_lines(token_env, root)
 
     # serve + token 齐 → 幂等持久化 bearer（yaml 已 bearer 不重复写，比对持久化值）。
+    # Codex 七轮 P1：yaml 写失败（只读实例根/磁盘满）同样发生在 serve 已开之后
+    # ——与 token 失败路径共用统一收尾（此前直接崩溃退出、serve 无人清理）。
     if persisted != "bearer":
-        _set_front_door_mode(cfg, root, "bearer")
+        try:
+            _set_front_door_mode(cfg, root, "bearer")
+        except Exception as exc:  # noqa: BLE001 - save_config 的任何失败都要收尾
+            lines.append(
+                "[red]front_door.mode 写入 octoagent.yaml 失败："
+                f"{type(exc).__name__}: {exc}[/red]"
+            )
+            kept, settle_lines = _settle_serve_after_failure(cfg, env, port)
+            lines.extend(settle_lines)
+            if kept:
+                lines.append(
+                    "[yellow]注意：mode 未持久化到 yaml，服务重启后将回到原模式。[/yellow]"
+                )
+            lines.append(
+                "[yellow]请确认 octoagent.yaml 可写后重试 `octo remote enable`。[/yellow]"
+            )
+            console.print(render_panel("octo remote enable", lines, border_style="red"))
+            raise SystemExit(1) from exc
         lines.append(f"front_door.mode: {persisted} → bearer（已写入 octoagent.yaml）")
     else:
         lines.append("front_door.mode 已是 bearer（幂等）")
