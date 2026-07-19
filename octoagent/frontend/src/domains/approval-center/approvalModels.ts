@@ -23,7 +23,9 @@ const SERVER_EMPTY_DIFF_SENTINEL = "（无行级差异）";
  * 把服务端 unified diff 文本解析为 DiffLineRow[]（供 DiffLineList 渲染）。
  *
  * 面向非技术用户的裁剪：
- * - 文件头（`---` / `+++`）丢弃——卡片标题已说明是哪个文件；
+ * - 文件头（`---` / `+++`，**仅出现在首个 hunk 之前**）丢弃——卡片标题已说明是
+ *   哪个文件。Codex final P2 闭环：首个 `@@` 之后的 `---`/`+++` 前缀行是真实
+ *   内容（如被删的 markdown 分隔线 `---` 在 diff 里呈现为 `----`），不得误吞；
  * - hunk 标记（`@@`）丢弃，hunk 之间插一行 "⋯" 分隔（unchanged）；
  * - `\ No newline at end of file` 技术噪音丢弃；
  * - 空文本 / 服务端「（无行级差异）」哨兵 → 返回 []（调用方展示无差异文案）；
@@ -37,7 +39,8 @@ export function parseUnifiedDiff(diffText: string): DiffLineRow[] {
   const rows: DiffLineRow[] = [];
   let seenHunk = false;
   for (const line of diffText.split("\n")) {
-    if (line.startsWith("+++") || line.startsWith("---")) {
+    if (!seenHunk && (line.startsWith("+++") || line.startsWith("---"))) {
+      // unified diff 文件头只在首个 @@ 之前；之后同前缀行是内容，交给下方 +/- 解析
       continue;
     }
     if (line.startsWith("@@")) {

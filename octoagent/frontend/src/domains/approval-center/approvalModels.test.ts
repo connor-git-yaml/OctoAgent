@@ -65,6 +65,27 @@ describe("parseUnifiedDiff", () => {
     ]);
   });
 
+  it("首个 hunk 之后内容行首为 ---/+++ 的真实改动不被误吞（Codex final P2）", () => {
+    // 被删的 markdown 分隔线 "---" 在 unified diff 里呈现为 "----"；
+    // 新增的 "+++" 字面量呈现为 "++++"。只有首个 @@ 之前的才是文件头。
+    const diff = [
+      "--- AGENTS.md（当前）",
+      "+++ AGENTS.md（精简提议）",
+      "@@ -1,3 +1,2 @@",
+      "----",
+      "-旧规则",
+      "++++加粗分隔",
+      " 上下文",
+    ].join("\n");
+    const rows = parseUnifiedDiff(diff);
+    expect(rows).toEqual([
+      { kind: "removed", text: "---" },
+      { kind: "removed", text: "旧规则" },
+      { kind: "added", text: "+++加粗分隔" },
+      { kind: "unchanged", text: "上下文" },
+    ]);
+  });
+
   it("服务端超长截断尾注（无前缀行）按原文保留", () => {
     const diff = "@@ -1 +1 @@\n-旧\n+新\n…（diff 超长已截断）";
     const rows = parseUnifiedDiff(diff);

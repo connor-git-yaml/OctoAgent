@@ -17,6 +17,8 @@ difflib unified diff，badge 轮询不该踩这条热路径）。
 
 from __future__ import annotations
 
+import sqlite3
+
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -76,17 +78,36 @@ async def get_approval_center_summary(
             status_code=500, detail=f"审批汇总查询失败: {exc}"
         ) from exc
 
-    # consolidation 表属 memory 子系统（init_memory_db），降级启动可能缺席 → 计 0
+    # consolidation 表属 memory 子系统（init_memory_db），降级启动可能缺席 → 计 0。
+    # Codex final P2 闭环：只有「表不存在」这一种预期缺席才降级——DB 锁/连接坏等
+    # 真故障必须如实 500，否则 badge 会把仍待审批的合并提议静默藏成 0。
     try:
         consolidation_pending = await _count_pending(conn, "consolidation_candidates")
-    except Exception as exc:
+    except sqlite3.OperationalError as exc:
+        if "no such table" not in str(exc):
+            log.error(
+                "approval_center_summary_failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            raise HTTPException(
+                status_code=500, detail=f"审批汇总查询失败: {exc}"
+            ) from exc
         log.warning(
             "approval_center_consolidation_count_degraded",
-            error_type=type(exc).__name__,
             error=str(exc),
-            hint="consolidation_candidates 表不可用（memory 子系统未初始化？）；计 0 降级",
+            hint="consolidation_candidates 表不存在（memory 子系统未初始化）；计 0 降级",
         )
         consolidation_pending = 0
+    except Exception as exc:
+        log.error(
+            "approval_center_summary_failed",
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=500, detail=f"审批汇总查询失败: {exc}"
+        ) from exc
 
     return ApprovalCenterSummary(
         memory_pending=memory_pending,

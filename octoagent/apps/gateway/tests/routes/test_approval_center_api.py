@@ -154,3 +154,21 @@ class TestSummaryEndpoint:
         assert body["consolidation_pending"] == 0
         assert body["behavior_compact_pending"] == 1
         assert body["total_pending"] == 2
+
+    async def test_non_missing_table_db_error_is_500(self, store_group, monkeypatch):
+        """Codex final P2 钉住：DB 真故障（非缺表）不得静默降级成 0——必须 500。
+
+        否则 badge 会把仍待审批的提议藏起来且用户拿不到任何错误信号。
+        """
+        import sqlite3
+
+        original = route_mod._count_pending
+
+        async def _locked(conn, table: str) -> int:
+            if table == "consolidation_candidates":
+                raise sqlite3.OperationalError("database is locked")
+            return await original(conn, table)
+
+        monkeypatch.setattr(route_mod, "_count_pending", _locked)
+        resp = _client_for(store_group).get("/api/approval-center/summary")
+        assert resp.status_code == 500
