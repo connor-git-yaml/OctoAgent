@@ -132,6 +132,25 @@ volumes:
 
 > **运维 follow-up**：当前 `docs/blueprint/deployment-and-ops.md` §12.2 + §12.1.2 仍保留 LiteLLM Proxy 段落作为历史参考，建议在 M6 F104（文件工作台 v0.1）期间或运维侧首次重部署时同步清理。
 
+#### 12.1.5 容器交付评估结论（M10 F147，2026-07-19）——**不做容器**
+
+> 本节记录 F147 对"是否把 OctoAgent 容器化交付"的评估结论，**取代** §12.1.2 的
+> Docker Compose 多容器生产拓扑愿景（那是 M0 期蓝图设想，M8 部署决策已实测超越）。
+
+**结论：单用户部署不做容器化。** 首选形态 = **禁睡常驻 Mac + launchd/systemd user unit + Tailscale**（M8 F129/F130 已交付并实测）。
+
+**取证与理由**：
+
+- **无编排需求**：Blueprint §0 锁定单用户深度，无多实例/横向扩展/多服务编排场景——Docker Compose 多容器（§12.1.2）解决的是编排问题，此处不存在。
+- **崩溃自愈 + 开机自启已由 OS 覆盖**：F129 `octo service {install,uninstall,status}`（launchd/systemd user unit，三态幂等 + 旧进程交接 + /ready 校验）已给出容器编排的核心卖点（进程守护、崩溃重启、开机自启），无需容器运行时。
+- **远程触达已解决**：F130 Tailscale serve（三态检测/建议/接管 + `octo remote enable`）已通手机远程链路，无需容器网络暴露。
+- **容器徒增复杂度无对应收益**：镜像构建/维护、卷挂载（`~/.octoagent` 数据 + behavior + secrets）、凭证注入、时区、以及 JobRunner 沙箱的 **Docker-in-Docker 嵌套**（部署容器内再起沙箱容器，见 §12.1.3）都是净增运维面，换不到单用户场景下的实际好处。
+- **JobRunner 执行沙箱仍用 Docker**：注意区分——**执行层**沙箱（§12.1.3 执行隔离）继续用 Docker Socket 挂载，这与"**部署层**是否容器化"是两回事；不做容器交付不影响执行沙箱隔离。
+
+**触发重评条件**（届时重开本节）：迁移到 NAS / 需要多实例 / 需与其他服务在同一编排栈共存 / 面向多用户开放（当前 Blueprint §0 明确排除）。
+
+**不产出任何 `Dockerfile` / `docker-compose` 部署制品**（本仓当前也无——§12.2 参考配置是历史蓝图文本，非实际交付物）。
+
 ### 12.2 Docker Compose 参考配置
 
 ```yaml
