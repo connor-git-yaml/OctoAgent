@@ -41,7 +41,8 @@ docs：`remote-access.md`（§5 表 + 新 §5c + §6 #5 翻转 + §7 limitation 
 
 ## 4. 验证（终门数字）
 
-- 全量回归：5380 passed（spec/plan commit 时点基线全量，本地 master 5311e250 = baseline，0 regression）；后续 P2/P3 修复面聚焦回归覆盖
+- **确定性层全量：0 regression**。base（range①②③ 时点）5380 passed 0 failed（6:43，real_llm 未跑）；终态全量 5386 passed（+6 净新增测试）/ 15 skipped，**唯 7 failed 全部命中 `real_llm` marker**（10 存 7 挂）。
+- **7 failed 归因=real_llm tier 非确定性 flaky，非 F134 回归**（三重取证）：①7 个失败全在真打 GPT-5.5 via OAuth 的 real_llm 用例（frozen_prefix / basic_tool_call / user_md / skill_pipeline / delegation / behavior_compact），属 release-lane/weekly-canary 非 per-commit 门；②隔离重跑 smoke real_llm 5 用例 = 3 failed / **2 passed**（同批全量里全挂、隔离下转过 → 非确定性坐实，真 LLM 限流/OAuth/波动，~4min/用例）；③F134 触及代码（front-door HTTP guard / CLI remote_commands / 日志 filter / attest 探针）与 LLM 决策环 / prefix cache / provider adapter **零重叠**——失败的 `frozen_prefix_after_two_writes` 属 prefix 缓存域，bearer 认证语义上不可能破坏。M9/M7 教义：real_llm「须统计处理非单跑断言」，per-commit 门用 e2e_smoke（无真 LLM）。
 - 相关域聚焦（终态）：backend frontdoor_auth 42 + provider dx（remote/attest）73 + logging_file_sink 19 + log_redaction；前端 vitest 386 passed（+3 gate +2 client 429）
 - e2e_smoke 8 passed / e2e_scripted 18 passed
 - L1 Playwright 场景②（bearer token gate + SSE query 鉴权全链路）2 passed
