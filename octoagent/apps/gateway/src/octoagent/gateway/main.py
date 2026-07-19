@@ -40,6 +40,7 @@ from .middleware.logging_config import setup_logfire, setup_logging
 from .middleware.logging_mw import LoggingMiddleware
 from .middleware.trace_mw import TraceMiddleware
 from .routes import (
+    approval_center,
     approvals,
     auth_callback,
     behavior_compact,
@@ -567,6 +568,10 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
     # F111：行为文件精简候选人审 + 手动触发 API（C7 用户面，唯一落盘入口）
     app.include_router(
         behavior_compact.router, tags=["behavior"], dependencies=protected
+    )
+    # F145：三源审批中心 pending 汇总（badge 计数只读端点）
+    app.include_router(
+        approval_center.router, tags=["approval-center"], dependencies=protected
     )
     # F101 Phase C v2 H-4：Web Notification list/dismiss API
     app.include_router(notifications.router, tags=["notifications"], dependencies=protected)

@@ -56,6 +56,13 @@ class ConsolidationCandidateItem(BaseModel):
     is_sensitive: bool
     status: str
     created_at: str
+    source_previews: list[str] = []
+    """待合并源记忆内容预览（F145 只读展示扩展，每条截 200 字符）。
+
+    accept 是破坏性 MERGE（源标 SUPERSEDED）——用户审查时须能看到「哪几条记忆会被
+    合并掉」。敏感候选/含敏感源 → 恒为空列表（对齐审批端第三层防御，见
+    ``_build_source_previews``）；源已失效 → 该条为占位文案。
+    """
 
 
 class ConsolidationCandidatesListResponse(BaseModel):
@@ -120,6 +127,60 @@ def _build_approval(store_group: Any) -> Any:
     )
 
 
+#: 单条来源记忆预览截断长度（展示辅助，非审批语义）。
+_SOURCE_PREVIEW_MAX_CHARS = 200
+
+#: 源已非 current / 不存在时的占位文案（accept 会走 CONFLICT，预览如实提示）。
+_SOURCE_STALE_PLACEHOLDER = "（该记忆已变化，接受时会自动失效）"
+
+
+async def _build_source_previews(conn: Any, candidate: Any) -> list[str]:
+    """构造候选的来源记忆内容预览（F145 spec §4-2，只读展示扩展）。
+
+    敏感纵深对齐（与 ``consolidation_approval._verify_sources_for_commit`` 同一
+    判定源 ``SENSITIVE_PARTITIONS``）：候选 ``is_sensitive`` / 候选 partition 敏感 /
+    任一源 SOR partition 敏感 → 返回空列表——此类候选 accept 必 CONFLICT，预览
+    无意义且不应外泄敏感内容。任何读取异常 → 空列表降级（预览是展示糖，list
+    端点不因此 500）。
+    """
+    from octoagent.memory import MemoryService
+    from octoagent.memory.enums import (
+        SENSITIVE_PARTITIONS,
+        MemoryLayer,
+        SorStatus,
+    )
+
+    try:
+        if candidate.is_sensitive or candidate.partition in SENSITIVE_PARTITIONS:
+            return []
+        memory_service = MemoryService(conn)
+        previews: list[str] = []
+        for sid in candidate.source_sor_ids:
+            record = await memory_service.get_memory(sid, layer=MemoryLayer.SOR)
+            if record is None:
+                previews.append(_SOURCE_STALE_PLACEHOLDER)
+                continue
+            if record.partition in SENSITIVE_PARTITIONS:
+                # 任一源敏感 → 整体不出预览（丢弃已收集项）
+                return []
+            if record.status is not SorStatus.CURRENT:
+                previews.append(_SOURCE_STALE_PLACEHOLDER)
+                continue
+            content = record.content
+            if len(content) > _SOURCE_PREVIEW_MAX_CHARS:
+                content = content[:_SOURCE_PREVIEW_MAX_CHARS] + "…"
+            previews.append(content)
+        return previews
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "consolidation_source_previews_degraded",
+            candidate_id=getattr(candidate, "candidate_id", "<unknown>"),
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        return []
+
+
 def _approval_result_to_http(result: Any) -> JSONResponse:
     """ApprovalResult → HTTP 响应（conflict→409 / not_found→404 / pending[回滚]→409）。"""
     if result.ok:
@@ -159,7 +220,8 @@ async def list_consolidation_candidates(
     from octoagent.memory.models import ConsolidationCandidateStatus
     from octoagent.memory.store import ConsolidationStore
 
-    consol_store = ConsolidationStore(_conn_of(store_group))
+    conn = _conn_of(store_group)
+    consol_store = ConsolidationStore(conn)
     pending = await consol_store.list_candidates(
         status=ConsolidationCandidateStatus.PENDING, limit=200
     )
@@ -176,6 +238,7 @@ async def list_consolidation_candidates(
             is_sensitive=c.is_sensitive,
             status=c.status.value,
             created_at=c.created_at.isoformat(),
+            source_previews=await _build_source_previews(conn, c),
         )
         for c in pending
     ]

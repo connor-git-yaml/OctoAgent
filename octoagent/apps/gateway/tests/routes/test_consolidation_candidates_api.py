@@ -140,6 +140,136 @@ class TestListEndpoint:
 
 
 # ============================================================
+# F145：source_previews 只读展示扩展（AC-7）
+# ============================================================
+
+
+async def _insert_candidate_direct(
+    store_group: StoreGroup,
+    *,
+    candidate_id: str,
+    source_sor_ids: list[str],
+    is_sensitive: bool = False,
+    partition: MemoryPartition = MemoryPartition.PROFILE,
+) -> None:
+    """绕过发现端直插候选（构造敏感/定向源等发现端不产的形态）。"""
+    from datetime import datetime, timezone
+
+    from octoagent.memory.models import ConsolidationCandidate
+
+    await ConsolidationStore(store_group.conn).insert_candidate(
+        ConsolidationCandidate(
+            candidate_id=candidate_id,
+            run_id="run-direct",
+            scope_id=_SCOPE,
+            partition=partition,
+            source_sor_ids=source_sor_ids,
+            merged_content="合并后内容",
+            is_sensitive=is_sensitive,
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+
+
+class TestSourcePreviews:
+    async def test_previews_show_source_contents(self, store_group, client):
+        """正常候选：previews 按 source_sor_ids 顺序给出源记忆原文。"""
+        await _seed_pending_candidate(store_group)
+        item = client.get("/api/consolidation/candidates").json()["candidates"][0]
+        assert item["source_previews"] == ["时区 上海", "时区 Asia/Shanghai"]
+
+    async def test_stale_source_gets_placeholder(self, store_group, client):
+        """pending 期间源被 UPDATE（非 current）→ 该条预览为占位文案，其余照常。"""
+        await _seed_pending_candidate(store_group)
+        memory = MemoryService(store_group.conn)
+        await memory.fast_commit(
+            scope_id=_SCOPE,
+            partition=MemoryPartition.PROFILE,
+            action=WriteAction.UPDATE,
+            subject_key="tz.a",
+            content="时区 更新为 Asia/Tokyo",
+            confidence=1.0,
+        )
+        item = client.get("/api/consolidation/candidates").json()["candidates"][0]
+        assert item["source_previews"][0] == "（该记忆已变化，接受时会自动失效）"
+        assert item["source_previews"][1] == "时区 Asia/Shanghai"
+
+    async def test_missing_source_gets_placeholder(self, store_group, client):
+        """源 SOR 不存在 → 占位文案（不 500）。"""
+        await _insert_candidate_direct(
+            store_group, candidate_id="cand-missing", source_sor_ids=["ghost-sor"]
+        )
+        item = client.get("/api/consolidation/candidates").json()["candidates"][0]
+        assert item["source_previews"] == ["（该记忆已变化，接受时会自动失效）"]
+
+    async def test_sensitive_candidate_empty_previews(self, store_group, client):
+        """is_sensitive 候选 → 预览恒为空列表（敏感纵深对齐，不外泄内容）。"""
+        memory = MemoryService(store_group.conn)
+        r = await memory.fast_commit(
+            scope_id=_SCOPE,
+            partition=MemoryPartition.HEALTH,
+            action=WriteAction.ADD,
+            subject_key="health.a",
+            content="敏感健康信息",
+            confidence=1.0,
+        )
+        await _insert_candidate_direct(
+            store_group,
+            candidate_id="cand-sensitive",
+            source_sor_ids=[r.sor_id],
+            is_sensitive=True,
+            partition=MemoryPartition.HEALTH,
+        )
+        item = client.get("/api/consolidation/candidates").json()["candidates"][0]
+        assert item["source_previews"] == []
+
+    async def test_sensitive_source_empty_previews(self, store_group, client):
+        """候选自身未标敏感但任一源 SOR 在敏感分区 → 整体空列表（源级防御）。"""
+        memory = MemoryService(store_group.conn)
+        r_ok = await memory.fast_commit(
+            scope_id=_SCOPE,
+            partition=MemoryPartition.PROFILE,
+            action=WriteAction.ADD,
+            subject_key="plain.a",
+            content="普通事实",
+            confidence=1.0,
+        )
+        r_health = await memory.fast_commit(
+            scope_id=_SCOPE,
+            partition=MemoryPartition.HEALTH,
+            action=WriteAction.ADD,
+            subject_key="health.b",
+            content="敏感健康信息",
+            confidence=1.0,
+        )
+        await _insert_candidate_direct(
+            store_group,
+            candidate_id="cand-mixed",
+            source_sor_ids=[r_ok.sor_id, r_health.sor_id],
+        )
+        item = client.get("/api/consolidation/candidates").json()["candidates"][0]
+        assert item["source_previews"] == []
+
+    async def test_long_source_truncated(self, store_group, client):
+        """超 200 字符源内容截断 + 省略号。"""
+        memory = MemoryService(store_group.conn)
+        long_content = "长" * 300
+        r = await memory.fast_commit(
+            scope_id=_SCOPE,
+            partition=MemoryPartition.PROFILE,
+            action=WriteAction.ADD,
+            subject_key="long.a",
+            content=long_content,
+            confidence=1.0,
+        )
+        await _insert_candidate_direct(
+            store_group, candidate_id="cand-long", source_sor_ids=[r.sor_id]
+        )
+        item = client.get("/api/consolidation/candidates").json()["candidates"][0]
+        assert item["source_previews"] == ["长" * 200 + "…"]
+
+
+# ============================================================
 # POST accept
 # ============================================================
 
