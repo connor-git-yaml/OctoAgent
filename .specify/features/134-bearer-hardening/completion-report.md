@@ -41,19 +41,24 @@ docs：`remote-access.md`（§5 表 + 新 §5c + §6 #5 翻转 + §7 limitation 
 
 ## 4. 验证（终门数字）
 
-- 相关域聚焦：157 passed（frontdoor 42 + remote/attest 59+ + logging/redaction）
-- 全量回归：见 §6 终门记录
-- e2e_smoke / e2e_scripted：见 §6
+- 全量回归：5380 passed（spec/plan commit 时点基线全量，本地 master 5311e250 = baseline，0 regression）；后续 P2/P3 修复面聚焦回归覆盖
+- 相关域聚焦（终态）：backend frontdoor_auth 42 + provider dx（remote/attest）73 + logging_file_sink 19 + log_redaction；前端 vitest 386 passed（+3 gate +2 client 429）
+- e2e_smoke 8 passed / e2e_scripted 18 passed
+- L1 Playwright 场景②（bearer token gate + SSE query 鉴权全链路）2 passed
 - F144 17 格矩阵：全绿且逐字未改（`git diff` 可证既有格零触碰）
 - serve 兼容语义：bearer 分支不检 XFF 逐字未变；A2 五格（bearer 正确 token × proxy header → 200）继续绿
+- tsc / ruff（仅 baseline SIM110 既有）/ complexity 全绿
 
 ## 5. 双评审闭环
 
-见 §6 终门记录（Codex final + Opus 自审，0 HIGH 收敛）。
+- **Codex spec 评审**：0 finding（文档层无阻塞矛盾）。
+- **Codex final（gpt-5.4，实施后）**：**15 轮对抗**收敛至 0 P1/0 P2。核心争点是「token 写失败/yaml 写失败后是否回滚已开的 serve 映射」——Codex 在「要回滚(暴露面) ↔ 反回滚(护 working 映射)」间乒乓 6 轮，最终以 `_remote_bearer_working` 直接行为观测探针（裸请求受保护 API 得 401+FRONT_DOOR_TOKEN_REQUIRED = bearer 真在挡）作二分裁决器收敛：working 保留、否则 fail-closed 回滚。另闭环 .env 原子 0600 / .env.litellm source 顺序 merge 语义 / 429 分模式 code / 前端 gate 归类 / 注入 token 静默轮换（披露式部分接受）。**2 处 Codex F1 rejected 带论证**（commit message 留痕）：①「回滚删用户既有 443 映射」——第三方映射在 serve 接管时已被覆盖，回滚 off 清的是本次接管；②「注入 token 不生成」——CLI 本质不可靠检测 + 会回归 F130 shell-only 503。
+- **Opus 自审（2 轮）**：首轮 PASS 0 P1/1 P2/4 P3（P2-1 原子 0600 + P3-2 filter fail-closed 已采纳修复）；增量复核 PASS 0 P1/0 P2/3 P3（P3-1 gate 组件测试已补、P3-3 docstring 已修、P3-2 认同披露决策）。
+- **0 HIGH/P1/P2 残留。**
 
-## 6. 终门记录
+## 6. 提交链
 
-（实施尾声填写）
+spec/plan → 实现 → living-docs → Codex 3-15 轮修复（每轮独立 commit 带论证）→ Opus P3 收尾。全部在 worktree `feature/134-bearer-hardening`，**未 push**。
 
 ## 7. 已知 limitations / follow-up
 
