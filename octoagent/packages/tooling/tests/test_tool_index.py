@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 
 import pytest
-
 from octoagent.core.models import ToolIndexQuery
 from octoagent.tooling.models import SideEffectLevel, ToolMeta, ToolTier
 from octoagent.tooling.tool_index import ToolIndex
