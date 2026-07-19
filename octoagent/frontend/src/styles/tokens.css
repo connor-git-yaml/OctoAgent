@@ -66,6 +66,9 @@
   --cp-scrollbar-thumb: rgba(255, 255, 255, 0.16);
   --cp-scrollbar-thumb-hover: rgba(255, 255, 255, 0.3);
   --cp-scrollbar-track: transparent;
+  /* 展示字体 token（index.css 聊天标题消费 var(--font-display)）——
+     v2 committed dark 反转：原未定义退化 Fraunces/serif → Figtree 无衬线 */
+  --font-display: "Figtree Variable", "Figtree", "Inter", system-ui, sans-serif;
   --color-bg: var(--cp-soft);
   --color-border: var(--cp-border);
   --color-text-secondary: var(--cp-muted);
