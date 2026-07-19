@@ -243,7 +243,8 @@ class SkillRunner:
                                 steps=steps,
                                 category=ErrorCategory.REPEAT_ERROR,
                                 error=SkillRepeatError(
-                                    f"速率限制重试耗尽（{rate_limit_retries - 1} 次退避后仍 429）: {exc}"
+                                    f"速率限制重试耗尽（{rate_limit_retries - 1} "
+                                    f"次退避后仍 429）: {exc}"
                                 ),
                             )
                         logger.warning(
