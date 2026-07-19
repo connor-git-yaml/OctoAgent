@@ -41,6 +41,16 @@ export const L1_WRITE_FILE_RELPATH = "l1_e2e/note.md";
 export const L1_WRITE_FILE_CONTENT = "F140-L1-MARKER：这行内容由脚本决策环真实写盘";
 export const L1_WRITE_REPLY = "文件已写好（L1 场景①）";
 
+// --- 场景③（F145 审批中心）契约常量（scenario_brain.py 同步字面量） ---
+export const L1_COMPACT_FILE_RELPATH = ["behavior", "system", "AGENTS.md"];
+export const L1_COMPACT_COMPACTED_CONTENT = [
+  "# AGENTS",
+  "",
+  "- 回复简洁精炼（L1-COMPACT-MARKER）",
+  "- commit message 用中文",
+  "",
+].join("\n");
+
 // --- 已知失败 marker（UI 稳定错误文案；命中即定性失败而非裸超时） ---
 export const KNOWN_FAILURE_MARKERS = [
   "刚才没有发送成功",
@@ -116,6 +126,16 @@ export async function pollTaskSucceeded(
 
 export function eventsOfType(detail: TaskDetail, type: string): TaskEvent[] {
   return detail.events.filter((e) => e.type === type);
+}
+
+/** 场景③：behavior compact pending 计数（REST 外部断言通道） */
+export async function fetchCompactPendingCount(mode: L1Mode): Promise<number> {
+  const resp = await fetch(`${l1ServerUrl(mode)}/api/behavior/compact/candidates`, {
+    headers: authHeaders(mode),
+  });
+  if (!resp.ok) throw new Error(`GET /api/behavior/compact/candidates ${resp.status}`);
+  const body = (await resp.json()) as { pending_count: number };
+  return body.pending_count;
 }
 
 export function toolCallEvents(

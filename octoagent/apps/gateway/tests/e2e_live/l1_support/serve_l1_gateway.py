@@ -160,7 +160,10 @@ def main() -> None:
     )
 
     sys.path.insert(0, str(_HERE.parent))
-    from scenario_brain import L1ScenarioModelClient  # noqa: PLC0415
+    from scenario_brain import (  # noqa: PLC0415
+        L1ScenarioModelClient,
+        provision_approval_center_scenario,
+    )
 
     bomb_sentinel = root / "L1_BOMB_TRIPPED"
 
@@ -190,6 +193,15 @@ def main() -> None:
 
         注意不能用 ``@app.on_event("startup")``——显式 ``lifespan=`` 下 Starlette
         不再执行 on_event 处理器。"""
+
+        async def bootstrap(self, app) -> None:  # type: ignore[override]
+            await super().bootstrap(app)
+            # F145 场景③：behavior compact 候选注入（bootstrap 完成后 store 就绪、
+            # server ready 之前——Playwright 拿到 ready 即已可见候选，无竞态窗口）。
+            # 两个 mode 都注入：loopback 归场景③消费；bearer 场景②不触审批页，
+            # 多一条 pending 候选只体现为 nav badge，无断言干扰。
+            assert self._store_group is not None, "bootstrap 后 store_group 必已就绪"
+            await provision_approval_center_scenario(root, self._store_group)
 
         def commit_to_app(self, app) -> None:  # type: ignore[override]
             super().commit_to_app(app)
