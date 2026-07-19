@@ -471,6 +471,19 @@ def remote_enable(dry_run: bool, verbose: bool) -> None:
             console.print(render_panel("octo remote enable", lines, border_style="red"))
             raise SystemExit(1) from exc
         lines.append(f"front_door.mode: {persisted} → bearer（已写入 octoagent.yaml）")
+        # Codex 九轮 P1（部分接受，窗口系 F130 既有架构）：guard 每请求现场
+        # 重读 yaml → 正在跑的 gateway **立即**按 bearer 校验，但其进程 env
+        # 是启动时快照、拿不到刚写入 .env 的 token → owner-facing API 短暂
+        # 503 直到重启。窗口 F130 起即有（当时靠用户手动设 token，同样要
+        # restart 才载入）、F134 不扩大且 token 已自动就位——但服务活着时
+        # 该窗口必然发生，提示从「下一步」升级为红色「立即」。消除窗口需
+        # guard 凭证热重载（gateway 核心改动），归档 v0.2 方向。
+        if token_lines and _octo_gateway_on_port(port):
+            lines.append(
+                "[red]重要：正在运行的服务已开始要求 bearer token，但尚未载入"
+                "刚生成的 token——请**立即**运行 `octo restart`（期间 API 会"
+                "短暂 503）。[/red]"
+            )
     else:
         lines.append("front_door.mode 已是 bearer（幂等）")
 

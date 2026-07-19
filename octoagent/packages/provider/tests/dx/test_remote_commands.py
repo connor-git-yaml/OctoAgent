@@ -29,6 +29,14 @@ class _FakeConfig:
         self.front_door = _FakeConfig._FrontDoor(mode)
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_gateway_probe(monkeypatch: pytest.MonkeyPatch):
+    """F134：默认 patch 掉 `/ready` 探针（hermetic——测试机上 127.0.0.1:8000
+    可能真跑着用户托管实例，真探测会让判定漂移 + 每格 2s 超时）。
+    需要"服务活着"语义的测试自行覆盖为 True。"""
+    monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: False)
+
+
 def _patch_env(monkeypatch: pytest.MonkeyPatch, **env: str) -> None:
     for key in ("OCTOAGENT_FRONTDOOR_MODE", "OCTOAGENT_FRONTDOOR_TOKEN", "OCTOAGENT_PORT"):
         monkeypatch.delenv(key, raising=False)
@@ -785,6 +793,30 @@ class TestCodexReviewFixes:
         assert ".env.litellm" in result.output
         assert "删除" in result.output
         assert not (tmp_path / ".env").exists()  # 未做无效写入
+
+    def test_enable_live_gateway_gets_immediate_restart_warning(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        """Codex 九轮 P1（部分接受）钉住：服务活着 + 本次生成 token + 切
+        bearer → guard 现场重读 yaml 立即要求 token 但进程 env 没有（503
+        窗口，F130 既有架构）——输出必须升级为红色「立即 restart」警告。"""
+        _patch_env(monkeypatch)
+        _patch_probe(monkeypatch, _READY)
+        saved: list = []
+        _patch_config(monkeypatch, _FakeConfig(mode="loopback"), saved)
+        monkeypatch.setattr(remote_commands, "resolve_instance_root", lambda: tmp_path)
+        monkeypatch.setattr(
+            remote_commands,
+            "enable_tailscale_serve",
+            lambda *a, **k: TailscaleServeResult(ok=True, published_url="https://x.ts.net/"),
+        )
+        monkeypatch.setattr(remote_commands, "_octo_gateway_on_port", lambda _port: True)
+
+        result = CliRunner().invoke(remote_group, ["enable"])
+        assert result.exit_code == 0
+        assert saved and saved[0][1] == "bearer"
+        assert "立即" in result.output
+        assert "octo restart" in result.output
 
     def test_enable_litellm_nonblank_token_counts_as_set(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path
