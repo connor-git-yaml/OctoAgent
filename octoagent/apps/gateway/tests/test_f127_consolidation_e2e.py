@@ -274,6 +274,8 @@ def _build_chain(
         event_store=store_group.event_store,
         snapshot_store=_FakeSnapshotStore(user_md=_USER_MD_ACTIVE),
         delegation_plane=plane,  # type: ignore[arg-type]
+        # F146 件①：e2e 走 live state 路径（盘上无 USER.md 哨兵 root）
+        project_root=Path("/nonexistent/f146-no-disk"),
         agent_context_store=store_group.agent_context_store,
         discovery_runner=_discovery_runner,
         notification_service=notif_svc,

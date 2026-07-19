@@ -49,8 +49,11 @@ from octoagent.memory.models import (
 from ulid import ULID
 
 from .consolidation_config import ConsolidationConfig
+from .user_md_cron import read_user_md_disk_first
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from octoagent.core.store.agent_context_store import SqliteAgentContextStore
     from octoagent.core.store.event_store import SqliteEventStore
     from octoagent.core.store.snapshot_store import SnapshotStore
@@ -147,6 +150,7 @@ class MemoryConsolidationService:
         event_store: SqliteEventStore,
         snapshot_store: SnapshotStore,
         delegation_plane: DelegationPlaneService,
+        project_root: Path,
         agent_context_store: SqliteAgentContextStore | None = None,
         discovery_runner: ConsolidationDiscoveryRunner | None = None,
         notification_service: NotificationService | None = None,
@@ -157,6 +161,8 @@ class MemoryConsolidationService:
         self._event_store = event_store
         self._snapshot_store = snapshot_store
         self._delegation_plane = delegation_plane
+        # F146 件①：USER.md 盘优先读取需要盘路径（F111 先例，必填不做 optional 双模式）
+        self._project_root = project_root
         # finding-1：定位主 Agent MAIN runtime 以注入其 AGENT_PRIVATE namespace scope
         # 给后台巩固 subagent（cron 无执行上下文，不能靠 exec_ctx 派生 caller）。
         # None 时降级（subagent 拿不到目标记忆，写 warning，不阻断 spawn——graceful）。
@@ -744,18 +750,10 @@ class MemoryConsolidationService:
         return ConsolidationConfig.from_user_md(self._read_user_md())
 
     def _read_user_md(self) -> str | None:
-        """读 USER.md 全文（复用 F102 SnapshotStore.get_live_state 同步范式）。"""
-        get_live = getattr(self._snapshot_store, "get_live_state", None)
-        if get_live is None:
-            return None
-        try:
-            result = get_live("USER.md")
-            if isinstance(result, str):
-                return result
-            return None
-        except Exception:
-            logger.exception("consolidation_read_user_md_failed")
-            return None
+        """读 USER.md 全文——磁盘优先，live state 兜底（F146 件①，F111 修法推广）。"""
+        return read_user_md_disk_first(
+            self._project_root, self._snapshot_store, log_prefix="consolidation"
+        )
 
     # ============================================================
     # 事件 emit（FR-D1）

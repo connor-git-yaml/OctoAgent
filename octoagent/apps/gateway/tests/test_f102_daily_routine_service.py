@@ -95,11 +95,17 @@ def notification_service() -> NotificationService:
     return svc
 
 
+#: F146 件①：默认构造用「盘上无 USER.md」哨兵 root（纯路径拼接不做 I/O）——
+#: 既有用例继续走 live state 路径（语义 = 盘缺失兜底），盘优先用例显式传 tmp_path root。
+_NO_DISK_ROOT = Path("/nonexistent/f146-no-disk")
+
+
 def _build_service(
     store_group: StoreGroup,
     notification_service: NotificationService,
     user_md: str = "",
     llm_return: str | Exception | None = None,
+    project_root: Path | None = None,
 ) -> DailyRoutineService:
     """构造 DailyRoutineService 实例 + mock provider_router。"""
     notification_service._event_store = store_group.event_store
@@ -122,6 +128,7 @@ def _build_service(
         notification_service=notification_service,
         snapshot_store=snapshot_store,
         provider_router=provider_router,
+        project_root=project_root or _NO_DISK_ROOT,
     )
 
 
@@ -762,3 +769,49 @@ class TestCancelledErrorRespected:
 
         with pytest.raises(asyncio.CancelledError):
             await svc._run_daily_summary()
+
+
+# ============================================================
+# F146 件①：USER.md 盘优先（F111 修法推广，TestConfigDiskFirst 同款锚）
+# ============================================================
+
+
+class TestConfigDiskFirst:
+    async def test_disk_user_md_wins_over_stale_snapshot(
+        self,
+        store_group: StoreGroup,
+        notification_service: NotificationService,
+        tmp_path: Path,
+    ) -> None:
+        """盘上 USER.md（routine_active=false）优先于 stale snapshot live state
+        （默认 true）——盘外编辑对 cron 即时可见（F146 件①行为变更锚）。"""
+        from octoagent.core.behavior_workspace import resolve_write_path_by_file_id
+
+        project_root = tmp_path / "root"
+        user_md = resolve_write_path_by_file_id(project_root, "USER.md")
+        user_md.parent.mkdir(parents=True, exist_ok=True)
+        user_md.write_text('- **routine_active**: "false"', encoding="utf-8")
+        svc = _build_service(
+            store_group,
+            notification_service,
+            user_md='- **routine_active**: "true"',  # stale snapshot
+            project_root=project_root,
+        )
+        config = svc._read_config()
+        assert config.routine_active is False  # 盘赢
+
+    async def test_snapshot_fallback_when_disk_missing(
+        self,
+        store_group: StoreGroup,
+        notification_service: NotificationService,
+        tmp_path: Path,
+    ) -> None:
+        """盘上无 USER.md → snapshot live state 兜底（#6 降级链原样）。"""
+        svc = _build_service(
+            store_group,
+            notification_service,
+            user_md='- **routine_active**: "false"',
+            project_root=tmp_path / "empty-root",
+        )
+        config = svc._read_config()
+        assert config.routine_active is False  # live state 兜底生效

@@ -39,8 +39,11 @@ from .daily_routine_config import (
     RoutineTriggeredPayload,
 )
 from .notification import NotificationPriority
+from .user_md_cron import read_user_md_disk_first
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from octoagent.core.store.event_store import SqliteEventStore
     from octoagent.core.store.snapshot_store import SnapshotStore
     from octoagent.core.store.task_store import SqliteTaskStore
@@ -108,6 +111,8 @@ class DailyRoutineService:
         notification_service: NotificationService,
         snapshot_store: SnapshotStore,
         provider_router: Any,
+        *,
+        project_root: Path,
     ) -> None:
         self._scheduler = scheduler
         self._task_store = task_store
@@ -115,6 +120,8 @@ class DailyRoutineService:
         self._notification_service = notification_service
         self._snapshot_store = snapshot_store
         self._provider_router = provider_router
+        # F146 件①：USER.md 盘优先读取需要盘路径（F111 先例，必填不做 optional 双模式）
+        self._project_root = project_root
         self._started: bool = False
         self._cron_registered: bool = False
         # F115：生效时区不再在 __init__ 缓存 env-only 值，改为每次读 config 时由
@@ -528,19 +535,10 @@ class DailyRoutineService:
         return DailyRoutineConfig.from_user_md(user_md_content)
 
     def _read_user_md(self) -> str | None:
-        """读取 USER.md 全文（兼容同步 / 异步 SnapshotStore）。"""
-        get_live = getattr(self._snapshot_store, "get_live_state", None)
-        if get_live is None:
-            return None
-        try:
-            result = get_live("USER.md")
-            # SnapshotStore.get_live_state 是同步方法（F101 实测）
-            if isinstance(result, str):
-                return result
-            return None
-        except Exception:
-            logger.exception("daily_routine_read_user_md_failed")
-            return None
+        """读取 USER.md 全文——磁盘优先，live state 兜底（F146 件①，F111 修法推广）。"""
+        return read_user_md_disk_first(
+            self._project_root, self._snapshot_store, log_prefix="daily_routine"
+        )
 
     def _compute_yesterday_range_utc(
         self, now_utc: datetime, user_timezone: str

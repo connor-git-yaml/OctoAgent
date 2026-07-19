@@ -104,12 +104,18 @@ async def store_group(tmp_path: Path) -> StoreGroup:
     return await create_store_group(db_path, str(artifacts_dir))
 
 
+#: F146 件①：默认构造用「盘上无 USER.md」哨兵 root（纯路径拼接不做 I/O）——
+#: 既有用例继续走 live state 路径（语义 = 盘缺失兜底），盘优先用例显式传 tmp_path root。
+_NO_DISK_ROOT = Path("/nonexistent/f146-no-disk")
+
+
 def _build_service(
     store_group: StoreGroup,
     *,
     user_md: str = "",
     plane: _FakePlane | None = None,
     agent_context_store: Any = None,
+    project_root: Path | None = None,
 ) -> MemoryConsolidationService:
     return MemoryConsolidationService(
         scheduler=_FakeScheduler(),
@@ -118,6 +124,7 @@ def _build_service(
         event_store=store_group.event_store,
         snapshot_store=_FakeSnapshotStore(user_md=user_md),
         delegation_plane=plane or _FakePlane(),  # type: ignore[arg-type]
+        project_root=project_root or _NO_DISK_ROOT,
         agent_context_store=agent_context_store,
     )
 
@@ -966,6 +973,7 @@ class TestPhaseCDiscoveryWiring:
             event_store=store_group.event_store,
             snapshot_store=_FakeSnapshotStore(user_md=user_md),
             delegation_plane=_FakePlane(),  # type: ignore[arg-type]
+            project_root=_NO_DISK_ROOT,
             agent_context_store=store_group.agent_context_store,
             discovery_runner=runner,
         )
@@ -1021,6 +1029,7 @@ class TestPhaseCDiscoveryWiring:
             event_store=store_group.event_store,
             snapshot_store=_FakeSnapshotStore(user_md=_USER_MD_ACTIVE),
             delegation_plane=plane,  # type: ignore[arg-type]
+            project_root=_NO_DISK_ROOT,
             agent_context_store=store_group.agent_context_store,
             discovery_runner=runner,
         )
@@ -1067,6 +1076,7 @@ class TestPhaseCDiscoveryWiring:
             event_store=store_group.event_store,
             snapshot_store=_FakeSnapshotStore(user_md=_USER_MD_ACTIVE),
             delegation_plane=_FakePlane(),  # type: ignore[arg-type]
+            project_root=_NO_DISK_ROOT,
             agent_context_store=store_group.agent_context_store,
             discovery_runner=None,
         )
@@ -1081,3 +1091,41 @@ class TestPhaseCDiscoveryWiring:
             store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
         )
         assert completed == []
+
+
+# ============================================================
+# F146 件①：USER.md 盘优先（F111 修法推广，TestConfigDiskFirst 同款锚）
+# ============================================================
+
+
+class TestConfigDiskFirst:
+    async def test_disk_user_md_wins_over_stale_snapshot(
+        self, store_group, tmp_path: Path
+    ):
+        """盘上 USER.md（consolidation_active=false）优先于 stale snapshot live
+        state（active）——盘外编辑对 cron 即时可见（F146 件①行为变更锚）。"""
+        from octoagent.core.behavior_workspace import resolve_write_path_by_file_id
+
+        project_root = tmp_path / "root"
+        user_md = resolve_write_path_by_file_id(project_root, "USER.md")
+        user_md.parent.mkdir(parents=True, exist_ok=True)
+        user_md.write_text(_USER_MD_DISABLED, encoding="utf-8")
+        svc = _build_service(
+            store_group,
+            user_md=_USER_MD_ACTIVE,  # stale snapshot
+            project_root=project_root,
+        )
+        config = svc._read_config()
+        assert config.consolidation_active is False  # 盘赢
+
+    async def test_snapshot_fallback_when_disk_missing(
+        self, store_group, tmp_path: Path
+    ):
+        """盘上无 USER.md → snapshot live state 兜底（#6 降级链原样）。"""
+        svc = _build_service(
+            store_group,
+            user_md=_USER_MD_ACTIVE,
+            project_root=tmp_path / "empty-root",
+        )
+        config = svc._read_config()
+        assert config.consolidation_active is True  # live state 兜底生效

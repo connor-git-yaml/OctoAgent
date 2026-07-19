@@ -1609,6 +1609,8 @@ class OctoHarness:
                 notification_service=app.state.notification_service,
                 snapshot_store=app.state.snapshot_store,
                 provider_router=app.state.provider_router,
+                # F146 件①：USER.md 盘优先读取（盘外编辑对 cron 即时可见）
+                project_root=project_root,
             )
             app.state.daily_routine_service = _daily_routine
             await _daily_routine.startup()
@@ -1681,6 +1683,8 @@ class OctoHarness:
                 event_store=store_group.event_store,
                 snapshot_store=app.state.snapshot_store,
                 delegation_plane=app.state.delegation_plane_service,
+                # F146 件①：USER.md 盘优先读取（盘外编辑对 cron 即时可见）
+                project_root=project_root,
                 # finding-1：定位主 Agent MAIN runtime → 注入其 AGENT_PRIVATE namespace
                 # scope 给后台巩固 subagent（cron 无执行上下文）。
                 agent_context_store=store_group.agent_context_store,

@@ -184,6 +184,10 @@ async def _seed_main_runtime_with_namespace(
     await store_group.conn.commit()
 
 
+#: F146 件①：默认构造用「盘上无 USER.md」哨兵 root——用例走 live state 路径不变
+_NO_DISK_ROOT = Path("/nonexistent/f146-no-disk")
+
+
 def _build_service(
     store_group: StoreGroup,
     *,
@@ -198,6 +202,7 @@ def _build_service(
         event_store=store_group.event_store,
         snapshot_store=_FakeSnapshotStore(user_md=user_md),
         delegation_plane=_FakePlane(),  # type: ignore[arg-type]
+        project_root=_NO_DISK_ROOT,
         agent_context_store=store_group.agent_context_store,
         discovery_runner=runner,
         notification_service=notification_service,
