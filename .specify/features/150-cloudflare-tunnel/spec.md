@@ -1,8 +1,8 @@
-# F150 Cloudflare 零信任远程 — Spec（设计先行 v0.1，待用户拍板 4 岔路后实施）
+# F150 Cloudflare 零信任远程 — Spec（v1.0 设计定稿，6 拍板锁定，待 Codex+Opus 双评审后实施）
 
 > 规模：**M（偏 M-L）**。命中"重大架构变更"（公网暴露面 + 新认证层）→ 回主 session 走 **Codex + Opus 双评审**。
-> 依赖：F134 bearer（已 master）、F130 tailscale_helper/remote CLI 范式（已 master）。与 F148（前端）**文件不冲突**（F150 = 后端 gateway + provider/dx CLI；配对码 SPA 入口屏是 F148）。
-> **本 spec 是设计草案**：§9 的 4 条设计岔路**必须先回用户拍板**，拍板后据结论收敛 FR/AC 再实施。
+> 依赖：F134 bearer（已 master）、F130 tailscale_helper/remote CLI 范式（已 master）。与 F148（已合入 master 9ae34d49）**文件不冲突**（F150 = 后端 gateway + provider/dx CLI；配对码 SPA 入口屏 = F148 后续）。
+> **本 spec 已定稿（2026-07-20 用户拍板 6 项，见 §9）**：4 条设计岔路 + SSE 缓冲处理 + 域名前提全部锁定，FR/AC 据结论收敛。下一步 Codex+Opus 双评审后实施。
 
 ---
 
@@ -44,18 +44,18 @@
   │  回源注入 Cf-Access-Jwt-Assertion / Cf-Connecting-IP / X-Forwarded-For
   ▼  http://127.0.0.1:8000（loopback）
 [OctoAgent gateway — FrontDoorGuard.authorize，mode=cloudflared]
-     层2b: 校验 Cf-Access-Jwt-Assertion（RS256/iss/aud/exp，岔路①推荐 = 验）
+     层2b: 校验 Cf-Access-Jwt-Assertion（RS256/iss/aud/exp，拍板① = 验）
      层3:  校验 bearer token（复用 F134 限流 + 强 token，Access 之后的纵深）
 ```
 
 **三层各自防什么（zero-trust 纵深）**：
 - **层1 Access（边缘）**：身份准入。挡"不是我授权的人/设备"。email OTP/SSO 交互 或 service token 非交互。
-- **层2 JWT 校验（origin，岔路①）**：**零信任不盲信边缘**。挡"tunnel 存在但 Access 未挂/被绕过"（最可能的用户误配）——无有效 JWT 一律拒。层2a（cloudflared 连接器，覆盖 SPA `/`）+ 层2b（gateway guard，覆盖 owner-facing API + 纵深）互补。
+- **层2 JWT 校验（origin，拍板①=验）**：**零信任不盲信边缘**。挡"tunnel 存在但 Access 未挂/被绕过"（最可能的用户误配）——无有效 JWT 一律拒。层2a（cloudflared 连接器，覆盖 SPA `/`）+ 层2b（gateway guard，覆盖 owner-facing API + 纵深）互补。
 - **层3 bearer（origin，复用 F134）**：app 级密钥。即便层1/2 被绕（CF 账号失陷/config 误配），仍需 Octo 自己的密钥。SSE `?access_token=` 路径的凭证。**配对码解决"手机怎么拿到 bearer"**（§4）。
 
 ---
 
-## §3 范围与组件（拍板后据岔路收敛）
+## §3 范围与组件（已按 6 拍板收敛）
 
 | 组件 | 新建/改 | 说明 |
 |------|---------|------|
@@ -64,18 +64,18 @@
 | `gateway/services/frontdoor_auth.py` | 改 | `authorize` 加 `cloudflared` 分支：校验 JWT（层2b）+ bearer（层3，复用现有 bearer 逻辑 + `_FailureRateLimiter`）。新 error code `FRONT_DOOR_ACCESS_JWT_*`。|
 | `config/config_schema.py` FrontDoorConfig | 改 | mode 加 `"cloudflared"`；加 `cloudflare_access_team_name` / `cloudflare_access_aud_tags: list[str]`（非 secret）；`validate_mode_requirements` 加 cloudflared 时 team/aud 必填。|
 | `frontdoor_exposure.py` | 改 | 暴露矩阵加 `loopback+cloudflared=safe` / `非loopback+cloudflared=warn`。|
-| `provider/dx/remote_commands.py`（或新 `cloudflare_commands.py`）| 改/新 | `octo remote cloudflare {enable,disable,status}`（CLI shape 见岔路③注）：检测三态 → 指引/接管 `tunnel run` → 切 mode=cloudflared → 发配对码 → 打印 `https://<hostname>/`。范式照搬 remote_enable（先 run 后持久化、fail-closed 收尾、token 零明文）。|
+| `provider/dx/remote_commands.py`（或新 `cloudflare_commands.py`）| 改/新 | `octo remote cloudflare {enable,disable,status}`（拍板③检测+指引）：检测三态 → 指引/接管 `tunnel run` → 切 mode=cloudflared → 发配对码 → 打印 `https://<hostname>/`。范式照搬 remote_enable（先 run 后持久化、fail-closed 收尾、token 零明文）。|
 | 配对码后端 | 新建 | 短码生成（CLI 侧）+ 交换端点（gateway，Access-JWT-gated + bearer-exempt）→ 发 bearer。TTL/单用/原子消费/重放防护。**SPA 入口屏 = F148**。|
 | `provider/dx/attest_commands.py` | 改 | `run_remote_probe` 认 mode==cloudflared 为 enabled 信号；用 service token 过 Access 验 edge→tunnel→gateway 全链（含 SSE，探 §C 缓冲风险）。|
 | `provider/dx/doctor.py` | 改 | 加 cloudflared 三态 + Access 配置健康 check（仿 tailscale check）。|
 
 ---
 
-## §4 配对码流程（岔路② 的推荐设计，拍板后定）
+## §4 配对码流程（拍板② = Option 2B，已定）
 
 **目的**：手机首次连，避免在手机键盘输 43 字符的 `token_urlsafe(32)` bearer。
 
-**推荐流（Option 2B）**：
+**定稿流（Option 2B，拍板②）**：
 1. `octo remote cloudflare enable` 成功后，在 Mac 终端**打印一个短配对码**（如 8 位 base32，人类可输；码本身**不是** secret 的等价物，是一次性换取器）。
 2. 手机浏览器开 `https://octo.<domain>/` → CF Access OTP 认证 → SPA 加载（此时有 Access JWT，但还没 bearer）。
 3. SPA 入口屏（**F148 建**）让用户输配对码 → 调 `POST /api/pairing/exchange {code}`。
@@ -91,7 +91,7 @@
 
 ---
 
-## §5 功能需求（FR，草案——拍板后据岔路增删）
+## §5 功能需求（FR，已定稿）
 
 - **FR-1**（cloudflared 三态 helper）：`cloudflared_helper` 探测 NOT_INSTALLED（无 binary）/ INSTALLED_NOT_READY（无 `cert.pem` 或无 named tunnel）/ READY，只读探测与 `tunnel run` 写操作分离，DI exec 零 sudo。
 - **FR-2**（front_door cloudflared 模式）：`mode=cloudflared` 时 `authorize` 校验层2b JWT（岔路①=验时）+ 层3 bearer；任一失败按类别拒（复用 `_reject_invalid_credential` + 限流）。
@@ -104,7 +104,7 @@
 
 ---
 
-## §6 验收标准（AC，草案）
+## §6 验收标准（AC，已定稿）
 
 - **AC-1**（helper 三态）：hermetic（FakeCommandRunner）覆盖三态，零真实 cloudflared 调用；permission denied 给手动提示不 sudo。
 - **AC-2**（JWT 校验正确性）：有效 JWT（正确 kid/iss/aud/exp/sig）→ 放行；篡改签名/错 aud/错 iss/过期/缺 header → 各自拒（专项断言）。JWKS rotation（新 kid）→ 刷新后放行。JWKS 拉取失败 → 软化不挡启动。
@@ -121,8 +121,8 @@
 
 ## §7 已知风险（写进 completion-report limitations）
 
-- **R1（SSE-over-CF 缓冲，见 research §C）**：**最高危**。OctoAgent SSE 是 GET，Cloudflare 对 SSE-over-GET 有缓冲（issue #1449 OPEN，named tunnel 未证清白）。**验收 gate**：`octo attest remote` SSE 握手 live 判定；不达则 spec 明确"cloudflared 提供可达+认证，实时 SSE 走 Tailscale"（并存兜底）。**F150 不做 SSE POST 化**（前端协议改动 = F148）。
-- **R2（域名硬前提）**：用户必须有 CF 托管域名（免费计划可）。无域名 = 用不了 cloudflared 路径（Tailscale 仍可用）。文档明确前提。
+- **R1（SSE-over-CF 缓冲，见 research §C）**：**最高危**。OctoAgent SSE 是 GET（`stream.py:48` EventSourceResponse），Cloudflare 对 SSE-over-GET 有缓冲（issue #1449 OPEN，named tunnel 未证清白）。**拍板⑤ = 方案 A（已定）**：cloudflared 只保证"公网可达 + 零信任认证"，**实时多轮任务流走 Tailscale E2E**，不由 cloudflared 路径保证实时性。**验收 gate**：`octo attest remote` 验 SSE 握手可达即 pass（不验实时性）；文档明示实时盯任务场景走 Tailscale（并存兜底）。**F150 不做 SSE POST 化**（前端协议改动 = F148 / F134 v0.2）。
+- **R2（域名硬前提，拍板⑥已满足）**：cloudflared 路径要求用户有 CF 托管域名（免费计划可）——**用户已确认有域名**，前提满足。文档仍写明此前提（无域名的部署者只能用 Tailscale）。
 - **R3（CF 侧配置手工）**：Access 应用/policy/AUD tag 需用户 dashboard 一次性配（除非岔路④用 API token）。`octo` 检测 + 指引，不代配。
 - **R4（key rotation 运维）**：JWKS 6 周轮换靠动态拉取自动兼容；但 CF 账号/team 变更需用户更新 config 的 team_name/aud_tags。
 - **R5（service token 静态 secret）**：attest 探针 + M12 移动端用的 service token 是静态 secret，泄露即公网可访问（被 bearer 层3 兜底）——文档提示轮换。
@@ -139,9 +139,13 @@
 
 ---
 
-## §9 必须回用户拍板的设计岔路（见 design-forks.md 详述 + 推荐）
+## §9 设计岔路拍板结果（2026-07-20 用户拍板，已定，见 design-forks.md 详述）
 
-- **岔路①**：gateway 要不要**代码层校验 Cf-Access-Jwt**（vs 纯信任 CF 边缘 + cloudflared 连接器自验）。**推荐：验**（零信任纵深）。
-- **岔路②**：**配对码语义**——短码换长期 bearer（§4 Option 2B）vs 手机直接输 bearer（2A，零前端改）vs 去 bearer 纯 Access（2C）。**推荐：2B**（backend 归 F150，SPA 屏 F148）。
-- **岔路③**：cloudflared 起法——`octo` 全自动 vs 检测+指引。**推荐：检测+指引**（CF Access 配置不可全自动化）。
-- **岔路④**：URL/域——用户 dashboard 手配 hostname+Access vs octo 用 CF API token 代配 DNS route。**推荐：用户手配**（避存 CF API token，#5）。
+全部 6 项已定，spec §2-§7 据此收敛：
+
+- **① gateway 校验 Cf-Access-Jwt = 验**（零信任纵深，不盲信边缘）。JWKS 动态拉取禁硬编码；验 RS256 + iss + aud + exp。→ FR-3 / AC-2。
+- **② 配对码语义 = Option 2B**（8 位短码换长期 bearer）。交换端点 Access-JWT-gated + bearer-exempt；TTL 10min / 单用 / 重放防护。backend 归 F150，SPA 入口屏归 F148 后续。→ §4 / FR-5 / AC-4。
+- **③ cloudflared 起法 = 检测 + 指引**（非全自动）。免存 CF API token（#5）；`octo` 只检测三态 + 指引 + 接管 `tunnel run` + 切 front_door 模式 + 发配对码。→ FR-1 / FR-4。
+- **④ URL/域 = 用户 dashboard 手配** named tunnel + Access 应用（避存 CF API token，#5）。→ §0.7 / R3。
+- **⑤ SSE-over-CF 缓冲 = 方案 A**：cloudflared 保证公网可达 + 零信任认证，**实时任务流走 Tailscale E2E**（并存兜底）；验收 gate 只验 SSE 握手可达不验实时性。→ R1 / AC-6。
+- **⑥ CF 托管域名 = 用户已有**（硬前提满足，直接推进）。→ R2。
