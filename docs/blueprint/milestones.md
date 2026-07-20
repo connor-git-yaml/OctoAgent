@@ -685,7 +685,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | Feature | 规模 | 一句话 | 波次 |
 |---------|------|--------|------|
 | **F148 设计系统 + Web 主工作台 v2** | L | Phase 0 设计系统先落全套（`tokens.css` 重皮肤化深色 + Figtree + octoBar/octoJelly/octoPulse 三动画 + logo）→ 主对话工作台三栏（项目分组会话+运行指示 / 对话舞台 / 「本会话运行状态」右栏，任务控制收进会话）+ 全局任务浮层 + 加载页。**复用现有数据逻辑，只换视觉/结构/交互**；交互态清单必列（右栏空态/会话几十个折叠/任务失败态/浮层与右栏同任务状态一致/多会话动画节流）。忠实还原设计稿 1a/1b/1c，文案走映射 | ① |
-| **F150 Cloudflare 零信任远程** | M | 设计先行（公网安全敏感）：front_door 加 `cloudflared` 模式与 Tailscale 并存 + named tunnel + **强制 Cloudflare Access**（OTP/SSO）+ 配对码流程 + bearer 纵深复用 F134。**排除 trycloudflare**。设计岔路回拍板（cloudflared 自动起 vs 检测指引 / 配对码语义 / Access 配置边界）| ① |
+| **F150 Cloudflare 零信任远程** ⏳ 设计先行完成待实施（2026-07-19，spec/plan/research/design-forks 于 worktree 4f1e18f7 未 push）| M-L | **认证三层纵深**：Cloudflare Access（边缘身份 OTP/SSO）→ gateway 验 `Cf-Access-Jwt`（不盲信边缘，PyJWT+JWKS 动态拉取）→ bearer（复用 F134 限流/强 token）。新增 `mode=cloudflared` 与 Tailscale 并存不加旁路（#10）；cloudflared 回源带 XFF 必走 bearer 纵深不裸 loopback。**排除 trycloudflare**。**用户拍板**：①gateway 验 JWT 做纵深 ②配对码=8 位短码换 bearer（TTL 10min/一次性）③cloudflared 检测+指引不全自动（免存 CF API token，#5）④用户 CF dashboard 手配 named tunnel+Access；⑤**SSE-over-GET Cloudflare 缓冲风险=方案 A**（Cloudflare 管可达+零信任，实时多轮任务流走 Tailscale E2E，写入 spec 验收 gate）；⑥**用户有 CF 托管域名**（硬前提满足，直接推进）。8 Phase：config→Access JWT 校验器→接 guard→cloudflared_helper→配对码→CLI→attest 全链→双评审 | ① |
 | **F149 Web 其余页面 v2** | M | 智能体/技能/MCP/文件/记忆/审批中心/定时/设置 按 v2 设计语言渐进重皮（消费 F148 设计系统）| ② |
 
 **波次**：①F148 主工作台 ∥ F150 Cloudflare（前端/后端不冲突，F150 设计先行）→ ②F149 承 F148 设计系统。**完成定义**：F148/F149/F150 ✅ + Web v2 全站切换 + `octo attest remote` 经 Cloudflare 亦绿。
