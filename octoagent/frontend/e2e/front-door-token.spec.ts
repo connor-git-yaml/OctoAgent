@@ -1,6 +1,6 @@
 /**
  * F140 AC-2【场景②】：FrontDoorGate token 流程（bearer 模式）——审计判定
- * 「真正 UI-only、无 API 等价」的第一名（F130 手机远程第一屏，此前 100% 手工验）。
+ * 「真正 UI-only、无 API 等价」的 token gate 首屏流程。
  *
  * 覆盖链：SPA 静态可达（不受 guard）→ API 401 → FrontDoorGate 渲染 → 输 token
  * 保存重试 → 界面解锁 → 发消息全链路成功（bearer 下 SSE 走 access_token query

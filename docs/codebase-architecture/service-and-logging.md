@@ -41,7 +41,7 @@
 - **systemd user unit**（`~/.config/systemd/user/octoagent.service`）：
   `Restart=on-failure` + `RestartSec=5` + `StartLimitBurst=5/60s`（崩溃风暴
   熔断）+ `RestartPreventExitStatus=78`（确定性配置错不重启；gateway 侧
-  主动 `exit(78)` 留 F130+）+ `TimeoutStopSec=90` + `KillMode=control-group`。
+  主动 `exit(78)` 拒绝不安全配置）+ `TimeoutStopSec=90` + `KillMode=control-group`。
 - **PATH 确定性**：不复制 shell PATH（幂等比对剔 PATH 防误判过时）；
   `which("uv")` 目录先过稳定性校验（worktree/.venv 弃用），
   `~/.local/bin` + Homebrew 兜底。

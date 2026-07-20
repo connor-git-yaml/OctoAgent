@@ -35,7 +35,7 @@ class TestLanesForMode:
         assert "l1-playwright" in ids
 
     def test_release_lanes_order(self, lane_mod) -> None:
-        """release 含全部 live lane；attest 顺序 service → remote（F144 handoff §2）。"""
+        """release 含全部 live lane。"""
         ids = [lane.id for lane in lane_mod.lanes_for_mode("release")]
         assert ids == [
             "quarantine-governance",
@@ -45,15 +45,12 @@ class TestLanesForMode:
             "frontend-vitest",
             "live-real-llm",
             "attest-service",
-            "attest-remote",
         ]
-        assert ids.index("attest-service") < ids.index("attest-remote")
 
     def test_release_live_flags(self, lane_mod) -> None:
         lanes = {lane.id: lane for lane in lane_mod.lanes_for_mode("release")}
         assert lanes["live-real-llm"].live is True
         assert lanes["attest-service"].live is True
-        assert lanes["attest-remote"].live is True
         assert lanes["backend-deterministic"].live is False
 
     def test_release_deterministic_excludes_real_llm_only(self, lane_mod) -> None:
@@ -88,7 +85,6 @@ class TestSkipValidation:
     def test_release_rejects_skip_attest_probe(self, lane_mod) -> None:
         lanes = lane_mod.lanes_for_mode("release")
         assert lane_mod.validate_skip_args("release", ["attest-service"], lanes)
-        assert lane_mod.validate_skip_args("release", ["attest-remote"], lanes)
 
     def test_release_rejects_skip_attestation_signed(self, lane_mod) -> None:
         lanes = lane_mod.lanes_for_mode("release")
@@ -215,35 +211,21 @@ class TestParseJunit:
 
 class TestEvaluateAttest:
     def test_pass(self, lane_mod) -> None:
-        status, _ = lane_mod.evaluate_attest("service", {"status": "pass"}, allow_not_enabled=False)
+        status, _ = lane_mod.evaluate_attest("service", {"status": "pass"})
         assert status == "pass"
 
     def test_fail_always_blocks(self, lane_mod) -> None:
-        """fail=已启用但链路断（如 bearer+tailscale 断链）恒阻断（F144 P2-1）。"""
-        for probe in ("service", "remote"):
-            status, _ = lane_mod.evaluate_attest(probe, {"status": "fail"}, allow_not_enabled=True)
-            assert status == "fail"
+        status, _ = lane_mod.evaluate_attest("service", {"status": "fail"})
+        assert status == "fail"
 
     def test_service_not_enabled_fails_no_flag(self, lane_mod) -> None:
         status, detail = lane_mod.evaluate_attest(
-            "service", {"status": "not_enabled"}, allow_not_enabled=True,
+            "service", {"status": "not_enabled"},
         )
         assert status == "fail" and "service install" in detail
 
-    def test_remote_not_enabled_default_fails(self, lane_mod) -> None:
-        status, detail = lane_mod.evaluate_attest(
-            "remote", {"status": "not_enabled"}, allow_not_enabled=False,
-        )
-        assert status == "fail" and "--allow-not-enabled" in detail
-
-    def test_remote_not_enabled_with_flag_warns(self, lane_mod) -> None:
-        status, _ = lane_mod.evaluate_attest(
-            "remote", {"status": "not_enabled"}, allow_not_enabled=True,
-        )
-        assert status == "warn"
-
     def test_unknown_status_fails(self, lane_mod) -> None:
-        status, _ = lane_mod.evaluate_attest("remote", {"status": "weird"}, allow_not_enabled=True)
+        status, _ = lane_mod.evaluate_attest("service", {"status": "weird"})
         assert status == "fail"
 
     def test_warn_is_not_blocking(self, lane_mod) -> None:
@@ -284,7 +266,7 @@ class TestOrchestration:
         assert by_id["quarantine-governance"].status == "pass"
         assert by_id["attestation-signed"].status in ("pass", "fail")
         for lane_id in ("backend-deterministic", "live-real-llm",
-                        "attest-service", "attest-remote"):
+                        "attest-service"):
             assert by_id[lane_id].status == "planned"
         # dry-run 不得触碰 attest 探针 / pytest 子进程（探针有真副作用：service 闪断）
         joined = [" ".join(c) for c in fake.calls]
@@ -303,16 +285,13 @@ class TestOrchestration:
     def test_attest_lane_parses_json_and_archives(self, lane_mod) -> None:
         fake = FakeRunner(attest_reports={
             "service": {"status": "pass", "checks": []},
-            "remote": {"status": "not_enabled", "next_steps": ["装 tailscale"]},
         })
-        orch = lane_mod.LaneOrchestrator("release", runner=fake, allow_not_enabled=True)
+        orch = lane_mod.LaneOrchestrator("release", runner=fake)
         lanes = [lane for lane in lane_mod.lanes_for_mode("release") if lane.kind == "attest"]
         results = orch.run(lanes)
         by_id = {r.id: r for r in results}
         assert by_id["attest-service"].status == "pass"
-        assert by_id["attest-remote"].status == "warn"
-        assert by_id["attest-remote"].extra["attest_report"]["status"] == "not_enabled"
-        assert "next_steps" in by_id["attest-remote"].detail
+        assert by_id["attest-service"].extra["attest_report"]["status"] == "pass"
 
     def test_attest_garbage_stdout_fails(self, lane_mod) -> None:
         class GarbageRunner(FakeRunner):

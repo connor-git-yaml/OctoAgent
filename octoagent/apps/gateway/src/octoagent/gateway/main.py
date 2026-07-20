@@ -255,7 +255,7 @@ def _resolve_startup_host() -> str:
 
 
 def _enforce_front_door_exposure(project_root: Path) -> None:
-    """F130 FR-C2：启动期 host↔mode 防裸奔 fail-fast（spec §E / 岔路⑤）。
+    """启动期 host↔mode 防裸奔 fail-fast。
 
     跨源读 host（env 优先，回退 argv ``--host``）+ ``front_door.mode`` → 纯函数判定：
     - **reject**（确定裸奔，如 host=0.0.0.0 + mode=loopback）→ 写清晰错误到
@@ -264,7 +264,7 @@ def _enforce_front_door_exposure(project_root: Path) -> None:
       字段会重启（其自身 10s 节流兜底），但 err.log 每次清晰暴露误配 →
       ``octo logs`` 可诊断（已知不对称，见 completion-report limitations）。
     - **warn**（暴露面大但有认证）→ 强警告放行（记录，doctor 兜底诊断）。
-    - **safe**（默认 127.0.0.1+loopback / serve 推荐 loopback+bearer）→ 放行。
+    - **safe**（默认 127.0.0.1+loopback / 反向隧道回源的 loopback+bearer）→ 放行。
 
     校验自身**只读、绝不改配置/系统**（FR-C4）；判定过程任何异常保守放行
     （不因校验 bug 挡启动 = 连本机都用不了，plan §2 Phase D 最高危警告）。
@@ -293,8 +293,7 @@ def _enforce_front_door_exposure(project_root: Path) -> None:
             f"  host={verdict.host}  front_door.mode={verdict.mode}\n"
             f"  原因：{verdict.reason}\n"
             f"  修复：{verdict.fix_hint}\n"
-            "  （诊断：`octo doctor` 查 front_door_exposure；"
-            "`octo remote enable` 一键切安全形态）"
+            "  （诊断：`octo doctor` 查 front_door_exposure）"
         )
         print(message, file=sys.stderr, flush=True)  # noqa: T201 - 启动期唯一出站口
         sys.exit(CONFIG_ERROR_EXIT_CODE)
@@ -506,7 +505,7 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
     project_root = _resolve_project_root()
     load_project_dotenv(project_root=project_root, override=False)
 
-    # F130 FR-C2：host↔mode 防裸奔 fail-fast。必须在昂贵的 app 构造之前——
+    # host↔mode 防裸奔 fail-fast。必须在昂贵的 app 构造之前——
     # 确定裸奔组合直接 exit(78)，不浪费启动。默认 127.0.0.1+loopback=safe。
     _enforce_front_door_exposure(project_root)
 

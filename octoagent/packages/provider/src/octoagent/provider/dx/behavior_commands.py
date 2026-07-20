@@ -748,46 +748,51 @@ def _run_async(fn) -> None:
 # ---------------------------------------------------------------------------
 #
 # compact 需要 LLM + 候选表 + 审批面（全在 gateway）——CLI 本地起 provider_router
-# 会造第二条落盘/审批路径（双事实源 + TOCTOU），故走 REST（同 attest/remote 范式）。
+# 会造第二条落盘/审批路径（双事实源 + TOCTOU），故走 REST。
 # 例外：--list-size 纯本地只读测量（measure_behavior_total_size），无副作用不走 HTTP。
 
 _COMPACT_HTTP_TIMEOUT_S = 120.0  # trigger 同步跑 LLM（main alias），给足余量
 
 
 def _compact_gateway_settings() -> tuple[str, dict[str, str]]:
-    """解析托管 gateway 的 base_url + 认证 header（复用 remote/attest 已验证链）。
+    """解析托管 gateway 的 base_url 与认证 header。
 
-    - port：实例生效 env ``OCTOAGENT_PORT``（`.env` 权威，同 remote_commands）。
+    - port：实例生效 env ``OCTOAGENT_PORT``（``.env`` 权威）。
     - front_door bearer 模式：token 值只从实例 ``.env`` / ``.env.litellm`` 读
-      （attest ``_default_token_reader`` 同款语义——shell-only 值服务不继承）；
+      （shell-only 值不可信，因为托管服务不会继承当前 CLI shell）；
       loopback 模式本机直连无需 header。
     """
+    from octoagent.gateway.services.config.config_wizard import load_config
     from octoagent.gateway.services.frontdoor_exposure import (
         read_instance_effective_env,
     )
 
-    from .remote_commands import (
-        _bearer_token_env_name,
-        _effective_mode,
-        _load_config_and_root,
-        _resolve_port,
-    )
+    from .service_manager import resolve_instance_root
 
-    cfg, root = _load_config_and_root()
+    root = resolve_instance_root()
+    try:
+        cfg = load_config(root)
+    except Exception as exc:
+        raise click.ClickException(f"读取 octoagent.yaml 失败：{exc}") from exc
     env = read_instance_effective_env(root)
-    port = _resolve_port(env)
+    raw_port = env.get("OCTOAGENT_PORT", "").strip()
+    port = int(raw_port) if raw_port.isdigit() else 8000
     base_url = f"http://127.0.0.1:{port}"
     headers: dict[str, str] = {}
-    mode = _effective_mode(cfg, env)
+    mode = env.get("OCTOAGENT_FRONTDOOR_MODE", "").strip()
+    if not mode:
+        mode = str(cfg.front_door.mode) if cfg is not None else "loopback"
     if mode == "bearer":
-        token_env = _bearer_token_env_name(cfg, env)
+        token_env = env.get("OCTOAGENT_FRONTDOOR_TOKEN_ENV", "").strip()
+        if not token_env and cfg is not None:
+            token_env = str(cfg.front_door.bearer_token_env).strip()
+        token_env = token_env or "OCTOAGENT_FRONTDOOR_TOKEN"
         token = _read_instance_dotenv_value(root, token_env)
         if token:
             headers["Authorization"] = f"Bearer {token}"
     elif mode == "trusted_proxy":
         # Codex round6 P2：trusted_proxy 模式下 FrontDoorGuard 会拒绝无代理凭证的
-        # 本机直连（403）——显式 fail-fast 优于让每个子命令神秘 403。与 attest/
-        # remote CLI 现有支持面一致（均只覆盖 loopback/bearer）。
+        # 本机直连（403）——显式 fail-fast 优于让每个子命令神秘 403。
         raise click.ClickException(
             "octo behavior compact 暂不支持 front_door.mode=trusted_proxy——"
             "请经反向代理侧调用 REST /api/behavior/compact/*，"
@@ -797,7 +802,7 @@ def _compact_gateway_settings() -> tuple[str, dict[str, str]]:
 
 
 def _read_instance_dotenv_value(root: Path, key: str) -> str | None:
-    """按 source 顺序取 ``.env`` → ``.env.litellm`` 最后的非空值（attest 同款）。"""
+    """按 source 顺序取 ``.env`` → ``.env.litellm`` 最后的非空值。"""
     resolved: str | None = None
     try:
         from dotenv import dotenv_values

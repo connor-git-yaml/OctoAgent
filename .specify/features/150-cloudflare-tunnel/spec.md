@@ -1,151 +1,88 @@
-# F150 Cloudflare 零信任远程 — Spec（v1.0 设计定稿，6 拍板锁定，待 Codex+Opus 双评审后实施）
+# F150 Cloudflare Tunnel 远程访问 — Feature Spec
 
-> 规模：**M（偏 M-L）**。命中"重大架构变更"（公网暴露面 + 新认证层）→ 回主 session 走 **Codex + Opus 双评审**。
-> 依赖：F134 bearer（已 master）、F130 tailscale_helper/remote CLI 范式（已 master）。与 F148（已合入 master 9ae34d49）**文件不冲突**（F150 = 后端 gateway + provider/dx CLI；配对码 SPA 入口屏 = F148 后续）。
-> **本 spec 已定稿（2026-07-20 用户拍板 6 项，见 §9）**：4 条设计岔路 + SSE 缓冲处理 + 域名前提全部锁定，FR/AC 据结论收敛。下一步 Codex+Opus 双评审后实施。
+> 状态：2026-07-20 架构复审后待评审。依赖 F134 front-door 加固、F148 Web 工作台设计系统与 F151 运行/打包边界门禁。
 
----
+## 0. 冻结约束
 
-## §0 设计约束与哲学（红线，禁越）
+1. Cloudflare named tunnel + Access 是 Octo 唯一远程访问方案，不设计 provider 选择器、profile 切换或备用网络入口。
+2. 手机只需标准浏览器，不要求安装网络客户端或修改系统网络连接。
+3. Gateway 始终绑定 `127.0.0.1`；`cloudflared` 通过出站连接回源，Octo 端口不监听外部网卡。
+4. 必须使用正式 named tunnel 和受管 service；禁止 quick tunnel、临时前台进程与公网直绑。
+5. Cloudflare 在边缘终止 TLS。产品文案只能写“HTTPS + Cloudflare Access 身份验证”，不得宣称设备到 Octo 的端到端加密。
+6. Cloudflare Access 必须开启；Gateway 还必须在 origin 验证 Access JWT，不能只相信代理 header。
+7. 浏览器直接复用 Cloudflare Access 的 application session；Octo 不再复制一套配对码、浏览器 session、设备表或 Cookie。origin 必须验证每个远程请求携带的 Access JWT，并把 identity 限定为显式 owner allowlist。
+8. `text/event-stream` 必须经过真实 named tunnel 的流式门禁；不达标则 F150 不完成，协议修复另立 Feature。
+9. 原生 iOS 的设备密钥、challenge、短期 token 与单设备撤销属于 F153；不得用浏览器“配对 Cookie”冒充设备身份。
 
-- **§0.1 不造认证轮子，收敛单入口**（Constitution #10）：cloudflared 模式加进 **FrontDoorGuard.authorize 同一分发**（`frontdoor_auth.py`），**不加旁路 middleware / 不在路由层自行拦截**。JWKS/JWT 校验作为 guard 内的一个 mode 分支。
-- **§0.2 Cloudflare ≠ 端到端加密**（milestones review 校正③，研究 §B.2 confirmed）：所有 spec/文档/CLI 文案措辞为"公网可达 + 边缘 TLS + Access 零信任认证"，**禁写"端到端加密"**。真 E2E 归 Tailscale/WireGuard（并存的价值）。
-- **§0.3 排除 trycloudflare**（用户拍板）：只做 named tunnel。CLI/helper 检测到用户在跑 quick tunnel 也**不支持**为其挂 Access（无认证层）。
-- **§0.4 与 Tailscale 并存非替代**：front_door 多一个 `cloudflared` 模式，Tailscale 的 `octo remote enable`（bearer 模式）路径**零改动**。两条远程路径独立可切。
-- **§0.5 secret 零落盘/LLM**（Constitution #5）：service token secret / bearer token 走实例 `.env`（原子 O_EXCL 0600，复用 F134 `_write_generated_token`）；**绝不进 octoagent.yaml / stdout / 日志**。AUD tag、team name、tunnel hostname 非 secret，可进 octoagent.yaml。JWT 值/凭证不落任何日志（复用 attest `_scrub` 脱敏范式）。
-- **§0.6 零 sudo + 优雅降级**（Constitution #6/#7）：`cloudflared_helper` 遇 permission **不自动 sudo**（给手动提示）；binary 缺失/未登录/JWKS 拉取失败**软化为三态或结构化 error，绝不抛未捕获异常阻塞**。启动期 JWKS 拉取失败**不得挡 gateway 启动**（连本机都用不了 = 最高危，仿 `_enforce_front_door_exposure` 保守放行/首请求懒加载）。
-- **§0.7 编排层不代配 CF 侧**：CF Access 应用创建 / policy / AUD tag 获取是**用户在 CF dashboard 一次性操作**（或需 CF API token，触 #5）。`octo` **只检测 + 指引 + 接管 `cloudflared tunnel run` + 切 front_door 模式 + 发配对码**，不代建 Access 应用/DNS（除非岔路④拍板用 API token）。
-- **§0.8 host 保持 loopback**：推荐 `OCTOAGENT_HOST=127.0.0.1`，cloudflared 从 loopback 回源（`proxyAddress` 默认 127.0.0.1，端口不监听外部网卡）。front_door 暴露矩阵加 `loopback+cloudflared=safe`。
+## 1. 用户结果
 
----
+用户在普通手机浏览器打开自己的 HTTPS 域名，经 Cloudflare Access 登录并通过 owner identity 校验后直接进入完整 Web UI。整个过程不改变手机已有网络连接，也不要求再输入 Octo 配对码或保存第二份长期凭证。
 
-## §1 问题陈述
+未配置远程访问时，Octo 仍可在主机本地通过 loopback 使用；远程配置失败不得破坏本地入口。
 
-**现状**：M8/M10 的远程只有 Tailscale（`octo remote enable` → bearer + `tailscale serve`）——**私网方案**，手机必须装 Tailscale 客户端 + 进同一 tailnet 才能访问。对"想让手机浏览器直接开 URL 就能用（含分享给可信第三方偶尔看）"的**公网可达**诉求，Tailscale 不满足。
+## 2. 范围
 
-**目标**：新增 **Cloudflare named tunnel + 强制 Cloudflare Access 零信任** 的公网远程路径，手机浏览器输 URL → CF Access 认证（email OTP/SSO）→ 到达 Octo Web UI，**全程无需装客户端**。安全靠三层纵深（Access 边缘身份 + origin JWT 校验 + bearer app 密钥），顶住公网暴露面。与 Tailscale 并存，用户按场景选（极敏感/实时 SSE → Tailscale E2E；便利公网 → Cloudflare）。
+### 2.1 Cloudflare 入口
 
-**非目标**：多用户/团队（§0 单用户锁定不变）；替代 Tailscale；SSE 协议改造（POST 化属 F148/前端）；移动原生 App（M12，F150 只打 service token 地基）。
+- `cloudflared` named tunnel 由官方 service manager 托管。
+- ingress 只回源 `http://127.0.0.1:<port>`，并有 catch-all `http_status:404`。
+- Access application 覆盖整个域名和全部路径，包括 SPA、API 与 SSE。
+- Octo 配置新增单一 `cloudflared` front-door mode，不引入通用 provider/profile 抽象。
 
----
+### 2.2 Origin 认证
 
-## §2 认证模型（三层纵深 + 数据流）
+- 从 Cloudflare 官方 JWKS 获取并缓存公钥，验证 Access JWT 的签名、`aud`、`iss`、`exp` 与允许身份。
+- 未验证的 `Cf-Access-*`、`X-Forwarded-*` 等 header 一律不构成信任。
+- JWKS 刷新失败时只允许缓存期内已有密钥；无有效密钥时 fail closed。
+- 认证失败继续复用 F134 的失败限流与脱敏日志。
 
-```
-手机浏览器
-  │  https://octo.<user-domain>/
-  ▼
-[CF 边缘]  ← 层1: Cloudflare Access（email OTP / SSO / service token）在边缘认证
-  │        （TLS 在此终止，CF 看明文——非 E2E，§0.2）
-  │        认证通过 → 签发 application-scoped JWT
-  ▼  named tunnel（post-quantum 加密）
-[cloudflared]（跑在用户 Mac）
-  │  ← 层2a(可选): originRequest.access.required 连接器自验 JWT（覆盖 SPA `/`）
-  │  回源注入 Cf-Access-Jwt-Assertion / Cf-Connecting-IP / X-Forwarded-For
-  ▼  http://127.0.0.1:8000（loopback）
-[OctoAgent gateway — FrontDoorGuard.authorize，mode=cloudflared]
-     层2b: 校验 Cf-Access-Jwt-Assertion（RS256/iss/aud/exp，拍板① = 验）
-     层3:  校验 bearer token（复用 F134 限流 + 强 token，Access 之后的纵深）
-```
+### 2.3 浏览器会话边界
 
-**三层各自防什么（zero-trust 纵深）**：
-- **层1 Access（边缘）**：身份准入。挡"不是我授权的人/设备"。email OTP/SSO 交互 或 service token 非交互。
-- **层2 JWT 校验（origin，拍板①=验）**：**零信任不盲信边缘**。挡"tunnel 存在但 Access 未挂/被绕过"（最可能的用户误配）——无有效 JWT 一律拒。层2a（cloudflared 连接器，覆盖 SPA `/`）+ 层2b（gateway guard，覆盖 owner-facing API + 纵深）互补。
-- **层3 bearer（origin，复用 F134）**：app 级密钥。即便层1/2 被绕（CF 账号失陷/config 误配），仍需 Octo 自己的密钥。SSE `?access_token=` 路径的凭证。**配对码解决"手机怎么拿到 bearer"**（§4）。
+- Cloudflare Access 已为受保护 hostname 签发 application token，并在每个已认证请求上向 origin 发送 Access JWT；Octo 不重复签发浏览器会话。
+- Gateway 只从验签后的 JWT 读取稳定 identity，并要求命中显式 owner allowlist；裸 `Cf-Access-*` / `X-Forwarded-*` header 不可信。
+- 远程 mutation 请求除 JWT 外还必须通过既有 Host/Origin/CSRF 策略；浏览器 Cookie 不能成为跨站写入旁路。
+- Access session 的时长、登出和撤销由 Cloudflare 管理。Octo 设置页只展示验证结果与官方登出/恢复入口，不伪造无法可靠证明的“浏览器设备列表”。
+- bearer 认证继续服务既有兼容面，但不是面向浏览器的远程访问流程；浏览器不得保存 bearer 或 Cloudflare service token。
 
----
+### 2.4 管理界面
 
-## §3 范围与组件（已按 6 拍板收敛）
+“远程访问”只有一个 Cloudflare 设置页，展示：
 
-| 组件 | 新建/改 | 说明 |
-|------|---------|------|
-| `provider/dx/cloudflared_helper.py` | 新建 | 三态编排 helper，**结构照抄 tailscale_helper.py**：`CloudflaredState`（NOT_INSTALLED/INSTALLED_NOT_READY/READY）+ probe（检 binary / `cert.pem` 登录 / named tunnel 存在）+ enable/disable（`cloudflared tunnel run` 接管 / 停）。DI exec 复用 `CommandRunner`，零 sudo，优雅降级。|
-| `gateway/services/cloudflare_access.py` | 新建 | Access JWT 校验器：JWKS 拉取（`https://<team>.cloudflareaccess.com/cdn-cgi/access/certs`）+ 缓存（kid 索引，TTL/rotation-aware，miss 刷新）+ RS256 验签 + iss/aud/exp 校验。优雅降级（拉取失败不挡启动，懒加载/软失败）。|
-| `gateway/services/frontdoor_auth.py` | 改 | `authorize` 加 `cloudflared` 分支：校验 JWT（层2b）+ bearer（层3，复用现有 bearer 逻辑 + `_FailureRateLimiter`）。新 error code `FRONT_DOOR_ACCESS_JWT_*`。|
-| `config/config_schema.py` FrontDoorConfig | 改 | mode 加 `"cloudflared"`；加 `cloudflare_access_team_name` / `cloudflare_access_aud_tags: list[str]`（非 secret）；`validate_mode_requirements` 加 cloudflared 时 team/aud 必填。|
-| `frontdoor_exposure.py` | 改 | 暴露矩阵加 `loopback+cloudflared=safe` / `非loopback+cloudflared=warn`。|
-| `provider/dx/remote_commands.py`（或新 `cloudflare_commands.py`）| 改/新 | `octo remote cloudflare {enable,disable,status}`（拍板③检测+指引）：检测三态 → 指引/接管 `tunnel run` → 切 mode=cloudflared → 发配对码 → 打印 `https://<hostname>/`。范式照搬 remote_enable（先 run 后持久化、fail-closed 收尾、token 零明文）。|
-| 配对码后端 | 新建 | 短码生成（CLI 侧）+ 交换端点（gateway，Access-JWT-gated + bearer-exempt）→ 发 bearer。TTL/单用/原子消费/重放防护。**SPA 入口屏 = F148**。|
-| `provider/dx/attest_commands.py` | 改 | `run_remote_probe` 认 mode==cloudflared 为 enabled 信号；用 service token 过 Access 验 edge→tunnel→gateway 全链（含 SSE，探 §C 缓冲风险）。|
-| `provider/dx/doctor.py` | 改 | 加 cloudflared 三态 + Access 配置健康 check（仿 tailscale check）。|
+- 未配置、等待验证、可用、故障四种状态；
+- 域名、Access audience、最近验证时间与可操作错误；
+- owner identity、打开远程站点、Access 登出/会话恢复指引；
+- 官方 `cloudflared` 安装与 service 配置指引。
 
----
+不得展示网络方案选择器、原始 JWT、service token、复杂代理 header 或调试字段；诊断信息放在 Advanced 折叠区。
 
-## §4 配对码流程（拍板② = Option 2B，已定）
+## 3. 功能需求
 
-**目的**：手机首次连，避免在手机键盘输 43 字符的 `token_urlsafe(32)` bearer。
+- **FR-1**：Cloudflare 配置缺失时 Gateway 保持 loopback 可用并明确报告未配置。
+- **FR-2**：启用 `cloudflared` mode 前必须验证 host、Access audience 与 JWT 验证配置完整。
+- **FR-3**：所有受保护 HTTP、WebSocket（若后续使用）与 SSE 路径执行同一 origin 认证链。
+- **FR-4**：origin 只接受签名、issuer、audience、时间与 owner identity 全部有效的 Access JWT；认证状态不得从裸 header 推导。
+- **FR-5**：远程 mutation 请求执行 Host/Origin/CSRF 校验；Access session 到期或被撤销后 HTTP 与 SSE 均拒绝或进入重新认证。
+- **FR-6**：日志、CLI、REST 响应和前端错误不得输出 JWT、Cookie 或 Cloudflare 凭证。
+- **FR-7**：配置或 tunnel 故障不自动降低认证强度，也不把 Gateway 改绑公网地址。
+- **FR-8**：真实手机宽度浏览器完成 Access 登录、刷新恢复、SSE 聊天、登出和过期后的重新认证。
+- **FR-9**：真实 named tunnel 下记录 SSE 首事件与事件间延迟，达到发布阈值后才能完成 Feature。
+- **FR-10**：F150 不新增浏览器配对码、remote session 或 browser device 数据表；若后续出现独立授权需求，必须以新的 threat model 证明其安全增益。
 
-**定稿流（Option 2B，拍板②）**：
-1. `octo remote cloudflare enable` 成功后，在 Mac 终端**打印一个短配对码**（如 8 位 base32，人类可输；码本身**不是** secret 的等价物，是一次性换取器）。
-2. 手机浏览器开 `https://octo.<domain>/` → CF Access OTP 认证 → SPA 加载（此时有 Access JWT，但还没 bearer）。
-3. SPA 入口屏（**F148 建**）让用户输配对码 → 调 `POST /api/pairing/exchange {code}`。
-4. 交换端点：**Access-JWT-gated（要有效 JWT）+ bearer-exempt（此时手机还没 bearer）** + 校验配对码有效 → **返回 bearer token**（SPA 存 localStorage，与 F134 现状一致）。
-5. 后续请求：SPA 带 bearer（header/SSE query）+ Access JWT（cookie→边缘→header）。
+## 4. 验收标准
 
-**安全参数**：
-- **TTL 短**（默认 **10 分钟**）；**单用**（首次成功交换即原子消费失效，仿 memory candidate atomic claim）；**一次一码**（新 enable 使旧码失效）；重放防护（消费后码作废）。
-- 交换端点**必须过 Access JWT**（层2）——否则任何知道码的公网请求都能换 bearer。Access + 短码 + 单用 = 三重收窄。
-- 配对码/bearer **零明文进日志**。
+1. 本地 loopback 回归全绿；公网网卡无法直连 Gateway 端口。
+2. 无 JWT、伪造 header、错 audience、过期 JWT、未知签名全部拒绝。
+3. 正确 JWT 但 identity 不在 owner allowlist 时拒绝；正确 owner identity 才能访问工作台 API。
+4. 跨站 mutation、错误 Host/Origin、Access 登出/过期后的请求均 fail closed。
+5. 页面刷新可复用有效 Access application session；不创建 Octo 浏览器 session、配对码或设备记录。
+6. 真实 named tunnel 的 SPA、REST、SSE、登出/重新认证与错误恢复通过 live 验证，证据中无 secret。
+7. 手机端全流程无需安装额外网络客户端，界面中不存在第二种远程方案或第二次配对入口。
 
-**单用户实例可用内存态存储**（进程内 `PairingCodeStore`，重启失效——短 TTL 本就该重发，无需落盘；与 F134 rate limiter 内存态同姿势）。
+## 5. 非目标
 
----
-
-## §5 功能需求（FR，已定稿）
-
-- **FR-1**（cloudflared 三态 helper）：`cloudflared_helper` 探测 NOT_INSTALLED（无 binary）/ INSTALLED_NOT_READY（无 `cert.pem` 或无 named tunnel）/ READY，只读探测与 `tunnel run` 写操作分离，DI exec 零 sudo。
-- **FR-2**（front_door cloudflared 模式）：`mode=cloudflared` 时 `authorize` 校验层2b JWT（岔路①=验时）+ 层3 bearer；任一失败按类别拒（复用 `_reject_invalid_credential` + 限流）。
-- **FR-3**（Access JWT 校验）：JWKS 动态拉取 + kid 缓存 + rotation 兼容（旧 key 7 天 grace）；校验 iss==team domain + aud∈配置 aud_tags + exp + RS256 签名。缺 `Cf-Access-Jwt-Assertion` header → 拒（`FRONT_DOOR_ACCESS_JWT_REQUIRED`）。
-- **FR-4**（CLI enable/disable/status）：`octo remote cloudflare enable` 三态指引/接管，先 `tunnel run` 成功后才切 mode（非原子态防护），token/配对码零明文，fail-closed 收尾（仿 F134 `_settle_serve_after_failure`）。
-- **FR-5**（配对码）：短码生成 + 交换端点（Access-gated + bearer-exempt）+ TTL/单用/重放（§4）。
-- **FR-6**（attest 全链）：`octo attest remote` 认 cloudflared 模式；service token 过 Access 验 edge→tunnel→gateway，含 SSE 握手（探 §C 风险），三态报告（pass/not_enabled/fail）。
-- **FR-7**（暴露矩阵 + doctor）：`validate_front_door_exposure` 加 cloudflared 行；doctor 加 cloudflared 三态 + Access 配置 check。
-- **FR-8**（Tailscale 零回归）：现有 `octo remote enable`（bearer + serve）路径行为 100% 不变；两模式独立可切。
-
----
-
-## §6 验收标准（AC，已定稿）
-
-- **AC-1**（helper 三态）：hermetic（FakeCommandRunner）覆盖三态，零真实 cloudflared 调用；permission denied 给手动提示不 sudo。
-- **AC-2**（JWT 校验正确性）：有效 JWT（正确 kid/iss/aud/exp/sig）→ 放行；篡改签名/错 aud/错 iss/过期/缺 header → 各自拒（专项断言）。JWKS rotation（新 kid）→ 刷新后放行。JWKS 拉取失败 → 软化不挡启动。
-- **AC-3**（loopback+cloudflared 不被 XFF 拒）：cloudflared 模式带 X-Forwarded-For 从 127.0.0.1 来 → **不 403**（对比 loopback 模式同请求 403，钉住"cloudflared 必走非 loopback 模式"的结论）。
-- **AC-4**（配对码）：有效码 + 有效 JWT → 换到 bearer；过期码/已用码/无 JWT/错码 → 各自拒；一次一码（新 enable 使旧码失效）；码/bearer 零明文进 capsys/日志（全文断言，仿 F134 AC-T1）。
-- **AC-5**（token 零明文红线）：`octo remote cloudflare enable` capsys 全文断言无 bearer/service secret 明文（仿 F134）。
-- **AC-6**（attest 全链 + SSE 风险探测）：service token 过 Access → 到达 gateway 全链 pass；无 service token → Access 挡（证明 Access 在挡）；SSE 握手检查如实反映缓冲（若 named tunnel 缓冲 SSE 则 fail + hint 指引实时场景走 Tailscale）。mode≠cloudflared → not_enabled 非失败。
-- **AC-7**（Tailscale 零回归）：现有 `octo remote enable` / bearer 模式 / attest bearer 路径全量测试 0 regression。
-- **AC-8**（暴露矩阵）：`loopback+cloudflared=safe` / `非loopback+cloudflared=warn`，startup fail-fast + doctor 一致。
-
-**AC↔test 绑定**（SDD 强化，实施时填 test 文件路径）：AC-2/3 → `test_frontdoor_cloudflared.py`；AC-1 → `test_cloudflared_helper.py`；AC-4 → `test_pairing_exchange.py`；AC-6 → `test_attest_cloudflare.py`。
-
----
-
-## §7 已知风险（写进 completion-report limitations）
-
-- **R1（SSE-over-CF 缓冲，见 research §C）**：**最高危**。OctoAgent SSE 是 GET（`stream.py:48` EventSourceResponse），Cloudflare 对 SSE-over-GET 有缓冲（issue #1449 OPEN，named tunnel 未证清白）。**拍板⑤ = 方案 A（已定）**：cloudflared 只保证"公网可达 + 零信任认证"，**实时多轮任务流走 Tailscale E2E**，不由 cloudflared 路径保证实时性。**验收 gate**：`octo attest remote` 验 SSE 握手可达即 pass（不验实时性）；文档明示实时盯任务场景走 Tailscale（并存兜底）。**F150 不做 SSE POST 化**（前端协议改动 = F148 / F134 v0.2）。
-- **R2（域名硬前提，拍板⑥已满足）**：cloudflared 路径要求用户有 CF 托管域名（免费计划可）——**用户已确认有域名**，前提满足。文档仍写明此前提（无域名的部署者只能用 Tailscale）。
-- **R3（CF 侧配置手工）**：Access 应用/policy/AUD tag 需用户 dashboard 一次性配（除非岔路④用 API token）。`octo` 检测 + 指引，不代配。
-- **R4（key rotation 运维）**：JWKS 6 周轮换靠动态拉取自动兼容；但 CF 账号/team 变更需用户更新 config 的 team_name/aud_tags。
-- **R5（service token 静态 secret）**：attest 探针 + M12 移动端用的 service token 是静态 secret，泄露即公网可访问（被 bearer 层3 兜底）——文档提示轮换。
-
----
-
-## §8 out-of-scope（明确退出）
-
-- SSE POST 化 / ticket 化（前端协议，F148 / F134 v0.2）。
-- 配对码 SPA 入口屏（前端，F148）。
-- 移动原生 App service token 集成（M12 消费 F150 地基）。
-- CF API token 全自动建 Access 应用/DNS（除非岔路④拍板；默认用户 dashboard 手配）。
-- 多用户 / 分享链接细粒度 ACL（§0 单用户）。
-
----
-
-## §9 设计岔路拍板结果（2026-07-20 用户拍板，已定，见 design-forks.md 详述）
-
-全部 6 项已定，spec §2-§7 据此收敛：
-
-- **① gateway 校验 Cf-Access-Jwt = 验**（零信任纵深，不盲信边缘）。JWKS 动态拉取禁硬编码；验 RS256 + iss + aud + exp。→ FR-3 / AC-2。
-- **② 配对码语义 = Option 2B**（8 位短码换长期 bearer）。交换端点 Access-JWT-gated + bearer-exempt；TTL 10min / 单用 / 重放防护。backend 归 F150，SPA 入口屏归 F148 后续。→ §4 / FR-5 / AC-4。
-- **③ cloudflared 起法 = 检测 + 指引**（非全自动）。免存 CF API token（#5）；`octo` 只检测三态 + 指引 + 接管 `tunnel run` + 切 front_door 模式 + 发配对码。→ FR-1 / FR-4。
-- **④ URL/域 = 用户 dashboard 手配** named tunnel + Access 应用（避存 CF API token，#5）。→ §0.7 / R3。
-- **⑤ SSE-over-CF 缓冲 = 方案 A**：cloudflared 保证公网可达 + 零信任认证，**实时任务流走 Tailscale E2E**（并存兜底）；验收 gate 只验 SSE 握手可达不验实时性。→ R1 / AC-6。
-- **⑥ CF 托管域名 = 用户已有**（硬前提满足，直接推进）。→ R2。
+- 多租户、团队 RBAC、组织级设备管理。
+- 自动购买域名、自动修改 DNS 或代管 Cloudflare 账户。
+- quick tunnel、公开匿名链接、直接公网监听。
+- 移动端原生 App 或把长期 service token 注入浏览器。
+- 浏览器设备证明、Octo 浏览器 session 与设备管理；真正的原生设备注册归 F153。
+- 在 F150 内改写 SSE 协议；流式不达标时另行治理。

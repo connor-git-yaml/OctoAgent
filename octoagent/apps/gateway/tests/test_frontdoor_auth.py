@@ -174,20 +174,19 @@ class TestFrontDoorAuth:
 
 
 # ---------------------------------------------------------------------------
-# F144 交付①：mode × header L3 矩阵补格（吸收 F130 AC-1 语义半边）
+# mode × header L3 矩阵
 #
 # 上面的全栈用例（full create_app + lifespan）继续守「guard 挂在真实路由树」
 # 的 wiring 层；本矩阵用 guard 聚焦轻量 app（无 lifespan/DB，每格 L4 速度）
-# 补 FrontDoorGuard 决策表缺格——尤其「serve 注入转发头时 bearer 放行」此前
-# 只有 F130 completion-report §2 的人工复核记录，零机械格。
+# 补 FrontDoorGuard 决策表缺格——尤其「反向代理注入转发头时 bearer 放行」。
 # ---------------------------------------------------------------------------
 
-#: 每个 proxy hint header 的拟真样例值（Tailscale serve / 反代注入形态）。
+#: 每个 proxy hint header 的拟真样例值（反向代理注入形态）。
 #: guard 只判断「非空」，值形态不影响判定——拟真只为可读性。
 _PROXY_HEADER_SAMPLES = {
     "forwarded": "for=203.0.113.10;proto=https",
     "x-forwarded-for": "203.0.113.10",
-    "x-forwarded-host": "octo.tailnet.ts.net",
+    "x-forwarded-host": "octo.example.invalid",
     "x-forwarded-proto": "https",
     "x-real-ip": "203.0.113.10",
 }
@@ -250,14 +249,13 @@ class TestFrontDoorModeHeaderMatrix:
         assert resp.status_code == 403
         assert resp.json()["detail"]["code"] == "FRONT_DOOR_LOOPBACK_PROXY_REJECTED"
 
-    # ---- A2：bearer + 正确 token × 5 header 逐个（核心缺格：serve+bearer 可行）----
+    # ---- A2：bearer + 正确 token × 5 header 逐个 ----
 
     @pytest.mark.parametrize("header_name", _PROXY_HINT_HEADERS)
     async def test_bearer_valid_token_ignores_each_proxy_hint_header(
         self, guard_app, monkeypatch, header_name: str
     ) -> None:
-        """F130 §0.2 硬约束的机械化：bearer 分支不检查任何转发头——
-        Tailscale serve 注入 X-Forwarded-* 时手机访问仍放行。"""
+        """bearer 分支不检查转发头；认证结果只由凭证决定。"""
         monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "bearer")
         monkeypatch.setenv("OCTOAGENT_FRONTDOOR_TOKEN", "matrix-secret")
 
@@ -326,7 +324,7 @@ class TestFrontDoorModeHeaderMatrix:
         assert resp.status_code == 403
         assert resp.json()["detail"]["code"] == "FRONT_DOOR_PROXY_TOKEN_INVALID"
 
-    # ---- A6/A7：SSE 路径 query token × XFF（serve 场景 SSE 半边）----
+    # ---- A6/A7：SSE 路径 query token × XFF ----
 
     async def test_bearer_sse_query_token_accepted_with_forward_header(
         self, guard_app, monkeypatch
@@ -376,7 +374,7 @@ class TestFrontDoorModeHeaderMatrix:
 # F134 交付①：认证失败限流矩阵（spec §1，既有 17 格零触碰只扩不删）
 #
 # 语义（D1 verify-first）：只有「带了凭证但验证失败」计数；正确凭证恒放行
-# 并清计数（serve 场景全远程共享 127.0.0.1 桶，锁定式会 DoS 唯一用户）；
+# 并清计数（反向隧道回源可能共享 127.0.0.1 桶，锁定式会 DoS 唯一用户）；
 # 缺凭证（SPA 首屏裸请求）不计数。阈值 10 次/60s 窗 → lockout 300s。
 # ---------------------------------------------------------------------------
 

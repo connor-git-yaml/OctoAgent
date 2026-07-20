@@ -494,7 +494,7 @@ Feature 025 + 027 + 030 + 031
   - automation 触发的 work 会保留 project / agent profile / budget / target 继承来源
 - F031-T07：定义 control-plane / ops 的信任边界验收：
   - 当前默认部署是否为 localhost / trusted network
-  - 如果走反向代理 / VPN / Tailscale，文档与运行方式是否明确说明保护前提
+  - 如果走受认证反向隧道，文档与运行方式是否明确说明保护前提
   - 不允许把当前未内建 front-door auth 的入口误写成“可直接公网暴露”
 - F031-T08：定义 update / backup / restore drill 的发布门禁：
   - backup-before-update

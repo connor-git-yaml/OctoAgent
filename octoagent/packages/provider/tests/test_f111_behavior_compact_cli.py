@@ -246,14 +246,18 @@ class TestGuards:
 
     def test_trusted_proxy_mode_fails_fast(self, runner, monkeypatch, tmp_path):
         """Codex round6 P2 闭环：trusted_proxy 模式显式 fail-fast（优于每个
-        子命令神秘 403），与 attest/remote CLI 支持面一致。"""
-        from octoagent.provider.dx import remote_commands as rc
-
-        monkeypatch.setattr(rc, "_load_config_and_root", lambda: (None, tmp_path))
-        monkeypatch.setattr(rc, "_effective_mode", lambda cfg, env: "trusted_proxy")
+        子命令神秘 403）。"""
+        import octoagent.gateway.services.config.config_wizard as cw
         import octoagent.gateway.services.frontdoor_exposure as fde
+        import octoagent.provider.dx.service_manager as sm
 
-        monkeypatch.setattr(fde, "read_instance_effective_env", lambda root: {})
+        monkeypatch.setattr(sm, "resolve_instance_root", lambda: tmp_path)
+        monkeypatch.setattr(cw, "load_config", lambda root: None)
+        monkeypatch.setattr(
+            fde,
+            "read_instance_effective_env",
+            lambda root: {"OCTOAGENT_FRONTDOOR_MODE": "trusted_proxy"},
+        )
 
         def _passthrough(method: str, path: str, payload: dict | None = None):
             # 真走 _compact_gateway_settings（不打真 HTTP——settings 阶段就该炸）

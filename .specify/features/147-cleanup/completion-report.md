@@ -11,7 +11,7 @@
 | 2 | cron 失败通知 | 三姊妹 FAILED + spawn_error 路径只写审计+log，零通知（F127/F111 显式静默设计，里程碑翻转）| **改**：genuine 失败（FAILED + spawn_error）补 HIGH；notification.py +record_when_filtered（深夜入桶可发现）；幂等键 run_id/date；manual notify=False 不推 | d698f3ef |
 | 3① | T1-TOOL-CALL-003 | AmbientRuntime 注入时间→模型抄答不调工具→撞断言 FAIL | **改**：prompt 改读 README+JSON（确定性需读工具）+ 收紧 tool_name_contains:read | af1a6223 |
 | 3② | runner.py 429 退避吃步数 | `while` 循环 steps 顶部无条件+1，429 扁平 sleep+continue 烧 max_steps | **改**：指数退避 + 回滚 steps/tracker.steps（不吃预算）+ 上界复用 max_attempts + 成功清零 | 9c04410b (+ e501 拆行) |
-| 4 | 容器交付评估 | 单用户 + launchd(F129)/Tailscale(F130) 已覆盖崩溃自愈/开机自启/远程 | **不实施**：deployment-and-ops.md §12.1.5 归档「不做容器」结论 + 触发重评条件 | 732f291b |
+| 4 | 容器交付评估 | 单用户 launchd/systemd 已覆盖崩溃自愈/开机自启；出站反向隧道无需容器网络 | **不实施**：deployment-and-ops.md §12.1.5 归档「不做容器」结论 + 触发重评条件 | 732f291b |
 | 5 | console_output 窄终端 | create_console 无显式 width + 模块单例 import 时锁死（实测非 TTY=80）→ 长 CJK 指引折断 | **改**：探测 width<120 给 floor（覆盖非 TTY + 真 80 列 SSH）；option a 漏真 TTY 故选 b | a70ee92f |
 
 ## 生产代码触碰（最小改 + 测试锚 + 0 regression）

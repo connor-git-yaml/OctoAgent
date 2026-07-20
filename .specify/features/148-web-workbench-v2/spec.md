@@ -3,7 +3,7 @@
 - **里程碑**：M11 波次①（∥ F150 Cloudflare）
 - **规模**：L（前端）
 - **基线**：`origin/master a753570b`；vitest 428 passed / tsc 0 / complexity pass 为零回归参照
-- **红线**：纯 `frontend/`，不碰 gateway/front_door/remote_commands（F150 地盘）；**绝不 push**
+- **红线**：纯 `frontend/`，不碰 gateway/front_door（F150 地盘）；**绝不 push**
 
 ## 1. 目标与范围
 

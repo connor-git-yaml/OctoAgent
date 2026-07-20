@@ -39,7 +39,7 @@ _RATE_LIMIT_WINDOW_SECONDS = 60.0
 _RATE_LIMIT_MAX_FAILURES = 10
 #: lockout 时长（秒）：期间该源的错误凭证请求一律 429。
 _RATE_LIMIT_LOCKOUT_SECONDS = 300.0
-#: 追踪的源上限（防伪造源撑爆内存；单用户私网实例足够）。
+#: 追踪的源上限（防伪造源撑爆内存；单用户实例足够）。
 _RATE_LIMIT_MAX_ENTRIES = 256
 
 
@@ -58,13 +58,13 @@ class _FailureRateLimiter:
 
     语义（D1，与 OpenClaw check-before-verify 的显式差异）：**验证优先**——
     调用方先做凭证验证，只有「带了凭证但验证失败」才 ``record_failure``；
-    验证成功恒放行并 ``reset``。因此正确凭证永不被锁（Tailscale serve 场景
-    所有远程共享 127.0.0.1 一个桶，锁定式会让 tailnet 内任一失控设备把唯一
+    验证成功恒放行并 ``reset``。因此正确凭证永不被锁（反向隧道回源场景
+    所有远程请求可能共享 127.0.0.1 一个桶，锁定式会让任一失控客户端把唯一
     用户锁在门外）。缺凭证（SPA 首屏裸请求渲染 FrontDoorGate 的正常路径）
     不经过本组件。
 
     key = TCP 层 client_host（不可伪造；不用 XFF——直连 LAN 场景 XFF 可被
-    伪造成每请求换桶绕过限流）；loopback 源**不豁免**（D2，serve 主入口就是
+    伪造成每请求换桶绕过限流）；loopback 源**不豁免**（D2，反向隧道回源就是
     127.0.0.1，豁免即失效）。时钟经构造注入（默认 ``time.monotonic``，测试
     可控无 sleep）。FastAPI 单 event loop 内方法为同步段，无锁需求。
     """

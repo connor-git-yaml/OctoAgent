@@ -83,8 +83,7 @@
     staged 附跑校验器、生产 src 无伴随测试 WARNING）；baseline = 合 master 前
     本地全量编排；**release = 真机部署前强制 live**——`-m real_llm` live lane
     （skip 即 FAIL：exit 0 且 passed≥1 且 unexpected_skip=0）+ `octo attest
-    service→remote` 探针（解析 --json status 字段；service not_enabled 恒
-    FAIL，remote not_enabled 默认 FAIL、`--allow-not-enabled` 降 WARN）+
+    service` 探针（解析 --json status 字段；not_enabled 恒 FAIL）+
     attestation 清单签署核对（`--require-signed`）；`SKIP_E2E` 在 release
     无效、`--skip` 拒 live/attestation lanes。
   - 新 marker **`real_llm`**：真发起 LLM 调用的**事实**子集（现 2 文件级 +

@@ -79,7 +79,7 @@ _ALWAYS_BLOCKED_NETWORKS = (ipaddress.ip_network("169.254.0.0/16"),)
 
 # CGNAT / Shared Address Space（RFC 6598）。`ipaddress.is_private` **不覆盖**
 # 100.64.0.0/10（is_private 与 is_global 都返回 False），必须显式拦。运营商级
-# NAT、Tailscale/WireGuard、部分云内网用它。
+# NAT、部分虚拟网络与云内网会使用它。
 _CGNAT_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 
 # IPv6→IPv4 翻译前缀：内嵌一个目标 IPv4，但前缀本身 is_global=True，不会被任何

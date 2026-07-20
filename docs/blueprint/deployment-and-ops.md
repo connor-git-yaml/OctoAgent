@@ -137,13 +137,13 @@ volumes:
 > 本节记录 F147 对"是否把 OctoAgent 容器化交付"的评估结论，**取代** §12.1.2 的
 > Docker Compose 多容器生产拓扑愿景（那是 M0 期蓝图设想，M8 部署决策已实测超越）。
 
-**结论：单用户部署不做容器化。** 首选形态 = **禁睡常驻 Mac + launchd/systemd user unit + Tailscale**（M8 F129/F130 已交付并实测）。
+**结论：单用户部署不做容器化。** 首选形态 = **禁睡常驻 Mac + launchd/systemd user unit**；远程入口由 F150 的 Cloudflare Tunnel 单独提供。
 
 **取证与理由**：
 
 - **无编排需求**：Blueprint §0 锁定单用户深度，无多实例/横向扩展/多服务编排场景——Docker Compose 多容器（§12.1.2）解决的是编排问题，此处不存在。
 - **崩溃自愈 + 开机自启已由 OS 覆盖**：F129 `octo service {install,uninstall,status}`（launchd/systemd user unit，三态幂等 + 旧进程交接 + /ready 校验）已给出容器编排的核心卖点（进程守护、崩溃重启、开机自启），无需容器运行时。
-- **远程触达已解决**：F130 Tailscale serve（三态检测/建议/接管 + `octo remote enable`）已通手机远程链路，无需容器网络暴露。
+- **远程触达不依赖容器网络**：F150 使用出站 Cloudflare Tunnel 回源 loopback，无需为 Gateway 开放容器端口或公网监听。
 - **容器徒增复杂度无对应收益**：镜像构建/维护、卷挂载（`~/.octoagent` 数据 + behavior + secrets）、凭证注入、时区、以及 JobRunner 沙箱的 **Docker-in-Docker 嵌套**（部署容器内再起沙箱容器，见 §12.1.3）都是净增运维面，换不到单用户场景下的实际好处。
 - **JobRunner 执行沙箱仍用 Docker**：注意区分——**执行层**沙箱（§12.1.3 执行隔离）继续用 Docker Socket 挂载，这与"**部署层**是否容器化"是两回事；不做容器交付不影响执行沙箱隔离。
 
@@ -493,35 +493,26 @@ Watchdog 作为 kernel 内部组件，监控 Task 执行健康度：
   `octo service install --keep-awake`（用户级 caffeinate 伴随，零 sudo，
   合盖睡眠软件挡不住——诚实边界）。
 
-#### 12.5.7 手机安全远程触达（F130 Tailscale，M8）
+#### 12.5.7 手机安全远程触达（F150 Cloudflare Tunnel，M11）
 
-> 让手机经互联网**安全打开完整 Web UI**（不只 Telegram 文本），走 Tailscale serve 私网隧道——
-> 零证书配置、不公网暴露、依托 F129 已常驻的服务。详见 `docs/codebase-architecture/remote-access.md`。
+> F150 规划以 Cloudflare named tunnel + Access 提供唯一远程 Web 入口。当前代码尚未交付该能力；现阶段只支持主机本地 loopback 使用。详见 `docs/codebase-architecture/remote-access.md`。
 
-**上手步骤（手机首次配置）**：
+**目标部署形态**：
 
-1. **常驻服务在线**：先 `octo service install`（F129），确认 `octo service status` 三态健康。
-2. **装 Tailscale + 登录**：Mac 装 Tailscale.app，`tailscale up` 登录 tailnet；admin console
-   启用 **MagicDNS + HTTPS Certificates**（serve 前置）。手机装 Tailscale App 登录同一 tailnet。
-3. **一键切远程模式**：`octo remote enable` →
-   - 检测 Tailscale 三态（未就绪给可操作指引，**不改配置**）；
-   - 就绪则**先跑 `tailscale serve`（成功后才**切 `front_door.mode=bearer`，原子）；
-   - 提示在 `~/.octoagent/.env` 设 `OCTOAGENT_FRONTDOOR_TOKEN=<强随机>`（走 .env 不落 config）；
-   - 打印手机访问 URL `https://<magicdns>/`。
-4. **重启生效**：`octo restart`（front_door 模式改动需重启）。
-5. **手机访问**：浏览器打开 `https://<magicdns>/`，页面输入 token 即得完整 Web UI。
+1. **常驻服务在线**：`octo service install` 托管 Gateway，确认 `octo service status` 健康。
+2. **正式 tunnel**：使用官方 `cloudflared` service + named tunnel，ingress 只回源 `127.0.0.1:<port>`。
+3. **Access 全站保护**：Access application 覆盖 SPA、API 与 SSE；Gateway 在 origin 再验证 Access JWT。
+4. **浏览器会话**：用户在普通浏览器完成 Access 登录；Gateway 验证 JWT 与 owner identity，直接复用 Access application session，不签发第二套 Octo Cookie。
+5. **验证**：真实 named tunnel 下完成 SPA、REST、SSE 流式、Access 登出/过期与重新认证测试，证据中不得出现 secret。
 
 **关键约束 / 红线**：
-- **serve 必配 bearer**（非 loopback）：serve 从 loopback 代理会注入 `X-Forwarded-*`，loopback 模式会全 403；
-  bearer 是 tailnet ACL 之外的纵深第二道闸。
-- **host 保持 127.0.0.1**：serve 从 loopback 代理，gateway 不监听任何外部网卡 = 暴露面最小；
-  **绑 0.0.0.0 + loopback 模式 = 裸奔** → 启动期 `exit(78)` 拒绝（`octo doctor` 亦标 FAIL）。
-- **零 sudo / 不代改系统**：serve 遇 permission / HTTPS 未启用给手动指引不代跑（延续 F129 红线）。
-- **secret 零落盘**：tskey 只在 `~/.octoagent/.env`，绝不进 plist/config/日志（log_redaction 补 tskey 前缀）。
-- **关闭**：`octo remote disable` 切回 loopback + 只关本功能的 serve 映射（不清整机他人 serve 配置）。
 
-**诊断**：`octo remote status`（当前 mode + 三态 + 暴露判定 + 手机 URL）；`octo doctor`
-新增 `tailscale_connectivity` + `front_door_exposure` 两 check。
+- Gateway 始终绑定 `127.0.0.1`，不得为远程访问改绑 `0.0.0.0`。
+- 禁止 quick tunnel、临时前台进程和匿名公开链接。
+- 手机不保存 bearer token 或 Cloudflare service token，也不要求安装额外网络客户端。
+- F150 不新增配对码、remote session 或 browser device 数据表；原生设备注册统一归 F153。
+- Cloudflare 在边缘终止 TLS，产品文案不得宣称设备间端到端加密。
+- 配置失败保持本地 loopback 可恢复，不降低认证强度。
 
 ### 12.6 升级与迁移
 

@@ -294,15 +294,14 @@ create_app 构造期注册，遮蔽 lifespan 期 harness 挂载的 telegram webh
 
 | 命令 | 吸收对象 | 副作用 |
 |------|---------|--------|
-| `octo attest remote [--json]` | F130 AC-1 链路半边（tailscale→serve→/ready+SPA+bearer+SSE 验活） | 零（只读 GET） |
 | `octo attest service [--dry-run] [--json]` | F129 AC-1 崩溃自愈（SIGKILL 真 pid → poll 恢复 → 新 pid） | 服务秒级闪断 |
 
 - **三态协议**：`pass / not_enabled / fail`（exit 0/0/1）——`not_enabled` 是
-  「能力未启用」不是失败；`fail` 才是回归信号（含「已启用但 tailscale 断链」）。
+  「service 未启用」不是命令执行错误；release lane 仍将其判为 FAIL。
 - **绝不进 CI**：真副作用 + 依赖真实实例。探针逻辑回归由 hermetic 单测
   `packages/provider/tests/dx/test_attest_commands.py` 在 CI 守（DI 全 fake：
-  零真 tailscale / 零真 HTTP / 零真 kill / 虚拟时钟）。
-- **F141 消费**：release lane 跑两探针 `--json` + attestation 清单签署
+  零真 kill / 虚拟时钟）。
+- **F141 消费**：release lane 跑 service 探针 `--json` + attestation 清单签署
   （`docs/codebase-architecture/attestation-checklist.md`，物理不可自动化残余，
   首版仅 2 项）。契约细节见
   `.specify/features/144-attestation-absorb/handoff-to-F141.md`。

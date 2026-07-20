@@ -1,6 +1,6 @@
 # F129 常驻服务地基 — Completion Report
 
-**Feature**: F129 / `service-foundation`（M8 P0，波次 1，F130 Tailscale 前置）
+**Feature**: F129 / `service-foundation`（M8 P0，服务基础）
 **分支**: `feature/129-service-foundation`（base master 30ea77ce）
 **状态**: 实施完成，双评审闭环 0 HIGH 残留，**未 push origin，等用户拍板**
 **规模复核**: spec 定 M —— 实际吻合（8 个实现 Phase commit，净增 ~4900 行含测试/文档，无 DB schema / 无 event schema / 无跨包大重构）
@@ -118,4 +118,4 @@
 | GATE-3 | 三态幂等 + 尽力 uninstall + dry-run | ✅ Phase B 实现，后续 Phase 未破坏（P2-3/P2-6 反而加严了 gate 透传） |
 | GATE-4 | restart 分层委托 | ✅ Phase C（OS_SERVICE 委托 / COMMAND 不变） |
 | GATE-5 | 日志 `~/.octoagent/logs/octoagent.log` 10MB×5 env 可配 + 脱敏默认 ON import 快照 + 文本格式 + octo logs | ✅ Phase D+E 全兑现 |
-| GATE-6 | 退避+熔断 | ✅ Phase B 模板（ThrottleInterval=10 / StartLimitBurst=5/60s / RestartPreventExitStatus=78）；gateway 侧主动 exit(78) 留 F130+（handoff 注明） |
+| GATE-6 | 退避+熔断 | ✅ Phase B 模板（ThrottleInterval=10 / StartLimitBurst=5/60s / RestartPreventExitStatus=78）；gateway 侧主动 exit(78) 拒绝不安全配置 |

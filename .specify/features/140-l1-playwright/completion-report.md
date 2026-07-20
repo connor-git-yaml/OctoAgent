@@ -65,7 +65,7 @@ return fetch(url, { ...init, headers });   // 修
 `/api/approve/*` 都传了 `Content-Type`）时，后展开的 `init.headers` 把已注入
 `Authorization` 的合并 headers 整体覆盖——**bearer 模式下手机/远程聊天发送必
 401**。这正是：
-- F130 完成后一直留给用户的真机验证路径（手机 Tailscale → bearer token → 聊天）——
+- bearer token gate 的浏览器验证路径——
   用户真上手机时第一条消息就会撞上；
 - 审计判定「FrontDoorGate 流程 UI-only 零测试」的确切后果——现有 client 单测只
   覆盖不带 caller-headers 的调用（`fetchControlSnapshot`），恰好绕过 bug 分支。

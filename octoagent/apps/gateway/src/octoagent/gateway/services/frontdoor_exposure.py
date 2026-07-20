@@ -1,4 +1,4 @@
-"""F130 host↔mode 暴露面校验（防裸奔，spec §E 矩阵 + 岔路⑤）。
+"""Gateway host↔mode 暴露面校验。
 
 **主责**（research.md §A.3）：host 与 mode 分属两个来源——host 在 uvicorn CLI
 层（``OCTOAGENT_HOST`` env，默认 127.0.0.1，**不进 FrontDoorConfig**），mode
@@ -14,10 +14,10 @@ doctor 据 verdict 映射 CheckStatus（Phase B）——判定逻辑单一事实
 | host 绑定       | mode          | verdict | 理由 |
 |-----------------|---------------|---------|------|
 | loopback        | loopback      | safe    | 纯本机 baseline（默认）|
-| loopback        | bearer        | safe    | serve 推荐组合（从 loopback 代理 + token 纵深）|
+| loopback        | bearer        | safe    | 反向隧道从 loopback 回源 + token 纵深 |
 | loopback        | trusted_proxy | safe    | 反代直连 loopback + 共享 token |
 | 非 loopback     | loopback      | reject  | 暴露全网卡 + source-IP 挡不住带 XFF 的外网 = 裸奔 |
-| 非 loopback     | bearer        | warn    | 暴露面大但有 token；建议改 serve+loopback |
+| 非 loopback     | bearer        | warn    | 暴露面大但有 token；建议改反向隧道+loopback |
 | 非 loopback     | trusted_proxy | warn    | 暴露面大，依赖 cidr+header 正确配置 |
 """
 
@@ -38,7 +38,7 @@ _LOOPBACK_HOST_NAMES = {"localhost", ""}
 
 #: 「实例权威」env 键——托管服务的真实生效值只来自实例 ``.env`` / descriptor，
 #: **不从当前 CLI shell 继承**（launchd/systemd 起的服务不继承 CLI export）。
-#: Codex 第五轮 P2：这些键的 shell-only 值会误导 remote/doctor（serve 指错端口 /
+#: Codex 第五轮 P2：这些键的 shell-only 值会误导 CLI/doctor（隧道指错端口 /
 #: 跳过 token 提示但重启 503）。前缀匹配（覆盖 ``OCTOAGENT_FRONTDOOR_TOKEN`` 及
 #: 自定义 ``*_TOKEN_ENV`` 指向的变量由调用方另行按名解析）。
 _INSTANCE_AUTHORITATIVE_PREFIXES = (
@@ -91,16 +91,16 @@ def _is_loopback_host(host: str) -> bool:
 def read_instance_effective_env(root: Path) -> dict[str, str]:
     """托管服务实际生效的 env：进程 env 为底 + 实例根 ``.env`` **覆盖**（只读）。
 
-    ★ 语义（Codex 第四轮 P2）：这是给 ``octo remote`` / ``octo doctor`` 从任意
+    ★ 语义（Codex 第四轮 P2）：这是给 CLI / ``octo doctor`` 从任意
     shell 诊断**托管服务**用的。托管服务由 launchd/systemd 起、``run-octo-home.sh``
     source 实例根 ``.env``——**CLI 当前 shell 里临时 export 的值不会被 OS 服务继承**。
     因此对 host/port/mode/token 这些键，**实例 ``.env`` 才是服务真实生效值**，
-    必须覆盖 shell 值（否则 shell 里 ``OCTOAGENT_PORT=9001`` 会让 serve 发布到错
+    必须覆盖 shell 值（否则 shell 里 ``OCTOAGENT_PORT=9001`` 会让反向隧道指向错
     端口、shell-only token 会让 CLI 跳过 token 提示但重启后 bearer 503）。
 
     ★ 「实例权威」键（host/port/mode/token，见 ``_INSTANCE_AUTHORITATIVE_PREFIXES``）
     **只来自 ``.env``，绝不从当前 CLI shell 继承**（Codex 第五轮 P2：托管服务不继承
-    CLI export，shell-only 值会误导——serve 指错端口 / 跳过 token 提示但重启 503）。
+    CLI export，shell-only 值会误导——隧道指错端口 / 跳过 token 提示但重启 503）。
     非权威键（PATH 等服务确实继承的值）以进程 env 为底、``.env`` 覆盖。**不 mutate
     os.environ**。
     """
@@ -138,13 +138,12 @@ def resolve_bind_host(env: dict[str, str] | None = None) -> str:
 def validate_front_door_exposure(host: str, mode: str) -> FrontDoorExposureVerdict:
     """按 spec §E 矩阵判定 host↔mode 暴露面（纯函数，只读）。
 
-    startup 只知 host+mode（serve 是否启用不是启动期已知输入——"serve +
-    loopback 功能不通"由 ``octo remote`` / doctor 兜底，非此处 reject）。
+    startup 只知 host+mode（反向隧道是否启用不是启动期已知输入）。
     """
     host_is_loopback = _is_loopback_host(host)
 
     if host_is_loopback:
-        # loopback host：所有 mode 都安全（serve 从 loopback 代理的推荐形态）
+        # loopback host：所有 mode 都安全（反向隧道从 loopback 回源的推荐形态）
         return FrontDoorExposureVerdict(
             verdict="safe",
             host=host,
@@ -152,7 +151,7 @@ def validate_front_door_exposure(host: str, mode: str) -> FrontDoorExposureVerdi
             reason=f"gateway 绑定 loopback（{host}）+ mode={mode}，暴露面最小",
         )
 
-    # 非 loopback host（0.0.0.0 / LAN IP / tailnet IP）——暴露面扩大
+    # 非 loopback host（0.0.0.0 / LAN IP）——暴露面扩大
     if mode == "loopback":
         # ★ 确定裸奔：既暴露全网卡，loopback mode 又靠 source IP 挡不住外网
         return FrontDoorExposureVerdict(
@@ -165,8 +164,8 @@ def validate_front_door_exposure(host: str, mode: str) -> FrontDoorExposureVerdi
                 "X-Forwarded-* 即可能绕过 = 裸奔"
             ),
             fix_hint=(
-                "改回 OCTOAGENT_HOST=127.0.0.1 + Tailscale serve（推荐，`octo remote enable`），"
-                "或若必须绑外部网卡则切 front_door.mode=bearer 并设置 token"
+                "改回 OCTOAGENT_HOST=127.0.0.1，并通过 Cloudflare Tunnel 回源；"
+                "若必须绑定外部网卡，则切 front_door.mode=bearer 并设置 token"
             ),
         )
 
@@ -179,8 +178,8 @@ def validate_front_door_exposure(host: str, mode: str) -> FrontDoorExposureVerdi
             f"gateway 绑定非 loopback（{host}）+ mode={mode}：有认证但暴露面偏大"
         ),
         fix_hint=(
-            "更安全的形态是 OCTOAGENT_HOST=127.0.0.1 + Tailscale serve"
-            "（serve 从 loopback 代理，端口不监听外部网卡）——`octo remote enable`"
+            "更安全的形态是 OCTOAGENT_HOST=127.0.0.1 + Cloudflare Tunnel"
+            "（隧道从 loopback 回源，端口不监听外部网卡）"
         ),
     )
 

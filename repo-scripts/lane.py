@@ -10,8 +10,8 @@
   complexity/vitest + L1 可选 ``--with-l1``）。
 - **release**：真机部署前，**强制 live**（cc-haha enforceReleaseLiveLanes 范式）——
   live lane 整体被跳过即 FAIL；``SKIP_E2E`` 无效；``--skip`` 不得指向 live /
-  attestation lanes；`octo attest` 探针按 F144 handoff 顺序 service → remote，
-  **解析 --json 的 status 字段**（not_enabled 与 pass 同 exit 0，不可只看退出码）。
+  attestation lanes；`octo attest service` 的 **JSON status** 是门禁事实源
+  （not_enabled 与 pass 同 exit 0，不可只看退出码）。
 
 release live lane（live-real-llm）判定（spec D4v2）：
     exit 0 且 passed ≥ 1 且 unexpected_skip = 0
@@ -87,7 +87,7 @@ class LaneSpec:
     command: list[str] = field(default_factory=list)  # script/command 用
     cwd: Path | None = None
     pytest_args: list[str] = field(default_factory=list)  # pytest* 用
-    attest_probe: str = ""  # attest 用："service" | "remote"
+    attest_probe: str = ""  # attest 用：当前仅 "service"
 
 
 @dataclass
@@ -110,7 +110,7 @@ class LaneResult:
 
 
 def lanes_for_mode(mode: str, *, with_l1: bool = False) -> list[LaneSpec]:
-    """按模式过滤 lane 清单（顺序即执行顺序；attest 顺序 = F144 handoff §2）。"""
+    """按模式过滤 lane 清单（顺序即执行顺序）。"""
     py = sys.executable
     lanes = [
         LaneSpec(
@@ -200,7 +200,6 @@ def lanes_for_mode(mode: str, *, with_l1: bool = False) -> list[LaneSpec]:
                 "-m", "real_llm", "-q", "-r", "s", "apps/gateway/tests/e2e_live",
             ],
         ),
-        # F144 handoff §2 顺序：service 先（闪断恢复后再跑 remote，避免撞闪断窗口）
         LaneSpec(
             id="attest-service",
             title="octo attest service（F129 崩溃自愈探针；秒级闪断）",
@@ -208,14 +207,6 @@ def lanes_for_mode(mode: str, *, with_l1: bool = False) -> list[LaneSpec]:
             kind="attest",
             live=True,
             attest_probe="service",
-        ),
-        LaneSpec(
-            id="attest-remote",
-            title="octo attest remote（F130 远程链路探针）",
-            modes=frozenset({"release"}),
-            kind="attest",
-            live=True,
-            attest_probe="remote",
         ),
     ]
     return [lane for lane in lanes if mode in lane.modes]
@@ -294,16 +285,12 @@ def evaluate_live_pytest(exit_code: int, counts: dict) -> tuple[bool, str, dict]
     return True, summary, breakdown
 
 
-def evaluate_attest(
-    probe: str, report: dict, *, allow_not_enabled: bool
-) -> tuple[str, str]:
+def evaluate_attest(probe: str, report: dict) -> tuple[str, str]:
     """attest 探针判定（spec D2）。返回 (lane status, 摘要)。
 
     - status 字段必须解析（not_enabled 与 pass 同 exit 0，F144 handoff §1 坑）；
-    - fail → FAIL（恒阻断，含 bearer+tailscale 断链）；
-    - service not_enabled → FAIL（常驻服务是部署形态前提，无 flag）；
-    - remote not_enabled → 默认 FAIL（防「忘了部署远程还以为验过」），
-      显式 ``--allow-not-enabled`` → WARN 记录放行。
+    - fail → FAIL；
+    - service not_enabled → FAIL（常驻服务是部署形态前提）。
     """
     status = report.get("status")
     if status == "pass":
@@ -311,19 +298,9 @@ def evaluate_attest(
     if status == "fail":
         return "fail", f"attest {probe} = fail（已启用但链路断，恒阻断）"
     if status == "not_enabled":
-        if probe == "service":
-            return "fail", (
-                "attest service = not_enabled——部署机上服务未安装是 release 阻断"
-                "（F129 常驻是部署形态前提）；先 `octo service install`"
-            )
-        if allow_not_enabled:
-            return "warn", (
-                "attest remote = not_enabled——已凭 --allow-not-enabled 显式确认"
-                "（远程触达未部署，记录放行）"
-            )
         return "fail", (
-            "attest remote = not_enabled——默认阻断防「忘了部署远程还以为验过」；"
-            "要么 `octo remote enable`，要么显式 `--allow-not-enabled` 确认"
+            "attest service = not_enabled——部署机上服务未安装是 release 阻断"
+            "（F129 常驻是部署形态前提）；先 `octo service install`"
         )
     return "fail", f"attest {probe} 输出无法识别的 status={status!r}"
 
@@ -371,14 +348,12 @@ class LaneOrchestrator:
         self,
         mode: str,
         *,
-        allow_not_enabled: bool = False,
         skip_ids: list[str] | None = None,
         dry_run: bool = False,
         attest_max_age: int | None = None,
         runner=None,
     ) -> None:
         self.mode = mode
-        self.allow_not_enabled = allow_not_enabled
         self.skip_ids = set(skip_ids or [])
         self.dry_run = dry_run
         self.attest_max_age = attest_max_age
@@ -485,9 +460,7 @@ class LaneOrchestrator:
                 f"attest --json stdout 不可解析（exit={proc.returncode}）: "
                 f"{(proc.stdout or '')[:300]} / stderr: {(proc.stderr or '')[:300]}",
             )
-        status, detail = evaluate_attest(
-            lane.attest_probe, report, allow_not_enabled=self.allow_not_enabled,
-        )
+        status, detail = evaluate_attest(lane.attest_probe, report)
         next_steps = report.get("next_steps") or []
         if status != "pass" and next_steps:
             detail += " | next_steps: " + "; ".join(str(s) for s in next_steps[:3])
@@ -525,7 +498,6 @@ def write_report(mode: str, args_ns: argparse.Namespace,
         "args": {
             "dry_run": args_ns.dry_run,
             "skip": args_ns.skip,
-            "allow_not_enabled": args_ns.allow_not_enabled,
             "with_l1": args_ns.with_l1,
         },
         "lanes": [
@@ -573,8 +545,6 @@ def main(argv: list[str] | None = None) -> int:
                              "有 planned 即 exit 3——彩排非通过）")
     parser.add_argument("--skip", action="append", default=[], metavar="LANE_ID",
                         help="显式跳过某 lane（记录在案；release 拒绝 live/attestation）")
-    parser.add_argument("--allow-not-enabled", action="store_true",
-                        help="release：attest remote = not_enabled 时降级 WARN 放行")
     parser.add_argument("--with-l1", action="store_true",
                         help="baseline：附加 L1 Playwright lane（需本地 playwright 浏览器）")
     parser.add_argument("--attest-max-age", type=int, default=None,
@@ -602,7 +572,6 @@ def main(argv: list[str] | None = None) -> int:
 
     orchestrator = LaneOrchestrator(
         args.mode,
-        allow_not_enabled=args.allow_not_enabled,
         skip_ids=args.skip,
         dry_run=args.dry_run,
         attest_max_age=args.attest_max_age,

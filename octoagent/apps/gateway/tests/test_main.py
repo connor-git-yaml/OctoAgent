@@ -376,7 +376,7 @@ async def test_lifespan_default_mode_uses_provider_router_with_skill_runner(
 
 
 # ---------------------------------------------------------------------------
-# F130 Phase D：host↔mode 启动期防裸奔 fail-fast（spec [@test] FR-C2/C3/AC-3）
+# host↔mode 启动期防裸奔 fail-fast
 # ---------------------------------------------------------------------------
 
 
@@ -429,7 +429,7 @@ def test_enforce_exposure_exit_message_mentions_exposure(
     captured = capsys.readouterr()
     assert "裸奔" in captured.err
     assert "0.0.0.0" in captured.err
-    assert "octo remote enable" in captured.err
+    assert "OCTOAGENT_HOST=127.0.0.1" in captured.err
 
 
 def test_enforce_exposure_warn_combo_does_not_exit(
@@ -443,10 +443,10 @@ def test_enforce_exposure_warn_combo_does_not_exit(
     gateway_main._enforce_front_door_exposure(tmp_path)
 
 
-def test_enforce_exposure_serve_recommended_combo_safe(
+def test_enforce_exposure_loopback_bearer_combo_safe(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Tailscale serve 推荐组合 127.0.0.1 + bearer → safe，不 exit。"""
+    """反向隧道回源组合 127.0.0.1 + bearer → safe，不 exit。"""
     gateway_main = _import_gateway_main_safely(monkeypatch)
     monkeypatch.setenv("OCTOAGENT_HOST", "127.0.0.1")
     monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "bearer")

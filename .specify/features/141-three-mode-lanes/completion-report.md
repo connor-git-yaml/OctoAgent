@@ -91,8 +91,7 @@ uv run --project octoagent --no-sync python repo-scripts/lane.py release
    运行中 + /ready 绿 → 在 attestation-checklist.md 回填 `last_attested: "YYYY-MM-DD"`）。
 2. `live-real-llm` 真打 GPT-5.5（9 用例，~5-10min，消耗 ChatGPT Pro 配额）；判定 = exit 0 且
    passed≥1 且 unexpected_skip=0（deviation/manual-gate skip 记录不阻断）。
-3. `attest-service` 会 SIGKILL 真实例（秒级闪断后自愈）；`attest-remote` 当前本机未部署
-   Tailscale → not_enabled → 默认 FAIL——确认暂不部署远程则 `--allow-not-enabled` 显式降 WARN。
+3. `attest-service` 会 SIGKILL 真实例（秒级闪断后自愈）。
 4. 报告归档 `~/.octoagent/logs/lane/release-<ts>.json`。
 
 ## 7. 已知 limitations / 后续

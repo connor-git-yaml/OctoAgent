@@ -238,11 +238,10 @@ def test_dump_scan_remains_final_net(tmp_path: Path) -> None:
 
 
 async def test_scan_catches_pattern_shapes_without_registration() -> None:
-    """模式类扫描（sk-/tskey-/JWT）不依赖禁串登记——防『忘了登记』的兜底。"""
+    """模式类扫描（sk-/JWT）不依赖禁串登记——防『忘了登记』的兜底。"""
     recorder = CassetteRecorder(meta={"scenario": "pattern-scan"})
     assert recorder.scan_serialized("harmless text") == []
     assert recorder.scan_serialized(f"oops {PLANTED_SK}")
-    assert recorder.scan_serialized("oops tskey-auth-abcd1234")
     assert recorder.scan_serialized(f"oops {PLANTED_JWT}")
 
 

@@ -58,7 +58,7 @@ lane——彩排非通过，gate 消费方只认 0）。
 | frontend-vitest | — | ✅ | ✅ | `npx vitest run` |
 | l1-playwright | — | `--with-l1` | — | 本地要装 playwright 浏览器；CI 有独立 job 常跑 |
 | live-real-llm | — | — | ✅ live | `pytest -m real_llm`：**exit 0 且 passed ≥ 1 且 unexpected_skip = 0** |
-| attest-service → attest-remote | — | — | ✅ live | `octo attest * --json` 解析 `status` 字段（not_enabled 与 pass 同 exit 0！）；service not_enabled = FAIL；remote not_enabled 默认 FAIL、`--allow-not-enabled` 降 WARN |
+| attest-service | — | — | ✅ live | `octo attest service --json` 解析 `status` 字段；service not_enabled = FAIL |
 
 - **pr 模式的 canonical 执行点是 pre-commit hook**（含 change-policy staged 路由：纯 docs
   fastpath 跳 e2e+前端 / gate 资产 staged 附跑校验 / 生产 src 无伴随测试 WARNING）；

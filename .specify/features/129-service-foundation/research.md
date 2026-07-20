@@ -26,7 +26,7 @@
   → **这就是 launchd/systemd 的 `ExecStart` 目标**（"stable-working-dir 脚本"已存在，Hermes 概念天然对齐）；**默认 host 127.0.0.1**（证实报告"默认已 loopback"）。
 - 实测 `~/.octoagent/data/ops/managed-runtime.json` 的 `start_command` = `["/bin/bash", ".../scripts/run-octo-home.sh"]`，`restart_strategy: "command"`，`verify_url: "http://127.0.0.1:8000/ready?profile=core"`。
 
-  ⚠️ **注意矛盾点**：`install_bootstrap._build_runtime_descriptor` 生成的 default descriptor 用 `--host 0.0.0.0`（install_bootstrap.py:58-66，instance_root=None 分支）；但实例里实际 descriptor 指向 `run-octo-home.sh`（默认 127.0.0.1）。host 绑定语义是 F130 的事，F129 只需知道 ExecStart 目标脚本已存在。
+  ⚠️ **注意矛盾点**：`install_bootstrap._build_runtime_descriptor` 生成的 default descriptor 用 `--host 0.0.0.0`（install_bootstrap.py:58-66，instance_root=None 分支）；但实例里实际 descriptor 指向 `run-octo-home.sh`（默认 127.0.0.1）。F129 只需知道 ExecStart 目标脚本已存在，host 安全矩阵由 Gateway 统一负责。
 
 - **"install" 语义已被占用**：`install-octo-home.sh` / `install_bootstrap.py`（Feature 024）做的是**app 级 bootstrap**（装依赖、写 descriptor、生成脚本），**不涉 launchd/systemd**。→ F129 的 `octo service install`（OS 守护安装）与之**语义不同**，命名要区分（设计岔路）。
 

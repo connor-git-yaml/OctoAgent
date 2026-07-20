@@ -11,10 +11,13 @@
 - 项目名称：**OctoAgent**
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
-- 版本：v0.1（实现准备版）
-- 状态：M0-Delivered / M1-Delivered / M1.5-Delivered / M2-Delivered / M3-Delivered / M4-Delivered / **M5-Delivered**（2026-05-25 F103 同步），M6 待启动
+- 版本：v0.1（Roadmap 已增量同步至 M12；架构正文的历史漂移待 F151 收敛）
+- 状态：M0-M9 Delivered；M10 功能 Delivered、物理远程验收待闭环；**M11 Active**；M12 Planned（privacy/identity gate first）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - M5 完成日期：2026-05-25（F102 commit `9185862` + F103 同步）
+- M9 完成日期：2026-07-13
+- M10 功能完成日期：2026-07-19（仅 ATT-129-BOOT 待物理验收）
+- M11 启动日期：2026-07-19；2026-07-20 完成 F148，二次架构复审后顺序调整为 F151 → F150 → F149（F150 live spike 可提前）
 - 目标读者：
   - 你（Owner / PM / 架构师 / 最终用户）
   - 未来可能加入的 1-3 名协作者（工程实现、前端、运维）
@@ -35,8 +38,8 @@
 | [architecture-tradeoffs.md](blueprint/architecture-tradeoffs.md) | §11 | 14 个架构权衡点与收敛方案 |
 | [deployment-and-ops.md](blueprint/deployment-and-ops.md) | §12 | 部署拓扑 / Docker / 备份 / 故障策略 / DX |
 | [testing-strategy.md](blueprint/testing-strategy.md) | §13 | 10 个测试类别 + 覆盖矩阵 |
-| [milestones.md](blueprint/milestones.md) | §14 | M0-M6 里程碑 Feature 列表 |
-| [architecture-audit.md](blueprint/architecture-audit.md) | §14.5-14.13 | 短板 / 架构问题 / Worker 审计 / 代码审计 / F084-F102 完成审计 |
+| [milestones.md](blueprint/milestones.md) | §14 | M0-M12 里程碑、Feature 状态、实施波次与完成门禁 |
+| [architecture-audit.md](blueprint/architecture-audit.md) | §14.5-14.14 | 短板 / 架构问题 / Worker 审计 / 代码审计 / F084-F102 完成审计 / M11 前全仓与竞品复审 |
 | [agent-collaboration-philosophy.md](blueprint/agent-collaboration-philosophy.md) | §2.3 | **Agent 协作三条设计哲学**（H1 管家 / H2 完整对等 / H3 两种委托）|
 | [appendix.md](blueprint/appendix.md) | 附录 | 术语表 + 示例配置 |
 
@@ -379,15 +382,21 @@ Channels (Telegram/Web) → OctoGateway → OctoKernel → Workers → LiteLLM P
 | M3 增强 | ✅ | Chat Import + Vault + ToolIndex + Pipeline |
 | M4 引导式工作台 | ✅ | 30 Feature 全部完成 |
 | **M5 架构债清理 + Worker 完整对等 + 委托模式分离 + 用户感知 ROI** | ✅ | F090-F103（13 Feature）+ F084-F088（基础设施）；H1/H2/H3 哲学全部代码层落地；架构债 D1-D14 闭环 12 推迟 2（D2→F117 ✅ / D8→F108 ✅） |
-| **M6 Surface 扩张** | ⏳ | F104 文件工作台 v0.1 ✅ / F105 Multi-Platform Gateway ✅ / F106 User Plugin Loader ✅ / **F107 文件工作台 v0.2（git-aware）✅** / F108 Capability Layer Refactor ✅ / **F109 语音 PoC（STT only）✅**（本地 faster-whisper，未 push 等拍板）/ F110 语音 v0.1 / F111 Behavior Compactor ⏭ M7；地基/债务 sprint F112-F126（穿插） |
+| **M6 Surface 扩张** | ✅ | 文件工作台、多平台 Gateway、Plugin Loader、Capability 重构、语音、F112-F126 地基/安全/效率 |
+| **M7 认知深化** | ✅ | F127 Sleep-Time Memory、F111 Behavior Compactor；F128 按真实学习信号触发 |
+| **M8 部署与日常使用** | ✅ 功能 | F129、F131-F133；F134 在 M10 完成；远程访问统一转入 F150 |
+| **M9 质量保证体系** | ✅ | L1-L4、LLM 网络硬闸、scripted harness、wire replay、三模式 lane、attestation |
+| **M10 部署完成度收尾** | ✅ 功能 | F145/F134/F146/F147 全完成；ATT-129-BOOT 作为独立物理验收保留 |
+| **M11 运行边界收口 + Cloudflare 远程访问 + Web v2** | ⏳ | F148 ✅；当前旧 VPN 方案删除 baseline → F151 runtime/package truth → F150 Access-only browser remote → F149 全站 v2；不新增 runtime/tunnel/session 实体 |
+| **M12 原生 iOS + 健康/日程感知** | 📋 | F152-F156 编号预留；privacy/identity/ingestion → 真机 transport/device proof → HealthKit → EventKit OS full-access 决策门 → native UX |
 
 ### 待办汇总
 
 > 已完成项详见 [blueprint/architecture-audit.md](blueprint/architecture-audit.md)
-> 短板 1-5 ✅ | 架构 A1-A7 ✅（A7 F091 关闭） | Worker W1-W5 ✅
+> 历史短板 1-5 ✅ | 旧架构 A1-A7 曾关闭，但 2026-07-20 复审确认 A2 反向依赖再次存在并纳入 F151 | Worker W1-W5 历史状态见审计
 > **M5 增补审计** §14.9-14.13：F084-F088 ✅ / F090-F092 ✅ / F093-F096 ✅ / F097-F100 ✅ / F101-F102 ✅
 
-**M5 全部已完成（2026-05-25）。** 推迟到 F107 / M6 的项见 [blueprint/milestones.md](blueprint/milestones.md) §M6。
+**当前 P0（2026-07-20 二次复审）**：先关闭当前旧 VPN 方案删除工作并建立全绿 baseline；F150 只提前做真实 named-tunnel/SSE/Access spike，生产实现先完成 F151。随后按 F150 → F149 推进。ATT-129-BOOT 作为独立物理验收项保留。准确顺序、F150 session 简化和 M12 Apple 权限门禁见 [blueprint/milestones.md](blueprint/milestones.md) §M10-M12。
 
 ### 三条设计哲学（M5 引入）
 

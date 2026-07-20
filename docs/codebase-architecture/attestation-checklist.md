@@ -25,16 +25,6 @@ attestations:
     frequency: release
     last_attested: null
     optional: false
-  - id: ATT-130-PHONE
-    source_ac: "F130 AC-1（手机首屏体验半边）"
-    why_physical: >-
-      跨设备（手机）+ 人眼体验（页面渲染/输 token 交互）无法在本机自动化；
-      链路半边（serve→/ready+SPA+bearer+SSE）已被 `octo attest remote` 吸收，
-      探针绿后本项基本冗余，故 optional。
-    action: "手机浏览器开 https://<magicdns>/ 输 token → 首屏正常可交互"
-    frequency: release
-    last_attested: null
-    optional: true
 ```
 
 ## 字段语义
@@ -55,9 +45,7 @@ attestations:
 |--------|-----------|-----------|
 | F129 崩溃自愈（kill → 拉起新 pid） | `octo attest service` | — |
 | F129 开机自启（reboot → 自动运行） | 物理不可自动化 | ATT-129-BOOT |
-| F130 远程链路（serve → /ready+SPA+bearer+SSE） | `octo attest remote` | — |
-| F130 手机首屏体验 | 跨设备人眼 | ATT-130-PHONE（optional） |
 | F135 gap-1（USER.md 写入 + 审批全链） | L3 scripted（`test_e2e_scripted_write_approval.py`） | — |
 
-维护：本文件随吸收进度更新——某残余项被新机制吸收（如未来远程 UI 自动化覆盖手机
-首屏）时**删行**，不留死项。来源制品：`.specify/features/144-attestation-absorb/`。
+维护：本文件随吸收进度更新——某残余项被新机制吸收时**删行**，不留死项。
+来源制品：`.specify/features/144-attestation-absorb/`。

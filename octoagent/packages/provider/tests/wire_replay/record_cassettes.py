@@ -14,7 +14,7 @@
 
 重录后必做（顺序固定）：
 1. 跑 secret 扫描：``pytest packages/provider/tests/wire_replay/ -k secret``；
-2. 人眼 review cassette diff 全文 + ``grep -RE "sk-[A-Za-z0-9_-]{8,}|tskey-|eyJ"``；
+2. 人眼 review cassette diff 全文 + ``grep -RE "sk-[A-Za-z0-9_-]{8,}|eyJ"``；
 3. 更新回放测试的精确断言（脚本尾部打印每个场景的解析摘要，直接誊写）；
 4. 重跑回放套件确认全绿。
 

@@ -148,10 +148,10 @@ transport 语义风险低）：
    `cookie` / `chatgpt-account-id`（OAuth 动态身份头）等一律不落盘。
 3. **响应头 allowlist**：仅 `content-type`（回放唯一需要）。
 4. **body 文本洗刷**：request/response 文本统一过 `octoagent.core.log_redaction.
-   redact_sensitive_text`（规则源复用：sk- / tskey- / Bearer / JWT / ENV 赋值 / JSON
+   redact_sensitive_text`（规则源复用：sk- / Bearer / JWT / ENV 赋值 / JSON
    字段 / Telegram / 连接串）。
 5. **落盘前机械断言（fail-closed）**：序列化全文扫描——
-   a) 模式类：`sk-[A-Za-z0-9_-]{8,}` / `tskey-` / JWT 三段式 `eyJ*.*.*` +
+   a) 模式类：`sk-[A-Za-z0-9_-]{8,}` / JWT 三段式 `eyJ*.*.*` +
       无歧义身份键洗刷不变量（`safety_identifier`/`prompt_cache_key` 若以 string
       值出现必须已是 `[scrubbed]`）；
    b) **已知凭证逐字匹配（raw 层硬 stop）**：录制器登记当次现役凭证
@@ -297,7 +297,7 @@ SSE 规范集，其余逐字节等价（F142 边界族 16 用例 + 既有 23 wir
 
 **AC（验收门）**：
 - AC-1 回放套件在 `env -i`（或等价 unset 全凭证 env）下全绿 —— FR-4 绑定文件。
-- AC-2 cassette 文件 `grep -RE "sk-[A-Za-z0-9_-]{8,}|tskey-|eyJ[A-Za-z0-9_-]+\."` 零命中
+- AC-2 cassette 文件 `grep -RE "sk-[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]+\."` 零命中
   + FR-8 测试常绿。
 - AC-3 全量回归 0 regression vs master d22378b8 baseline + e2e_smoke 8/8。
 - AC-4 双评审（Codex final + Opus 自审）0 HIGH 残留。

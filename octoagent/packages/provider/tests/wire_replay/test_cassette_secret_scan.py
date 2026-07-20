@@ -1,7 +1,7 @@
 """F139 committed cassette 永久 secret 扫描（spec FR-8/FR-13 + AC-2，CI 每次跑）。
 
 对仓内全部 cassettes/*.json **原文**做：
-- secret 模式扫描（sk-/tskey-/JWT，与录制管线同源 SECRET_SCAN_PATTERNS）；
+- secret 模式扫描（sk-/JWT，与录制管线同源 SECRET_SCAN_PATTERNS）；
 - auth 头名零出现（authorization / x-api-key / cookie / set-cookie /
   chatgpt-account-id——请求头 allowlist 的落盘后验证）；
 - 身份字段洗刷不变量（instructions / safety_identifier / prompt_cache_key /
@@ -66,7 +66,6 @@ def test_cassette_has_zero_secret_shapes(filename: str) -> None:
         assert f'"{header}"' not in lowered, f"{filename} 含被禁头 {header}"
     # AC-2 人工 grep 的机械等价（双查的常绿半边）
     assert not re.search(r"sk-[A-Za-z0-9_\-]{8,}", text)
-    assert "tskey-" not in text
     assert not re.search(r"eyJ[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}", text)
 
 

@@ -26,7 +26,7 @@
 
 | # | 文件 | 内容 |
 |---|------|------|
-| C1 | `repo-scripts/lane.py`（新） | LANES 注册表（spec §3 全表）+ 模式过滤 + 顺序执行 + release 强制语义（SKIP_E2E 无效告警 / --skip 拒 live / live lane passed≥1 且 unexpected_skip=0【junit skip reason 三分类，D4v2】/ attest JSON status 解析 / --allow-not-enabled / attestation --require-signed）+ `--dry-run` + 报告写 `~/.octoagent/logs/lane/<mode>-<ts>.json` + stdout 摘要表；pytest 子进程用 `uv run --no-sync python -m pytest`（cwd=octoagent，PYTHONNOUSERSITE=1 + **PYTHONPATH 锁自身 repo 树 9 个 src 目录**，D1v2/Codex M2） |
+| C1 | `repo-scripts/lane.py`（新） | LANES 注册表（spec §3 全表）+ 模式过滤 + 顺序执行 + release 强制语义（SKIP_E2E 无效告警 / --skip 拒 live / live lane passed≥1 且 unexpected_skip=0【junit skip reason 三分类，D4v2】/ service attest JSON status 解析 / attestation --require-signed）+ `--dry-run` + 报告写 `~/.octoagent/logs/lane/<mode>-<ts>.json` + stdout 摘要表；pytest 子进程用 `uv run --no-sync python -m pytest`（cwd=octoagent，PYTHONNOUSERSITE=1 + **PYTHONPATH 锁自身 repo 树 9 个 src 目录**，D1v2/Codex M2） |
 | C2 | `octoagent/tests/gate/test_lane_orchestrator.py`（新） | lane 组合按模式过滤正确；release 语义 AC-3 各条含 skip 三分类（用 fake runner 注入，不真跑子进程） |
 | C3 | `real_llm` marker（D9）：pyproject 注册 + pytestmark 加 `test_e2e_smoke_real_llm.py` / `test_e2e_mcp_skill_pipeline.py`（先 grep 复核真打面没有第三个文件） | |
 

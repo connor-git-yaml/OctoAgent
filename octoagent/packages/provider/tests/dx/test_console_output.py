@@ -53,7 +53,7 @@ def test_create_console_floors_width_for_narrow_env(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """F147：窄环境（非 TTY，探测 width=80）create_console 给可读下限，
-    `octo remote enable` 关键指引长 CJK 行不被 Rich 硬折断。"""
+    关键操作指引的长 CJK 行不被 Rich 硬折断。"""
     # pytest 捕获 stdout = 非 TTY；COLUMNS=80 → Rich 探测 width=80（现状会折断）
     monkeypatch.setenv("COLUMNS", "80")
     monkeypatch.delenv("OCTOAGENT_PLAIN_OUTPUT", raising=False)
@@ -70,7 +70,7 @@ def test_create_console_floors_width_for_narrow_env(
     with console.capture() as capture:
         console.print(
             render_panel(
-                "octo remote enable",
+                "安全配置",
                 [long_line],
                 environ={"TERM": "xterm-256color", "LANG": "en_US.UTF-8"},
             )

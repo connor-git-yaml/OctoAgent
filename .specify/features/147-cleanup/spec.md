@@ -15,7 +15,7 @@
 | 2 | cron 后台失败通知 | 三姊妹 FAILED + F127/F111 spawn_error 路径**只写审计 + log，零通知**（F127/F111 显式「失败静默」，被 M10 里程碑翻转） | **改（v2 加固）**：genuine 失败（FAILED + spawn_error）补 HIGH + `record_when_filtered`（quiet 内入桶可发现）；良性 SKIPPED 静默 | 是（新增通知调用 + notification.py 加 1 backward-compat 参数） |
 | 3① | T1-TOOL-CALL-003 断言 | prompt 问时间，AmbientRuntime 已把 `current_datetime_local`+`timezone` 注入 prompt → 模型抄答不调工具 → 撞「必须 TOOL_CALL」断言 FAIL | **改**：prompt 改成确定性需要工具（读文件 + 结构化 JSON），保留 tool_call+结构化输出域意图 | 否（benchmark 非生产） |
 | 3② | runner.py 429 退避吃步数 | `while` 循环 `steps+=1` 在顶部无条件；429 分支扁平 `sleep(3)`+`continue` → 回顶部再 `steps+=1` → 退避烧 max_steps；无 rate-limit 测试 | **改**：指数退避 + 退避不计步数 + 独立重试上界 + 成功清零 | 是（skills/runner.py 决策环） |
-| 4 | 容器交付评估 | 单用户 + launchd/systemd 常驻已给崩溃自愈/开机自启 + Tailscale 给远程 | **不实施容器**：写评估结论归档 | 否 |
+| 4 | 容器交付评估 | 单用户 + launchd/systemd 常驻已给崩溃自愈/开机自启；远程反向隧道无需容器网络 | **不实施容器**：写评估结论归档 | 否 |
 | 5 | console_output 窄终端 | `create_console` 无显式 width + 模块单例 import 时锁死（实测非 TTY width=80 且 COLUMNS 后改不生效）→ 长 CJK 指引行 word-wrap 折断 | **改**：窄时给 width 下限（floor 120），保留自动探测 | 是（provider/dx/console_output.py） |
 
 ---
@@ -118,10 +118,10 @@
 
 ### 取证（实测）
 - 全仓无 `Dockerfile*` / `docker-compose*`（排除 .venv/_references）——从未实施容器。
-- M8 部署形态已定（`CLAUDE.local.md` §M8 部署形态）：单用户 = 禁睡常驻 Mac + launchd user unit + Tailscale。F129（`octo service` launchd/systemd）已给崩溃自愈 + 开机自启；F130（Tailscale serve）已给手机远程。
+- 部署形态已定：单用户 = 禁睡常驻 Mac + launchd/systemd user unit。F129（`octo service`）已给崩溃自愈 + 开机自启；F150 的 Cloudflare 出站 tunnel 不依赖容器网络。
 
 ### 决策：不实施容器，写评估结论归档
-- 归档到 `docs/blueprint/deployment-and-ops.md`（部署运维权威文档）新增「容器交付评估」小节：结论 = **不做容器**。理由：①单用户无编排/横向扩展需求；②launchd/systemd user unit 已覆盖崩溃自愈 + 开机自启（容器的核心卖点）；③Tailscale 已解决远程触达；④容器徒增迁移复杂度（镜像构建/卷挂载/凭证注入/时区/Docker-in-Docker JobRunner 嵌套）无对应收益。触发重评条件：迁移到 NAS / 多实例 / 需与其他服务编排共存时。
+- 归档到 `docs/blueprint/deployment-and-ops.md`（部署运维权威文档）新增「容器交付评估」小节：结论 = **不做容器**。理由：①单用户无编排/横向扩展需求；②launchd/systemd user unit 已覆盖崩溃自愈 + 开机自启（容器的核心卖点）；③Cloudflare 出站 tunnel 无需容器网络；④容器徒增迁移复杂度（镜像构建/卷挂载/凭证注入/时区/Docker-in-Docker JobRunner 嵌套）无对应收益。触发重评条件：迁移到 NAS / 多实例 / 需与其他服务编排共存时。
 - **不写任何 Dockerfile / compose**。
 
 ---
@@ -129,8 +129,8 @@
 ## 项 5：console_output 窄终端适配
 
 ### 取证（实测 Rich 行为）
-- `create_console`（`console_output.py:61`）建 `Console` **无显式 width**；消费方 `console = create_console()` 是**模块单例**（remote_commands/behavior_commands/chat_import/cli/backup 等 dx 命令共用）。
-- 实测（worktree venv）：非 TTY（CI/pipe）`create_console().width == 80`，且**同实例改 COLUMNS 不生效**（width import 时锁死）；width=80 时长 CJK 指引行被 Rich word-wrap 折断（`octo remote enable` 的「将生成强随机 bearer token 写入 …（变量 …，不打印明文）」断成两行）；width=120 时该行完整单行。
+- `create_console`（`console_output.py:61`）建 `Console` **无显式 width**；消费方 `console = create_console()` 是**模块单例**（behavior_commands/chat_import/cli/backup 等 dx 命令共用）。
+- 实测（worktree venv）：非 TTY（CI/pipe）`create_console().width == 80`，且**同实例改 COLUMNS 不生效**（width import 时锁死）；width=80 时长 CJK 指引行被 Rich word-wrap 折断；width=120 时该行完整单行。
 - F134 CI triage（commit 2955bc46）已实证此坑：测试注入 `Console(width=10000)` 覆盖单例绕开，并显式把「真实窄终端 CJK 折行的 console_output 适配」归 F147 followup。
 
 ### 决策：改（选 option b：width floor，保留自动探测）
@@ -141,8 +141,8 @@
 - **v2 已知限制留档（Codex 项5 LOW×2）**：floor 是「可读下限」非「永不折断」——单行 > floor（如超长 home 路径）仍会折。这是把阈值从 80 抬到 120（覆盖当前所有 remote/dx 指引行，实测最长 token 行 ~110 宽），不是任意长度根治；面板作者应保持单行 ≤ floor。「真实 80 列终端 box 溢出由终端软换行」是取舍（内容完整优先于 box 对齐，符合里程碑「关键指引可读性」诉求），已由 worktree venv 实测锚定（width=80 折断 / width=120 完整），非纯审美假设。
 
 ### 验证 / 测试锚（`test_console_output.py` 新增）
-- 新增测试：模拟窄环境（非 TTY，探测 width=80）经 `create_console` 渲染 `octo remote enable` 关键指引行，断言长 CJK 行**完整不折断**（子串完整在单行）+ 断言 `create_console().width >= _MIN_CONSOLE_WIDTH`。
-- 回归：现有 4 个 console_output 测试全绿；`test_remote_commands.py`（注入 width=10000）不冲突（10000 > floor）；全量 dx 命令输出测试（service_commands/doctor/remote/behavior 等）全绿（floor 只放宽窄环境、只让更多子串完整，不破坏断言）。
+- 新增测试：模拟窄环境（非 TTY，探测 width=80）经 `create_console` 渲染关键指引行，断言长 CJK 行**完整不折断**（子串完整在单行）+ 断言 `create_console().width >= _MIN_CONSOLE_WIDTH`。
+- 回归：现有 console_output 与全量 dx 命令输出测试（service_commands/doctor/behavior 等）全绿（floor 只放宽窄环境、只让更多子串完整，不破坏断言）。
 
 ---
 

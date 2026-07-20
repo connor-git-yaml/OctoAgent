@@ -137,10 +137,10 @@ class TestRequireSigned:
 
     def test_optional_item_never_blocks(self, attestation_mod, tmp_path: Path) -> None:
         body = BASE_ITEM.format(last_attested="2026-07-01") + (
-            '  - id: ATT-130-PHONE\n'
-            '    source_ac: "F130 AC-1"\n'
-            '    why_physical: "跨设备人眼"\n'
-            '    action: "手机浏览器验证"\n'
+            '  - id: ATT-OPTIONAL-UX\n'
+            '    source_ac: "移动端体验抽查"\n'
+            '    why_physical: "真实移动设备人眼体验"\n'
+            '    action: "手机浏览器抽查"\n'
             '    frequency: release\n'
             '    last_attested: null\n'
             '    optional: true\n'

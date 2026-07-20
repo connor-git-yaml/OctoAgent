@@ -104,7 +104,6 @@ def scrub_identity_fields(text: str) -> str:
 #: 落盘前全文扫描的 secret 形状（与 AC-2 的人工 grep 模式一致）。
 SECRET_SCAN_PATTERNS: tuple[re.Pattern[str], ...] = (
     re.compile(r"sk-[A-Za-z0-9_\-]{8,}"),
-    re.compile(r"tskey-"),
     re.compile(r"eyJ[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}\.[A-Za-z0-9_\-]{4,}"),
 )
 

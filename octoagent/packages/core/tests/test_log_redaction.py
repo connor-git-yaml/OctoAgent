@@ -38,42 +38,6 @@ class TestVendorPrefixKeys:
         assert "***" in result
 
 
-class TestTailscaleKeys:
-    """F130 FR-E1：Tailscale key 前缀（tskey-auth/api/client）脱敏。"""
-
-    @pytest.mark.parametrize(
-        "key",
-        [
-            "tskey-auth-k1A2b3C4d5E6-abcdefghijklmnopqrstuvwxyz",
-            "tskey-api-k9Z8y7X6w5V4-0123456789abcdefghij",
-            "tskey-client-kQwErTyUiOpA-secretsecretsecret1234",
-        ],
-    )
-    def test_tskey_masked(self, key: str) -> None:
-        result = redact_sensitive_text(f"registering node with {key} now")
-        assert key not in result
-        # 长 token 留头 6（保 tskey- 可辨认来源）尾 4 + 省略号
-        assert "tskey-" in result
-        assert "…" in result
-
-    def test_tskey_in_raw_traceback_line_masked(self) -> None:
-        """启动期崩溃 traceback 里的裸 key（非 ENV/JSON 赋值形态）也被遮。"""
-        line = 'ValueError: invalid auth key tskey-auth-abc123DEF456-tailtailtailtail'
-        result = redact_sensitive_text(line)
-        assert "tskey-auth-abc123DEF456-tailtailtailtail" not in result
-
-    def test_tskey_idempotent(self) -> None:
-        key = "tskey-auth-k1A2b3C4d5E6-abcdefghijklmnopqrstuvwxyz"
-        once = redact_sensitive_text(key)
-        twice = redact_sensitive_text(once)
-        assert once == twice
-
-    def test_non_tskey_text_untouched(self) -> None:
-        # 不含 tskey- 前缀的相似文本不误伤
-        text = "the task key task-42 maps to a work item"
-        assert redact_sensitive_text(text) == text
-
-
 class TestEnvAndJsonFields:
     """FR-E2：通用 ENV/JSON 字段名含 API_KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL|AUTH。"""
 

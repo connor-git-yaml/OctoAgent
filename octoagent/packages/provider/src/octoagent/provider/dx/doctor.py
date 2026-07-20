@@ -14,10 +14,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
+from octoagent.gateway.services.config.config_schema import TelegramChannelConfig
 from rich.table import Table
 
 from ..auth.store import CredentialStore
-from octoagent.gateway.services.config.config_schema import TelegramChannelConfig
 from .models import CheckLevel, CheckResult, CheckStatus, DoctorReport
 from .onboarding_models import OnboardingStepStatus
 from .service_manager import (
@@ -28,11 +28,6 @@ from .service_manager import (
     resolve_instance_root,
 )
 from .sleep_probe import SleepRisk, probe_sleep_risk
-from .tailscale_helper import (
-    TailscaleProbeResult,
-    TailscaleState,
-    probe_tailscale_status,
-)
 from .telegram_verifier import TelegramOnboardingVerifier
 
 log = structlog.get_logger()
@@ -59,7 +54,6 @@ class DoctorRunner:
         telegram_verifier: TelegramOnboardingVerifier | None = None,
         service_manager_factory: Callable[[Path], ServiceManager] | None = None,
         sleep_risk_probe: Callable[[], SleepRisk] | None = None,
-        tailscale_probe: Callable[[], TailscaleProbeResult] | None = None,
     ) -> None:
         if project_root is None:
             self._root = Path.cwd()
@@ -76,9 +70,6 @@ class DoctorRunner:
             lambda _root: build_service_manager(resolve_instance_root())
         )
         self._sleep_risk_probe = sleep_risk_probe or probe_sleep_risk
-        # F130 FR-D1 DI 缝：测试注入 stub（绝不真跑 tailscale status）。默认
-        # 走真实只读 probe（status --json），异常软化 SKIP（#6）。
-        self._tailscale_probe = tailscale_probe or probe_tailscale_status
 
     def _has_yaml_runtime_config(self) -> bool:
         return (self._root / "octoagent.yaml").exists()
@@ -127,8 +118,7 @@ class DoctorRunner:
         checks.append(await self.check_service_status())
         checks.append(await self.check_sleep_settings())
 
-        # F130 新增检查项（Tailscale 连通 + host↔mode 暴露面）
-        checks.append(await self.check_tailscale_connectivity())
+        # front-door host↔mode 暴露面
         checks.append(await self.check_front_door_exposure())
 
         # --live 检查
@@ -691,53 +681,8 @@ class DoctorRunner:
             message=message,
         )
 
-    async def check_tailscale_connectivity(self) -> CheckResult:
-        """F130 FR-D1：Tailscale 三态 + tailnet 连接（远程触达诊断）。
-
-        未装是 RECOMMENDED 非 blocking——未用远程触达的用户不该 FAIL。
-        探测只读（``status --json``），任何失败降级 SKIP（#6）。DI
-        ``tailscale_probe`` 注入 stub 保 hermetic。
-        """
-        name = "tailscale_connectivity"
-        try:
-            probe = self._tailscale_probe()
-        except Exception as exc:
-            return CheckResult(
-                name=name,
-                status=CheckStatus.SKIP,
-                level=CheckLevel.RECOMMENDED,
-                message=f"Tailscale 探测失败（{type(exc).__name__}），跳过检查",
-            )
-        if probe.state == TailscaleState.NOT_INSTALLED:
-            return CheckResult(
-                name=name,
-                status=CheckStatus.SKIP,
-                level=CheckLevel.RECOMMENDED,
-                message="未安装 Tailscale（手机远程触达需要，未部署可忽略）",
-                fix_hint=(
-                    "如需手机经互联网安全访问 Web UI：安装 Tailscale "
-                    "(https://tailscale.com/download) 后 `octo remote enable`"
-                ),
-            )
-        if probe.state == TailscaleState.INSTALLED_NOT_READY:
-            return CheckResult(
-                name=name,
-                status=CheckStatus.WARN,
-                level=CheckLevel.RECOMMENDED,
-                message=f"Tailscale 已安装但未就绪——{probe.detail}",
-                fix_hint="运行 `tailscale up` 登录并启用 MagicDNS，再 `octo remote enable`",
-            )
-        return CheckResult(
-            name=name,
-            status=CheckStatus.PASS,
-            level=CheckLevel.RECOMMENDED,
-            message=f"Tailscale 就绪（{probe.dns_name}"
-            + (f"，{probe.ipv4}" if probe.ipv4 else "")
-            + "）",
-        )
-
     async def check_front_door_exposure(self) -> CheckResult:
-        """F130 FR-D2：host↔mode 暴露面（spec §E 矩阵，跨源读，报警不阻塞）。
+        """host↔mode 暴露面检查（跨源读，报警不阻塞）。
 
         跨源读 ``OCTOAGENT_HOST`` env + ``config.front_door.mode`` → 纯函数
         判定。doctor 层：safe=PASS / warn=WARN / reject=FAIL（**此处 FAIL 但

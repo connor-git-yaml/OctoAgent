@@ -44,7 +44,7 @@ F doctor 2 check（service_status 依赖 B / sleep_settings 独立）
 G 双评审 panel（Codex + Opus，全量回归）
                │
                ▼
-H 文档 + living-docs 漂移闸 + completion-report + handoff(F130)
+H 文档 + living-docs 漂移闸 + completion-report
 ```
 
 **并行机会**：C（restart 集成，改 update_service.py）与 D（日志，改 logging_config.py）文件不冲突可并行。B 是两者前置（C 需 OS_SERVICE 策略语义，E 需 backend）。
@@ -110,7 +110,7 @@ H 文档 + living-docs 漂移闸 + completion-report + handoff(F130)
   - 同步 `docs/blueprint/` 相关（milestones.md M8 F129 状态 / 若涉部署运维文档 deployment-and-ops.md 加 service 章节）。
   - `CLAUDE.md` CLI 命令面 / `octo service` 新命令若需登记。
 - `completion-report.md`：实际做了 vs 计划（Phase 对照）+ Codex/Opus finding 闭环表（N high/M med/K low）+ 已知 limitations + 规模复核。
-- `handoff.md`：给 F130（Tailscale）——service 定义现沿用 `--host 127.0.0.1`，F130 切 front_door 模式时需 host↔mode 校验 + 可能改 ExecStart host；status 三态可复用；日志脱敏层可复用。
+- 后续远程入口继续沿用 `--host 127.0.0.1`；status 三态与日志脱敏层可复用，不需要修改 service 的监听语义。
 - **不主动 push**，归总回报等用户拍板。
 
 ---

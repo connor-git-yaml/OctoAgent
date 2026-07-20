@@ -2,7 +2,7 @@
 
 **Feature ID**: F129
 **Slug**: service-foundation
-**Milestone**: M8（部署与日常使用）— P0，波次 1（F129→F130 严格串行前置）
+**Milestone**: M8（部署与日常使用）— P0，服务基础
 **规模**: **M**（复核见 §8）
 **Status**: **设计先行草案 v0.1**（研究闭环，spec/plan 待用户拍板 §7 设计岔路后进入实施）
 **Base**: master 30ea77ce / 分支 `feature/129-service-foundation`
@@ -60,7 +60,7 @@
 
 ## 1. 目标（Why）
 
-让 Connor 能把 Octo 部署成**禁睡常驻 Mac（mini）上的 OS 托管服务**——关终端/崩溃/开机后自动运行，运行与崩溃日志可查可脱敏，为 F130（Tailscale 手机触达）铺好"进程一直在、日志可诊断"的地基。
+让 Connor 能把 Octo 部署成**禁睡常驻 Mac（mini）上的 OS 托管服务**——关终端/崩溃/开机后自动运行，运行与崩溃日志可查可脱敏，为本机使用和后续 Cloudflare 远程入口铺好“进程一直在、日志可诊断”的地基。
 
 **用户可感知的改变**：
 - `octo service install` 一次 → 之后崩溃自愈 + 开机自启，人在外面不再失联。
@@ -88,9 +88,9 @@
 
 - **Windows 支持**（schtasks + startup dropper）：非目标平台，`detect_init_system()` 留 `none` 兜底扩展缝（§7 GATE-1）。
 - **系统级电源设置自动修改**（`pmset`/sudo）：**明确不做**（§7 GATE-2，违 #7）。
-- **host↔mode 校验 / front_door 模式切换 / Tailscale**：F130 主体。F129 的 service 定义只沿用 `run-octo-home.sh` 现有 `--host 127.0.0.1` 默认，不改绑定语义。
+- **host↔mode 校验 / front_door 模式切换 / 远程入口**：不属于 F129。service 定义只沿用 `run-octo-home.sh` 现有 `--host 127.0.0.1` 默认，不改绑定语义。
 - **service 内嵌 token auto-refresh 半自动重装**（OpenClaw install.ts）：Octo 用 `.env` 引用不把 secret 写进服务定义，从源头免此补救。
-- **RPC/WS 深度探活 / 端口占用探测 / config 漂移审计**（OpenClaw status.gather 全维度）：v0.1 status 用 `{installed,loaded,running}` + `/ready` 即可；深度诊断维度可 F130 doctor 扩展时增补。
+- **RPC/WS 深度探活 / 端口占用探测 / config 漂移审计**（OpenClaw status.gather 全维度）：v0.1 status 用 `{installed,loaded,running}` + `/ready` 即可；深度诊断维度按独立 Feature 增补。
 - **restart-intent 落 SQLite handoff**：v0.1 不必（Octo restart 语义简单）；若后续 `octo update` 触发自重启需解释原因再引入。
 - **业务日志搬文件**：Octo 有 Event Store（#2）+ structlog，F129 只补**进程级 stdout/traceback 兜底 + errors triage**，不重造业务可观测性（research.md §B.5）。
 

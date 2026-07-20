@@ -52,9 +52,8 @@ def _build_runtime_descriptor(
     start_command: list[str]
     if instance_root is None:
         environment_overrides["OCTOAGENT_PROJECT_ROOT"] = str(project_root)
-        # F130：绑 127.0.0.1（最小暴露面，spec §0.3）——绑 0.0.0.0 + 默认
-        # front_door.mode=loopback 是「裸奔」组合（会被启动期 exit(78) 拒绝）。
-        # 远程访问走 `octo remote enable`（Tailscale serve + bearer），不绑外部网卡。
+        # 默认绑定 127.0.0.1 以保持最小暴露面。绑定 0.0.0.0 + 默认
+        # front_door.mode=loopback 会被启动期暴露校验拒绝。
         start_command = [
             "uv",
             "run",
@@ -288,7 +287,7 @@ def run_install_bootstrap(
                         (
                             "使用 uv run uvicorn octoagent.gateway.main:app "
                             "--host 127.0.0.1 --port 8000 启动 gateway"
-                            "（远程访问走 `octo remote enable`，不绑 0.0.0.0）。"
+                            "（不要为了远程访问改绑 0.0.0.0；应使用受认证反向隧道）。"
                         ),
                     ]
                 )

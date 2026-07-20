@@ -1,4 +1,4 @@
-"""F130：host↔mode 暴露判定纯函数矩阵测试（spec [@test] FR-C1 / AC-2 / AC-3）。
+"""host↔mode 暴露判定纯函数矩阵测试。
 
 Hermetic：纯函数，零文件系统 / 零子进程。覆盖 spec §E 全组合 → verdict，
 + 校验只读（不改 env/config）。启动期 exit(78) 接入测试见 test_main.py。
@@ -15,13 +15,13 @@ from octoagent.gateway.services.frontdoor_exposure import (
 
 
 class TestExposureMatrix:
-    """spec §E 判定矩阵全组合。"""
+    """host↔mode 判定矩阵全组合。"""
 
     @pytest.mark.parametrize(
         ("host", "mode"),
         [
             ("127.0.0.1", "loopback"),  # 默认 baseline
-            ("127.0.0.1", "bearer"),  # Tailscale serve 推荐组合
+            ("127.0.0.1", "bearer"),  # 反向隧道回源组合
             ("127.0.0.1", "trusted_proxy"),
             ("localhost", "loopback"),
             ("::1", "bearer"),
@@ -50,8 +50,8 @@ class TestExposureMatrix:
         assert verdict.verdict == "warn"
         assert verdict.fix_hint
 
-    def test_tailnet_ip_bearer_warns(self) -> None:
-        """绑 tailnet IP（bind-tailnet 备选）+ bearer → warn（可用但非最小）。"""
+    def test_private_network_ip_bearer_warns(self) -> None:
+        """绑定虚拟私网 IP + bearer → warn（可用但非最小暴露面）。"""
         verdict = validate_front_door_exposure("100.101.102.103", "bearer")
         assert verdict.verdict == "warn"
 

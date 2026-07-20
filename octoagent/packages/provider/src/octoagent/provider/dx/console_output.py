@@ -15,8 +15,8 @@ from rich.console import Console, RenderableType
 from rich.panel import Panel
 
 # F147：控制台可读宽度下限。非 TTY（CI/pipe）与真实窄终端（80 列 SSH）下 Rich 探测
-# 宽度低至 80，会把长 CJK 指引行（如 `octo remote enable` 的 bearer/MagicDNS 提示）
-# word-wrap 硬折断——可读性差。低于此下限时给 Console 显式 width，让指引行完整不折断
+# 宽度低至 80，会把较长的 CJK 操作指引
+# 的 word-wrap 硬折断——可读性差。低于此下限时给 Console 显式 width，让指引行完整不折断
 # （宽/正常终端保持 Rich 自动探测）。这是"可读下限"非"永不折断"：单行 > 下限仍会折。
 _MIN_CONSOLE_WIDTH = 120
 
@@ -115,4 +115,3 @@ def render_panel(
         border_style=border_style,
         box=box.ASCII if mode.ascii_only else box.ROUNDED,
     )
-

@@ -62,7 +62,7 @@ fail-closed 拒绝产出（两次禁串命中零半成品文件）。
   skipped/xfailed/xpassed 逐项相同，**0 regression 数学闭合**。
 - **e2e_smoke**：8 passed（+1 skipped，基线一致）。
 - **AC-1 hermetic**：unset 全凭证 env（Opus 复验另加假 HOME）回放套件全绿。
-- **AC-2 secret 双查**：`grep -RE "sk-...|tskey-|eyJ..."` + auth 头名 → 8 盘零
+- **AC-2 secret 双查**：`grep -RE "sk-...|eyJ..."` + auth 头名 → 8 盘零
   命中；`test_cassette_secret_scan.py` 常绿化（含期望清单防目录漂移）。
 - **AC-5 diff 面**：生产代码 0 行 / pyproject 0 行 / frontend/.github/.githooks/
   gateway 0 文件（红线全守住）。
