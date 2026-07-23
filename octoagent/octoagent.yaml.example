@@ -7,7 +7,7 @@
 # 快速开始：
 #   cp octoagent.yaml.example octoagent.yaml
 #   octo config provider add openrouter   # 添加 Provider 并配置 API Key
-#   octo config sync                       # 校验配置 + 查看已启用 Provider/别名摘要
+#   octo setup                             # 保存配置并验证 Provider 直连
 
 config_version: 1
 updated_at: "2026-03-08"
@@ -15,12 +15,12 @@ updated_at: "2026-03-08"
 # Provider 列表 — 每个 Provider 对应一个 LLM 服务商
 # auth_type: api_key（API Key 认证）或 oauth（OAuth 认证）
 # api_key_env: 凭证所在的环境变量名（仅存名称，不存实际值）
-# enabled: false 时不生成对应 litellm-config 条目，但配置保留（可逆）
+# enabled: false 时不参与 Provider 路由，但配置保留（可逆）
 providers:
   - id: openrouter
     name: "OpenRouter"
     auth_type: api_key
-    api_key_env: OPENROUTER_API_KEY   # 实际值在 .env.litellm 中
+    api_key_env: OPENROUTER_API_KEY   # 实际值在 CredentialStore 或 .env 中
     enabled: true
 
   # 多 Provider 示例（按需取消注释）
@@ -44,7 +44,7 @@ providers:
 
 # 模型别名映射 — 将用户可见别名绑定到具体 Provider 和模型字符串
 # provider: 对应 providers[].id（引用完整性，octo config 会自动校验）
-# model: 传递给 LiteLLM 的完整模型字符串
+# model: 传递给 Provider adapter 的完整模型字符串
 # 内置别名：main（主力模型）和 cheap（低成本模型，用于 octo doctor --live ping）
 model_aliases:
   main:
@@ -73,12 +73,6 @@ model_aliases:
   #   model: "gpt-5.4"
   #   description: "低成本模型（GPT-5.4，轻量推理）"
   #   thinking_level: low
-
-# 运行时配置 — 预留块（当前无字段）
-# F081 退役 LiteLLM Proxy（改为 ProviderRouter 直连）后，原 llm_mode /
-# litellm_proxy_url / master_key_env 三个字段均已删除，RuntimeConfig 现为空占位。
-# schema 暂无运行时字段，故此处不写 runtime: 键（OctoAgentConfig 会用空的
-# RuntimeConfig 默认值）；未来新增运行时配置项时在此添加 runtime: 块。
 
 # Front-door 边界 — 保护 owner-facing API（Control Plane / Tasks / Ops / Chat / SSE）
 # mode:

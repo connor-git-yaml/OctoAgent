@@ -23,18 +23,16 @@ from __future__ import annotations
 
 import asyncio
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 import pytest_asyncio
-
-from octoagent.core.models import RuntimeControlContext
 from octoagent.core.models import (
-    ExecutionBackend,
     HumanInputPolicy,
+    RuntimeControlContext,
     TaskStatus,
 )
 from octoagent.core.models.enums import EventType
@@ -47,7 +45,6 @@ from octoagent.gateway.services.execution_context import (
 )
 from octoagent.gateway.services.runtime_control import is_recall_planner_skip
 from octoagent.gateway.services.sse_hub import SSEHub
-
 
 # ---------------------------------------------------------------------------
 # 公共 fixture
@@ -74,7 +71,7 @@ def sse_hub():
 
 async def _ensure_task(sg, task_id: str, status: TaskStatus = TaskStatus.RUNNING) -> Task:
     """确保测试用 task 记录存在。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task = Task(
         task_id=task_id,
         created_at=now,
@@ -205,7 +202,6 @@ class TestAcF1AskBackResumeFullRecall:
             backend_job_id="backend-job-ac-f1",
             interactive=True,
             input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
-            backend=ExecutionBackend.DOCKER,
             worker_id="test-worker-ac-f1",
         )
 
@@ -219,8 +215,8 @@ class TestAcF1AskBackResumeFullRecall:
             is_caller_worker=True,
         )
 
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         deps = ToolDeps(
             project_root=MagicMock(),
@@ -316,7 +312,6 @@ class TestAcF1AskBackResumeFullRecall:
             backend_job_id="backend-job-resume-2",
             interactive=True,
             input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
-            backend=ExecutionBackend.DOCKER,
             worker_id="test-worker-resume-2",
         )
 
@@ -330,8 +325,8 @@ class TestAcF1AskBackResumeFullRecall:
             is_caller_worker=True,
         )
 
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         deps = ToolDeps(
             project_root=MagicMock(),
@@ -419,9 +414,7 @@ class TestMultiRoundAskBackLoop:
     """
 
     @pytest.mark.asyncio
-    async def test_multi_round_ask_back_full_recall_each_round(
-        self, store_group, sse_hub
-    ):
+    async def test_multi_round_ask_back_full_recall_each_round(self, store_group, sse_hub):
         """F-2b 核心：2 轮 ask_back loop，每轮验证 is_recall_planner_skip=False。
 
         场景：
@@ -443,7 +436,6 @@ class TestMultiRoundAskBackLoop:
             backend_job_id="backend-job-multi",
             interactive=True,
             input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
-            backend=ExecutionBackend.DOCKER,
             worker_id="test-worker-multi",
         )
 
@@ -457,8 +449,8 @@ class TestMultiRoundAskBackLoop:
             is_caller_worker=True,
         )
 
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         deps = ToolDeps(
             project_root=MagicMock(),
@@ -574,9 +566,7 @@ class TestMultiRoundAskBackLoop:
                 TaskStatus.RUNNING,
                 TaskStatus.WAITING_INPUT,
                 TaskStatus.SUCCEEDED,
-            ), (
-                f"Round {round_num}: task status 应为活跃态，实际: {task_current.status}"
-            )
+            ), f"Round {round_num}: task status 应为活跃态，实际: {task_current.status}"
 
         # --- 多轮汇总验证 ---
 
@@ -596,7 +586,8 @@ class TestMultiRoundAskBackLoop:
         # EventStore 验证：每轮各有 CONTROL_METADATA_UPDATED 事件（工具意图独立）
         events = await store_group.event_store.get_events_for_task(task_id)
         ctrl_events = [
-            e for e in events
+            e
+            for e in events
             if e.type == EventType.CONTROL_METADATA_UPDATED
             and e.payload.get("source") == "worker_ask_back"
         ]
@@ -607,9 +598,7 @@ class TestMultiRoundAskBackLoop:
         )
 
     @pytest.mark.asyncio
-    async def test_multi_round_request_input_independent_per_round(
-        self, store_group, sse_hub
-    ):
+    async def test_multi_round_request_input_independent_per_round(self, store_group, sse_hub):
         """F-2b 补充：request_input 多轮 loop 独立性验证。
 
         确认 request_input（ask_back 的底层实现）每轮返回对应轮次的答案，
@@ -629,7 +618,6 @@ class TestMultiRoundAskBackLoop:
             backend_job_id="backend-job-req",
             interactive=True,
             input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
-            backend=ExecutionBackend.DOCKER,
             worker_id="test-worker-req",
         )
 
@@ -643,8 +631,8 @@ class TestMultiRoundAskBackLoop:
             is_caller_worker=True,
         )
 
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         deps = ToolDeps(
             project_root=MagicMock(),
@@ -705,9 +693,7 @@ class TestMultiRoundAskBackLoop:
             assert len(error_list) == 0, (
                 f"Round {round_num}: request_input 不应抛出异常: {error_list}"
             )
-            assert len(result_list) == 1, (
-                f"Round {round_num}: request_input 应有一个返回值"
-            )
+            assert len(result_list) == 1, f"Round {round_num}: request_input 应有一个返回值"
             assert result_list[0] == expected_answer, (
                 f"Round {round_num}: request_input 应返回 {expected_answer!r}，"
                 f"实际: {result_list[0]!r}"
@@ -732,7 +718,9 @@ class TestMultiRoundAskBackLoop:
             # unspecified 路径（ask_back resume 后 runtime_context 丢失）
             start = time.perf_counter()
             result = is_recall_planner_skip(
-                RuntimeControlContext(task_id=f"task-round-{round_num}", delegation_mode="unspecified"),
+                RuntimeControlContext(
+                    task_id=f"task-round-{round_num}", delegation_mode="unspecified"
+                ),
             )
             elapsed_us = (time.perf_counter() - start) * 1_000_000
             round_timings.append(elapsed_us)

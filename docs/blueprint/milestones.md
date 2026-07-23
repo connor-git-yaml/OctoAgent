@@ -44,7 +44,7 @@ M0 实现要点与 Blueprint 偏差记录：
 
 ### M1（最小智能闭环）：LiteLLM + Auth + Skill + Tool contract（2 周）
 
-- [x] 接入 LiteLLM Proxy + 运行时 alias group 配置（cheap/main/fallback）+ 语义 alias 映射 — Feature 002 已交付
+- [x] 历史交付：接入 LiteLLM Proxy + 运行时 alias group 配置（cheap/main/fallback）+ 语义 alias 映射 — Feature 002 已交付，后由 ProviderRouter direct 退役
 - [x] 语义 alias → 运行时 group 映射 + FallbackManager + 成本双通道记录 — Feature 002 已交付
 - [x] Auth Adapter + DX 工具（§8.9.4 + §12.9）— Feature 003 已交付（253 tests）
   - 凭证数据模型（ApiKey/Token/OAuth 三种类型定义）+ AuthAdapter 接口
@@ -75,7 +75,7 @@ M0 实现要点与 Blueprint 偏差记录：
 - 工具 schema 自动反射与代码签名一致（contract test 通过）
 - 每次模型调用生成 cost/tokens 事件
 - 配置 alias 与运行时消费一致；legacy 语义 alias 仅在未显式配置同名 alias 时按兼容映射回退
-- Auth：OpenAI/OpenRouter API Key → credential store → LiteLLM Proxy → 真实 LLM 调用成功
+- 历史验收：OpenAI/OpenRouter API Key → credential store → LiteLLM Proxy → 真实 LLM 调用成功；当前改由 ProviderRouter direct 验收
 - Auth：OAuth PKCE 全流程（本地回调 + 手动降级 + Token 自动刷新）
 - Auth/DX：`octo init`（历史路径）+ `octo config`（当前路径）可完成认证配置，`octo doctor` 诊断凭证状态
 - Auth：凭证不出现在日志/事件/LLM 上下文中（C5 合规）
@@ -93,7 +93,7 @@ Feature 007（已完成）验证快照（2026-03-02）：
 > **拆解文档**：`docs/milestone/m1.5-feature-split.md`
 
 - [x] Feature 008：Orchestrator Skeleton（版本化派发契约 + Worker 回传）
-- [x] Feature 009：Worker Runtime（Free Loop + Docker/timeout/cancel）
+- [x] Feature 009：Worker Runtime（历史交付范围曾写作 Docker；当前真实实现为 Free Loop + Inline/Graph + timeout/cancel，未实现 Docker 隔离 backend）
 - [x] Feature 010：Checkpoint & Resume（幂等恢复 + 损坏降级）
 - [x] Feature 011：Watchdog + Task Journal + Drift Detector
 - [x] Feature 012：Logfire + Health/Plugin Diagnostics
@@ -128,7 +128,7 @@ M1.5 交付约束（已验证）：
 - [x] Feature 016：TelegramChannel（pairing + webhook/polling + session routing）
 - [x] Feature 017：统一操作收件箱（approvals / alerts / retry / cancel，Web + Telegram 等价）
 - [x] Feature 018：A2A-Lite 消息投递 + A2AStateMapper
-- [x] Feature 019：JobRunner docker backend + 交互式执行控制台
+- [x] Feature 019：历史任务名为 JobRunner docker backend + 交互式执行控制台；当前只保留执行控制台与 runtime 接口，Docker backend 未实现且不再宣称交付
 - [x] Feature 020：基础 memory（Fragments + SoR + WriteProposal + Vault skeleton）
 - [x] Feature 021：Chat Import Core（`octo import chats` / dry-run / report）
 - [x] Feature 022：Backup/Restore + 会话导出 + 恢复演练记录
@@ -148,7 +148,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - 新用户在引导式流程内完成 provider 配置、doctor 自检、Telegram pairing，并成功发送首条测试消息
 - Telegram 消息 → NormalizedMessage → Task 创建 / 审批 / 回传 端到端通过
 - A2A-Lite 消息在 Orchestrator ↔ Worker 间可靠投递，A2AStateMapper 映射幂等
-- JobRunner 在 Docker 内执行任务并支持日志流、取消、可选人工输入
+- 历史 M2 验收曾要求 JobRunner 在 Docker 内执行；该项未形成真实 backend，当前只验收日志流、取消与可选人工输入，隔离执行必须在后续独立能力具备真实实现后重新验收
 - Memory 写入经仲裁（WriteProposal → 验证 → commit），SoR 同 subject_key 只有 1 条 current
 - Chat Import 增量导入去重 + 窗口化摘要正确，且不污染主聊天 scope
 - 备份包可在 dry-run 中完成校验，并能恢复 tasks / events / chats / config 元数据
@@ -678,7 +678,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 ### M11（运行边界收口 + Cloudflare 远程访问 + Web 工作台 v2）⏳ 进行中（2026-07-20 二次重评）
 
 > **来源**：用户在 Claude Design 产出 Web + Mobile 两份 v2 设计稿（Spotify 深色风 · project 851e3fb2），F148 已完成主工作台。2026-07-20 又对 Octo、OpenClaw、Hermes Agent、Agent Zero 做固定版本源码审计，结论见 [architecture-audit.md](architecture-audit.md) §14.14：三个项目都值得借局部运行机制，但它们的兼容层、全局状态、Plugin/Memory 膨胀和 host-first 安全模型不应成为 Octo 的目标架构。
-> **架构定位**：Octo 保持单用户、单 Gateway application host 的模块化单体，不新建 `apps/kernel`、`workers/*`、`packages/management` 或第二套 runtime。先修真实依赖环、打包与失真配置，再开放公网；God service 只按后续触达的垂直切片收敛，不做 big-bang 重写。
+> **架构定位**：Octo 保持单用户、单 Gateway application host 的模块化单体；`apps/kernel`、`workers/*` 是历史物理拆分设想，不新建这些目录、`packages/management` 或第二套 runtime。先修真实依赖环、打包与失真配置，再开放公网；God service 只按后续触达的垂直切片收敛，不做 big-bang 重写。
 > **远程产品定位（2026-07-20 二次重评）**：Cloudflare named tunnel + Access 是唯一远程访问路径。手机使用标准浏览器，不安装网络客户端，不改变已有网络连接；Gateway 保持 loopback 回源，Access 边缘认证后由 origin 验证 JWT 与 owner identity。浏览器直接复用 Access application session，不再增加配对码、Octo Cookie、remote session/browser device 表；真正设备身份统一归 F153。
 > **设计与文案硬约束**：① Butler→主 Agent，LiteLLM→ProviderRouter，普通页面禁暴露 JWT/AUD/JWKS 等内部词；②继续消费 F148 `--cp-*` 深色 token，不造第二套主题、不向 `index.css` 堆叠；③ Cloudflare 在边缘终止 TLS，禁写“端到端加密”；④ F150 删除二次配对 UI，只补“未配置 / Access 登录 / 可用 / 会话过期或登出 / 故障恢复”的手机与桌面状态；⑤ `#1ed760` 个人自用可，未来公开分发前换成自有品牌色。
 

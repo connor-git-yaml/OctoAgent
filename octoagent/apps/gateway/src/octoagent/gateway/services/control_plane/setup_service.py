@@ -9,7 +9,6 @@ get_skill_governance_document / get_diagnostics_summary / get_capability_pack_do
 
 from __future__ import annotations
 
-import asyncio
 from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, date, datetime
@@ -24,7 +23,6 @@ from octoagent.core.models import (
     ControlPlaneCapability,
     ControlPlaneDegradedState,
     ControlPlaneResourceRef,
-    ControlPlaneSurface,
     ControlPlaneTargetRef,
     DiagnosticsFailureSummary,
     DiagnosticsSubsystemStatus,
@@ -36,12 +34,10 @@ from octoagent.core.models import (
     SetupReviewSummary,
     SkillGovernanceDocument,
     SkillGovernanceItem,
-    UpdateTriggerSource,
 )
-from octoagent.provider.dx.backup_service import BackupService
 from octoagent.gateway.services.config.config_schema import OctoAgentConfig
 from octoagent.gateway.services.config.config_wizard import load_config, save_config
-import octoagent.gateway.services.control_plane as _cp_pkg  # 通过 package 引用以支持 monkeypatch
+from octoagent.gateway.services.operations.backup_service import BackupService
 from pydantic import ValidationError
 
 from ._base import ControlPlaneActionError, ControlPlaneContext, DomainServiceBase
@@ -188,11 +184,7 @@ class SetupDomainService(
                     label="切换项目",
                     action_id="project.select",
                     enabled=switch_allowed,
-                    support_status=(
-                        "supported"
-                        if switch_allowed
-                        else "degraded"
-                    ),
+                    support_status=("supported" if switch_allowed else "degraded"),
                     reason="" if switch_allowed else "当前只有 default project",
                 )
             ],
@@ -277,9 +269,7 @@ class SetupDomainService(
                 missing_requirements.append("部分 MCP tools 当前处于降级状态。")
             config = mcp_configs.get(server_name)
             mount_policy = (
-                str(config.mount_policy).strip().lower()
-                if config is not None
-                else "auto_readonly"
+                str(config.mount_policy).strip().lower() if config is not None else "auto_readonly"
             )
             items.append(
                 SkillGovernanceItem(
@@ -418,7 +408,6 @@ class SetupDomainService(
                 config.current_value,
                 secret_audit=secret_audit,
                 bridge_refs=config.bridge_refs,
-                litellm_sync_ok=not config.degraded.is_degraded,
             ),
             source_refs=[
                 self._resource_ref("config_schema", "config:octoagent"),
@@ -755,7 +744,8 @@ class SetupDomainService(
     # ══════════════════════════════════════════════════════════════
 
     async def _handle_project_select(
-        self, request: ActionRequestEnvelope,
+        self,
+        request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         project_id = str(request.params.get("project_id", "")).strip()
         if not project_id:
@@ -794,7 +784,8 @@ class SetupDomainService(
         )
 
     async def _handle_setup_review(
-        self, request: ActionRequestEnvelope,
+        self,
+        request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         current_config = load_config(self._ctx.project_root)
         if current_config is None:
@@ -879,7 +870,8 @@ class SetupDomainService(
         )
 
     async def _handle_setup_apply(
-        self, request: ActionRequestEnvelope,
+        self,
+        request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         draft = request.params.get("draft", {})
         if draft is None:
@@ -910,11 +902,9 @@ class SetupDomainService(
                 else set()
             )
             effective_blocking = [
-                reason for reason in review.blocking_reasons
-                if not (
-                    reason.startswith("secret_missing:")
-                    and pending_env_names
-                )
+                reason
+                for reason in review.blocking_reasons
+                if not (reason.startswith("secret_missing:") and pending_env_names)
             ]
             if effective_blocking:
                 blocking = "、".join(effective_blocking) or "存在未通过项"
@@ -983,7 +973,7 @@ class SetupDomainService(
                 secret_values=secret_values,
             )
             if (
-                secret_result["litellm_env_names"]
+                secret_result["provider_env_names"]
                 or secret_result["runtime_env_names"]
                 or secret_result["profile_names"]
             ):
@@ -1024,17 +1014,6 @@ class SetupDomainService(
             )
             data["skill_selection"] = dict(skill_result.data)
             resource_refs.extend(skill_result.resource_refs)
-
-        # 密钥或配置变更后重启 Proxy
-        if self._proxy_manager is not None:
-            try:
-                await self._proxy_manager.restart()
-            except Exception as exc:
-                log.warning(
-                    "proxy_restart_after_setup_apply_failed",
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                )
 
         return self._completed_result(
             request=request,
@@ -1101,9 +1080,7 @@ class SetupDomainService(
                 },
             }
         )
-        oauth_result = await self._mcp_domain._handle_provider_oauth_openai_codex(
-            oauth_request
-        )
+        oauth_result = await self._mcp_domain._handle_provider_oauth_openai_codex(oauth_request)
         oauth_data: dict[str, Any] = dict(oauth_result.data) if oauth_result.data else {}
 
         # Step 2：OAuth 成功 → 尝试 setup.apply。apply 内部会再做 review，一旦 blocking
@@ -1174,24 +1151,6 @@ class SetupDomainService(
         apply_result = await self._handle_setup_apply(
             request.model_copy(update={"action_id": "setup.apply"})
         )
-        activation_data = await self._activate_runtime_after_config_change(
-            request=request,
-            failure_code="SETUP_ACTIVATION_FAILED",
-            failure_prefix="配置已保存，但 runtime reload 失败",
-            raise_on_failure=True,
-        )
-
-        # Feature 081 P4：proxy_manager 总是 None（Provider 直连无 Proxy）；
-        # 此分支仅做安全检查保留，下个版本删除
-        if self._proxy_manager is not None:
-            try:
-                await self._proxy_manager.restart()
-            except Exception as exc:
-                log.warning(
-                    "proxy_restart_after_quick_connect_failed",
-                    error_type=type(exc).__name__,
-                    error=str(exc),
-                )
 
         review_result = await self._handle_setup_review(
             request.model_copy(update={"action_id": "setup.review", "params": {"draft": {}}})
@@ -1200,13 +1159,10 @@ class SetupDomainService(
         data = dict(apply_result.data)
         if isinstance(refreshed_review, dict) and refreshed_review:
             data["review"] = refreshed_review
-        data["activation"] = activation_data
-
-        message = str(activation_data["runtime_reload_message"])
         return self._completed_result(
             request=request,
             code="SETUP_QUICK_CONNECTED",
-            message=message,
+            message="配置与凭证已保存；当前进程需要时请重启 Gateway。",
             data=data,
             resource_refs=self._dedupe_resource_refs(
                 list(apply_result.resource_refs)
@@ -1279,7 +1235,8 @@ class SetupDomainService(
         )
 
     async def _handle_config_apply(
-        self, request: ActionRequestEnvelope,
+        self,
+        request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         payload = request.params.get("config")
         if not isinstance(payload, dict):
@@ -1304,98 +1261,6 @@ class SetupDomainService(
     #  Private Helpers
     # ══════════════════════════════════════════════════════════════
 
-    # ── runtime activation ───────────────────────────────────────
-
-    async def _activate_runtime_after_config_change(
-        self,
-        *,
-        request: ActionRequestEnvelope,
-        failure_code: str,
-        failure_prefix: str,
-        raise_on_failure: bool,
-    ) -> dict[str, Any]:
-        """触发 runtime reload（Feature 081 后不再启动 LiteLLM Proxy）。
-
-        Feature 081 P4 修复（Codex F1）：原实现调用 ``start_proxy()`` 启动 LiteLLM
-        Proxy 子进程；Provider 直连后无 Proxy 概念，``start_proxy()`` 已退役为
-        总是抛 ``RuntimeActivationError``。修复后直接跳过 proxy 启动，仅保留
-        managed runtime 的 reload 分支（让 Gateway 进程重读新 yaml + 重建
-        ProviderRouter alias 缓存）。
-
-        ``failure_code`` / ``failure_prefix`` / ``raise_on_failure`` 仍接受但
-        在 Provider 直连模式下不会触发——保留参数以最小化调用方改动。
-        """
-        activation_service = _cp_pkg.RuntimeActivationService(self._ctx.project_root)
-        managed_runtime = activation_service.has_managed_runtime()
-
-        # Feature 081 P4：跳过 start_proxy()；直接构造成功 activation_data
-        activation_data: dict[str, Any] = {
-            "project_root": str(self._ctx.project_root),
-            "source_root": str(self._ctx.project_root),
-            "compose_file": "",
-            "proxy_url": "",
-            "managed_runtime": managed_runtime,
-            "warnings": [],
-            "runtime_reload_mode": "none",
-            "runtime_reload_message": "配置已保存，Provider 直连已就绪。",
-            "activation_succeeded": True,
-        }
-
-        update_service = self._ctx.update_service
-        if managed_runtime and update_service is not None:
-            if request.surface == ControlPlaneSurface.CLI:
-                await update_service.restart(
-                    trigger_source=self._map_update_source(request.surface)
-                )
-                activation_data["runtime_reload_mode"] = "managed_restart_completed"
-                activation_data["runtime_reload_message"] = (
-                    "已自动重启托管实例，真实模型会在新进程里生效。"
-                )
-            else:
-                asyncio.create_task(
-                    self._restart_runtime_after_delay(
-                        delay_seconds=2.0,
-                        trigger_source=self._map_update_source(request.surface),
-                    )
-                )
-                activation_data["runtime_reload_mode"] = "managed_restart_scheduled"
-                activation_data["runtime_reload_message"] = (
-                    "配置已保存，当前实例会在几秒内自动重启并切到真实模型（Provider 直连）。"
-                )
-        else:
-            activation_data["runtime_reload_mode"] = "manual_restart_required"
-            activation_data["runtime_reload_message"] = (
-                "配置已保存（Provider 直连）；如果当前 Gateway 正在运行，请手动重启后再开始真实对话。"
-            )
-        return activation_data
-
-    async def _restart_runtime_after_delay(
-        self,
-        *,
-        delay_seconds: float,
-        trigger_source: UpdateTriggerSource,
-    ) -> None:
-        update_service = self._ctx.update_service
-        if update_service is None:
-            return
-        await asyncio.sleep(delay_seconds)
-        try:
-            await update_service.restart(trigger_source=trigger_source)
-        except Exception as exc:  # pragma: no cover
-            log.warning(
-                "setup_quick_connect_restart_failed",
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
-
-    @staticmethod
-    def _map_update_source(surface: ControlPlaneSurface) -> UpdateTriggerSource:
-        mapping = {
-            ControlPlaneSurface.WEB: UpdateTriggerSource.WEB,
-            ControlPlaneSurface.CLI: UpdateTriggerSource.CLI,
-        }
-        return mapping.get(surface, UpdateTriggerSource.SYSTEM)
-
     # ── wizard session ────────────────────────────────────────────
 
     async def _get_wizard_session(self) -> Any:
@@ -1403,7 +1268,7 @@ class SetupDomainService(
             WizardSessionDocument,
             WizardStepDocument,
         )
-        from octoagent.provider.dx.onboarding_service import OnboardingService
+        from octoagent.gateway.services.operations.onboarding_service import OnboardingService
 
         onboarding = OnboardingService(self._ctx.project_root)
         session, _, notes = onboarding.load_or_create_session()

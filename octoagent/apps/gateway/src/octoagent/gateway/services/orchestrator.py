@@ -9,10 +9,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
-import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -20,35 +18,26 @@ from pathlib import Path
 from typing import Any, Protocol
 
 import structlog
-from octoagent.core.models.agent_context import resolve_permission_preset
 from octoagent.core.models import (
     TERMINAL_STATES,
-    A2AConversation,
     A2AConversationStatus,
-    A2AMessageAuditPayload,
     A2AMessageDirection,
-    A2AMessageRecord,
     ActorType,
-    AgentRuntime,
-    AgentRuntimeRole,
-    AgentSession,
-    AgentSessionKind,
     AgentDecision,
     AgentDecisionMode,
+    AgentSession,
     DelegationMode,
     DelegationResult,
     DelegationTargetKind,
     DispatchEnvelope,
-    RecallPlannerMode,
     Event,
     EventCausality,
     EventType,
-    ExecutionBackend,
     ExecutionSessionState,
     HumanInputPolicy,
     OrchestratorDecisionPayload,
     OrchestratorRequest,
-    RecallPlan,
+    RecallPlannerMode,
     RiskLevel,
     RuntimeControlContext,
     SessionContextState,
@@ -57,7 +46,6 @@ from octoagent.core.models import (
     ToolIndexQuery,
     ToolIndexSelectedPayload,
     TurnExecutorKind,
-    Work,
     WorkerDispatchedPayload,
     WorkerDispatchState,
     WorkerResult,
@@ -68,44 +56,35 @@ from octoagent.core.store import SYSTEM_INTERNAL_TASK_CHANNEL, StoreGroup
 from octoagent.policy.models import ApprovalDecision, ApprovalStatus
 from octoagent.protocol import (
     build_cancel_message,
-    build_error_message,
     build_heartbeat_message,
-    build_result_message,
-    build_task_message,
     build_update_message,
-    dispatch_envelope_from_task_message,
 )
-from octoagent.protocol.models import A2AMessage
 from octoagent.provider import ModelCallResult, TokenUsage
 from ulid import ULID
 
 from .agent_context import (
-    _SESSION_TRANSCRIPT_LIMIT_DEFAULT,
-    _dynamic_transcript_limit,
     AgentContextService,
-    build_scope_aware_session_id,
+    _dynamic_transcript_limit,
 )
-from .dispatch_service import A2ADispatchMixin
 from .agent_decision import (
     _is_trivial_direct_answer,
     build_runtime_hint_bundle,
     decide_agent_routing,
-    render_behavior_system_block,
-    render_runtime_hint_block,
 )
 from .connection_metadata import (
     resolve_delegation_target_profile_id,
     resolve_session_owner_profile_id,
 )
+from .dispatch_service import A2ADispatchMixin
 from .execution_console import ExecutionConsoleService
 from .execution_context import ExecutionRuntimeContext
 from .runtime_control import (
     RUNTIME_CONTEXT_JSON_KEY,
-    RUNTIME_CONTEXT_KEY,
     encode_runtime_context,
     is_single_loop_main_active,
     runtime_context_from_metadata,
 )
+from .runtime_service_bundle import RuntimeServiceBundle
 from .task_service import TaskService
 from .worker_runtime import (
     WorkerCancellationRegistry,
@@ -114,47 +93,6 @@ from .worker_runtime import (
 )
 
 log = structlog.get_logger()
-
-
-class _InlineReplyLLMService:
-    """把 orchestrator 的确定性收口回复接入标准 Task LLM 主链。"""
-
-    def __init__(
-        self,
-        content: str,
-        *,
-        model_alias: str = "inline-reply",
-        provider: str = "inline",
-    ) -> None:
-        self._content = content
-        self._model_alias = model_alias
-        self._provider = provider
-
-    async def call(
-        self,
-        prompt_or_messages,
-        model_alias: str | None = None,
-        *,
-        task_id: str | None = None,
-        trace_id: str | None = None,
-        metadata: dict[str, Any] | None = None,
-        worker_capability: str | None = None,
-        tool_profile: str | None = None,
-    ) -> ModelCallResult:
-        del prompt_or_messages, task_id, trace_id, metadata, worker_capability, tool_profile
-        resolved_alias = (model_alias or self._model_alias).strip() or self._model_alias
-        return ModelCallResult(
-            content=self._content,
-            model_alias=resolved_alias,
-            model_name="agent-inline",
-            provider=self._provider,
-            duration_ms=1,
-            token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
-            cost_usd=0.0,
-            cost_unavailable=False,
-            is_fallback=False,
-            fallback_reason="",
-        )
 
 
 class OrchestratorRoutingError(RuntimeError):
@@ -350,7 +288,7 @@ class WorkerRuntimeAdapter:
         self,
         store_group: StoreGroup,
         sse_hub,
-        llm_service,
+        runtime_services: RuntimeServiceBundle,
         *,
         worker_id: str = "worker.llm.default",
         capability: str = "llm_generation",
@@ -367,7 +305,7 @@ class WorkerRuntimeAdapter:
         self._runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_service,
+            runtime_services=runtime_services,
             config=runtime_config,
             docker_available_checker=docker_available_checker,
             cancellation_registry=cancellation_registry,
@@ -400,7 +338,7 @@ class OrchestratorService(A2ADispatchMixin):
         self,
         store_group: StoreGroup,
         sse_hub,
-        llm_service,
+        runtime_services: RuntimeServiceBundle,
         approval_manager: OrchestratorApprovalManager | None = None,
         *,
         policy_gate: OrchestratorPolicyGate | None = None,
@@ -416,7 +354,8 @@ class OrchestratorService(A2ADispatchMixin):
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
-        self._llm_service = llm_service
+        self._runtime_services = runtime_services
+        self._llm_service = runtime_services.llm_service
         _env_root = os.environ.get("OCTOAGENT_PROJECT_ROOT", "").strip()
         self._project_root = (
             project_root or (Path(_env_root) if _env_root else Path.cwd())
@@ -436,7 +375,7 @@ class OrchestratorService(A2ADispatchMixin):
             WorkerRuntimeAdapter(
                 store_group,
                 sse_hub,
-                llm_service,
+                runtime_services,
                 worker_id="worker.llm.default",
                 capability="llm_generation",
                 runtime_config=worker_runtime_config,
@@ -484,10 +423,7 @@ class OrchestratorService(A2ADispatchMixin):
             # F127：系统内部占位 Task（channel=="system"：巩固 root+child / F102 audit /
             # ops）状态变更不向用户推通知——后台巩固全程静默（H1），且任务列表已过滤这些
             # system task，推 STATE_TRANSITION 通知自相矛盾。状态机/审计不受影响。
-            if (
-                task is not None
-                and task.requester.channel == SYSTEM_INTERNAL_TASK_CHANNEL
-            ):
+            if task is not None and task.requester.channel == SYSTEM_INTERNAL_TASK_CHANNEL:
                 return
 
             payload = {
@@ -618,7 +554,10 @@ class OrchestratorService(A2ADispatchMixin):
             )
 
         # Feature 065: DELEGATE_GRAPH 路由分支
-        if routing_decision is not None and routing_decision.mode is AgentDecisionMode.DELEGATE_GRAPH:
+        if (
+            routing_decision is not None
+            and routing_decision.mode is AgentDecisionMode.DELEGATE_GRAPH
+        ):
             graph_result = await self._dispatch_delegate_graph(
                 request=request,
                 gate_decision=gate_decision,
@@ -713,9 +652,7 @@ class OrchestratorService(A2ADispatchMixin):
         metadata = dict(request.metadata)
         session_owner_profile_id = resolve_session_owner_profile_id(metadata)
         delegation_target_profile_id = resolve_delegation_target_profile_id(metadata)
-        explicit_requested_worker_type = str(
-            metadata.get("requested_worker_type", "")
-        ).strip()
+        explicit_requested_worker_type = str(metadata.get("requested_worker_type", "")).strip()
         canonical_worker_type = self._canonical_requested_worker_type(metadata)
         if explicit_requested_worker_type and canonical_worker_type:
             return request
@@ -781,7 +718,9 @@ class OrchestratorService(A2ADispatchMixin):
         )
         stored_rev = metadata.get("_pack_revision", 0)
         # F091 Phase C: 读 runtime_context.delegation_mode == "main_inline" 决议（F100/F112 已无 metadata fallback）
-        runtime_context_for_check = request.runtime_context or runtime_context_from_metadata(metadata)
+        runtime_context_for_check = request.runtime_context or runtime_context_from_metadata(
+            metadata
+        )
         if is_single_loop_main_active(runtime_context_for_check) and pack_rev == stored_rev:
             # F091 Phase D medium #1 闭环：short-circuit 前确保 runtime_context.delegation_mode == "main_inline"。
             # 命中此分支时 delegation_mode 为 worker_inline（is_single_loop_main_active 已排除 unspecified/None）；
@@ -816,7 +755,12 @@ class OrchestratorService(A2ADispatchMixin):
             worker_type=worker_type,
         )
         if selection is not None:
-            await TaskService(self._stores, self._sse_hub, project_root=self._project_root).append_structured_event(
+            await TaskService(
+                self._stores,
+                self._sse_hub,
+                project_root=self._project_root,
+                storage_only=True,
+            ).append_structured_event(
                 task_id=request.task_id,
                 event_type=EventType.TOOL_INDEX_SELECTED,
                 actor=ActorType.KERNEL,
@@ -856,9 +800,7 @@ class OrchestratorService(A2ADispatchMixin):
             "selected_tools": selected_tools,
             "recommended_tools": recommended_tools,
             "selected_tools_json": json.dumps(recommended_tools, ensure_ascii=False),
-            "tool_selection": (
-                selection.model_dump(mode="json") if selection is not None else {}
-            ),
+            "tool_selection": (selection.model_dump(mode="json") if selection is not None else {}),
             "agent_execution_mode": "single_loop",
             "_pack_revision": pack_rev,
         }
@@ -1010,6 +952,7 @@ class OrchestratorService(A2ADispatchMixin):
         agent_context_service = AgentContextService(
             self._stores,
             project_root=self._project_root,
+            storage_only=True,
         )
         project, workspace = await agent_context_service._resolve_project_scope(
             task=task,
@@ -1138,40 +1081,21 @@ class OrchestratorService(A2ADispatchMixin):
             route_reason=route_reason,
             gate_decision=gate_decision,
         )
-        task_service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
-        await task_service.ensure_task_running(
-            request.task_id,
-            trace_id=request.trace_id,
+        task_service = TaskService(
+            self._stores,
+            self._sse_hub,
+            project_root=self._project_root,
+            storage_only=True,
         )
-        clarification_metadata = {
-            **dict(request.metadata),
-            "final_speaker": "main",
-            "agent_decision_mode": decision.mode.value,
-            "clarification_category": decision.category,
-            "clarification_needed": decision.metadata.get(
-                "clarification_needed",
-                decision.category,
-            ),
-            "clarification_source_text": request.user_text,
-            "clarification_rationale": decision.rationale,
-            "clarification_missing_inputs": list(decision.missing_inputs),
-            "clarification_missing_inputs_json": json.dumps(
-                decision.missing_inputs,
-                ensure_ascii=False,
-            ),
-            "agent_boundary_note": decision.user_visible_boundary_note,
-            **self._build_decision_trace_metadata(decision),
-        }
-        await task_service.process_task_with_llm(
+        await task_service.complete_task_with_precomputed_result(
             task_id=request.task_id,
             user_text=request.user_text,
-            llm_service=_InlineReplyLLMService(decision.reply_prompt),
-            model_alias=request.model_alias,
-            execution_context=None,
-            dispatch_metadata=clarification_metadata,
-            worker_capability="llm_generation",
-            tool_profile="minimal",
-            runtime_context=request.runtime_context,
+            result=self._build_inline_result(
+                content=decision.reply_prompt,
+                model_alias=request.model_alias or "main",
+            ),
+            context_frame_id="",
+            request_context_snapshot=request.user_text,
         )
         task_after = await self._stores.task_store.get_task(request.task_id)
         summary_prefix = (
@@ -1184,6 +1108,21 @@ class OrchestratorService(A2ADispatchMixin):
             task_status=task_after.status if task_after is not None else TaskStatus.FAILED,
             success_summary=f"{summary_prefix}:{decision.category or 'general'}",
             dispatch_prefix="agent-clarification",
+        )
+
+    @staticmethod
+    def _build_inline_result(*, content: str, model_alias: str) -> ModelCallResult:
+        return ModelCallResult(
+            content=content,
+            model_alias=model_alias,
+            model_name="agent-inline",
+            provider="inline",
+            duration_ms=1,
+            token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+            cost_usd=0.0,
+            cost_unavailable=False,
+            is_fallback=False,
+            fallback_reason="",
         )
 
     async def _dispatch_direct_execution(
@@ -1207,24 +1146,28 @@ class OrchestratorService(A2ADispatchMixin):
         """
         is_trivial = _is_trivial_direct_answer(request.user_text)
         route_reason = (
-            "agent_direct_execution:trivial"
-            if is_trivial
-            else "agent_direct_execution:standard"
+            "agent_direct_execution:trivial" if is_trivial else "agent_direct_execution:standard"
         )
 
         # Phase 2 (Feature 064): 解析工具集，注入 tool_selection 到 metadata
         # 使 LLMService.call() → _try_call_with_tools() → SkillRunner 多轮循环自动生效
         worker_type = "general"
         selection = await self._resolve_single_loop_tool_selection(
-            request, worker_type=worker_type,
+            request,
+            worker_type=worker_type,
         )
         selected_tools = list(selection.selected_tools) if selection is not None else []
+        task_service = TaskService(
+            self._stores,
+            self._sse_hub,
+            project_root=self._project_root,
+            runtime_services=self._runtime_services,
+        )
         if selection is not None:
             route_reason = self._join_route_reason(
                 route_reason,
                 f"tool_resolution={selection.resolution_mode}",
             )
-            task_service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
             await task_service.append_structured_event(
                 task_id=request.task_id,
                 event_type=EventType.TOOL_INDEX_SELECTED,
@@ -1254,9 +1197,7 @@ class OrchestratorService(A2ADispatchMixin):
             "agent_execution_mode": "direct",
             "agent_is_trivial": is_trivial,
             "selected_tools": selected_tools,
-            "tool_selection": (
-                selection.model_dump(mode="json") if selection is not None else {}
-            ),
+            "tool_selection": (selection.model_dump(mode="json") if selection is not None else {}),
         }
         if selection is not None and selection.effective_tool_universe is not None:
             if selection.effective_tool_universe.profile_id:
@@ -1265,7 +1206,6 @@ class OrchestratorService(A2ADispatchMixin):
                     selection.effective_tool_universe.profile_id,
                 )
 
-        task_service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
         await task_service.ensure_task_running(
             request.task_id,
             trace_id=request.trace_id,
@@ -1277,7 +1217,6 @@ class OrchestratorService(A2ADispatchMixin):
         await task_service.process_task_with_llm(
             task_id=request.task_id,
             user_text=request.user_text,
-            llm_service=self._llm_service,
             model_alias=request.model_alias or "main",
             execution_context=None,
             dispatch_metadata=agent_metadata,
@@ -1289,9 +1228,7 @@ class OrchestratorService(A2ADispatchMixin):
         task_after = await self._stores.task_store.get_task(request.task_id)
         return self._agent_worker_result(
             request=request,
-            task_status=(
-                task_after.status if task_after is not None else TaskStatus.FAILED
-            ),
+            task_status=(task_after.status if task_after is not None else TaskStatus.FAILED),
             success_summary=f"agent_direct:{('trivial' if is_trivial else 'standard')}",
             dispatch_prefix="agent-direct",
         )
@@ -1311,12 +1248,17 @@ class OrchestratorService(A2ADispatchMixin):
             tool_profile_override=choice.tool_profile,
         )
         selected_tools = list(selection.selected_tools) if selection is not None else []
+        task_service = TaskService(
+            self._stores,
+            self._sse_hub,
+            project_root=self._project_root,
+            runtime_services=self._runtime_services,
+        )
         if selection is not None:
             route_reason = self._join_route_reason(
                 route_reason,
                 f"tool_resolution={selection.resolution_mode}",
             )
-            task_service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
             await task_service.append_structured_event(
                 task_id=request.task_id,
                 event_type=EventType.TOOL_INDEX_SELECTED,
@@ -1340,7 +1282,6 @@ class OrchestratorService(A2ADispatchMixin):
             gate_decision=gate_decision,
         )
 
-        task_service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
         await task_service.ensure_task_running(
             request.task_id,
             trace_id=request.trace_id,
@@ -1357,9 +1298,7 @@ class OrchestratorService(A2ADispatchMixin):
             "agent_profile_id": choice.profile_id,
             "selected_worker_type": choice.worker_type,
             "selected_tools": selected_tools,
-            "tool_selection": (
-                selection.model_dump(mode="json") if selection is not None else {}
-            ),
+            "tool_selection": (selection.model_dump(mode="json") if selection is not None else {}),
             "requested_agent_profile_id": "",
             "delegation_target_profile_id": "",
         }
@@ -1370,7 +1309,6 @@ class OrchestratorService(A2ADispatchMixin):
         await task_service.process_task_with_llm(
             task_id=request.task_id,
             user_text=request.user_text,
-            llm_service=self._llm_service,
             model_alias=request.model_alias or choice.model_alias or "main",
             execution_context=execution_context,
             dispatch_metadata=owner_metadata,
@@ -1407,7 +1345,6 @@ class OrchestratorService(A2ADispatchMixin):
             task_id=request.task_id,
             session_id=session_id,
             backend_job_id=session_id,
-            backend=ExecutionBackend.INLINE,
             interactive=True,
             input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
             worker_id=worker_id,
@@ -1425,7 +1362,7 @@ class OrchestratorService(A2ADispatchMixin):
             trace_id=request.trace_id,
             session_id=session_id,
             worker_id=worker_id,
-            backend=ExecutionBackend.INLINE.value,
+            backend="inline",
             console=self._execution_console,
             work_id=str(request.metadata.get("work_id", "")),
             runtime_kind=runtime_kind,
@@ -1493,8 +1430,8 @@ class OrchestratorService(A2ADispatchMixin):
 
     def _build_system_prompt(
         self,
-        session: "AgentSession | None",
-        snapshot_store: "Any | None" = None,
+        session: AgentSession | None,
+        snapshot_store: Any | None = None,
     ) -> dict[str, str]:
         """构建主 Agent 的系统提示冻结快照内容（Feature 084 Phase 2 接入）。
 
@@ -1540,9 +1477,7 @@ class OrchestratorService(A2ADispatchMixin):
                 str(latest_metadata.get("clarification_category", "")).strip()
                 or str(latest_metadata.get("clarification_needed", "")).strip()
             )
-            latest_source_text = str(
-                latest_metadata.get("clarification_source_text", "")
-            ).strip()
+            latest_source_text = str(latest_metadata.get("clarification_source_text", "")).strip()
 
         recent_worker_lane = await self._resolve_recent_worker_lane(task_id=request.task_id)
 
@@ -1669,7 +1604,7 @@ class OrchestratorService(A2ADispatchMixin):
         self,
         *,
         request: OrchestratorRequest,
-        gate_decision: "OrchestratorPolicyDecision",
+        gate_decision: OrchestratorPolicyDecision,
         decision: AgentDecision,
     ) -> WorkerResult | None:
         """Feature 065: DELEGATE_GRAPH 路由。
@@ -1762,9 +1697,7 @@ class OrchestratorService(A2ADispatchMixin):
         if continuity_topic:
             continuity_lines.append(f"- continuity_topic: {continuity_topic}")
         if requested_agent_profile_id:
-            continuity_lines.append(
-                f"- preferred_worker_profile_id: {requested_agent_profile_id}"
-            )
+            continuity_lines.append(f"- preferred_worker_profile_id: {requested_agent_profile_id}")
         if recent_lane is not None and recent_lane.worker_type == worker_type:
             continuity_lines.append(
                 f"- recent_lane_summary: {recent_lane.summary or recent_lane.source_work_id}"
@@ -1834,9 +1767,8 @@ class OrchestratorService(A2ADispatchMixin):
             replay = await AgentContextService(
                 self._stores,
                 project_root=self._project_root,
-            ).build_agent_session_replay_projection(
-                agent_session=agent_session
-            )
+                storage_only=True,
+            ).build_agent_session_replay_projection(agent_session=agent_session)
             transcript_entries = list(replay.transcript_entries)
             recent_tool_lines = list(replay.tool_exchange_lines)
             latest_model_preview = replay.latest_model_reply_preview
@@ -1887,8 +1819,7 @@ class OrchestratorService(A2ADispatchMixin):
                 )
 
         recent_user_lines = [
-            f"- {self._truncate_preview(text, limit=240)}"
-            for text in recent_user_messages[-4:]
+            f"- {self._truncate_preview(text, limit=240)}" for text in recent_user_messages[-4:]
         ]
         return (
             "RecentConversation:\n"
@@ -1951,7 +1882,7 @@ class OrchestratorService(A2ADispatchMixin):
                     "task_id": str(item.get("task_id", "")).strip(),
                 }
             )
-        return normalized[-_dynamic_transcript_limit():]
+        return normalized[-_dynamic_transcript_limit() :]
 
     async def _persist_main_session_transcript(
         self,
@@ -1961,7 +1892,7 @@ class OrchestratorService(A2ADispatchMixin):
         latest_model_summary: str,
         latest_model_preview: str,
     ) -> None:
-        normalized = transcript_entries[-_dynamic_transcript_limit():]
+        normalized = transcript_entries[-_dynamic_transcript_limit() :]
         metadata = {
             **session.metadata,
             "recent_transcript": normalized,
@@ -2012,9 +1943,7 @@ class OrchestratorService(A2ADispatchMixin):
                 artifact = await self._stores.artifact_store.get_artifact(artifact_ref)
                 if artifact is None or artifact.name != "llm-response":
                     continue
-                latest_model_summary = str(
-                    event.payload.get("response_summary", "") or ""
-                ).strip()
+                latest_model_summary = str(event.payload.get("response_summary", "") or "").strip()
                 payload = await self._stores.artifact_store.get_artifact_content(artifact_ref)
                 preview = (
                     self._truncate_preview(payload.decode("utf-8", errors="ignore"))
@@ -2032,7 +1961,7 @@ class OrchestratorService(A2ADispatchMixin):
                     }
                 )
         return (
-            transcript_entries[-_dynamic_transcript_limit():],
+            transcript_entries[-_dynamic_transcript_limit() :],
             recent_user_messages,
             latest_model_summary,
             latest_model_preview,
@@ -2616,7 +2545,12 @@ class OrchestratorService(A2ADispatchMixin):
         if task is None or task.status in TERMINAL_STATES:
             return
 
-        service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
+        service = TaskService(
+            self._stores,
+            self._sse_hub,
+            project_root=self._project_root,
+            storage_only=True,
+        )
         try:
             if task.status == TaskStatus.CREATED:
                 await service._write_state_transition(
@@ -2658,7 +2592,12 @@ class OrchestratorService(A2ADispatchMixin):
         if task is None or task.status in TERMINAL_STATES:
             return
 
-        service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
+        service = TaskService(
+            self._stores,
+            self._sse_hub,
+            project_root=self._project_root,
+            storage_only=True,
+        )
         try:
             if task.status == TaskStatus.CREATED:
                 await service._write_state_transition(
@@ -2744,7 +2683,12 @@ class OrchestratorService(A2ADispatchMixin):
         if target is None:
             return
 
-        service = TaskService(self._stores, self._sse_hub, project_root=self._project_root)
+        service = TaskService(
+            self._stores,
+            self._sse_hub,
+            project_root=self._project_root,
+            storage_only=True,
+        )
         try:
             if task.status == TaskStatus.CREATED:
                 await service._write_state_transition(

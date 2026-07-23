@@ -142,13 +142,9 @@ async def test_main_and_worker_session_turns_are_isolated(tmp_path: Path) -> Non
     assert all(item.task_id == "task-main-001" for item in main_turns)
     assert all(item.task_id == "task-worker-001" for item in worker_turns)
 
-    svc = AgentContextService(store_group)
-    main_session = await store_group.agent_context_store.get_agent_session(
-        "session-main-iso"
-    )
-    worker_session = await store_group.agent_context_store.get_agent_session(
-        "session-worker-iso"
-    )
+    svc = AgentContextService(store_group, storage_only=True)
+    main_session = await store_group.agent_context_store.get_agent_session("session-main-iso")
+    worker_session = await store_group.agent_context_store.get_agent_session("session-worker-iso")
     main_projection = await svc.build_agent_session_replay_projection(
         agent_session=main_session,
     )
@@ -191,13 +187,9 @@ async def test_recent_conversation_filters_by_session_id(tmp_path: Path) -> None
         output="worker 检索结果",
     )
 
-    svc = AgentContextService(store_group)
-    main_session = await store_group.agent_context_store.get_agent_session(
-        "session-main-iso"
-    )
-    worker_session = await store_group.agent_context_store.get_agent_session(
-        "session-worker-iso"
-    )
+    svc = AgentContextService(store_group, storage_only=True)
+    main_session = await store_group.agent_context_store.get_agent_session("session-main-iso")
+    worker_session = await store_group.agent_context_store.get_agent_session("session-worker-iso")
 
     main_by_id = await svc.build_agent_session_replay_projection(
         agent_session_id="session-main-iso",
@@ -245,9 +237,7 @@ async def test_worker_turn_persisted_event_emitted(tmp_path: Path) -> None:
     )
 
     events = await store_group.event_store.get_events_for_task("task-worker-A5")
-    turn_events = [
-        item for item in events if item.type is EventType.AGENT_SESSION_TURN_PERSISTED
-    ]
+    turn_events = [item for item in events if item.type is EventType.AGENT_SESSION_TURN_PERSISTED]
     # 1 次 hook = 1 tool_call + 1 tool_result = 2 turn 持久化事件
     assert len(turn_events) == 2
 
@@ -274,16 +264,11 @@ async def test_worker_turn_persisted_event_emitted(tmp_path: Path) -> None:
     )
     main_events = await store_group.event_store.get_events_for_task("task-main-A5")
     main_turn_events = [
-        item
-        for item in main_events
-        if item.type is EventType.AGENT_SESSION_TURN_PERSISTED
+        item for item in main_events if item.type is EventType.AGENT_SESSION_TURN_PERSISTED
     ]
     assert len(main_turn_events) == 2
     for item in main_turn_events:
         assert item.payload["agent_session_id"] == "session-main-iso"
-        assert (
-            item.payload["agent_session_kind"]
-            == AgentSessionKind.MAIN_BOOTSTRAP.value
-        )
+        assert item.payload["agent_session_kind"] == AgentSessionKind.MAIN_BOOTSTRAP.value
 
     await store_group.close()

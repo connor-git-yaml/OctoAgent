@@ -36,7 +36,6 @@ from octoagent.core.models import (
     AgentSessionKind,
     AgentSessionStatus,
     AutomationJob,
-    AutomationScheduleKind,
     ControlPlaneActionStatus,
     ControlPlaneActor,
     ControlPlaneEvent,
@@ -56,13 +55,12 @@ from octoagent.core.models.payloads import ControlPlaneAuditPayload
 from octoagent.core.models.task import RequesterInfo
 from octoagent.core.store import StoreGroup
 from octoagent.gateway.services.control_plane.automation_store import AutomationStore
-from octoagent.gateway.services.control_plane.control_plane_state import ControlPlaneStateStore
 from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
 from octoagent.gateway.services.memory.retrieval_platform_service import (
     RetrievalPlatformError,
     RetrievalPlatformService,
 )
-from octoagent.provider.dx.import_workbench_service import ImportWorkbenchService
+from octoagent.gateway.services.operations.import_workbench_service import ImportWorkbenchService
 from ulid import ULID
 
 from ._base import ControlPlaneActionError, ControlPlaneContext, ControlPlaneServiceRegistry
@@ -117,12 +115,14 @@ class ControlPlaneService(TelegramCommandMixin):
             task_runner=task_runner,
             capability_pack_service=capability_pack_service,
             delegation_plane_service=delegation_plane_service,
-            import_workbench_service=import_workbench_service or ImportWorkbenchService(
+            import_workbench_service=import_workbench_service
+            or ImportWorkbenchService(
                 project_root,
                 surface="web",
                 store_group=store_group,
             ),
-            memory_console_service=memory_console_service or MemoryConsoleService(
+            memory_console_service=memory_console_service
+            or MemoryConsoleService(
                 project_root,
                 store_group=store_group,
             ),
@@ -316,13 +316,15 @@ class ControlPlaneService(TelegramCommandMixin):
         raise ControlPlaneActionError("ACTION_NOT_FOUND", f"未知动作: {request.action_id}")
 
     async def _dispatch_inline_action(
-        self, request: ActionRequestEnvelope,
+        self,
+        request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope | None:
         """处理不属于任何 domain service 的简单 inline actions。"""
         action_id = request.action_id
 
         if action_id == "wizard.refresh":
             from octoagent.gateway.services.onboarding import OnboardingService
+
             await OnboardingService(self._project_root).run(status_only=True)
             return self._completed_result(
                 request=request,
@@ -333,6 +335,7 @@ class ControlPlaneService(TelegramCommandMixin):
 
         if action_id == "wizard.restart":
             from octoagent.gateway.services.onboarding import OnboardingService
+
             await OnboardingService(self._project_root).run(restart=True, status_only=False)
             return self._completed_result(
                 request=request,
@@ -372,9 +375,12 @@ class ControlPlaneService(TelegramCommandMixin):
             )
 
         if action_id == "backup.create":
-            from octoagent.provider.dx.backup_service import BackupService
+            from octoagent.gateway.services.operations.backup_service import BackupService
+
             label = str(request.params.get("label", "")).strip() or None
-            bundle = await BackupService(self._project_root, store_group=self._stores).create_bundle(
+            bundle = await BackupService(
+                self._project_root, store_group=self._stores
+            ).create_bundle(
                 label=label,
             )
             return self._completed_result(
@@ -386,7 +392,8 @@ class ControlPlaneService(TelegramCommandMixin):
             )
 
         if action_id == "restore.plan":
-            from octoagent.provider.dx.backup_service import BackupService
+            from octoagent.gateway.services.operations.backup_service import BackupService
+
             bundle = str(request.params.get("bundle", "")).strip()
             target_root = str(request.params.get("target_root", "")).strip() or None
             if not bundle:
@@ -468,10 +475,14 @@ class ControlPlaneService(TelegramCommandMixin):
             return await self._handle_operator_approval(request)
 
         if action_id in {
-            "operator.alert.ack", "operator.task.retry", "operator.task.cancel",
-            "channel.pairing.approve", "channel.pairing.reject",
+            "operator.alert.ack",
+            "operator.task.retry",
+            "operator.task.cancel",
+            "channel.pairing.approve",
+            "channel.pairing.reject",
         }:
             from octoagent.core.models import OperatorActionKind
+
             kind_map = {
                 "operator.alert.ack": OperatorActionKind.ACK_ALERT,
                 "operator.task.retry": OperatorActionKind.RETRY_TASK,
@@ -488,9 +499,11 @@ class ControlPlaneService(TelegramCommandMixin):
     # ------------------------------------------------------------------
 
     async def _handle_operator_approval(
-        self, request: ActionRequestEnvelope,
+        self,
+        request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         from octoagent.core.models import OperatorActionKind
+
         approval_id = str(request.params.get("approval_id", "")).strip()
         mode = str(request.params.get("mode", "once")).strip().lower()
         if not approval_id:
@@ -530,10 +543,12 @@ class ControlPlaneService(TelegramCommandMixin):
         item_id: str,
         kind: Any,
     ) -> ActionResultEnvelope:
-        from octoagent.core.models import OperatorActionRequest, OperatorActionSource
+        from octoagent.core.models import OperatorActionRequest
+
         if self._ctx.operator_action_service is None:
             raise ControlPlaneActionError(
-                "OPERATOR_ACTION_UNAVAILABLE", "operator action service 不可用",
+                "OPERATOR_ACTION_UNAVAILABLE",
+                "operator action service 不可用",
             )
         result = await self._ctx.operator_action_service.execute(
             OperatorActionRequest(
@@ -569,6 +584,7 @@ class ControlPlaneService(TelegramCommandMixin):
     @staticmethod
     def _map_operator_source(surface: ControlPlaneSurface) -> Any:
         from octoagent.core.models import OperatorActionSource
+
         mapping = {
             ControlPlaneSurface.WEB: OperatorActionSource.WEB,
             ControlPlaneSurface.CLI: OperatorActionSource.CLI,
@@ -579,6 +595,7 @@ class ControlPlaneService(TelegramCommandMixin):
     @staticmethod
     def _map_update_source(surface: ControlPlaneSurface) -> Any:
         from octoagent.core.models.update import UpdateTriggerSource
+
         mapping = {
             ControlPlaneSurface.WEB: UpdateTriggerSource.WEB,
             ControlPlaneSurface.CLI: UpdateTriggerSource.CLI,
@@ -689,7 +706,8 @@ class ControlPlaneService(TelegramCommandMixin):
             else list(resolvers)
         )
         skipped_sections = {
-            name for name, _ in resolvers
+            name
+            for name, _ in resolvers
             if str(mode or "").strip().lower() == "lite" and name not in lite_sections
         }
 
@@ -703,7 +721,9 @@ class ControlPlaneService(TelegramCommandMixin):
         snapshot_started = time.perf_counter()
         section_timings_ms: dict[str, float] = {}
 
-        async def _run_timed_resolver(section: str, resolver: Any) -> tuple[str, Any, Exception | None]:
+        async def _run_timed_resolver(
+            section: str, resolver: Any
+        ) -> tuple[str, Any, Exception | None]:
             started = time.perf_counter()
             try:
                 return await _run_resolver(section, resolver)
@@ -711,10 +731,7 @@ class ControlPlaneService(TelegramCommandMixin):
                 section_timings_ms[section] = (time.perf_counter() - started) * 1000
 
         results = await asyncio.gather(
-            *[
-                _run_timed_resolver(section, resolver)
-                for section, resolver in selected_resolvers
-            ]
+            *[_run_timed_resolver(section, resolver) for section, resolver in selected_resolvers]
         )
         for section, document, exc in results:
             if exc is None:
@@ -934,12 +951,14 @@ class ControlPlaneService(TelegramCommandMixin):
         trigger: str = "scheduler",
     ) -> Any:
         from octoagent.core.models import ControlPlaneActor as _Actor
+
         resolved_actor = actor or _Actor(
             actor_id="system:automation",
             actor_label="Automation Scheduler",
         )
         return await self._automation_service.create_automation_run(
-            job=job, actor=resolved_actor,
+            job=job,
+            actor=resolved_actor,
         )
 
     # ------------------------------------------------------------------

@@ -23,6 +23,18 @@ from octoagent.core.models import (
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.cli.cli import main as provider_cli
+
+# F081 cleanup：octoagent.provider.config 已删除（连同 LiteLLM Proxy）；
+# echo 模式现仅由 OCTOAGENT_LLM_MODE 环境变量控制。
+from octoagent.gateway.services.operations.channel_verifier import ChannelVerifierRegistry
+from octoagent.gateway.services.operations.chat_import_service import ChatImportService
+from octoagent.gateway.services.operations.doctor import DoctorRunner
+from octoagent.gateway.services.operations.models import CheckStatus, DoctorReport
+from octoagent.gateway.services.operations.onboarding_models import OnboardingStep
+from octoagent.gateway.services.operations.secret_service import SecretService
+from octoagent.gateway.services.operations.telegram_verifier import TelegramOnboardingVerifier
+from octoagent.gateway.services.operations.update_status_store import UpdateStatusStore
 from octoagent.gateway.services.operator_actions import encode_telegram_operator_action
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
@@ -33,18 +45,9 @@ from octoagent.protocol import (
     build_task_message,
     dispatch_envelope_from_task_message,
 )
-# F081 cleanup：octoagent.provider.config 已删除（连同 LiteLLM Proxy）；
-# echo 模式现仅由 OCTOAGENT_LLM_MODE 环境变量控制。
-from octoagent.provider.dx.channel_verifier import ChannelVerifierRegistry
-from octoagent.provider.dx.chat_import_service import ChatImportService
-from octoagent.provider.dx.cli import main as provider_cli
-from octoagent.provider.dx.doctor import DoctorRunner
-from octoagent.provider.dx.models import CheckStatus, DoctorReport
-from octoagent.provider.dx.onboarding_models import OnboardingStep
-from octoagent.provider.dx.secret_service import SecretService
-from octoagent.provider.dx.telegram_verifier import TelegramOnboardingVerifier
-from octoagent.provider.dx.update_status_store import UpdateStatusStore
 from octoagent.provider.models import ModelCallResult, TokenUsage
+
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 
 class AcceptanceBotClient:
@@ -245,11 +248,11 @@ async def test_first_use_acceptance_config_gateway_pairing_and_onboarding_resume
         return SimpleNamespace(overall_status="SUCCEEDED")
 
     monkeypatch.setattr(
-        "octoagent.provider.dx.secret_service.UpdateService.restart",
+        "octoagent.gateway.services.operations.secret_service.UpdateService.restart",
         _fake_restart,
     )
     monkeypatch.setattr(
-        "octoagent.provider.dx.secret_service.UpdateService.verify",
+        "octoagent.gateway.services.operations.secret_service.UpdateService.verify",
         _fake_verify,
     )
 
@@ -286,7 +289,7 @@ async def test_first_use_acceptance_config_gateway_pairing_and_onboarding_resume
     monkeypatch.setenv("MASTER_KEY_SOURCE", "master-secret")
 
     from octoagent.gateway import main as gateway_main
-    from octoagent.provider.dx.onboarding_service import OnboardingService
+    from octoagent.gateway.services.operations.onboarding_service import OnboardingService
 
     monkeypatch.setattr(gateway_main, "TelegramBotClient", lambda _root: bot_client)
     monkeypatch.setenv("OCTOAGENT_LLM_MODE", "echo")
@@ -300,75 +303,73 @@ async def test_first_use_acceptance_config_gateway_pairing_and_onboarding_resume
             base_url="http://test",
         ) as client,
     ):
-            first = await client.post(
-                "/api/telegram/webhook",
-                json={
-                    "update_id": 101,
-                    "message": {
-                        "message_id": 7,
-                        "text": "/start",
-                        "chat": {"id": 42, "type": "private"},
-                        "from": {"id": 42, "username": "owner", "first_name": "Owner"},
-                    },
+        first = await client.post(
+            "/api/telegram/webhook",
+            json={
+                "update_id": 101,
+                "message": {
+                    "message_id": 7,
+                    "text": "/start",
+                    "chat": {"id": 42, "type": "private"},
+                    "from": {"id": 42, "username": "owner", "first_name": "Owner"},
                 },
-            )
-            assert first.status_code == 202
-            assert first.json()["status"] == "pairing_required"
+            },
+        )
+        assert first.status_code == 202
+        assert first.json()["status"] == "pairing_required"
 
-            inbox = await client.get("/api/operator/inbox")
-            assert inbox.status_code == 200
-            items = inbox.json()["items"]
-            assert any(item["item_id"] == "pairing:42" for item in items)
+        inbox = await client.get("/api/operator/inbox")
+        assert inbox.status_code == 200
+        items = inbox.json()["items"]
+        assert any(item["item_id"] == "pairing:42" for item in items)
 
-            approve = await client.post(
-                "/api/operator/actions",
-                json={
-                    "item_id": "pairing:42",
-                    "kind": OperatorActionKind.APPROVE_PAIRING.value,
-                    "source": OperatorActionSource.WEB.value,
-                    "actor_id": "user:web",
-                    "actor_label": "owner",
+        approve = await client.post(
+            "/api/operator/actions",
+            json={
+                "item_id": "pairing:42",
+                "kind": OperatorActionKind.APPROVE_PAIRING.value,
+                "source": OperatorActionSource.WEB.value,
+                "actor_id": "user:web",
+                "actor_label": "owner",
+            },
+        )
+        assert approve.status_code == 200
+        assert approve.json()["outcome"] == "succeeded"
+
+        accepted = await client.post(
+            "/api/telegram/webhook",
+            json={
+                "update_id": 102,
+                "message": {
+                    "message_id": 8,
+                    "text": "run acceptance task",
+                    "chat": {"id": 42, "type": "private"},
+                    "from": {"id": 42, "username": "owner", "first_name": "Owner"},
                 },
-            )
-            assert approve.status_code == 200
-            assert approve.json()["outcome"] == "succeeded"
+            },
+        )
+        assert accepted.status_code == 200
+        payload = accepted.json()
+        assert payload["status"] == "accepted"
+        accepted_task_id = payload["task_id"]
 
-            accepted = await client.post(
-                "/api/telegram/webhook",
-                json={
-                    "update_id": 102,
-                    "message": {
-                        "message_id": 8,
-                        "text": "run acceptance task",
-                        "chat": {"id": 42, "type": "private"},
-                        "from": {"id": 42, "username": "owner", "first_name": "Owner"},
-                    },
-                },
-            )
-            assert accepted.status_code == 200
-            payload = accepted.json()
-            assert payload["status"] == "accepted"
-            accepted_task_id = payload["task_id"]
-
-            verifier = TelegramOnboardingVerifier(
-                environ={"TELEGRAM_BOT_TOKEN": "test-token"},
-                client_factory=lambda _root: bot_client,
-            )
-            registry = ChannelVerifierRegistry()
-            registry.register(verifier)
-            onboarding = OnboardingService(
-                tmp_path,
-                channel="telegram",
-                doctor_factory=lambda _root: PassingDoctorRunner(_ready_report()),
-                registry=registry,
-            )
-            onboarding_result = await onboarding.run()
+        verifier = TelegramOnboardingVerifier(
+            environ={"TELEGRAM_BOT_TOKEN": "test-token"},
+            client_factory=lambda _root: bot_client,
+        )
+        registry = ChannelVerifierRegistry()
+        registry.register(verifier)
+        onboarding = OnboardingService(
+            tmp_path,
+            channel="telegram",
+            doctor_factory=lambda _root: PassingDoctorRunner(_ready_report()),
+            registry=registry,
+        )
+        onboarding_result = await onboarding.run()
 
     assert onboarding_result.exit_code == 0
     assert onboarding_result.session is not None
-    assert (
-        onboarding_result.session.steps[OnboardingStep.FIRST_MESSAGE].status.value == "completed"
-    )
+    assert onboarding_result.session.steps[OnboardingStep.FIRST_MESSAGE].status.value == "completed"
     assert accepted_task_id in onboarding_result.session.steps[OnboardingStep.FIRST_MESSAGE].summary
 
 
@@ -382,7 +383,7 @@ async def test_a2a_task_message_can_drive_worker_runtime_and_return_result(
     )
     try:
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         message = NormalizedMessage(
             text="a2a acceptance",
             idempotency_key="f023-a2a-001",
@@ -404,7 +405,7 @@ async def test_a2a_task_message_can_drive_worker_runtime_and_return_result(
         worker = WorkerRuntimeAdapter(
             store_group,
             sse_hub,
-            InstantLLMService(),
+            runtime_service_fixture(InstantLLMService()).bundle,
             runtime_config=WorkerRuntimeConfig(docker_mode="disabled"),
             docker_available_checker=lambda: False,
         )
@@ -469,63 +470,61 @@ async def test_operator_parity_acceptance_web_and_telegram_share_same_pairing_it
             base_url="http://test",
         ) as client,
     ):
-            first = await client.post(
-                "/api/telegram/webhook",
-                json={
-                    "update_id": 201,
+        first = await client.post(
+            "/api/telegram/webhook",
+            json={
+                "update_id": 201,
+                "message": {
+                    "message_id": 17,
+                    "text": "/start",
+                    "chat": {"id": 42, "type": "private"},
+                    "from": {"id": 42, "username": "owner", "first_name": "Owner"},
+                },
+            },
+        )
+        assert first.status_code == 202
+        assert first.json()["status"] == "pairing_required"
+
+        approve = await client.post(
+            "/api/operator/actions",
+            json={
+                "item_id": "pairing:42",
+                "kind": OperatorActionKind.APPROVE_PAIRING.value,
+                "source": OperatorActionSource.WEB.value,
+                "actor_id": "user:web",
+                "actor_label": "owner",
+            },
+        )
+        assert approve.status_code == 200
+        assert approve.json()["outcome"] == "succeeded"
+
+        callback = await client.post(
+            "/api/telegram/webhook",
+            json={
+                "update_id": 202,
+                "callback_query": {
+                    "id": "cb-acceptance-001",
+                    "data": encode_telegram_operator_action(
+                        "pairing:42",
+                        OperatorActionKind.APPROVE_PAIRING,
+                    ),
+                    "from": {"id": 42, "username": "owner", "first_name": "Owner"},
                     "message": {
                         "message_id": 17,
-                        "text": "/start",
+                        "text": "pairing card",
                         "chat": {"id": 42, "type": "private"},
-                        "from": {"id": 42, "username": "owner", "first_name": "Owner"},
+                        "from": {"id": 999, "username": "octobot", "first_name": "Octo"},
                     },
                 },
-            )
-            assert first.status_code == 202
-            assert first.json()["status"] == "pairing_required"
+            },
+        )
+        assert callback.status_code == 200
+        assert callback.json()["status"] == "operator_action"
+        assert callback.json()["detail"] == "already_handled"
+        assert bot_client.answered_callbacks[-1][1] == "已被处理"
+        assert "结果: already_handled" in bot_client.edited_messages[-1][2]
 
-            approve = await client.post(
-                "/api/operator/actions",
-                json={
-                    "item_id": "pairing:42",
-                    "kind": OperatorActionKind.APPROVE_PAIRING.value,
-                    "source": OperatorActionSource.WEB.value,
-                    "actor_id": "user:web",
-                    "actor_label": "owner",
-                },
-            )
-            assert approve.status_code == 200
-            assert approve.json()["outcome"] == "succeeded"
-
-            callback = await client.post(
-                "/api/telegram/webhook",
-                json={
-                    "update_id": 202,
-                    "callback_query": {
-                        "id": "cb-acceptance-001",
-                        "data": encode_telegram_operator_action(
-                            "pairing:42",
-                            OperatorActionKind.APPROVE_PAIRING,
-                        ),
-                        "from": {"id": 42, "username": "owner", "first_name": "Owner"},
-                        "message": {
-                            "message_id": 17,
-                            "text": "pairing card",
-                            "chat": {"id": 42, "type": "private"},
-                            "from": {"id": 999, "username": "octobot", "first_name": "Octo"},
-                        },
-                    },
-                },
-            )
-            assert callback.status_code == 200
-            assert callback.json()["status"] == "operator_action"
-            assert callback.json()["detail"] == "already_handled"
-            assert bot_client.answered_callbacks[-1][1] == "已被处理"
-            assert "结果: already_handled" in bot_client.edited_messages[-1][2]
-
-            events = await app.state.store_group.event_store.get_events_for_task(
-                "ops-operator-inbox"
-            )
+        events = await app.state.store_group.event_store.get_events_for_task("ops-operator-inbox")
 
     audit_events = [
         event
@@ -550,7 +549,7 @@ async def test_chat_import_memory_backup_restore_acceptance(tmp_path: Path) -> N
     report = await import_service.import_chats(input_path=input_path)
     assert report.summary.committed_count == 1
 
-    from octoagent.provider.dx.backup_service import BackupService
+    from octoagent.gateway.services.operations.backup_service import BackupService
 
     backup_service = BackupService(tmp_path)
     bundle = await backup_service.create_bundle(label="after-chat-import")
@@ -582,7 +581,7 @@ async def test_a2a_task_message_timeout_maps_to_error_and_failed_state(
     )
     try:
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         message = NormalizedMessage(
             text="a2a timeout acceptance",
             idempotency_key="f023-a2a-timeout-001",
@@ -604,7 +603,7 @@ async def test_a2a_task_message_timeout_maps_to_error_and_failed_state(
         worker = WorkerRuntimeAdapter(
             store_group,
             sse_hub,
-            SlowLLMService(delay_s=0.3),
+            runtime_service_fixture(SlowLLMService(delay_s=0.3)).bundle,
             runtime_config=WorkerRuntimeConfig(
                 docker_mode="disabled",
                 max_execution_timeout_seconds=0.05,

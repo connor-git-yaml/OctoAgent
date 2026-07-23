@@ -21,6 +21,8 @@ from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalDecision
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 
 class InteractiveLLMService:
     """通过 execution context 驱动输入请求的测试 LLM。"""
@@ -70,7 +72,7 @@ async def execution_test_app(
     runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=llm_service,
+        runtime_services=runtime_service_fixture(llm_service).bundle,
         approval_manager=approval_manager,
         timeout_seconds=60,
         monitor_interval_seconds=0.05,
@@ -86,7 +88,7 @@ async def execution_test_app(
     app.state.execution_console = runner.execution_console
 
     try:
-        yield app, TaskService(store_group, sse_hub), runner, approval_manager
+        yield app, TaskService(store_group, sse_hub, storage_only=True), runner, approval_manager
     finally:
         await runner.shutdown()
         await store_group.close()
@@ -266,13 +268,16 @@ class TestExecutionApi:
         self,
         tmp_path: Path,
     ) -> None:
-        async with execution_test_app(
-            tmp_path,
-            InteractiveLLMService(),
-        ) as (app, _, _, _), AsyncClient(
-            transport=ASGITransport(app=app),
-            base_url="http://test",
-        ) as client:
+        async with (
+            execution_test_app(
+                tmp_path,
+                InteractiveLLMService(),
+            ) as (app, _, _, _),
+            AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+            ) as client,
+        ):
             resp = await client.get("/api/tasks/01NONEXISTENT0000000000000/execution")
             assert resp.status_code == 404
             assert resp.json()["error"]["code"] == "TASK_NOT_FOUND"

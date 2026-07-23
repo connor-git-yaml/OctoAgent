@@ -15,14 +15,5 @@ if [[ -f "${INSTANCE_ROOT}/.env" ]]; then
   set +a
 fi
 
-# Feature 081 P3：兼容窗口——老用户的 .env.litellm 在 P4 删除前继续读取。
-# 推荐用户跑 `octo config migrate-080` 把凭证合并到 .env。
-if [[ -f "${INSTANCE_ROOT}/.env.litellm" ]]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "${INSTANCE_ROOT}/.env.litellm"
-  set +a
-fi
-
 cd "${PROJECT_ROOT}"
 exec uv run octo doctor "$@"

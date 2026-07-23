@@ -8,6 +8,8 @@ from octoagent.core.models.message import NormalizedMessage
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.task_service import TaskService
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 
 class CountingLLMService:
     """统计调用次数的 LLMService 包装器。"""
@@ -24,7 +26,10 @@ class CountingLLMService:
 class TestFeature010CheckpointResume:
     async def test_recovery_replays_no_side_effect(self, integration_app) -> None:
         sg = integration_app.state.store_group
-        service = TaskService(sg, integration_app.state.sse_hub)
+        llm = CountingLLMService()
+        service = TaskService(
+            sg, integration_app.state.sse_hub, runtime_services=runtime_service_fixture(llm).bundle
+        )
 
         msg = NormalizedMessage(
             text="Feature010 resume idempotency",
@@ -38,13 +43,10 @@ class TestFeature010CheckpointResume:
             f"trace-{task_id}",
         )
 
-        llm = CountingLLMService()
-
         # 第一次恢复执行：写入 ledger + artifact + success
         await service.process_task_with_llm(
             task_id=task_id,
             user_text=msg.text,
-            llm_service=llm,
             model_alias="main",
             resume_from_node="model_call_started",
             resume_state_snapshot={"next_node": "response_persisted"},
@@ -60,7 +62,6 @@ class TestFeature010CheckpointResume:
         await service.process_task_with_llm(
             task_id=task_id,
             user_text=msg.text,
-            llm_service=llm,
             model_alias="main",
             resume_from_node="model_call_started",
             resume_state_snapshot={"next_node": "response_persisted"},
@@ -81,7 +82,7 @@ class TestFeature010CheckpointResume:
         integration_app,
     ) -> None:
         sg = integration_app.state.store_group
-        service = TaskService(sg, integration_app.state.sse_hub)
+        service = TaskService(sg, integration_app.state.sse_hub, storage_only=True)
 
         # 404: task 不存在
         resp = await client.post("/api/tasks/01NONEXISTENT0000000000000/resume")
@@ -93,6 +94,7 @@ class TestFeature010CheckpointResume:
             idempotency_key="f010-resume-422",
         )
         task_422, _ = await service.create_task(msg_422)
+        assert await sg.task_job_store.create_job(task_422, msg_422.text)
         await service._write_state_transition(
             task_422,
             TaskStatus.CREATED,
@@ -109,6 +111,7 @@ class TestFeature010CheckpointResume:
             idempotency_key="f010-resume-409",
         )
         task_409, _ = await service.create_task(msg_409)
+        assert await sg.task_job_store.create_job(task_409, msg_409.text)
         await service._write_state_transition(
             task_409,
             TaskStatus.CREATED,
@@ -131,6 +134,7 @@ class TestFeature010CheckpointResume:
             idempotency_key="f010-resume-200",
         )
         task_200, _ = await service.create_task(msg_200)
+        assert await sg.task_job_store.create_job(task_200, msg_200.text)
         await service._write_state_transition(
             task_200,
             TaskStatus.CREATED,

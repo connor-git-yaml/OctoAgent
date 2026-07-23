@@ -470,10 +470,14 @@ class A2ADispatchMixin:
         }
         if status is not None:
             update_fields["status"] = status
-            if status in {
-                A2AConversationStatus.ACTIVE,
-                A2AConversationStatus.WAITING_INPUT,
-            } and not completed:
+            if (
+                status
+                in {
+                    A2AConversationStatus.ACTIVE,
+                    A2AConversationStatus.WAITING_INPUT,
+                }
+                and not completed
+            ):
                 update_fields["completed_at"] = None
         if completed:
             update_fields["completed_at"] = now
@@ -809,9 +813,13 @@ class A2ADispatchMixin:
             await self._stores.agent_context_store.save_agent_session(session)
         except sqlite3.IntegrityError:
             # 并发 race：partial unique index 拒绝同 project 同 kind 第二条 active session。
-            if kind in (AgentSessionKind.MAIN_BOOTSTRAP, AgentSessionKind.DIRECT_WORKER) and project_id:
+            if (
+                kind in (AgentSessionKind.MAIN_BOOTSTRAP, AgentSessionKind.DIRECT_WORKER)
+                and project_id
+            ):
                 refreshed = await self._stores.agent_context_store.get_active_session_for_project(
-                    project_id, kind=kind,
+                    project_id,
+                    kind=kind,
                 )
                 if refreshed is not None:
                     return refreshed
@@ -836,8 +844,7 @@ class A2ADispatchMixin:
     @staticmethod
     def _agent_uri(label: str) -> str:
         normalized = "".join(
-            ch if ch.isalnum() or ch in "._/-" else "-"
-            for ch in label.strip().lower()
+            ch if ch.isalnum() or ch in "._/-" else "-" for ch in label.strip().lower()
         ).strip("-")
         return f"agent://{normalized or 'unknown'}"
 
@@ -873,10 +880,14 @@ class A2ADispatchMixin:
         """
         # 仅信任显式 source 信号（envelope.metadata 或 runtime_metadata）
         # 不使用 turn_executor_kind（这是 target 侧字段，被 prepare_dispatch 写入 target_kind）
-        source_runtime_kind = str(
-            envelope_metadata.get("source_runtime_kind", "")
-            or runtime_metadata.get("source_runtime_kind", "")
-        ).strip().lower()
+        source_runtime_kind = (
+            str(
+                envelope_metadata.get("source_runtime_kind", "")
+                or runtime_metadata.get("source_runtime_kind", "")
+            )
+            .strip()
+            .lower()
+        )
 
         # 派生 source role
         if source_runtime_kind in ("worker", "subagent"):
@@ -894,10 +905,13 @@ class A2ADispatchMixin:
 
         # F099 Phase C: automation 分支（GATE_DESIGN G-2 / FR-C1）
         if source_runtime_kind == SOURCE_RUNTIME_KIND_AUTOMATION:
-            source_automation_id = self._first_non_empty(
-                str(envelope_metadata.get("source_automation_id", "")),
-                str(runtime_metadata.get("source_automation_id", "")),
-            ) or "unknown"
+            source_automation_id = (
+                self._first_non_empty(
+                    str(envelope_metadata.get("source_automation_id", "")),
+                    str(runtime_metadata.get("source_automation_id", "")),
+                )
+                or "unknown"
+            )
             return (
                 AgentRuntimeRole.AUTOMATION,
                 AgentSessionKind.AUTOMATION_INTERNAL,
@@ -906,10 +920,13 @@ class A2ADispatchMixin:
 
         # F099 Phase C: user_channel 分支（GATE_DESIGN G-2 / FR-C1）
         if source_runtime_kind == SOURCE_RUNTIME_KIND_USER_CHANNEL:
-            source_channel_id = self._first_non_empty(
-                str(envelope_metadata.get("source_channel_id", "")),
-                str(runtime_metadata.get("source_channel_id", "")),
-            ) or "unknown"
+            source_channel_id = (
+                self._first_non_empty(
+                    str(envelope_metadata.get("source_channel_id", "")),
+                    str(runtime_metadata.get("source_channel_id", "")),
+                )
+                or "unknown"
+            )
             return (
                 AgentRuntimeRole.USER_CHANNEL,
                 AgentSessionKind.USER_CHANNEL,
@@ -987,7 +1004,11 @@ class A2ADispatchMixin:
                     # F103c C-3: 升级到 EventStore audit chain（保留原 structlog 双轨）
                     if task_id:
                         try:
-                            _audit_svc = TaskService(self._stores, self._sse_hub)
+                            _audit_svc = TaskService(
+                                self._stores,
+                                self._sse_hub,
+                                storage_only=True,
+                            )
                             agent_runtime_id, degraded_reason = derive_agent_runtime_id(
                                 envelope_metadata
                             )

@@ -12,7 +12,16 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.llm_service import LLMService
+from octoagent.gateway.services.runtime_service_bundle import RuntimeServiceBundle
 from octoagent.gateway.services.sse_hub import SSEHub
+
+
+class _StorageRouteTaskRunner:
+    def __init__(self, runtime_services: RuntimeServiceBundle) -> None:
+        self._runtime_services = runtime_services
+
+    async def enqueue(self, task_id: str, prompt: str) -> None:
+        del task_id, prompt
 
 
 @pytest_asyncio.fixture
@@ -35,6 +44,12 @@ async def test_app(tmp_path: Path):
     app.state.store_group = store_group
     app.state.sse_hub = SSEHub()
     app.state.llm_service = LLMService()
+    app.state.runtime_services = RuntimeServiceBundle(
+        llm_service=app.state.llm_service,
+        provider_router=object(),
+        background_tasks=set(),
+    )
+    app.state.task_runner = _StorageRouteTaskRunner(app.state.runtime_services)
 
     yield app
 

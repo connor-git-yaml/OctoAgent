@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from octoagent.core.models import (
@@ -17,7 +21,11 @@ from octoagent.core.models import (
 )
 from octoagent.core.models.enums import EventType, TaskStatus
 from octoagent.core.models.message import NormalizedMessage
-from octoagent.core.store import create_store_group
+from octoagent.core.store import StoreGroup, create_store_group
+from octoagent.gateway.services.execution_console import (
+    ExecutionConsoleService,
+    ExecutionInputError,
+)
 from octoagent.gateway.services.execution_context import get_current_execution_context
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
@@ -28,10 +36,168 @@ from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalDecision
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 # F142 件5a：xdist 分组——本文件含时序敏感断言（固定 sleep 窗口/性能阈值/状态机
 # 竞态，F083 归档债），`--dist=loadgroup` 下同组钉同一 worker 串行执行，
 # 解锁其余测试 `-n auto` 并行（本地全量与 CI 双提速）。
 pytestmark = pytest.mark.xdist_group("task_runner_state_machine")
+
+RunnerSnapshot = dict[str, object]
+SnapshotReader = Callable[[], Awaitable[RunnerSnapshot]]
+SnapshotPredicate = Callable[[RunnerSnapshot], bool]
+
+
+class _MissingInputEventStore:
+    async def get_events_for_task(self, _task_id: str) -> list[object]:
+        return []
+
+
+class _RecordingInputEventService:
+    def __init__(self) -> None:
+        self.append_count = 0
+
+    async def append_structured_event(self, **_kwargs: object) -> None:
+        self.append_count += 1
+
+
+async def test_input_attached_event_fails_closed_when_commit_is_not_durable() -> None:
+    service = _RecordingInputEventService()
+    console = ExecutionConsoleService(
+        SimpleNamespace(event_store=_MissingInputEventStore()),
+        sse_hub=object(),
+    )
+
+    with pytest.raises(ExecutionInputError) as captured:
+        await console._ensure_input_attached_event(
+            service=service,
+            task_id="task-1",
+            request_id="request-1",
+            payload={"text": "confirmed"},
+        )
+
+    assert captured.value.code == "INPUT_EVENT_NOT_DURABLE"
+    assert service.append_count == 3
+
+
+class TaskRunnerStateTimeout(AssertionError):
+    """复合状态未在monotonic deadline内收敛。"""
+
+
+async def _wait_for_runner_state(
+    read_snapshot: SnapshotReader,
+    predicate: SnapshotPredicate,
+    *,
+    description: str,
+    timeout_seconds: float = 15.0,
+    poll_seconds: float = 0.01,
+) -> RunnerSnapshot:
+    deadline = time.monotonic() + timeout_seconds
+    last_snapshot = await read_snapshot()
+    while not predicate(last_snapshot):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TaskRunnerStateTimeout(f"{description}; last_snapshot={last_snapshot!r}")
+        await asyncio.sleep(min(poll_seconds, remaining))
+        last_snapshot = await read_snapshot()
+    return last_snapshot
+
+
+async def _runner_snapshot(
+    task_service: TaskService,
+    store_group: StoreGroup,
+    runner: TaskRunner,
+    task_id: str,
+) -> RunnerSnapshot:
+    task = await task_service.get_task(task_id)
+    job = await store_group.task_job_store.get_job(task_id)
+    session = await runner.get_execution_session(task_id)
+    events = await store_group.event_store.get_events_for_task(task_id)
+    artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+    conversations = await store_group.a2a_store.list_conversations(task_id=task_id)
+    messages = []
+    if len(conversations) == 1:
+        messages = await store_group.a2a_store.list_messages(
+            a2a_conversation_id=conversations[0].a2a_conversation_id
+        )
+    return {
+        "task_status": getattr(task, "status", None),
+        "job_status": getattr(job, "status", None),
+        "session_state": getattr(session, "state", None),
+        "session_id": getattr(session, "session_id", None),
+        "session_live": getattr(session, "live", None),
+        "session_can_attach_input": getattr(session, "can_attach_input", None),
+        "session_pending_approval_id": getattr(session, "pending_approval_id", None),
+        "event_types": tuple(event.type for event in events),
+        "artifact_names": tuple(artifact.name for artifact in artifacts),
+        "conversation_statuses": tuple(item.status.value for item in conversations),
+        "message_types": tuple(item.message_type for item in messages),
+    }
+
+
+def _controlled_terminal_state() -> RunnerSnapshot:
+    return {
+        "task_status": TaskStatus.SUCCEEDED,
+        "job_status": "RUNNING",
+        "session_state": ExecutionSessionState.RUNNING,
+        "event_types": (),
+        "side_effects": (),
+    }
+
+
+def _terminal_state_is_consistent(item: RunnerSnapshot) -> bool:
+    return (
+        item["task_status"] == TaskStatus.SUCCEEDED
+        and item["job_status"] == "SUCCEEDED"
+        and item["session_state"] == ExecutionSessionState.SUCCEEDED
+        and item["event_types"] == ("MODEL_CALL_COMPLETED",)
+        and item["side_effects"] == ("completion-notified",)
+    )
+
+
+async def _release_controlled_terminal_state(state: RunnerSnapshot, release: asyncio.Event) -> None:
+    await release.wait()
+    state.update(
+        job_status="SUCCEEDED",
+        session_state=ExecutionSessionState.SUCCEEDED,
+        event_types=("MODEL_CALL_COMPLETED",),
+        side_effects=("completion-notified",),
+    )
+
+
+async def _assert_quiescence_wait_contract() -> None:
+    state = _controlled_terminal_state()
+    observed = asyncio.Event()
+    release = asyncio.Event()
+
+    async def snapshot() -> RunnerSnapshot:
+        observed.set()
+        return dict(state)
+
+    updater = asyncio.create_task(_release_controlled_terminal_state(state, release))
+    waiter = asyncio.create_task(
+        _wait_for_runner_state(
+            snapshot,
+            _terminal_state_is_consistent,
+            description="controlled terminal convergence",
+        )
+    )
+    await observed.wait()
+    assert state["task_status"] == TaskStatus.SUCCEEDED
+    assert _terminal_state_is_consistent(state) is False
+    assert waiter.done() is False
+    release.set()
+    assert await waiter == state
+    await updater
+
+    state["job_status"] = "RUNNING"
+    with pytest.raises(AssertionError, match="last_snapshot.*RUNNING"):
+        await _wait_for_runner_state(
+            snapshot,
+            _terminal_state_is_consistent,
+            description="controlled timeout",
+            timeout_seconds=0,
+        )
 
 
 class SlowLLMService:
@@ -109,11 +275,11 @@ class TestTaskRunner:
         )
         sse_hub = SSEHub()
         llm_service = LLMService()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_service,
+            runtime_services=runtime_service_fixture(llm_service).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
@@ -127,7 +293,13 @@ class TestTaskRunner:
         assert created is True
 
         await runner.enqueue(task_id, msg.text)
-        await asyncio.sleep(0.4)
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.SUCCEEDED and state["job_status"] == "SUCCEEDED"
+            ),
+            description="enqueue task/job SUCCEEDED",
+        )
 
         task = await task_service.get_task(task_id)
         job = await store_group.task_job_store.get_job(task_id)
@@ -145,7 +317,7 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="orphan running",
@@ -169,7 +341,7 @@ class TestTaskRunner:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=LLMService(),
+            runtime_services=runtime_service_fixture(LLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
@@ -193,12 +365,12 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         llm_service = CancellableLLMService()
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_service,
+            runtime_services=runtime_service_fixture(llm_service).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
@@ -237,7 +409,7 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         notified: list[str] = []
         completed = asyncio.Event()
 
@@ -248,7 +420,7 @@ class TestTaskRunner:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=LLMService(),
+            runtime_services=runtime_service_fixture(LLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
             completion_notifier=notifier,
@@ -270,19 +442,17 @@ class TestTaskRunner:
         await runner.shutdown()
         await store_group.close()
 
-    async def test_cancel_running_job_marks_task_and_job_cancelled(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_cancel_running_job_marks_task_and_job_cancelled(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
             str(tmp_path / "runner-cancel.db"),
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=SlowLLMService(delay_s=0.5),
+            runtime_services=runtime_service_fixture(SlowLLMService(delay_s=0.5)).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
@@ -296,7 +466,15 @@ class TestTaskRunner:
         assert created is True
         await runner.enqueue(task_id, msg.text)
 
-        await asyncio.sleep(0.1)
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.RUNNING
+                and state["job_status"] == "RUNNING"
+                and state["session_state"] == ExecutionSessionState.RUNNING
+            ),
+            description="cancel precondition RUNNING",
+        )
         cancelled = await runner.cancel_task(task_id)
         assert cancelled is True
 
@@ -326,12 +504,12 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         llm_service = CancellableLLMService()
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_service,
+            runtime_services=runtime_service_fixture(llm_service).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
             worker_runtime_config=WorkerRuntimeConfig(docker_mode="disabled"),
@@ -380,11 +558,11 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=LLMService(),
+            runtime_services=runtime_service_fixture(LLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
@@ -451,11 +629,11 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=LLMService(),
+            runtime_services=runtime_service_fixture(LLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
@@ -504,11 +682,11 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=LLMService(),
+            runtime_services=runtime_service_fixture(LLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
@@ -583,7 +761,7 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="resume from checkpoint",
@@ -618,12 +796,18 @@ class TestTaskRunner:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=LLMService(),
+            runtime_services=runtime_service_fixture(LLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
         await runner.startup()
-        await asyncio.sleep(0.4)
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.SUCCEEDED and state["job_status"] == "SUCCEEDED"
+            ),
+            description="startup recovery task/job SUCCEEDED",
+        )
 
         task = await task_service.get_task(task_id)
         job = await store_group.task_job_store.get_job(task_id)
@@ -653,7 +837,7 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         notified: list[str] = []
 
         async def notifier(task_id: str) -> None:
@@ -683,7 +867,7 @@ class TestTaskRunner:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=LLMService(),
+            runtime_services=runtime_service_fixture(LLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
             completion_notifier=notifier,
@@ -704,7 +888,7 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="double resume without duplicated side effect",
@@ -750,12 +934,20 @@ class TestTaskRunner:
         runner1 = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_service,
+            runtime_services=runtime_service_fixture(llm_service).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
         await runner1.startup()
-        await asyncio.sleep(0.45)
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner1, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.SUCCEEDED
+                and state["job_status"] == "SUCCEEDED"
+                and llm_service.calls == 1
+            ),
+            description="first recovery converged once",
+        )
         await runner1.shutdown()
         assert llm_service.calls == 1
 
@@ -785,12 +977,20 @@ class TestTaskRunner:
         runner2 = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_service,
+            runtime_services=runtime_service_fixture(llm_service).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
         await runner2.startup()
-        await asyncio.sleep(0.45)
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner2, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.SUCCEEDED
+                and state["job_status"] == "SUCCEEDED"
+                and llm_service.calls == 1
+            ),
+            description="second recovery reused prior result",
+        )
 
         task = await task_service.get_task(task_id)
         job = await store_group.task_job_store.get_job(task_id)
@@ -809,7 +1009,7 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="resume event chain",
@@ -837,12 +1037,24 @@ class TestTaskRunner:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=LLMService(),
+            runtime_services=runtime_service_fixture(LLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
         )
         await runner.startup()
-        await asyncio.sleep(0.45)
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] in {TaskStatus.SUCCEEDED, TaskStatus.FAILED}
+                and state["job_status"] in {"SUCCEEDED", "FAILED"}
+                and EventType.RESUME_STARTED in state["event_types"]
+                and bool(
+                    {EventType.RESUME_SUCCEEDED, EventType.RESUME_FAILED}
+                    & set(state["event_types"])
+                )
+            ),
+            description="resume task/job/event chain converged",
+        )
 
         events = await store_group.event_store.get_events_for_task(task_id)
         chain = [
@@ -871,19 +1083,17 @@ class TestTaskRunner:
         await runner.shutdown()
         await store_group.close()
 
-    async def test_attach_input_live_path_updates_session_and_job(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_attach_input_live_path_updates_session_and_job(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
             str(tmp_path / "runner-interactive.db"),
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=InteractiveLLMService(),
+            runtime_services=runtime_service_fixture(InteractiveLLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
             docker_available_checker=lambda: True,
@@ -898,35 +1108,20 @@ class TestTaskRunner:
         assert created is True
         await runner.enqueue(task_id, msg.text)
 
-        # Feature 083 P4：等更全的状态——task.status=WAITING_INPUT + session.state +
-        # session.can_attach_input 三者齐 + 5s 窗口（原 1s 在 xdist 下偶发不够）。
-        # F142 件5a：job.status 折进等待条件——task/session 达 WAITING_INPUT 与
-        # job 行更新非原子，原来 poll 断开后独立断言 job 状态踩的正是 F083 归档
-        # 的「次生窗口」（loadgroup 首跑实证间歇红）；窗口 100→200 迭代（迭代
-        # 计数制 deadline 在高负载下随 sleep 实际时长自动扩张）。
-        job = None
-        for _ in range(200):
-            task = await task_service.get_task(task_id)
-            session = await runner.get_execution_session(task_id)
-            job = await store_group.task_job_store.get_job(task_id)
-            if (
-                task is not None
-                and task.status == TaskStatus.WAITING_INPUT
-                and session is not None
-                and session.state == ExecutionSessionState.WAITING_INPUT
-                and session.can_attach_input is True
-                and job is not None
-                and job.status == "WAITING_INPUT"
-            ):
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError(
-                "task/session/job 未在窗口内齐达 WAITING_INPUT："
-                f"task={getattr(task, 'status', None)} "
-                f"session={getattr(session, 'state', None)} "
-                f"job={getattr(job, 'status', None)}"
-            )
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.WAITING_INPUT
+                and state["job_status"] == "WAITING_INPUT"
+                and state["session_state"] == ExecutionSessionState.WAITING_INPUT
+                and state["session_can_attach_input"] is True
+                and EventType.EXECUTION_INPUT_REQUESTED in state["event_types"]
+            ),
+            description="live input task/job/session/event WAITING_INPUT",
+            timeout_seconds=60,
+        )
+        session = await runner.get_execution_session(task_id)
+        job = await store_group.task_job_store.get_job(task_id)
 
         assert session is not None
         assert session.state == ExecutionSessionState.WAITING_INPUT
@@ -940,45 +1135,31 @@ class TestTaskRunner:
         result = await runner.attach_input(task_id, "live-confirmed")
         assert result.delivered_live is True
 
-        # F142 件5a：同上——job.status 折进等待条件（task→SUCCEEDED 与 job 行
-        # 更新之间同样存在次生窗口）+ 窗口 20→100 迭代。
-        for _ in range(100):
-            task = await task_service.get_task(task_id)
-            job = await store_group.task_job_store.get_job(task_id)
-            if (
-                task is not None
-                and task.status == TaskStatus.SUCCEEDED
-                and job is not None
-                and job.status == "SUCCEEDED"
-            ):
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError(
-                "task/job 未在窗口内齐达 SUCCEEDED："
-                f"task={getattr(task, 'status', None)} job={getattr(job, 'status', None)}"
-            )
-
-        assert job is not None
-        assert job.status == "SUCCEEDED"
-
-        # F142 件5a：事件链落齐窗口 20→100 迭代（TASK_HEARTBEAT 等异步落库，
-        # 高负载下 1s 窗口不够）。
-        for _ in range(100):
-            events = await store_group.event_store.get_events_for_task(task_id)
-            event_types = [event.type.value for event in events]
-            if {
-                "EXECUTION_INPUT_REQUESTED",
-                "EXECUTION_INPUT_ATTACHED",
-                "EXECUTION_STATUS_CHANGED",
-                "A2A_MESSAGE_RECEIVED",
-                "A2A_MESSAGE_SENT",
-                "TASK_HEARTBEAT",
-            }.issubset(set(event_types)):
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError(f"missing expected events: {event_types}")
+        expected_events = {
+            EventType.EXECUTION_INPUT_REQUESTED,
+            EventType.EXECUTION_INPUT_ATTACHED,
+            EventType.EXECUTION_STATUS_CHANGED,
+            EventType.A2A_MESSAGE_RECEIVED,
+            EventType.A2A_MESSAGE_SENT,
+            EventType.TASK_HEARTBEAT,
+        }
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.SUCCEEDED
+                and state["job_status"] == "SUCCEEDED"
+                and expected_events.issubset(set(state["event_types"]))
+                and {"human-input", "llm-response"}.issubset(set(state["artifact_names"]))
+                and state["conversation_statuses"] == ("completed",)
+                and state["message_types"][-1:] == ("RESULT",)
+            ),
+            description="live input complete task/job/events/artifacts/A2A",
+            timeout_seconds=60,
+        )
+        job = await store_group.task_job_store.get_job(task_id)
+        assert job is not None and job.status == "SUCCEEDED"
+        events = await store_group.event_store.get_events_for_task(task_id)
+        event_types = [event.type.value for event in events]
 
         assert "EXECUTION_INPUT_REQUESTED" in event_types
         assert "EXECUTION_INPUT_ATTACHED" in event_types
@@ -1005,18 +1186,16 @@ class TestTaskRunner:
         await runner.shutdown()
         await store_group.close()
 
-    async def test_attach_input_after_restart_resumes_waiting_task(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_attach_input_after_restart_resumes_waiting_task(self, tmp_path: Path) -> None:
         db_path = str(tmp_path / "runner-interactive-restart.db")
         artifacts_dir = str(tmp_path / "artifacts")
         store_group = await create_store_group(db_path, artifacts_dir)
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=InteractiveLLMService(),
+            runtime_services=runtime_service_fixture(InteractiveLLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
             docker_available_checker=lambda: True,
@@ -1031,24 +1210,27 @@ class TestTaskRunner:
         assert created is True
         await runner.enqueue(task_id, msg.text)
 
-        for _ in range(20):
-            task = await task_service.get_task(task_id)
-            if task is not None and task.status == TaskStatus.WAITING_INPUT:
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError("task did not enter WAITING_INPUT before restart")
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.WAITING_INPUT
+                and state["job_status"] == "WAITING_INPUT"
+                and state["session_state"] == ExecutionSessionState.WAITING_INPUT
+                and EventType.EXECUTION_INPUT_REQUESTED in state["event_types"]
+            ),
+            description="restart precondition WAITING_INPUT converged",
+        )
 
         await runner.shutdown()
         await store_group.close()
 
         store_group_2 = await create_store_group(db_path, artifacts_dir)
         sse_hub_2 = SSEHub()
-        task_service_2 = TaskService(store_group_2, sse_hub_2)
+        task_service_2 = TaskService(store_group_2, sse_hub_2, storage_only=True)
         runner_2 = TaskRunner(
             store_group=store_group_2,
             sse_hub=sse_hub_2,
-            llm_service=InteractiveLLMService(),
+            runtime_services=runtime_service_fixture(InteractiveLLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
             docker_available_checker=lambda: True,
@@ -1065,27 +1247,18 @@ class TestTaskRunner:
         assert result.delivered_live is False
         assert result.session_id == original_session_id
 
-        # Feature 083 P5：等到 task.status 和 job.status 双方都 SUCCEEDED 才停。
-        # 原代码只等 task.status == SUCCEEDED，但 task_store 和 task_job_store
-        # 是两个独立 store，task.status set 后 job.status 同步可能滞后；xdist 高
-        # CPU 负载下窗口被放大到偶发 fail。5s 窗口足够覆盖。
-        for _ in range(100):
-            task = await task_service_2.get_task(task_id)
-            job = await store_group_2.task_job_store.get_job(task_id)
-            if (
-                task is not None
-                and task.status == TaskStatus.SUCCEEDED
-                and job is not None
-                and job.status == "SUCCEEDED"
-            ):
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError(
-                f"task / job did not both reach SUCCEEDED within 5s "
-                f"(task.status={task.status if task else None}, "
-                f"job.status={job.status if job else None})"
-            )
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service_2, store_group_2, runner_2, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.SUCCEEDED
+                and state["job_status"] == "SUCCEEDED"
+                and state["session_id"] == original_session_id
+                and {"human-input", "llm-response"}.issubset(set(state["artifact_names"]))
+                and EventType.EXECUTION_INPUT_ATTACHED in state["event_types"]
+            ),
+            description="restart resume task/job/session/artifacts converged",
+        )
+        job = await store_group_2.task_job_store.get_job(task_id)
 
         assert job is not None
         assert job.status == "SUCCEEDED"
@@ -1103,11 +1276,11 @@ class TestTaskRunner:
         artifacts_dir = str(tmp_path / "artifacts")
         store_group = await create_store_group(db_path, artifacts_dir)
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=InteractiveLLMService(),
+            runtime_services=runtime_service_fixture(InteractiveLLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
             docker_available_checker=lambda: True,
@@ -1122,24 +1295,27 @@ class TestTaskRunner:
         assert created is True
         await runner.enqueue(task_id, msg.text)
 
-        for _ in range(20):
-            task = await task_service.get_task(task_id)
-            if task is not None and task.status == TaskStatus.WAITING_INPUT:
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError("task did not enter WAITING_INPUT before shutdown")
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.WAITING_INPUT
+                and state["job_status"] == "WAITING_INPUT"
+                and state["session_state"] == ExecutionSessionState.WAITING_INPUT
+                and state["session_can_attach_input"] is True
+            ),
+            description="cancel precondition WAITING_INPUT converged",
+        )
 
         await runner.shutdown()
         await store_group.close()
 
         store_group_2 = await create_store_group(db_path, artifacts_dir)
         sse_hub_2 = SSEHub()
-        task_service_2 = TaskService(store_group_2, sse_hub_2)
+        task_service_2 = TaskService(store_group_2, sse_hub_2, storage_only=True)
         runner_2 = TaskRunner(
             store_group=store_group_2,
             sse_hub=sse_hub_2,
-            llm_service=InteractiveLLMService(),
+            runtime_services=runtime_service_fixture(InteractiveLLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
             docker_available_checker=lambda: True,
@@ -1168,9 +1344,7 @@ class TestTaskRunner:
 
         events = await store_group_2.event_store.get_events_for_task(task_id)
         terminal_events = [
-            event
-            for event in events
-            if event.type == EventType.EXECUTION_STATUS_CHANGED
+            event for event in events if event.type == EventType.EXECUTION_STATUS_CHANGED
         ]
         assert terminal_events
         assert terminal_events[-1].payload["status"] == ExecutionSessionState.CANCELLED.value
@@ -1185,20 +1359,20 @@ class TestTaskRunner:
         await runner_2.shutdown()
         await store_group_2.close()
 
-    async def test_attach_input_requires_approval_when_requested(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_attach_input_requires_approval_when_requested(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
             str(tmp_path / "runner-approval.db"),
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
         approval_manager = ApprovalManager(event_store=store_group.event_store)
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=InteractiveLLMService(approval_required=True),
+            runtime_services=runtime_service_fixture(
+                InteractiveLLMService(approval_required=True)
+            ).bundle,
             approval_manager=approval_manager,
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
@@ -1214,28 +1388,18 @@ class TestTaskRunner:
         assert created is True
         await runner.enqueue(task_id, msg.text)
 
-        # Feature 083 P4：等到 task 真正进入 WAITING_INPUT + session 露出 approval_id
-        # 才发 attach_input。原代码只等 session.pending_approval_id 出现，但
-        # `pending_approval_id` 设置点可能早于 task.status=WAITING_INPUT，xdist
-        # 高 CPU 负载下两步 transition 之间的 gap 让 attach_input 命中
-        # "task is not waiting for human input"。
-        approval_id: str | None = None
-        for _ in range(100):  # 5s 窗口（原 1s 太紧）
-            task = await task_service.get_task(task_id)
-            session = await runner.get_execution_session(task_id)
-            if (
-                task is not None
-                and task.status == TaskStatus.WAITING_INPUT
-                and session is not None
-                and session.pending_approval_id
-            ):
-                approval_id = session.pending_approval_id
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError(
-                "task did not reach WAITING_INPUT + pending_approval_id within 5s"
-            )
+        waiting = await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.WAITING_INPUT
+                and state["job_status"] == "WAITING_INPUT"
+                and state["session_state"] == ExecutionSessionState.WAITING_INPUT
+                and bool(state["session_pending_approval_id"])
+                and EventType.EXECUTION_INPUT_REQUESTED in state["event_types"]
+            ),
+            description="approval input task/job/session/event WAITING_INPUT",
+        )
+        approval_id = waiting["session_pending_approval_id"]
 
         assert approval_id is not None
 
@@ -1256,13 +1420,17 @@ class TestTaskRunner:
         )
         assert result.approval_id == approval_id
 
-        for _ in range(20):
-            task = await task_service.get_task(task_id)
-            if task is not None and task.status == TaskStatus.SUCCEEDED:
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError("approved input did not resume task")
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.SUCCEEDED
+                and state["job_status"] == "SUCCEEDED"
+                and state["session_pending_approval_id"] is None
+                and {"human-input", "llm-response"}.issubset(set(state["artifact_names"]))
+                and EventType.EXECUTION_INPUT_ATTACHED in state["event_types"]
+            ),
+            description="approved input terminal state converged",
+        )
 
         final_session = await runner.get_execution_session(task_id)
         assert final_session is not None
@@ -1271,9 +1439,7 @@ class TestTaskRunner:
         await runner.shutdown()
         await store_group.close()
 
-    async def test_task_runner_ask_back_state_transition(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_task_runner_ask_back_state_transition(self, tmp_path: Path) -> None:
         """T-E-3 / AC-E1: task_runner 层 ask_back 状态迁移（F099 Phase E）。
 
         验证：InteractiveLLMService（模拟 worker.ask_back 路径）触发：
@@ -1290,11 +1456,13 @@ class TestTaskRunner:
             str(tmp_path / "artifacts"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=InteractiveLLMService(),  # 模拟 worker.ask_back 内部调用 request_input
+            runtime_services=runtime_service_fixture(
+                InteractiveLLMService()
+            ).bundle,  # 模拟 worker.ask_back 内部调用 request_input
             timeout_seconds=60,
             monitor_interval_seconds=0.05,
             docker_available_checker=lambda: True,
@@ -1309,23 +1477,19 @@ class TestTaskRunner:
         assert created is True
         await runner.enqueue(task_id, msg.text)
 
-        # AC-E1: 等待 RUNNING → WAITING_INPUT 状态迁移
-        for _ in range(100):  # 5s 窗口
-            task = await task_service.get_task(task_id)
-            session = await runner.get_execution_session(task_id)
-            if (
-                task is not None
-                and task.status == TaskStatus.WAITING_INPUT
-                and session is not None
-                and session.state == ExecutionSessionState.WAITING_INPUT
-                and session.can_attach_input is True
-            ):
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError(
-                "F099: task did not reach WAITING_INPUT within 5s（ask_back state transition 失败）"
-            )
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.WAITING_INPUT
+                and state["job_status"] == "WAITING_INPUT"
+                and state["session_state"] == ExecutionSessionState.WAITING_INPUT
+                and state["session_can_attach_input"] is True
+                and EventType.EXECUTION_INPUT_REQUESTED in state["event_types"]
+            ),
+            description="ask-back task/job/session/event WAITING_INPUT",
+        )
+        task = await task_service.get_task(task_id)
+        session = await runner.get_execution_session(task_id)
 
         # WAITING_INPUT 状态验证
         assert task is not None
@@ -1337,20 +1501,23 @@ class TestTaskRunner:
         result = await runner.attach_input(task_id, user_answer)
         assert result.delivered_live is True
 
-        # 等待 SUCCEEDED
-        for _ in range(40):  # 2s 窗口
-            task = await task_service.get_task(task_id)
-            if task is not None and task.status == TaskStatus.SUCCEEDED:
-                break
-            await asyncio.sleep(0.05)
-        else:
-            raise AssertionError(
-                "F099: task did not SUCCEED after attach_input（ask_back resume 失败）"
-            )
+        await _wait_for_runner_state(
+            partial(_runner_snapshot, task_service, store_group, runner, task_id),
+            lambda state: (
+                state["task_status"] == TaskStatus.SUCCEEDED
+                and state["job_status"] == "SUCCEEDED"
+                and state["session_can_attach_input"] is False
+                and EventType.MODEL_CALL_COMPLETED in state["event_types"]
+                and {"human-input", "llm-response"}.issubset(set(state["artifact_names"]))
+            ),
+            description="ask-back terminal task/job/session/events converged",
+        )
+        task = await task_service.get_task(task_id)
 
         assert task.status == TaskStatus.SUCCEEDED
 
-        # 验证 MODEL_CALL_COMPLETED 事件中包含用户回答（InteractiveLLMService 返回 "interactive:{human_input}"）
+        # 验证 MODEL_CALL_COMPLETED 事件包含用户回答；InteractiveLLMService 返回
+        # "interactive:{human_input}"。
         events = await store_group.event_store.get_events_for_task(task_id)
         model_call_events = [e for e in events if e.type == EventType.MODEL_CALL_COMPLETED]
         assert len(model_call_events) >= 1, (
@@ -1365,3 +1532,7 @@ class TestTaskRunner:
 
         await runner.shutdown()
         await store_group.close()
+
+    async def test_waits_for_consistent_terminal_snapshot_and_reports_timeout(self) -> None:
+        """终态先可见时仍等待关联状态收敛，超时携带最后快照。"""
+        await _assert_quiescence_wait_contract()

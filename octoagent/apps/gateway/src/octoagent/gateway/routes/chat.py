@@ -7,7 +7,6 @@ GET /stream/task/{task_id} -- SSE 任务事件流（复用已有 stream 路由�
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import uuid
@@ -61,38 +60,34 @@ def _resolve_long_prompt_threshold() -> int:
         return LONG_PROMPT_THRESHOLD
     return value
 
-# 保存后台任务引用，防止 GC 回收
-_background_tasks: set[asyncio.Task[None]] = set()
+
+def require_runtime_task_runner(request: Request) -> Any:
+    """在任何Task写入前取得与composition root一致的TaskRunner。"""
+    task_runner = getattr(request.app.state, "task_runner", None)
+    runner_services = getattr(task_runner, "_runtime_services", None)
+    runtime_services = getattr(request.app.state, "runtime_services", None)
+    if (
+        task_runner is None
+        or runner_services is None
+        or (runtime_services is not None and runner_services is not runtime_services)
+    ):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "RUNTIME_SERVICES_NOT_READY",
+                "message": "运行时服务尚未完成初始化。",
+            },
+        )
+    return task_runner
 
 
-async def _enqueue_or_run(
-    request: Request,
-    service,
+async def _enqueue_task(
+    task_runner: Any,
     task_id: str,
     message: str,
     model_alias: str | None = None,
-    dispatch_metadata: dict[str, Any] | None = None,
 ) -> None:
-    if not (
-        hasattr(request.app.state, "llm_service")
-        and request.app.state.llm_service
-    ):
-        return
-    task_runner = getattr(request.app.state, "task_runner", None)
-    if task_runner is not None:
-        await task_runner.enqueue(task_id, message, model_alias=model_alias)
-        return
-    task = asyncio.create_task(
-        service.process_task_with_llm(
-            task_id,
-            message,
-            request.app.state.llm_service,
-            model_alias=model_alias,
-            dispatch_metadata=dispatch_metadata or {},
-        )
-    )
-    _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    await task_runner.enqueue(task_id, message, model_alias=model_alias)
 
 
 def _chat_send_failure(
@@ -242,8 +237,12 @@ async def _resolve_session_owner_profile_id(store_group, task_id: str) -> str:
         if not legacy_owner:
             continue
         # F117 Wave 2bc：读统一行 + is_worker_behavior_profile 判别（baseline 用 worker_profile 存在=worker）
-        anchored_agent_profile = await store_group.agent_context_store.get_agent_profile(legacy_owner)
-        if anchored_agent_profile is not None and is_worker_behavior_profile(anchored_agent_profile):
+        anchored_agent_profile = await store_group.agent_context_store.get_agent_profile(
+            legacy_owner
+        )
+        if anchored_agent_profile is not None and is_worker_behavior_profile(
+            anchored_agent_profile
+        ):
             continue
         return legacy_owner
     return anchored_owner_profile_id
@@ -268,9 +267,7 @@ async def _resolve_owner_turn_executor_kind(store_group, profile_id: str) -> Tur
         return TurnExecutorKind.SELF
     # F117 Wave 2bc：读统一行 + is_worker_behavior_profile 判别（baseline 用 worker_profile 存在=worker；
     # get_agent_profile 还会返回 main/subagent，必须 is_worker_behavior_profile guard 排除→SELF）
-    agent_profile = await store_group.agent_context_store.get_agent_profile(
-        resolved_profile_id
-    )
+    agent_profile = await store_group.agent_context_store.get_agent_profile(resolved_profile_id)
     if agent_profile is not None and is_worker_behavior_profile(agent_profile):
         return TurnExecutorKind.WORKER
     return TurnExecutorKind.SELF
@@ -302,9 +299,7 @@ async def _record_web_conversation_binding(
     主 Agent last-route。失败 WARNING 降级，不阻断消息主链（Constitution #6）。
     """
     if owner_turn_executor_kind is TurnExecutorKind.WORKER:
-        logger.debug(
-            "web_conversation_binding_skipped_direct_worker thread_id=%s", thread_id
-        )
+        logger.debug("web_conversation_binding_skipped_direct_worker thread_id=%s", thread_id)
         return
     binding_store = getattr(store_group, "conversation_binding_store", None)
     if binding_store is None:
@@ -317,9 +312,7 @@ async def _record_web_conversation_binding(
             project_id=project_id,
         )
     except Exception:
-        logger.warning(
-            "web_conversation_binding_failed thread_id=%s", thread_id, exc_info=True
-        )
+        logger.warning("web_conversation_binding_failed thread_id=%s", thread_id, exc_info=True)
 
 
 def _parse_projected_session_ref(session_id: str) -> tuple[str, str]:
@@ -381,6 +374,7 @@ async def send_chat_message(
     FR-023: 接收消息，创建/复用 Task，返回 stream_url。
     前端使用 EventSource 连接 stream_url 获取流式输出。
     """
+    task_runner = require_runtime_task_runner(request)
     chat_control_metadata: dict[str, Any] = {}
     requested_session_id = str(body.session_id or "").strip()
     requested_thread_id = str(body.thread_id or "").strip()
@@ -448,7 +442,7 @@ async def send_chat_message(
     after_event_id = ""
     from ..services.task_service import TaskService
 
-    service = TaskService(store_group, request.app.state.sse_hub)
+    service = TaskService(store_group, request.app.state.sse_hub, storage_only=True)
 
     # 创建 Task 记录（如果是新对话）
     if not body.task_id:
@@ -523,13 +517,11 @@ async def send_chat_message(
                 )
             )
             try:
-                await _enqueue_or_run(
-                    request,
-                    service,
+                await _enqueue_task(
+                    task_runner,
                     task_id,
                     body.message,
                     model_alias=requested_model_alias or None,
-                    dispatch_metadata=dispatch_metadata,
                 )
             except Exception as exc:
                 logger.warning("chat_send_enqueue_failed", exc_info=True)
@@ -587,13 +579,11 @@ async def send_chat_message(
                         agent_profile_id=requested_agent_profile_id,
                     )
                 )
-            await _enqueue_or_run(
-                request,
-                service,
+            await _enqueue_task(
+                task_runner,
                 task_id,
                 body.message,
                 model_alias=requested_model_alias or None,
-                dispatch_metadata=dispatch_metadata,
             )
         except HTTPException:
             raise

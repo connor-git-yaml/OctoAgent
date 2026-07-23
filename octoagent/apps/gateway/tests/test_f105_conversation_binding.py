@@ -23,6 +23,8 @@ from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 from .test_f105_channel_adapter import _build_service, _write_config
 
 
@@ -79,9 +81,7 @@ async def test_runtime_upsert_and_touch(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_binding_failure_degrades(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_binding_failure_degrades(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """binding store 写入抛异常时消息主链不受影响（US-3 AC-3，Constitution #6）。"""
     _write_config(tmp_path, dm_policy="open")
     store_group = await create_store_group(
@@ -92,9 +92,7 @@ async def test_binding_failure_degrades(
     async def _boom(*args, **kwargs):
         raise RuntimeError("binding store broken")
 
-    monkeypatch.setattr(
-        store_group.conversation_binding_store, "upsert_runtime_binding", _boom
-    )
+    monkeypatch.setattr(store_group.conversation_binding_store, "upsert_runtime_binding", _boom)
 
     result = await service.handle_webhook_update(_telegram_update(1, 10, "hello"))
     assert result.status == "accepted"  # task 照常创建
@@ -118,15 +116,13 @@ async def web_app(tmp_path: Path):
     app = FastAPI()
     app.include_router(chat.router)
 
-    store_group = await create_store_group(
-        str(tmp_path / "web.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "web.db"), str(tmp_path / "artifacts"))
     sse_hub = SSEHub()
     llm_service = LLMService()
     task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=llm_service,
+        runtime_services=runtime_service_fixture(llm_service).bundle,
         timeout_seconds=60,
         monitor_interval_seconds=0.05,
     )
@@ -146,9 +142,7 @@ async def web_app(tmp_path: Path):
 
 @pytest_asyncio.fixture
 async def web_client(web_app) -> AsyncClient:
-    async with AsyncClient(
-        transport=ASGITransport(app=web_app), base_url="http://test"
-    ) as ac:
+    async with AsyncClient(transport=ASGITransport(app=web_app), base_url="http://test") as ac:
         yield ac
 
 
@@ -174,9 +168,7 @@ async def test_web_send_records_binding_and_continue_touches(
     first_active = rows[0].last_active_at
 
     # 续聊（task_id 复用路径）→ touch 同一行
-    resp2 = await web_client.post(
-        "/api/chat/send", json={"message": "again", "task_id": task_id}
-    )
+    resp2 = await web_client.post("/api/chat/send", json={"message": "again", "task_id": task_id})
     assert resp2.status_code == 200
     rows = await store.list_by_platform("web")
     assert len(rows) == 1
@@ -211,9 +203,7 @@ async def test_project_scoped_continue_touches_same_binding(
     assert rows[0].project_id == "proj-f105"
 
     # 纯 task_id 续聊（请求不带 project_id）→ 仍 touch 同一行，不新增空 project 行
-    resp2 = await web_client.post(
-        "/api/chat/send", json={"message": "again", "task_id": task_id}
-    )
+    resp2 = await web_client.post("/api/chat/send", json={"message": "again", "task_id": task_id})
     assert resp2.status_code == 200
     rows = await store.list_by_platform("web")
     assert len(rows) == 1
@@ -221,11 +211,10 @@ async def test_project_scoped_continue_touches_same_binding(
 
 
 @pytest.mark.asyncio
-async def test_direct_worker_session_not_bound(
-    web_client: AsyncClient, web_app
-) -> None:
+async def test_direct_worker_session_not_bound(web_client: AsyncClient, web_app) -> None:
     """CODEX-H4：用户显式选 worker 直聊的会话不写 binding（H1 不被污染）。"""
-    await _save_worker_with_mirror(web_app.state.store_group.agent_context_store,
+    await _save_worker_with_mirror(
+        web_app.state.store_group.agent_context_store,
         AgentProfile(
             profile_id="worker-profile-f105",
             project_id="",
@@ -233,7 +222,7 @@ async def test_direct_worker_session_not_bound(
             summary="direct session",
             model_alias="cheap",
             status=AgentProfileStatus.ACTIVE,
-        )
+        ),
     )
     await web_app.state.store_group.conn.commit()
 
@@ -243,9 +232,7 @@ async def test_direct_worker_session_not_bound(
     )
     assert resp.status_code == 200
 
-    rows = await web_app.state.store_group.conversation_binding_store.list_by_platform(
-        "web"
-    )
+    rows = await web_app.state.store_group.conversation_binding_store.list_by_platform("web")
     assert rows == []
 
 
@@ -256,9 +243,7 @@ async def test_direct_worker_session_not_bound(
 
 def test_h1_no_agent_profile_write_path() -> None:
     """upsert 签名物理上不含 agent_profile_id（H1 构造性保证，spec D5）。"""
-    signature = inspect.signature(
-        SqliteConversationBindingStore.upsert_runtime_binding
-    )
+    signature = inspect.signature(SqliteConversationBindingStore.upsert_runtime_binding)
     assert "agent_profile_id" not in signature.parameters
 
 
@@ -279,6 +264,8 @@ async def test_h1_all_rows_remain_main_agent(tmp_path: Path) -> None:
     assert len(rows) == 2
     assert all(row.agent_profile_id == "" for row in rows)
     await store_group.close()
+
+
 # ── F117 测试辅助（worker 镜像播种）────────────────────────────────────
 # 运行时统一读 agent_profiles(kind=worker) 镜像；生产中镜像由 publish/_sync 写。本 helper
 # 把 worker 配置 AgentProfile 写成镜像（kind=worker + source_* 标记）反映生产状态。

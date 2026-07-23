@@ -1,7 +1,7 @@
 """OctoAgent 统一配置 Schema -- Feature 014
 
 定义 octoagent.yaml 的 Pydantic v2 数据模型。
-所有 Provider/ModelAlias/RuntimeConfig/OctoAgentConfig 实体均在此文件定义。
+所有 Provider/ModelAlias/OctoAgentConfig 实体均在此文件定义。
 对应 FR-001 ~ FR-004，data-model.md 全部实体定义。
 
 Feature 081 P2 升级（v1 → v2 schema）：
@@ -13,18 +13,17 @@ from __future__ import annotations
 
 import ipaddress
 import warnings
-from typing import Annotated, Any, Literal, Union
+from typing import Annotated, Any, Literal
 
 import yaml
+from octoagent.gateway.services.operations.control_plane_models import ConfigSchemaDocument
 from pydantic import BaseModel, Field, field_validator, model_validator
-
-from octoagent.provider.dx.control_plane_models import ConfigSchemaDocument
 
 # octoagent.yaml 文件头注释（不含凭证提示）
 _YAML_HEADER = (
     "# OctoAgent 统一配置文件\n"
     "# 此文件安全纳入版本管理（不含凭证）\n"
-    "# 凭证由 .env.litellm 管理（已在 .gitignore）\n"
+    "# 凭证由 CredentialStore 或 .env 管理（已在 .gitignore）\n"
     "# NEVER 在此文件存储 API Key 明文 — 使用 api_key_env 存储环境变量名\n"
     "#\n"
 )
@@ -115,7 +114,7 @@ class AuthOAuth(BaseModel):
 
 
 ProviderAuth = Annotated[
-    Union[AuthApiKey, AuthOAuth],
+    AuthApiKey | AuthOAuth,
     Field(discriminator="kind"),
 ]
 
@@ -216,7 +215,10 @@ class ProviderEntry(BaseModel):
 
     @property
     def effective_api_key_env(self) -> str:
-        """API key 环境变量名；v2 ``auth.env`` 优先，v1 ``api_key_env`` fallback；空串表示未配置。"""
+        """返回 API key 环境变量名。
+
+        v2 ``auth.env`` 优先，v1 ``api_key_env`` fallback；空串表示未配置。
+        """
         if self.auth is not None and isinstance(self.auth, AuthApiKey):
             return self.auth.env
         return self.api_key_env or ""
@@ -235,8 +237,7 @@ class ProviderEntry(BaseModel):
 # ModelAlias — 模型别名
 # ---------------------------------------------------------------------------
 
-# thinking_level 到 LiteLLM budget_tokens 的映射
-# 通过 litellm_params.thinking 传递给 LiteLLM Proxy（由各 Provider 适配）
+# thinking_level 到 Provider adapter budget_tokens 的映射
 THINKING_BUDGET_TOKENS: dict[str, int] = {
     "xhigh": 32000,
     "high": 16000,
@@ -268,7 +269,7 @@ class ModelAlias(BaseModel):
         default=None,
         description=(
             "推理深度级别（可选）：xhigh/high/medium/low。"
-            "生成 litellm_params.thinking = {type: enabled, budget_tokens: N}。"
+            "生成 Provider adapter thinking = {type: enabled, budget_tokens: N}。"
             "xhigh=32000, high=16000, medium=8000, low=1024 tokens。"
         ),
     )
@@ -277,19 +278,6 @@ class ModelAlias(BaseModel):
     def _normalize_model_string(self) -> ModelAlias:
         self.model = normalize_provider_model_string(self.provider, self.model)
         return self
-
-
-# ---------------------------------------------------------------------------
-# RuntimeConfig — 运行时配置
-# ---------------------------------------------------------------------------
-
-
-class RuntimeConfig(BaseModel):
-    """运行时配置 — octoagent.yaml runtime 块（占位，目前无字段）。
-
-    F081 P3b 退役 LiteLLM 后所有原有字段均已删除（``llm_mode`` / ``litellm_proxy_url``
-    / ``master_key_env``）。块本身保留作为 schema 占位，后续新增运行时配置直接在此扩展。
-    """
 
 
 # ---------------------------------------------------------------------------
@@ -660,10 +648,6 @@ class OctoAgentConfig(BaseModel):
         default_factory=dict,
         description="模型别名映射（key 为别名字符串，value 为 ModelAlias）",
     )
-    runtime: RuntimeConfig = Field(
-        default_factory=RuntimeConfig,
-        description="运行时配置块",
-    )
     memory: MemoryConfig = Field(
         default_factory=MemoryConfig,
         description="Memory backend 与高级检索默认配置",
@@ -780,6 +764,27 @@ class OctoAgentConfig(BaseModel):
                 field_path="(root)",
             )
 
+        runtime = raw.get("runtime")
+        if isinstance(runtime, dict):
+            for key in ("llm_mode", "litellm_proxy_url", "master_key_env"):
+                if key in runtime:
+                    raise ConfigParseError(
+                        message=f"RUNTIME_CONFIG_RETIRED: runtime.{key}",
+                        field_path=f"runtime.{key}",
+                    )
+            if runtime:
+                key = sorted(runtime)[0]
+                raise ConfigParseError(
+                    message=f"RUNTIME_CONFIG_UNKNOWN: runtime.{key}",
+                    field_path=f"runtime.{key}",
+                )
+            raw.pop("runtime")
+        elif runtime is not None:
+            raise ConfigParseError(
+                message="RUNTIME_CONFIG_UNKNOWN: runtime",
+                field_path="runtime",
+            )
+
         from pydantic import ValidationError
 
         try:
@@ -822,7 +827,6 @@ def build_config_schema_document(
             "provider",
             "models",
             "memory",
-            "runtime",
             "telegram",
             "review",
         ],

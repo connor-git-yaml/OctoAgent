@@ -31,8 +31,8 @@ OctoAgent 采用"**三层 Agent + Skill Pipeline**"的统一架构：
 - **Pydantic Skills（强类型执行层）**
   每个节点以 contract 为中心：结构化输出、工具参数校验、并行工具调用、框架化重试/审批。
 
-- **LiteLLM Proxy（模型网关/治理层）**
-  统一模型出口：alias 路由、fallback、限流、成本统计、日志审计。
+- **ProviderRouter（模型路由与治理层）**
+  在进程内完成 alias 解析、direct transport、fallback、成本统计与调用审计。
 
 > **设计原则**：主 Agent、Workers、Subagent 都以 Free Loop 保持最大灵活性，确定性只在需要的地方引入（Skill Pipeline）。Graph 不是"执行模式"，而是 Agent 手中的编排工具。三层 Agent 的核心区别在于持久性与 Project 所有权：主 Agent/Worker 持久化且拥有 Project，Subagent 临时且共享 Project。
 
@@ -54,7 +54,7 @@ flowchart TB
     STRM["Stream<br/><small>SSE / WebSocket</small>"]
   end
 
-  subgraph Kernel["🧠 OctoKernel"]
+  subgraph Runtime["🧠 Gateway Application Runtime"]
     direction TB
     ROUTER["Orchestrator<br/><small>Free Loop: 目标理解 → 路由 → 监督</small>"]
     POLICY["Policy Engine<br/><small>allow / ask / deny</small>"]
@@ -94,14 +94,16 @@ flowchart TB
   end
 
   subgraph Provider["☁️ Provider Plane"]
-    LLM["LiteLLM Proxy<br/><small>alias 路由 + fallback + 成本统计</small>"]
+    ROUTE["ProviderRouter<br/><small>alias 解析 + fallback + 成本统计</small>"]
+    LLM["Provider APIs<br/><small>direct transports</small>"]
+    ROUTE --> LLM
   end
 
   Channels -->|"消息入站"| Gateway
-  Gateway -->|"NormalizedMessage"| Kernel
-  Kernel -->|"A2A-Lite 派发"| Exec
-  Exec -->|"LLM 调用"| Provider
-  Exec -.->|"事件回传"| Kernel
+  Gateway -->|"NormalizedMessage"| Runtime
+  Runtime -->|"A2A-Lite 派发"| Exec
+  Exec -->|"LLM 调用"| ROUTE
+  Exec -.->|"事件回传"| Runtime
   Gateway -.->|"SSE 事件推送"| Channels
 
   %% 样式定义
@@ -119,7 +121,7 @@ flowchart TB
   class TASKS,ART,MEM store
   class W1,W2,W3,JR worker
   class SKILLS,GRAPH,TOOLS capability
-  class LLM provider
+  class ROUTE,LLM provider
 ```
 
 ### 6.3 数据与控制流（关键路径）
@@ -127,8 +129,8 @@ flowchart TB
 #### 6.3.1 用户消息 → 任务
 
 1. ChannelAdapter 收到消息 → 转成 `NormalizedMessage`
-2. Gateway 调 `POST /ingest_message` 投递到 Kernel
-3. Kernel：
+2. Gateway 调 `POST /ingest_message` 投递到同一 Gateway application runtime
+3. Runtime：
    - 创建 Task（若是新请求）或产生 UPDATE 事件（若是追加信息）
    - Orchestrator Loop 分类/路由 → 选择 Worker 并派发
    - Worker 以 Free Loop 执行，自主决定调用 Skill 或 Skill Pipeline（Graph）
@@ -144,7 +146,7 @@ flowchart TB
 
 #### 6.3.3 崩溃恢复
 
-- Kernel 重启：
+- Gateway application runtime 重启：
   - 扫描 Task Store：所有 RUNNING/WAITING_* 的任务进入"恢复队列"
   - Skill Pipeline（Graph）内崩溃：从最后 checkpoint 继续（确定性恢复）
   - Worker Free Loop 内崩溃：重启 Free Loop，将之前的 Event 历史注入为上下文，由 LLM 自主判断从哪里继续（可配置为"需要人工确认"）

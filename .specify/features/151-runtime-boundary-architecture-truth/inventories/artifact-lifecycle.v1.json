@@ -1,0 +1,611 @@
+{
+  "version": 1,
+  "feature_id": "F151",
+  "feature_root": ".specify/features/151-runtime-boundary-architecture-truth",
+  "evidence_root": ".specify/features/151-runtime-boundary-architecture-truth/evidence",
+  "states": ["Design", "Phase0-RED", "Corrective-RED", "Implement", "Verify", "Final"],
+  "authority_transition": {
+    "Design": {
+      "current_review": "analysis-report.md#t006-index-amendment-corrective-gate",
+      "on_gate_approval": "freeze the exact T006 index-amendment design bytes; only a separately approved index-integrity RED may follow and the accepted dirty RED remains immutable"
+    },
+    "Phase0-RED": {
+      "required_stop": "PHASE0_RED_REVIEW",
+      "main_owned_anchor": "evidence/bootstrap-anchor.v1.json",
+      "runner_may_create_anchor": false
+    },
+    "Corrective-RED": {
+      "required_stop": "T005_CORRECTIVE_RED_REVIEW",
+      "amendment_required_stops": ["T006_COMMITTED_MODE_RED_REVIEW accepted and frozen", "T006_INDEX_AMENDMENT_RED_REVIEW pending"],
+      "existing_anchor_and_bootstrap_raw_are_immutable": true,
+      "rejected_v1_and_runs_are_immutable_until_main_recovery_release": true,
+      "checker_changes_before_main_release": "forbidden",
+      "t006_prior_index_and_runs_are_immutable": {"record_count":20,"formal_run_count":12}
+    },
+    "Implement": {
+      "current_authority": ["spec.md", "plan.md", "tasks.md", "contracts/runtime-boundary-contract.md"],
+      "generated_local_evidence": true
+    },
+    "Verify": {
+      "required_committed_indexes": ["evidence/evidence-index.v2.json", "verification-report.md"]
+    },
+    "Final": {
+      "required_committed_indexes": ["evidence/evidence-index.v2.json", "verification-report.md"],
+      "required_committed_paths": ["evidence/.gitignore", "evidence/bootstrap-anchor.v1.json", "evidence/evidence-index.v2.json", "verification-report.md"],
+      "gate_reviews_are_history_not_final_authority": true
+    }
+  },
+  "committed_exact_paths": [
+    {"path":".specify/features/151-runtime-boundary-architecture-truth/evidence/.gitignore","owner":"S002-manifest-integrity","first_state":"Design","first_writer_task":"DESIGN-ROUND10","producer_command_id":"ROUND10_DESIGN_PATCH","retention":"permanent","required_in_final":true},
+    {"path":".specify/features/151-runtime-boundary-architecture-truth/evidence/bootstrap-anchor.v1.json","owner":"S004-evidence-checker","first_state":"Phase0-RED","first_writer_task":"PHASE0_RED_REVIEW","producer_command_id":"MAIN_PHASE0_ANCHOR_WRITE","retention":"permanent-after-T005","required_in_final":true},
+    {"path":".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v2.json","owner":"S004-evidence-checker","first_state":"Corrective-RED","first_writer_task":"T005","producer_command_id":"C20-recover","evolution_owners":["S006-committed-worktree-clean","S006-index-amendment-integrity"],"evolution_command_id":"C20-amend","evolution":"strict hash-linked append-only records with full-schema and canonical-run-set revalidation","retention":"permanent","required_in_final":true},
+    {"path":".specify/features/151-runtime-boundary-architecture-truth/verification-report.md","owner":"S104-docs","first_state":"Verify","first_writer_task":"T124","producer_command_id":"C25","retention":"permanent","required_in_final":true}
+  ],
+  "committed_producer_commands": [
+    {"command_id":"ROUND10_DESIGN_PATCH","kind":"design-governance-write","task":"DESIGN-ROUND10","exact_output_paths":[".specify/features/151-runtime-boundary-architecture-truth/evidence/.gitignore"],"may_run_after_t001":false},
+    {"command_id":"MAIN_PHASE0_ANCHOR_WRITE","kind":"main-owned-external-anchor-write","task":"PHASE0_RED_REVIEW","exact_output_paths":[".specify/features/151-runtime-boundary-architecture-truth/evidence/bootstrap-anchor.v1.json"],"runner_may_execute":false},
+    {"command_id":"C20-recover","kind":"main-released-stage-command","task":"T005","exact_output_paths":[".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v2.json"],"prevalidation_or_unrecognized_state_failure_write_count":0,"declared_interruption_result":"one exact resumable recovery_state_machine state"},
+    {"command_id":"C25","kind":"stage-command","task":"T124","exact_output_paths":[".specify/features/151-runtime-boundary-architecture-truth/verification-report.md"]}
+  ],
+  "append_mutator_commands": [
+    {"command_id":"C20-amend","kind":"main-released-append-only-index-mutation","task":"T006","exact_output_path":".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v2.json","immutable_prior_record_count":20,"immutable_prior_formal_run_count":12,"allowed_appended_record_count":6,"failure_or_unknown_interruption_prior_byte_changes":0}
+  ],
+  "generated_local_types": [
+    {
+      "type": "phase0-bootstrap",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/bootstrap/{slice_id}/RED/{artifact_name}",
+      "allowed_slice_ids": ["S001-import-direction", "S002-retired-quality", "S002-manifest-integrity", "S003-complexity-checker", "S004-evidence-checker", "S004-junit-parser"],
+      "required_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"],
+      "owner": "T001-T004 bootstrap transaction",
+      "retention": "retain unchanged until Final approval; raw bytes are not committed"
+    },
+    {
+      "type": "formal-rgr",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/runs/{slice_id}/{phase}/{artifact_name}",
+      "allowed_phases": ["RED", "GREEN", "REFACTOR"],
+      "required_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"],
+      "slice_source": "inventories/rgr-slices.md",
+      "owner": "tdd-evidence run",
+      "retention": "retain through Final approval; commit only hashes and normalized node outcomes"
+    },
+    {
+      "type": "corrective-red",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/corrective/T005-integrity-v2/{slice_id}/RED/{artifact_name}",
+      "allowed_tasks": ["T005", "T006"],
+      "transactions": [
+        {
+          "slice_id": "S004-evidence-checker",
+          "expected_oracle_id": "F151_T005_EVIDENCE_INTEGRITY_CONTRACT_MISSING",
+          "exact_nodeids": [
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_accepts_complete_pytest_red_green_refactor_artifacts",
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_rejects_fake_artifact_hash",
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_rejects_reordered_rgr_steps",
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_rejects_missing_runner_artifact",
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_rejects_selector_mismatch",
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_dirty_behavior_change_requires_slice_when_head_is_unchanged",
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_artifact_lifecycle_rejects_unknown_early_wrong_writer_or_gitignored_escape",
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_bootstrap_anchor_rejects_missing_malformed_hash_mismatch_or_second_anchor",
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_bootstrap_anchor_rejects_replaced_or_mixed_base_tree_argv_junit_and_raw"
+          ],
+          "compound_case_owners": {
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_accepts_complete_pytest_red_green_refactor_artifacts": ["exact 12-field tree positive control", "required full record hash and chain positive control", "canonical run-index bijection positive control"],
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_rejects_missing_runner_artifact": ["tree missing field", "tree extra field", "invocation missing field", "record missing required tree cross-field"],
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_rejects_reordered_rgr_steps": ["exact eight-record prefix delete", "insert", "reorder", "replace", "rejected v1 record injection"],
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_dirty_behavior_change_requires_slice_when_head_is_unchanged": ["verify local-working-tree valid base-ref positive", "verify committed valid base-ref positive", "unknown through-task", "unresolvable base-ref"],
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_artifact_lifecycle_rejects_unknown_early_wrong_writer_or_gitignored_escape": ["architecture all resolvable base-ref positive and exact forwarding", "architecture all missing base-ref", "architecture all unresolvable base-ref", "recovery R0 through R4 idempotent paths", "recovery interruption after runs rename", "after v1 rename", "before temp", "partial temp", "after temp fsync", "after replace", "unrecognized mixed recovery state", "missing/empty/unknown/reused main review id"],
+            "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_bootstrap_anchor_rejects_replaced_or_mixed_base_tree_argv_junit_and_raw": ["tree slice", "phase", "base_ref", "merge_base_sha", "head_sha", "head_tree_sha", "worktree_fingerprint", "fingerprint_scope", "fingerprint_files", "status_porcelain", "captured_utc cross-field mismatch"]
+          }
+        },
+        {
+          "slice_id": "S002-manifest-integrity",
+          "expected_oracle_id": "F151_FINALIZE_VERIFICATION_CONTRACT_MISSING",
+          "exact_nodeids": [
+            "octoagent/tests/gate/test_runtime_architecture.py::TestManifestIntegrity::test_finalize_verification_writes_only_required_report_after_all_gates"
+          ],
+          "compound_cases": ["T120-T123 and T124 input closure positive creates exact report", "missing T120, T121, T122 or T123 input fails with output byte count zero", "C25/report/T124 completion is not a precondition", "existing output remains byte-identical on failure"]
+        }
+      ],
+      "amendment_path_templates": {
+        "T006": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/corrective/T006-committed-mode-v1/{slice_id}/RED/{artifact_name}"
+      },
+      "amendment_transactions": [
+        {
+          "task_id": "T006",
+          "slice_id": "S006-committed-worktree-clean",
+          "expected_oracle_id": "F151_COMMITTED_MODE_DIRTY_WORKTREE_ACCEPTED",
+          "exact_nodeids": ["octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_dirty_behavior_change_requires_slice_when_head_is_unchanged"],
+          "compound_cases": ["clean committed worktree accepts", "exact generated evidence-only dirty accepts", "staged relevant path rejects", "unstaged relevant path rejects", "untracked relevant path rejects"]
+        },
+        {
+          "task_id": "T006",
+          "slice_id": "S006-index-amendment-integrity",
+          "expected_oracle_id": "F151_T006_INDEX_AMENDMENT_CONTRACT_MISSING",
+          "exact_nodeids": ["octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_t006_index_amendment_adopts_exact_two_reds_and_preserves_prior_chain"],
+          "compound_cases": ["capability absence is an assertion RED rather than argparse or collection failure", "valid exact two-RED adoption preserves prior20 objects and hashes plus 12 canonical runs", "reentry does not duplicate records", "missing partial or mutated artifact fails with unchanged index bytes", "wrong combined aggregate fails with unchanged index bytes", "wrong or reused review id fails with unchanged index bytes", "corrupt prior index fails with unchanged bytes", "extra or unindexed run fails", "duplicate or wrong-order record fails", "through-task T006 fails before the six-record tail is complete and passes without requiring future tasks after completion"]
+        }
+      ],
+      "expected_failing_nodeids_source": "transactions.*.exact_nodeids plus amendment_transactions.*.exact_nodeids",
+      "argv_rule": ["uv", "run", "--project", "octoagent", "--no-sync", "python", "-m", "pytest", "-q", "-rA", "<transaction exact_nodeids in listed order>", "--junitxml=<expanded path_template/junit.xml>"],
+      "environment_profile": "stage-command-matrix.v1.json pre-sdk exact ordered PYTHONPATH plus PYTHONNOUSERSITE=1",
+      "required_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"],
+      "owner": "main-approved fixed pytest/JUnit transactions over existing S004/S002 nodes and the two exact T006 corrective nodes",
+      "retention": "retain all four corrective transaction directories unchanged through Final approval; T006 REDs may enter canonical v2 only after main records their per-slice and canonical combined aggregate sha256"
+    },
+    {
+      "type": "coverage",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/coverage/{stage_task}/{artifact_name}",
+      "allowed_stage_tasks": ["T029", "T036", "T049", "T070", "T090", "T105", "T122"],
+      "required_artifact_names": ["coverage.lcov", "coverage-metadata.json", "stdout.txt", "stderr.txt", "exit-code.txt"],
+      "owner": "C19 pre/post transaction",
+      "retention": "retain through Final approval; commit only sha256, freshness metadata and verdict"
+    },
+    {
+      "type": "constructor-coverage",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/special/C084/{artifact_name}",
+      "required_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "selected-nodes.json"],
+      "owner": "C084",
+      "retention": "retain through Final approval; commit normalized node/constructor join and hashes"
+    },
+    {
+      "type": "atomic-namespace-before",
+      "exact_relative_path": "local/atomic/S017-namespace-atomic/T017-BEFORE/atomic-namespace-before.v1.json",
+      "task_id": "T017",
+      "phase": "BEFORE",
+      "slice_id": "S017-namespace-atomic",
+      "required_artifact_names": ["atomic-namespace-before.v1.json"],
+      "owner": "T017 BEFORE snapshot",
+      "retention": "local-only raw; never enter canonical v2 or commit; retain unchanged through main T029 and Final review"
+    },
+    {
+      "type": "atomic-namespace-after",
+      "exact_relative_path": "local/atomic/S017-namespace-atomic/T029-AFTER/atomic-namespace-after.v1.json",
+      "task_id": "T029",
+      "phase": "AFTER",
+      "slice_id": "S017-namespace-atomic",
+      "required_artifact_names": ["atomic-namespace-after.v1.json"],
+      "owner": "T029 AFTER snapshot",
+      "retention": "local-only raw; never enter canonical v2 or commit; retain unchanged through main T029 and Final review"
+    }
+  ],
+  "anchor_transport": {
+    "path": ".specify/features/151-runtime-boundary-architecture-truth/evidence/bootstrap-anchor.v1.json",
+    "required_cli": ["--bootstrap-anchor-file", ".specify/features/151-runtime-boundary-architecture-truth/evidence/bootstrap-anchor.v1.json", "--bootstrap-anchor-sha256", "<64-lower-hex>"],
+    "creator": "main reviewer after PHASE0_RED_REVIEW",
+    "consumer": "T005 recover-index and every later full index validation",
+    "runner_can_generate_or_replace": false,
+    "required_fields": ["version", "feature_id", "base_sha", "worktree_fingerprint", "anchored_utc", "main_review_message_id", "artifacts"],
+    "artifact_fields": ["slice_id", "phase", "relative_path", "sha256", "size_bytes", "argv_sha256", "tree_sha256", "junit_sha256", "stdout_sha256", "stderr_sha256", "exit_code"],
+    "single_anchor_rule": "exactly one anchor file and one externally supplied expected sha256; a second anchor, replacement, missing file or mismatched bytes fails"
+  },
+  "content_policy": {
+    "raw_artifacts_committed": false,
+    "raw_artifacts_must_be_review_accessible": true,
+    "max_bytes_per_raw_file": 5242880,
+    "secrets": "redact known credentials before persistence; record redaction count and sha256 of the redacted bytes, never the secret",
+    "evidence_index_must_hash": ["raw/JUnit/stdout/stderr/exit/invocation/tree artifacts", "bootstrap anchor", "production/tests/untracked dirty fingerprint"],
+    "unknown_path": "fail even when ignored by Git"
+  },
+  "automatic_verify_policy": {
+    "deterministic_full_suite_command": "C23",
+    "deterministic_all_transaction_command": "C24",
+    "forbidden_commands": ["C18", "repo-scripts/lane.py baseline"],
+    "host_credentials": "forbidden",
+    "network_or_external_cost": "forbidden",
+    "implicit_authorization": "default HOME, credential presence and skip outcomes never authorize execution",
+    "manual_live_scope": "not registered by F151 and cannot produce F151 lifecycle evidence"
+  },
+  "rejected_evidence": {
+    "status": "REJECTED_EVIDENCE_NOT_RELEASE_INPUT",
+    "current_index_path": ".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v1.json",
+    "current_index_sha256": "1ad740db7bb515c633e48c42c75da92dd310ad7bc1e1993cdd973c9c52023adb",
+    "current_run_root": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/runs",
+    "current_run_aggregate_sha256": "a8f84281dd3749a5e80facf724fb40fb4ec20bdfb9e84c0a0edccb500501ba62",
+    "slice_ids": ["S001-import-direction", "S002-retired-quality", "S002-manifest-integrity", "S003-complexity-checker", "S004-evidence-checker", "S004-junit-parser"],
+    "phases": ["GREEN", "REFACTOR"],
+    "artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"],
+    "quarantine_root": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/rejected-t005-t006-v1",
+    "recovery_rule": "only C20-recover after main release; validate every source byte and the main-supplied review id first, then advance the monotonic recovery_state_machine one hash-identified step at a time; no cross-path atomicity or rollback is claimed",
+    "may_be_indexed_as_valid": false,
+    "may_be_deleted_overwritten_rerun_or_staged": false
+  },
+  "superseded_contract_evidence": {
+    "status": "VALID_BYTES_FOR_SUPERSEDED_CONTRACT",
+    "release_eligible": false,
+    "chain_required": true,
+    "canonical_index_path": ".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v2.json",
+    "canonical_index_sha256_at_review": "f6deaa1c63f02833db75dc0e5e6dbe86062df68c20328dc3c540fe92a9925310",
+    "record_position": 33,
+    "record_identity": ["formal-rgr", "T011", "S011-clean-wheel", "RED"],
+    "record_sha256": "9debfc1462bf819b1af7aef2259532321480b346c370c3a580522a049474a479",
+    "artifact_root": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/runs/S011-clean-wheel/RED",
+    "artifact_aggregate_sha256": "1b1489ad90723853492609513d36e20d3c48a21206c0f7ac3269d53461ff48ef",
+    "test_sha256": "91bca2f696bce6a6490cd89f8417b44701e77a4d285270d467b3d36cb74bc975",
+    "governance_reason": "the five-node contract required namespace zero, exit69, startup exit78 and full/all before their T029/T045/T064/T070 owners",
+    "mutation_policy": "record, six artifacts and chain position may not be deleted, overwritten, moved, rerun, reindexed or presented as release evidence",
+    "release_replacement": {
+      "protocol_id": "t011-preliminary-direct-corrective-red",
+      "exact_root": "/tmp/f151-s011-clean-wheel-preliminary-red-main/RED",
+      "repo_root_cwd": "/Users/connorlu/.codex/worktrees/c931/OctoAgent",
+      "exact_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"],
+      "ordered_environment": [
+        {"name": "PYTHONNOUSERSITE", "value": "1"},
+        {"name": "PYTHONPATH", "value": "/Users/connorlu/.codex/worktrees/c931/OctoAgent/octoagent/packages/core/src:/Users/connorlu/.codex/worktrees/c931/OctoAgent/octoagent/packages/provider/src:/Users/connorlu/.codex/worktrees/c931/OctoAgent/octoagent/packages/protocol/src:/Users/connorlu/.codex/worktrees/c931/OctoAgent/octoagent/packages/tooling/src:/Users/connorlu/.codex/worktrees/c931/OctoAgent/octoagent/packages/skills/src:/Users/connorlu/.codex/worktrees/c931/OctoAgent/octoagent/packages/policy/src:/Users/connorlu/.codex/worktrees/c931/OctoAgent/octoagent/packages/memory/src:/Users/connorlu/.codex/worktrees/c931/OctoAgent/octoagent/packages/sdk/src:/Users/connorlu/.codex/worktrees/c931/OctoAgent/octoagent/apps/gateway/src"},
+        {"name": "LITELLM_LOCAL_MODEL_COST_MAP", "value": "True"}
+      ],
+      "exact_nodeids": [
+        "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_provider_wheel_isolated_import_and_requires_dist",
+        "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_gateway_relocation_level_runs_three_help_and_namespace_checks",
+        "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_gateway_full_runs_external_cwd_host_readiness_and_sigterm",
+        "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_gateway_full_maps_invalid_startup_to_exit_78_before_uvicorn",
+        "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_source_managed_commands_exit_69_before_side_effects"
+      ],
+      "ordered_argv": [
+        "uv", "run", "--project", "octoagent", "--no-sync", "python", "-m", "pytest", "-q", "-rA",
+        "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_provider_wheel_isolated_import_and_requires_dist",
+        "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_gateway_relocation_level_runs_three_help_and_namespace_checks",
+        "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_gateway_full_runs_external_cwd_host_readiness_and_sigterm",
+        "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_gateway_full_maps_invalid_startup_to_exit_78_before_uvicorn",
+        "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_source_managed_commands_exit_69_before_side_effects",
+        "--junitxml=/tmp/f151-s011-clean-wheel-preliminary-red-main/RED/junit.xml"
+      ],
+      "exact_command_rule": "shlex.join(['env', '<ordered_environment name=value items in listed order>', '<the identical ordered_argv object>']); invocation.argv must be the same argv object used by subprocess",
+      "invocation_exact_fields": ["version", "slice_id", "phase", "task_scope", "argv", "cwd", "env", "exact_command", "started_utc", "finished_utc", "exit_code"],
+      "invocation_constants": {"version": 1, "slice_id": "S011-clean-wheel", "phase": "RED", "task_scope": "T011", "exit_code": 1},
+      "tree_exact_fields": ["version", "slice_id", "phase", "base_ref", "merge_base_sha", "head_sha", "head_tree_sha", "worktree_fingerprint", "fingerprint_scope", "fingerprint_files", "status_porcelain", "captured_utc"],
+      "tree_constants": {"version": 1, "slice_id": "S011-clean-wheel", "phase": "RED", "base_ref": "origin/master", "merge_base_sha": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "head_sha": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "head_tree_sha": "11712afdb9a50a10bba16aaabf06a2017ff183ec", "fingerprint_scope": "committed/staged/unstaged/untracked final files excluding evidence outputs"},
+      "fingerprint_rule": "collect git status --porcelain=v1 -z --untracked-files=all; exclude evidence local plus anchor/index; build sorted fingerprint_files with path/kind/sha256/size or deleted, sort status_porcelain, then worktree_fingerprint=sha256(UTF-8 canonical JSON of fingerprint_files with sort_keys=true,separators=(',',':'))",
+      "expected_oracle_id": "F151_CLEAN_WHEEL_CONTRACT_MISSING",
+      "expected_exit_code": 1,
+      "expected_selected_count": 5,
+      "expected_passed_count": 0,
+      "expected_failed_count": 5,
+      "expected_error_count": 0,
+      "expected_skipped_count": 0,
+      "expected_rerun_count": 0,
+      "stderr_size_bytes": 0,
+      "failure_rule": "all five exact nodeids are assertion failures; every failure contains exactly F151_CLEAN_WHEEL_CONTRACT_MISSING as the contract oracle and no collection/import/path/usage/environment failure",
+      "artifact_binding": {
+        "artifact_sha256": {"junit.xml": "1491e6080eab7616fb895e6f026cccf7cf7e12a00be23a5e6e257a2f54f0f659", "stdout.txt": "e81ae3d6bf9d0e7b44055a6eaac39778be5f7bf9b492f322b92ff0a6e433dffb", "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "exit-code.txt": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865", "invocation.json": "3857b70b92e3dd932a12eab0f30f07a83d3c90a32518f808bc8f1064516c2b62", "tree.json": "6d1c080a2fb99f573a19371047b5d6cd18454f8abc7c78980026fc5cb1c21be7"},
+        "artifact_size_bytes": {"junit.xml": 2244, "stdout.txt": 1882, "stderr.txt": 0, "exit-code.txt": 2, "invocation.json": 3611, "tree.json": 19080},
+        "canonical_aggregate_rule": "sha256(UTF-8 canonical JSON of the exact artifact name->sha256 map with sort_keys=true,separators=(',',':'))",
+        "artifact_aggregate_sha256": "2405581c676b28dea56f9ca66b13e22abeafb386e75ea680e03f246226db84da",
+        "test_sha256": "294b2e57189d79b622f7048da1e6f5a33cb00982fc7fbebec1fb04b069f238f5",
+        "main_review_message_id": "main-f151-t011-replacement-red-review-2405581c676b28de-20260721",
+        "main_attestation_binding_rule": "sha256(UTF-8 canonical JSON of protocol_id,exact_root,artifact_sha256,artifact_size_bytes,artifact_aggregate_sha256,test_sha256,main_review_message_id with sort_keys=true,separators=(',',':'))",
+        "main_attestation_binding_sha256": "61047efa7dfeadb6d20f45664a1cd83e825356b11c460d8958ccc9963139f061"
+      },
+      "canonical_index_adoption": false,
+      "runner": "direct standard pytest/JUnit transaction owned by main; not a second runner or index",
+      "main_review_state": "ACCEPTED",
+      "required_before": "T012 formal GREEN",
+      "raw_retention": "the exact /tmp six bytes remain immutable and review-accessible through T012_REFACTOR_REVIEW; after main accepts the complete machine attestation they are not a Final filesystem dependency",
+      "final_verifier_owner": "T103 S103-existing-report validates the exact main attestation maps, canonical aggregate and binding; it does not require /tmp raw bytes to survive until Final",
+      "contract_migration": {
+        "trigger": "any normalized-AST or byte change to the five S011 nodes or their requires-dist/isolation assertion helpers relative to accepted test_sha256 294b2e57189d79b622f7048da1e6f5a33cb00982fc7fbebec1fb04b069f238f5",
+        "old_binding_transition": "ACCEPTED -> SUPERSEDED_HISTORY_NOT_RELEASE_EVIDENCE",
+        "old_raw_policy": "retain immutable; never reuse its /tmp root, aggregate, review id or attestation binding for the revised contract",
+        "successor_protocol": {
+          "protocol_id": "t011-preliminary-unowned-direct-red-v5",
+          "exact_root": "/tmp/f151-s011-clean-wheel-contract-v5-red-main/RED",
+          "root_owner": "main creates and proves empty after test-code review",
+          "repo_root_cwd": "/Users/connorlu/.codex/worktrees/c931/OctoAgent",
+          "ordered_environment": "exactly equal release_replacement.ordered_environment",
+          "exact_nodeids": "exactly equal release_replacement.exact_nodeids in the same order",
+          "ordered_argv_rule": "exactly equal release_replacement.ordered_argv except the final --junitxml value is /tmp/f151-s011-clean-wheel-contract-v5-red-main/RED/junit.xml",
+          "exact_command_rule": "shlex.join from the same ordered environment and identical actual argv object",
+          "invocation_exact_fields": "exactly equal release_replacement.invocation_exact_fields",
+          "tree_exact_fields": "exactly equal release_replacement.tree_exact_fields",
+          "expected_result": {
+            "exit_code": 1,
+            "selected": 5,
+            "passed": 0,
+            "failed": 5,
+            "errors": 0,
+            "skipped": 0,
+            "reruns": 0,
+            "stderr_size_bytes": 0,
+            "oracle": "F151_CLEAN_WHEEL_CONTRACT_MISSING"
+          },
+          "test_contract_preconditions": [
+            "observable-delta audit covers every changed S011 assertion and both new T012 nodes with no no-op mutation",
+            "S011 literal occurrences use ownership_state resolved or unowned; unowned exact projection and count are complete while runtime delta consumes only resolved rows",
+            "child isolation facts come from the actual child probe",
+            "the old 294b2e test SHA is not accepted for this protocol"
+          ],
+          "acceptance_binding_required_fields": [
+            "artifact_sha256",
+            "artifact_size_bytes",
+            "artifact_aggregate_sha256",
+            "test_sha256",
+            "main_review_message_id",
+            "main_attestation_binding_sha256"
+          ],
+          "main_review_message_id": "main-f151-t012-final-unowned-v5-review-20260721",
+          "predecessor_selector_attestation": {
+            "selectors": ["S012-child-isolation-observation"],
+            "rule": "child selector and owned helpers remain normalized-AST exact across v5; import v4 predecessor is superseded by the separately bound v5 RED"
+          },
+          "import_selector_migration": {
+            "v4_state": "SUPERSEDED_HISTORY_NOT_RELEASE_EVIDENCE",
+            "v4_root": "/tmp/f151-s012-import-contract-v4-red-main/RED",
+            "v4_artifact_aggregate_sha256": "9fea0f7208c15a74bbc5c146be1a1371ea26ea8d2160e34a1c0271a1265af8a3",
+            "successor_protocol_id": "t012-import-unowned-direct-red-v5",
+            "successor_exact_root": "/tmp/f151-s012-import-contract-v5-red-main/RED",
+            "successor_main_review_message_id": "main-f151-t012-final-unowned-v5-review-20260721",
+            "successor_state": "VALID_DIRECT_RED_PENDING_FINAL_BINDING",
+            "unreached_test_fixture_correction": {
+              "rule": "the accepted v5 RED failure must occur before either corrected helper is reached; JUnit nodeid and oracle remain exact",
+              "assert_isolation_ast_before": "03cb91b382aed029ca98306155b5ab278db65bdb891c49a9a1c08a5fea86d1da",
+              "assert_isolation_ast_after": "be3050b5761abde8496ee8802ea5ea07b3f354dab72565416d602e08f231d388",
+              "unknown_dynamic_fixture_ast_before": "a9b1ae0d73aab8f138a119a8240d2915d603eb9bf8f9c4da97dd482edfc8a1be",
+              "unknown_dynamic_fixture_ast_after": "c880054e2622bd1b6556483bd6792b29b30596f69f696965acd0d72158b53b01",
+              "s011_red_failure_before_helper": "literal unowned classification rejected or preliminary/deferred contract mismatch",
+              "import_red_failure_before_helper": "missing public seam validate_classified_occurrences"
+            }
+          },
+          "accepted_batch_binding": {
+            "binding_rule": "sha256(UTF-8 canonical JSON of {main_review_message_id,accepted_reds} with sort_keys=true,separators=(',',':')); each accepted_red contains protocol_id, exact_root, artifact maps, aggregate, execution/current test SHA and any selector-level AST attestation",
+            "main_review_message_id": "main-f151-t012-final-unowned-v5-review-20260721",
+            "current_test_sha256": "07b4b0e463979c4cb58adf6fdaa1a4423a1810c11c54c2cd6bf7fe18f64a8d77",
+            "accepted_reds": [
+              {
+                "protocol_id": "t011-preliminary-unowned-direct-red-v5",
+                "exact_root": "/tmp/f151-s011-clean-wheel-contract-v5-red-main/RED",
+                "artifact_sha256": {"exit-code.txt":"4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865","invocation.json":"eb528d56a4de357b62c4bf3d462dfcdfc273ea03e6e75d8ac30d5d182487a438","junit.xml":"99edaa28106ffc66085fd2d117d16163ece4f718d55473fe41f920133547bae8","stderr.txt":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout.txt":"a138bcbdf769787b40b375562cffe795a56add9ac40daf7b7ef0adf7153fa1ec","tree.json":"39b9cbf5edd094cb446da152253deec5764f8a3f91e4f4bd8b3dc815dd6d662c"},
+                "artifact_size_bytes": {"exit-code.txt":2,"invocation.json":3462,"junit.xml":2212,"stderr.txt":0,"stdout.txt":1935,"tree.json":16967},
+                "artifact_aggregate_sha256": "7eae68d7a702b042088ad1c225ad93e5d9c30f7d65850fbdc5640c487a628521",
+                "execution_test_sha256": "8bf4ef435d8d403ccc94458112d9b1ff2fd088bc797e794a5bac2f2a9fae4535",
+                "current_test_sha256": "07b4b0e463979c4cb58adf6fdaa1a4423a1810c11c54c2cd6bf7fe18f64a8d77",
+                "attestation_binding_sha256": "311f207e3fbb2f138c1b9c274141ae3a004ff40a087a0ab95949f3d6718fec50"
+              },
+              {
+                "protocol_id": "t012-import-unowned-direct-red-v5",
+                "exact_root": "/tmp/f151-s012-import-contract-v5-red-main/RED",
+                "artifact_sha256": {"exit-code.txt":"4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865","invocation.json":"c122459f16a16004bb352e9ffcca04b757634310d3f1c29fb2b1ef589ffdf650","junit.xml":"71105a65d634111af72aa0ce84cebf6f33bd5482329883aa077b322a78b3f7cb","stderr.txt":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout.txt":"9d0b7411efb9adbfc3563f97df50069926b6f8565beb8a9020de7a3c10ff6a74","tree.json":"3f044c74c7743dc287dba3f40e6ceb897057666c238805af538a7b527082c6af"},
+                "artifact_size_bytes": {"exit-code.txt":2,"invocation.json":2442,"junit.xml":719,"stderr.txt":0,"stdout.txt":665,"tree.json":16987},
+                "artifact_aggregate_sha256": "83ecf65292de1776a62afc0cf5e9476d63d0478ef0d6290525aa614a54336489",
+                "execution_test_sha256": "d35b617c306e25b1977d33f18347e397c0077ef589f1a1cd223543acb6cc4847",
+                "current_test_sha256": "07b4b0e463979c4cb58adf6fdaa1a4423a1810c11c54c2cd6bf7fe18f64a8d77",
+                "attestation_binding_sha256": "1e06064f13597ee5e9bfd7ddde733f3005155c686c5b12b5749b288bb6ecfd06"
+              },
+              {
+                "protocol_id": "t012-child-observation-direct-red-v4",
+                "exact_root": "/tmp/f151-s012-child-contract-v4-red-main/RED",
+                "artifact_sha256": {"exit-code.txt":"4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865","invocation.json":"2ac47ab80423549e87073d0797efa01f7104b6ca27a8e8efda3bdd28102b3448","junit.xml":"f989562c1201dfe3999b356f447c41ba0997d76a3c570f52deb776d54bd023ed","stderr.txt":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout.txt":"a528b7173bc00660867c5263953dbbd15338fce57091608097fce6494ab0d8dc","tree.json":"7bebe7d62090e0294a4c65b7ce9d4dd27e507721c1079db8661689d158cb1d09"},
+                "artifact_size_bytes": {"exit-code.txt":2,"invocation.json":2525,"junit.xml":653,"stderr.txt":0,"stdout.txt":602,"tree.json":19768},
+                "artifact_aggregate_sha256": "92fa08d79f880fe49c6a87fe7457ab17168a21ca8b4be9a1d48727ab3f72f2e0",
+                "execution_test_sha256": "8fd1a683f6fa4814b98cc42af366ba824a9e1d6cca1cd30994adff356e4a5b6a",
+                "current_test_sha256": "07b4b0e463979c4cb58adf6fdaa1a4423a1810c11c54c2cd6bf7fe18f64a8d77",
+                "selector_owned_helpers_ast_sha256": "eec1bb70c9e665c290137a31d4f2ea0f16d9f0465536823538970caff5a4cdfd",
+                "attestation_binding_sha256": "c77ad4ff345c1cbbfe8f2182d68c3ccd85b92dafd28cd4e3bb0a7455f91a9bdd"
+              }
+            ],
+            "batch_attestation_binding_sha256": "fca3d946f3c245737cbf8bd0a153766e5922afa17566f85b2ad1815ffc8abaec"
+          },
+          "acceptance_binding_state": "ACCEPTED_V5_BATCH",
+          "canonical_index_adoption": false,
+          "reuse_old_root_review_or_binding": "fail"
+        }
+      }
+    }
+  },
+  "evidence_index_schema": {
+    "canonical_path": ".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v2.json",
+    "exact_top_level_fields": ["schema_version", "feature_id", "bootstrap_anchor_path", "bootstrap_anchor_sha256", "base_sha", "created_utc", "recovery", "records", "chain_head_sha256"],
+    "schema_version": 2,
+    "feature_id": "F151",
+    "recovery_exact_fields": ["rejected_index_sha256", "rejected_run_aggregate_sha256", "quarantine_root", "corrective_red_aggregate_sha256", "main_review_message_id", "approval_binding_sha256"],
+    "canonical_json": {"encoding":"UTF-8","sort_keys":true,"separators":[",",":"]},
+    "genesis_rule": "sha256(canonical-json({feature_id,bootstrap_anchor_sha256,base_sha}))",
+    "record_hash_rule": "sha256(canonical-json(record excluding record_sha256 but including previous_record_sha256))",
+    "chain_head_rule": "equals final record_sha256; empty records forbidden",
+    "actual_run_bijection": "accepted bootstrap, corrective-red and canonical formal run directories equal indexed records in both directions; rejected quarantine is excluded; main-owned direct S011/import/child replacement evidence is noncanonical and never enters this bijection",
+    "release_eligibility_rule": "hash-chain validity and release eligibility are separate: records33/38/39 remain immutable in the chain; the active contracts are qualified by the machine-bound S011 v5/import v5 direct REDs plus the child v4 selector-level predecessor attestation. Older direct generations remain superseded history; T103 revalidates the active maps and batch binding",
+    "ordered_record_identity_fields": ["lifecycle_type", "task_id", "slice_id", "phase"],
+    "required_v2_prefix": [
+      ["phase0-bootstrap", "T001", "S001-import-direction", "RED"],
+      ["phase0-bootstrap", "T002", "S002-manifest-integrity", "RED"],
+      ["phase0-bootstrap", "T002", "S002-retired-quality", "RED"],
+      ["phase0-bootstrap", "T003", "S003-complexity-checker", "RED"],
+      ["phase0-bootstrap", "T004", "S004-evidence-checker", "RED"],
+      ["phase0-bootstrap", "T004", "S004-junit-parser", "RED"],
+      ["corrective-red", "T005", "S004-evidence-checker", "RED"],
+      ["corrective-red", "T005", "S002-manifest-integrity", "RED"]
+    ],
+    "required_v2_prefix_count": 8,
+    "rejected_v1_record_prefix_count": 0,
+    "post_prefix_phase_order": ["GREEN", "REFACTOR"],
+    "post_prefix_slice_order": ["S001-import-direction", "S002-manifest-integrity", "S002-retired-quality", "S003-complexity-checker", "S004-evidence-checker", "S004-junit-parser"],
+    "accepted_record_count_before_t006_amendment": 20,
+    "required_t006_amendment_tail": [
+      ["corrective-red", "T006", "S006-committed-worktree-clean", "RED"],
+      ["corrective-red", "T006", "S006-index-amendment-integrity", "RED"],
+      ["formal-rgr", "T006", "S006-committed-worktree-clean", "GREEN"],
+      ["formal-rgr", "T006", "S006-index-amendment-integrity", "GREEN"],
+      ["formal-rgr", "T006", "S006-committed-worktree-clean", "REFACTOR"],
+      ["formal-rgr", "T006", "S006-index-amendment-integrity", "REFACTOR"]
+    ],
+    "valid_record_counts_during_t006_amendment": [20, 21, 22, 23, 24, 25, 26],
+    "ordered_record_key_rule": "the first eight identities must equal required_v2_prefix exactly; records 9-20 are the accepted six GREEN plus six REFACTOR identities and remain byte-identical; only an exact prefix of the two RED then two GREEN then two REFACTOR required_t006_amendment_tail may follow; rejected v1 records never enter the chain; unknown, duplicate, inserted, reordered or missing identities fail"
+  },
+  "evidence_index_record_schema": {
+    "exact_required_fields": ["producer_id", "lifecycle_type", "slice_id", "phase", "task_id", "cwd", "argv", "env", "mode", "base_ref", "base_sha", "head_sha", "head_tree_sha", "worktree_fingerprint", "fingerprint_scope", "fingerprint_files", "status_porcelain", "tree_captured_utc", "started_utc", "finished_utc", "exit_code", "expected_oracle_id", "expected_failing_nodeids", "observed_nodeids", "selected_count", "passed_count", "failed_count", "error_count", "skipped_count", "rerun_count", "artifact_paths", "artifact_sha256", "artifact_size_bytes", "artifact_aggregate_sha256", "previous_record_sha256", "record_sha256"],
+    "artifact_paths_rule": "the relative-path set must equal the producing lifecycle type required_artifact_names expanded under its exact path_template",
+    "invocation_exact_fields": ["version", "slice_id", "phase", "task_scope", "argv", "cwd", "env", "exact_command", "started_utc", "finished_utc", "exit_code"],
+    "tree_exact_fields": ["version", "slice_id", "phase", "base_ref", "merge_base_sha", "head_sha", "head_tree_sha", "worktree_fingerprint", "fingerprint_scope", "fingerprint_files", "status_porcelain", "captured_utc"],
+    "tree_record_cross_field_map": {
+      "slice_id": "slice_id",
+      "phase": "phase",
+      "base_ref": "base_ref",
+      "merge_base_sha": "base_sha",
+      "head_sha": "head_sha",
+      "head_tree_sha": "head_tree_sha",
+      "worktree_fingerprint": "worktree_fingerprint",
+      "fingerprint_scope": "fingerprint_scope",
+      "fingerprint_files": "fingerprint_files",
+      "status_porcelain": "status_porcelain",
+      "captured_utc": "tree_captured_utc"
+    },
+    "tree_schema_compatibility": "phase0-bootstrap, corrective-red and formal-rgr all use this same immutable-bootstrap-compatible 12-field shape; missing, extra or renamed fields fail",
+    "prior_record_evolution": "append only; revalidate every prior record, hash link and canonical run before atomic replace; prior record bytes and hashes are immutable",
+    "t006_corrective_producer_identity": "t006-corrective-red-pytest@sha256(canonical-json({main_review_message_id,corrective_red_combined_aggregate_sha256})); the same binding protects both RED producer identities through each record_sha256 without adding a record field",
+    "record_sha256_required_unique": true
+  },
+  "recovery_authorization": {
+    "required_cli_option": "--main-review-message-id",
+    "source": "main supplies the exact value in the one-time C20-recover invocation; chat text, environment variables and defaults are not inputs",
+    "required_prefix": "main-f151-t005-corrective-red-review-",
+    "forbidden_reuse_rules": ["empty value", "bootstrap anchor main_review_message_id", "any value already present in rejected v1 or rejected run bytes", "any value beginning main-f151-t006-"],
+    "approval_binding_rule": "approval_binding_sha256 = sha256(canonical-json({main_review_message_id,corrective_red_aggregate_sha256})) and both source values plus the binding are stored in recovery",
+    "unknown_rule": "a value outside the required prefix, absent from the exact CLI, or violating any reuse rule fails before any recovery path changes"
+  },
+  "t006_amendment_authorization": {
+    "existing_command": "tdd-evidence run",
+    "new_subcommand_count": 0,
+    "required_cli_options": ["--adopt-corrective-red-root", "--corrective-red-aggregate-sha256", "--main-review-message-id"],
+    "required_review_id_prefix": "main-f151-t006-index-amendment-red-review-",
+    "corrective_parent_root": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/corrective/T006-committed-mode-v1",
+    "required_red_slice_ids": ["S006-committed-worktree-clean", "S006-index-amendment-integrity"],
+    "combined_aggregate_rule": "sha256(UTF-8 canonical-json({slice_id: artifact_aggregate_sha256 for the exact two RED slices}, sort_keys=true, separators=(',', ':')))",
+    "approval_binding_rule": "sha256(canonical-json({main_review_message_id,corrective_red_combined_aggregate_sha256})) is embedded in both corrective record producer_ids",
+    "prevalidation": "validate exact v2 records 1-20, chain head, 12/12 canonical runs, both exact corrective six-file sets, nodeids, oracles, counts, per-slice aggregates and canonical combined aggregate before any index write",
+    "atomicity": "only evidence-index.v2.json is replaced via temp+fsync+atomic replace; corrective artifacts and prior runs are read-only",
+    "reentry": "if exact records 21-22 already exist with the same binding, fully validate and return; never append a duplicate or accept a one-record partial state",
+    "unknown_or_partial_state": "fail closed with zero prior index/run byte changes"
+  },
+  "recovery_state_machine": {
+    "kind": "monotonic-reentrant-hash-identified",
+    "source_index": ".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v1.json",
+    "source_runs": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/runs",
+    "quarantine_index": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/rejected-t005-t006-v1/evidence-index.v1.json",
+    "quarantine_runs": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/rejected-t005-t006-v1",
+    "v2_temp": ".specify/features/151-runtime-boundary-architecture-truth/evidence/.evidence-index.v2.json.recovering",
+    "v2_final": ".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v2.json",
+    "deterministic_v2_created_utc_rule": "equals the latest finished_utc in the fixed eight-record prefix, so re-entry with identical inputs produces identical bytes",
+    "states": [
+      {"id":"R0_SOURCE","required":"source index and source runs have the frozen hashes; quarantine root/temp/final absent","next":"rename source runs directly to the exact quarantine root whose parent evidence/local already exists, then fsync evidence/local; no mkdir intermediate exists"},
+      {"id":"R1_RUNS_QUARANTINED","required":"source index and the exact run subtrees now rooted at quarantine root have frozen hashes; source runs/quarantine index/temp/final absent","next":"rename source index into quarantine root as evidence-index.v1.json, fsync source and target parents"},
+      {"id":"R2_SOURCES_QUARANTINED","required":"quarantine index and quarantine runs have frozen hashes; both sources/temp/final absent","next":"build deterministic v2 temp, fsync file and evidence parent"},
+      {"id":"R2_PARTIAL_TEMP","required":"R2 quarantine hashes exact, final absent, temp exists but does not equal deterministic expected v2 bytes","next":"remove only the recovery-owned temp, fsync evidence parent, return to R2"},
+      {"id":"R3_V2_TEMP_DURABLE","required":"R2 quarantine hashes exact, temp equals deterministic expected v2 bytes, final absent","next":"os.replace temp to final, fsync evidence parent"},
+      {"id":"R4_COMPLETE","required":"quarantine index/runs and final v2 all have exact expected hashes; both sources and temp absent","next":"full v2 schema/chain/run validation then idempotent success without byte changes"}
+    ],
+    "interruption_fixtures": ["after runs rename yields R1 and resumes", "after v1 rename yields R2 and resumes", "before v2 temp leaves R2", "during v2 temp write yields R2_PARTIAL_TEMP and only that temp is removed", "after temp fsync before replace yields R3 and resumes", "after replace before parent fsync yields exact R4 and resumes by fsync plus validation"],
+    "mixed_state_rule": "any path presence or hash combination not matching exactly one state fails closed without mutation; no rollback across source, quarantine and index paths is claimed"
+  },
+  "finalize_verification_prerequisite": {
+    "producer_task": "T124",
+    "required_completed_tasks": ["T120", "T121", "T122", "T123"],
+    "required_input_closure": "all commands, gates, artifacts and v2 frontier required by T120-T123 plus T124 inputs, evaluated before C25 writes",
+    "excluded_from_precondition": ["T124 completion", "C25 success", "verification-report.md"],
+    "success_rule": "C25 success creates the T124 verification-report output; it is not a prerequisite of itself"
+  },
+  "exact_set_policy": {
+    "source": "inventories/evidence-producers.v1.json",
+    "missing_artifact": "fail",
+    "extra_artifact": "fail",
+    "name_alias": "fail",
+    "formal_forbidden_aliases": ["stdout.bin", "stderr.bin", "run.json"],
+    "formal_required_root": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/runs",
+    "producer_and_lifecycle_sets_must_equal": true
+  },
+  "path_discovery": {
+    "feature_root": "walk the filesystem including ignored evidence/local paths",
+    "known_path": "exact committed path or exact match of one generated_local_types template with registered slice/stage/type/name",
+    "wide_evidence_glob_exception": false,
+    "unknown_feature_artifact": "fail",
+    "changed_path_scope_exception": false
+  },
+  "negative_fixtures": [
+    "missing anchor file fails",
+    "malformed anchor schema fails",
+    "anchor file sha256 differs from --bootstrap-anchor-sha256 fails",
+    "an anchored artifact byte replacement fails",
+    "mixed base, tree, argv, JUnit, raw stdout or stderr from another run fails",
+    "a second/re-anchored manifest fails",
+    "an unknown file under evidence/local fails despite .gitignore",
+    "a current F151 artifact cannot escape planned-diff by being called evidence or archive",
+    "a generated type with an unregistered slice, phase, stage or filename fails",
+    "a committed artifact appearing before its first_state or written by a different first_writer task fails",
+    "stdout.bin, stderr.bin, run.json or a formal run outside evidence/local/runs fails",
+    "a formal producer missing invocation.json or tree.json fails",
+    "a committed exact path without exactly one reachable first_writer task and producer command fails",
+    "a coverage stage missing from either lifecycle or stage-command-matrix fails",
+    "a registered F151 automatic producer that invokes C18, lane.py baseline, host credentials, network or external cost fails",
+    "default HOME, credential presence or a skip result cannot authorize a live producer",
+    "missing, optional or duplicate record_sha256 fails",
+    "top-level, record, invocation or tree missing/extra field fails",
+    "deleting, inserting, reordering or replacing any prior record fails",
+    "chain_head or previous_record hash mismatch fails",
+    "an actual canonical run missing from the index or an indexed run missing on disk fails",
+    "records33/38/39 must remain in the hash chain unchanged; claiming a superseded contract as current release evidence or omitting the active direct/selector attestation fails",
+    "after an S011 requires-dist or isolation assertion changes, the accepted 240558 replacement is only superseded history; reusing its root, review id, aggregate or binding, or proceeding without the successor main-owned direct RED fails",
+    "the T011 direct replacement root with a wrong cwd, ordered environment, argv, exact command, invocation/tree field, missing/extra artifact, wrong node/count/oracle/stderr, per-file hash/size map, aggregate, review id or attestation binding fails and is never inserted into canonical v2",
+    "same-anchor corrupted existing index fails instead of short-circuiting",
+    "invalid or ignored mode, base-ref or through-task fails",
+    "committed mode with any staged, unstaged or untracked path in fingerprint scope fails before base diff; clean and exact evidence-only states accept",
+    "architecture all accepts and forwards one resolvable base-ref to every base-aware subgate; a missing or unresolvable base-ref fails before a PASS verdict",
+    "recover-index missing, empty, unknown or reused --main-review-message-id fails before any recovery path changes",
+    "each declared recovery interruption state resumes to the same deterministic v2; an unrecognized mixed state fails without mutation",
+    "v2 prefix differs from the exact six bootstrap RED plus two corrective RED identities, or contains any rejected v1 record, fails",
+    "records 1-20 differ, the six-record T006 amendment tail is missing/reordered/duplicated, or through-task T006 accepts before all six new identities fails",
+    "C20-amend receives a non-machine-equal corrective parent, missing/partial/mutated RED, wrong per-slice or combined aggregate, missing/unknown/reused review id, corrupt prior index, extra/unindexed run, duplicate/wrong-order record, or attempts to overwrite a prior record/run fails with zero prior byte changes",
+    "finalize-verification does not require its own C25/report/T124 completion as an input",
+    "recovery prevalidation or an unrecognized mixed state changes no byte; a declared interruption leaves exactly one resumable FSM state; failed finalize-verification changes no output byte"
+  ],
+  "self_check": {
+    "state_count": 6,
+    "committed_exact_path_count": 4,
+    "committed_producer_command_count": 4,
+    "append_mutator_command_count": 1,
+    "final_required_committed_path_count": 4,
+    "generated_local_type_count": 7,
+    "atomic_snapshot_local_type_count": 2,
+    "atomic_snapshot_exact_path_count": 2,
+    "atomic_snapshot_type_producer_mismatch_count": 0,
+    "phase0_bootstrap_slice_count": 6,
+    "anchor_transport_count": 1,
+    "committed_path_missing_first_writer_task_count": 0,
+    "committed_path_missing_producer_command_count": 0,
+    "phase0_red_committed_path_count": 1,
+    "broad_evidence_escape_count": 0,
+    "unknown_path_policy": "fail",
+    "formal_artifact_exact_set_count": 6,
+    "coverage_allowed_stage_count": 7,
+    "automatic_verify_command_count": 2,
+    "automatic_live_or_external_cost_producer_count": 0,
+    "rejected_evidence_set_count": 1,
+    "superseded_contract_record_count": 1,
+    "main_owned_direct_corrective_protocol_count": 4,
+    "accepted_main_owned_direct_corrective_protocol_count": 3,
+    "pending_main_owned_direct_corrective_protocol_count": 0,
+    "superseded_main_owned_direct_corrective_protocol_count": 1,
+    "direct_corrective_ordered_environment_count": 3,
+    "direct_corrective_ordered_argv_count": 16,
+    "direct_corrective_exact_node_count": 5,
+    "direct_corrective_invocation_exact_field_count": 11,
+    "direct_corrective_tree_exact_field_count": 12,
+    "direct_corrective_exact_artifact_count": 6,
+    "direct_corrective_artifact_hash_map_count": 6,
+    "direct_corrective_artifact_size_map_count": 6,
+    "direct_corrective_required_assertion_failure_count": 5,
+    "direct_corrective_final_raw_filesystem_dependency_count": 0,
+    "canonical_index_schema_version": 2,
+    "record_hash_required": true,
+    "tree_exact_field_count": 12,
+    "tree_bootstrap_schema_mismatch_count": 0,
+    "record_identity_field_count": 4,
+    "required_v2_prefix_count": 8,
+    "required_v2_bootstrap_prefix_count": 6,
+    "required_v2_corrective_prefix_count": 2,
+    "accepted_record_count_before_t006_amendment": 20,
+    "required_t006_amendment_tail_count": 6,
+    "final_t006_record_count": 26,
+    "corrective_red_transaction_count": 4,
+    "rejected_v1_record_prefix_count": 0,
+    "recovery_state_count": 6,
+    "recovery_unresolved_interruption_count": 0,
+    "recover_main_review_cli_option_count": 1,
+    "finalize_self_dependency_count": 0
+  }
+}

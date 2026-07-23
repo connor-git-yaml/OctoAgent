@@ -28,10 +28,10 @@ from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.gateway.services.notification import (
     TelegramNotificationChannel,
 )
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.telegram import TelegramGatewayService
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 
 from .test_telegram_service import FakeTaskRunner, FakeTelegramBotClient
 
@@ -93,9 +93,7 @@ async def test_telegram_inbound_message_fields_equal_baseline(
             captured.append(message)
             return await super().create_task(message)
 
-    monkeypatch.setattr(
-        "octoagent.gateway.services.telegram.TaskService", _CapturingTaskService
-    )
+    monkeypatch.setattr("octoagent.gateway.services.telegram.TaskService", _CapturingTaskService)
 
     result = await service.handle_webhook_update(
         {
@@ -255,7 +253,7 @@ async def test_completion_fanout_web_task_no_telegram_send(tmp_path: Path) -> No
     service, _ = _build_service(tmp_path, store_group, bot_client=bot_client)
 
     # 建一个 web 渠道 task
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     task_id, created = await task_service.create_task(
         build_web_inbound_message(
             thread_id="t-1",

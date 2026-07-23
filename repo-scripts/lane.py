@@ -50,6 +50,11 @@ OCTOAGENT_DIR = REPO_ROOT / "octoagent"
 FRONTEND_DIR = OCTOAGENT_DIR / "frontend"
 SCRIPTS_DIR = REPO_ROOT / "repo-scripts"
 
+BENCHMARK_TEST_NODES = (
+    "benchmarks/tests/unit/test_octo_runner.py::test_source_checkout_required_before_side_effects",
+    "benchmarks/tests/unit/test_octo_runner.py::test_runner_fn_provider_error_maps_to_infra_error",
+)
+
 MODES = ("pr", "baseline", "release")
 
 # release live lane 允许的 skip 分类（除此以外一切 skip = unexpected → FAIL）。
@@ -58,7 +63,7 @@ ALLOWED_SKIP_PATTERNS: dict[str, tuple[str, ...]] = {
     # 结构化 LLM 未命中（设计内变异性，e2e-testing.md GATE_P3_DEVIATION）
     "deviation_skip": (
         "GATE_P3_DEVIATION",
-        "LLM 没触发",   # 域#12 IRREVERSIBLE 未触发（test_e2e_smoke_real_llm.py:486）
+        "LLM 没触发",  # 域#12 IRREVERSIBLE 未触发（test_e2e_smoke_real_llm.py:486）
     ),
     # 人工闸 / 域#5 外部 MCP 环境族（文件 docstring 明示「e2e 环境通常 SKIP」）
     "manual_gate_skip": (
@@ -119,7 +124,11 @@ def lanes_for_mode(mode: str, *, with_l1: bool = False) -> list[LaneSpec]:
             modes=frozenset(MODES),
             kind="script",
             dry_runnable=True,
-            command=[py, str(SCRIPTS_DIR / "check-quarantine.py"), "--enforce-review-date"],
+            command=[
+                py,
+                str(SCRIPTS_DIR / "check-quarantine.py"),
+                "--enforce-review-date",
+            ],
         ),
         LaneSpec(
             id="attestation-signed",
@@ -165,6 +174,26 @@ def lanes_for_mode(mode: str, *, with_l1: bool = False) -> list[LaneSpec]:
             pytest_args=["-m", "not real_llm", "-q"],
         ),
         LaneSpec(
+            id="benchmark-unit",
+            title="benchmark runner 确定性边界（C17）",
+            modes=frozenset({"baseline", "release"}),
+            kind="command",
+            command=[
+                "env",
+                "PYTHONNOUSERSITE=1",
+                f"PYTHONPATH={post_sdk_pythonpath()}",
+                "uv",
+                "run",
+                "--project",
+                "octoagent",
+                "--no-sync",
+                "python",
+                "-m",
+                "pytest",
+                *BENCHMARK_TEST_NODES,
+            ],
+        ),
+        LaneSpec(
             id="frontend-vitest",
             title="前端 vitest",
             modes=frozenset({"baseline", "release"}),
@@ -197,7 +226,12 @@ def lanes_for_mode(mode: str, *, with_l1: bool = False) -> list[LaneSpec]:
             # 的 piper importorskip 在宿主缺可选依赖时 module 级 skip），该 skip 先于
             # -m 过滤进 junit → 被误判 unexpected_skip → live lane 假 FAIL。
             pytest_args=[
-                "-m", "real_llm", "-q", "-r", "s", "apps/gateway/tests/e2e_live",
+                "-m",
+                "real_llm",
+                "-q",
+                "-r",
+                "s",
+                "apps/gateway/tests/e2e_live",
             ],
         ),
         LaneSpec(
@@ -210,6 +244,24 @@ def lanes_for_mode(mode: str, *, with_l1: bool = False) -> list[LaneSpec]:
         ),
     ]
     return [lane for lane in lanes if mode in lane.modes]
+
+
+def post_sdk_pythonpath() -> str:
+    """C17 使用的 post-SDK source roots，含 root testpaths 外 benchmark。"""
+    components = [
+        OCTOAGENT_DIR / "packages" / name / "src"
+        for name in (
+            "core",
+            "provider",
+            "protocol",
+            "tooling",
+            "skills",
+            "policy",
+            "memory",
+        )
+    ]
+    components.extend((OCTOAGENT_DIR / "apps" / "gateway" / "src", REPO_ROOT))
+    return os.pathsep.join(str(component) for component in components)
 
 
 # ---------------------------------------------------------------------------
@@ -243,10 +295,12 @@ def parse_junit_counts(junit_path: Path) -> dict:
             elif case.find("error") is not None:
                 errors += 1
             elif (skipped := case.find("skipped")) is not None:
-                skips.append({
-                    "nodeid": nodeid,
-                    "reason": skipped.get("message") or (skipped.text or ""),
-                })
+                skips.append(
+                    {
+                        "nodeid": nodeid,
+                        "reason": skipped.get("message") or (skipped.text or ""),
+                    }
+                )
             else:
                 passed += 1
     return {"passed": passed, "failed": failed, "errors": errors, "skips": skips}
@@ -258,7 +312,9 @@ def evaluate_live_pytest(exit_code: int, counts: dict) -> tuple[bool, str, dict]
     返回 (是否通过, 摘要文本, 分类明细)。
     """
     breakdown: dict[str, list[dict]] = {
-        "deviation_skip": [], "manual_gate_skip": [], "unexpected_skip": [],
+        "deviation_skip": [],
+        "manual_gate_skip": [],
+        "unexpected_skip": [],
     }
     for skip in counts["skips"]:
         breakdown[classify_skip_reason(skip["reason"])].append(skip)
@@ -305,12 +361,16 @@ def evaluate_attest(probe: str, report: dict) -> tuple[str, str]:
     return "fail", f"attest {probe} 输出无法识别的 status={status!r}"
 
 
-def validate_skip_args(mode: str, skip_ids: list[str], lanes: list[LaneSpec]) -> str | None:
+def validate_skip_args(
+    mode: str, skip_ids: list[str], lanes: list[LaneSpec]
+) -> str | None:
     """--skip 合法性（release 拒 live / attestation lanes）。返回错误信息或 None。"""
     lane_by_id = {lane.id: lane for lane in lanes}
     for skip_id in skip_ids:
         if skip_id not in lane_by_id:
-            return f"--skip 指向未知 lane: {skip_id}（本模式可用: {sorted(lane_by_id)}）"
+            return (
+                f"--skip 指向未知 lane: {skip_id}（本模式可用: {sorted(lane_by_id)}）"
+            )
         lane = lane_by_id[skip_id]
         if mode == "release" and (lane.live or lane.id == "attestation-signed"):
             return (
@@ -333,11 +393,19 @@ def build_pytest_env(base_env: dict[str, str]) -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 
-def _default_runner(cmd: list[str], *, cwd: Path, env: dict[str, str] | None = None,
-                    capture: bool = False) -> subprocess.CompletedProcess:
+def _default_runner(
+    cmd: list[str],
+    *,
+    cwd: Path,
+    env: dict[str, str] | None = None,
+    capture: bool = False,
+) -> subprocess.CompletedProcess:
     return subprocess.run(
-        cmd, cwd=str(cwd), env=env,
-        capture_output=capture, text=True,
+        cmd,
+        cwd=str(cwd),
+        env=env,
+        capture_output=capture,
+        text=True,
     )
 
 
@@ -365,11 +433,17 @@ class LaneOrchestrator:
         start = time.monotonic()
 
         if lane.id in self.skip_ids:
-            return LaneResult(lane.id, lane.title, "skipped_explicit",
-                              0.0, "--skip 显式跳过（记录在案）")
+            return LaneResult(
+                lane.id,
+                lane.title,
+                "skipped_explicit",
+                0.0,
+                "--skip 显式跳过（记录在案）",
+            )
         if self.dry_run and not lane.dry_runnable:
-            return LaneResult(lane.id, lane.title, "planned", 0.0,
-                              "--dry-run：仅列入计划未执行")
+            return LaneResult(
+                lane.id, lane.title, "planned", 0.0, "--dry-run：仅列入计划未执行"
+            )
 
         try:
             if lane.kind == "script":
@@ -385,7 +459,10 @@ class LaneOrchestrator:
             raise ValueError(f"未知 lane kind: {lane.kind}")
         except FileNotFoundError as exc:
             return LaneResult(
-                lane.id, lane.title, "fail", time.monotonic() - start,
+                lane.id,
+                lane.title,
+                "fail",
+                time.monotonic() - start,
                 f"工具缺失: {exc}（安装后重跑，或非 live lane 可 --skip {lane.id} 显式记录）",
             )
 
@@ -403,8 +480,11 @@ class LaneOrchestrator:
     def _run_command(self, lane: LaneSpec, start: float) -> LaneResult:
         proc = self.runner(lane.command, cwd=lane.cwd or REPO_ROOT, capture=True)
         status = "pass" if proc.returncode == 0 else "fail"
-        detail = "" if status == "pass" else \
-            ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()[-2000:]
+        detail = (
+            ""
+            if status == "pass"
+            else ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()[-2000:]
+        )
         return LaneResult(lane.id, lane.title, status, time.monotonic() - start, detail)
 
     def _pytest_cmd(self, extra_args: list[str]) -> list[str]:
@@ -413,7 +493,10 @@ class LaneOrchestrator:
     def _run_pytest(self, lane: LaneSpec, start: float) -> LaneResult:
         env = build_pytest_env(dict(os.environ))
         proc = self.runner(
-            self._pytest_cmd(lane.pytest_args), cwd=OCTOAGENT_DIR, env=env, capture=True,
+            self._pytest_cmd(lane.pytest_args),
+            cwd=OCTOAGENT_DIR,
+            env=env,
+            capture=True,
         )
         status = "pass" if proc.returncode == 0 else "fail"
         tail = "\n".join((proc.stdout or "").strip().splitlines()[-6:])
@@ -425,21 +508,32 @@ class LaneOrchestrator:
             junit_path = Path(tmp) / "junit-live.xml"
             args = [*lane.pytest_args, f"--junitxml={junit_path}"]
             proc = self.runner(
-                self._pytest_cmd(args), cwd=OCTOAGENT_DIR, env=env, capture=True,
+                self._pytest_cmd(args),
+                cwd=OCTOAGENT_DIR,
+                env=env,
+                capture=True,
             )
             if not junit_path.is_file():
                 return LaneResult(
-                    lane.id, lane.title, "fail", time.monotonic() - start,
+                    lane.id,
+                    lane.title,
+                    "fail",
+                    time.monotonic() - start,
                     f"junit 产物缺失（pytest exit={proc.returncode}，collection 崩溃？）",
                 )
             counts = parse_junit_counts(junit_path)
         ok, summary, breakdown = evaluate_live_pytest(proc.returncode, counts)
         return LaneResult(
-            lane.id, lane.title, "pass" if ok else "fail",
-            time.monotonic() - start, summary,
-            extra={"skip_breakdown": {
-                k: [s["nodeid"] for s in v] for k, v in breakdown.items()
-            }},
+            lane.id,
+            lane.title,
+            "pass" if ok else "fail",
+            time.monotonic() - start,
+            summary,
+            extra={
+                "skip_breakdown": {
+                    k: [s["nodeid"] for s in v] for k, v in breakdown.items()
+                }
+            },
         )
 
     def _run_attest(self, lane: LaneSpec, start: float) -> LaneResult:
@@ -447,16 +541,25 @@ class LaneOrchestrator:
         # PYTHONPATH 锁本树——探针代码与被 release 的代码同源。
         env = build_pytest_env(dict(os.environ))
         cmd = [
-            "uv", "run", "--no-sync", "python", "-c",
-            "from octoagent.provider.dx.cli import main; main()",
-            "attest", lane.attest_probe, "--json",
+            "uv",
+            "run",
+            "--no-sync",
+            "python",
+            "-c",
+            "from octoagent.gateway.cli.cli import main; main()",
+            "attest",
+            lane.attest_probe,
+            "--json",
         ]
         proc = self.runner(cmd, cwd=OCTOAGENT_DIR, env=env, capture=True)
         try:
             report = json.loads(proc.stdout or "")
         except json.JSONDecodeError:
             return LaneResult(
-                lane.id, lane.title, "fail", time.monotonic() - start,
+                lane.id,
+                lane.title,
+                "fail",
+                time.monotonic() - start,
                 f"attest --json stdout 不可解析（exit={proc.returncode}）: "
                 f"{(proc.stdout or '')[:300]} / stderr: {(proc.stderr or '')[:300]}",
             )
@@ -465,7 +568,11 @@ class LaneOrchestrator:
         if status != "pass" and next_steps:
             detail += " | next_steps: " + "; ".join(str(s) for s in next_steps[:3])
         return LaneResult(
-            lane.id, lane.title, status, time.monotonic() - start, detail,
+            lane.id,
+            lane.title,
+            status,
+            time.monotonic() - start,
+            detail,
             extra={"attest_report": report},  # F144：token 零泄漏，可全文归档
         )
 
@@ -476,10 +583,18 @@ class LaneOrchestrator:
         for lane in lanes:
             print(f"[lane:{self.mode}] ▶ {lane.id} —— {lane.title}", flush=True)
             result = self.run_lane(lane)
-            marker = {"pass": "✅", "fail": "❌", "warn": "⚠️",
-                      "skipped_explicit": "⏭", "planned": "·"}[result.status]
-            print(f"[lane:{self.mode}] {marker} {lane.id} ({result.duration_s:.1f}s) "
-                  f"{result.detail.splitlines()[0] if result.detail else ''}", flush=True)
+            marker = {
+                "pass": "✅",
+                "fail": "❌",
+                "warn": "⚠️",
+                "skipped_explicit": "⏭",
+                "planned": "·",
+            }[result.status]
+            print(
+                f"[lane:{self.mode}] {marker} {lane.id} ({result.duration_s:.1f}s) "
+                f"{result.detail.splitlines()[0] if result.detail else ''}",
+                flush=True,
+            )
             results.append(result)
         return results
 
@@ -489,8 +604,9 @@ class LaneOrchestrator:
 # ---------------------------------------------------------------------------
 
 
-def write_report(mode: str, args_ns: argparse.Namespace,
-                 results: list[LaneResult], exit_code: int) -> Path | None:
+def write_report(
+    mode: str, args_ns: argparse.Namespace, results: list[LaneResult], exit_code: int
+) -> Path | None:
     report = {
         "feature": "F141",
         "mode": mode,
@@ -502,8 +618,11 @@ def write_report(mode: str, args_ns: argparse.Namespace,
         },
         "lanes": [
             {
-                "id": r.id, "title": r.title, "status": r.status,
-                "duration_s": round(r.duration_s, 2), "detail": r.detail,
+                "id": r.id,
+                "title": r.title,
+                "status": r.status,
+                "duration_s": round(r.duration_s, 2),
+                "detail": r.detail,
                 **({"extra": r.extra} if r.extra else {}),
             }
             for r in results
@@ -515,7 +634,9 @@ def write_report(mode: str, args_ns: argparse.Namespace,
         out_dir.mkdir(parents=True, exist_ok=True)
         ts = time.strftime("%Y%m%d-%H%M%S")
         out = out_dir / f"{mode}-{ts}.json"
-        out.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        out.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         return out
     except OSError:
         return None
@@ -540,15 +661,30 @@ def main(argv: list[str] | None = None) -> int:
         description="F141 三模式 lane 门禁编排（pr / baseline / release）",
     )
     parser.add_argument("mode", choices=MODES)
-    parser.add_argument("--dry-run", action="store_true",
-                        help="只跑文件级治理校验，其余 lane 列计划不执行（release 彩排；"
-                             "有 planned 即 exit 3——彩排非通过）")
-    parser.add_argument("--skip", action="append", default=[], metavar="LANE_ID",
-                        help="显式跳过某 lane（记录在案；release 拒绝 live/attestation）")
-    parser.add_argument("--with-l1", action="store_true",
-                        help="baseline：附加 L1 Playwright lane（需本地 playwright 浏览器）")
-    parser.add_argument("--attest-max-age", type=int, default=None,
-                        help="attestation 签署有效天数（默认走 check-attestation.py 的 90）")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="只跑文件级治理校验，其余 lane 列计划不执行（release 彩排；"
+        "有 planned 即 exit 3——彩排非通过）",
+    )
+    parser.add_argument(
+        "--skip",
+        action="append",
+        default=[],
+        metavar="LANE_ID",
+        help="显式跳过某 lane（记录在案；release 拒绝 live/attestation）",
+    )
+    parser.add_argument(
+        "--with-l1",
+        action="store_true",
+        help="baseline：附加 L1 Playwright lane（需本地 playwright 浏览器）",
+    )
+    parser.add_argument(
+        "--attest-max-age",
+        type=int,
+        default=None,
+        help="attestation 签署有效天数（默认走 check-attestation.py 的 90）",
+    )
     args = parser.parse_args(argv)
 
     lanes = lanes_for_mode(args.mode, with_l1=args.with_l1)
@@ -560,11 +696,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if os.environ.get("SKIP_E2E") == "1":
         if args.mode == "release":
-            print("[lane] ⚠ SKIP_E2E=1 在 release 模式**无效**（skip 即 FAIL 是 release 的"
-                  "存在意义）——live lane 照常执行", flush=True)
+            print(
+                "[lane] ⚠ SKIP_E2E=1 在 release 模式**无效**（skip 即 FAIL 是 release 的"
+                "存在意义）——live lane 照常执行",
+                flush=True,
+            )
         else:
-            print("[lane] ⚠ lane.py 不消费 SKIP_E2E（那是 pre-commit hook 专属逃生门）；"
-                  "显式调 lane 即显式要跑门禁", flush=True)
+            print(
+                "[lane] ⚠ lane.py 不消费 SKIP_E2E（那是 pre-commit hook 专属逃生门）；"
+                "显式调 lane 即显式要跑门禁",
+                flush=True,
+            )
 
     if shutil.which("uv") is None:
         print("[lane] uv 不可用——lane 依赖 uv 驱动 pytest/octo 子进程", file=sys.stderr)
@@ -592,8 +734,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[lane] {args.mode} 全部通过")
     elif exit_code == 3:
         planned = [r.id for r in results if r.status == "planned"]
-        print(f"[lane] {args.mode} 彩排完成（exit 3，非通过）：未执行 lane {planned}",
-              file=sys.stderr)
+        print(
+            f"[lane] {args.mode} 彩排完成（exit 3，非通过）：未执行 lane {planned}",
+            file=sys.stderr,
+        )
     else:
         failed = [r.id for r in results if r.blocking]
         print(f"[lane] {args.mode} FAIL: {failed}", file=sys.stderr)

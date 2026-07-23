@@ -201,7 +201,7 @@
 
 位置：[`orchestrator.py`](../../../octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py)
 
-`OrchestratorService` 是当前“Kernel 逻辑”的主要落点。
+`OrchestratorService` 是 Gateway application host 内的协调 application service；历史文档曾称其为“Kernel 逻辑”，但当前没有独立 Kernel 模块或网络边界。
 
 ### 6.1 `dispatch()`
 
@@ -300,7 +300,7 @@
 
 职责：
 
-- 从环境变量读取最大步数、超时、docker mode、默认 tool profile 等参数
+- 从环境变量读取最大步数、超时、历史 `docker_mode` 兼容配置与默认 tool profile 等参数；当前没有 Docker backend，`required` 只会 fail closed
 
 ### 8.2 `WorkerCancellationRegistry`
 
@@ -309,14 +309,15 @@
 - 提供 task 级 cancel signal
 - 被 `TaskRunner` 和 runtime backend 共用
 
-### 8.3 `InlineRuntimeBackend` / `DockerRuntimeBackend`
+### 8.3 `InlineRuntimeBackend` / `GraphRuntimeBackend`
 
 当前实现里：
 
-- `InlineRuntimeBackend` 直接把执行委托回 `TaskService.process_task_with_llm()`
-- `DockerRuntimeBackend` 目前仍复用 inline 执行路径，先把路由和探测接入
+- `InlineRuntimeBackend` 直接把执行委托回 `TaskService.process_task_with_llm()`。
+- `GraphRuntimeBackend` 真实消费 pydantic-graph 的确定性编排路径。
+- 历史 `DockerRuntimeBackend` 已删除；当前没有 Docker 隔离 backend，`required` 配置不得回退为 Inline 假绿。
 
-也就是说，当前 docker runtime 的“执行语义”还没有完全独立出来，但 runtime 选择边界已经存在。
+当前 runtime 选择边界只承诺 Inline/Graph；任何隔离或远程 backend 都必须以后续真实实现和独立验收为准。
 
 ### 8.4 `WorkerRuntime.run()`
 

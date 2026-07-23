@@ -52,7 +52,7 @@ import logging
 import os
 import tempfile
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -238,7 +238,9 @@ async def octo_harness_session(
                 if router is not None and hasattr(router, "aclose"):
                     await router.aclose()
             except Exception as exc:
-                logger.warning("provider_router_aclose_failed", extra={"error": repr(exc)})
+                logger.warning(
+                    "provider_router_aclose_failed", extra={"error": repr(exc)}
+                )
             if bootstrap_ok:
                 await harness.shutdown(app)
 
@@ -292,7 +294,10 @@ def _materialize_instance_config(
                 break
 
     # Step 2: octoagent.yaml（必填 + 重写 main alias）
-    yaml_candidates = (src_root / "octoagent.yaml", src_root / "octoagent.yaml.template")
+    yaml_candidates = (
+        src_root / "octoagent.yaml",
+        src_root / "octoagent.yaml.template",
+    )
     yaml_src = next((p for p in yaml_candidates if p.exists()), None)
     if yaml_src is None:
         if require_config:
@@ -343,7 +348,9 @@ def _rewrite_main_alias_to_bench(
     new_main = dict(bench_def)
     new_main["description"] = f"F103d OctoBench：rewritten to {bench_alias}（控变量）"
     aliases["main"] = new_main
-    aliases["cheap"] = dict(new_main, description=f"F103d OctoBench：cheap = main = {bench_alias}")
+    aliases["cheap"] = dict(
+        new_main, description=f"F103d OctoBench：cheap = main = {bench_alias}"
+    )
     # 保留原 bench alias 自身（运行时显式引用时仍可用）
     data["model_aliases"] = aliases
     return _yaml.safe_dump(data, allow_unicode=True, sort_keys=False)
@@ -873,22 +880,23 @@ async def runner_fn(task_meta: Any, iteration: int) -> TaskExecutionOutcome:
                 return await _run_tier2_tau(task_meta, iteration, rubrics, started_at)
             if "gaia" in domain_lower:
                 return await _run_tier2_gaia(task_meta, iteration, rubrics, started_at)
-            return _outcome_error(
-                started_at, f"tier 2 unsupported domain={domain!r}"
-            )
+            return _outcome_error(started_at, f"tier 2 unsupported domain={domain!r}")
         if tier == 3:
             return await _run_tier3(task_meta, iteration, rubrics, started_at)
         return _outcome_error(started_at, f"unsupported tier={tier!r}")
     except Exception as exc:
         # 异常分类：所有结构化 infra-level 异常都标 INFRA_ERROR（不进分母）.
         # Codex round 2 HIGH 闭环：provider 异常（ProviderError 基类含
-        # CredentialError / AuthenticationError / ProxyUnreachableError 等）从
+        # CredentialError / AuthenticationError 等）从
         # _run_gaia_fallback 透传到这里，必须明确分类为 INFRA_ERROR——而非
         # broad except Exception 误为 RESULT_ERROR.
         if _is_infra_error(exc):
             logger.info(
                 "runner_fn_infra_error",
-                extra={"task": _task_id_repr(task_meta), "error_type": type(exc).__name__},
+                extra={
+                    "task": _task_id_repr(task_meta),
+                    "error_type": type(exc).__name__,
+                },
             )
             return TaskExecutionOutcome(
                 result=RESULT_INFRA_ERROR,
@@ -910,7 +918,7 @@ def _is_infra_error(exc: BaseException) -> bool:
     1. ``MissingInstanceConfigError``：缺 octoagent.yaml / bench alias
     2. ``TauBenchNotIntegratedError``：τ-bench 集成 deferred
     3. ``ProviderError`` 及子类：CredentialError / AuthenticationError /
-       ProxyUnreachableError / OAuthFlowError 等（packages/provider/exceptions.py）
+       OAuthFlowError 等（packages/provider/exceptions.py）
     4. ``ConnectionError`` / ``TimeoutError`` / ``OSError`` 等网络层异常
     """
     # 已知结构化 infra 异常
@@ -932,7 +940,9 @@ def _is_infra_error(exc: BaseException) -> bool:
 
 def _task_id_repr(task_meta: Any) -> str:
     """安全 repr task_id（log 用）."""
-    return str(_raw_dict(task_meta).get("task_id") or getattr(task_meta, "task_id", "?"))
+    return str(
+        _raw_dict(task_meta).get("task_id") or getattr(task_meta, "task_id", "?")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -954,7 +964,9 @@ async def _run_tier1(
     每 task 新建 trigger 重置 ``_call_count``，符合 ``reset_call_count`` 语义.
     """
     raw = _raw_dict(task_meta)
-    timeout_seconds = float(raw.get("timeout_seconds", TASK_DEFAULT_OVERALL_TIMEOUT_SECONDS))
+    timeout_seconds = float(
+        raw.get("timeout_seconds", TASK_DEFAULT_OVERALL_TIMEOUT_SECONDS)
+    )
     prompt = str(raw.get("prompt", ""))
 
     async with octo_harness_session() as handle:
@@ -1071,7 +1083,9 @@ async def _run_tier3(
 ) -> TaskExecutionOutcome:
     """Tier 3 哲学 task：起 OctoHarness → submit → fetch_events_tier3 → score_tier3."""
     raw = _raw_dict(task_meta)
-    timeout_seconds = float(raw.get("timeout_seconds", TASK_DEFAULT_OVERALL_TIMEOUT_SECONDS))
+    timeout_seconds = float(
+        raw.get("timeout_seconds", TASK_DEFAULT_OVERALL_TIMEOUT_SECONDS)
+    )
     prompt = str(raw.get("prompt", ""))
 
     async with octo_harness_session() as handle:

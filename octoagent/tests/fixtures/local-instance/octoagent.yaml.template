@@ -38,9 +38,6 @@ model_aliases:
     description: "F087 e2e 低成本探测模型（同 main，OAuth 不计 token 费）"
     thinking_level: low
 
-runtime:
-  llm_mode: provider_direct  # F081 后默认走 ProviderRouter 直连
-
 front_door:
   mode: loopback
   bearer_token_env: OCTOAGENT_FRONTDOOR_TOKEN

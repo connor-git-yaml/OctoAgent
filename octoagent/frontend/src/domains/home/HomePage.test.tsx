@@ -9,14 +9,20 @@ let mockWorkbench: {
   busyActionId: string | null;
 };
 
-vi.mock("../../components/shell/WorkbenchLayout", () => ({
-  useWorkbench: () => mockWorkbench,
-}));
+vi.mock("../../components/shell/WorkbenchLayout", async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import("../../components/shell/WorkbenchLayout")
+  >();
+  return {
+    ...actual,
+    useWorkbench: () => mockWorkbench,
+  };
+});
 
 function buildSnapshot(options?: {
   setupReady?: boolean;
   diagnosticsStatus?: string;
-  llmMode?: string;
+  providerEnabled?: boolean;
   pendingCount?: number;
   nextActions?: string[];
   blockingReasons?: string[];
@@ -27,7 +33,7 @@ function buildSnapshot(options?: {
 }) {
   const setupReady = options?.setupReady ?? false;
   const diagnosticsStatus = options?.diagnosticsStatus ?? "degraded";
-  const llmMode = options?.llmMode ?? "echo";
+  const providerEnabled = options?.providerEnabled ?? false;
   const pendingCount = options?.pendingCount ?? 0;
   const nextActions = options?.nextActions ?? (setupReady ? [] : ["先完成 Provider 与密钥连接。"]);
   const blockingReasons =
@@ -81,9 +87,9 @@ function buildSnapshot(options?: {
       },
       config: {
         current_value: {
-          runtime: {
-            llm_mode: llmMode,
-          },
+          providers: providerEnabled
+            ? [{ id: "openrouter", enabled: true }]
+            : [],
         },
       },
       delegation: {
@@ -103,7 +109,7 @@ describe("HomePage", () => {
       snapshot: buildSnapshot({
         setupReady: false,
         diagnosticsStatus: "degraded",
-        llmMode: "echo",
+        providerEnabled: false,
       }),
       submitAction: vi.fn(),
       busyActionId: null,
@@ -115,7 +121,7 @@ describe("HomePage", () => {
       </MemoryRouter>
     );
 
-    // buildPrimaryState 在 echo 模式下返回的标题和按钮文案
+    // 未配置 Provider 时返回的标题和按钮文案
     expect(screen.getByRole("heading", { name: "模型未连接" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "前往设置" })).toBeInTheDocument();
     expect(screen.getByText("当前还没有接入真实模型。")).toBeInTheDocument();
@@ -123,12 +129,12 @@ describe("HomePage", () => {
     expect(screen.queryByText("当前提醒")).not.toBeInTheDocument();
   });
 
-  it("echo-ready 状态下不会把已通过 review 的提示混进首页主引导", () => {
+  it("Provider 未连接时不会把已通过 review 的提示混进首页主引导", () => {
     mockWorkbench = {
       snapshot: buildSnapshot({
         setupReady: true,
         diagnosticsStatus: "ready",
-        llmMode: "echo",
+        providerEnabled: false,
         nextActions: ['检查已通过，可以点击“保存配置”。'],
       }),
       submitAction: vi.fn(),
@@ -141,7 +147,7 @@ describe("HomePage", () => {
       </MemoryRouter>
     );
 
-    // echo 模式（setupReady=true）下，buildPrimaryState 仍走 echo 分支
+    // Provider 未连接时，buildPrimaryState 仍优先引导连接模型
     expect(screen.getByRole("heading", { name: "模型未连接" })).toBeInTheDocument();
     expect(screen.getByText("当前配置已经可以保存，但还没有切到真实模型。")).toBeInTheDocument();
     expect(
@@ -155,7 +161,7 @@ describe("HomePage", () => {
       snapshot: buildSnapshot({
         setupReady: true,
         diagnosticsStatus: "ready",
-        llmMode: "litellm",
+        providerEnabled: true,
         channelSummary: {
           telegram: {
             status: "ready",
@@ -187,7 +193,7 @@ describe("HomePage", () => {
       snapshot: buildSnapshot({
         setupReady: true,
         diagnosticsStatus: "ready",
-        llmMode: "litellm",
+        providerEnabled: true,
         pendingCount: 2,
         operatorItems: [
           {
@@ -235,7 +241,7 @@ describe("HomePage", () => {
       snapshot: buildSnapshot({
         setupReady: true,
         diagnosticsStatus: "ready",
-        llmMode: "litellm",
+        providerEnabled: true,
         availableProjects: [
           {
             project_id: "project-default",
@@ -266,7 +272,7 @@ describe("HomePage", () => {
       snapshot: buildSnapshot({
         setupReady: true,
         diagnosticsStatus: "ready",
-        llmMode: "litellm",
+        providerEnabled: true,
         sessions: [
           {
             session_id: "session-1",

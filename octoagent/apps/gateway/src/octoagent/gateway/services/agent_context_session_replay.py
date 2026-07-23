@@ -17,6 +17,7 @@ prompt 组装见 agent_context_prompt_assembly，防止职责再次堆回单文�
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -25,10 +26,13 @@ from octoagent.core.models import (
     AgentSession,
     AgentSessionTurn,
     AgentSessionTurnKind,
+    ContextFrame,
+    RecallFrame,
 )
 from octoagent.tooling.security_render import (  # F124 D2
     render_persisted_tool_turn_for_llm,
 )
+from ulid import ULID
 
 # 路径不变（含 orchestrator 引用的 _dynamic_transcript_limit 等私有名）。redundant-alias
 # 形式（X as X）向 ruff/类型检查器声明显式 re-export。
@@ -44,6 +48,31 @@ from .context_compaction import (
 log = structlog.get_logger()
 
 
+@dataclass(frozen=True)
+class ResponseContextStorageRequest:
+    """一次响应上下文持久化所需的不可变输入。"""
+
+    task_id: str
+    context_frame_id: str
+    request_artifact_id: str
+    response_artifact_id: str
+    latest_user_text: str
+    model_response: str
+    recent_summary: str = ""
+    session_lock: asyncio.Lock | None = None
+
+
+@dataclass(frozen=True)
+class _PrecomputedContextEntities:
+    """预计算上下文帧所依赖的已解析实体。"""
+
+    project: Any
+    profile: Any
+    runtime: Any
+    session: AgentSession
+    state: Any
+
+
 class AgentContextSessionReplayMixin:
     """SessionReplay 职责簇：见模块 docstring。
 
@@ -51,7 +80,7 @@ class AgentContextSessionReplayMixin:
     方法签名、返回值与副作用与拆分前完全等价（F113 行为零变更）。
     """
 
-    _stores: "Any"
+    _stores: Any
 
     async def record_response_context(
         self,
@@ -65,13 +94,50 @@ class AgentContextSessionReplayMixin:
         recent_summary: str = "",
         session_lock: asyncio.Lock | None = None,
     ) -> None:
+        self._require_runtime_mode("record_response_context")
+        agent_session, project = await self.persist_response_context_storage(
+            ResponseContextStorageRequest(
+                task_id=task_id,
+                context_frame_id=context_frame_id,
+                request_artifact_id=request_artifact_id,
+                response_artifact_id=response_artifact_id,
+                latest_user_text=latest_user_text,
+                model_response=model_response,
+                recent_summary=recent_summary,
+                session_lock=session_lock,
+            )
+        )
+        if agent_session is not None:
+            self._spawn_session_memory_extraction(
+                agent_session=agent_session,
+                project=project,
+            )
+
+    async def persist_response_context_storage(
+        self,
+        request: ResponseContextStorageRequest,
+    ) -> tuple[AgentSession | None, Any]:
+        task_id = request.task_id
+        context_frame_id = request.context_frame_id
+        request_artifact_id = request.request_artifact_id
+        response_artifact_id = request.response_artifact_id
+        latest_user_text = request.latest_user_text
+        model_response = request.model_response
+        recent_summary = request.recent_summary
+        session_lock = request.session_lock
         task = await self._stores.task_store.get_task(task_id)
         if task is None:
-            return
+            return None, None
 
         frame = await self._stores.agent_context_store.get_context_frame(context_frame_id)
         project = None
         state = None
+        if frame is None and not context_frame_id:
+            frame, project, state = await self._ensure_precomputed_context_frame(
+                task=task,
+                latest_user_text=latest_user_text,
+            )
+            context_frame_id = frame.context_frame_id
         if frame is not None:
             project = (
                 await self._stores.project_store.get_project(frame.project_id)
@@ -206,7 +272,9 @@ class AgentContextSessionReplayMixin:
                                 "session_replay_tool_lines": list(replay.tool_exchange_lines),
                                 "session_replay_sanitize_notes": {
                                     "dropped_orphan_tool_calls": replay.dropped_orphan_tool_calls,
-                                    "dropped_orphan_tool_results": replay.dropped_orphan_tool_results,
+                                    "dropped_orphan_tool_results": (
+                                        replay.dropped_orphan_tool_results
+                                    ),
                                 },
                             },
                             "updated_at": datetime.now(tz=UTC),
@@ -219,21 +287,121 @@ class AgentContextSessionReplayMixin:
                     await _update_agent_session()
             else:
                 await _update_agent_session()
-        if frame is not None:
-            current_frame = frame
-            # Feature 067: worker tool evidence writeback 已废弃
-            # 记忆提取统一由 SessionMemoryExtractor 从完整会话上下文中提取有意义的事实
-            # 旧的 _record_private_tool_evidence_writeback 产出的是工具调用原始记录，
-            # 对 SoR/ToM 提取没有价值，已移除。
         await self._stores.conn.commit()
+        return agent_session, project
 
-        # Feature 067: fire-and-forget 触发 Session 驱动记忆提取
-        if agent_session is not None:
-            self._spawn_session_memory_extraction(
-                agent_session=agent_session,
+    async def _ensure_precomputed_context_frame(
+        self,
+        *,
+        task: Any,
+        latest_user_text: str,
+    ) -> tuple[ContextFrame, Any, Any]:
+        project, _ = await self._resolve_project_scope(
+            task=task,
+            surface=task.requester.channel,
+        )
+        state = await self._ensure_session_context(task=task, project=project)
+        request = self._build_context_request(
+            task=task,
+            trigger_text=latest_user_text,
+            dispatch_metadata={},
+            worker_capability=None,
+            runtime_context=None,
+        )
+        profile, _ = await self._resolve_agent_profile(project=project)
+        runtime = await self._ensure_agent_runtime(
+            request=request,
+            project=project,
+            agent_profile=profile,
+        )
+        session = await self._ensure_agent_session(
+            request=request,
+            task=task,
+            project=project,
+            agent_runtime=runtime,
+            session_state=state,
+        )
+        frame = self._build_precomputed_context_frame(
+            task=task,
+            entities=_PrecomputedContextEntities(
                 project=project,
+                profile=profile,
+                runtime=runtime,
+                session=session,
+                state=state,
+            ),
+        )
+        await self._stores.agent_context_store.save_recall_frame(
+            self._build_precomputed_recall_frame(
+                frame=frame,
+                latest_user_text=latest_user_text,
             )
+        )
+        await self._stores.agent_context_store.save_context_frame(frame)
+        await self._stores.agent_context_store.save_agent_session(
+            session.model_copy(
+                update={
+                    "last_context_frame_id": frame.context_frame_id,
+                    "last_recall_frame_id": frame.recall_frame_id or "",
+                    "updated_at": datetime.now(tz=UTC),
+                }
+            )
+        )
+        state = state.model_copy(
+            update={
+                "agent_runtime_id": runtime.agent_runtime_id,
+                "agent_session_id": session.agent_session_id,
+                "last_context_frame_id": frame.context_frame_id,
+                "last_recall_frame_id": frame.recall_frame_id or "",
+                "updated_at": datetime.now(tz=UTC),
+            }
+        )
+        await self._stores.agent_context_store.save_session_context(state)
+        return frame, project, state
 
+    @staticmethod
+    def _build_precomputed_context_frame(
+        *,
+        task: Any,
+        entities: _PrecomputedContextEntities,
+    ) -> ContextFrame:
+        context_frame_id = str(ULID())
+        return ContextFrame(
+            context_frame_id=context_frame_id,
+            task_id=task.task_id,
+            session_id=entities.state.session_id,
+            agent_runtime_id=entities.runtime.agent_runtime_id,
+            agent_session_id=entities.session.agent_session_id,
+            project_id=entities.project.project_id if entities.project is not None else "",
+            agent_profile_id=entities.profile.profile_id,
+            recall_frame_id=str(ULID()),
+            recent_summary=entities.state.rolling_summary,
+            degraded_reason="precomputed_storage_only",
+            delegation_context={"source": "precomputed_completion"},
+            budget={"memory_recall": {"mode": "skip", "hit_count": 0}},
+            source_refs=[{"ref_type": "task", "ref_id": task.task_id}],
+        )
+
+    @staticmethod
+    def _build_precomputed_recall_frame(
+        *,
+        frame: ContextFrame,
+        latest_user_text: str,
+    ) -> RecallFrame:
+        return RecallFrame(
+            recall_frame_id=frame.recall_frame_id or str(ULID()),
+            agent_runtime_id=frame.agent_runtime_id,
+            agent_session_id=frame.agent_session_id,
+            context_frame_id=frame.context_frame_id,
+            task_id=frame.task_id,
+            project_id=frame.project_id,
+            query=latest_user_text,
+            recent_summary=frame.recent_summary,
+            source_refs=list(frame.source_refs),
+            budget=dict(frame.budget),
+            degraded_reason=frame.degraded_reason,
+            metadata={"request_kind": "precomputed", "source": "precomputed_completion"},
+        )
 
     @staticmethod
     def _normalize_session_transcript_entries(
@@ -262,7 +430,6 @@ class AgentContextSessionReplayMixin:
             return normalized
         return normalized[-limit:]
 
-
     @classmethod
     def _agent_session_transcript_entries(
         cls,
@@ -273,7 +440,6 @@ class AgentContextSessionReplayMixin:
         return cls._normalize_session_transcript_entries(
             session.recent_transcript or session.metadata.get("recent_transcript", [])
         )
-
 
     @staticmethod
     def _agent_session_turn_to_transcript_entry(
@@ -294,7 +460,6 @@ class AgentContextSessionReplayMixin:
             "task_id": turn.task_id,
         }
 
-
     async def _list_agent_session_turn_transcript_entries(
         self,
         *,
@@ -313,7 +478,6 @@ class AgentContextSessionReplayMixin:
             if (entry := self._agent_session_turn_to_transcript_entry(turn)) is not None
         ]
         return self._normalize_session_transcript_entries(entries)
-
 
     async def build_agent_session_replay_projection(
         self,
@@ -455,7 +619,9 @@ class AgentContextSessionReplayMixin:
             tool_exchange_lines=tool_exchange_lines,
             latest_context_summary=(
                 latest_context_summary
-                or (resolved_session.rolling_summary.strip() if resolved_session is not None else "")
+                or (
+                    resolved_session.rolling_summary.strip() if resolved_session is not None else ""
+                )
             ),
             latest_model_reply_preview=latest_model_reply_preview,
             source="agent_session_turn_store",
@@ -463,14 +629,12 @@ class AgentContextSessionReplayMixin:
             dropped_orphan_tool_results=dropped_orphan_tool_results,
         )
 
-
     @staticmethod
     def _normalize_turn_summary(value: Any, *, limit: int = 720) -> str:
         text = " ".join(str(value or "").split()).strip()
         if not text:
             return ""
         return truncate_chars(text, limit)
-
 
     @staticmethod
     def render_agent_session_replay_block(
@@ -483,9 +647,7 @@ class AgentContextSessionReplayMixin:
         ]
         sanitize_notes: list[str] = []
         if replay.dropped_orphan_tool_calls:
-            sanitize_notes.append(
-                f"dropped_orphan_tool_calls={replay.dropped_orphan_tool_calls}"
-            )
+            sanitize_notes.append(f"dropped_orphan_tool_calls={replay.dropped_orphan_tool_calls}")
         if replay.dropped_orphan_tool_results:
             sanitize_notes.append(
                 f"dropped_orphan_tool_results={replay.dropped_orphan_tool_results}"
@@ -501,7 +663,6 @@ class AgentContextSessionReplayMixin:
             f"latest_model_reply_preview: {replay.latest_model_reply_preview or 'N/A'}\n"
             f"sanitize_notes: {', '.join(sanitize_notes) or 'none'}"
         )
-
 
     @staticmethod
     def _trim_session_replay_projection(
@@ -541,7 +702,6 @@ class AgentContextSessionReplayMixin:
             dropped_orphan_tool_results=replay.dropped_orphan_tool_results,
         )
 
-
     @classmethod
     def _append_session_transcript_entries(
         cls,
@@ -564,7 +724,7 @@ class AgentContextSessionReplayMixin:
             "task_id": task_id,
         }
         if normalized[-2:] == [user_entry, assistant_entry]:
-            return normalized[-_dynamic_transcript_limit(conversation_budget_tokens):]
+            return normalized[-_dynamic_transcript_limit(conversation_budget_tokens) :]
         if normalized and normalized[-1] == user_entry:
             normalized = normalized[:-1]
         if (
@@ -576,8 +736,7 @@ class AgentContextSessionReplayMixin:
         ):
             normalized = normalized[:-2]
         normalized.extend([user_entry, assistant_entry])
-        return normalized[-_dynamic_transcript_limit(conversation_budget_tokens):]
-
+        return normalized[-_dynamic_transcript_limit(conversation_budget_tokens) :]
 
     @classmethod
     def _replace_session_transcript_entries_from_messages(
@@ -592,7 +751,9 @@ class AgentContextSessionReplayMixin:
         replaced = [
             {
                 "role": role,
-                "content": truncate_chars(" ".join(content.split()), 720 if role == "assistant" else 480),
+                "content": truncate_chars(
+                    " ".join(content.split()), 720 if role == "assistant" else 480
+                ),
                 "task_id": task_id,
             }
             for item in messages
@@ -603,7 +764,6 @@ class AgentContextSessionReplayMixin:
         if not replaced:
             return normalized[-effective_limit:]
         return replaced[-effective_limit:]
-
 
     async def record_compaction_context(
         self,
@@ -668,8 +828,7 @@ class AgentContextSessionReplayMixin:
                         messages=compacted_messages,
                         task_id=task_id,
                         existing_entries=(
-                            agent_session.recent_transcript
-                            or metadata.get("recent_transcript", [])
+                            agent_session.recent_transcript or metadata.get("recent_transcript", [])
                         ),
                     )
                 metadata.update(

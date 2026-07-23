@@ -17,11 +17,11 @@ from pathlib import Path
 from typing import Any
 
 from octoagent.core.models import ConfigFieldHint
+from octoagent.gateway.services.config.config_schema import OctoAgentConfig
+from octoagent.gateway.services.operations.secret_service import SecretService
 from octoagent.provider.auth.credentials import ApiKeyCredential
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
-from octoagent.gateway.services.config.config_schema import OctoAgentConfig
-from octoagent.provider.dx.secret_service import SecretService
 from pydantic import SecretStr, ValidationError
 
 
@@ -47,7 +47,7 @@ class SetupConfigIOMixin:
             if str(key).strip() and str(value).strip()
         }
         if not normalized:
-            return {"litellm_env_names": [], "runtime_env_names": [], "profile_names": []}
+            return {"provider_env_names": [], "runtime_env_names": [], "profile_names": []}
 
         # F081 cleanup：runtime.master_key_env 已删除；ProviderRouter 直连后无 master
         # key 概念。所有 provider api_key 进 .env，runtime/channel 凭证也进 .env。
@@ -74,9 +74,7 @@ class SetupConfigIOMixin:
             if env_name in provider_targets
         }
         runtime_updates = {
-            env_name: value
-            for env_name, value in normalized.items()
-            if env_name in runtime_targets
+            env_name: value for env_name, value in normalized.items() if env_name in runtime_targets
         }
 
         # 所有 secret 统一写 .env（F081 P3b 退役 .env.litellm 后不再分文件）
@@ -115,14 +113,13 @@ class SetupConfigIOMixin:
             saved_profiles.append(profile.name)
 
         return {
-            "litellm_env_names": sorted(provider_updates.keys()),
+            "provider_env_names": sorted(provider_updates.keys()),
             "runtime_env_names": sorted(runtime_updates.keys()),
             "profile_names": saved_profiles,
         }
 
     def _build_config_ui_hints(self) -> dict[str, ConfigFieldHint]:
-        # F081 cleanup：移除 runtime.{llm_mode,litellm_proxy_url,master_key_env}
-        # 三个 ConfigFieldHint。这三个字段已从 RuntimeConfig 删除。
+        # Runtime 旧模型配置提示已经整体退役。
         hints = {
             "memory.reasoning_model_alias": ConfigFieldHint(
                 field_path="memory.reasoning_model_alias",
@@ -373,13 +370,14 @@ class SetupConfigIOMixin:
         *,
         secret_audit: Any | None,
         bridge_refs: list[dict[str, Any]],
-        litellm_sync_ok: bool,
     ) -> dict[str, Any]:
-        providers = [
-            item for item in config_value.get("providers", []) if isinstance(item, dict)
-        ]
-        env_litellm = self._env_file_values(self._ctx.project_root / ".env.litellm")
+        providers = [item for item in config_value.get("providers", []) if isinstance(item, dict)]
         env_runtime = self._env_file_values(self._ctx.project_root / ".env")
+        provider_env_names = {
+            str(item.get("api_key_env", "")).strip()
+            for item in providers
+            if str(item.get("api_key_env", "")).strip() in env_runtime
+        }
         profiles = self._credential_store().list_profiles()
         oauth_profile = next(
             (profile for profile in profiles if profile.provider == "openai-codex"),
@@ -391,10 +389,9 @@ class SetupConfigIOMixin:
             ],
             "provider_entries": providers,
             "model_aliases": sorted(config_value.get("model_aliases", {}).keys()),
-            "litellm_sync_ok": litellm_sync_ok,
             "bridge_ref_count": len(bridge_refs),
             "secret_audit_status": secret_audit.overall_status if secret_audit else "unknown",
-            "litellm_env_names": sorted(env_litellm.keys()),
+            "provider_env_names": sorted(provider_env_names),
             "runtime_env_names": sorted(env_runtime.keys()),
             "credential_profiles": [
                 {
@@ -408,9 +405,7 @@ class SetupConfigIOMixin:
                         and getattr(profile.credential, "expires_at", None) is not None
                         else ""
                     ),
-                    "account_id": (
-                        str(getattr(profile.credential, "account_id", "") or "")
-                    ),
+                    "account_id": (str(getattr(profile.credential, "account_id", "") or "")),
                 }
                 for profile in profiles
             ],

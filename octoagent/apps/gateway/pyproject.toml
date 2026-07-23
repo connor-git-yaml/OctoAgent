@@ -4,27 +4,48 @@ version = "0.1.0"
 description = "OctoAgent Gateway - FastAPI REST API + SSE"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115,<1.0",
-    "uvicorn>=0.30,<1.0",
-    "sse-starlette>=2.0,<4.0",
-    "structlog>=25.1,<26.0",
-    "logfire>=3.0",
-    "octoagent-core",
-    "octoagent-provider",
-    "octoagent-policy",
+    "aiosqlite>=0.21,<1.0",
     "apscheduler>=3.10,<4.0",
-    # F105 v0.2（FR-C6）：Discord Interactions Ed25519 验签——锁内已有
-    # （传递依赖 46.0.5），显式声明防传递链断裂破坏生产验签路径
+    "click>=8.1,<9.0",
     "cryptography>=43,<47",
-    # F106 Phase C：plugin 目录热重载 observer。lazy import + 优雅降级——
-    # 未装时 watcher 禁用（手动 refresh 仍可，FR-6.4），不阻塞 gateway。
+    "fastapi>=0.115,<1.0",
+    "filelock>=3.12,<4.0",
+    "httpx>=0.27,<1.0",
+    "jieba>=0.42,<1.0",
+    "keyring>=25.0,<26.0",
+    "lancedb>=0.21,<1.0",
+    "logfire>=3.0",
+    "mcp>=1.0,<2.0",
+    "octoagent-core",
+    "octoagent-memory",
+    "octoagent-policy",
+    "octoagent-protocol",
+    "octoagent-provider",
+    "octoagent-skills",
+    "octoagent-tooling",
+    "pyarrow>=18,<24",
+    "pydantic>=2.10,<3.0",
+    "pydantic-graph>=1,<2",
+    "python-dotenv>=1.0,<2.0",
+    "python-ulid>=3.1,<4.0",
+    "PyYAML>=6.0,<7.0",
+    "questionary>=2.0,<3.0",
+    "rich>=13.0,<14.0",
+    "sse-starlette>=2.0,<4.0",
+    "starlette>=0.40,<1.0",
+    "structlog>=25.1,<26.0",
+    "uvicorn>=0.30,<1.0",
     "watchdog>=4.0,<7.0",
 ]
 
 [tool.uv.sources]
 octoagent-core = { workspace = true }
+octoagent-memory = { workspace = true }
 octoagent-provider = { workspace = true }
 octoagent-policy = { workspace = true }
+octoagent-protocol = { workspace = true }
+octoagent-skills = { workspace = true }
+octoagent-tooling = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -47,6 +68,13 @@ voice = [
     "piper-tts>=1.4,<2.0",          # F110 本地 TTS（GPL-3.0 optional，GATE_DESIGN D1 接受）
     # "pyogg>=0.8,<1.0",             # D4 备选：Phase 0 实测 PyAV 不可用时启用（本 venv 两者均缺）
 ]
+local-embedding = [
+    "sentence-transformers>=3.4,<4.0",
+]
+tokenizer = [
+    "tiktoken>=0.8,<1.0",
+]
 
 [project.scripts]
+octo = "octoagent.gateway.cli.cli:main"
 octo-bench = "octoagent.gateway.cli.bench_commands:app"

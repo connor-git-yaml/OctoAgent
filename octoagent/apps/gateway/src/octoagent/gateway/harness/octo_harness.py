@@ -24,6 +24,7 @@ hermetic 隔离回归测试（``test_hermetic_isolation.py`` 4 case patch
 
 from __future__ import annotations
 
+from datetime import UTC
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -41,7 +42,7 @@ if TYPE_CHECKING:
         MessageAdapter,
         ProviderRouter,
     )
-    from octoagent.provider.dx.credential_store import CredentialStore
+    from octoagent.provider.auth.store import CredentialStore
     from octoagent.skills import StructuredModelClientProtocol
 
 
@@ -132,6 +133,7 @@ class OctoHarness:
         替换 McpInstallerService 安装目录与 mkdir 路径
       * ``data_dir`` → ``_bootstrap_stores`` / ``_bootstrap_capability_pack``
         替换 DB / artifacts / user_pipelines 默认根
+      * ``user_skills_dir`` → ``_bootstrap_capability_pack`` 替换用户 Skill 根
       * ``plugins_dir``（F106）→ ``_bootstrap_user_plugins`` 替换 plugin 装载目录
       * ``model_client``（F138）→ ``_bootstrap_executors`` 替换 SkillRunner 的
         决策环 model_client（**路径 B**：非 None 时无条件建 SkillRunner，与
@@ -152,6 +154,7 @@ class OctoHarness:
         llm_adapter: MessageAdapter | None = None,
         mcp_servers_dir: Path | None = None,
         data_dir: Path | None = None,
+        user_skills_dir: Path | None = None,
         plugins_dir: Path | None = None,
         model_client: StructuredModelClientProtocol | None = None,
         clock: Callable[[], datetime] | None = None,
@@ -171,6 +174,7 @@ class OctoHarness:
         self._llm_adapter_override = llm_adapter
         self._mcp_servers_dir = mcp_servers_dir
         self._data_dir = data_dir
+        self._user_skills_dir = user_skills_dir
         self._plugins_dir = plugins_dir
         self._model_client_override = model_client
         self._clock_override = clock
@@ -191,6 +195,8 @@ class OctoHarness:
         self._approval_override_cache: Any | None = None
         self._tool_broker: Any | None = None
         self._llm_service_ref: list[Any] = []
+        self._shutdown_lock: Any | None = None
+        self._shutdown_complete = False
 
     # ----- 三入口（P1 骨架，body 在 T-P1-3..T-P1-6 填充） -----
 
@@ -212,18 +218,33 @@ class OctoHarness:
         await self._bootstrap_runtime_services(app)
         await self._bootstrap_llm(app)
         await self._bootstrap_capability_pack(app)
-        await self._bootstrap_user_plugins(app)  # F106 段 7.5：在 SkillDiscovery 构造后、executors 前
+        await self._bootstrap_user_plugins(
+            app
+        )  # F106 段 7.5：在 SkillDiscovery 构造后、executors 前
         await self._bootstrap_mcp(app)
         await self._bootstrap_executors(app)
         await self._bootstrap_optional_routines(app)
         await self._bootstrap_control_plane(app)
 
     async def shutdown(self, app: FastAPI) -> None:
+        """串行执行一次完整关闭链；成功后重复调用无副作用。"""
+        import asyncio
+
+        if self._shutdown_lock is None:
+            self._shutdown_lock = asyncio.Lock()
+        async with self._shutdown_lock:
+            if self._shutdown_complete:
+                return
+            await self._shutdown_once(app)
+            self._shutdown_complete = True
+
+    async def _shutdown_once(self, app: FastAPI) -> None:
         """对应 ``main.py:lifespan`` 内 ``yield`` 之后的 shutdown 段
         （行 854-916）。byte-for-byte 等价。"""
         import asyncio
 
-        from ..main import _BACKGROUND_TASK_SHUTDOWN_TIMEOUT_S, log as _log
+        from ..main import _BACKGROUND_TASK_SHUTDOWN_TIMEOUT_S
+        from ..main import log as _log
 
         # 关闭：尝试优雅等待后台任务完成，降低中断导致的任务丢失概率
         background_tasks: set[asyncio.Task] = getattr(app.state, "background_tasks", set())
@@ -331,6 +352,10 @@ class OctoHarness:
             log=_log,
         )
 
+        runtime_services = getattr(app.state, "runtime_services", None)
+        if runtime_services is not None:
+            await runtime_services.aclose()
+
         if hasattr(app.state, "store_group") and app.state.store_group:
             # F104：关闭主连接 + versionable 独立写连接（StoreGroup.close 幂等）。
             await app.state.store_group.close()
@@ -361,6 +386,16 @@ class OctoHarness:
 
         T-P1-3 搬运：从 main.py:lifespan 行 291-305 byte-for-byte 复制。
         """
+        import os
+
+        from ..services.config.config_bootstrap import (
+            detect_legacy_runtime_files,
+            validate_loaded_environment,
+        )
+
+        detect_legacy_runtime_files(self._project_root)
+        validate_loaded_environment(os.environ)
+
         # 局部引用复用 main.py 顶层 import / helper
         from ..main import (
             _build_update_service,
@@ -440,6 +475,7 @@ class OctoHarness:
         # → tools = apps/gateway/src/octoagent/gateway/tools
         # 这里 __file__ = .../gateway/harness/octo_harness.py，需 parent.parent / "tools"
         from .. import main as _main_module
+
         _builtin_tools_path = Path(_main_module.__file__).resolve().parent / "tools"
         _tool_registry = get_registry()
         scan_and_register(_tool_registry, _builtin_tools_path)
@@ -452,6 +488,7 @@ class OctoHarness:
         skeleton_created = ensure_filesystem_skeleton(project_root)
         if skeleton_created:
             from ..main import log as _log
+
             _log.info("filesystem_skeleton_created", paths=skeleton_created)
 
         from ..services.startup_bootstrap import ensure_startup_records
@@ -484,6 +521,7 @@ class OctoHarness:
             apply_user_md_sync_to_owner_profile,
             owner_profile_sync_on_startup,
         )
+
         from ..main import log as _log
 
         store_group = self._store_group
@@ -523,10 +561,9 @@ class OctoHarness:
             ToolBroker,
         )
 
-        from ..services.content_threat_scan import ContentThreatScanService
-
         from .. import main as _main_module
         from ..main import _resolve_telegram_polling_timeout
+        from ..services.content_threat_scan import ContentThreatScanService
 
         # 通过 _main_module 拿这些符号，保留 monkeypatch.setattr(main, "X", ...)
         # 路径（baseline 行为）。
@@ -662,9 +699,7 @@ class OctoHarness:
                         _platform_name,
                         _notify_target,
                         scope_id=(
-                            f"chat:{_platform_name}:{_notify_target}"
-                            if _notify_target
-                            else ""
+                            f"chat:{_platform_name}:{_notify_target}" if _notify_target else ""
                         ),
                     )
                     if _notify_target:
@@ -747,13 +782,18 @@ class OctoHarness:
         import asyncio
         import os as _os
 
+        from octoagent.gateway.services.config.config_wizard import load_config
+        from octoagent.gateway.services.config.provider_route_resolver import (
+            resolve_provider_route,
+        )
         from octoagent.provider import (
             ProviderRouter as _ProviderRouter,
+        )
+        from octoagent.provider import (
             ProviderRouterMessageAdapter,
         )
 
         from .. import main as _main_module
-        from ..services.agent_context import AgentContextService
 
         EchoMessageAdapter = _main_module.EchoMessageAdapter
         FallbackManager = _main_module.FallbackManager
@@ -778,8 +818,15 @@ class OctoHarness:
         _cred_store = self._credential_store_override or getattr(
             store_group, "credential_store", None
         )
+
+        def _resolve_route(alias: str):
+            config = load_config(project_root)
+            if config is None:
+                raise RuntimeError("octoagent.yaml不存在，无法解析Provider路由")
+            return resolve_provider_route(config, alias)
+
         provider_router = _ProviderRouter(
-            project_root=project_root,
+            route_resolver=_resolve_route,
             credential_store=_cred_store,
             event_store=store_group.event_store,
         )
@@ -829,16 +876,8 @@ class OctoHarness:
         app.state.proxy_manager = None
 
         app.state.llm_service = llm_service
-        # Feature 067: 注入 LLMService 到 AgentContextService
-        AgentContextService.set_llm_service(llm_service)
         app.state.alias_registry = alias_registry
         app.state.background_tasks: set[asyncio.Task] = set()
-        # Feature 067 / shutdown 竞态修复：让 Session 记忆提取 fire-and-forget task
-        # 注册进同一集合，shutdown 关 DB 连接前先 drain（见 octo_harness.shutdown）。
-        AgentContextService.set_background_tasks(app.state.background_tasks)
-
-        # 让所有 AgentContextService 实例都拿到同一个 router 实例
-        AgentContextService.set_provider_router(provider_router)
 
         # 跨段共享
         self._provider_router = provider_router
@@ -870,6 +909,7 @@ class OctoHarness:
             approval_override_cache=approval_override_cache,
             # Feature 080 Phase 5：把 router 注入到 capability_pack
             provider_router=provider_router,
+            user_skills_dir=self._user_skills_dir,
         )
         # Feature 057: 挂载 SkillDiscovery 到 app.state 供依赖注入
         app.state.skill_discovery = app.state.capability_pack_service.skill_discovery
@@ -884,6 +924,7 @@ class OctoHarness:
             # → /pipelines（在 repo root）
             # 这里需基于 main.py __file__ 解析（保持 byte-for-byte 等价）
             from .. import main as _main_module
+
             _builtin_pipelines = Path(_main_module.__file__).resolve().parents[5] / "pipelines"
             # F087 P2 T-P2-16: hermetic 隔离——data_dir 注入时 user_pipelines 走 data_dir,
             # 否则走宿主 ~/.octoagent/pipelines（生产路径不变）
@@ -925,9 +966,7 @@ class OctoHarness:
             else:
                 _env_plugins = os.environ.get("OCTOAGENT_PLUGINS_DIR")
                 plugins_dir = (
-                    Path(_env_plugins)
-                    if _env_plugins
-                    else Path.home() / ".octoagent" / "plugins"
+                    Path(_env_plugins) if _env_plugins else Path.home() / ".octoagent" / "plugins"
                 )
             skill_discovery = getattr(app.state, "skill_discovery", None)
             if skill_discovery is None:
@@ -956,18 +995,14 @@ class OctoHarness:
             )
             await plugin_registry.discover_and_register()
             app.state.plugin_registry = plugin_registry
-            _main_module.log.info(
-                "plugin_registry_ready", counts=plugin_registry._counts()
-            )
+            _main_module.log.info("plugin_registry_ready", counts=plugin_registry._counts())
 
             # F106 Phase C：watchdog 热重载（lazy import + 降级；observer 失败不拖垮，FR-6.4）
             app.state.plugin_watcher = None
             try:
                 from ..services.plugin_watcher import PluginWatcher
 
-                _watcher = PluginWatcher(
-                    plugins_dir, plugin_registry, asyncio.get_running_loop()
-                )
+                _watcher = PluginWatcher(plugins_dir, plugin_registry, asyncio.get_running_loop())
                 if _watcher.start():
                     app.state.plugin_watcher = _watcher
             except Exception:
@@ -989,10 +1024,9 @@ class OctoHarness:
         访问保留 monkeypatch 路径；``McpInstallerService`` / ``McpSessionPool``
         是延迟 import（不在顶层），保持原行为。
         """
+        from .. import main as _main_module
         from ..services.mcp_installer import McpInstallerService
         from ..services.mcp_session_pool import McpSessionPool
-
-        from .. import main as _main_module
 
         McpRegistryService = _main_module.McpRegistryService
 
@@ -1028,9 +1062,10 @@ class OctoHarness:
         # 闭包捕获 sse_hub 引用，通过 task_id 参数（request_approval 传入）路由广播。
         _store_group = self._store_group
         try:
-            from datetime import datetime, timezone as _tz
+            from datetime import datetime
 
-            from octoagent.core.models.enums import ActorType as _ActorType, EventType as _EventType
+            from octoagent.core.models.enums import ActorType as _ActorType
+            from octoagent.core.models.enums import EventType as _EventType
             from octoagent.core.models.event import Event as _Event
             from octoagent.gateway.harness.approval_gate import ApprovalGate
             from ulid import ULID as _ULID
@@ -1057,12 +1092,16 @@ class OctoHarness:
                     )
                     return
                 try:
-                    _task_seq = await _store_group.event_store.get_next_task_seq(task_id) if _store_group is not None else 0
+                    _task_seq = (
+                        await _store_group.event_store.get_next_task_seq(task_id)
+                        if _store_group is not None
+                        else 0
+                    )
                     _event = _Event(
                         event_id=str(_ULID()),
                         task_id=task_id,
                         task_seq=_task_seq,
-                        ts=datetime.now(_tz.utc),
+                        ts=datetime.now(UTC),
                         type=_EventType.APPROVAL_REQUESTED,
                         actor=_ActorType.SYSTEM,
                         payload={"session_id": session_id, **payload},
@@ -1077,8 +1116,12 @@ class OctoHarness:
                     )
 
             _approval_gate = ApprovalGate(
-                event_store=_store_group.event_store if _store_group is not None and hasattr(_store_group, "event_store") else None,
-                task_store=_store_group.task_store if _store_group is not None and hasattr(_store_group, "task_store") else None,
+                event_store=_store_group.event_store
+                if _store_group is not None and hasattr(_store_group, "event_store")
+                else None,
+                task_store=_store_group.task_store
+                if _store_group is not None and hasattr(_store_group, "task_store")
+                else None,
                 sse_push_fn=_approval_sse_push_fn,  # F101 Phase B FR-C2：真实 SSE 推送闭包
             )
             app.state.approval_gate = _approval_gate
@@ -1096,9 +1139,7 @@ class OctoHarness:
             _tool_deps._snapshot_store = snapshot_store
 
         # F107 W2：workspace git store（API 路由）+ durable RollbackService（启动 rehydrate）
-        app.state.workspace_git_store = (
-            app.state.capability_pack_service.workspace_git_store
-        )
+        app.state.workspace_git_store = app.state.capability_pack_service.workspace_git_store
         from octoagent.gateway.services.workspace_rollback import (
             WorkspaceRollbackService,
         )
@@ -1113,9 +1154,7 @@ class OctoHarness:
             try:
                 _rb_state = await app.state.workspace_rollback_service.rehydrate()
                 for _req in _rb_state.get("approved", []):
-                    await app.state.workspace_rollback_service.approve_and_execute(
-                        _req.request_id
-                    )
+                    await app.state.workspace_rollback_service.approve_and_execute(_req.request_id)
             except Exception:
                 from ..main import log as _wg_log
 
@@ -1142,8 +1181,8 @@ class OctoHarness:
         ``TaskRunner`` 都在 ``main.py`` 顶层 import，通过 ``main`` 模块属性引用
         保留 monkeypatch 路径。
         """
-        from ..services.agent_context import AgentContextService
         from .. import main as _main_module
+        from ..services.runtime_service_bundle import RuntimeServiceBundle
 
         SkillRunner = _main_module.SkillRunner
         ProviderModelClient = _main_module.ProviderModelClient
@@ -1171,11 +1210,15 @@ class OctoHarness:
         _llm_service_ref: list[Any] = self._llm_service_ref
 
         async def _on_tool_search_result(
-            result_json: str, task_id: str = "", trace_id: str = "",
+            result_json: str,
+            task_id: str = "",
+            trace_id: str = "",
         ) -> None:
             if _llm_service_ref:
                 await _llm_service_ref[0].process_tool_search_results(
-                    result_json, task_id=task_id, trace_id=trace_id,
+                    result_json,
+                    task_id=task_id,
+                    trace_id=trace_id,
                 )
 
         if self._model_client_override is not None:
@@ -1201,7 +1244,6 @@ class OctoHarness:
                 skill_discovery=app.state.skill_discovery,
             )
             _llm_service_ref.append(app.state.llm_service)
-            AgentContextService.set_llm_service(app.state.llm_service)
             _log.info(
                 "skill_runner_model_client_override",
                 model_client_type=type(self._model_client_override).__name__,
@@ -1226,7 +1268,6 @@ class OctoHarness:
                 skill_discovery=app.state.skill_discovery,
             )
             _llm_service_ref.append(app.state.llm_service)
-            AgentContextService.set_llm_service(app.state.llm_service)
         else:
             # echo 模式：保持上面已构造的 LLMService（无 SkillRunner）
             _log.info("skill_runner_skipped", reason="echo_mode")
@@ -1238,6 +1279,11 @@ class OctoHarness:
         )
         app.state.capability_pack_service.bind_delegation_plane(app.state.delegation_plane_service)
         llm_service = app.state.llm_service
+        app.state.runtime_services = RuntimeServiceBundle(
+            llm_service=llm_service,
+            provider_router=app.state.provider_router,
+            background_tasks=app.state.background_tasks,
+        )
 
         # F101 Phase C T-C-00：创建 NotificationService 实例并注册渠道。
         # NotificationService 由 TaskRunner 在 WAITING_APPROVAL 进入时调用（FR-B1）。
@@ -1250,6 +1296,7 @@ class OctoHarness:
             from ..services.notification import (
                 NotificationService as _NotificationService,
             )
+
             # H-7：注入 snapshot_store 供 NotificationService 读取 USER.md active_hours
             # H-6：注入 event_store 供 NotificationService 写审计事件
             _notif_event_store = getattr(store_group, "event_store", None)
@@ -1292,7 +1339,7 @@ class OctoHarness:
         app.state.task_runner = TaskRunner(
             store_group=store_group,
             sse_hub=app.state.sse_hub,
-            llm_service=llm_service,
+            runtime_services=app.state.runtime_services,
             approval_manager=app.state.approval_manager,
             completion_notifier=self._platform_registry.notify_task_completion,
             delegation_plane=app.state.delegation_plane_service,
@@ -1328,7 +1375,9 @@ class OctoHarness:
                 # handler 调用（与 _snapshot_store 同 pattern；capability_pack.py:1669/1673/
                 # 1716 真消费此字段）。必须在 capability_pack.refresh() 之前完成。
                 _tool_deps_for_pipeline = getattr(
-                    app.state.capability_pack_service, "_tool_deps", None,
+                    app.state.capability_pack_service,
+                    "_tool_deps",
+                    None,
                 )
                 if _tool_deps_for_pipeline is not None:
                     _tool_deps_for_pipeline._graph_pipeline_tool = graph_pipeline_tool
@@ -1400,6 +1449,7 @@ class OctoHarness:
         """
         from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+        from .. import main as _main_module
         from ..routines.observation_promoter import ObservationRoutine
         from ..services.watchdog.config import WatchdogConfig
         from ..services.watchdog.cooldown import CooldownRegistry
@@ -1409,8 +1459,6 @@ class OctoHarness:
             StateMachineDriftDetector,
         )
         from ..services.watchdog.scanner import WatchdogScanner
-
-        from .. import main as _main_module
 
         load_config = _main_module.load_config
         _log = _main_module.log
@@ -1696,9 +1744,7 @@ class OctoHarness:
                 discovery_runner=_consolidation_discovery_runner,
                 # Phase E：巩固完成"待确认"通知（仅 proposals>0 发 MEDIUM，FR-E）。
                 # notification_service 在本 bootstrap 更早处构造（None 时巩固静默降级）。
-                notification_service=getattr(
-                    app.state, "notification_service", None
-                ),
+                notification_service=getattr(app.state, "notification_service", None),
             )
             app.state.memory_consolidation_service = _memory_consolidation
             await _memory_consolidation.startup()
@@ -1736,9 +1782,7 @@ class OctoHarness:
                 project_root=project_root,
                 # 公开注入缝：e2e 脚本化测试 bootstrap 后替换为脚本 stub（spec AC-11 注）
                 llm_client=_compact_llm,
-                notification_service=getattr(
-                    app.state, "notification_service", None
-                ),
+                notification_service=getattr(app.state, "notification_service", None),
             )
             app.state.behavior_compaction_service = _behavior_compaction
             await _behavior_compaction.startup()

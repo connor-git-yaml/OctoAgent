@@ -11,6 +11,8 @@ from octoagent.core.store import create_store_group
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 
+from apps.gateway.tests.runtime_service_fixtures import start_runtime_task_runner
+
 
 class TestSC2Durability:
     """SC-2: 进程重启后数据完整"""
@@ -30,9 +32,18 @@ class TestSC2Durability:
             # 第一次启动：创建任务
             app1 = create_app()
             sg1 = await create_store_group(db_path, artifacts_dir)
+            sse_hub1 = SSEHub()
+            llm_service1 = LLMService()
+            runtime_fixture1, task_runner1 = await start_runtime_task_runner(
+                sg1,
+                sse_hub1,
+                llm_service1,
+            )
             app1.state.store_group = sg1
-            app1.state.sse_hub = SSEHub()
-            app1.state.llm_service = LLMService()
+            app1.state.sse_hub = sse_hub1
+            app1.state.llm_service = llm_service1
+            app1.state.runtime_services = runtime_fixture1.bundle
+            app1.state.task_runner = task_runner1
 
             async with AsyncClient(
                 transport=ASGITransport(app=app1),
@@ -46,6 +57,7 @@ class TestSC2Durability:
                 task_id = resp.json()["task_id"]
 
             # 关闭连接（模拟进程退出）
+            await task_runner1.shutdown()
             await sg1.close()
 
             # 第二次启动：验证数据完整

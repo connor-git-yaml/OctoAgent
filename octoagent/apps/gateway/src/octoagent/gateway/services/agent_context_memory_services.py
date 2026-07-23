@@ -39,17 +39,17 @@ class AgentContextMemoryServiceMixin:
     方法签名、返回值与副作用与拆分前完全等价（F113 行为零变更）。
     """
 
-    _stores: "Any"
+    _stores: Any
 
     async def get_memory_service(
         self,
         *,
         project: Project | None,
     ) -> MemoryService:
+        self._require_runtime_mode("get_memory_service")
         return await self._memory_runtime.memory_service_for_scope(
             project=project,
         )
-
 
     def get_consolidation_service(self):
         """获取 ConsolidationService 实例（Feature 065）。
@@ -57,10 +57,13 @@ class AgentContextMemoryServiceMixin:
         延迟创建，首次调用时实例化。若 LLM 服务不可用则返回 None。
         Phase 2: 自动注入 DerivedExtractionService。
         """
+        self._require_runtime_mode("get_consolidation_service")
         if not hasattr(self, "_consolidation_service"):
             try:
+                from octoagent.gateway.services.inference.consolidation_service import (
+                    ConsolidationService,
+                )
                 from octoagent.memory import SqliteMemoryStore
-                from octoagent.gateway.services.inference.consolidation_service import ConsolidationService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -81,16 +84,18 @@ class AgentContextMemoryServiceMixin:
                 self._consolidation_service = None
         return self._consolidation_service
 
-
     def get_derived_extraction_service(self):
         """获取 DerivedExtractionService 实例（Feature 065 Phase 2, US-4）。
 
         延迟创建，首次调用时实例化。
         """
+        self._require_runtime_mode("get_derived_extraction_service")
         if not hasattr(self, "_derived_extraction_service"):
             try:
+                from octoagent.gateway.services.inference.derived_extraction_service import (
+                    DerivedExtractionService,
+                )
                 from octoagent.memory import SqliteMemoryStore
-                from octoagent.gateway.services.inference.derived_extraction_service import DerivedExtractionService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -103,16 +108,18 @@ class AgentContextMemoryServiceMixin:
                 self._derived_extraction_service = None
         return self._derived_extraction_service
 
-
     def get_tom_extraction_service(self):
         """获取 ToMExtractionService 实例（Feature 065 Phase 3, US-7）。
 
         延迟创建，首次调用时实例化。
         """
+        self._require_runtime_mode("get_tom_extraction_service")
         if not hasattr(self, "_tom_extraction_service"):
             try:
+                from octoagent.gateway.services.inference.tom_extraction_service import (
+                    ToMExtractionService,
+                )
                 from octoagent.memory import SqliteMemoryStore
-                from octoagent.gateway.services.inference.tom_extraction_service import ToMExtractionService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -125,16 +132,18 @@ class AgentContextMemoryServiceMixin:
                 self._tom_extraction_service = None
         return self._tom_extraction_service
 
-
     def get_profile_generator_service(self):
         """获取 ProfileGeneratorService 实例（Feature 065 Phase 3, US-9）。
 
         延迟创建，首次调用时实例化。
         """
+        self._require_runtime_mode("get_profile_generator_service")
         if not hasattr(self, "_profile_generator_service"):
             try:
+                from octoagent.gateway.services.inference.profile_generator_service import (
+                    ProfileGeneratorService,
+                )
                 from octoagent.memory import SqliteMemoryStore
-                from octoagent.gateway.services.inference.profile_generator_service import ProfileGeneratorService
 
                 memory_store = SqliteMemoryStore(self._stores.conn)
                 llm_service = self._llm_service
@@ -147,13 +156,13 @@ class AgentContextMemoryServiceMixin:
                 self._profile_generator_service = None
         return self._profile_generator_service
 
-
     def get_session_memory_extractor(self):
         """获取 SessionMemoryExtractor 实例（Feature 067）。
 
         延迟创建，首次调用时实例化。若依赖不可用则返回 None。
         LLM service 每次从实例或类变量动态获取，避免构造时序问题。
         """
+        self._require_runtime_mode("get_session_memory_extractor")
         if not hasattr(self, "_session_memory_extractor"):
             try:
                 from .session_memory_extractor import SessionMemoryExtractor
@@ -170,7 +179,6 @@ class AgentContextMemoryServiceMixin:
                 self._session_memory_extractor = None
         return self._session_memory_extractor
 
-
     def _spawn_session_memory_extraction(
         self,
         *,
@@ -185,6 +193,7 @@ class AgentContextMemoryServiceMixin:
         SessionMemoryExtractor 内部对残留的 closed-conn 竞态仍有 defense-in-depth
         降级（drain 超时被 cancel 的极端情形）。返回创建的 task（便于测试断言注册）。
         """
+        self._require_runtime_mode("_spawn_session_memory_extraction")
         extractor = self.get_session_memory_extractor()
         if extractor is None:
             log.warning(
@@ -203,7 +212,7 @@ class AgentContextMemoryServiceMixin:
 
         # 注册进 shutdown drain 集合（若已注入）。集合是 set，add/discard 是 O(1)；
         # discard 回调在 task 结束后自动移除，避免集合无界增长。
-        background_tasks = self._shared_background_tasks
+        background_tasks = self._background_tasks
         if isinstance(background_tasks, set):
             background_tasks.add(task)
             task.add_done_callback(background_tasks.discard)
@@ -223,15 +232,17 @@ class AgentContextMemoryServiceMixin:
         task.add_done_callback(_on_extraction_done)
         return task
 
-
     def get_reranker_service(self):
         """获取 ModelRerankerService 实例（Feature 065 Phase 2, US-6）。
 
         延迟创建，首次调用时实例化。后台 warmup 模型。
         """
+        self._require_runtime_mode("get_reranker_service")
         if not hasattr(self, "_reranker_service"):
             try:
-                from octoagent.gateway.services.inference.model_reranker_service import ModelRerankerService
+                from octoagent.gateway.services.inference.model_reranker_service import (
+                    ModelRerankerService,
+                )
 
                 self._reranker_service = ModelRerankerService(auto_load=True)
             except Exception:

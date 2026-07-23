@@ -27,6 +27,7 @@ class TestLanesForMode:
             "quarantine-governance",
             "frontend-complexity",
             "backend-full",
+            "benchmark-unit",
             "frontend-vitest",
         ]
 
@@ -42,6 +43,7 @@ class TestLanesForMode:
             "attestation-signed",
             "frontend-complexity",
             "backend-deterministic",
+            "benchmark-unit",
             "frontend-vitest",
             "live-real-llm",
             "attest-service",
@@ -63,7 +65,8 @@ class TestLanesForMode:
         """pr lane 的 pytest 表达式与 pre-commit hook 一致（AC-6 抽样）。"""
         lanes = {lane.id: lane for lane in lane_mod.lanes_for_mode("pr")}
         assert lanes["backend-smoke-scripted"].pytest_args[:2] == [
-            "-m", "e2e_smoke or e2e_scripted",
+            "-m",
+            "e2e_smoke or e2e_scripted",
         ]
         hook_text = (Path(lane_mod.REPO_ROOT) / ".githooks" / "pre-commit").read_text(
             encoding="utf-8"
@@ -130,17 +133,24 @@ class TestEvaluateLivePytest:
     def test_all_skip_fails(self, lane_mod) -> None:
         """全 SKIP（exit 0 passed=0）→ FAIL（假绿防护）。"""
         ok, detail, _ = lane_mod.evaluate_live_pytest(
-            0, counts(skips=[{"nodeid": "t::a", "reason": "auth-profiles.json 不存在"}]),
+            0,
+            counts(skips=[{"nodeid": "t::a", "reason": "auth-profiles.json 不存在"}]),
         )
         assert ok is False and "零真跑" in detail
 
     def test_pass_with_deviation_skip_ok(self, lane_mod) -> None:
         ok, _, breakdown = lane_mod.evaluate_live_pytest(
             0,
-            counts(passed=3, skips=[
-                {"nodeid": "t::a", "reason": "域#7 层2 SKIP（GATE_P3_DEVIATION）: LLM 未选 graph"},
-                {"nodeid": "t::b", "reason": "域#12 real LLM: LLM 没触发 IRREVERSIBLE 工具"},
-            ]),
+            counts(
+                passed=3,
+                skips=[
+                    {
+                        "nodeid": "t::a",
+                        "reason": "域#7 层2 SKIP（GATE_P3_DEVIATION）: LLM 未选 graph",
+                    },
+                    {"nodeid": "t::b", "reason": "域#12 real LLM: LLM 没触发 IRREVERSIBLE 工具"},
+                ],
+            ),
         )
         assert ok is True
         assert len(breakdown["deviation_skip"]) == 2
@@ -148,11 +158,20 @@ class TestEvaluateLivePytest:
     def test_pass_with_manual_gate_skip_ok(self, lane_mod) -> None:
         ok, _, breakdown = lane_mod.evaluate_live_pytest(
             0,
-            counts(passed=2, skips=[
-                {"nodeid": "t::a",
-                 "reason": "域#5 SKIP（manual gate）: 需设置 OCTOAGENT_E2E_PERPLEXITY_API_KEY"},
-                {"nodeid": "t::b", "reason": "域#5 SKIP: npm 未安装，无法跑真 npm install。"},
-            ]),
+            counts(
+                passed=2,
+                skips=[
+                    {
+                        "nodeid": "t::a",
+                        "reason": (
+                            "域#5 SKIP（manual gate）: 需设置 "
+                            # 保持长环境变量名换行，同时继续由 Ruff 执行 E501。
+                            "OCTOAGENT_E2E_PERPLEXITY_API_KEY"
+                        ),
+                    },
+                    {"nodeid": "t::b", "reason": "域#5 SKIP: npm 未安装，无法跑真 npm install。"},
+                ],
+            ),
         )
         assert ok is True
         assert len(breakdown["manual_gate_skip"]) == 2
@@ -161,9 +180,12 @@ class TestEvaluateLivePytest:
         """1 pass + 凭证缺失 skip → FAIL（Codex H2：假诚实防护）。"""
         ok, detail, breakdown = lane_mod.evaluate_live_pytest(
             0,
-            counts(passed=1, skips=[
-                {"nodeid": "t::a", "reason": "auth-profiles.json 不存在（宿主 OAuth 未配置）"},
-            ]),
+            counts(
+                passed=1,
+                skips=[
+                    {"nodeid": "t::a", "reason": "auth-profiles.json 不存在（宿主 OAuth 未配置）"},
+                ],
+            ),
         )
         assert ok is False
         assert "unexpected_skip" in detail
@@ -172,7 +194,8 @@ class TestEvaluateLivePytest:
     def test_quota_skip_is_unexpected(self, lane_mod) -> None:
         """quota 耗尽 = 没验证成 → FAIL（不许「配额不足」冒充验过）。"""
         ok, _, breakdown = lane_mod.evaluate_live_pytest(
-            0, counts(passed=2, skips=[{"nodeid": "t::a", "reason": "quota 耗尽 SKIP"}]),
+            0,
+            counts(passed=2, skips=[{"nodeid": "t::a", "reason": "quota 耗尽 SKIP"}]),
         )
         assert ok is False
         assert len(breakdown["unexpected_skip"]) == 1
@@ -220,7 +243,8 @@ class TestEvaluateAttest:
 
     def test_service_not_enabled_fails_no_flag(self, lane_mod) -> None:
         status, detail = lane_mod.evaluate_attest(
-            "service", {"status": "not_enabled"},
+            "service",
+            {"status": "not_enabled"},
         )
         assert status == "fail" and "service install" in detail
 
@@ -241,8 +265,7 @@ class TestEvaluateAttest:
 class FakeRunner:
     """按命令特征返回预置 CompletedProcess 的 fake。"""
 
-    def __init__(self, attest_reports: dict[str, dict] | None = None,
-                 default_rc: int = 0) -> None:
+    def __init__(self, attest_reports: dict[str, dict] | None = None, default_rc: int = 0) -> None:
         self.attest_reports = attest_reports or {}
         self.default_rc = default_rc
         self.calls: list[list[str]] = []
@@ -265,12 +288,11 @@ class TestOrchestration:
         by_id = {r.id: r for r in results}
         assert by_id["quarantine-governance"].status == "pass"
         assert by_id["attestation-signed"].status in ("pass", "fail")
-        for lane_id in ("backend-deterministic", "live-real-llm",
-                        "attest-service"):
+        for lane_id in ("backend-deterministic", "live-real-llm", "attest-service"):
             assert by_id[lane_id].status == "planned"
         # dry-run 不得触碰 attest 探针 / pytest 子进程（探针有真副作用：service 闪断）
         joined = [" ".join(c) for c in fake.calls]
-        assert not any("octoagent.provider.dx.cli" in c for c in joined)
+        assert not any("octoagent.gateway.cli.cli" in c for c in joined)
         assert not any("pytest" in c for c in joined)
         # 治理校验脚本允许真跑（文件级只读）
         assert any("check-quarantine.py" in c for c in joined)
@@ -283,9 +305,11 @@ class TestOrchestration:
         assert by_id["frontend-vitest"].status == "skipped_explicit"
 
     def test_attest_lane_parses_json_and_archives(self, lane_mod) -> None:
-        fake = FakeRunner(attest_reports={
-            "service": {"status": "pass", "checks": []},
-        })
+        fake = FakeRunner(
+            attest_reports={
+                "service": {"status": "pass", "checks": []},
+            }
+        )
         orch = lane_mod.LaneOrchestrator("release", runner=fake)
         lanes = [lane for lane in lane_mod.lanes_for_mode("release") if lane.kind == "attest"]
         results = orch.run(lanes)
@@ -310,8 +334,9 @@ class TestOrchestration:
                 raise FileNotFoundError("node")
 
         orch = lane_mod.LaneOrchestrator("baseline", runner=MissingToolRunner())
-        lanes = [lane for lane in lane_mod.lanes_for_mode("baseline")
-                 if lane.id == "frontend-complexity"]
+        lanes = [
+            lane for lane in lane_mod.lanes_for_mode("baseline") if lane.id == "frontend-complexity"
+        ]
         results = orch.run(lanes)
         assert results[0].status == "fail" and "工具缺失" in results[0].detail
 
@@ -332,10 +357,11 @@ class TestLiveLaneCollectScope:
 
 class TestPytestEnvPin:
     def test_pythonpath_locks_repo_tree(self, lane_mod) -> None:
-        """D1v2：PYTHONPATH 锁本 repo 树 9 个 src 目录 + PYTHONNOUSERSITE。"""
+        """D1v2：PYTHONPATH 锁本 repo 树 8 个 src 目录 + PYTHONNOUSERSITE。"""
         env = lane_mod.build_pytest_env({"PATH": "/usr/bin"})
         assert env["PYTHONNOUSERSITE"] == "1"
         parts = env["PYTHONPATH"].split(":")
         assert str(lane_mod.OCTOAGENT_DIR / "apps" / "gateway" / "src") in parts
         pkg_srcs = [p for p in parts if "/packages/" in p and p.endswith("/src")]
-        assert len(pkg_srcs) == 8, f"应锁 8 个包 src，实际 {pkg_srcs}"
+        assert len(pkg_srcs) == 7, f"应锁 7 个包 src，实际 {pkg_srcs}"
+        assert all("/packages/sdk/" not in part for part in parts)

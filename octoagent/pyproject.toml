@@ -9,6 +9,7 @@ dependencies = []
 
 [dependency-groups]
 dev = [
+    "hatchling==1.29.0",
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "pytest-cov>=6.0",
@@ -24,7 +25,6 @@ dev = [
     "octoagent-policy",
     "octoagent-memory",
     "octoagent-protocol",
-    "octoagent-sdk",
     "pytest-xdist>=3.8.0",
     "pytest-rerunfailures>=14.0",
     "psutil>=5.9",
@@ -43,7 +43,6 @@ octoagent-skills = { workspace = true }
 octoagent-policy = { workspace = true }
 octoagent-memory = { workspace = true }
 octoagent-protocol = { workspace = true }
-octoagent-sdk = { workspace = true }
 
 [tool.uv.workspace]
 members = [
@@ -54,7 +53,6 @@ members = [
     "packages/skills",
     "packages/policy",
     "packages/memory",
-    "packages/sdk",
     "apps/gateway",
 ]
 
@@ -69,6 +67,7 @@ ignore = ["B008", "B017"]  # B008: FastAPI Depends() 标准模式; B017: 测试�
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["packages/core/tests", "packages/provider/tests", "packages/protocol/tests", "packages/tooling/tests", "packages/skills/tests", "packages/policy/tests", "packages/memory/tests", "apps/gateway/tests", "tests"]
+pythonpath = ["."]
 consider_namespace_packages = true
 markers = [
     "e2e_smoke: F087 smoke 5 域集成层 e2e（不真打 LLM，DI stub 驱动；pre-commit hook 自动跑，≤ 180s。F137 gate 下保持 deny——smoke 漏网真调用必炸）",
@@ -107,6 +106,5 @@ source = [
     "packages/skills/src",
     "packages/policy/src",
     "packages/memory/src",
-    "packages/sdk/src",
     "apps/gateway/src",
 ]

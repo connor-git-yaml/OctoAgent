@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
-import structlog
 from pathlib import Path
 from typing import Any
 
+import structlog
 from octoagent.core.models import MemoryRetrievalProfile, Project
-from octoagent.memory import MemoryBackendStatus, MemoryPartition, MemoryService, SorRecord, SqliteMemoryStore
+from octoagent.memory import (
+    MemoryBackendStatus,
+    MemoryPartition,
+    MemoryService,
+    SorRecord,
+    SqliteMemoryStore,
+)
 
 _log = structlog.get_logger()
 
-from octoagent.provider.dx.backup_service import resolve_project_root
+from octoagent.gateway.services.operations.backup_service import resolve_project_root
+
 from .memory_backend_resolver import MemoryBackendResolver
 from .memory_retrieval_profile import load_memory_retrieval_profile
 from .retrieval_platform_service import RetrievalPlatformService
@@ -79,11 +86,12 @@ class MemoryRuntimeService:
                 project=project,
             )
             resolved_backend_status = await memory_service.get_backend_status()
-        active_embedding_target, requested_embedding_target = (
-            await self._retrieval_platform_service.get_memory_embedding_targets(
-                project=project,
-                backend_status=resolved_backend_status,
-            )
+        (
+            active_embedding_target,
+            requested_embedding_target,
+        ) = await self._retrieval_platform_service.get_memory_embedding_targets(
+            project=project,
+            backend_status=resolved_backend_status,
         )
         return load_memory_retrieval_profile(
             self._project_root,

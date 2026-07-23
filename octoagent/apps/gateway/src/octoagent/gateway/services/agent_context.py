@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -12,78 +11,32 @@ from typing import Any
 import structlog
 from octoagent.core.behavior_workspace import (
     BehaviorLoadProfile,
-    build_behavior_bootstrap_template_ids,
     load_onboarding_state,
-    resolve_behavior_workspace,
 )
 from octoagent.core.models import (
     ActorType,
-    AgentProfile,
-    AgentProfileScope,
-    AgentProfileStatus,
-    AgentRuntime,
-    AgentRuntimeRole,
-    AgentSession,
-    AgentSessionKind,
-    AgentSessionStatus,
-    AgentSessionTurn,
-    AgentSessionTurnKind,
     BehaviorPack,
     ContextFrame,
     ContextRequestKind,
     ContextResolveRequest,
     ContextResolveResult,
-    DelegationTargetKind,
     Event,
     EventCausality,
     EventType,
-    MemoryNamespace,
     MemoryNamespaceKind,
-    MemoryRetrievalProfile,
-    OwnerOverlayScope,
-    OwnerProfile,
-    OwnerProfileOverlay,
-    Project,
     RecallEvidenceBundle,
     RecallFrame,
     RecallPlan,
     RecallPlanMode,
     RuntimeControlContext,
-    SessionContextState,
     SubagentDelegation,
     Task,
     TurnExecutorKind,
-    is_private_namespace,
-)
-from octoagent.core.models.agent_context import (
-    DEFAULT_WORKER_MEMORY_RECALL_PREFERENCES,
-    resolve_permission_preset,
 )
 from octoagent.core.models.payloads import (
-    ControlMetadataUpdatedPayload,
     MemoryRecallCompletedPayload,
-    UserMessagePayload,
-)
-from octoagent.gateway.services.memory.memory_retrieval_profile import (
-    apply_retrieval_profile_to_hook_options,
 )
 from octoagent.gateway.services.memory.memory_runtime_service import MemoryRuntimeService
-from octoagent.memory import (
-    EvidenceRef,
-    MemoryMaintenanceCommand,
-    MemoryMaintenanceCommandKind,
-    MemoryPartition,
-    MemoryRecallHit,
-    MemoryRecallResult,
-    MemoryService,
-    WriteAction,
-    init_memory_db,
-)
-from octoagent.memory.partition_inference import infer_memory_partition
-from octoagent.tooling.security_render import (  # F124 D2
-    render_persisted_tool_turn_for_llm,
-    render_tool_result_for_llm,
-)
 from ulid import ULID
 
 from .agent_context_entity_ensure import AgentContextEntityEnsureMixin
@@ -187,13 +140,8 @@ from .agent_context_prompt_assembly import AgentContextPromptAssemblyMixin
 from .agent_context_session_replay import AgentContextSessionReplayMixin
 from .agent_context_turn_writer import AgentContextTurnWriterMixin
 from .agent_decision import (
-    build_behavior_tool_guide_block,
-    build_runtime_hint_bundle,
-    is_worker_behavior_profile,
     make_behavior_pack_loaded_payload,
     make_behavior_pack_used_payload,
-    render_behavior_system_block,
-    render_runtime_hint_block,
     resolve_behavior_pack,
 )
 from .connection_metadata import (
@@ -201,18 +149,19 @@ from .connection_metadata import (
     resolve_delegation_target_profile_id,
     resolve_session_owner_profile_id,
     resolve_turn_executor_kind,
-    summarize_control_metadata_for_prompt,
 )
 from .context_budget import BudgetAllocation
 from .context_compaction import (
     CompiledTaskContext,
     ContextCompactionConfig,
-    estimate_messages_tokens,
-    truncate_chars,
+)
+from .runtime_service_bundle import (
+    RuntimeServiceBundle,
+    RuntimeServiceModeError,
+    validate_runtime_service_mode,
 )
 
 log = structlog.get_logger()
-
 
 
 class AgentContextService(
@@ -263,26 +212,47 @@ class AgentContextService(
         store_group,
         *,
         project_root: Path | None = None,
+        runtime_services: RuntimeServiceBundle | None = None,
+        storage_only: bool = False,
         llm_service: Any | None = None,
         provider_router: Any | None = None,
     ) -> None:
+        self._storage_only = validate_runtime_service_mode(
+            runtime_services=runtime_services,
+            storage_only=storage_only,
+        )
+        if llm_service is not None or provider_router is not None:
+            raise RuntimeServiceModeError(
+                "AgentContextService runtime 依赖必须只通过 runtime_services 提供"
+            )
+        self._runtime_services = runtime_services
         self._stores = store_group
-        self._llm_service = llm_service or self._shared_llm_service
+        self._llm_service = runtime_services.llm_service if runtime_services is not None else None
+        self._provider_router = (
+            runtime_services.provider_router if runtime_services is not None else None
+        )
+        self._background_tasks = (
+            runtime_services.background_tasks if runtime_services is not None else None
+        )
         self._budget_config = ContextCompactionConfig.from_env()
         _env_root = os.environ.get("OCTOAGENT_PROJECT_ROOT", "").strip()
         self._project_root = (
             project_root or (Path(_env_root) if _env_root else Path.cwd())
         ).resolve()
-        # Feature 080 Phase 5：embedding 走 ProviderRouter 直连。优先用显式注入，
-        # 否则回落到 main.py lifespan 注入的 _shared_provider_router 单例
-        # （与 _shared_llm_service 同模式，避免 5 个调用方都改签名）
-        self._provider_router = provider_router or self._shared_provider_router
-        self._memory_runtime = MemoryRuntimeService(
-            self._project_root,
-            store_group=store_group,
-            reranker_service=self.get_reranker_service(),
-            provider_router=self._provider_router,
-        )
+        self._memory_runtime = None
+        if not self._storage_only:
+            self._memory_runtime = MemoryRuntimeService(
+                self._project_root,
+                store_group=store_group,
+                reranker_service=self.get_reranker_service(),
+                provider_router=self._provider_router,
+            )
+
+    def _require_runtime_mode(self, operation: str) -> RuntimeServiceBundle:
+        runtime_services = self._runtime_services
+        if self._storage_only or runtime_services is None:
+            raise RuntimeServiceModeError(f"AgentContextService.{operation} 需要 runtime_services")
+        return runtime_services
 
     async def build_task_context(
         self,
@@ -299,6 +269,7 @@ class AgentContextService(
         deferred_tools_text: str = "",
         pipeline_catalog_content: str = "",
     ) -> CompiledTaskContext:
+        self._require_runtime_mode("build_task_context")
         dispatch_metadata = dispatch_metadata or {}
         resolve_request = self._build_context_request(
             task=task,
@@ -346,11 +317,7 @@ class AgentContextService(
             load_profile_for_emit = (
                 BehaviorLoadProfile.MINIMAL
                 if agent_profile.kind == "subagent"
-                else (
-                    BehaviorLoadProfile.WORKER
-                    if worker_capability
-                    else BehaviorLoadProfile.FULL
-                )
+                else (BehaviorLoadProfile.WORKER if worker_capability else BehaviorLoadProfile.FULL)
             )
             loaded_pack = resolve_behavior_pack(
                 agent_profile=agent_profile,
@@ -432,9 +399,7 @@ class AgentContextService(
             hit_count=int(memory_recall.get("hit_count", 0) or 0),
             delivered_hit_count=len(memory_hits),
             citations=[
-                str(item.citation).strip()
-                for item in memory_hits
-                if str(item.citation).strip()
+                str(item.citation).strip() for item in memory_hits if str(item.citation).strip()
             ],
             backend=str(memory_recall.get("backend", "")).strip(),
             backend_state=str(memory_recall.get("backend_state", "")).strip(),
@@ -451,9 +416,7 @@ class AgentContextService(
         )
         if recall_plan is not None:
             memory_recall["recall_plan"] = recall_plan.model_dump(mode="json")
-        memory_recall["recall_evidence_bundle"] = recall_evidence_bundle.model_dump(
-            mode="json"
-        )
+        memory_recall["recall_evidence_bundle"] = recall_evidence_bundle.model_dump(mode="json")
         memory_namespace_ids = [item.namespace_id for item in memory_namespaces]
         source_refs = self._build_source_refs(
             project=project,
@@ -559,8 +522,7 @@ class AgentContextService(
                 # 未知 enum 值——可能是 schema drift / 数据损坏；
                 # audit 层面记录，不影响 recall 主返回。
                 audit_anomalies.append(
-                    f"hit[{hit_index}].metadata.namespace_kind invalid "
-                    f"(value={kind_value!r})"
+                    f"hit[{hit_index}].metadata.namespace_kind invalid (value={kind_value!r})"
                 )
         hit_namespace_kinds = sorted(hit_kinds_raw, key=lambda k: k.value)
         if audit_anomalies:
@@ -765,9 +727,7 @@ class AgentContextService(
                     hit_namespace_kinds=[k.value for k in hit_namespace_kinds],
                 ).model_dump(),
                 trace_id=f"trace-{task.task_id}",
-                causality=EventCausality(
-                    idempotency_key=f"{recall_frame.recall_frame_id}:event"
-                ),
+                causality=EventCausality(idempotency_key=f"{recall_frame.recall_frame_id}:event"),
             )
             await self._stores.event_store.append_event_committed(
                 sync_event, update_task_pointer=False
@@ -849,6 +809,7 @@ class AgentContextService(
         worker_capability: str | None = None,
         runtime_context: RuntimeControlContext | None = None,
     ) -> RecallPlanningContext:
+        self._require_runtime_mode("build_recall_planning_context")
         dispatch_metadata = dispatch_metadata or {}
         resolve_request = self._build_context_request(
             task=task,
@@ -994,9 +955,7 @@ class AgentContextService(
         # → ContextResolveRequest.delegation_metadata 链路传递（Phase 0 侦察 §3 确认路径已通）。
         # ephemeral profile 生命周期绑定本次 _resolve_context_bundle 调用，不写 agent_profile 表。
         # P2-2 闭环：ephemeral 构造提为 _build_ephemeral_subagent_profile，测试可直接调用真实 helper。
-        _target_kind_for_profile = str(
-            request.delegation_metadata.get("target_kind", "")
-        ).strip()
+        _target_kind_for_profile = str(request.delegation_metadata.get("target_kind", "")).strip()
         if _target_kind_for_profile == "subagent":
             agent_profile = self._build_ephemeral_subagent_profile(project)
             degraded_reasons: list[str] = []
@@ -1131,6 +1090,4 @@ class AgentContextService(
     # Feature 067: _record_memory_writeback + _record_private_tool_evidence_writeback 已删除
     # 记忆提取统一由 SessionMemoryExtractor 从完整会话上下文中提取有意义的事实
 
-
     # Feature 067: get_flush_prompt_injector 已删除 -- FlushPromptInjector 整体废弃
-

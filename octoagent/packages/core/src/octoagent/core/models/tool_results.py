@@ -57,6 +57,7 @@ class WriteResult(BaseModel):
 # Config 工具子类
 # ---------------------------------------------------------------------------
 
+
 class ConfigAddProviderResult(WriteResult):
     """config.add_provider 写入结果。"""
 
@@ -74,40 +75,32 @@ class ConfigSetModelAliasResult(WriteResult):
     hint: str = ""
 
 
-class ConfigSyncResult(WriteResult):
-    """config.sync 写入结果。"""
-
-    enabled_providers: list[str] = []
-    enabled_aliases: list[str] = []
-
-
 class SetupQuickConnectResult(WriteResult):
     """setup.quick_connect 写入结果。
 
-    F19 修复：保留旧 tool 返回的全部 canonical envelope 字段（success / code /
-    activation / resource_refs / review），调用方依赖这些字段做激活检查、
-    resource refresh 与状态展示。
+    返回保存结果、review 与资源刷新引用，不承载已经退役的 runtime activation
+    投影。
     """
 
     provider_id: str = ""
     alias: str = ""
     hint: str = ""
-    # F19 修复：保留旧 tool envelope 字段（防压扁回归）
-    success: bool = False                          # 旧 payload 的 "success" 字段
-    code: str | None = None                        # error code（如 "INVALID_DRAFT_JSON"）
-    review: dict[str, Any] | None = None           # 配置审视结果
-    activation: dict[str, Any] | None = None       # 含 proxy_url / restart 等激活信息
-    resource_refs: list[str] = Field(default_factory=list)  # 触发的 resource refresh 清单
+    success: bool = False
+    code: str | None = None
+    review: dict[str, Any] | None = None
+    resource_refs: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
 # MCP 工具子类
 # ---------------------------------------------------------------------------
 
+
 class McpInstallResult(WriteResult):
     """mcp.install 写入结果。
 
-    异步路径（npm/pip install）：status="pending" + task_id 非空，调用方通过 mcp.install_status 追踪。
+    异步路径（npm/pip install）：status="pending" + task_id 非空，
+    调用方通过 mcp.install_status 追踪。
     同步路径（本地配置写入完成）：status="written" + server_name 非空。
     防 F14 回归：task_id 在 pending 时必须非空，确保追踪链路不断裂。
     """
@@ -128,6 +121,7 @@ class McpUninstallResult(WriteResult):
 # ---------------------------------------------------------------------------
 # Delegation / Work 工具子类
 # ---------------------------------------------------------------------------
+
 
 class ChildSpawnInfo(BaseModel):
     """subagents.spawn 单个子任务信息。"""
@@ -200,6 +194,7 @@ class WorkDeleteResult(WriteResult):
 # Memory 工具子类
 # ---------------------------------------------------------------------------
 
+
 class MemoryWriteResult(WriteResult):
     """memory.write 写入结果。保留 memory_id / version / action / scope_id（防 F4 压扁）。"""
 
@@ -212,6 +207,7 @@ class MemoryWriteResult(WriteResult):
 # ---------------------------------------------------------------------------
 # Filesystem / Behavior / Canvas 工具子类
 # ---------------------------------------------------------------------------
+
 
 class FilesystemWriteTextResult(WriteResult):
     """filesystem.write_text 写入结果。"""
@@ -251,6 +247,7 @@ class CanvasWriteResult(WriteResult):
 # Graph Pipeline 工具子类（F15 修复：从执行类移入写入类）
 # ---------------------------------------------------------------------------
 
+
 class GraphPipelineResult(WriteResult):
     """graph_pipeline 写入结果（F15 修复）。
 
@@ -288,6 +285,7 @@ class GraphPipelineResult(WriteResult):
 # ---------------------------------------------------------------------------
 # User Profile 工具子类（Phase 2 新增）
 # ---------------------------------------------------------------------------
+
 
 class UserProfileUpdateResult(WriteResult):
     """user_profile.update 写入结果（Phase 2 新增）。"""
@@ -377,7 +375,6 @@ __all__ = [
     # Config
     "ConfigAddProviderResult",
     "ConfigSetModelAliasResult",
-    "ConfigSyncResult",
     "SetupQuickConnectResult",
     # MCP
     "McpInstallResult",

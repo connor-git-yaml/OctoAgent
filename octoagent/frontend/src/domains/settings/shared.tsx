@@ -100,9 +100,6 @@ const OPENROUTER_REASONING_PATTERNS = [
 ];
 
 export const CUSTOM_PROVIDER_FIELD_PATHS = new Set([
-  "runtime.llm_mode",
-  "runtime.litellm_proxy_url",
-  "runtime.master_key_env",
   "providers",
   "model_aliases",
 ]);
@@ -218,15 +215,7 @@ export function parseJsonFieldValue(
   return fallback;
 }
 
-export function optionLabelForHint(hint: ConfigFieldHint, option: string): string {
-  if (hint.field_path === "runtime.llm_mode") {
-    if (option === "echo") {
-      return "echo · 体验模式";
-    }
-    if (option === "litellm") {
-      return "litellm · 连接真实模型";
-    }
-  }
+export function optionLabelForHint(_hint: ConfigFieldHint, option: string): string {
   return option;
 }
 
@@ -238,7 +227,7 @@ export function buildFieldGuide(
     return {
       title: "填写说明",
       description:
-        "填写环境变量名（非实际值）。实际密钥存储于 ~/.octoagent/.env 或 ~/.octoagent/.env.litellm。",
+        "填写环境变量名（非实际值）。实际密钥存储于 CredentialStore 或 ~/.octoagent/.env。",
     };
   }
   if (hint.field_path === "providers" || hint.field_path === "model_aliases") {

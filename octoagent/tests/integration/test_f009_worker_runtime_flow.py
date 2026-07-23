@@ -18,6 +18,8 @@ from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.worker_runtime import WorkerRuntimeConfig
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 # F142 件5a：xdist 分组——本文件含时序敏感断言（固定 sleep 窗口/性能阈值/状态机
 # 竞态，F083 归档债），`--dist=loadgroup` 下同组钉同一 worker 串行执行，
 # 解锁其余测试 `-n auto` 并行（本地全量与 CI 双提速）。
@@ -64,7 +66,7 @@ async def _build_app(
     task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=llm_service,
+        runtime_services=runtime_service_fixture(llm_service).bundle,
         timeout_seconds=60,
         monitor_interval_seconds=0.05,
         worker_runtime_config=runtime_config,
@@ -154,16 +156,14 @@ class TestFeature009WorkerRuntimeFlow:
             await asyncio.sleep(0.05)
         assert data and data["task"]["status"] == "FAILED"
 
-        returned = [
-            event for event in data["events"] if event["type"] == "WORKER_RETURNED"
-        ]
+        returned = [event for event in data["events"] if event["type"] == "WORKER_RETURNED"]
         assert returned
         assert returned[-1]["payload"]["summary"] == "worker_runtime_timeout:max_exec"
 
     @pytest.mark.skip(
         reason=(
             "echo LLM 路径在优化后 task 会在 80ms 内直接到 SUCCEEDED，/cancel 收到时"
-            "task 已在终态，endpoint 按约定返回 409。本测试依赖\"task 正在 RUNNING 时 cancel\""
+            'task 已在终态，endpoint 按约定返回 409。本测试依赖"task 正在 RUNNING 时 cancel"'
             "的时序窗口，该窗口已经小到不可靠。需要重写为注入慢 LLM 的 fixture 或测 orchestrator "
             "内部 cancel_task 方法。"
         )
@@ -188,10 +188,10 @@ class TestFeature009WorkerRuntimeFlow:
         data = detail.json()
         assert data["task"]["status"] == "CANCELLED"
 
-    async def test_privileged_profile_without_approval_is_rejected(
-        self, cancel_app
-    ) -> None:
-        service = TaskService(cancel_app.state.store_group, cancel_app.state.sse_hub)
+    async def test_privileged_profile_without_approval_is_rejected(self, cancel_app) -> None:
+        service = TaskService(
+            cancel_app.state.store_group, cancel_app.state.sse_hub, storage_only=True
+        )
         msg = NormalizedMessage(
             text="f009 privileged deny",
             idempotency_key="f009-privileged-001",

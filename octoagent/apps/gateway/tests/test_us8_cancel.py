@@ -74,7 +74,7 @@ class TestTaskCancel:
 
         store_group = test_app.state.store_group
         sse_hub = test_app.state.sse_hub
-        service = TaskService(store_group, sse_hub)
+        service = TaskService(store_group, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="Cancel me",
@@ -97,7 +97,7 @@ class TestTaskCancel:
 
         store_group = test_app.state.store_group
         sse_hub = test_app.state.sse_hub
-        service = TaskService(store_group, sse_hub)
+        service = TaskService(store_group, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="Cancel running",
@@ -124,7 +124,7 @@ class TestTaskCancel:
 
         store_group = test_app.state.store_group
         sse_hub = test_app.state.sse_hub
-        service = TaskService(store_group, sse_hub)
+        service = TaskService(store_group, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="Already done",
@@ -160,7 +160,7 @@ class TestTaskCancel:
 
         store_group = test_app.state.store_group
         sse_hub = test_app.state.sse_hub
-        service = TaskService(store_group, sse_hub)
+        service = TaskService(store_group, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="Cancel events test",
@@ -179,9 +179,9 @@ class TestTaskCancel:
 
         # 找到取消的 STATE_TRANSITION 事件
         cancel_events = [
-            e for e in events
-            if e.type.value == "STATE_TRANSITION"
-            and e.payload.get("to_status") == "CANCELLED"
+            e
+            for e in events
+            if e.type.value == "STATE_TRANSITION" and e.payload.get("to_status") == "CANCELLED"
         ]
         assert len(cancel_events) == 1
         assert cancel_events[0].payload["from_status"] == "CREATED"

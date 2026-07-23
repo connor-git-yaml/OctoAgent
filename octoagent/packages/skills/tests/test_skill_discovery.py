@@ -5,10 +5,10 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
-
 from octoagent.skills.discovery import (
     SkillDiscovery,
     parse_frontmatter,
@@ -16,7 +16,6 @@ from octoagent.skills.discovery import (
     validate_skill,
 )
 from octoagent.skills.skill_models import SkillSource
-
 
 # ============================================================
 # split_frontmatter 测试
@@ -145,7 +144,10 @@ def _write_skill(
         description = f"A skill named {name}"
     skill_dir = base_dir / name
     skill_dir.mkdir(exist_ok=True)
-    content = f"---\nname: {name}\ndescription: {description}\n{extra_fields}---\n\n# {name}\n\nSkill body content."
+    content = (
+        f"---\nname: {name}\ndescription: {description}\n{extra_fields}"
+        f"---\n\n# {name}\n\nSkill body content."
+    )
     (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
     return skill_dir
 
@@ -212,9 +214,7 @@ class TestSkillDiscovery:
         # 缺少 description
         bad_dir = skill_dirs["builtin"] / "bad-skill"
         bad_dir.mkdir()
-        (bad_dir / "SKILL.md").write_text(
-            "---\nname: bad-skill\n---\n\n# Bad", encoding="utf-8"
-        )
+        (bad_dir / "SKILL.md").write_text("---\nname: bad-skill\n---\n\n# Bad", encoding="utf-8")
 
         _write_skill(skill_dirs["builtin"], "good-skill")
 
@@ -286,6 +286,19 @@ class TestSkillDiscovery:
         _write_skill(skill_dirs["builtin"], "github")
         sd.refresh()
         assert len(sd.list_items()) == 2
+
+    def test_refresh_removes_deleted_skill(self, skill_dirs):
+        """refresh() 必须移除文件系统中已删除的缓存项。"""
+        skill_file = _write_skill(skill_dirs["user"], "removable")
+        sd = SkillDiscovery(user_dir=skill_dirs["user"])
+        sd.scan()
+        assert sd.get("removable") is not None
+
+        shutil.rmtree(skill_file.parent)
+        sd.refresh()
+
+        assert sd.get("removable") is None
+        assert not skill_file.parent.exists()
 
     def test_none_directories(self):
         """所有目录为 None 时应正常工作。"""

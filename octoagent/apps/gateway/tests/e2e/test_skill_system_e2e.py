@@ -21,7 +21,7 @@ from httpx import ASGITransport, AsyncClient
 
 
 @pytest_asyncio.fixture
-async def e2e_skill_client(tmp_path: Path):
+async def e2e_skill_client(tmp_path: Path, monkeypatch):
     """完整 lifespan 启动的测试客户端。"""
     os.environ["OCTOAGENT_DB_PATH"] = str(tmp_path / "data" / "sqlite" / "test.db")
     os.environ["OCTOAGENT_ARTIFACTS_DIR"] = str(tmp_path / "data" / "artifacts")
@@ -29,13 +29,25 @@ async def e2e_skill_client(tmp_path: Path):
     os.environ["OCTOAGENT_LLM_MODE"] = "echo"
     os.environ["LOGFIRE_SEND_TO_LOGFIRE"] = "false"
 
+    from octoagent.gateway.harness.octo_harness import OctoHarness
     from octoagent.gateway.main import create_app
 
-    app = create_app()
-    async with app.router.lifespan_context(app), AsyncClient(
-        transport=ASGITransport(app=app),
-        base_url="http://test",
-    ) as client:
+    app = create_app(
+        harness_factory=lambda: OctoHarness(
+            project_root=tmp_path,
+            data_dir=tmp_path / "data",
+            mcp_servers_dir=tmp_path / "mcp-servers",
+            plugins_dir=tmp_path / "plugins",
+            user_skills_dir=tmp_path / "user-skills",
+        )
+    )
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client,
+    ):
         yield client
 
     for key in [

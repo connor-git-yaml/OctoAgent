@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "base_sha": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc",
+  "identity": ["source", "target", "action"],
+  "policy": {
+    "move_count": 44,
+    "delete_count": 1,
+    "non_pytest_utility_exceptions": 1,
+    "old_test_namespace_target_count": 0,
+    "projection_owner": "namespace relocation, RGR scope, stage commands and constructor inventories must resolve source paths through this map before set comparison",
+    "universe": "all collectable provider test_*.py modules that directly import Gateway or test code whose production owner moves to Gateway; manual wire_replay/record_cassettes.py is not a pytest test and is separately required to drop its Gateway dotenv-loader import"
+  },
+  "moves": [
+    {"source": "octoagent/packages/provider/tests/dx/test_attest_commands.py", "target": "octoagent/apps/gateway/tests/cli/test_attest_commands.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/dx/test_config_schema.py", "target": "octoagent/apps/gateway/tests/services/config/test_config_schema.py", "bucket": "config"},
+    {"source": "octoagent/packages/provider/tests/dx/test_config_wizard.py", "target": "octoagent/apps/gateway/tests/services/config/test_config_wizard.py", "bucket": "config"},
+    {"source": "octoagent/packages/provider/tests/dx/test_console_output.py", "target": "octoagent/apps/gateway/tests/cli/test_console_output.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/dx/test_doctor_frontdoor.py", "target": "octoagent/apps/gateway/tests/services/operations/test_doctor_frontdoor.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/dx/test_doctor_service_checks.py", "target": "octoagent/apps/gateway/tests/services/operations/test_doctor_service_checks.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/dx/test_memory_console_service.py", "target": "octoagent/apps/gateway/tests/services/memory/test_memory_console_service.py", "bucket": "gateway-memory"},
+    {"source": "octoagent/packages/provider/tests/dx/test_memory_retrieval_profile.py", "target": "octoagent/apps/gateway/tests/services/memory/test_memory_retrieval_profile.py", "bucket": "gateway-memory"},
+    {"source": "octoagent/packages/provider/tests/dx/test_project_commands.py", "target": "octoagent/apps/gateway/tests/cli/test_project_commands.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/dx/test_retrieval_platform_service.py", "target": "octoagent/apps/gateway/tests/services/operations/test_retrieval_platform_service.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/dx/test_secret_refs.py", "target": "octoagent/apps/gateway/tests/services/operations/test_secret_refs.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/dx/test_secret_service.py", "target": "octoagent/apps/gateway/tests/services/operations/test_secret_service.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/dx/test_service_commands.py", "target": "octoagent/apps/gateway/tests/cli/test_service_commands.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/dx/test_telegram_pairing.py", "target": "octoagent/apps/gateway/tests/services/operations/test_telegram_pairing.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/dx/test_telegram_verifier.py", "target": "octoagent/apps/gateway/tests/services/operations/test_telegram_verifier.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/dx/test_wizard_session.py", "target": "octoagent/apps/gateway/tests/services/operations/test_wizard_session.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_backup_commands.py", "target": "octoagent/apps/gateway/tests/cli/test_backup_commands.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_backup_service.py", "target": "octoagent/apps/gateway/tests/services/operations/test_backup_service.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_behavior_commands.py", "target": "octoagent/apps/gateway/tests/cli/test_behavior_commands.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_channel_verifier.py", "target": "octoagent/apps/gateway/tests/services/operations/test_channel_verifier.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_chat_import_commands.py", "target": "octoagent/apps/gateway/tests/cli/test_chat_import_commands.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_chat_import_service.py", "target": "octoagent/apps/gateway/tests/services/operations/test_chat_import_service.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_config_bootstrap.py", "target": "octoagent/apps/gateway/tests/services/config/test_config_bootstrap.py", "bucket": "config"},
+    {"source": "octoagent/packages/provider/tests/test_config_memory_commands.py", "target": "octoagent/apps/gateway/tests/cli/test_config_memory_commands.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_config_provider_activation.py", "target": "octoagent/apps/gateway/tests/cli/test_config_provider_activation.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_doctor.py", "target": "octoagent/apps/gateway/tests/cli/test_doctor.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_doctor_remediation.py", "target": "octoagent/apps/gateway/tests/services/operations/test_doctor_remediation.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_dotenv_loader.py", "target": "octoagent/apps/gateway/tests/services/config/test_dotenv_loader.py", "bucket": "config"},
+    {"source": "octoagent/packages/provider/tests/test_f111_behavior_compact_cli.py", "target": "octoagent/apps/gateway/tests/cli/test_f111_behavior_compact_cli.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_import_workbench_service.py", "target": "octoagent/apps/gateway/tests/services/operations/test_import_workbench_service.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_install_bootstrap.py", "target": "octoagent/apps/gateway/tests/cli/test_install_bootstrap.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_memory_backend_resolver.py", "target": "octoagent/apps/gateway/tests/services/operations/test_memory_backend_resolver.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_onboard.py", "target": "octoagent/apps/gateway/tests/cli/test_onboard.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_onboarding_models.py", "target": "octoagent/apps/gateway/tests/services/operations/test_onboarding_models.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_onboarding_store.py", "target": "octoagent/apps/gateway/tests/services/operations/test_onboarding_store.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_paste_token_command.py", "target": "octoagent/apps/gateway/tests/cli/test_paste_token_command.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_project_migration.py", "target": "octoagent/apps/gateway/tests/services/operations/test_project_migration.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_project_migration_cli.py", "target": "octoagent/apps/gateway/tests/cli/test_project_migration_cli.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_recovery_status_store.py", "target": "octoagent/apps/gateway/tests/services/operations/test_recovery_status_store.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_service_manager.py", "target": "octoagent/apps/gateway/tests/services/operations/test_service_manager.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_setup_command.py", "target": "octoagent/apps/gateway/tests/cli/test_setup_command.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_update_commands.py", "target": "octoagent/apps/gateway/tests/cli/test_update_commands.py", "bucket": "cli"},
+    {"source": "octoagent/packages/provider/tests/test_update_service.py", "target": "octoagent/apps/gateway/tests/services/operations/test_update_service.py", "bucket": "operations"},
+    {"source": "octoagent/packages/provider/tests/test_update_status_store.py", "target": "octoagent/apps/gateway/tests/services/operations/test_update_status_store.py", "bucket": "operations"}
+  ],
+  "deletes": [
+    {"source": "octoagent/packages/provider/tests/test_runtime_activation.py", "action": "delete", "reason": "retired no-op activation behavior"}
+  ],
+  "exceptions": [
+    {
+      "path": "octoagent/packages/provider/tests/wire_replay/record_cassettes.py",
+      "kind": "non-pytest-manual-provider-transport-recorder",
+      "required_change": "remove octoagent.gateway dotenv-loader import and require caller-provided environment; no Gateway application dependency remains",
+      "owner": "S016-router-seam",
+      "oracle": "Provider test tree Gateway import scan is zero after projecting the 44 moves and applying this exact exception"
+    }
+  ],
+  "self_check": {
+    "entry_count": 45,
+    "move_count": 44,
+    "delete_count": 1,
+    "exception_count": 1,
+    "unique_source_count": 45,
+    "unique_target_count": 44,
+    "direct_gateway_importing_collectable_test_count": 22,
+    "direct_gateway_importing_manual_utility_count": 1,
+    "old_provider_test_gateway_dependency_target_count": 0,
+    "bucket_counts": {"cli": 17, "config": 4, "operations": 21, "gateway-memory": 2}
+  }
+}

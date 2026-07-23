@@ -106,20 +106,17 @@ def read_instance_effective_env(root: Path) -> dict[str, str]:
     """
     # 非权威键：进程 env 为底（服务确实继承的 PATH 等）。
     merged: dict[str, str] = {
-        key: value
-        for key, value in os.environ.items()
-        if not _is_instance_authoritative_key(key)
+        key: value for key, value in os.environ.items() if not _is_instance_authoritative_key(key)
     }
     try:
         from dotenv import dotenv_values
 
-        for filename in (".env", ".env.litellm"):
-            env_path = root / filename
-            if env_path.exists():
-                for key, value in dotenv_values(env_path).items():
-                    if value is not None:
-                        # 权威键只从 .env 来；非权威键 .env 覆盖进程 env。
-                        merged[key] = value
+        env_path = root / ".env"
+        if env_path.exists():
+            for key, value in dotenv_values(env_path).items():
+                if value is not None:
+                    # 权威键只从 .env 来；非权威键 .env 覆盖进程 env。
+                    merged[key] = value
     except Exception:  # pragma: no cover - dotenv 缺失/读失败降级
         pass
     return merged
@@ -174,9 +171,7 @@ def validate_front_door_exposure(host: str, mode: str) -> FrontDoorExposureVerdi
         verdict="warn",
         host=host,
         mode=mode,
-        reason=(
-            f"gateway 绑定非 loopback（{host}）+ mode={mode}：有认证但暴露面偏大"
-        ),
+        reason=(f"gateway 绑定非 loopback（{host}）+ mode={mode}：有认证但暴露面偏大"),
         fix_hint=(
             "更安全的形态是 OCTOAGENT_HOST=127.0.0.1 + Cloudflare Tunnel"
             "（隧道从 loopback 回源，端口不监听外部网卡）"

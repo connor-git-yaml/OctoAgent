@@ -52,7 +52,7 @@ class TestF013ScenarioC:
         """
         sg = watchdog_integration_app.state.store_group
         sse_hub = watchdog_integration_app.state.sse_hub
-        service = TaskService(sg, sse_hub)
+        service = TaskService(sg, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="f013 watchdog stalled task",
@@ -99,7 +99,7 @@ class TestF013ScenarioC:
         """
         sg = watchdog_integration_app.state.store_group
         sse_hub = watchdog_integration_app.state.sse_hub
-        service = TaskService(sg, sse_hub)
+        service = TaskService(sg, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="f013 watchdog cooldown test",
@@ -156,14 +156,12 @@ class TestF013ScenarioC:
         """
         sg = watchdog_integration_app.state.store_group
         sse_hub = watchdog_integration_app.state.sse_hub
-        service = TaskService(sg, sse_hub)
+        service = TaskService(sg, sse_hub, storage_only=True)
 
         # 验证 watchdog 配置确实已被覆盖（threshold = 1 cycle × 1s = 1 秒）
         scanner = watchdog_integration_app.state.watchdog_scanner
         actual_threshold = scanner._config.no_progress_threshold_seconds
-        assert actual_threshold == 1, (
-            f"阈值配置覆盖未生效，期望 1 秒，实际: {actual_threshold} 秒"
-        )
+        assert actual_threshold == 1, f"阈值配置覆盖未生效，期望 1 秒，实际: {actual_threshold} 秒"
 
         # 创建任务并等待超过阈值
         msg = NormalizedMessage(

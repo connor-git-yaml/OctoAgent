@@ -299,7 +299,7 @@ create_app 构造期注册，遮蔽 lifespan 期 harness 挂载的 telegram webh
 - **三态协议**：`pass / not_enabled / fail`（exit 0/0/1）——`not_enabled` 是
   「service 未启用」不是命令执行错误；release lane 仍将其判为 FAIL。
 - **绝不进 CI**：真副作用 + 依赖真实实例。探针逻辑回归由 hermetic 单测
-  `packages/provider/tests/dx/test_attest_commands.py` 在 CI 守（DI 全 fake：
+  `apps/gateway/tests/cli/test_attest_commands.py` 在 CI 守（DI 全 fake：
   零真 kill / 虚拟时钟）。
 - **F141 消费**：release lane 跑 service 探针 `--json` + attestation 清单签署
   （`docs/codebase-architecture/attestation-checklist.md`，物理不可自动化残余，

@@ -91,9 +91,7 @@ async def _resolve_task_session_alias(task: Task, store_group: StoreGroup) -> st
         if str(item.thread_id).strip() != str(task.thread_id).strip():
             continue
         if item.agent_session_id:
-            _append(
-                await store_group.agent_context_store.get_agent_session(item.agent_session_id)
-            )
+            _append(await store_group.agent_context_store.get_agent_session(item.agent_session_id))
         if item.session_id:
             candidate_legacy_session_ids.add(str(item.session_id).strip())
 
@@ -125,7 +123,7 @@ async def list_tasks(
 
     不做 project scope 过滤——单用户系统中 project 是组织维度而非访问控制边界。
     """
-    service = TaskService(store_group)
+    service = TaskService(store_group, storage_only=True)
     tasks = await service.list_tasks(status)
 
     return TaskListResponse(
@@ -155,7 +153,7 @@ async def get_task_detail(
     不做 project scope 隔离——聊天恢复需要跨项目读取 task detail，
     用户在侧边栏点击了 session 即代表有意查看该 task。
     """
-    service = TaskService(store_group)
+    service = TaskService(store_group, storage_only=True)
     task = await service.get_task(task_id)
 
     if task is None:

@@ -26,24 +26,25 @@ import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from octoagent.core.models import Project
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.routes.chat import LONG_PROMPT_THRESHOLD, _resolve_long_prompt_threshold
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
-from octoagent.gateway.routes.chat import LONG_PROMPT_THRESHOLD, _resolve_long_prompt_threshold
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 # -----------------------------------------------------------------------
 # 消息构造工具
 # -----------------------------------------------------------------------
+
 
 def _make_long_message(length: int, char: str = "a") -> str:
     """生成长度为 length 的消息（重复 char）。"""
@@ -58,6 +59,7 @@ def _make_unicode_message(length: int, char: str = "测") -> str:
 # -----------------------------------------------------------------------
 # fixtures
 # -----------------------------------------------------------------------
+
 
 @pytest_asyncio.fixture
 async def test_app(tmp_path: Path):
@@ -78,7 +80,7 @@ async def test_app(tmp_path: Path):
     task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=llm_service,
+        runtime_services=runtime_service_fixture(llm_service).bundle,
         timeout_seconds=60,
         monitor_interval_seconds=0.05,
     )
@@ -109,6 +111,7 @@ async def client(test_app) -> AsyncClient:
 # 辅助：spy service.create_task，捕获 NormalizedMessage.control_metadata
 # -----------------------------------------------------------------------
 
+
 class CapturedControlMetadata:
     """捕获 TaskService.create_task / append_user_message 被调用时的 control_metadata。"""
 
@@ -132,6 +135,7 @@ class CapturedControlMetadata:
 # -----------------------------------------------------------------------
 # TestNewChatControlMetadata — 新对话路径，NormalizedMessage.control_metadata（H-A1 修复路径）
 # -----------------------------------------------------------------------
+
 
 class TestNewChatControlMetadata:
     """H-A1 修复路径验证：新对话路径，force_full_recall 写入 NormalizedMessage.control_metadata。
@@ -165,8 +169,7 @@ class TestNewChatControlMetadata:
         cm = captured.last_create_task_control_metadata
         assert cm is not None, "NormalizedMessage.control_metadata 未被捕获"
         assert cm.get("force_full_recall") is True, (
-            f"期望 NormalizedMessage.control_metadata['force_full_recall'] == True，"
-            f"实际得到 {cm}"
+            f"期望 NormalizedMessage.control_metadata['force_full_recall'] == True，实际得到 {cm}"
         )
 
     async def test_short_message_does_not_set_force_full_recall(
@@ -244,6 +247,7 @@ class TestNewChatControlMetadata:
 # TestContinueChatControlMetadata — 续对话路径（AC-D3）
 # -----------------------------------------------------------------------
 
+
 class TestContinueChatControlMetadata:
     """H-A1 修复路径验证（续对话）：force_full_recall 写入 append_user_message control_metadata。
 
@@ -256,7 +260,9 @@ class TestContinueChatControlMetadata:
         import uuid
 
         thread_id = f"thread-continue-{uuid.uuid4().hex[:8]}"
-        task_service = TaskService(test_app.state.store_group, test_app.state.sse_hub)
+        task_service = TaskService(
+            test_app.state.store_group, test_app.state.sse_hub, storage_only=True
+        )
         task_id, created = await task_service.create_task(
             NormalizedMessage(
                 channel="web",
@@ -281,7 +287,9 @@ class TestContinueChatControlMetadata:
 
         async def spy_append(self, task_id, text, *, control_metadata=None, **kwargs):
             captured.append_control_metas.append(control_metadata or {})
-            return await orig_append(self, task_id, text, control_metadata=control_metadata, **kwargs)
+            return await orig_append(
+                self, task_id, text, control_metadata=control_metadata, **kwargs
+            )
 
         with patch.object(TaskService, "append_user_message", spy_append):
             resp = await client.post(
@@ -306,7 +314,9 @@ class TestContinueChatControlMetadata:
 
         async def spy_append(self, task_id, text, *, control_metadata=None, **kwargs):
             captured.append_control_metas.append(control_metadata or {})
-            return await orig_append(self, task_id, text, control_metadata=control_metadata, **kwargs)
+            return await orig_append(
+                self, task_id, text, control_metadata=control_metadata, **kwargs
+            )
 
         with patch.object(TaskService, "append_user_message", spy_append):
             resp = await client.post(
@@ -324,6 +334,7 @@ class TestContinueChatControlMetadata:
 # -----------------------------------------------------------------------
 # TestUserMessageEventPersistence — USER_MESSAGE event 持久化链路验证
 # -----------------------------------------------------------------------
+
 
 class TestUserMessageEventPersistence:
     """验证 force_full_recall 经 USER_MESSAGE event.control_metadata 持久化后
@@ -353,7 +364,9 @@ class TestUserMessageEventPersistence:
         task_id = resp.json()["task_id"]
 
         # 通过 get_latest_user_metadata 读取持久化的 control_metadata
-        task_service = TaskService(test_app.state.store_group, test_app.state.sse_hub)
+        task_service = TaskService(
+            test_app.state.store_group, test_app.state.sse_hub, storage_only=True
+        )
         meta = await task_service.get_latest_user_metadata(task_id)
 
         assert meta.get("force_full_recall") is True, (
@@ -374,12 +387,13 @@ class TestUserMessageEventPersistence:
         assert resp.status_code == 200
         task_id = resp.json()["task_id"]
 
-        task_service = TaskService(test_app.state.store_group, test_app.state.sse_hub)
+        task_service = TaskService(
+            test_app.state.store_group, test_app.state.sse_hub, storage_only=True
+        )
         meta = await task_service.get_latest_user_metadata(task_id)
 
         assert "force_full_recall" not in meta, (
-            f"短 prompt 不应在 get_latest_user_metadata 中包含 force_full_recall，"
-            f"实际 meta={meta}"
+            f"短 prompt 不应在 get_latest_user_metadata 中包含 force_full_recall，实际 meta={meta}"
         )
 
     async def test_continue_chat_force_full_recall_persisted(
@@ -390,7 +404,9 @@ class TestUserMessageEventPersistence:
 
         # 先创建初始对话
         thread_id = f"thread-persist-{uuid.uuid4().hex[:8]}"
-        task_service = TaskService(test_app.state.store_group, test_app.state.sse_hub)
+        task_service = TaskService(
+            test_app.state.store_group, test_app.state.sse_hub, storage_only=True
+        )
         task_id, created = await task_service.create_task(
             NormalizedMessage(
                 channel="web",
@@ -415,14 +431,14 @@ class TestUserMessageEventPersistence:
         # 验证持久化
         meta = await task_service.get_latest_user_metadata(task_id)
         assert meta.get("force_full_recall") is True, (
-            f"续对话路径 force_full_recall 应通过 get_latest_user_metadata 读回，"
-            f"实际 meta={meta}"
+            f"续对话路径 force_full_recall 应通过 get_latest_user_metadata 读回，实际 meta={meta}"
         )
 
 
 # -----------------------------------------------------------------------
 # TestOrchestratorMetadataLinkage — M-A1 orchestrator 链路集成测试
 # -----------------------------------------------------------------------
+
 
 class TestOrchestratorMetadataLinkage:
     """M-A1 orchestrator 链路集成测试：
@@ -479,8 +495,7 @@ class TestOrchestratorMetadataLinkage:
         )
         last_meta = captured_metadata[-1]
         assert last_meta.get("force_full_recall") is True, (
-            f"orchestrator.dispatch metadata 应含 force_full_recall=True，"
-            f"实际 metadata={last_meta}"
+            f"orchestrator.dispatch metadata 应含 force_full_recall=True，实际 metadata={last_meta}"
         )
 
     async def test_orchestrator_dispatch_no_force_full_recall_for_short_msg(
@@ -526,6 +541,7 @@ class TestOrchestratorMetadataLinkage:
 # -----------------------------------------------------------------------
 # TestEnvThresholdOverride — H-A2 ENV 覆盖测试
 # -----------------------------------------------------------------------
+
 
 class TestEnvThresholdOverride:
     """H-A2 修复验证：_resolve_long_prompt_threshold() 优先 ENV OCTOAGENT_LONG_PROMPT_THRESHOLD。"""
@@ -609,6 +625,7 @@ class TestEnvThresholdOverride:
 # TestCrossLanguageMatrix — A-5b 跨语言矩阵
 # -----------------------------------------------------------------------
 
+
 class TestCrossLanguageMatrix:
     """A-5b 跨语言测试矩阵：≥ 5 类输入（中/英/代码/JSON/混合），len > 2000 均触发。
 
@@ -675,6 +692,7 @@ class TestCrossLanguageMatrix:
 # TestIsRecallPlannerSkipIntegration — AC-D1 第二层验证（无网络）
 # -----------------------------------------------------------------------
 
+
 class TestIsRecallPlannerSkipIntegration:
     """AC-D1 第二层验证：runtime_context.force_full_recall=True → is_recall_planner_skip=False。
 
@@ -687,7 +705,13 @@ class TestIsRecallPlannerSkipIntegration:
         from octoagent.gateway.services.runtime_control import is_recall_planner_skip
 
         # force_full_recall=True，无论 delegation_mode / recall_planner_mode 如何
-        for delegation_mode in ("main_inline", "worker_inline", "main_delegate", "subagent", "unspecified"):
+        for delegation_mode in (
+            "main_inline",
+            "worker_inline",
+            "main_delegate",
+            "subagent",
+            "unspecified",
+        ):
             for recall_planner_mode in ("auto", "skip", "full"):
                 ctx = RuntimeControlContext(
                     task_id="task-test",

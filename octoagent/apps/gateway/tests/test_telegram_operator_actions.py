@@ -9,6 +9,13 @@ import pytest
 from octoagent.core.models import OperatorActionKind
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.config.config_schema import (
+    ChannelsConfig,
+    OctoAgentConfig,
+    TelegramChannelConfig,
+)
+from octoagent.gateway.services.config.config_wizard import save_config
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.operator_actions import (
     OperatorActionService,
     encode_telegram_operator_action,
@@ -17,16 +24,9 @@ from octoagent.gateway.services.operator_inbox import OperatorInboxService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.telegram import TelegramGatewayService
+from octoagent.gateway.services.telegram_client import InlineKeyboardMarkup
 from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalRequest
-from octoagent.gateway.services.config.config_schema import (
-    ChannelsConfig,
-    OctoAgentConfig,
-    TelegramChannelConfig,
-)
-from octoagent.gateway.services.config.config_wizard import save_config
-from octoagent.gateway.services.telegram_client import InlineKeyboardMarkup
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from octoagent.tooling.models import SideEffectLevel
 
 
@@ -40,9 +40,7 @@ def _write_config(project_root: Path, **telegram_overrides: object) -> None:
     save_config(
         OctoAgentConfig(
             updated_at="2026-03-07",
-            channels=ChannelsConfig(
-                telegram=TelegramChannelConfig(**telegram_config)
-            ),
+            channels=ChannelsConfig(telegram=TelegramChannelConfig(**telegram_config)),
         ),
         project_root,
     )
@@ -115,7 +113,7 @@ async def test_telegram_callback_executes_operator_action_and_is_idempotent(
     state_store.upsert_approved_user(user_id="42", chat_id="42", username="owner")
     bot_client = FakeTelegramBotClient()
     approval_manager = ApprovalManager(event_store=store_group.event_store)
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     task_id, created = await task_service.create_task(
         NormalizedMessage(
             channel="web",

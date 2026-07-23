@@ -16,7 +16,7 @@
 - Skill：强类型执行单元（Input/Output contract，Pydantic 模型校验输入输出）
 - Tool：可被 LLM 调用的函数/能力（schema 反射 + 风险标注）
 - Policy / 权限：工具访问由 check_permission()（PermissionPreset × SideEffectLevel 矩阵）+ ApprovalManager 审批流控制
-- JobRunner：执行隔离层，统一接口（start/status/cancel/stream_logs/collect_artifacts），后端支持 Docker/SSH/远程
+- Runtime backend：Gateway application host 内统一执行接口；当前实现为 Inline/Graph，Docker/SSH/远程隔离仍未实现，不得写成现役能力
 
 **数据模型：**
 
@@ -36,7 +36,7 @@
 
 **基础设施：**
 
-- LiteLLM Proxy：模型网关，alias 路由（router/extractor/planner/executor/summarizer/fallback）与治理层
+- ProviderRouter：进程内模型路由层，负责 alias 解析、direct transport、fallback、成本与调用审计
 - Thread / Scope：消息关联维度；thread_id 标识对话线程，scope_id 标识归属范围（如 `chat:telegram:123`）
 
 ---
@@ -50,24 +50,21 @@ system:
   timezone: "Asia/Singapore"
   base_url: "http://localhost:9000"
 
-provider:
-  litellm:
-    base_url: "http://localhost:4000/v1"
-    api_key: "ENV:LITELLM_API_KEY"
+providers:
+  - id: openrouter
+    name: "OpenRouter"
+    auth_type: api_key
+    api_key_env: OPENROUTER_API_KEY
+    enabled: true
 
 # 对齐 §8.9.1 / §8.9.2：legacy 语义 alias fallback
-model_alias_map:
-  router: "cheap"                  # 意图分类、风险分级（小模型）
-  extractor: "cheap"               # 结构化抽取（小/中模型）
-  planner: "main"                  # 多约束规划（大模型）
-  executor: "main"                 # 高风险执行前确认（大模型）
-  summarizer: "cheap"              # 摘要/压缩（小模型）
-  fallback: "fallback"             # 备用 provider
-
-runtime_models:
-  cheap: "alias/cheap"
-  main: "alias/main"
-  fallback: "alias/fallback"
+model_aliases:
+  main:
+    provider: openrouter
+    model: "openrouter/auto"
+  cheap:
+    provider: openrouter
+    model: "openrouter/auto"
 
 storage:
   sqlite_path: "./data/sqlite/octoagent.db"

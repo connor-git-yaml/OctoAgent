@@ -134,11 +134,9 @@ class TelegramApprovedUserLike(Protocol):
 
 
 class TelegramStateStoreProtocol(Protocol):
-    def is_user_allowed(self, user_id: str) -> bool:
-        ...
+    def is_user_allowed(self, user_id: str) -> bool: ...
 
-    def is_group_allowed(self, chat_id: str, sender_id: str) -> bool:
-        ...
+    def is_group_allowed(self, chat_id: str, sender_id: str) -> bool: ...
 
     def ensure_pairing_request(
         self,
@@ -148,8 +146,7 @@ class TelegramStateStoreProtocol(Protocol):
         chat_id: str,
         display_name: str = "",
         last_message_text: str = "",
-    ) -> TelegramPairingRequestLike:
-        ...
+    ) -> TelegramPairingRequestLike: ...
 
     def record_dm_message(
         self,
@@ -160,37 +157,28 @@ class TelegramStateStoreProtocol(Protocol):
         display_name: str = "",
         message_id: int | None = None,
         text: str = "",
-    ) -> None:
-        ...
+    ) -> None: ...
 
-    def list_allowed_groups(self) -> list[str]:
-        ...
+    def list_allowed_groups(self) -> list[str]: ...
 
-    def list_group_allow_users(self) -> list[str]:
-        ...
+    def list_group_allow_users(self) -> list[str]: ...
 
-    def get_pending_pairing(self, user_id: str) -> TelegramPairingRequestLike | None:
-        ...
+    def get_pending_pairing(self, user_id: str) -> TelegramPairingRequestLike | None: ...
 
-    def list_pending_pairings(self) -> list[TelegramPairingRequestLike]:
-        ...
+    def list_pending_pairings(self) -> list[TelegramPairingRequestLike]: ...
 
-    def upsert_approved_user(self, **kwargs: Any) -> TelegramApprovedUserLike:
-        ...
+    def upsert_approved_user(self, **kwargs: Any) -> TelegramApprovedUserLike: ...
 
-    def delete_pending_pairing(self, user_id: str) -> None:
-        ...
+    def delete_pending_pairing(self, user_id: str) -> None: ...
 
-    def first_approved_user(self) -> TelegramApprovedUserLike | None:
-        ...
+    def first_approved_user(self) -> TelegramApprovedUserLike | None: ...
 
     def resolve_reply_thread_root(
         self,
         *,
         chat_id: str,
         message_id: str,
-    ) -> str | None:
-        ...
+    ) -> str | None: ...
 
     def remember_reply_thread_root(
         self,
@@ -198,14 +186,11 @@ class TelegramStateStoreProtocol(Protocol):
         chat_id: str,
         message_id: str,
         root_message_id: str,
-    ) -> str:
-        ...
+    ) -> str: ...
 
-    def get_polling_offset(self) -> int | None:
-        ...
+    def get_polling_offset(self) -> int | None: ...
 
-    def set_polling_offset(self, offset: int | None) -> int | None:
-        ...
+    def set_polling_offset(self, offset: int | None) -> int | None: ...
 
 
 class TelegramBotClientProtocol(Protocol):
@@ -218,16 +203,14 @@ class TelegramBotClientProtocol(Protocol):
         message_thread_id: str | int | None = None,
         disable_notification: bool = False,
         reply_markup: InlineKeyboardMarkup | dict[str, Any] | None = None,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
     async def get_updates(
         self,
         *,
         offset: int | None = None,
         timeout_s: int,
-    ) -> list[Any]:
-        ...
+    ) -> list[Any]: ...
 
     async def answer_callback_query(
         self,
@@ -235,8 +218,7 @@ class TelegramBotClientProtocol(Protocol):
         *,
         text: str = "",
         show_alert: bool = False,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
     async def edit_message_text(
         self,
@@ -245,14 +227,11 @@ class TelegramBotClientProtocol(Protocol):
         message_id: str | int,
         text: str,
         reply_markup: InlineKeyboardMarkup | dict[str, Any] | None = None,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
-    async def get_file(self, file_id: str) -> dict[str, Any]:
-        ...
+    async def get_file(self, file_id: str) -> dict[str, Any]: ...
 
-    async def download_file_bytes(self, file_path: str, *, max_bytes: int = ...) -> bytes:
-        ...
+    async def download_file_bytes(self, file_path: str, *, max_bytes: int = ...) -> bytes: ...
 
     async def send_voice(
         self,
@@ -712,9 +691,7 @@ class TelegramGatewayService:
                     attempts = item.attempts + 1
                     if attempts >= _SPOOL_MAX_ATTEMPTS:
                         with contextlib.suppress(Exception):
-                            await store.mark_failed(
-                                item.id, attempts=attempts, last_error=str(exc)
-                            )
+                            await store.mark_failed(item.id, attempts=attempts, last_error=str(exc))
                         logger.warning(
                             "telegram_outbound_spool_failed_final spool_id=%s "
                             "chat_id=%s attempts=%s error=%s",
@@ -833,9 +810,7 @@ class TelegramGatewayService:
             finally:
                 self._voice_queue.task_done()
 
-    async def _ingest_text_context(
-        self, context: TelegramInboundContext
-    ) -> TelegramIngestResult:
+    async def _ingest_text_context(self, context: TelegramInboundContext) -> TelegramIngestResult:
         """文字消息主链(baseline _ingest_update 后半段原样抽取,F133 零行为变更)。
 
         文字 update 直接走此路;voice 由后台 worker 转写成功回填 text 后走此路——
@@ -872,7 +847,7 @@ class TelegramGatewayService:
             idempotency_key=self._build_idempotency_key(context),
         )
 
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         task_id, created = await service.create_task(message)
         # H-1/D17a：投递优先——enqueue 先于非关键路由 state 写入，确保"落盘未入队"
         # 窗口的补队不被 binding / reply-thread 写入异常阻断（对齐 slack/discord）
@@ -881,7 +856,9 @@ class TelegramGatewayService:
         # F110 FIX-3：voice_mode 写入已前移到 _handle_voice_message 转写成功后（enqueue 之前），
         # 此处 _record_conversation_binding 仅维护 last_* 路由字段（不再传 set_voice_mode_if_unset）。
         await self._record_conversation_binding(
-            context, scope_id, reply_thread_root_id,
+            context,
+            scope_id,
+            reply_thread_root_id,
         )
         self._remember_inbound_reply_thread(context, reply_thread_root_id)
         return TelegramIngestResult(
@@ -927,9 +904,7 @@ class TelegramGatewayService:
         idempotency_key = self._build_idempotency_key(context)
         existing_task_id = await self._stores.event_store.check_idempotency_key(idempotency_key)
         if existing_task_id:
-            return TelegramIngestResult(
-                status="duplicate", task_id=existing_task_id, created=False
-            )
+            return TelegramIngestResult(status="duplicate", task_id=existing_task_id, created=False)
 
         # ② STT 不可用 → 降级(AC-4)。
         if self._stt_service is None or not self._stt_service.is_available():
@@ -942,9 +917,7 @@ class TelegramGatewayService:
         if (voice.duration and voice.duration > _VOICE_MAX_DURATION_S) or (
             voice.file_size and voice.file_size > _VOICE_MAX_BYTES
         ):
-            await self._reply_voice_degrade(
-                context, _VOICE_DEGRADE_TOO_LARGE, reason="too_large"
-            )
+            await self._reply_voice_degrade(context, _VOICE_DEGRADE_TOO_LARGE, reason="too_large")
             return TelegramIngestResult(status="ignored", detail="voice_too_large")
 
         # ④ 下载音频 → 失败降级。
@@ -1451,9 +1424,7 @@ class TelegramGatewayService:
         if sent_message is not None:
             self._remember_outbound_reply_thread(target, sent_message)
 
-    async def _try_send_voice_reply(
-        self, target: dict[str, str], text: str
-    ) -> bool:
+    async def _try_send_voice_reply(self, target: dict[str, str], text: str) -> bool:
         """尝试 TTS + send_voice；任何失败记日志后返回 False（调用方降级文字）。
 
         Constitution #6 + FR-B4/B5：所有异常在此捕获，永不逃逸到 notify_task_result 调用方。
@@ -1466,9 +1437,7 @@ class TelegramGatewayService:
         """
         try:
             if self._tts_service is None or not self._tts_service.is_available():
-                logger.debug(
-                    "tts_skip reason=tts_unavailable chat_id=%s", target.get("chat_id")
-                )
+                logger.debug("tts_skip reason=tts_unavailable chat_id=%s", target.get("chat_id"))
                 return False
 
             # 查 voice_mode
@@ -1484,13 +1453,17 @@ class TelegramGatewayService:
             if not tts_result.ok:
                 logger.warning(
                     "tts_degrade reason=%s chat_id=%s text_len=%d",
-                    tts_result.reason, target.get("chat_id"), len(text),
+                    tts_result.reason,
+                    target.get("chat_id"),
+                    len(text),
                 )
                 return False
 
             logger.info(
                 "tts_success backend=%s duration_ms=%d text_len=%d",
-                tts_result.backend, tts_result.duration_ms, len(text),
+                tts_result.backend,
+                tts_result.duration_ms,
+                len(text),
             )
 
             # send_voice（失败抛 TelegramBotApiError，此处捕获）
@@ -1572,11 +1545,7 @@ class TelegramGatewayService:
             self._remember_outbound_reply_thread(target, sent_message)
 
     async def _handle_callback_query(self, context: TelegramInboundContext) -> TelegramIngestResult:
-        if (
-            self._bot_client is None
-            or not context.callback_query_id
-            or not context.callback_data
-        ):
+        if self._bot_client is None or not context.callback_query_id or not context.callback_data:
             return TelegramIngestResult(status="ignored", detail="operator_action_unavailable")
 
         # F101 Phase C v2 H-3：先检测 dismiss_notif 格式（优先于 operator action 解码）
@@ -1728,9 +1697,7 @@ class TelegramGatewayService:
                 callback_data = encode_telegram_operator_action(item.item_id, action.kind)
             except ValueError:
                 continue
-            current.append(
-                InlineKeyboardButton(text=action.label, callback_data=callback_data)
-            )
+            current.append(InlineKeyboardButton(text=action.label, callback_data=callback_data))
             if len(current) == 2:
                 rows.append(current)
                 current = []
@@ -1758,11 +1725,7 @@ class TelegramGatewayService:
 
     @staticmethod
     def _render_operator_result_text(result) -> str:
-        return (
-            "Operator Action\n"
-            f"结果: {result.outcome.value}\n"
-            f"说明: {result.message}"
-        )
+        return f"Operator Action\n结果: {result.outcome.value}\n说明: {result.message}"
 
     @staticmethod
     def _render_control_plane_result(result) -> str:
@@ -1796,9 +1759,7 @@ class TelegramGatewayService:
             thread_id = str(metadata.get("telegram_message_thread_id", "")).strip()
             if thread_id:
                 result["message_thread_id"] = thread_id
-            reply_thread_root_id = str(
-                metadata.get("telegram_reply_thread_root_id", "")
-            ).strip()
+            reply_thread_root_id = str(metadata.get("telegram_reply_thread_root_id", "")).strip()
             if reply_thread_root_id:
                 result["reply_thread_root_id"] = reply_thread_root_id
             return result
@@ -1853,11 +1814,7 @@ class TelegramGatewayService:
         context: TelegramInboundContext,
         reply_thread_root_id: str,
     ) -> None:
-        if (
-            self._state_store is None
-            or context.chat_type == "private"
-            or not reply_thread_root_id
-        ):
+        if self._state_store is None or context.chat_type == "private" or not reply_thread_root_id:
             return
         self._state_store.remember_reply_thread_root(
             chat_id=context.chat_id,

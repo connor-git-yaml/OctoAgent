@@ -46,7 +46,6 @@ from _wire_recorder import (  # noqa: E402
 )
 
 CASSETTES_DIR = _HERE / "cassettes"
-OCTOAGENT_HOME = Path("~/.octoagent").expanduser()
 
 _GATE_ENV = "OCTOAGENT_ALLOW_MODEL_REQUESTS"
 
@@ -60,17 +59,43 @@ def _require_gate() -> None:
         raise SystemExit(78)
 
 
-def _load_host_env() -> None:
-    """加载宿主 ~/.octoagent/.env（SILICONFLOW_API_KEY 等，不覆盖已有 env）。"""
-    from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
-
-    load_project_dotenv(OCTOAGENT_HOME)
-
-
 def _build_recording_client(recorder: CassetteRecorder) -> httpx.AsyncClient:
     return httpx.AsyncClient(
         timeout=httpx.Timeout(120.0, connect=10.0),
         transport=RecordingTransport(recorder),
+    )
+
+
+def _required_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        raise RuntimeError(f"caller必须显式提供环境变量{name}")
+    return value
+
+
+def _route_from_environment(alias: str) -> Any:
+    """从caller显式环境构造secret-safe ProviderRoute，不读取应用配置。"""
+    from octoagent.provider.provider_route import ProviderAuthRoute, ProviderRoute
+
+    prefix = f"OCTOAGENT_RECORD_{alias.upper().replace('-', '_')}_"
+    auth_kind = _required_env(f"{prefix}AUTH_KIND")
+    if auth_kind not in {"api_key", "oauth"}:
+        raise RuntimeError(f"{prefix}AUTH_KIND仅允许api_key或oauth")
+    auth_reference = _required_env(
+        f"{prefix}{'AUTH_ENV' if auth_kind == 'api_key' else 'AUTH_PROFILE'}"
+    )
+    auth = ProviderAuthRoute(
+        kind=auth_kind,
+        env=auth_reference if auth_kind == "api_key" else None,
+        profile=auth_reference if auth_kind == "oauth" else None,
+    )
+    return ProviderRoute(
+        alias=alias,
+        provider=_required_env(f"{prefix}PROVIDER"),
+        model=_required_env(f"{prefix}MODEL"),
+        transport=_required_env(f"{prefix}TRANSPORT"),
+        api_base=_required_env(f"{prefix}API_BASE"),
+        auth=auth,
     )
 
 
@@ -96,10 +121,24 @@ async def _record_scenario(
     extra_note: str | None = None,
 ) -> None:
     """按宿主 alias 解析 runtime，注入录制 client，跑一个场景并落盘 cassette。"""
+    from octoagent.provider.auth.store import CredentialStore
     from octoagent.provider.provider_client import ProviderClient
     from octoagent.provider.provider_router import ProviderRouter
 
-    router = ProviderRouter(project_root=OCTOAGENT_HOME)
+    route = _route_from_environment(alias)
+    credential_store = CredentialStore(
+        store_path=Path(_required_env("OCTOAGENT_HOME")) / "auth-profiles.json"
+    )
+
+    def resolve_route(requested: str) -> Any:
+        if requested != alias:
+            raise RuntimeError(f"未声明录制alias: {requested}")
+        return route
+
+    router = ProviderRouter(
+        route_resolver=resolve_route,
+        credential_store=credential_store,
+    )
     try:
         resolved = router.resolve_for_alias(alias)
         runtime = resolved.client.runtime
@@ -228,7 +267,6 @@ async def _record_anthropic() -> None:
 
 async def _main() -> None:
     _require_gate()
-    _load_host_env()
     target = sys.argv[1] if len(sys.argv) > 1 else "all"
     if target not in {"all", "chat", "responses", "anthropic"}:
         print(f"用法: record_cassettes.py [all|chat|responses|anthropic]（收到 {target!r}）")

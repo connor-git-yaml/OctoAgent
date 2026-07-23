@@ -28,9 +28,7 @@ def _write_config(project_root: Path) -> None:
     save_config(
         OctoAgentConfig(
             updated_at="2026-07-06",
-            channels=ChannelsConfig(
-                telegram=TelegramChannelConfig(enabled=True, mode="polling")
-            ),
+            channels=ChannelsConfig(telegram=TelegramChannelConfig(enabled=True, mode="polling")),
         ),
         project_root,
     )
@@ -78,13 +76,9 @@ class _FlipBot:
 @pytest.mark.asyncio
 async def test_spool_store_enqueue_list_mark(tmp_path: Path) -> None:
     """store 基本契约：enqueue → list_due 取出 → mark_sent 删行 / count_pending。"""
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
     store = store_group.telegram_outbound_spool_store
-    sid = await store.enqueue(
-        chat_id="123", text="hi", created_at=100.0, next_retry_at=100.0
-    )
+    sid = await store.enqueue(chat_id="123", text="hi", created_at=100.0, next_retry_at=100.0)
     assert sid > 0
     assert await store.count_pending() == 1
     due = await store.list_due(now=100.0)
@@ -106,9 +100,7 @@ async def test_spool_store_enqueue_list_mark(tmp_path: Path) -> None:
 async def test_send_failure_enqueues_to_spool(tmp_path: Path) -> None:
     """AC-5：_send_or_spool 发送失败 → 消息落 spool（含 chat_id/text/reply/thread）。"""
     _write_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
     service = TelegramGatewayService(
         project_root=tmp_path,
         store_group=store_group,
@@ -142,9 +134,7 @@ async def test_send_failure_enqueues_to_spool(tmp_path: Path) -> None:
 async def test_spool_drain_retries_and_clears_on_success(tmp_path: Path) -> None:
     """AC-6：入队后网络恢复，drain 补发成功 → 从表删除（不重复发）。"""
     _write_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
     # 先用失败 bot 入队
     service = TelegramGatewayService(
         project_root=tmp_path,
@@ -217,14 +207,16 @@ async def test_startup_drains_spool(tmp_path: Path) -> None:
     """
     import asyncio as _aio
 
-    from octoagent.provider.dx.telegram_pairing import TelegramStateStore
+    from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 
     _write_config(tmp_path)
     db_path = str(tmp_path / "g.db")
     artifacts = str(tmp_path / "artifacts")
     store_group_1 = await create_store_group(db_path, artifacts)
     service_1 = TelegramGatewayService(
-        project_root=tmp_path, store_group=store_group_1, sse_hub=SSEHub(),
+        project_root=tmp_path,
+        store_group=store_group_1,
+        sse_hub=SSEHub(),
         bot_client=_FailBot(),
     )
     await service_1._send_or_spool({"chat_id": "1"}, "startup补发", task_id="t")
@@ -233,8 +225,11 @@ async def test_startup_drains_spool(tmp_path: Path) -> None:
     store_group_2 = await create_store_group(db_path, artifacts)
     ok_bot = _OKBot()
     service_2 = TelegramGatewayService(
-        project_root=tmp_path, store_group=store_group_2, sse_hub=SSEHub(),
-        state_store=TelegramStateStore(tmp_path), bot_client=ok_bot,
+        project_root=tmp_path,
+        store_group=store_group_2,
+        sse_hub=SSEHub(),
+        state_store=TelegramStateStore(tmp_path),
+        bot_client=ok_bot,
     )
     await service_2.startup()  # 起后台 drain loop（首轮立即 drain）+ polling task
     # 条件轮询后台 drain 首轮完成信号（deadline 5s，确定性等待而非赌固定窗口）
@@ -255,12 +250,12 @@ async def test_startup_drains_spool(tmp_path: Path) -> None:
 async def test_successful_send_does_not_spool(tmp_path: Path) -> None:
     """AC-8：send_message 首发成功 → spool 表为空（不引入无谓写盘）。"""
     _write_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
     ok_bot = _OKBot()
     service = TelegramGatewayService(
-        project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
         bot_client=ok_bot,
     )
     result = await service._send_or_spool({"chat_id": "42"}, "首发成功", task_id="t")
@@ -276,12 +271,12 @@ async def test_send_or_spool_defaults_disable_notification_true(tmp_path: Path) 
     baseline notify_task_result 省略参数用 client 默认 True 的行为，不被改成有声。
     并验证 spool 落盘也保留该 flag。"""
     _write_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
     ok_bot = _OKBot()
     service = TelegramGatewayService(
-        project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
         bot_client=ok_bot,
     )
     # 成功路径：默认静音
@@ -305,13 +300,13 @@ async def test_send_or_spool_defaults_disable_notification_true(tmp_path: Path) 
 async def test_spool_retry_backoff_and_max_attempts(tmp_path: Path) -> None:
     """AC-9：drain 失败 → 记 attempts + 退避延后；超上限标 failed（不再 drain）。"""
     _write_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
     store = store_group.telegram_outbound_spool_store
     fail_bot = _FailBot()
     service = TelegramGatewayService(
-        project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
         bot_client=fail_bot,
     )
     # 入队一条（next_retry_at=0 立即到期）
@@ -330,9 +325,7 @@ async def test_spool_retry_backoff_and_max_attempts(tmp_path: Path) -> None:
 
     # 已无 pending（被标 failed），但行仍在（保留供诊断）
     assert await store.count_pending() == 0
-    cursor = await store._conn.execute(
-        "SELECT status, attempts FROM telegram_outbound_spool"
-    )
+    cursor = await store._conn.execute("SELECT status, attempts FROM telegram_outbound_spool")
     row = await cursor.fetchone()
     assert row is not None
     assert row[0] == "failed"
@@ -344,12 +337,12 @@ async def test_spool_retry_backoff_and_max_attempts(tmp_path: Path) -> None:
 async def test_spool_retry_increments_attempts_before_max(tmp_path: Path) -> None:
     """AC-9 中间态：未到上限的失败 → status 保持 pending + attempts 递增 + 退避延后。"""
     _write_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
     store = store_group.telegram_outbound_spool_store
     service = TelegramGatewayService(
-        project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
         bot_client=_FailBot(),
     )
     await store.enqueue(chat_id="1", text="x", created_at=0.0, next_retry_at=0.0)
@@ -377,7 +370,9 @@ async def test_spool_failure_degrades_gracefully(tmp_path: Path) -> None:
     # store_group 无 telegram_outbound_spool_store 属性（用 SimpleNamespace 模拟缺失）
     fake_stores = SimpleNamespace(telegram_outbound_spool_store=None)
     service = TelegramGatewayService(
-        project_root=tmp_path, store_group=fake_stores, sse_hub=SSEHub(),
+        project_root=tmp_path,
+        store_group=fake_stores,
+        sse_hub=SSEHub(),
         bot_client=_FailBot(),
     )
     # 不抛（缺 spool store → drop + log）
@@ -400,16 +395,17 @@ async def test_drain_reregisters_reply_thread_root(tmp_path: Path) -> None:
     """Codex P2：群聊 reply-thread 任务结果首发失败入队时保存 root id；
     drain 补发成功后登记新 message_id → root 映射（用户回复补发消息落回原线程）。"""
     _write_config(tmp_path)
-    from octoagent.provider.dx.telegram_pairing import TelegramStateStore
+    from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
     state_store = TelegramStateStore(tmp_path)
     # 首发失败 → 入队（带 reply_thread_root_id）
     service = TelegramGatewayService(
-        project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
-        state_store=state_store, bot_client=_FailBot(),
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
+        state_store=state_store,
+        bot_client=_FailBot(),
     )
     await service._send_or_spool(
         {"chat_id": "-100", "reply_thread_root_id": "88"}, "群聊补发", task_id="t"
@@ -440,7 +436,7 @@ async def test_webhook_mode_background_drain_loop(
         TelegramChannelConfig,
     )
     from octoagent.gateway.services.config.config_wizard import save_config
-    from octoagent.provider.dx.telegram_pairing import TelegramStateStore
+    from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 
     save_config(
         OctoAgentConfig(
@@ -457,17 +453,18 @@ async def test_webhook_mode_background_drain_loop(
     )
     os.environ["TELEGRAM_BOT_TOKEN"] = "test-token"
     try:
-        store_group = await create_store_group(
-            str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-        )
+        store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
         # 用失败 bot 预置一条待发（startup 首轮 drain 发不出去，留给周期 loop）
         await store_group.telegram_outbound_spool_store.enqueue(
             chat_id="1", text="后台补发", created_at=0.0, next_retry_at=0.0
         )
         ok_bot = _OKBot()
         service = TelegramGatewayService(
-            project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
-            state_store=TelegramStateStore(tmp_path), bot_client=ok_bot,
+            project_root=tmp_path,
+            store_group=store_group,
+            sse_hub=SSEHub(),
+            state_store=TelegramStateStore(tmp_path),
+            bot_client=ok_bot,
         )
         service._spool_drain_interval_s = 0.02  # 加速周期
         await service.startup()  # webhook 模式 → 起后台 drain loop
@@ -506,11 +503,11 @@ def test_backoff_no_overflow_on_long_streak() -> None:
 async def test_concurrent_drain_skips_when_locked(tmp_path: Path) -> None:
     """串行锁：drain 进行中再次调用 drain 直接跳过（不重复取同批行）。"""
     _write_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
     service = TelegramGatewayService(
-        project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
         bot_client=_OKBot(),
     )
     # 手动持锁 → drain 应立即返回不动
@@ -530,13 +527,13 @@ async def test_concurrent_drain_skips_when_locked(tmp_path: Path) -> None:
 async def test_flip_bot_drain_recovers_after_transient_failures(tmp_path: Path) -> None:
     """端到端：入队 → 数次 drain 失败（退避）→ 恢复后 drain 成功清账。"""
     _write_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
     store = store_group.telegram_outbound_spool_store
     flip = _FlipBot(fail_count=2)
     service = TelegramGatewayService(
-        project_root=tmp_path, store_group=store_group, sse_hub=SSEHub(),
+        project_root=tmp_path,
+        store_group=store_group,
+        sse_hub=SSEHub(),
         bot_client=flip,
     )
     await store.enqueue(chat_id="7", text="终会送达", created_at=0.0, next_retry_at=0.0)

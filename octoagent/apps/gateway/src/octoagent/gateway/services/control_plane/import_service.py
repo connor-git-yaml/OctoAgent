@@ -23,13 +23,13 @@ from octoagent.core.models import (
     ActionRequestEnvelope,
     ActionResultEnvelope,
 )
-from octoagent.provider.dx.chat_import_service import ChatImportService
-from octoagent.provider.dx.import_workbench_models import (
+from octoagent.gateway.services.operations.chat_import_service import ChatImportService
+from octoagent.gateway.services.operations.import_workbench_models import (
     ImportRunDocument,
     ImportSourceDocument,
     ImportWorkbenchDocument,
 )
-from octoagent.provider.dx.import_workbench_service import (
+from octoagent.gateway.services.operations.import_workbench_service import (
     ImportWorkbenchError,
     ImportWorkbenchService,
 )

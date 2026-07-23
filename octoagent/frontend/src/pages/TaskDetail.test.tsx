@@ -133,7 +133,9 @@ describe("TaskDetail", () => {
 
     await screen.findByText("Running Task");
     await screen.findByText("运行中");
-    expect(FakeEventSource.instances).toHaveLength(1);
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
 
     await act(async () => {
       FakeEventSource.instances[0]?.emit("STATE_TRANSITION", {
@@ -199,7 +201,9 @@ describe("TaskDetail", () => {
     renderTaskDetail();
 
     await screen.findByText("Running Task");
-    expect(FakeEventSource.instances).toHaveLength(1);
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
 
     await act(async () => {
       FakeEventSource.instances[0]?.emit("ARTIFACT_CREATED", {

@@ -15,20 +15,18 @@ F092 Phase C 修订：
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-
 from octoagent.core.models.task import RequesterInfo, Task, TaskPointers
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 from octoagent.gateway.services.builtin_tools.delegation_tools import register
 from octoagent.gateway.services.delegation_plane import SpawnChildResult
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -72,8 +70,8 @@ async def deps_with_stores(tmp_path: Path):
     # 预创建 audit task 防 FK violation（保留以兼容历史）
     audit_task = Task(
         task_id="_subagents_spawn_audit",
-        created_at=datetime.now(tz=timezone.utc),
-        updated_at=datetime.now(tz=timezone.utc),
+        created_at=datetime.now(tz=UTC),
+        updated_at=datetime.now(tz=UTC),
         title="audit",
         requester=RequesterInfo(channel="system", sender_id="system"),
         pointers=TaskPointers(),
@@ -106,6 +104,7 @@ async def _bind_mock_plane_and_capture_handler(
     *,
     spawn_child_side_effect=None,
     spawn_child_return_value=None,
+    task_runner_available: bool = True,
 ):
     """注入 mock plane + 捕获 subagents.spawn handler。
 
@@ -122,10 +121,10 @@ async def _bind_mock_plane_and_capture_handler(
     else:
         mock_plane.spawn_child = AsyncMock(return_value=_make_written("default-task"))
     deps._delegation_plane = mock_plane
+    deps._task_runner = MagicMock() if task_runner_available else None
 
     fake_context = MagicMock(work_id="parent-work-id")
-    fake_parent_task = MagicMock(task_id="parent-task-id", depth=0,
-                                  thread_id="parent-thread")
+    fake_parent_task = MagicMock(task_id="parent-task-id", depth=0, thread_id="parent-thread")
 
     async def _fake_current_work_context(_deps):
         return fake_context, fake_parent_task
@@ -140,6 +139,7 @@ async def _bind_mock_plane_and_capture_handler(
     # 用 monkeypatch.setattr 替换 delegation_tools 模块的 current_work_context 引用
     # （测试结束后自动还原，避免污染 test_capability_pack_tools 等其他测试）
     from octoagent.gateway.services.builtin_tools import delegation_tools as _dt
+
     monkeypatch.setattr(_dt, "current_work_context", _fake_current_work_context)
 
     captured: dict[str, Any] = {}
@@ -163,7 +163,8 @@ async def _bind_mock_plane_and_capture_handler(
 async def test_spawn_passes_when_no_constraints(deps_with_stores, monkeypatch) -> None:
     """正常路径：plane.spawn_child 返回 written → 工具返回 status=written。"""
     handler, mock_plane = await _bind_mock_plane_and_capture_handler(
-        deps_with_stores, monkeypatch,
+        deps_with_stores,
+        monkeypatch,
         spawn_child_return_value=_make_written("child-1"),
     )
     result = await handler(objective="find latest news")
@@ -184,16 +185,17 @@ async def test_spawn_passes_when_no_constraints(deps_with_stores, monkeypatch) -
 
 @pytest.mark.asyncio
 async def test_spawn_partial_reject_keeps_successful(deps_with_stores, monkeypatch) -> None:
-    """批量 5 objectives，前 3 written + 后 2 rejected → status=written + created=3 + preview 含约束拒绝。"""
-    side_effect_values = [
-        _make_written(f"child-{i}", objective=f"task {i}") for i in range(3)
-    ] + [
-        _make_rejected("活跃子任务数 3 ≥ 3", error_code="CAPACITY_EXCEEDED")
-        for _ in range(2)
+    """批量 5 objectives，前 3 written + 后 2 rejected。
+
+    结果应为 status=written + created=3，且 preview 包含约束拒绝。
+    """
+    side_effect_values = [_make_written(f"child-{i}", objective=f"task {i}") for i in range(3)] + [
+        _make_rejected("活跃子任务数 3 ≥ 3", error_code="CAPACITY_EXCEEDED") for _ in range(2)
     ]
 
     handler, mock_plane = await _bind_mock_plane_and_capture_handler(
-        deps_with_stores, monkeypatch,
+        deps_with_stores,
+        monkeypatch,
         spawn_child_side_effect=side_effect_values,
     )
     result = await handler(objectives=[f"task {i}" for i in range(5)])
@@ -209,10 +211,10 @@ async def test_spawn_partial_reject_keeps_successful(deps_with_stores, monkeypat
 async def test_spawn_all_blocked_returns_rejected(deps_with_stores, monkeypatch) -> None:
     """全部 objective 被 plane.spawn_child 拒绝 → status=rejected（防 LLM 误以为派发成功）。"""
     handler, _ = await _bind_mock_plane_and_capture_handler(
-        deps_with_stores, monkeypatch,
+        deps_with_stores,
+        monkeypatch,
         spawn_child_side_effect=[
-            _make_rejected("max_concurrent=0", error_code="CAPACITY_EXCEEDED")
-            for _ in range(2)
+            _make_rejected("max_concurrent=0", error_code="CAPACITY_EXCEEDED") for _ in range(2)
         ],
     )
     result = await handler(objectives=["a", "b"])
@@ -227,7 +229,8 @@ async def test_spawn_all_blocked_returns_rejected(deps_with_stores, monkeypatch)
 async def test_spawn_blocks_when_target_blacklisted(deps_with_stores, monkeypatch) -> None:
     """blacklist 命中（plane 返回 rejected with blacklist_blocked）→ 工具返回 rejected。"""
     handler, _ = await _bind_mock_plane_and_capture_handler(
-        deps_with_stores, monkeypatch,
+        deps_with_stores,
+        monkeypatch,
         spawn_child_return_value=_make_rejected(
             "目标 Worker 'general' 在黑名单中", error_code="blacklist_blocked"
         ),
@@ -243,10 +246,9 @@ async def test_spawn_propagates_launch_raise_from_plane(deps_with_stores, monkey
     """plane.spawn_child raise（含 enforce / task_runner 错误）→ subagents.spawn
     propagate 给 broker（保持 F085 worker→worker 拒绝 invariant：result.is_error=True）。"""
     handler, _ = await _bind_mock_plane_and_capture_handler(
-        deps_with_stores, monkeypatch,
-        spawn_child_side_effect=RuntimeError(
-            "worker runtime cannot delegate to another worker"
-        ),
+        deps_with_stores,
+        monkeypatch,
+        spawn_child_side_effect=RuntimeError("worker runtime cannot delegate to another worker"),
     )
 
     # spawn_child raise → subagents.spawn handler propagate（不 catch）
@@ -262,7 +264,8 @@ async def test_spawn_batch_propagates_raise_at_second_objective(
     Codex Phase C MEDIUM 2 锁定：旧行为是 raise 直接 propagate，已派发的前 N-1 个不会
     出现在工具结果中（因为 raise 跳出 handler）。"""
     handler, mock_plane = await _bind_mock_plane_and_capture_handler(
-        deps_with_stores, monkeypatch,
+        deps_with_stores,
+        monkeypatch,
         spawn_child_side_effect=[
             _make_written("child-0", objective="task 0"),
             RuntimeError("worker runtime cannot delegate to another worker"),
@@ -275,3 +278,92 @@ async def test_spawn_batch_propagates_raise_at_second_objective(
 
     # 第 1 个已成功（mock 返回 written），第 2 个 raise propagate；第 3 个未被调
     assert mock_plane.spawn_child.await_count == 2  # 不是 3
+
+
+@pytest.mark.asyncio
+async def test_spawn_accepts_only_exact_target_values_without_coercion(
+    deps_with_stores, monkeypatch
+) -> None:
+    """显式 selector 必须精确匹配；缺省才使用 subagent。"""
+    handler, mock_plane = await _bind_mock_plane_and_capture_handler(
+        deps_with_stores,
+        monkeypatch,
+        spawn_child_return_value=_make_written("child-strict"),
+    )
+    valid = ("worker", "subagent", "acp_runtime", "graph_agent", "fallback")
+    invalid: tuple[Any, ...] = (
+        "",
+        " worker",
+        "worker ",
+        "Worker",
+        "docker",
+        None,
+        1,
+        True,
+        [],
+        {},
+    )
+    issues: list[str] = []
+
+    await handler(objective="default target")
+    if mock_plane.spawn_child.await_args.kwargs["target_kind"] != "subagent":
+        issues.append("absent selector did not default to subagent")
+
+    for target in valid:
+        await handler(objective="exact target", target_kind=target)
+        if mock_plane.spawn_child.await_args.kwargs["target_kind"] != target:
+            issues.append(f"{target!r}: exact value drifted")
+
+    for target in invalid:
+        before = mock_plane.spawn_child.await_count
+        error: BaseException | None = None
+        try:
+            await handler(objective="invalid target", target_kind=target, worker_type="dev")
+        except BaseException as exc:  # noqa: BLE001 - 统一映射到冻结 RED oracle
+            error = exc
+        if error is None or "WORKER_RUNTIME_SELECTOR_UNSUPPORTED" not in str(error):
+            issues.append(f"{target!r}: invalid selector was accepted")
+        if mock_plane.spawn_child.await_count != before:
+            issues.append(f"{target!r}: child spawn occurred")
+
+    if issues:
+        pytest.fail(
+            f"F151_TOOL_SPAWN_STRICT_SELECTOR_MISSING: {'; '.join(issues)}",
+            pytrace=False,
+        )
+
+
+@pytest.mark.asyncio
+async def test_spawn_preflights_complete_batch_before_first_child(
+    deps_with_stores, monkeypatch
+) -> None:
+    issues: list[str] = []
+    handler, mock_plane = await _bind_mock_plane_and_capture_handler(
+        deps_with_stores,
+        monkeypatch,
+        spawn_child_side_effect=[_make_written("child-1"), _make_written("child-2")],
+    )
+    result = await handler(objectives=["first", "second"], target_kind="subagent")
+    if result.created != 2 or mock_plane.spawn_child.await_count != 2:
+        issues.append("valid batch did not create both children")
+
+    handler, mock_plane = await _bind_mock_plane_and_capture_handler(
+        deps_with_stores,
+        monkeypatch,
+        task_runner_available=False,
+    )
+    error: BaseException | None = None
+    try:
+        await handler(objectives=["first", "second"], target_kind="graph_agent")
+    except BaseException as exc:  # noqa: BLE001 - 统一映射到冻结 RED oracle
+        error = exc
+    if error is None or "WORKER_RUNTIME_UNAVAILABLE" not in str(error):
+        issues.append("unavailable batch was accepted")
+    if mock_plane.spawn_child.await_count:
+        issues.append("unavailable batch reached first child")
+
+    if issues:
+        pytest.fail(
+            f"F151_TOOL_BATCH_PREFLIGHT_MISSING: {'; '.join(issues)}",
+            pytrace=False,
+        )

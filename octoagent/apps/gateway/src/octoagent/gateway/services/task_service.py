@@ -12,9 +12,10 @@ import hashlib
 import inspect
 import json
 import re
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 import aiosqlite
@@ -68,6 +69,9 @@ from octoagent.core.store.transaction import (
     append_event_only,
     create_task_with_initial_events,
 )
+from octoagent.gateway.services.memory.memory_retrieval_profile import (
+    apply_retrieval_profile_to_hook_options,
+)
 from octoagent.memory import (
     EvidenceRef,
     MemoryMaintenanceCommand,
@@ -76,10 +80,8 @@ from octoagent.memory import (
     init_memory_db,
 )
 from octoagent.provider import ProviderLLMCallError
+from octoagent.provider.models import ModelCallResult
 from octoagent.skills import SkillAuthError
-from octoagent.gateway.services.memory.memory_retrieval_profile import (
-    apply_retrieval_profile_to_hook_options,
-)
 from ulid import ULID
 
 from .agent_context import (
@@ -89,6 +91,7 @@ from .agent_context import (
     memory_recall_max_hits,
     memory_recall_per_scope_limit,
 )
+from .agent_context_session_replay import ResponseContextStorageRequest
 from .connection_metadata import (
     input_metadata_from_payload,
     merge_control_metadata,
@@ -104,15 +107,20 @@ from .runtime_control import (
     is_recall_planner_skip,
     runtime_context_from_metadata,
 )
+from .runtime_service_bundle import (
+    RuntimeServiceBundle,
+    RuntimeServiceModeError,
+    validate_runtime_service_mode,
+)
 
 log = structlog.get_logger()
 
 # 匹配常见 API 密钥/Token 格式（sk-xxx, Bearer xxx, key=xxx 等）
 _SECRET_PATTERN = re.compile(
-    r"(sk-[A-Za-z0-9_-]{8,})"          # OpenAI-style keys
-    r"|(Bearer\s+\S{8,})"              # Bearer tokens
+    r"(sk-[A-Za-z0-9_-]{8,})"  # OpenAI-style keys
+    r"|(Bearer\s+\S{8,})"  # Bearer tokens
     r"|(api[_-]?key\s*[:=]\s*\S{4,})"  # api_key=xxx / api-key: xxx
-    r"|(token\s*[:=]\s*\S{8,})",       # token=xxx
+    r"|(token\s*[:=]\s*\S{8,})",  # token=xxx
     re.IGNORECASE,
 )
 
@@ -120,6 +128,17 @@ _SECRET_PATTERN = re.compile(
 def _sanitize_error_message(raw: str) -> str:
     """脱敏错误信息中的凭证，保留错误类型和网络/服务相关描述。"""
     return _SECRET_PATTERN.sub("[REDACTED]", raw)[:500]
+
+
+@dataclass(frozen=True)
+class _PrecomputedCompletion:
+    """已完成模型结果持久化阶段的不可变输入。"""
+
+    task_id: str
+    user_text: str
+    result: ModelCallResult
+    context_frame_id: str
+    recent_summary: str
 
 
 class TaskService:
@@ -142,12 +161,36 @@ class TaskService:
     _terminal_state_callbacks: list[Callable[[str], Awaitable[None]]] = []
     _terminal_state_callbacks_lock = asyncio.Lock()
 
-    def __init__(self, store_group: StoreGroup, sse_hub=None, *, project_root: Path | None = None) -> None:
+    def __init__(
+        self,
+        store_group: StoreGroup,
+        sse_hub=None,
+        *,
+        project_root: Path | None = None,
+        runtime_services: RuntimeServiceBundle | None = None,
+        storage_only: bool = False,
+    ) -> None:
+        self._storage_only = validate_runtime_service_mode(
+            runtime_services=runtime_services,
+            storage_only=storage_only,
+        )
+        self._runtime_services = runtime_services
         self._stores = store_group
         self._sse_hub = sse_hub
         self._context_compaction = ContextCompactionService(store_group)
-        self._agent_context = AgentContextService(store_group, project_root=project_root)
+        self._agent_context = AgentContextService(
+            store_group,
+            project_root=project_root,
+            runtime_services=runtime_services,
+            storage_only=storage_only,
+        )
         self._budget_planner = ContextBudgetPlanner(config=self._context_compaction._config)
+
+    def _require_runtime_mode(self, operation: str) -> RuntimeServiceBundle:
+        runtime_services = self._runtime_services
+        if self._storage_only or runtime_services is None:
+            raise RuntimeServiceModeError(f"TaskService.{operation} 需要 runtime_services")
+        return runtime_services
 
     @classmethod
     async def register_terminal_state_callback(
@@ -544,6 +587,173 @@ class TaskService:
         )
         return llm_result, request_artifact, response_artifact
 
+    async def complete_task_with_precomputed_result(
+        self,
+        *,
+        task_id: str,
+        user_text: str,
+        result: ModelCallResult,
+        context_frame_id: str,
+        recent_summary: str = "",
+        request_context_snapshot: str | None = None,
+    ) -> str:
+        """持久化已完成的模型形状结果，不获取任何运行时模型能力。"""
+        trace_id = f"trace-{task_id}"
+        await self._prepare_task_for_processing(task_id, trace_id)
+        await self._write_checkpoint(
+            task_id=task_id,
+            node_id="state_running",
+            trace_id=trace_id,
+            state_snapshot={"next_node": "model_call_started"},
+        )
+        request_artifact_id = await self._store_precomputed_request_artifact(
+            task_id=task_id,
+            trace_id=trace_id,
+            content=request_context_snapshot,
+        )
+        await self._write_precomputed_model_call_started(
+            task_id=task_id,
+            trace_id=trace_id,
+            user_text=user_text,
+            result=result,
+            request_artifact_id=request_artifact_id,
+        )
+        await self._write_checkpoint(
+            task_id=task_id,
+            node_id="model_call_started",
+            trace_id=trace_id,
+            state_snapshot={"next_node": "response_persisted"},
+        )
+        artifact_id = await self._persist_precomputed_result(
+            completion=_PrecomputedCompletion(
+                task_id=task_id,
+                user_text=user_text,
+                result=result,
+                context_frame_id=context_frame_id,
+                recent_summary=recent_summary,
+            ),
+            trace_id=trace_id,
+            request_artifact_id=request_artifact_id,
+        )
+        await self._complete_precomputed_task_state(
+            task_id=task_id,
+            trace_id=trace_id,
+            artifact_id=artifact_id,
+        )
+        return artifact_id
+
+    async def _complete_precomputed_task_state(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        artifact_id: str,
+    ) -> None:
+        await self._write_checkpoint(
+            task_id=task_id,
+            node_id="response_persisted",
+            trace_id=trace_id,
+            state_snapshot={"next_node": "task_succeeded", "artifact_id": artifact_id},
+        )
+        await self._write_state_transition(
+            task_id,
+            TaskStatus.RUNNING,
+            TaskStatus.SUCCEEDED,
+            trace_id,
+        )
+        await self._write_checkpoint(
+            task_id=task_id,
+            node_id="task_succeeded",
+            trace_id=trace_id,
+            state_snapshot={"next_node": None, "artifact_id": artifact_id},
+        )
+
+    async def _persist_precomputed_result(
+        self,
+        *,
+        completion: _PrecomputedCompletion,
+        trace_id: str,
+        request_artifact_id: str,
+    ) -> str:
+        artifact_id, artifact = await self._store_llm_artifact(
+            completion.task_id,
+            completion.result,
+        )
+        await self._write_model_call_completed(
+            completion.task_id,
+            trace_id,
+            completion.result,
+            artifact_id,
+        )
+        await self._write_artifact_created(
+            completion.task_id,
+            trace_id,
+            artifact_id,
+            artifact,
+            source="llm-response",
+        )
+        await self._agent_context.persist_response_context_storage(
+            ResponseContextStorageRequest(
+                task_id=completion.task_id,
+                context_frame_id=completion.context_frame_id,
+                request_artifact_id=request_artifact_id,
+                response_artifact_id=artifact_id,
+                latest_user_text=completion.user_text,
+                model_response=completion.result.content,
+                recent_summary=completion.recent_summary,
+            )
+        )
+        return artifact_id
+
+    async def _store_precomputed_request_artifact(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        content: str | None,
+    ) -> str:
+        if content is None:
+            return ""
+        artifact = await self.create_text_artifact(
+            task_id=task_id,
+            name="llm-request-context",
+            description="主模型请求上下文快照",
+            content=content,
+            trace_id=trace_id,
+            emit_event=False,
+            source="llm-request-context",
+        )
+        return artifact.artifact_id
+
+    async def _write_precomputed_model_call_started(
+        self,
+        *,
+        task_id: str,
+        trace_id: str,
+        user_text: str,
+        result: ModelCallResult,
+        request_artifact_id: str,
+    ) -> None:
+        event = await self._append_event_only_with_retry(
+            task_id=task_id,
+            event_builder=lambda seq: Event(
+                event_id=str(ULID()),
+                task_id=task_id,
+                task_seq=seq,
+                ts=datetime.now(UTC),
+                type=EventType.MODEL_CALL_STARTED,
+                actor=ActorType.SYSTEM,
+                payload=ModelCallStartedPayload(
+                    model_alias=result.model_alias,
+                    request_summary=user_text[:MESSAGE_PREVIEW_LENGTH],
+                    artifact_ref=request_artifact_id or None,
+                ).model_dump(),
+                trace_id=trace_id,
+            ),
+        )
+        if self._sse_hub:
+            await self._sse_hub.broadcast(task_id, event)
+
     # 响应摘要截断阈值（对齐 FR-002-CL-4，沿用 M0 8KB 阈值）
     RESPONSE_SUMMARY_MAX_BYTES = 8192
 
@@ -551,7 +761,6 @@ class TaskService:
         self,
         task_id: str,
         user_text: str,
-        llm_service,
         model_alias: str | None = None,
         resume_from_node: str | None = None,
         resume_state_snapshot: dict[str, Any] | None = None,
@@ -576,6 +785,9 @@ class TaskService:
         - MODEL_CALL_COMPLETED payload 填充 cost/provider/is_fallback 新字段
         - 响应超过 8KB 截断为 response_summary + Artifact 引用
         """
+        self._require_runtime_mode("process_task_with_llm")
+        assert self._runtime_services is not None
+        llm_service = self._runtime_services.llm_service
         trace_id = f"trace-{task_id}"
         effective_alias = model_alias or "main"
         llm_call_idempotency_key = self._derive_llm_call_idempotency_key(
@@ -653,9 +865,7 @@ class TaskService:
                 _agent_sid = str(llm_dispatch_metadata.get("agent_session_id", "")).strip()
                 if _agent_sid:
                     try:
-                        _as = await self._stores.agent_context_store.get_agent_session(
-                            _agent_sid
-                        )
+                        _as = await self._stores.agent_context_store.get_agent_session(_agent_sid)
                         if _as is not None:
                             _lsn = _as.metadata.get("loaded_skill_names")
                             if _lsn:
@@ -757,9 +967,7 @@ class TaskService:
                             worker_capability=worker_capability,
                             tool_profile=tool_profile,
                         )
-                    sanitized_content = self._sanitize_user_visible_response(
-                        llm_result.content
-                    )
+                    sanitized_content = self._sanitize_user_visible_response(llm_result.content)
                     if sanitized_content and sanitized_content != llm_result.content:
                         llm_result = llm_result.model_copy(update={"content": sanitized_content})
 
@@ -789,7 +997,9 @@ class TaskService:
                     )
                     if compiled_context is not None and compiled_context.context_frame_id:
                         # Feature 060 Phase 4: 获取 per-session 锁用于 rolling_summary 写保护
-                        _resp_session_id = str(llm_dispatch_metadata.get("agent_session_id", "")).strip()
+                        _resp_session_id = str(
+                            llm_dispatch_metadata.get("agent_session_id", "")
+                        ).strip()
                         _resp_session_lock = (
                             self._context_compaction.get_compaction_lock(_resp_session_id)
                             if _resp_session_id
@@ -814,14 +1024,22 @@ class TaskService:
                                 error=str(exc),
                             )
                         # Feature 060 Phase 4: 预判下轮是否超限，触发后台压缩
-                        if _resp_session_id and not self._context_compaction.has_pending_compaction(_resp_session_id):
+                        if _resp_session_id and not self._context_compaction.has_pending_compaction(
+                            _resp_session_id
+                        ):
                             try:
                                 _bg_budget = self._budget_planner.plan(
                                     max_input_tokens=self._context_compaction._config.max_input_tokens,
-                                    loaded_skill_names=llm_dispatch_metadata.get("loaded_skill_names", []) or [],
+                                    loaded_skill_names=llm_dispatch_metadata.get(
+                                        "loaded_skill_names", []
+                                    )
+                                    or [],
                                     memory_top_k=6,
                                 )
-                                if compiled_context.final_tokens > _bg_budget.conversation_budget * 0.6:
+                                if (
+                                    compiled_context.final_tokens
+                                    > _bg_budget.conversation_budget * 0.6
+                                ):
                                     await self._context_compaction.schedule_background_compaction(
                                         agent_session_id=_resp_session_id,
                                         task_id=task_id,
@@ -958,30 +1176,36 @@ class TaskService:
     ) -> dict[str, Any]:
         merged = dict(dispatch_metadata)
         if compiled_context is not None:
-            if compiled_context.effective_agent_runtime_id and not str(
-                merged.get("agent_runtime_id", "")
-            ).strip():
+            if (
+                compiled_context.effective_agent_runtime_id
+                and not str(merged.get("agent_runtime_id", "")).strip()
+            ):
                 merged["agent_runtime_id"] = compiled_context.effective_agent_runtime_id
-            if compiled_context.effective_agent_session_id and not str(
-                merged.get("agent_session_id", "")
-            ).strip():
+            if (
+                compiled_context.effective_agent_session_id
+                and not str(merged.get("agent_session_id", "")).strip()
+            ):
                 merged["agent_session_id"] = compiled_context.effective_agent_session_id
-            if compiled_context.context_frame_id and not str(
-                merged.get("context_frame_id", "")
-            ).strip():
+            if (
+                compiled_context.context_frame_id
+                and not str(merged.get("context_frame_id", "")).strip()
+            ):
                 merged["context_frame_id"] = compiled_context.context_frame_id
-            if compiled_context.recall_frame_id and not str(
-                merged.get("recall_frame_id", "")
-            ).strip():
+            if (
+                compiled_context.recall_frame_id
+                and not str(merged.get("recall_frame_id", "")).strip()
+            ):
                 merged["recall_frame_id"] = compiled_context.recall_frame_id
             if compiled_context.memory_namespace_ids and "memory_namespace_ids" not in merged:
                 merged["memory_namespace_ids"] = list(compiled_context.memory_namespace_ids)
             # Feature 061: 传递 permission_preset 到 LLM dispatch metadata
             if compiled_context.permission_preset and "permission_preset" not in merged:
                 merged["permission_preset"] = compiled_context.permission_preset
-        if runtime_context is not None and runtime_context.work_id and not str(
-            merged.get("work_id", "")
-        ).strip():
+        if (
+            runtime_context is not None
+            and runtime_context.work_id
+            and not str(merged.get("work_id", "")).strip()
+        ):
             merged["work_id"] = runtime_context.work_id
         # F091 Final Codex M1 闭环：把 explicit runtime_context 序列化进 metadata，
         # 让下游 LLMService（仅从 metadata 解析）能拿到与 task_service caller 一致的
@@ -1012,7 +1236,9 @@ class TaskService:
         ]
         transcript_block = "\n".join(transcript_lines) or "N/A"
         summary = planning_context.recent_summary.strip() or "N/A"
-        project_name = planning_context.project.name if planning_context.project is not None else "N/A"
+        project_name = (
+            planning_context.project.name if planning_context.project is not None else "N/A"
+        )
         workspace_name = "N/A"
         return [
             {
@@ -1022,9 +1248,9 @@ class TaskService:
                     "你的唯一任务是判断：在正式回答前，是否值得先做一次 memory recall。"
                     "只输出 JSON，不要输出解释性正文。\n"
                     "JSON schema: "
-                    "{\"mode\":\"skip|recall\",\"query\":\"...\",\"rationale\":\"...\","
-                    "\"subject_hint\":\"...\",\"focus_terms\":[\"...\"],"
-                    "\"allow_vault\":false,\"limit\":4}\n"
+                    '{"mode":"skip|recall","query":"...","rationale":"...",'
+                    '"subject_hint":"...","focus_terms":["..."],'
+                    '"allow_vault":false,"limit":4}\n'
                     "规则：\n"
                     "- 如果当前问题明显依赖长期事实、约束、历史承诺、用户偏好、project continuity 或多轮上下文，再用 mode=recall。\n"
                     "- 如果 recent summary / recent transcript 已足够，或当前问题与长期记忆无关，用 mode=skip。\n"
@@ -1090,7 +1316,9 @@ class TaskService:
         if plan.mode is RecallPlanMode.RECALL and not plan.query.strip():
             return plan.model_copy(update={"mode": RecallPlanMode.SKIP})
         metadata = dict(plan.metadata)
-        request_ref = str(dispatch_metadata.get("precomputed_recall_plan_request_artifact_ref", "")).strip()
+        request_ref = str(
+            dispatch_metadata.get("precomputed_recall_plan_request_artifact_ref", "")
+        ).strip()
         response_ref = str(
             dispatch_metadata.get("precomputed_recall_plan_response_artifact_ref", "")
         ).strip()
@@ -1100,12 +1328,10 @@ class TaskService:
                 "metadata": {
                     **metadata,
                     "plan_source": plan_source or str(metadata.get("plan_source", "")).strip(),
-                    "request_artifact_ref": request_ref or str(
-                        metadata.get("request_artifact_ref", "")
-                    ).strip(),
-                    "response_artifact_ref": response_ref or str(
-                        metadata.get("response_artifact_ref", "")
-                    ).strip(),
+                    "request_artifact_ref": request_ref
+                    or str(metadata.get("request_artifact_ref", "")).strip(),
+                    "response_artifact_ref": response_ref
+                    or str(metadata.get("response_artifact_ref", "")).strip(),
                 }
             }
         )
@@ -1142,8 +1368,7 @@ class TaskService:
             runtime_context=runtime_context,
         )
         if (
-            planning_context.prefetch_mode
-            not in {"agent_led_hint_first", "hint_first"}
+            planning_context.prefetch_mode not in {"agent_led_hint_first", "hint_first"}
             or not planning_context.planner_enabled
             or not planning_context.memory_scope_ids
             or not planning_context.query.strip()
@@ -1241,7 +1466,8 @@ class TaskService:
         existing_compaction_version = "v1"
         try:
             frames = await self._stores.agent_context_store.list_context_frames(
-                task_id=task_id, limit=1,
+                task_id=task_id,
+                limit=1,
             )
             if frames:
                 _sess = await self._stores.agent_context_store.get_agent_session(
@@ -1253,7 +1479,8 @@ class TaskService:
                         existing_compressed_layers,
                         existing_compaction_version,
                     ) = ContextCompactionService._parse_compaction_state(
-                        _sess.metadata, _sess.rolling_summary,
+                        _sess.metadata,
+                        _sess.rolling_summary,
                     )
         except Exception:
             pass
@@ -1277,9 +1504,7 @@ class TaskService:
         # Feature 060: 获取 Skill 内容文本（从 LLMService 迁移）
         loaded_skills_content = ""
         if hasattr(llm_service, "_build_loaded_skills_context"):
-            loaded_skills_content = llm_service._build_loaded_skills_context(
-                dispatch_metadata
-            )
+            loaded_skills_content = llm_service._build_loaded_skills_context(dispatch_metadata)
 
         # Feature 065: 获取 Pipeline 目录文本
         pipeline_catalog_content = ""
@@ -1775,9 +2000,7 @@ class TaskService:
                 if ctx_frame is not None:
                     valid_kind_values = {kind.value for kind in MemoryNamespaceKind}
                     base_degraded = (
-                        "; ".join(recall.degraded_reasons)
-                        if recall.degraded_reasons
-                        else ""
+                        "; ".join(recall.degraded_reasons) if recall.degraded_reasons else ""
                     )
                     delayed_degraded_reason = (
                         f"{base_degraded}; F096_delayed_path"
@@ -1800,8 +2023,7 @@ class TaskService:
                         recent_summary="",
                         memory_namespace_ids=list(recall.scope_ids),
                         memory_hits=[
-                            AgentContextService._memory_hit_payload(hit)
-                            for hit in recall.hits
+                            AgentContextService._memory_hit_payload(hit) for hit in recall.hits
                         ],
                         source_refs=[
                             {"kind": "request", "ref": request_artifact_id},
@@ -1833,9 +2055,7 @@ class TaskService:
                         ],
                         created_at=datetime.now(UTC),
                     )
-                    await self._stores.agent_context_store.save_recall_frame(
-                        delayed_recall_frame
-                    )
+                    await self._stores.agent_context_store.save_recall_frame(delayed_recall_frame)
             except Exception as persist_exc:
                 log.warning(
                     "memory_recall_completed_save_recall_frame_failed_delayed_path",
@@ -1990,9 +2210,7 @@ class TaskService:
                 "schedule_reason": "",
                 "backend": str(memory_recall.get("backend", "")),
                 "backend_state": str(memory_recall.get("backend_state", "")).strip().lower(),
-                "pending_replay_count": int(
-                    memory_recall.get("pending_replay_count", 0) or 0
-                ),
+                "pending_replay_count": int(memory_recall.get("pending_replay_count", 0) or 0),
             }
         query = str(memory_recall.get("query", "")).strip()
         scope_ids = [
@@ -2155,8 +2373,7 @@ class TaskService:
                     (
                         item
                         for item in namespaces
-                        if item.kind is MemoryNamespaceKind.PROJECT_SHARED
-                        and item.memory_scope_ids
+                        if item.kind is MemoryNamespaceKind.PROJECT_SHARED and item.memory_scope_ids
                     ),
                     None,
                 )
@@ -2226,7 +2443,12 @@ class TaskService:
             line = raw_line.rstrip()
             stripped = line.strip()
             if not stripped:
-                if not pending_json_after_tool and not skip_block_kind and cleaned_lines and cleaned_lines[-1] != "":
+                if (
+                    not pending_json_after_tool
+                    and not skip_block_kind
+                    and cleaned_lines
+                    and cleaned_lines[-1] != ""
+                ):
                     cleaned_lines.append("")
                 continue
 
@@ -2575,8 +2797,7 @@ class TaskService:
         # 判定 retryable（按 error_type 类名匹配会漏掉直连路径，Codex
         # re-review MEDIUM）。
         is_auth_failure = isinstance(error, SkillAuthError) or (
-            isinstance(error, ProviderLLMCallError)
-            and error.status_code in (401, 403)
+            isinstance(error, ProviderLLMCallError) and error.status_code in (401, 403)
         )
         error_category = "auth_error" if is_auth_failure else ""
         try:
@@ -2765,9 +2986,7 @@ class TaskService:
         否则用户会在任务列表看到"F127 记忆巩固根任务占位"等系统条目（违 H1 + UI
         普通用户原则）。store accessor 默认忠实不过滤，此处显式开 exclude_internal。
         """
-        return await self._stores.task_store.list_tasks(
-            status, exclude_internal=True
-        )
+        return await self._stores.task_store.list_tasks(status, exclude_internal=True)
 
     @classmethod
     async def _get_task_lock(cls, task_id: str) -> asyncio.Lock:

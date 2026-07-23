@@ -163,9 +163,9 @@
 
 **改善方向**：考虑合并 `subagents.spawn` 和 `work.split`（spawn 支持批量 objectives 参数即可消除 split）。`workers.review` 改名为更明确的 `work.plan` 以区分规划和管理语义。
 
-#### W2: DockerRuntimeBackend 是空壳
+#### 历史审计 W2：DockerRuntimeBackend 曾是空壳
 
-**现状**：继承 InlineRuntimeBackend 未重写任何方法，Docker 隔离实际未实现。
+**历史现状**：该类曾继承 InlineRuntimeBackend 而未重写任何方法，Docker 隔离从未实际实现；当前类已删除，运行时只有 Inline/Graph backend。
 
 **改善方向**：M2 阶段实现或直接删除空壳类（Constitution #9 禁止保留无实际行为的代码）。
 

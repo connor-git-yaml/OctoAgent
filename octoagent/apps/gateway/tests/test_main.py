@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import sys
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,47 @@ from octoagent.gateway.services.config.config_schema import (
     TelegramChannelConfig,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
+
+
+def test_module_entry_accepts_exact_help_host_port_and_rejects_duplicate_or_unknown_before_import(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    oracle = "F151_SINGLE_PRODUCTION_STARTUP_ENTRY_MISSING"
+    sys.modules.pop("octoagent.gateway.__main__", None)
+    sys.modules.pop("octoagent.gateway.main", None)
+    try:
+        entry = importlib.import_module("octoagent.gateway.__main__")
+    except ModuleNotFoundError:
+        pytest.fail(f"{oracle}: canonical module entry is absent", pytrace=False)
+    issues: list[str] = []
+    if "octoagent.gateway.main" in sys.modules:
+        issues.append("module entry imported app before parsing argv")
+
+    options = entry.parse_cli_args(["--host", "127.0.0.1", "--port", "8123"])
+    if (options.host, options.port) != ("127.0.0.1", 8123):
+        issues.append(f"accepted options drifted: {options!r}")
+    with pytest.raises(SystemExit) as help_exit:
+        entry.parse_cli_args(["--help"])
+    if help_exit.value.code != 0:
+        issues.append(f"help exit={help_exit.value.code}")
+    capsys.readouterr()
+
+    rejected = (
+        ["--host", "127.0.0.1", "--host", "0.0.0.0"],
+        ["--port", "8000", "--port", "8001"],
+        ["--unknown"],
+        ["--port", "0"],
+    )
+    for argv in rejected:
+        with pytest.raises(SystemExit) as invalid_exit:
+            entry.parse_cli_args(argv)
+        if invalid_exit.value.code != 64:
+            issues.append(f"argv={argv!r} exit={invalid_exit.value.code}, expected 64")
+        capsys.readouterr()
+    if "octoagent.gateway.main" in sys.modules:
+        issues.append("invalid/help argv imported app")
+    if issues:
+        pytest.fail(f"{oracle}: {'; '.join(issues)}", pytrace=False)
 
 
 def _write_litellm_config(tmp_path: Path, content: str) -> None:
@@ -394,9 +436,7 @@ def _import_gateway_main_safely(monkeypatch):
     return importlib.import_module("octoagent.gateway.main")
 
 
-def test_create_app_default_host_mode_is_safe_no_exit(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_create_app_default_host_mode_is_safe_no_exit(tmp_path: Path, monkeypatch) -> None:
     """★ 最高危护栏：默认 127.0.0.1 + loopback = safe，create_app 正常返回
     （不误 exit——否则 gateway 起不来连本机都用不了，plan §2 Phase D）。"""
     gateway_main = _import_gateway_main_safely(monkeypatch)
@@ -405,9 +445,7 @@ def test_create_app_default_host_mode_is_safe_no_exit(
     assert isinstance(app, FastAPI)
 
 
-def test_enforce_exposure_naked_combo_exits_78(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_enforce_exposure_naked_combo_exits_78(tmp_path: Path, monkeypatch) -> None:
     """★ AC-3：host=0.0.0.0 + mode=loopback → 启动期 sys.exit(78)。"""
     gateway_main = _import_gateway_main_safely(monkeypatch)  # 安全 env 下先 import
     monkeypatch.setenv("OCTOAGENT_HOST", "0.0.0.0")
@@ -432,9 +470,7 @@ def test_enforce_exposure_exit_message_mentions_exposure(
     assert "OCTOAGENT_HOST=127.0.0.1" in captured.err
 
 
-def test_enforce_exposure_warn_combo_does_not_exit(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_enforce_exposure_warn_combo_does_not_exit(tmp_path: Path, monkeypatch) -> None:
     """FR-C3：host=0.0.0.0 + mode=bearer → 强警告放行，不 exit。"""
     gateway_main = _import_gateway_main_safely(monkeypatch)
     monkeypatch.setenv("OCTOAGENT_HOST", "0.0.0.0")
@@ -443,9 +479,7 @@ def test_enforce_exposure_warn_combo_does_not_exit(
     gateway_main._enforce_front_door_exposure(tmp_path)
 
 
-def test_enforce_exposure_loopback_bearer_combo_safe(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_enforce_exposure_loopback_bearer_combo_safe(tmp_path: Path, monkeypatch) -> None:
     """反向隧道回源组合 127.0.0.1 + bearer → safe，不 exit。"""
     gateway_main = _import_gateway_main_safely(monkeypatch)
     monkeypatch.setenv("OCTOAGENT_HOST", "127.0.0.1")
@@ -453,12 +487,10 @@ def test_enforce_exposure_loopback_bearer_combo_safe(
     gateway_main._enforce_front_door_exposure(tmp_path)
 
 
-def test_enforce_exposure_uses_config_error_exit_code_constant(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_enforce_exposure_uses_config_error_exit_code_constant(tmp_path: Path, monkeypatch) -> None:
     """exit code 复用 service_manager.CONFIG_ERROR_EXIT_CODE 单一事实源
     （对齐 systemd RestartPreventExitStatus）。"""
-    from octoagent.provider.dx.service_manager import CONFIG_ERROR_EXIT_CODE
+    from octoagent.gateway.services.operations.service_manager import CONFIG_ERROR_EXIT_CODE
 
     gateway_main = _import_gateway_main_safely(monkeypatch)
     monkeypatch.setenv("OCTOAGENT_HOST", "0.0.0.0")
@@ -468,9 +500,7 @@ def test_enforce_exposure_uses_config_error_exit_code_constant(
     assert exc_info.value.code == CONFIG_ERROR_EXIT_CODE
 
 
-def test_resolve_front_door_mode_env_overrides_config(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_resolve_front_door_mode_env_overrides_config(tmp_path: Path, monkeypatch) -> None:
     gateway_main = _import_gateway_main_safely(monkeypatch)
     monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "bearer")
     assert gateway_main._resolve_front_door_mode(tmp_path) == "bearer"

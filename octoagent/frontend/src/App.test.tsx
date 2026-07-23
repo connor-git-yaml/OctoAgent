@@ -2,6 +2,10 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
+import {
+  buildFieldGuide,
+  CUSTOM_PROVIDER_FIELD_PATHS,
+} from "./domains/settings/shared";
 import type {
   ControlPlaneCapability,
   ControlPlaneSnapshot,
@@ -955,7 +959,8 @@ describe("App workbench routing", () => {
     ).toBe(true);
   });
 
-  it("设置页保存配置直接提交 setup.apply（review 由后端内部执行）并按 resource_refs 回刷", async () => {
+  it("setup action omits retired activation fields", async () => {
+    const oracle = "setup action仍含旧字段";
     window.history.pushState({}, "", "/settings");
 
     const nextSnapshot = buildSnapshot();
@@ -1063,24 +1068,36 @@ describe("App workbench routing", () => {
       .filter((call) => String((call as FetchArgs)[0]).includes("/api/control/actions"))
       .map((call) => String((call as FetchArgs)[1]?.body ?? ""));
 
-    expect(
-      actionBodies.some((body) => body.includes('"action_id":"setup.apply"'))
-    ).toBe(true);
-    expect(
-      actionBodies.some((body) => body.includes('"id":"openai"'))
-    ).toBe(true);
-    expect(
-      actionBodies.some((body) => body.includes('"llm_mode":"litellm"'))
-    ).toBe(true);
-    expect(
-      actionBodies.some((body) => body.includes('"litellm_proxy_url":"http://localhost:4000"'))
-    ).toBe(true);
-    expect(
-      actionBodies.some((body) => body.includes('"master_key_env":"LITELLM_MASTER_KEY"'))
-    ).toBe(true);
-    expect(
-      actionBodies.some((body) => body.includes('"LITELLM_MASTER_KEY":"'))
-    ).toBe(true);
+    const setupApplyBody = actionBodies.find((body) =>
+      body.includes('"action_id":"setup.apply"')
+    );
+    expect(setupApplyBody, oracle).toBeDefined();
+    expect(setupApplyBody, oracle).toContain('"id":"openai"');
+    for (const retiredToken of [
+      '"runtime"',
+      "llm_mode",
+      "litellm_proxy_url",
+      "master_key_env",
+      "LITELLM_MASTER_KEY",
+      '"activation"',
+    ]) {
+      expect(setupApplyBody, oracle).not.toContain(retiredToken);
+    }
+
+    for (const retiredField of [
+      "runtime.llm_mode",
+      "runtime.litellm_proxy_url",
+      "runtime.master_key_env",
+    ]) {
+      expect(CUSTOM_PROVIDER_FIELD_PATHS.has(retiredField), oracle).toBe(false);
+    }
+    const retiredSecretHint = buildSnapshot().resources.config.ui_hints[
+      "runtime.master_key_env"
+    ]!;
+    const credentialGuide = buildFieldGuide(retiredSecretHint, false);
+    expect(credentialGuide?.description, oracle).toContain("CredentialStore");
+    expect(credentialGuide?.description, oracle).toContain("~/.octoagent/.env");
+    expect(credentialGuide?.description, oracle).not.toContain(".env.litellm");
     expect(await screen.findByText(/主 Agent 与系统设置已同步/)).toBeInTheDocument();
   });
 

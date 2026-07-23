@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "scanner_version": "f151-v1",
+  "ruff_version": "0.15.4",
+  "ruff_config_sha256": "262e9b7fc5e626f42a08aa9dc6bd48cb4c1180cdac7f012e589699fe8cfedd56",
+  "base_commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc",
+  "paths": [
+    "octoagent/apps/*/src/**/*.py",
+    "octoagent/packages/*/src/**/*.py"
+  ],
+  "rules": [
+    "C901",
+    "PLR0911",
+    "PLR0912",
+    "PLR0913",
+    "PLR0915"
+  ],
+  "total_by_rule": {
+    "C901": 167,
+    "PLR0911": 67,
+    "PLR0912": 90,
+    "PLR0913": 259,
+    "PLR0915": 75
+  },
+  "hotspots": {
+    "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py": {
+      "by_rule": {"C901": 4, "PLR0911": 2, "PLR0912": 4, "PLR0913": 15, "PLR0915": 3},
+      "logical_loc": 2709,
+      "max_function_span": 357
+    },
+    "octoagent/packages/provider/src/octoagent/provider/provider_client.py": {
+      "by_rule": {"C901": 4, "PLR0911": 0, "PLR0912": 4, "PLR0913": 6, "PLR0915": 3},
+      "logical_loc": 1026,
+      "max_function_span": 310
+    },
+    "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py": {
+      "by_rule": {"C901": 4, "PLR0911": 3, "PLR0912": 0, "PLR0913": 8, "PLR0915": 0},
+      "logical_loc": 2484,
+      "max_function_span": 166
+    },
+    "octoagent/apps/gateway/src/octoagent/gateway/services/task_runner.py": {
+      "by_rule": {"C901": 4, "PLR0911": 2, "PLR0912": 3, "PLR0913": 3, "PLR0915": 2},
+      "logical_loc": 1206,
+      "max_function_span": 168
+    },
+    "octoagent/packages/skills/src/octoagent/skills/runner.py": {
+      "by_rule": {"C901": 2, "PLR0911": 1, "PLR0912": 2, "PLR0913": 4, "PLR0915": 2},
+      "logical_loc": 1004,
+      "max_function_span": 470
+    },
+    "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py": {
+      "by_rule": {"C901": 3, "PLR0911": 0, "PLR0912": 2, "PLR0913": 1, "PLR0915": 5},
+      "logical_loc": 1175,
+      "max_function_span": 256
+    }
+  }
+}

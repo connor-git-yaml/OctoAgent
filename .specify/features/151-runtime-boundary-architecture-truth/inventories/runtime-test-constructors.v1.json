@@ -1,0 +1,1404 @@
+{
+  "version": 1,
+  "base_sha": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc",
+  "identity": [
+    "path",
+    "qualname",
+    "definition_ordinal",
+    "ordinal"
+  ],
+  "line_is_identity": false,
+  "direct_taskservice_calls": 144,
+  "files": 40,
+  "mode_counts": {
+    "runtime-bundle": 26,
+    "storage-only": 116,
+    "characterization-remove": 1,
+    "dead-shadowed-runtime-bundle": 1
+  },
+  "additional_dynamic_subclass": {
+    "path": "octoagent/apps/gateway/tests/test_context_compaction.py",
+    "qualname": "TestContextCompaction.test_compaction_resume_does_not_repeat_side_effects",
+    "line_report_only": 524,
+    "class": "CrashBeforeModelStartedCheckpointTaskService",
+    "mode": "runtime-bundle"
+  },
+  "source_text_baseline": {
+    "TaskService_open_paren_occurrences": 147,
+    "explanation": "144 direct Call(TaskService): 143 non-shadowed AST identities + 1 dead shadowed by duplicate test qualname; the 143 comprise 123 test/nested identities (three under skipped F033 nodes) and 20 helper identities, so this count is not behavior coverage; plus two subclass definitions and one runtime subclass instantiation"
+  },
+  "process_task_with_llm_override_calls": {
+    "ast_total": 44,
+    "collected_live": 43,
+    "dead_shadowed": 1
+  },
+  "entries": [
+    {
+      "path": "octoagent/apps/gateway/tests/test_f127_consolidation_trigger.py",
+      "qualname": "TestSystemTaskExclusion.test_task_service_list_tasks_excludes_consolidation_root",
+      "ordinal": 1,
+      "line_report_only": 726,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f127_consolidation_trigger.py",
+      "qualname": "TestSystemTaskNotificationSuppression.test_audit_worker_error_suppress_emits_event_no_notify",
+      "ordinal": 1,
+      "line_report_only": 859,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f127_consolidation_trigger.py",
+      "qualname": "TestSystemTaskNotificationSuppression.test_audit_worker_error_no_suppress_notifies",
+      "ordinal": 1,
+      "line_report_only": 891,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_operator_actions.py",
+      "qualname": "_create_base_task",
+      "ordinal": 1,
+      "line_report_only": 48,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_enqueue_runs_and_marks_job_succeeded",
+      "ordinal": 1,
+      "line_report_only": 112,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_startup_recovery_marks_orphan_running_failed",
+      "ordinal": 1,
+      "line_report_only": 148,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_shutdown_marks_running_task_failed_instead_of_leaving_task_running",
+      "ordinal": 1,
+      "line_report_only": 196,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_enqueue_notifies_completion",
+      "ordinal": 1,
+      "line_report_only": 240,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_cancel_running_job_marks_task_and_job_cancelled",
+      "ordinal": 1,
+      "line_report_only": 281,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_cancel_running_job_cancels_underlying_llm_call",
+      "ordinal": 1,
+      "line_report_only": 329,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_run_job_preserves_deferred_job_status",
+      "ordinal": 1,
+      "line_report_only": 383,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_cancel_deferred_job_without_live_runner_marks_cancelled",
+      "ordinal": 1,
+      "line_report_only": 454,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_schedule_dispatch_envelope_requeues_terminal_job_and_executes",
+      "ordinal": 1,
+      "line_report_only": 507,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_startup_recovery_resumes_from_checkpoint",
+      "ordinal": 1,
+      "line_report_only": 586,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_startup_recovery_terminal_job_notifies_completion",
+      "ordinal": 1,
+      "line_report_only": 656,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_recover_twice_side_effect_executes_only_once",
+      "ordinal": 1,
+      "line_report_only": 707,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_resume_event_chain_order",
+      "ordinal": 1,
+      "line_report_only": 812,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_attach_input_live_path_updates_session_and_job",
+      "ordinal": 1,
+      "line_report_only": 882,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_attach_input_after_restart_resumes_waiting_task",
+      "ordinal": 1,
+      "line_report_only": 1015,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_attach_input_after_restart_resumes_waiting_task",
+      "ordinal": 2,
+      "line_report_only": 1047,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_cancel_waiting_input_without_live_runner_marks_execution_cancelled",
+      "ordinal": 1,
+      "line_report_only": 1106,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_cancel_waiting_input_without_live_runner_marks_execution_cancelled",
+      "ordinal": 2,
+      "line_report_only": 1138,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_attach_input_requires_approval_when_requested",
+      "ordinal": 1,
+      "line_report_only": 1197,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_runner.py",
+      "qualname": "TestTaskRunner.test_task_runner_ask_back_state_transition",
+      "ordinal": 1,
+      "line_report_only": 1293,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_discord_service.py",
+      "qualname": "test_notify_task_result_rest_message",
+      "ordinal": 1,
+      "line_report_only": 348,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_context_compaction.py",
+      "qualname": "TestContextCompaction.test_task_service_compacts_history_and_flushes_memory",
+      "ordinal": 1,
+      "line_report_only": 259,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_context_compaction.py",
+      "qualname": "TestContextCompaction.test_worker_runtime_skips_compaction_for_subagent_target",
+      "ordinal": 1,
+      "line_report_only": 398,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_context_compaction.py",
+      "qualname": "TestContextCompaction.test_compaction_degrades_to_raw_history_when_summarizer_fails",
+      "ordinal": 1,
+      "line_report_only": 466,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_context_compaction.py",
+      "qualname": "TestContextCompaction.test_compaction_bounds_summarizer_transcript_for_long_history",
+      "ordinal": 1,
+      "line_report_only": 615,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_context_compaction.py",
+      "qualname": "TestContextCompaction.test_compaction_event_uses_configured_summarizer_alias",
+      "ordinal": 1,
+      "line_report_only": 676,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_resume_engine.py",
+      "qualname": "_prepare_running_task",
+      "ordinal": 1,
+      "line_report_only": 25,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_hardening.py",
+      "qualname": "service_with_store",
+      "ordinal": 1,
+      "line_report_only": 38,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_us8_cancel.py",
+      "qualname": "TestTaskCancel.test_cancel_created_task",
+      "ordinal": 1,
+      "line_report_only": 77,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_us8_cancel.py",
+      "qualname": "TestTaskCancel.test_cancel_running_task",
+      "ordinal": 1,
+      "line_report_only": 100,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_us8_cancel.py",
+      "qualname": "TestTaskCancel.test_cancel_terminal_task_409",
+      "ordinal": 1,
+      "line_report_only": 127,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_us8_cancel.py",
+      "qualname": "TestTaskCancel.test_cancel_writes_events",
+      "ordinal": 1,
+      "line_report_only": 163,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_chat_force_full_recall.py",
+      "qualname": "TestContinueChatControlMetadata.existing_task_id",
+      "ordinal": 1,
+      "line_report_only": 259,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_chat_force_full_recall.py",
+      "qualname": "TestUserMessageEventPersistence.test_force_full_recall_persisted_in_user_message_event",
+      "ordinal": 1,
+      "line_report_only": 356,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_chat_force_full_recall.py",
+      "qualname": "TestUserMessageEventPersistence.test_short_message_force_full_recall_not_in_event",
+      "ordinal": 1,
+      "line_report_only": 377,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_chat_force_full_recall.py",
+      "qualname": "TestUserMessageEventPersistence.test_continue_chat_force_full_recall_persisted",
+      "ordinal": 1,
+      "line_report_only": 393,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_control_plane_api.py",
+      "qualname": "_create_task",
+      "ordinal": 1,
+      "line_report_only": 118,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_control_plane_api.py",
+      "qualname": "TestControlPlaneApi.test_session_projection_reports_delegated_worker_execution",
+      "ordinal": 1,
+      "line_report_only": 4193,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_control_plane_api.py",
+      "qualname": "TestControlPlaneApi.test_legacy_main_session_with_worker_profile_pollution_is_marked_for_reset",
+      "ordinal": 1,
+      "line_report_only": 4303,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestEscalatePermissionWaitingApproval.test_ac_c1_task_enters_waiting_approval._intercepted_wait_for_decision",
+      "ordinal": 1,
+      "line_report_only": 296,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestEscalatePermissionWaitingApproval.test_ac_c1_task_enters_waiting_approval",
+      "ordinal": 2,
+      "line_report_only": 329,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestEscalatePermissionWaitingApproval.test_ac_c1_task_enters_waiting_approval",
+      "ordinal": 3,
+      "line_report_only": 341,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestApprovalTimeoutFailed.test_ac_c3_approval_timeout_task_runner_failed",
+      "ordinal": 1,
+      "line_report_only": 381,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestApprovalTimeoutFailed.test_ac_c3_waiting_input_not_affected",
+      "ordinal": 1,
+      "line_report_only": 450,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestApprovalRaceConditions.test_b9b_scenario2_monitor_and_timeout_concurrent",
+      "ordinal": 1,
+      "line_report_only": 641,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestStartupRecoveryIsCallerWorker.test_ac_c6_startup_recovery_is_caller_worker_signal_restored",
+      "ordinal": 1,
+      "line_report_only": 747,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestStartupRecoveryIsCallerWorker.test_ac_c6_startup_recovery_is_caller_worker_signal_restored",
+      "ordinal": 2,
+      "line_report_only": 755,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestStartupRecoveryIsCallerWorker.test_ac_c6_startup_recovery_no_signal",
+      "ordinal": 1,
+      "line_report_only": 782,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh02FinallyBlockRaceCondition.test_high02_finally_skips_restore_when_task_failed",
+      "ordinal": 1,
+      "line_report_only": 961,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh02FinallyBlockRaceCondition.test_high02_finally_restores_when_still_waiting",
+      "ordinal": 1,
+      "line_report_only": 1000,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh03MonitorCasFailureAbortsSideEffects.test_high03_cas_success_emits_side_effects",
+      "ordinal": 1,
+      "line_report_only": 1044,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh03MonitorCasFailureAbortsSideEffects.test_high03_cas_failure_via_concurrent_resolution",
+      "ordinal": 1,
+      "line_report_only": 1156,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh04StartupRecoveryWaitingApproval.test_high04_startup_recovery_pushes_waiting_approval_to_failed",
+      "ordinal": 1,
+      "line_report_only": 1256,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh04StartupRecoveryWaitingApproval.test_high04_startup_recovery_reason_contains_restart",
+      "ordinal": 1,
+      "line_report_only": 1318,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh02V3FinallyConditionalRestore.test_high02_v3_approved_restores_running",
+      "ordinal": 1,
+      "line_report_only": 1579,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh02V3FinallyConditionalRestore.test_high02_v3_rejected_does_not_restore",
+      "ordinal": 1,
+      "line_report_only": 1613,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh02V3FinallyConditionalRestore.test_high02_v3_timeout_does_not_restore",
+      "ordinal": 1,
+      "line_report_only": 1648,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh04V3StartupRecoveryRestartMonitor.test_high04_v3_restart_monitor_when_not_timed_out",
+      "ordinal": 1,
+      "line_report_only": 1715,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh04V3StartupRecoveryRestartMonitor.test_high04_v3_push_failed_when_timed_out",
+      "ordinal": 1,
+      "line_report_only": 1797,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh04V3StartupRecoveryRestartMonitor.test_high04_v3_no_approval_event_fallback_gateway_restart",
+      "ordinal": 1,
+      "line_report_only": 1870,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestNM02V3RunJobTerminalDedup.test_nm02_skip_double_notify_when_job_already_terminal",
+      "ordinal": 1,
+      "line_report_only": 2013,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestNM02V3RunJobTerminalDedup.test_nm02_normal_notify_when_job_not_terminal",
+      "ordinal": 1,
+      "line_report_only": 2076,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh02V4MonitorScansDatabase.test_high02_v4_monitor_scans_db_waiting_approval_orphan",
+      "ordinal": 1,
+      "line_report_only": 2146,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh02V4MonitorScansDatabase.test_high02_v4_monitor_in_running_jobs_not_duplicated",
+      "ordinal": 1,
+      "line_report_only": 2220,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh04V4DeadApprovalExpire.test_high04_v4_startup_recovery_expires_approval_manager_entry",
+      "ordinal": 1,
+      "line_report_only": 2299,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+      "qualname": "TestHigh04V4DeadApprovalExpire.test_high04_v4_startup_recovery_expired_timeout_also_expires_manager",
+      "ordinal": 1,
+      "line_report_only": 2420,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_telegram_service.py",
+      "qualname": "test_group_followup_reply_to_bot_message_keeps_same_thread_id",
+      "ordinal": 1,
+      "line_report_only": 706,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_telegram_service.py",
+      "qualname": "test_notify_task_result_and_approval_event_reply_to_original_thread",
+      "ordinal": 1,
+      "line_report_only": 777,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_orchestrator.py",
+      "qualname": "_build_context",
+      "ordinal": 1,
+      "line_report_only": 57,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_orchestrator.py",
+      "qualname": "_build_freshness_context",
+      "ordinal": 1,
+      "line_report_only": 228,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_orchestrator.py",
+      "qualname": "TestOrchestrator.test_dispatch_prepared_roundtrips_through_a2a_and_restores_runtime_context",
+      "ordinal": 1,
+      "line_report_only": 416,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_orchestrator.py",
+      "qualname": "TestOrchestrator.test_high_risk_task_allowed_with_valid_approval_id",
+      "ordinal": 1,
+      "line_report_only": 580,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_chat_send_route.py",
+      "qualname": "TestChatSendRoute.test_task_detail_prefers_projected_session_alias",
+      "ordinal": 1,
+      "line_report_only": 291,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_chat_send_route.py",
+      "qualname": "TestChatSendRoute.test_continue_legacy_main_session_ignores_polluted_worker_owner",
+      "ordinal": 1,
+      "line_report_only": 373,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_delegation_plane.py",
+      "qualname": "_build_services",
+      "ordinal": 1,
+      "line_report_only": 67,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_injects_profile_bootstrap_recent_and_memory",
+      "ordinal": 1,
+      "line_report_only": 391,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_agent_led_recall_uses_model_planned_query",
+      "ordinal": 1,
+      "line_report_only": 667,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phase",
+      "ordinal": 1,
+      "line_report_only": 803,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_single_loop_executor_skips_auxiliary_recall_planner_phase",
+      "ordinal": 1,
+      "line_report_only": 870,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_worker_context_defaults_to_private_namespace_hint_first_recall",
+      "ordinal": 1,
+      "line_report_only": 1145,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_worker_context_enables_planned_recall_by_default",
+      "ordinal": 1,
+      "line_report_only": 1387,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_worker_context_respects_explicit_detailed_prefetch_override",
+      "ordinal": 1,
+      "line_report_only": 1567,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_worker_private_writeback_surfaces_runtime_memory_hints_across_sessions",
+      "ordinal": 1,
+      "line_report_only": 1665,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_prompt_context_only_exposes_sanitized_control_metadata",
+      "ordinal": 1,
+      "line_report_only": 1816,
+      "mode": "dead-shadowed-runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": false,
+      "target_qualname": "test_worker_tool_writeback_and_private_memory_are_isolated_across_sessions"
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_prompt_context_only_exposes_sanitized_control_metadata",
+      "ordinal": 1,
+      "line_report_only": 2078,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 2,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_injects_runtime_hints_block_into_prompt_and_request_snapshot",
+      "ordinal": 1,
+      "line_report_only": 2163,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_persists_delayed_recall_as_durable_artifacts_and_events",
+      "ordinal": 1,
+      "line_report_only": 2344,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_f096_audit_chain_profile_runtime_recallframe_consistency",
+      "ordinal": 1,
+      "line_report_only": 2571,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_delayed_recall_save_recall_frame_failure_does_not_block_emit",
+      "ordinal": 1,
+      "line_report_only": 2798,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_migrates_legacy_session_and_trims_prompt_budget",
+      "ordinal": 1,
+      "line_report_only": 2907,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_prefers_frozen_runtime_context_over_live_selector",
+      "ordinal": 1,
+      "line_report_only": 2975,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_session_create_with_project_does_not_double_write_agent_rows",
+      "ordinal": 1,
+      "line_report_only": 3120,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_resume_api.py",
+      "qualname": "_create_task_with_status",
+      "ordinal": 1,
+      "line_report_only": 42,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_telegram_operator_actions.py",
+      "qualname": "test_telegram_callback_executes_operator_action_and_is_idempotent",
+      "ordinal": 1,
+      "line_report_only": 118,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_f105_channel_adapter.py",
+      "qualname": "test_completion_fanout_web_task_no_telegram_send",
+      "ordinal": 1,
+      "line_report_only": 258,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_worker_runtime.py",
+      "qualname": "_create_task_with_envelope",
+      "ordinal": 1,
+      "line_report_only": 83,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_slack_service.py",
+      "qualname": "test_foreign_channel_task_noop",
+      "ordinal": 1,
+      "line_report_only": 403,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_operator_inbox_service.py",
+      "qualname": "test_operator_inbox_aggregates_four_item_types",
+      "ordinal": 1,
+      "line_report_only": 52,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_operator_inbox_service.py",
+      "qualname": "test_operator_inbox_hides_acknowledged_alert",
+      "ordinal": 1,
+      "line_report_only": 159,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_operator_inbox_service.py",
+      "qualname": "test_operator_inbox_hides_retryable_failure_after_retry_succeeds",
+      "ordinal": 1,
+      "line_report_only": 212,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_capability_pack_tools.py",
+      "qualname": "_build_runtime_services",
+      "ordinal": 1,
+      "line_report_only": 142,
+      "mode": "characterization-remove",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_capability_pack_tools.py",
+      "qualname": "test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degradation",
+      "ordinal": 1,
+      "line_report_only": 580,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_execution_api.py",
+      "qualname": "execution_test_app",
+      "ordinal": 1,
+      "line_report_only": 89,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/test_operator_inbox_api.py",
+      "qualname": "_seed_approval",
+      "ordinal": 1,
+      "line_report_only": 82,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_task_runner_subagent_cleanup.py",
+      "qualname": "_create_parent_task",
+      "ordinal": 1,
+      "line_report_only": 79,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_phase_h_terminal_callback.py",
+      "qualname": "test_write_state_transition_invokes_callback_on_terminal",
+      "ordinal": 1,
+      "line_report_only": 132,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_phase_h_terminal_callback.py",
+      "qualname": "test_write_state_transition_callback_failure_does_not_break_transition",
+      "ordinal": 1,
+      "line_report_only": 180,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_f.py",
+      "qualname": "_create_task_with_delegation",
+      "ordinal": 1,
+      "line_report_only": 145,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_f.py",
+      "qualname": "test_spawn_fills_caller_memory_namespace_ids",
+      "ordinal": 1,
+      "line_report_only": 407,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_f.py",
+      "qualname": "test_spawn_caller_without_namespace_gets_empty_ids",
+      "ordinal": 1,
+      "line_report_only": 481,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_f.py",
+      "qualname": "test_spawn_unknown_caller_skips_namespace_query",
+      "ordinal": 1,
+      "line_report_only": 549,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_phase_g_atomic_cleanup.py",
+      "qualname": "_setup_completed_subagent_task",
+      "ordinal": 1,
+      "line_report_only": 59,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_b.py",
+      "qualname": "_create_task_with_delegation",
+      "ordinal": 1,
+      "line_report_only": 109,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_b.py",
+      "qualname": "test_ensure_session_worker_no_parent_is_direct_worker",
+      "ordinal": 1,
+      "line_report_only": 244,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_b.py",
+      "qualname": "test_ensure_session_worker_with_parent_is_worker_internal",
+      "ordinal": 1,
+      "line_report_only": 288,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_b.py",
+      "qualname": "test_ensure_session_main_agent_is_main_bootstrap",
+      "ordinal": 1,
+      "line_report_only": 332,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_b.py",
+      "qualname": "test_p2_3_event_emitted_before_session_save",
+      "ordinal": 1,
+      "line_report_only": 468,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_b.py",
+      "qualname": "test_p2_4_dispatch_exception_triggers_cleanup",
+      "ordinal": 1,
+      "line_report_only": 545,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_b.py",
+      "qualname": "test_spawn_to_cleanup_end_to_end",
+      "ordinal": 1,
+      "line_report_only": 592,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/test_agent_context_phase_b.py",
+      "qualname": "_create_parent_task_simple",
+      "ordinal": 1,
+      "line_report_only": 930,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/e2e_live/helpers/factories.py",
+      "qualname": "submit_message_with_control_metadata",
+      "ordinal": 1,
+      "line_report_only": 266,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/operations/test_telegram_verifier.py",
+      "source_path_report_only": "octoagent/packages/provider/tests/dx/test_telegram_verifier.py",
+      "qualname": "test_verifier_first_message_completes_after_detecting_inbound_task",
+      "ordinal": 1,
+      "line_report_only": 285,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/apps/gateway/tests/services/operations/test_telegram_verifier.py",
+      "source_path_report_only": "octoagent/packages/provider/tests/dx/test_telegram_verifier.py",
+      "qualname": "test_verifier_first_message_ignores_group_task_from_same_user",
+      "ordinal": 1,
+      "line_report_only": 335,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f010_checkpoint_resume.py",
+      "qualname": "TestFeature010CheckpointResume.test_recovery_replays_no_side_effect",
+      "ordinal": 1,
+      "line_report_only": 27,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f010_checkpoint_resume.py",
+      "qualname": "TestFeature010CheckpointResume.test_resume_api_error_code_semantics",
+      "ordinal": 1,
+      "line_report_only": 84,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_sc6_cancel.py",
+      "qualname": "TestSC6Cancel.test_cancel_e2e",
+      "ordinal": 1,
+      "line_report_only": 19,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_sc6_cancel.py",
+      "qualname": "TestSC6Cancel.test_cancel_terminal_returns_409",
+      "ordinal": 1,
+      "line_report_only": 53,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f033_agent_context_continuity.py",
+      "qualname": "test_f033_context_survives_restart",
+      "ordinal": 1,
+      "line_report_only": 186,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f033_agent_context_continuity.py",
+      "qualname": "test_f033_context_survives_restart",
+      "ordinal": 2,
+      "line_report_only": 211,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f033_agent_context_continuity.py",
+      "qualname": "test_f033_project_context_does_not_leak_across_projects",
+      "ordinal": 1,
+      "line_report_only": 305,
+      "mode": "runtime-bundle",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f009_worker_runtime_flow.py",
+      "qualname": "TestFeature009WorkerRuntimeFlow.test_privileged_profile_without_approval_is_rejected",
+      "ordinal": 1,
+      "line_report_only": 194,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f031_m3_acceptance.py",
+      "qualname": "_create_task",
+      "ordinal": 1,
+      "line_report_only": 129,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f013_checkpoint.py",
+      "qualname": "TestF013ScenarioB.test_resume_from_checkpoint_after_restart",
+      "ordinal": 1,
+      "line_report_only": 56,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f013_checkpoint.py",
+      "qualname": "TestF013ScenarioB.test_resume_idempotency",
+      "ordinal": 1,
+      "line_report_only": 121,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f013_checkpoint.py",
+      "qualname": "TestF013ScenarioB.test_resume_with_corrupted_checkpoint",
+      "ordinal": 1,
+      "line_report_only": 200,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f013_watchdog.py",
+      "qualname": "TestF013ScenarioC.test_watchdog_detects_stalled_task",
+      "ordinal": 1,
+      "line_report_only": 55,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f013_watchdog.py",
+      "qualname": "TestF013ScenarioC.test_watchdog_cooldown_prevents_duplicate_alerts",
+      "ordinal": 1,
+      "line_report_only": 102,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f013_watchdog.py",
+      "qualname": "TestF013ScenarioC.test_watchdog_threshold_config_override",
+      "ordinal": 1,
+      "line_report_only": 159,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f023_m2_acceptance.py",
+      "qualname": "test_a2a_task_message_can_drive_worker_runtime_and_return_result",
+      "ordinal": 1,
+      "line_report_only": 385,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    },
+    {
+      "path": "octoagent/tests/integration/test_f023_m2_acceptance.py",
+      "qualname": "test_a2a_task_message_timeout_maps_to_error_and_failed_state",
+      "ordinal": 1,
+      "line_report_only": 585,
+      "mode": "storage-only",
+      "definition_ordinal": 1,
+      "collected_baseline": true
+    }
+  ],
+  "behavior_evidence": {
+    "identity_join": "path+qualname+definition_ordinal+ordinal joins to runtime-test-behavior-owners selector expansion and JUnit collected node; helper identities additionally require a reverse-call edge from a collected deterministic node",
+    "baseline_classification": {
+      "live_test_or_nested_constructor_count": 123,
+      "helper_constructor_count": 20,
+      "dead_shadowed_constructor_count": 1,
+      "skipped_constructor_count_within_live_tests": 3
+    },
+    "f033_skipped_identities": [
+      {"path":"octoagent/tests/integration/test_f033_agent_context_continuity.py","qualname":"test_f033_context_survives_restart","definition_ordinal":1,"ordinal":1,"target_selector":"octoagent/tests/integration/test_f033_agent_context_continuity.py::test_f033_context_survives_restart","target_oracle":"restart preserves exact persisted Task/Event/session continuity without prompt-text coupling"},
+      {"path":"octoagent/tests/integration/test_f033_agent_context_continuity.py","qualname":"test_f033_context_survives_restart","definition_ordinal":1,"ordinal":2,"target_selector":"octoagent/tests/integration/test_f033_agent_context_continuity.py::test_f033_context_survives_restart","target_oracle":"restart preserves exact persisted Task/Event/session continuity without prompt-text coupling"},
+      {"path":"octoagent/tests/integration/test_f033_agent_context_continuity.py","qualname":"test_f033_project_context_does_not_leak_across_projects","definition_ordinal":1,"ordinal":1,"target_selector":"octoagent/tests/integration/test_f033_agent_context_continuity.py::test_f033_project_context_does_not_leak_across_projects","target_oracle":"persisted project/session scope remains isolated across projects"}
+    ],
+    "target_classification": {
+      "existing_live_direct_or_nested": 120,
+      "f033_skip_rewrite": 3,
+      "shadowed_definition_rename_and_characterization": 1,
+      "helper_reverse_call_evidence": 20,
+      "total": 144,
+      "note": "target total 144 TaskService constructor identities counts the renamed shadowed definition plus 143 baseline live identities; the 20 helper entries are a subset of those 143 and require reverse-call evidence"
+    },
+    "completion": "all 144 identities map to a passing, non-skipped, non-rerun deterministic node; three F033 identities cannot be represented by a file-level collect result"
+  },
+  "policy": {
+    "unknown_constructor_mode": 0,
+    "process_task_with_llm_llm_override": 0,
+    "shared_service_setters": 0,
+    "runtime_fixture_identity": "same final LLM, ProviderRouter and background registry",
+    "storage_fixture": "explicit storage_only=True",
+    "path_projection": "provider-test-rehome.v1.json is applied before identity and behavior-node comparison"
+  },
+  "live_direct_taskservice_calls": 143,
+  "dead_shadowed_direct_taskservice_calls": 1,
+  "duplicate_test_qualnames": [
+    {
+      "path": "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+      "qualname": "test_task_service_prompt_context_only_exposes_sanitized_control_metadata",
+      "definition_lines": [
+        1782,
+        2043
+      ],
+      "constructor_lines": [
+        1816,
+        2078
+      ],
+      "baseline_collected_definition_ordinal": 2,
+      "target_first_qualname": "test_worker_tool_writeback_and_private_memory_are_isolated_across_sessions",
+      "target_duplicate_count": 0
+    }
+  ],
+  "self_check": {
+    "entry_count": 144,
+    "unique_identity_count": 144,
+    "duplicate_identity_count": 0,
+    "all_test_duplicate_qualname_groups": 1,
+    "baseline_live_test_or_nested_constructor_count": 123,
+    "baseline_helper_constructor_count": 20,
+    "baseline_dead_shadowed_constructor_count": 1,
+    "baseline_skipped_constructor_count": 3,
+    "target_constructor_behavior_evidence_count": 144,
+    "target_skipped_constructor_count": 0
+  },
+  "target": {
+    "collected_direct_taskservice_calls": 144,
+    "duplicate_test_qualnames": 0,
+    "process_task_with_llm_llm_override": 0,
+    "unknown_constructor_mode": 0
+  }
+}

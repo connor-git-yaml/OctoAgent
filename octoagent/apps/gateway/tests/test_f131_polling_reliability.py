@@ -20,6 +20,7 @@ from octoagent.gateway.services.config.config_schema import (
     TelegramChannelConfig,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.telegram import (
     _POLL_BACKOFF_BASE_S,
@@ -30,16 +31,13 @@ from octoagent.gateway.services.telegram import (
     _is_getupdates_conflict,
 )
 from octoagent.gateway.services.telegram_client import TelegramBotApiError
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 
 
 def _write_polling_config(project_root: Path) -> None:
     save_config(
         OctoAgentConfig(
             updated_at="2026-07-06",
-            channels=ChannelsConfig(
-                telegram=TelegramChannelConfig(enabled=True, mode="polling")
-            ),
+            channels=ChannelsConfig(telegram=TelegramChannelConfig(enabled=True, mode="polling")),
         ),
         project_root,
     )
@@ -76,9 +74,7 @@ def test_backoff_sequence_bounded() -> None:
     扁平 sleep(1.0) 持续失败 5 次总等待 = 5s；退避序列前 5 次（去 jitter 下界）
     ≥ base*(1+2+4+8+16)*0.8，证明退避显著拉长单位时间调用间隔 → 不 busy-loop。
     """
-    lows = [
-        _POLL_BACKOFF_BASE_S * (2**i) * 0.8 for i in range(5)
-    ]  # base 的 1,2,4,8,16 倍下界
+    lows = [_POLL_BACKOFF_BASE_S * (2**i) * 0.8 for i in range(5)]  # base 的 1,2,4,8,16 倍下界
     expected_min_total = sum(lows)
     assert expected_min_total > 5.0  # 远超扁平 5×sleep(1.0)
     # 每一档都比前一档大（去 jitter 语义上单调）
@@ -106,9 +102,7 @@ def test_is_getupdates_conflict_ignores_non_409() -> None:
     """普通网络错 / 非 409 / 非 getUpdates 的 409 → 不误判为双开。"""
     assert _is_getupdates_conflict(RuntimeError("connection reset")) is False
     assert (
-        _is_getupdates_conflict(
-            TelegramBotApiError("Bad Request", status_code=400, payload={})
-        )
+        _is_getupdates_conflict(TelegramBotApiError("Bad Request", status_code=400, payload={}))
         is False
     )
     # 409 但描述与 getUpdates 无关（罕见）→ 不判双开
@@ -126,9 +120,7 @@ async def test_conflict_409_emits_distinct_hint(
 ) -> None:
     """AC-3：polling loop 遇 409 → WARNING 含 conflict 诊断 hint（用户可修）。"""
     _write_polling_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
 
     class _ConflictBot:
         async def get_updates(self, *, offset=None, timeout_s: int):
@@ -171,9 +163,7 @@ async def test_network_error_no_conflict_hint(
 ) -> None:
     """AC-3 反向：普通网络错日志文案不含 conflict hint（与 409 区分）。"""
     _write_polling_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
 
     class _FlakyBot:
         async def get_updates(self, *, offset=None, timeout_s: int):
@@ -208,14 +198,10 @@ async def test_network_error_no_conflict_hint(
 
 
 @pytest.mark.asyncio
-async def test_conflict_409_backs_off(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_conflict_409_backs_off(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """AC-4：409 场景调用退避（与普通错共用退避），不裸 busy-loop。"""
     _write_polling_config(tmp_path)
-    store_group = await create_store_group(
-        str(tmp_path / "g.db"), str(tmp_path / "artifacts")
-    )
+    store_group = await create_store_group(str(tmp_path / "g.db"), str(tmp_path / "artifacts"))
 
     class _ConflictBot:
         def __init__(self) -> None:
@@ -223,9 +209,7 @@ async def test_conflict_409_backs_off(
 
         async def get_updates(self, *, offset=None, timeout_s: int):
             self.calls += 1
-            raise TelegramBotApiError(
-                "Conflict getUpdates", status_code=409, payload={}
-            )
+            raise TelegramBotApiError("Conflict getUpdates", status_code=409, payload={})
 
     backoff_calls: list[int] = []
 
@@ -233,9 +217,7 @@ async def test_conflict_409_backs_off(
         backoff_calls.append(attempt)
         return 0.01
 
-    monkeypatch.setattr(
-        "octoagent.gateway.services.telegram._compute_poll_backoff", _fake_backoff
-    )
+    monkeypatch.setattr("octoagent.gateway.services.telegram._compute_poll_backoff", _fake_backoff)
     bot = _ConflictBot()
     service = TelegramGatewayService(
         project_root=tmp_path,

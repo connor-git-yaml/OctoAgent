@@ -20,10 +20,10 @@ from octoagent.gateway.services.config.config_schema import (
     TelegramChannelConfig,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.telegram import TelegramGatewayService
 from octoagent.gateway.voice import SttResult
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 
 from .test_telegram_voice import (
     FakeTaskRunner,
@@ -170,9 +170,7 @@ async def test_polling_loop_not_blocked_by_slow_voice(tmp_path: Path) -> None:
             super().__init__()
             self._batches = list(batches)
 
-        async def get_updates(
-            self, *, offset: int | None = None, timeout_s: int
-        ) -> list[object]:
+        async def get_updates(self, *, offset: int | None = None, timeout_s: int) -> list[object]:
             del offset, timeout_s
             if self._batches:
                 return self._batches.pop(0)
@@ -398,7 +396,7 @@ async def test_worker_survives_pipeline_error(tmp_path: Path) -> None:
     assert any("处理失败" in s.text for s in bot.sent)
     assert service._voice_worker_task is not None and not service._voice_worker_task.done()
     # 第 2 条：正常走完主链
-    assert ("这条正常" in [text for _, text in runner.enqueued])
+    assert "这条正常" in [text for _, text in runner.enqueued]
     assert stt.transcribe_calls == 2
 
     await service.shutdown()

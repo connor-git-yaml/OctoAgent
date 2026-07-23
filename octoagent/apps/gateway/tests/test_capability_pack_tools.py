@@ -5,14 +5,13 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-
-import pytest
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import httpx
+import pytest
 from octoagent.core.models import (
     ExecutionBackend,
     ExecutionConsoleSession,
@@ -45,6 +44,8 @@ from octoagent.tooling import (
     ToolBroker,
 )
 from octoagent.tooling.models import PermissionPreset
+
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 
 def _write_mcp_echo_server(path: Path) -> None:
@@ -110,7 +111,6 @@ async def _build_runtime_services(tmp_path: Path):
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-
             source="tests",
         )
     )
@@ -132,14 +132,14 @@ async def _build_runtime_services(tmp_path: Path):
     task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=LLMService(),
+        runtime_services=runtime_service_fixture(LLMService()).bundle,
         delegation_plane=delegation_plane,
     )
     capability_pack.bind_delegation_plane(delegation_plane)
     capability_pack.bind_task_runner(task_runner)
     await capability_pack.startup()
     await task_runner.startup()
-    task_service = TaskService(store_group, sse_hub)
+    task_service = TaskService(store_group, sse_hub, storage_only=True)
     return (
         store_group,
         sse_hub,
@@ -178,7 +178,6 @@ async def test_capability_pack_exposes_builtin_tool_catalog_and_availability(
             "subagents.list",
             "subagents.kill",
             "subagents.steer",
-            "subagents.spawn",
             "work.merge",
             "work.delete",
             "web.fetch",
@@ -252,7 +251,7 @@ async def test_capability_pack_setup_quick_connect_tool_reuses_canonical_setup_f
         tool_broker,
     ) = await _build_runtime_services(tmp_path)
 
-    import octoagent.provider.dx.setup_governance_adapter as adapter_module
+    import octoagent.gateway.services.operations.setup_governance_adapter as adapter_module
 
     class FakeAdapter:
         def __init__(self, project_root: Path) -> None:
@@ -299,7 +298,6 @@ async def test_capability_pack_setup_quick_connect_tool_reuses_canonical_setup_f
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:general",
-
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -418,7 +416,6 @@ async def test_capability_pack_general_tools_support_filesystem_and_terminal_wit
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:general",
-
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -545,7 +542,6 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-
             source="tests",
         )
     )
@@ -577,7 +573,7 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
         await capability_pack.startup()
         pack = await capability_pack.get_pack()
         by_name = {item.tool_name: item for item in pack.tools}
-        task_service = TaskService(store_group, SSEHub())
+        task_service = TaskService(store_group, SSEHub(), storage_only=True)
         mcp_task_id, created = await task_service.create_task(
             NormalizedMessage(
                 text="执行 MCP 工具测试",
@@ -599,7 +595,6 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
                 task_id=mcp_task_id,
                 trace_id=f"trace-{mcp_task_id}",
                 caller="tests",
-    
                 permission_preset=PermissionPreset.MINIMAL,
             ),
         )
@@ -610,7 +605,6 @@ async def test_capability_pack_registers_mcp_proxy_tools_and_marks_runtime_degra
                 task_id=mcp_task_id,
                 trace_id=f"trace-{mcp_task_id}",
                 caller="tests",
-    
                 permission_preset=PermissionPreset.NORMAL,
             ),
         )
@@ -701,15 +695,11 @@ async def test_capability_pack_honors_mcp_mount_policy_defaults(
         )
 
         assert (
-            capability_pack._mcp_tool_enabled_by_default(
-                server_name="all", tool_profile="minimal"
-            )
+            capability_pack._mcp_tool_enabled_by_default(server_name="all", tool_profile="minimal")
             is True
         )
         assert (
-            capability_pack._mcp_tool_enabled_by_default(
-                server_name="all", tool_profile="standard"
-            )
+            capability_pack._mcp_tool_enabled_by_default(server_name="all", tool_profile="standard")
             is True
         )
         assert (
@@ -771,7 +761,6 @@ async def test_web_search_tool_returns_parsed_results(
                 task_id=task_id,
                 trace_id=f"trace-{task_id}",
                 caller="tests",
-    
                 permission_preset=PermissionPreset.MINIMAL,
             ),
         )
@@ -839,7 +828,6 @@ async def test_memory_recall_tool_returns_structured_recall_pack(
                 task_id=task_id,
                 trace_id=f"trace-{task_id}",
                 caller="tests",
-    
                 permission_preset=PermissionPreset.MINIMAL,
             ),
         )
@@ -916,7 +904,6 @@ async def test_browser_tools_persist_session_and_follow_clickable_refs(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:test",
-
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1116,7 +1103,6 @@ async def test_subagent_management_tools_list_kill_and_steer_descendants(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:test",
-
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1286,7 +1272,6 @@ async def test_work_split_tool_creates_real_child_tasks_and_canvas_artifact(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:test",
-
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1393,7 +1378,6 @@ async def test_work_split_allows_worker_to_worker_delegation_after_F098(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1412,9 +1396,7 @@ async def test_work_split_allows_worker_to_worker_delegation_after_F098(
         # 验证错误不含历史 reject 文案（具体业务结果由 DelegationManager 决定，
         # max_depth=2 仍可能拒绝；但不再是 enforce_child_target_kind_policy 的硬编码 raise）
         if result.is_error:
-            assert "worker runtime cannot delegate to another worker" not in (
-                result.error or ""
-            ), (
+            assert "worker runtime cannot delegate to another worker" not in (result.error or ""), (
                 "F098 Phase C 闭环失败：仍命中 enforce_child_target_kind_policy 历史 raise"
             )
     finally:
@@ -1469,7 +1451,6 @@ async def test_workers_review_tool_returns_supervisor_plan_with_tool_profiles(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-
             permission_preset=PermissionPreset.MINIMAL,
         )
 
@@ -1544,7 +1525,6 @@ async def test_runtime_now_tool_returns_owner_local_time_payload(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-
             permission_preset=PermissionPreset.MINIMAL,
         )
 
@@ -1610,7 +1590,6 @@ async def test_runtime_now_tool_marks_missing_owner_profile_as_degraded(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-
             permission_preset=PermissionPreset.MINIMAL,
         )
 
@@ -1675,7 +1654,6 @@ async def test_subagents_spawn_preserves_freshness_tool_profile_and_lineage(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1770,7 +1748,6 @@ async def test_subagents_spawn_allows_worker_to_worker_delegation_after_F098(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1788,9 +1765,7 @@ async def test_subagents_spawn_allows_worker_to_worker_delegation_after_F098(
 
         # F098 Phase C: 不再 reject 历史 enforce raise 文案
         if result.is_error:
-            assert "worker runtime cannot delegate to another worker" not in (
-                result.error or ""
-            ), (
+            assert "worker runtime cannot delegate to another worker" not in (result.error or ""), (
                 "F098 Phase C 闭环失败：仍命中 enforce_child_target_kind_policy 历史 raise"
             )
     finally:
@@ -1844,7 +1819,6 @@ async def test_subagents_spawn_keeps_local_document_queries_on_minimal_profile(
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:supervisor",
-
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1928,7 +1902,6 @@ async def test_subagents_spawn_uses_objective_as_child_prompt_when_title_is_prov
             task_id=task_id,
             trace_id=f"trace-{task_id}",
             caller="worker:test",
-
             permission_preset=PermissionPreset.NORMAL,
         )
 
@@ -1986,7 +1959,12 @@ async def test_bootstrap_shared_only_no_type_specific_templates(
         assert template_ids == {"bootstrap:shared"}
 
         # 不应有 type-specific 模板
-        for type_id in ["bootstrap:general", "bootstrap:ops", "bootstrap:research", "bootstrap:dev"]:
+        for type_id in [
+            "bootstrap:general",
+            "bootstrap:ops",
+            "bootstrap:research",
+            "bootstrap:dev",
+        ]:
             assert type_id not in template_ids
     finally:
         await task_runner.shutdown()
@@ -2090,7 +2068,15 @@ async def test_unified_worker_profiles_share_same_tool_groups(
         assert general is dev
 
         # 包含所有必要分组
-        required_groups = {"project", "filesystem", "terminal", "memory", "mcp", "skills", "runtime"}
+        required_groups = {
+            "project",
+            "filesystem",
+            "terminal",
+            "memory",
+            "mcp",
+            "skills",
+            "runtime",
+        }
         assert required_groups.issubset(set(general.default_tool_groups))
     finally:
         await task_runner.shutdown()
@@ -2129,8 +2115,7 @@ async def test_bootstrap_token_budget_within_limit(
         # 粗略估算: 1 token ~ 4 字符（混合中英文）
         estimated_tokens = total_chars / 3
         assert estimated_tokens <= 250, (
-            f"Bootstrap 估算 token 数 {estimated_tokens:.0f} 超过 250 限制。"
-            f" 总字符: {total_chars}"
+            f"Bootstrap 估算 token 数 {estimated_tokens:.0f} 超过 250 限制。 总字符: {total_chars}"
         )
     finally:
         await task_runner.shutdown()

@@ -9,7 +9,6 @@ import type { ProjectOption, SessionProjectionDocument, SessionProjectionItem } 
 import {
   formatDateTime,
   formatSessionDisplayTitle,
-  getValueAtPath,
 } from "../../workbench/utils";
 import { useApprovalCenterCount } from "../../hooks/useApprovalCenterCount";
 
@@ -110,15 +109,32 @@ function formatDiagnosticsLabel(status: string): string {
   return "状态检查中";
 }
 
+export function hasConfiguredProvider(configValue: unknown): boolean {
+  if (!configValue || typeof configValue !== "object" || Array.isArray(configValue)) {
+    return false;
+  }
+  const providers = (configValue as Record<string, unknown>).providers;
+  return (
+    Array.isArray(providers) &&
+    providers.some(
+      (provider) =>
+        provider !== null &&
+        typeof provider === "object" &&
+        !Array.isArray(provider) &&
+        (provider as Record<string, unknown>).enabled !== false
+    )
+  );
+}
+
 function buildShellStatus(options: {
-  runtimeMode: string;
+  hasProvider: boolean;
   pendingCount: number;
   pendingTitle: string;
   diagnosticsStatus: string;
   activeWorkCount: number;
 }): { title: string; summary: string } {
   const diagnosticsNormalized = String(options.diagnosticsStatus ?? "").trim().toLowerCase();
-  if (options.runtimeMode === "echo") {
+  if (!options.hasProvider) {
     return {
       title: "还在体验模式",
       summary: "先连上真实模型后，联网查询、专门角色协作和长期使用才会稳定。",
@@ -471,10 +487,7 @@ export default function WorkbenchLayout() {
     return match?.name || "Agent";
   };
   const pendingTotal = sessions.operator_summary?.total_pending ?? 0;
-  const runtimeMode =
-    String(getValueAtPath(config.current_value, "runtime.llm_mode") ?? "echo")
-      .trim()
-      .toLowerCase() || "echo";
+  const hasProvider = hasConfiguredProvider(config.current_value);
   const activeWorks = (delegation?.works ?? []).filter((item) =>
     ACTIVE_WORK_STATUSES.has(String(item.status).toLowerCase())
   );
@@ -482,7 +495,7 @@ export default function WorkbenchLayout() {
   const operatorItems = Array.isArray(sessions.operator_items) ? sessions.operator_items : [];
   const pendingTitle = operatorItems[0]?.title?.trim() ?? "";
   const shellStatus = buildShellStatus({
-    runtimeMode,
+    hasProvider,
     pendingCount: pendingTotal,
     pendingTitle,
     diagnosticsStatus: diagnostics.overall_status,

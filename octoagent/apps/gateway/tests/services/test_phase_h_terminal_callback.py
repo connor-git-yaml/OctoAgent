@@ -19,7 +19,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
-
 from octoagent.core.models import TaskStatus
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.sse_hub import SSEHub
@@ -125,11 +124,9 @@ async def test_invoke_callbacks_empty_list_no_error():
 @pytest.mark.asyncio
 async def test_write_state_transition_invokes_callback_on_terminal(tmp_path: Path):
     """AC-H1+H2: _write_state_transition 在终态后触发所有 callback。"""
-    store_group = await create_store_group(
-        str(tmp_path / "h-1.db"), str(tmp_path / "art")
-    )
+    store_group = await create_store_group(str(tmp_path / "h-1.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
 
     callback_invoked = []
 
@@ -161,9 +158,7 @@ async def test_write_state_transition_invokes_callback_on_terminal(tmp_path: Pat
     )
 
     # AC-H1+H2: 终态触发了 callback
-    assert task_id in callback_invoked, (
-        "AC-H1+H2 闭环失败：终态后 callback 未被触发"
-    )
+    assert task_id in callback_invoked, "AC-H1+H2 闭环失败：终态后 callback 未被触发"
 
     await store_group.close()
 
@@ -173,11 +168,9 @@ async def test_write_state_transition_callback_failure_does_not_break_transition
     tmp_path: Path,
 ):
     """AC-H5 集成: callback 异常 → state transition 仍成功（事件已 commit）。"""
-    store_group = await create_store_group(
-        str(tmp_path / "h-2.db"), str(tmp_path / "art")
-    )
+    store_group = await create_store_group(str(tmp_path / "h-2.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
 
     async def failing_callback(task_id: str) -> None:
         raise RuntimeError("intentional callback failure")

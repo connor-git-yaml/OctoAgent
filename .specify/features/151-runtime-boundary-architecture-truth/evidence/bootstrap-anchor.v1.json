@@ -1,0 +1,88 @@
+{
+  "version": 1,
+  "feature_id": "F151",
+  "base_sha": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc",
+  "worktree_fingerprint": "a8030b7e0b2482ce69a74034b1a98b3f37063447c93660500e2c2d8b1d54790f",
+  "anchored_utc": "2026-07-20T17:00:57Z",
+  "main_review_message_id": "main-f151-phase0-red-review-v4-20260720t170057z",
+  "artifacts": [
+    {
+      "slice_id": "S001-import-direction",
+      "phase": "RED",
+      "relative_path": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/bootstrap/S001-import-direction/RED",
+      "sha256": "56ccf733bf6d51e1c70356607d575cca8e717a8b8440dda8958c3eca6a4ef6e3",
+      "size_bytes": 24147,
+      "argv_sha256": "579ac3faef0dcd32fc0b62822ecd94292ef1707815107f7cb1ceb5666924d234",
+      "tree_sha256": "90472dc9ee6c574ca076c668e7e79340503a8dd8802b797e9de9d7d7b8c01150",
+      "junit_sha256": "d58d64aaa7fe24117468d7b9968e16ac11bfee30728ed997f629d7d6563afee3",
+      "stdout_sha256": "dd1ad58d18db73ce277ef172ed0e1744e6b9f525003ffc4aa6e13e8b0594371e",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 1
+    },
+    {
+      "slice_id": "S002-manifest-integrity",
+      "phase": "RED",
+      "relative_path": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/bootstrap/S002-manifest-integrity/RED",
+      "sha256": "e34b17d88945cdc4ab3f806ed114251b47df166674cc5f02ede01b213bd74e3a",
+      "size_bytes": 48869,
+      "argv_sha256": "91865d86e4a87c5f8a4326dba9906581764b9e2382cecba50b1dc458620b3fa4",
+      "tree_sha256": "c7ebb3e35b0baf6c09d26c836b2fb46c1b84d5c6abbecbf615c63891c50586da",
+      "junit_sha256": "364aeaad0b537a98705c89832f56505d89065b412c30e0679c5a69445203fd40",
+      "stdout_sha256": "a252a502b25ae8febff3cc2b1d92fb8caa612446f203e6cf83b705379b9e2132",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 1
+    },
+    {
+      "slice_id": "S002-retired-quality",
+      "phase": "RED",
+      "relative_path": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/bootstrap/S002-retired-quality/RED",
+      "sha256": "241365033a38889cade6556646aeb3f6c8c932dda6d66acecaa5f84377aab8ce",
+      "size_bytes": 23379,
+      "argv_sha256": "3fa34e758e93582c3deb1d83bfe1cdb2ffbdcaa9bf4fb05fb6bf14030e80b34c",
+      "tree_sha256": "8e8d7c71848b8c72a21c51ef605e52589c50f818104b6262cc928e96c1068250",
+      "junit_sha256": "b42730082b799ca530ef2ccd808b2b8a197ee78548772090e28b975aa41e5d80",
+      "stdout_sha256": "9e98e743f4459ff1c9e3d69a66b59abdcfa27e8cb1cbcb9a21d5c77d2e826466",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 1
+    },
+    {
+      "slice_id": "S003-complexity-checker",
+      "phase": "RED",
+      "relative_path": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/bootstrap/S003-complexity-checker/RED",
+      "sha256": "11985461717ce21c9dacacc4c3a0c17cd66e9188affb6fd0f968d191686c940a",
+      "size_bytes": 23878,
+      "argv_sha256": "df0a38aaca103ffa65e74694a18f1a33cc9caf0eef801a13e83210aac89ba12b",
+      "tree_sha256": "d00035f098c125321df3cca1bdebb9f1b3923821cbebc4e3174928ebe9cb61af",
+      "junit_sha256": "db81628f4a2f79246094fb16e7968b6b128db010f25720f4d9b8194097bf09b0",
+      "stdout_sha256": "ed3e4aa85238afe3c0323b07e699baa75861bcc81cca57e531de9c97865af92f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 1
+    },
+    {
+      "slice_id": "S004-evidence-checker",
+      "phase": "RED",
+      "relative_path": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/bootstrap/S004-evidence-checker/RED",
+      "sha256": "9fb792e6f1e8af8a2ce841a15fadf61cdd32060c48b583c3b34fb7e6c9a40285",
+      "size_bytes": 36922,
+      "argv_sha256": "344460898a3ee0ecb70ecfbc97811aa13b85c00f9b1d4ed4d295a4b87c5c3ccc",
+      "tree_sha256": "63c1829fd14e50e7d1259b35f9663a79a366047abcb6a623f4c34647ec14c929",
+      "junit_sha256": "a511ba2dd497d17527f9dbc6b00e013a031caebda2fb9cb65db457361b6d3b4c",
+      "stdout_sha256": "eb567f10028ab4f9443ce5091893faed42529ecf2af311fb4c9d07f9da67fa73",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 1
+    },
+    {
+      "slice_id": "S004-junit-parser",
+      "phase": "RED",
+      "relative_path": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/bootstrap/S004-junit-parser/RED",
+      "sha256": "26d89a2e6e5c5cff948626ee700836c59032b372b369c599dd7f41d24526f1f0",
+      "size_bytes": 22521,
+      "argv_sha256": "4d397c536879c36b82245ba52db3a267191f35935840c02149651a8ca97032c4",
+      "tree_sha256": "440c81b6ed0b608ef07d7380ca6a5e7da7d55cfcf5a55d47f3663ee96159865c",
+      "junit_sha256": "a5afc308f084860310887d5bc6238c9c0a84e8cfe5711a5e82fa1d9c7318cb0b",
+      "stdout_sha256": "35d1da84696d6b4006a145a85c2b18ed2099a99470ddd01b78696c2af159d21f",
+      "stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "exit_code": 1
+    }
+  ]
+}

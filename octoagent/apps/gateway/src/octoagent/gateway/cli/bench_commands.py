@@ -9,15 +9,20 @@ Lazy import ``benchmarks.runner.cli``：让 gateway 包不硬依赖 benchmarks/
 from __future__ import annotations
 
 import sys
-from typing import Sequence
+from collections.abc import Sequence
+from pathlib import Path
+
+from octoagent.gateway.cli.install_bootstrap import resolve_managed_source_checkout
 
 
 def app(argv: Sequence[str] | None = None) -> None:
     """``octo-bench`` entry point。
 
-    Phase D 方案 A：独立命令（不修改 octoagent.provider.dx.cli:main）；
+    Phase D 方案 A：独立命令（不修改 octoagent.gateway.cli.cli:main）；
     spec 文字提到的 ``octo bench daily`` 等价为 ``octo-bench daily``。
     """
+    resolve_managed_source_checkout(Path.cwd())
+
     from benchmarks.runner.cli import main as _main
 
     sys.exit(_main(argv if argv is not None else sys.argv[1:]))

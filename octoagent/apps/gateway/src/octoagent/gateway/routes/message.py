@@ -3,14 +3,13 @@
 POST /api/message: 接收用户消息，创建 Task，异步启动 LLM 处理。
 """
 
-import asyncio
-
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from octoagent.core.models.message import NormalizedMessage
 from pydantic import BaseModel, Field
 
 from ..deps import get_sse_hub, get_store_group
 from ..services.task_service import TaskService
+from .chat import require_runtime_task_runner
 
 router = APIRouter()
 
@@ -40,6 +39,7 @@ class MessageResponse(BaseModel):
 async def receive_message(
     body: MessageRequest,
     request: Request,
+    response_tasks: BackgroundTasks,
     store_group=Depends(get_store_group),
     sse_hub=Depends(get_sse_hub),
 ):
@@ -49,6 +49,9 @@ async def receive_message(
     - idempotency_key 已存在返回 200 OK
     """
     from starlette.responses import JSONResponse
+
+    task_runner = require_runtime_task_runner(request)
+    del response_tasks
 
     # 转换为 NormalizedMessage
     msg = NormalizedMessage(
@@ -62,27 +65,11 @@ async def receive_message(
         idempotency_key=body.idempotency_key,
     )
 
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     task_id, created = await service.create_task(msg)
 
     if created:
-        # 异步启动后台 LLM 处理（如果有）
-        if hasattr(request.app.state, "llm_service") and request.app.state.llm_service:
-            task_runner = getattr(request.app.state, "task_runner", None)
-            if task_runner is not None:
-                await task_runner.enqueue(task_id, msg.text)
-            else:
-                background_task = asyncio.create_task(
-                    service.process_task_with_llm(
-                        task_id,
-                        msg.text,
-                        request.app.state.llm_service,
-                    )
-                )
-                background_tasks = getattr(request.app.state, "background_tasks", None)
-                if isinstance(background_tasks, set):
-                    background_tasks.add(background_task)
-                    background_task.add_done_callback(background_tasks.discard)
+        await task_runner.enqueue(task_id, msg.text)
 
         return JSONResponse(
             status_code=201,

@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
 from typing import Any
 
 import structlog
@@ -22,11 +21,11 @@ from octoagent.core.models import (
     ControlPlaneSupportStatus,
     ControlPlaneTargetRef,
     DelegationPlaneDocument,
+    DelegationTargetKind,
     DynamicToolSelection,
     NormalizedMessage,
     PipelineRunItem,
     SkillPipelineDocument,
-    Task,
     Work,
     WorkProjectionItem,
 )
@@ -34,10 +33,10 @@ from ulid import ULID
 
 from ._base import (
     ControlPlaneActionError,
-    ControlPlaneContext,
     DomainServiceBase,
     expand_internal_work_ids,
 )
+
 log = structlog.get_logger()
 
 
@@ -201,167 +200,149 @@ class WorkDomainService(DomainServiceBase):
         child_map: dict[str, list[str]],
     ) -> WorkProjectionItem:
         selection = self._tool_selection_from_work(work)
-        return (
-            WorkProjectionItem(
-                work_id=work.work_id,
-                task_id=work.task_id,
-                parent_work_id=work.parent_work_id or "",
-                title=work.title,
-                status=work.status.value,
-                target_kind=work.target_kind.value,
-                selected_worker_type=work.selected_worker_type,
-                route_reason=work.route_reason,
-                owner_id=work.owner_id,
-                selected_tools=work.selected_tools,
-                pipeline_run_id=work.pipeline_run_id,
-                runtime_id=work.runtime_id,
-                project_id=work.project_id,
-                workspace_id="",
-                agent_profile_id=work.agent_profile_id,
-                session_owner_profile_id=work.session_owner_profile_id,
-                turn_executor_kind=work.turn_executor_kind.value,
-                delegation_target_profile_id=work.delegation_target_profile_id,
-                requested_agent_profile_id=work.requested_agent_profile_id,
-                requested_agent_profile_version=work.requested_agent_profile_version,
-                effective_profile_snapshot_id=work.effective_profile_snapshot_id,
-                tool_resolution_mode=(
-                    selection.resolution_mode
-                    if selection is not None
-                    else str(work.metadata.get("tool_resolution_mode", ""))
+        return WorkProjectionItem(
+            work_id=work.work_id,
+            task_id=work.task_id,
+            parent_work_id=work.parent_work_id or "",
+            title=work.title,
+            status=work.status.value,
+            target_kind=work.target_kind.value,
+            selected_worker_type=work.selected_worker_type,
+            route_reason=work.route_reason,
+            owner_id=work.owner_id,
+            selected_tools=work.selected_tools,
+            pipeline_run_id=work.pipeline_run_id,
+            runtime_id=work.runtime_id,
+            project_id=work.project_id,
+            workspace_id="",
+            agent_profile_id=work.agent_profile_id,
+            session_owner_profile_id=work.session_owner_profile_id,
+            turn_executor_kind=work.turn_executor_kind.value,
+            delegation_target_profile_id=work.delegation_target_profile_id,
+            requested_agent_profile_id=work.requested_agent_profile_id,
+            requested_agent_profile_version=work.requested_agent_profile_version,
+            effective_profile_snapshot_id=work.effective_profile_snapshot_id,
+            tool_resolution_mode=(
+                selection.resolution_mode
+                if selection is not None
+                else str(work.metadata.get("tool_resolution_mode", ""))
+            ),
+            mounted_tools=list(selection.mounted_tools) if selection is not None else [],
+            blocked_tools=list(selection.blocked_tools) if selection is not None else [],
+            tool_resolution_warnings=list(selection.warnings) if selection is not None else [],
+            child_work_ids=child_map.get(work.work_id, []),
+            child_work_count=len(child_map.get(work.work_id, [])),
+            merge_ready=self._is_work_merge_ready(work, works),
+            a2a_conversation_id=str(work.metadata.get("a2a_conversation_id", "")),
+            main_agent_session_id=str(work.metadata.get("source_agent_session_id", "")),
+            worker_agent_session_id=str(work.metadata.get("target_agent_session_id", "")),
+            a2a_message_count=int(work.metadata.get("a2a_message_count", 0) or 0),
+            runtime_summary={
+                "delegation_strategy": str(work.metadata.get("delegation_strategy", "")),
+                "final_speaker": str(work.metadata.get("final_speaker", "")),
+                "requested_target_kind": str(work.metadata.get("requested_target_kind", "")),
+                "requested_worker_type": str(work.metadata.get("requested_worker_type", "")),
+                "requested_tool_profile": str(work.metadata.get("requested_tool_profile", "")),
+                "requested_agent_profile_id": work.requested_agent_profile_id,
+                "requested_agent_profile_version": work.requested_agent_profile_version,
+                "effective_profile_snapshot_id": work.effective_profile_snapshot_id,
+                "a2a_conversation_id": str(work.metadata.get("a2a_conversation_id", "")),
+                "main_agent_session_id": str(work.metadata.get("source_agent_session_id", "")),
+                "worker_agent_session_id": str(work.metadata.get("target_agent_session_id", "")),
+                "a2a_message_count": int(work.metadata.get("a2a_message_count", 0) or 0),
+                "research_child_task_id": str(work.metadata.get("research_child_task_id", "")),
+                "research_child_thread_id": str(work.metadata.get("research_child_thread_id", "")),
+                "research_child_work_id": str(work.metadata.get("research_child_work_id", "")),
+                "research_child_status": str(work.metadata.get("research_child_status", "")),
+                "research_worker_status": str(work.metadata.get("research_worker_status", "")),
+                "research_worker_id": str(work.metadata.get("research_worker_id", "")),
+                "research_route_reason": str(work.metadata.get("research_route_reason", "")),
+                "research_tool_profile": str(work.metadata.get("research_tool_profile", "")),
+                "research_a2a_conversation_id": str(
+                    work.metadata.get("research_a2a_conversation_id", "")
                 ),
-                mounted_tools=list(selection.mounted_tools) if selection is not None else [],
-                blocked_tools=list(selection.blocked_tools) if selection is not None else [],
-                tool_resolution_warnings=list(selection.warnings) if selection is not None else [],
-                child_work_ids=child_map.get(work.work_id, []),
-                child_work_count=len(child_map.get(work.work_id, [])),
-                merge_ready=self._is_work_merge_ready(work, works),
-                a2a_conversation_id=str(work.metadata.get("a2a_conversation_id", "")),
-                main_agent_session_id=str(work.metadata.get("source_agent_session_id", "")),
-                worker_agent_session_id=str(work.metadata.get("target_agent_session_id", "")),
-                a2a_message_count=int(work.metadata.get("a2a_message_count", 0) or 0),
-                runtime_summary={
-                    "delegation_strategy": str(work.metadata.get("delegation_strategy", "")),
-                    "final_speaker": str(work.metadata.get("final_speaker", "")),
-                    "requested_target_kind": str(work.metadata.get("requested_target_kind", "")),
-                    "requested_worker_type": str(work.metadata.get("requested_worker_type", "")),
-                    "requested_tool_profile": str(work.metadata.get("requested_tool_profile", "")),
-                    "requested_agent_profile_id": work.requested_agent_profile_id,
-                    "requested_agent_profile_version": work.requested_agent_profile_version,
-                    "effective_profile_snapshot_id": work.effective_profile_snapshot_id,
-                    "a2a_conversation_id": str(work.metadata.get("a2a_conversation_id", "")),
-                    "main_agent_session_id": str(
-                        work.metadata.get("source_agent_session_id", "")
+                "research_main_agent_session_id": str(
+                    work.metadata.get("research_main_agent_session_id", "")
+                ),
+                "research_worker_agent_session_id": str(
+                    work.metadata.get("research_worker_agent_session_id", "")
+                ),
+                "research_a2a_message_count": int(
+                    work.metadata.get("research_a2a_message_count", 0) or 0
+                ),
+                "research_result_artifact_ref": str(
+                    work.metadata.get("research_result_artifact_ref", "")
+                ),
+                "research_handoff_artifact_ref": str(
+                    work.metadata.get("research_handoff_artifact_ref", "")
+                ),
+                "freshness_resolution": str(work.metadata.get("freshness_resolution", "")),
+                "freshness_degraded_reason": str(
+                    work.metadata.get("freshness_degraded_reason", "")
+                ),
+                "clarification_needed": str(work.metadata.get("clarification_needed", "")),
+                "runtime_status": str(work.metadata.get("runtime_status", "")),
+            },
+            updated_at=work.updated_at,
+            capabilities=[
+                ControlPlaneCapability(
+                    capability_id="work.cancel",
+                    label="取消 Work",
+                    action_id="work.cancel",
+                    enabled=work.status not in WORK_TERMINAL_STATUSES,
+                ),
+                ControlPlaneCapability(
+                    capability_id="work.retry",
+                    label="重试 Work",
+                    action_id="work.retry",
+                    enabled=work.status.value != "deleted",
+                ),
+                ControlPlaneCapability(
+                    capability_id="worker.review",
+                    label="评审 Worker 方案",
+                    action_id="worker.review",
+                    enabled=work.status not in WORK_TERMINAL_STATUSES,
+                ),
+                ControlPlaneCapability(
+                    capability_id="work.split",
+                    label="拆分 Work",
+                    action_id="work.split",
+                    enabled=work.status not in WORK_TERMINAL_STATUSES,
+                ),
+                ControlPlaneCapability(
+                    capability_id="work.merge",
+                    label="合并 Work",
+                    action_id="work.merge",
+                    enabled=self._is_work_merge_ready(work, works),
+                    support_status=(
+                        ControlPlaneSupportStatus.SUPPORTED
+                        if self._is_work_merge_ready(work, works)
+                        else ControlPlaneSupportStatus.DEGRADED
                     ),
-                    "worker_agent_session_id": str(
-                        work.metadata.get("target_agent_session_id", "")
+                    reason=(
+                        ""
+                        if self._is_work_merge_ready(work, works)
+                        else "存在未完成 child works 或尚未拆分"
                     ),
-                    "a2a_message_count": int(work.metadata.get("a2a_message_count", 0) or 0),
-                    "research_child_task_id": str(
-                        work.metadata.get("research_child_task_id", "")
-                    ),
-                    "research_child_thread_id": str(
-                        work.metadata.get("research_child_thread_id", "")
-                    ),
-                    "research_child_work_id": str(
-                        work.metadata.get("research_child_work_id", "")
-                    ),
-                    "research_child_status": str(
-                        work.metadata.get("research_child_status", "")
-                    ),
-                    "research_worker_status": str(
-                        work.metadata.get("research_worker_status", "")
-                    ),
-                    "research_worker_id": str(work.metadata.get("research_worker_id", "")),
-                    "research_route_reason": str(work.metadata.get("research_route_reason", "")),
-                    "research_tool_profile": str(
-                        work.metadata.get("research_tool_profile", "")
-                    ),
-                    "research_a2a_conversation_id": str(
-                        work.metadata.get("research_a2a_conversation_id", "")
-                    ),
-                    "research_main_agent_session_id": str(
-                        work.metadata.get("research_main_agent_session_id", "")
-                    ),
-                    "research_worker_agent_session_id": str(
-                        work.metadata.get("research_worker_agent_session_id", "")
-                    ),
-                    "research_a2a_message_count": int(
-                        work.metadata.get("research_a2a_message_count", 0) or 0
-                    ),
-                    "research_result_artifact_ref": str(
-                        work.metadata.get("research_result_artifact_ref", "")
-                    ),
-                    "research_handoff_artifact_ref": str(
-                        work.metadata.get("research_handoff_artifact_ref", "")
-                    ),
-                    "freshness_resolution": str(work.metadata.get("freshness_resolution", "")),
-                    "freshness_degraded_reason": str(
-                        work.metadata.get("freshness_degraded_reason", "")
-                    ),
-                    "clarification_needed": str(work.metadata.get("clarification_needed", "")),
-                    "runtime_status": str(work.metadata.get("runtime_status", "")),
-                },
-                updated_at=work.updated_at,
-                capabilities=[
-                    ControlPlaneCapability(
-                        capability_id="work.cancel",
-                        label="取消 Work",
-                        action_id="work.cancel",
-                        enabled=work.status not in WORK_TERMINAL_STATUSES,
-                    ),
-                    ControlPlaneCapability(
-                        capability_id="work.retry",
-                        label="重试 Work",
-                        action_id="work.retry",
-                        enabled=work.status.value != "deleted",
-                    ),
-                    ControlPlaneCapability(
-                        capability_id="worker.review",
-                        label="评审 Worker 方案",
-                        action_id="worker.review",
-                        enabled=work.status not in WORK_TERMINAL_STATUSES,
-                    ),
-                    ControlPlaneCapability(
-                        capability_id="work.split",
-                        label="拆分 Work",
-                        action_id="work.split",
-                        enabled=work.status not in WORK_TERMINAL_STATUSES,
-                    ),
-                    ControlPlaneCapability(
-                        capability_id="work.merge",
-                        label="合并 Work",
-                        action_id="work.merge",
-                        enabled=self._is_work_merge_ready(work, works),
-                        support_status=(
-                            ControlPlaneSupportStatus.SUPPORTED
-                            if self._is_work_merge_ready(work, works)
-                            else ControlPlaneSupportStatus.DEGRADED
-                        ),
-                        reason=(
-                            ""
-                            if self._is_work_merge_ready(work, works)
-                            else "存在未完成 child works 或尚未拆分"
-                        ),
-                    ),
-                    ControlPlaneCapability(
-                        capability_id="work.delete",
-                        label="删除 Work",
-                        action_id="work.delete",
-                        enabled=work.status in WORK_TERMINAL_STATUSES
-                        and work.status.value != "deleted",
-                    ),
-                    ControlPlaneCapability(
-                        capability_id="work.escalate",
-                        label="升级 Work",
-                        action_id="work.escalate",
-                    ),
-                    ControlPlaneCapability(
-                        capability_id="worker.extract_profile_from_runtime",
-                        label="提炼 Root Agent",
-                        action_id="worker.extract_profile_from_runtime",
-                    ),
-                ],
-            )
+                ),
+                ControlPlaneCapability(
+                    capability_id="work.delete",
+                    label="删除 Work",
+                    action_id="work.delete",
+                    enabled=work.status in WORK_TERMINAL_STATUSES
+                    and work.status.value != "deleted",
+                ),
+                ControlPlaneCapability(
+                    capability_id="work.escalate",
+                    label="升级 Work",
+                    action_id="work.escalate",
+                ),
+                ControlPlaneCapability(
+                    capability_id="worker.extract_profile_from_runtime",
+                    label="提炼 Root Agent",
+                    action_id="worker.extract_profile_from_runtime",
+                ),
+            ],
         )
 
     @staticmethod
@@ -397,6 +378,49 @@ class WorkDomainService(DomainServiceBase):
             return []
         return [item.strip() for item in raw.splitlines() if item.strip()]
 
+    @staticmethod
+    def _delegation_target(
+        params: dict[str, Any],
+        *,
+        default: DelegationTargetKind,
+    ) -> str:
+        if "target_kind" not in params:
+            return default.value
+        value = params["target_kind"]
+        if type(value) is not str:
+            raise ControlPlaneActionError(
+                "WORKER_RUNTIME_SELECTOR_UNSUPPORTED",
+                "target_kind 必须是受支持的精确字符串值",
+            )
+        try:
+            return DelegationTargetKind(value).value
+        except ValueError as exc:
+            raise ControlPlaneActionError(
+                "WORKER_RUNTIME_SELECTOR_UNSUPPORTED",
+                f"不支持的 target_kind: {value!r}",
+            ) from exc
+
+    @classmethod
+    def _normalize_worker_plan_targets(cls, plan: dict[str, Any]) -> dict[str, Any]:
+        assignments = plan.get("assignments")
+        if not isinstance(assignments, list):
+            return dict(plan)
+        normalized: list[Any] = []
+        for assignment in assignments:
+            if not isinstance(assignment, dict):
+                normalized.append(assignment)
+                continue
+            normalized.append(
+                {
+                    **assignment,
+                    "target_kind": cls._delegation_target(
+                        assignment,
+                        default=DelegationTargetKind.SUBAGENT,
+                    ),
+                }
+            )
+        return {**plan, "assignments": normalized}
+
     # ==================================================================
     # Action Handlers
     # ==================================================================
@@ -430,9 +454,15 @@ class WorkDomainService(DomainServiceBase):
             raise ControlPlaneActionError("WORKER_PLAN_REQUIRED", "plan 必须是 object")
         if self._ctx.capability_pack_service is None:
             raise ControlPlaneActionError("CAPABILITY_PACK_UNAVAILABLE", "capability pack 不可用")
+        normalized_plan = self._normalize_worker_plan_targets(raw_plan)
+        if self._ctx.task_runner is None:
+            raise ControlPlaneActionError(
+                "WORKER_RUNTIME_UNAVAILABLE",
+                "当前 runtime 未启用 TaskRunner",
+            )
         await self._get_work_in_scope(work_id)
         result = await self._ctx.capability_pack_service.apply_worker_plan(
-            plan={**raw_plan, "work_id": work_id},
+            plan={**normalized_plan, "work_id": work_id},
             actor=request.actor.actor_id,
         )
         return self._completed_result(
@@ -516,7 +546,10 @@ class WorkDomainService(DomainServiceBase):
             raise ControlPlaneActionError("OBJECTIVES_REQUIRED", "objectives 不能为空")
 
         worker_type = self._param_str(request.params, "worker_type") or "general"
-        target_kind = self._param_str(request.params, "target_kind") or "subagent"
+        target_kind = self._delegation_target(
+            request.params,
+            default=DelegationTargetKind.SUBAGENT,
+        )
         tool_profile = self._param_str(request.params, "tool_profile") or "minimal"
         child_tasks: list[dict[str, Any]] = []
         for objective in parsed_objectives:
@@ -608,9 +641,7 @@ class WorkDomainService(DomainServiceBase):
             raise ControlPlaneActionError("DELEGATION_UNAVAILABLE", "delegation plane 不可用")
         work = await self._get_work_in_scope(work_id)
         descendants = await self._ctx.delegation_plane_service.list_descendant_works(work_id)
-        active = [
-            item.work_id for item in descendants if item.status not in WORK_TERMINAL_STATUSES
-        ]
+        active = [item.work_id for item in descendants if item.status not in WORK_TERMINAL_STATUSES]
         if work.status not in WORK_TERMINAL_STATUSES:
             active.insert(0, work.work_id)
         if active:

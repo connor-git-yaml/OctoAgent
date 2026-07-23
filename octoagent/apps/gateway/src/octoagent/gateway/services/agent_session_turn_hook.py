@@ -19,7 +19,7 @@ class AgentSessionTurnHook:
     """把 tool call / tool result 写入 AgentSession 正式 turn store。"""
 
     def __init__(self, store_group) -> None:
-        self._agent_context = AgentContextService(store_group)
+        self._agent_context = AgentContextService(store_group, storage_only=True)
         self._current_context: SkillExecutionContext | None = None
 
     async def skill_start(

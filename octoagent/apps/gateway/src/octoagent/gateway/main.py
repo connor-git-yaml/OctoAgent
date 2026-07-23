@@ -5,7 +5,9 @@ app 创建 + lifespan 管理：DB 初始化/关闭 + LLM 组件初始化 + 路�
 启动时自动加载 .env（override=False）。
 """
 
-import asyncio
+# ruff: noqa: I001 - F151/F150 gate要求保留基线import顺序，只允许machine映射的路径迁移。
+
+import asyncio  # noqa: F401 - 保持 Gateway main 历史公共装配命名空间
 import os
 import sys
 from collections.abc import AsyncGenerator
@@ -17,23 +19,24 @@ from typing import Any
 import structlog
 from fastapi import Depends, FastAPI
 from fastapi.staticfiles import StaticFiles
-from octoagent.core.config import get_artifacts_dir, get_db_path
-from octoagent.core.store import create_store_group
-from octoagent.memory import init_memory_db
-from octoagent.provider import (
+from octoagent.core.config import get_artifacts_dir, get_db_path  # noqa: F401
+from octoagent.core.store import create_store_group  # noqa: F401
+from octoagent.memory import init_memory_db  # noqa: F401
+from octoagent.provider import (  # noqa: F401
     AliasRegistry,
     EchoMessageAdapter,
     FallbackManager,
 )
+from octoagent.gateway.services.config.config_bootstrap import detect_legacy_runtime_files
 from octoagent.gateway.services.config.config_wizard import load_config
 from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
-from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService
-from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
-from octoagent.provider.dx.service_manager import CONFIG_ERROR_EXIT_CODE
-from octoagent.gateway.services.telegram_client import TelegramBotClient
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
-from octoagent.skills import SkillRunner
-from octoagent.skills.provider_model_client import ProviderModelClient
+from octoagent.gateway.services.memory.memory_console_service import MemoryConsoleService  # noqa: F401
+from octoagent.gateway.services.operations.project_migration import ProjectWorkspaceMigrationService  # noqa: F401
+from octoagent.gateway.services.operations.service_manager import CONFIG_ERROR_EXIT_CODE
+from octoagent.gateway.services.telegram_client import TelegramBotClient  # noqa: F401
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore  # noqa: F401
+from octoagent.skills import SkillRunner  # noqa: F401
+from octoagent.skills.provider_model_client import ProviderModelClient  # noqa: F401
 
 from .deps import require_front_door_access
 from .middleware.logging_config import setup_logfire, setup_logging
@@ -65,35 +68,47 @@ from .routes import (
     watchdog,
     workspace_git,
 )
-from .services.agent_session_turn_hook import AgentSessionTurnHook
-from .services.auth_refresh import build_auth_refresh_callback
-from .services.automation_scheduler import AutomationSchedulerService
-from .services.capability_pack import CapabilityPackService
-from .services.control_plane import ControlPlaneService
-from .services.delegation_plane import DelegationPlaneService
-from .services.frontdoor_auth import FrontDoorGuard
+from .services.agent_session_turn_hook import AgentSessionTurnHook  # noqa: F401
+from .services.auth_refresh import build_auth_refresh_callback  # noqa: F401
+from .services.automation_scheduler import AutomationSchedulerService  # noqa: F401
+from .services.capability_pack import CapabilityPackService  # noqa: F401
+from .services.control_plane import ControlPlaneService  # noqa: F401
+from .services.delegation_plane import DelegationPlaneService  # noqa: F401
+from .services.frontdoor_auth import FrontDoorGuard  # noqa: F401
 from .services.frontdoor_exposure import validate_front_door_exposure
-from .services.llm_service import LLMService
-from .services.mcp_registry import McpRegistryService
-from .services.operator_actions import OperatorActionService
-from .services.operator_inbox import OperatorInboxService
-from .services.discord import DiscordGatewayService
-from .services.discord_client import DiscordApiClient
-from .services.slack import SlackGatewayService
-from .services.slack_client import SlackApiClient
-from .services.sse_hub import SSEHub
-from .services.task_journal import TaskJournalService
-from .services.task_runner import TaskRunner
-from .services.telegram import (
+from .services.llm_service import LLMService  # noqa: F401
+from .services.mcp_registry import McpRegistryService  # noqa: F401
+from .services.operator_actions import OperatorActionService  # noqa: F401
+from .services.operator_inbox import OperatorInboxService  # noqa: F401
+from .services.discord import DiscordGatewayService  # noqa: F401
+from .services.discord_client import DiscordApiClient  # noqa: F401
+from .services.slack import SlackGatewayService  # noqa: F401
+from .services.slack_client import SlackApiClient  # noqa: F401
+from .services.sse_hub import SSEHub  # noqa: F401
+from .services.task_journal import TaskJournalService  # noqa: F401
+from .services.task_runner import TaskRunner  # noqa: F401
+from .services.telegram import (  # noqa: F401
     CompositeApprovalBroadcaster,
     TelegramApprovalBroadcaster,
     TelegramGatewayService,
 )
-from .sse.approval_events import SSEApprovalBroadcaster
+from .sse.approval_events import SSEApprovalBroadcaster  # noqa: F401
 
 log = structlog.get_logger()
 
 _BACKGROUND_TASK_SHUTDOWN_TIMEOUT_S = 10
+
+
+class GatewayRuntimeConfigError(RuntimeError):
+    """Gateway 静态运行时配置无效。"""
+
+    error_code = "GATEWAY_RUNTIME_CONFIG_INVALID"
+
+
+class GatewaySecurityConfigError(RuntimeError):
+    """Gateway 静态安全配置无法完成判定。"""
+
+    error_code = "GATEWAY_SECURITY_CONFIG_INVALID"
 
 
 class SpaStaticFiles(StaticFiles):
@@ -211,17 +226,13 @@ def _resolve_front_door_mode(project_root: Path) -> str:
     （``OCTOAGENT_FRONTDOOR_MODE``），保证启动期校验与运行时认证判定一致。
     配置读取失败保守回退 loopback（default，与 FrontDoorConfig 一致）。
     """
-    env_mode = os.environ.get("OCTOAGENT_FRONTDOOR_MODE", "").strip()
-    if env_mode:
-        return env_mode
     try:
         cfg = load_config(project_root)
     except Exception as exc:
-        log.warning(
-            "front_door_mode_config_invalid_fallback",
-            error_type=type(exc).__name__,
-        )
-        return "loopback"
+        raise GatewayRuntimeConfigError(str(exc)) from exc
+    env_mode = os.environ.get("OCTOAGENT_FRONTDOOR_MODE", "").strip()
+    if env_mode:
+        return env_mode
     if cfg is None:
         return "loopback"
     return str(cfg.front_door.mode)
@@ -266,19 +277,15 @@ def _enforce_front_door_exposure(project_root: Path) -> None:
     - **warn**（暴露面大但有认证）→ 强警告放行（记录，doctor 兜底诊断）。
     - **safe**（默认 127.0.0.1+loopback / 反向隧道回源的 loopback+bearer）→ 放行。
 
-    校验自身**只读、绝不改配置/系统**（FR-C4）；判定过程任何异常保守放行
-    （不因校验 bug 挡启动 = 连本机都用不了，plan §2 Phase D 最高危警告）。
+    校验自身**只读、绝不改配置/系统**（FR-C4）；判定异常必须在服务启动前
+    fail closed，避免把无法判定的暴露面当成安全配置继续运行。
     """
+    host = _resolve_startup_host()
+    mode = _resolve_front_door_mode(project_root)
     try:
-        host = _resolve_startup_host()
-        mode = _resolve_front_door_mode(project_root)
         verdict = validate_front_door_exposure(host, mode)
-    except Exception as exc:  # pragma: no cover - 纯函数极难触发；保守放行
-        log.warning(
-            "front_door_exposure_check_skipped",
-            error_type=type(exc).__name__,
-        )
-        return
+    except Exception as exc:
+        raise GatewaySecurityConfigError(str(exc)) from exc
 
     if verdict.verdict == "reject":
         # 双写：结构化 log（写侧脱敏）+ stderr（service 层 err.log 唯一出口）。
@@ -289,7 +296,7 @@ def _enforce_front_door_exposure(project_root: Path) -> None:
             reason=verdict.reason,
         )
         message = (
-            "[FATAL] 拒绝启动：危险的 host↔mode 组合（防裸奔）\n"
+            "GATEWAY_SECURITY_CONFIG_INVALID: 拒绝启动：危险的 host↔mode 组合（防裸奔）\n"
             f"  host={verdict.host}  front_door.mode={verdict.mode}\n"
             f"  原因：{verdict.reason}\n"
             f"  修复：{verdict.fix_hint}\n"
@@ -311,7 +318,7 @@ def _enforce_front_door_exposure(project_root: Path) -> None:
 def _build_update_status_store(project_root: Path) -> Any | None:
     """构建 024 UpdateStatusStore，缺失时安全降级。"""
     try:
-        from octoagent.provider.dx.update_status_store import UpdateStatusStore
+        from octoagent.gateway.services.operations.update_status_store import UpdateStatusStore
     except Exception as exc:
         log.debug(
             "update_status_store_unavailable",
@@ -328,7 +335,7 @@ def _build_update_status_store(project_root: Path) -> Any | None:
 def _build_update_service(project_root: Path, *, status_store: Any | None = None) -> Any | None:
     """构建 024 UpdateService，缺失时安全降级。"""
     try:
-        from octoagent.provider.dx.update_service import UpdateService
+        from octoagent.gateway.services.operations.update_service import UpdateService
     except Exception as exc:
         log.debug(
             "update_service_unavailable",
@@ -503,6 +510,7 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
     """
     # Feature 003: 自动加载 .env（override=False，不覆盖已有环境变量）
     project_root = _resolve_project_root()
+    detect_legacy_runtime_files(project_root)
     load_project_dotenv(project_root=project_root, override=False)
 
     # host↔mode 防裸奔 fail-fast。必须在昂贵的 app 构造之前——
@@ -514,9 +522,7 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
         version="0.1.0",
         description="OctoAgent M0 基础底座 API",
         lifespan=(
-            _make_harness_lifespan(harness_factory)
-            if harness_factory is not None
-            else lifespan
+            _make_harness_lifespan(harness_factory) if harness_factory is not None else lifespan
         ),
     )
 
@@ -539,12 +545,8 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
     # 统一挂载，不带 protected——平台自鉴权，spec v0.2 D1/D2/FR-A3）。
     app.include_router(tasks.router, tags=["tasks"], dependencies=protected)
     app.include_router(files.router, tags=["files"], dependencies=protected)
-    app.include_router(
-        behavior_versions.router, tags=["behavior-versions"], dependencies=protected
-    )
-    app.include_router(
-        workspace_git.router, tags=["workspace-git"], dependencies=protected
-    )
+    app.include_router(behavior_versions.router, tags=["behavior-versions"], dependencies=protected)
+    app.include_router(workspace_git.router, tags=["workspace-git"], dependencies=protected)
     app.include_router(cancel.router, tags=["cancel"], dependencies=protected)
     app.include_router(execution.router, tags=["execution"], dependencies=protected)
     app.include_router(stream.router, tags=["stream"], dependencies=protected)
@@ -561,17 +563,11 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
     # F084 Phase 3 T050-T051：Memory Candidates + Snapshots API
     app.include_router(memory_candidates.router, tags=["memory"], dependencies=protected)
     # F127 Phase D：巩固合并候选人审 API（C7 用户面，破坏性 MERGE accept/reject）
-    app.include_router(
-        consolidation_candidates.router, tags=["memory"], dependencies=protected
-    )
+    app.include_router(consolidation_candidates.router, tags=["memory"], dependencies=protected)
     # F111：行为文件精简候选人审 + 手动触发 API（C7 用户面，唯一落盘入口）
-    app.include_router(
-        behavior_compact.router, tags=["behavior"], dependencies=protected
-    )
+    app.include_router(behavior_compact.router, tags=["behavior"], dependencies=protected)
     # F145：三源审批中心 pending 汇总（badge 计数只读端点）
-    app.include_router(
-        approval_center.router, tags=["approval-center"], dependencies=protected
-    )
+    app.include_router(approval_center.router, tags=["approval-center"], dependencies=protected)
     # F101 Phase C v2 H-4：Web Notification list/dismiss API
     app.include_router(notifications.router, tags=["notifications"], dependencies=protected)
     pipelines.include_pipeline_routers(app, tags=["pipelines"], dependencies=protected)

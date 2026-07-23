@@ -13,6 +13,16 @@ from typing import Any
 import structlog
 from octoagent.core.event_helpers import emit_task_event
 from octoagent.core.models.enums import ActorType, EventType
+
+# F137 硬闸：gate=deny 下漏网真调用的专用异常——在 runner 的模型调用宽捕获
+# 之前 re-raise，不得进入 retry/backoff/failed-result 转换链（否则闸异常被
+# 拖慢成多轮退避重试后转 REPEAT_ERROR failed result，信号被掩埋）。
+from octoagent.provider import ModelRequestsNotAllowedError
+
+# Feature 081 P1：从 provider 包直接 import LLMCallError，不再通过 litellm_client。
+# ProviderModelClient（Feature 080 主 model_client）抛的也是 ProviderLLMCallError，
+# 这里 alias 为 LLMCallError 与现有签名兼容。
+from octoagent.provider import ProviderLLMCallError as LLMCallError
 from octoagent.tooling.models import ExecutionContext, PermissionPreset, SideEffectLevel
 from octoagent.tooling.protocols import EventStoreProtocol, ToolBrokerProtocol
 from pydantic import BaseModel, ValidationError
@@ -24,7 +34,6 @@ from .exceptions import (
     SkillLoopDetectedError,
     SkillRepeatError,
     SkillToolExecutionError,
-    SkillValidationError,
 )
 from .hooks import NoopSkillRunnerHook, SkillRunnerHook
 from .manifest import SkillManifest
@@ -47,15 +56,6 @@ from .models import (
     is_runtime_exempt_tool,
     resolve_effective_tool_allowlist,
 )
-# Feature 081 P1：从 provider 包直接 import LLMCallError，不再通过 litellm_client。
-# ProviderModelClient（Feature 080 主 model_client）抛的也是 ProviderLLMCallError，
-# 这里 alias 为 LLMCallError 与现有签名兼容。
-from octoagent.provider import ProviderLLMCallError as LLMCallError
-
-# F137 硬闸：gate=deny 下漏网真调用的专用异常——在 runner 的模型调用宽捕获
-# 之前 re-raise，不得进入 retry/backoff/failed-result 转换链（否则闸异常被
-# 拖慢成多轮退避重试后转 REPEAT_ERROR failed result，信号被掩埋）。
-from octoagent.provider import ModelRequestsNotAllowedError
 from .protocols import StructuredModelClientProtocol
 
 logger = structlog.get_logger(__name__)
@@ -88,6 +88,12 @@ class SkillRunner:
         # Feature 072: tool_search 结果回调（用于提升 deferred 工具）
         self._on_tool_search_result = on_tool_search_result
 
+    async def aclose(self) -> None:
+        """释放本地模型客户端资源，不取得其共享上游资源所有权。"""
+        close_fn = getattr(self._model_client, "aclose", None)
+        if callable(close_fn):
+            await close_fn()
+
     async def run(
         self,
         *,
@@ -107,10 +113,7 @@ class SkillRunner:
         # 向后兼容：调用方未自定义 usage_limits 时，从 manifest.loop_guard 转换。
         # 比较整个 LoopGuardPolicy 对象而非仅检查 max_steps，
         # 避免 UsageLimits 默认值变更后导致条件语义漂移。
-        if (
-            limits == _DEFAULT_USAGE_LIMITS
-            and manifest.loop_guard != _DEFAULT_LOOP_GUARD
-        ):
+        if limits == _DEFAULT_USAGE_LIMITS and manifest.loop_guard != _DEFAULT_LOOP_GUARD:
             limits = manifest.loop_guard.to_usage_limits()
         tracker = UsageTracker(start_time=start_time)
 
@@ -180,9 +183,7 @@ class SkillRunner:
                 )
                 # --- Feature 062: 累加 token/cost 数据 ---
                 if hasattr(raw_output, "token_usage") and raw_output.token_usage:
-                    tracker.request_tokens += int(
-                        raw_output.token_usage.get("prompt_tokens", 0)
-                    )
+                    tracker.request_tokens += int(raw_output.token_usage.get("prompt_tokens", 0))
                     tracker.response_tokens += int(
                         raw_output.token_usage.get("completion_tokens", 0)
                     )
@@ -283,9 +284,7 @@ class SkillRunner:
                             attempts=attempts,
                             steps=steps,
                             category=ErrorCategory.REPEAT_ERROR,
-                            error=SkillRepeatError(
-                                f"对话状态已丢失，需从 checkpoint 恢复: {exc}"
-                            ),
+                            error=SkillRepeatError(f"对话状态已丢失，需从 checkpoint 恢复: {exc}"),
                         )
 
                 retry_failures += 1
@@ -366,9 +365,7 @@ class SkillRunner:
                     repeat_count == limits.repeat_warning_threshold
                     and repeat_count < limits.repeat_signature_threshold
                 ):
-                    tool_names = ", ".join(
-                        sorted({call.tool_name for call in output.tool_calls})
-                    )
+                    tool_names = ", ".join(sorted({call.tool_name for call in output.tool_calls}))
                     feedback.append(
                         ToolFeedbackMessage(
                             tool_name=FEEDBACK_SENDER_LOOP_GUARD,
@@ -552,9 +549,7 @@ class SkillRunner:
         result.usage = tracker.to_dict()
         result.total_cost_usd = tracker.cost_usd
         await self._emit_usage_report(manifest, execution_context, tracker)
-        await self._emit_resource_limit_hit(
-            manifest, execution_context, tracker, category, limits
-        )
+        await self._emit_resource_limit_hit(manifest, execution_context, tracker, category, limits)
         await self._call_hook("skill_end", manifest, execution_context, result)
         self._try_clear_history(history_key)
         return result
@@ -579,9 +574,7 @@ class SkillRunner:
                 # 避免 LLM 在 schema 中看得见 mcp.* 但执行层拒绝导致孤立 tool_call。
                 tool_meta = await self._tool_broker.get_tool_meta(call.tool_name)
                 tool_group = tool_meta.tool_group if tool_meta else ""
-                tool_metadata = (
-                    getattr(tool_meta, "metadata", None) if tool_meta else None
-                )
+                tool_metadata = getattr(tool_meta, "metadata", None) if tool_meta else None
                 if is_runtime_exempt_tool(call.tool_name, tool_group, tool_metadata):
                     continue
                 raise SkillToolExecutionError(
@@ -589,7 +582,7 @@ class SkillRunner:
                 )
 
         # 2. 分桶：按 SideEffectLevel 将 tool_calls 分为三组
-        bucket_none: list[ToolCallSpec] = []       # 并行
+        bucket_none: list[ToolCallSpec] = []  # 并行
         bucket_reversible: list[ToolCallSpec] = []  # 串行
         bucket_irreversible: list[ToolCallSpec] = []  # 审批串行
 
@@ -606,10 +599,7 @@ class SkillRunner:
         # 用于按原始顺序重排结果
         results_map: dict[str, ToolFeedbackMessage] = {}
         # 每个 call 的唯一键（用于多次调用同一工具的场景）
-        call_keys = [
-            f"{c.tool_name}:{c.tool_call_id}:{i}"
-            for i, c in enumerate(tool_calls)
-        ]
+        call_keys = [f"{c.tool_name}:{c.tool_call_id}:{i}" for i, c in enumerate(tool_calls)]
 
         batch_id: str | None = None
         batch_start_time = time.monotonic()
@@ -634,8 +624,7 @@ class SkillRunner:
         if bucket_none:
             none_indices = [call_index_map[id(c)] for c in bucket_none]
             coros = [
-                self._execute_single_tool(manifest, execution_context, call)
-                for call in bucket_none
+                self._execute_single_tool(manifest, execution_context, call) for call in bucket_none
             ]
             parallel_results = await asyncio.gather(*coros, return_exceptions=True)
             for call, idx, result in zip(bucket_none, none_indices, parallel_results):
@@ -722,12 +711,12 @@ class SkillRunner:
             work_id=execution_context.work_id,
             permission_preset=_preset,
         )
-        tool_result = await self._tool_broker.execute(
-            call.tool_name, call.arguments, tool_context
-        )
+        tool_result = await self._tool_broker.execute(call.tool_name, call.arguments, tool_context)
 
         feedback = self._build_tool_feedback(
-            call.tool_name, tool_result, manifest.context_budget,
+            call.tool_name,
+            tool_result,
+            manifest.context_budget,
             tool_call_id=call.tool_call_id,
         )
 
@@ -1061,8 +1050,7 @@ class SkillRunner:
         }
         if output.tool_calls:
             payload["tool_calls"] = [
-                {"tool_name": tc.tool_name, "arguments": tc.arguments}
-                for tc in output.tool_calls
+                {"tool_name": tc.tool_name, "arguments": tc.arguments} for tc in output.tool_calls
             ]
         await self._emit_event(
             execution_context=execution_context,

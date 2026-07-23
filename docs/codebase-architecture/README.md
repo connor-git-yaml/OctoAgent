@@ -30,10 +30,10 @@ OctoAgent 当前同时存在两套“结构视角”：
 - 一套来自 [blueprint](../blueprint.md)，描述的是目标态架构和长期分层
 - 一套来自当前真实代码，描述的是现在已经落地、正在运行、正在被维护的模块骨架
 
-如果不把这两层拆开，新维护者会误以为：
+如果不把这两层拆开，新维护者会误以为历史规划中的物理拆分仍然有效：
 
-- `apps/kernel` 已经是独立模块
-- `workers/*` 已经是独立源码树
+- 历史规划曾把协调内核描述为独立应用；当前不存在该物理模块
+- 历史规划曾把 Worker 描述为独立源码树；当前仅保留同一 Gateway runtime 内的逻辑角色
 - `packages/plugins` / `packages/observability` 已经像 blueprint 那样拆好
 
 但当前真实实现并不是这样。当前主线实现的很多职责仍然收敛在 `apps/gateway/services/*`，并通过 `packages/core / provider / tooling / skills / policy / memory / protocol` 与 `frontend` 共同构成系统主链。
@@ -46,7 +46,7 @@ OctoAgent 当前同时存在两套“结构视角”：
 | --- | --- | --- | --- |
 | Gateway Runtime | `octoagent/apps/gateway` | FastAPI 应用装配、任务运行时、控制面、Orchestrator、Delegation、Worker runtime | [`main.py`](../../octoagent/apps/gateway/src/octoagent/gateway/main.py) |
 | Core Domain / Persistence | `octoagent/packages/core` | 领域模型、SQLite store、事务辅助、行为工作区、控制面共享文档模型 | [`store/__init__.py`](../../octoagent/packages/core/src/octoagent/core/store/__init__.py) |
-| Provider / LLM Stack | `octoagent/packages/provider` | `octoagent.yaml` schema、alias 注册、LiteLLM Client、CLI/setup/doctor/runtime activation | [`config_schema.py`](../../octoagent/packages/provider/src/octoagent/provider/dx/config_schema.py) |
+| Provider / LLM Stack | `octoagent/packages/provider` + `octoagent/apps/gateway` | Provider transport/route 与 Gateway 配置、CLI、operations | [`config_schema.py`](../../octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py) |
 | Tooling / Policy / Skills | `octoagent/packages/tooling` `packages/policy` `packages/skills` | tool contract、broker、审批与策略、Skill loop、deterministic pipeline | [`broker.py`](../../octoagent/packages/tooling/src/octoagent/tooling/broker.py) |
 | Memory / Protocol | `octoagent/packages/memory` `packages/protocol` | 记忆治理、检索/维护、A2A-Lite 适配与状态映射 | [`service.py`](../../octoagent/packages/memory/src/octoagent/memory/service.py) |
 | Frontend Workbench | `octoagent/frontend` | Web 工作台、控制面 snapshot 消费、设置/Agents/Memory/Work 等 UI surface | [`WorkbenchLayout.tsx`](../../octoagent/frontend/src/components/shell/WorkbenchLayout.tsx) |
@@ -56,17 +56,18 @@ OctoAgent 当前同时存在两套“结构视角”：
 
 ### 3.1 Blueprint 里的目标态
 
-[blueprint](../blueprint.md) 中的目标分层大致是：
+[blueprint](../blueprint.md) 中的逻辑分层大致是：
 
 ```text
-Channels -> Gateway -> Kernel -> Workers -> Tools / Skills / Provider / Memory
+Channels -> Gateway application host -> TaskRunner / Orchestrator / Delegation
+         -> logical Agent runtimes -> Tools / Skills / Provider / Memory
 ```
 
-并进一步拆成：
+历史 blueprint 曾进一步拆成：
 
 - `apps/gateway`
-- `apps/kernel`
-- `workers/*`
+- 历史的独立协调内核应用
+- 历史的独立 Worker 源码树
 - `packages/core`
 - `packages/protocol`
 - `packages/plugins`
@@ -82,11 +83,11 @@ Channels -> Gateway -> Kernel -> Workers -> Tools / Skills / Provider / Memory
 
 最典型的差异是：
 
-- `Kernel` 相关逻辑当前仍大量收敛在 `apps/gateway/services/orchestrator.py`、`task_runner.py`、`control_plane.py`
-- `Workers` 相关运行时、执行后端、A2A 会话和 delegation plane 也仍主要在 `apps/gateway/services/*`
+- 历史所谓 `Kernel` 是当前 `apps/gateway/services/orchestrator.py`、`task_runner.py`、`control_plane.py` 等 application service 的逻辑职责，不是待补的物理应用
+- 历史所谓 `Workers` 是 `apps/gateway/services/*` 中的逻辑 Agent runtime、A2A 会话与 delegation plane，不是独立源码树或必需部署单元
 - `plugins` / `observability` 还没有作为独立 workspace package 拆出
 
-因此，阅读当前代码时可以把 blueprint 当成“设计目标和边界说明”，但不要把它当成当前目录真相。当前目录真相应以本组文档和源码扫描为准。
+因此，阅读当前代码时应把 blueprint 的这些名字理解为逻辑角色，而不是未来必须物理拆分的承诺。当前目录真相应以本组文档和源码扫描为准。
 
 ## 4. 当前实现的主控制流
 

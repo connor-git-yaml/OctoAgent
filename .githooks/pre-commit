@@ -69,6 +69,29 @@ if [[ -f "${Q_SCRIPT}" && -f "${Q_MANIFEST}" ]]; then
   fi
 fi
 
+# ---- F151: architecture gate（恒跑，必须先于 docs fastpath）----
+# docs / constitution / Feature machine artifacts 同样可能破坏架构合同，不能因
+# docs-only 路由而绕过。base ref 默认使用主分支；离线 worktree 未持有远端 ref 时
+# 只退到本地父提交（首提交再退到 HEAD），且仍由 checker 先解析 commit。
+ARCH_REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+ARCH_BASE_REF="${F151_ARCH_BASE_REF:-origin/master}"
+if ! git cat-file -e "${ARCH_BASE_REF}^{commit}" 2>/dev/null; then
+  if git cat-file -e "HEAD^{commit}" 2>/dev/null && git cat-file -e "HEAD^" 2>/dev/null; then
+    ARCH_BASE_REF="HEAD^"
+  else
+    ARCH_BASE_REF="HEAD"
+  fi
+fi
+ARCH_PYTHONPATH="${ARCH_REPO_ROOT}/octoagent/packages/core/src:${ARCH_REPO_ROOT}/octoagent/packages/provider/src:${ARCH_REPO_ROOT}/octoagent/packages/protocol/src:${ARCH_REPO_ROOT}/octoagent/packages/tooling/src:${ARCH_REPO_ROOT}/octoagent/packages/skills/src:${ARCH_REPO_ROOT}/octoagent/packages/policy/src:${ARCH_REPO_ROOT}/octoagent/packages/memory/src:${ARCH_REPO_ROOT}/octoagent/apps/gateway/src"
+if ! env PYTHONNOUSERSITE=1 PYTHONPATH="${ARCH_PYTHONPATH}" \
+  uv run --project "${ARCH_REPO_ROOT}/octoagent" --no-sync python \
+  "${ARCH_REPO_ROOT}/repo-scripts/check-runtime-architecture.py" all \
+  --base-ref "${ARCH_BASE_REF}"; then
+  echo "[ARCHITECTURE FAIL] F151 architecture gate 未通过"
+  echo "  详情: repo-scripts/check-runtime-architecture.py all --base-ref ${ARCH_BASE_REF}"
+  exit 1
+fi
+
 # ---- F141: change-policy 路由（git diff --cached --name-only 前缀路由）----
 # 保守两条（spec 件3；不做复杂 area 矩阵）：
 #   ① 纯 docs 提速：staged 全部 ∈ {docs/**, **/*.md, .specify/**} → 跳过

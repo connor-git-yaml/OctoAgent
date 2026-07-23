@@ -14,13 +14,13 @@ from octoagent.core.models import (
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.operator_actions import OperatorActionService
 from octoagent.gateway.services.operator_inbox import OperatorInboxService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalRequest
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from octoagent.tooling.models import SideEffectLevel
 
 
@@ -79,7 +79,7 @@ async def client(operator_app) -> AsyncClient:
 
 
 async def _seed_approval(store_group, approval_manager) -> str:
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     task_id, created = await task_service.create_task(
         NormalizedMessage(
             channel="web",

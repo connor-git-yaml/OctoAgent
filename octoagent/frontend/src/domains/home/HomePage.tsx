@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { useWorkbench } from "../../components/shell/WorkbenchLayout";
+import {
+  hasConfiguredProvider,
+  useWorkbench,
+} from "../../components/shell/WorkbenchLayout";
 import { describeOperatorItemForUser } from "../operator/userFacing";
 import { PageIntro } from "../../ui/primitives";
 import type { OperatorInboxItem, WorkProjectionItem } from "../../types";
-import { getValueAtPath } from "../../workbench/utils";
 
 const ACTIVE_WORK_STATUSES = new Set(["created", "assigned", "running", "escalated"]);
 const READY_DIAGNOSTIC_STATUSES = new Set(["ready", "ok", "healthy"]);
@@ -137,11 +139,11 @@ function buildRemoteEntrySummary(channelSummaryEntries: Array<[string, unknown]>
 }
 
 function buildAvailabilityImpact(options: {
-  usingEchoMode: boolean;
+  needsProvider: boolean;
   setupReady: boolean;
   diagnosticsStatus: string;
 }): string {
-  if (options.usingEchoMode) {
+  if (options.needsProvider) {
     return "现在还能先体验页面和流程，但实时查询和专门角色协作不会稳定工作。";
   }
   if (!options.setupReady) {
@@ -164,7 +166,7 @@ function buildSessionSummary(summary: string): string {
   return truncateText(normalized, 96);
 }
 
-function buildEchoModeGuidance(options: {
+function buildProviderGuidance(options: {
   setupReady: boolean;
   nextActions: string[];
   blockingReasons: string[];
@@ -190,13 +192,13 @@ function formatWorkSummary(work: WorkProjectionItem): string {
 }
 
 function buildPrimaryState(options: {
-  usingEchoMode: boolean;
+  needsProvider: boolean;
   setupReady: boolean;
   diagnosticsStatus: string;
   operatorItems: OperatorInboxItem[];
   activeWorks: WorkProjectionItem[];
 }): HomePrimaryState {
-  if (options.usingEchoMode) {
+  if (options.needsProvider) {
     return {
       title: "模型未连接",
       summary: "当前处于体验模式，需要先在 Settings 中配置至少一个 Provider。",
@@ -285,22 +287,18 @@ export default function HomePage() {
       )[0] ?? null,
     [sessions.sessions]
   );
-  const runtimeMode =
-    String(getValueAtPath(config.current_value, "runtime.llm_mode") ?? "echo")
-      .trim()
-      .toLowerCase() || "echo";
-  const usingEchoMode = runtimeMode === "echo";
+  const needsProvider = !hasConfiguredProvider(config.current_value);
   const channelSummaryEntries = Object.entries(diagnostics.channel_summary ?? {}).filter(
     ([, value]) => Boolean(value)
   );
   const primaryState = buildPrimaryState({
-    usingEchoMode,
+    needsProvider,
     setupReady: setupReview.ready,
     diagnosticsStatus: diagnostics.overall_status,
     operatorItems,
     activeWorks,
   });
-  const echoModeGuidance = buildEchoModeGuidance({
+  const providerGuidance = buildProviderGuidance({
     setupReady: setupReview.ready,
     nextActions: setupReview.next_actions,
     blockingReasons: setupReview.blocking_reasons,
@@ -342,7 +340,7 @@ export default function HomePage() {
             <div>
               <p className="wb-card-label">现在先做什么</p>
               <h3>
-                {usingEchoMode || !setupReview.ready
+                {needsProvider || !setupReview.ready
                   ? "先把这一步补上"
                   : operatorItems.length > 0
                     ? "现在需要你处理的事情"
@@ -353,15 +351,15 @@ export default function HomePage() {
             </div>
           </div>
 
-          {usingEchoMode ? (
+          {needsProvider ? (
             <div className="wb-note-stack">
               <div className="wb-note">
                 <strong>当前状态</strong>
-                <span>{echoModeGuidance.status}</span>
+                <span>{providerGuidance.status}</span>
               </div>
               <div className="wb-note">
                 <strong>下一步</strong>
-                <span>{echoModeGuidance.nextStep}</span>
+                <span>{providerGuidance.nextStep}</span>
               </div>
               <Link className="wb-button wb-button-secondary" to="/settings">
                 去设置页处理
@@ -447,7 +445,7 @@ export default function HomePage() {
             <div className="wb-note">
               <strong>聊天会不会被挡住</strong>
               <span>
-                {usingEchoMode
+                {needsProvider
                   ? "现在还能体验页面和对话流程，但回答不会代表真实能力。"
                   : !setupReview.ready
                     ? "基础对话可能还能继续，但先补齐设置会更稳。"
@@ -458,7 +456,7 @@ export default function HomePage() {
               <strong>哪些能力可能受影响</strong>
               <span>
                 {buildAvailabilityImpact({
-                  usingEchoMode,
+                  needsProvider,
                   setupReady: setupReview.ready,
                   diagnosticsStatus: diagnostics.overall_status,
                 })}

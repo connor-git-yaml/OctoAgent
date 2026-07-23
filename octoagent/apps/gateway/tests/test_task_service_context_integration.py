@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from types import MethodType
 
 import pytest
 from octoagent.core.models import (
@@ -20,6 +20,7 @@ from octoagent.core.models import (
     AgentSessionKind,
     AgentSessionTurn,
     AgentSessionTurnKind,
+    ContextFrame,
     EventType,
     MemoryNamespaceKind,
     OwnerOverlayScope,
@@ -31,6 +32,7 @@ from octoagent.core.models import (
     ProjectSelectorState,
     RuntimeControlContext,
     SessionContextState,
+    TaskStatus,
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
@@ -47,11 +49,8 @@ from octoagent.gateway.services.agent_context_helpers import build_worker_agent_
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
-    MemoryAccessPolicy,
     MemoryBackendState,
     MemoryBackendStatus,
-    MemoryEvidenceProjection,
-    MemoryEvidenceQuery,
     MemoryLayer,
     MemoryPartition,
     MemoryRecallHit,
@@ -59,11 +58,14 @@ from octoagent.memory import (
     MemoryRecallPostFilterMode,
     MemoryRecallRerankMode,
     MemoryRecallResult,
-    MemorySearchHit,
-    MemorySearchOptions,
     MemoryService,
 )
 from octoagent.provider.models import ModelCallResult, TokenUsage
+
+from apps.gateway.tests.runtime_service_fixtures import (
+    DelegatingLLMService,
+    runtime_service_fixture,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -156,6 +158,11 @@ class PlannerAwareLLMService(RecordingLLMService):
         )
 
 
+def _task_model_calls(llm_service) -> list[dict[str, object]]:
+    """排除共用 runtime LLM 执行的 session-memory extraction 调用。"""
+    return [call for call in llm_service.calls if "metadata" in call]
+
+
 def test_build_ambient_runtime_facts_formats_local_datetime_and_fallbacks() -> None:
     facts, degraded_reasons = build_ambient_runtime_facts(
         owner_profile=OwnerProfile(
@@ -201,7 +208,6 @@ async def _seed_project_context(store_group) -> None:
         ProjectBinding(
             binding_id="binding-scope-alpha",
             project_id=project.project_id,
-
             binding_type=ProjectBindingType.SCOPE,
             binding_key="chat:web:thread-alpha",
             binding_value="chat:web:thread-alpha",
@@ -213,7 +219,6 @@ async def _seed_project_context(store_group) -> None:
         ProjectBinding(
             binding_id="binding-memory-alpha",
             project_id=project.project_id,
-
             binding_type=ProjectBindingType.MEMORY_SCOPE,
             binding_key="memory/project-alpha",
             binding_value="memory/project-alpha",
@@ -256,7 +261,6 @@ async def _seed_project_context(store_group) -> None:
             session_id="thread-alpha",
             thread_id="thread-alpha",
             project_id=project.project_id,
-
             task_ids=["legacy-task"],
             recent_turn_refs=["legacy-task"],
             recent_artifact_refs=["artifact-legacy"],
@@ -290,7 +294,7 @@ async def test_agent_context_backfills_bootstrap_templates_and_routes(
         )
     )
 
-    service = AgentContextService(store_group, project_root=tmp_path)
+    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
     project = await store_group.project_store.get_project("project-alpha")
     assert project is not None
 
@@ -302,9 +306,7 @@ async def test_agent_context_backfills_bootstrap_templates_and_routes(
     )
     # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（与原 _ensure 等价：读
     # worker_profile → build_worker_agent_profile）。W4-4 删 worker store 方法后这些测试改构造 DTO。
-    _worker_research = await store_group.agent_context_store.get_agent_profile(
-        "singleton:research"
-    )
+    _worker_research = await store_group.agent_context_store.get_agent_profile("singleton:research")
     assert _worker_research is not None
     mirrored = build_worker_agent_profile(_worker_research)
 
@@ -388,8 +390,10 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -403,7 +407,6 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
         dispatch_metadata=await service.get_latest_user_metadata(task_id),
     )
 
@@ -519,9 +522,7 @@ async def test_task_service_injects_profile_bootstrap_recent_and_memory(
         MemoryNamespaceKind.AGENT_PRIVATE,
     }
     expected_scope_ids = {
-        scope_id
-        for namespace in namespaces
-        for scope_id in namespace.memory_scope_ids
+        scope_id for namespace in namespaces for scope_id in namespace.memory_scope_ids
     }
     agent_private_namespace = next(
         item for item in namespaces if item.kind is MemoryNamespaceKind.AGENT_PRIVATE
@@ -664,8 +665,10 @@ async def test_task_service_agent_led_recall_uses_model_planned_query(
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = PlannerAwareLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -679,13 +682,13 @@ async def test_task_service_agent_led_recall_uses_model_planned_query(
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
         dispatch_metadata=await service.get_latest_user_metadata(task_id),
     )
 
-    assert len(llm_service.calls) == 2
-    planner_prompt = llm_service.calls[0]["prompt_or_messages"]
-    final_prompt = llm_service.calls[1]["prompt_or_messages"]
+    task_calls = _task_model_calls(llm_service)
+    assert len(task_calls) == 2
+    planner_prompt = task_calls[0]["prompt_or_messages"]
+    final_prompt = task_calls[1]["prompt_or_messages"]
     assert isinstance(planner_prompt, list)
     assert isinstance(final_prompt, list)
     planner_joined = "\n".join(str(item.get("content", "")) for item in planner_prompt)
@@ -724,7 +727,6 @@ async def test_task_service_agent_led_recall_uses_model_planned_query(
     await store_group.close()
 
 
-
 async def test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phase(
     tmp_path: Path,
     monkeypatch,
@@ -759,9 +761,7 @@ async def test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phas
                 "max_hits": max_hits,
                 "extra_kwargs": kwargs,
                 "hook_options": (
-                    hook_options.model_dump(mode="json")
-                    if hook_options is not None
-                    else None
+                    hook_options.model_dump(mode="json") if hook_options is not None else None
                 ),
             }
         )
@@ -800,8 +800,10 @@ async def test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phas
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = PlannerAwareLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -815,7 +817,6 @@ async def test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phas
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
             "precomputed_recall_plan": {
@@ -833,8 +834,9 @@ async def test_task_service_precomputed_recall_plan_skips_auxiliary_planner_phas
         },
     )
 
-    assert len(llm_service.calls) == 1
-    final_prompt = llm_service.calls[0]["prompt_or_messages"]
+    task_calls = _task_model_calls(llm_service)
+    assert len(task_calls) == 1
+    final_prompt = task_calls[0]["prompt_or_messages"]
     assert isinstance(final_prompt, list)
     final_joined = "\n".join(str(item.get("content", "")) for item in final_prompt)
     assert "MemoryRecallHints:" in final_joined
@@ -867,8 +869,10 @@ async def test_task_service_single_loop_executor_skips_auxiliary_recall_planner_
     )
     await _seed_project_context(store_group)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = PlannerAwareLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -893,7 +897,6 @@ async def test_task_service_single_loop_executor_skips_auxiliary_recall_planner_
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
         dispatch_metadata={
             **(await service.get_latest_user_metadata(task_id)),
             "selected_worker_type": "general",
@@ -902,8 +905,9 @@ async def test_task_service_single_loop_executor_skips_auxiliary_recall_planner_
         },
     )
 
-    assert len(llm_service.calls) == 1
-    final_call = llm_service.calls[0]
+    task_calls = _task_model_calls(llm_service)
+    assert len(task_calls) == 1
+    final_call = task_calls[0]
     # F100 Phase E1: metadata 不再含 single_loop_executor；改读 runtime_context_json
     assert "single_loop_executor" not in final_call["metadata"]
     joined = "\n".join(
@@ -936,7 +940,6 @@ async def test_agent_session_replay_projection_pairs_tool_turns_and_drops_orphan
             agent_runtime_id=runtime_id,
             role=AgentRuntimeRole.MAIN,
             project_id="project-default",
-
         )
     )
     await store_group.agent_context_store.save_agent_session(
@@ -1021,9 +1024,9 @@ async def test_agent_session_replay_projection_pairs_tool_turns_and_drops_orphan
         await store_group.agent_context_store.save_agent_session_turn(turn)
     await store_group.conn.commit()
 
-    projection = await AgentContextService(store_group).build_agent_session_replay_projection(
-        agent_session_id=session_id
-    )
+    projection = await AgentContextService(
+        store_group, storage_only=True
+    ).build_agent_session_replay_projection(agent_session_id=session_id)
     assert projection.source == "agent_session_turn_store"
     assert projection.transcript_entries[-2:] == [
         {
@@ -1142,8 +1145,10 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -1162,7 +1167,6 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
         thread_id="thread-alpha",
         session_id="worker-thread-alpha",
         project_id="project-alpha",
-
         work_id="work-alpha-1",
         agent_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1176,7 +1180,6 @@ async def test_task_service_worker_context_defaults_to_private_namespace_hint_fi
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
         worker_capability="llm_generation",
         runtime_context=runtime_context,
         dispatch_metadata={
@@ -1384,8 +1387,10 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = PlannerAwareLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -1404,7 +1409,6 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
         thread_id="thread-alpha",
         session_id="worker-thread-alpha",
         project_id="project-alpha",
-
         work_id="work-alpha-2",
         agent_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1418,7 +1422,6 @@ async def test_task_service_worker_context_enables_planned_recall_by_default(
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
         worker_capability="llm_generation",
         runtime_context=runtime_context,
         dispatch_metadata={
@@ -1564,8 +1567,10 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -1584,7 +1589,6 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
         thread_id="thread-alpha",
         session_id="worker-thread-alpha",
         project_id="project-alpha",
-
         work_id="work-alpha-2",
         agent_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
@@ -1598,7 +1602,6 @@ async def test_task_service_worker_context_respects_explicit_detailed_prefetch_o
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
         worker_capability="llm_generation",
         runtime_context=runtime_context,
         dispatch_metadata={
@@ -1662,8 +1665,10 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
         agent_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
     )
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
 
     async def run_worker_turn(
         *,
@@ -1689,7 +1694,6 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
             thread_id="thread-alpha",
             session_id="worker-thread-alpha",
             project_id="project-alpha",
-
             work_id=work_id,
             agent_profile_id=worker_profile.profile_id,
             worker_capability="llm_generation",
@@ -1702,7 +1706,6 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
         await service.process_task_with_llm(
             task_id=task_id,
             user_text=message.text,
-            llm_service=llm_service,
             worker_capability="llm_generation",
             runtime_context=runtime_context,
             dispatch_metadata={
@@ -1755,7 +1758,9 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
 
     assert second_frame.agent_session_id == second_agent_session_id
     assert second_frame.memory_hits == []
-    assert second_frame.budget["memory_recall"]["recall_owner_role"] == AgentRuntimeRole.WORKER.value
+    assert (
+        second_frame.budget["memory_recall"]["recall_owner_role"] == AgentRuntimeRole.WORKER.value
+    )
     assert second_frame.budget["memory_recall"]["prefetch_mode"] == "hint_first"
     assert any(
         entry["scope_id"] == first_private_scope_ids[1]
@@ -1779,7 +1784,7 @@ async def test_task_service_worker_private_writeback_surfaces_runtime_memory_hin
 # 旧的 _record_private_tool_evidence_writeback 已被 SessionMemoryExtractor 替代
 
 
-async def test_task_service_prompt_context_only_exposes_sanitized_control_metadata(
+async def test_worker_tool_writeback_and_private_memory_are_isolated_across_sessions(
     tmp_path: Path,
 ) -> None:
     store_group = await create_store_group(
@@ -1813,7 +1818,10 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         agent_profile_id=worker_profile.profile_id,
         worker_capability="llm_generation",
     )
-    service = TaskService(store_group, SSEHub())
+    runtime_llm = DelegatingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(runtime_llm).bundle
+    )
 
     class ToolAwareLLMService:
         def __init__(self) -> None:
@@ -1912,6 +1920,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         idempotency_key: str,
         llm_service,
     ):
+        runtime_llm.delegate = llm_service
         message = NormalizedMessage(
             channel="web",
             thread_id="thread-alpha",
@@ -1929,7 +1938,6 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
             thread_id="thread-alpha",
             session_id="worker-thread-alpha",
             project_id="project-alpha",
-
             work_id=work_id,
             agent_profile_id=worker_profile.profile_id,
             worker_capability="llm_generation",
@@ -1942,7 +1950,6 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         await service.process_task_with_llm(
             task_id=task_id,
             user_text=message.text,
-            llm_service=llm_service,
             worker_capability="llm_generation",
             runtime_context=runtime_context,
             dispatch_metadata={
@@ -1977,18 +1984,18 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         llm_service=tool_llm_service,
     )
 
-    tool_writeback = first_frame.budget["private_tool_writeback"]
-    assert tool_writeback["status"] == "completed"
-    assert tool_writeback["scope_id"] == first_private_scope_ids[1]
-    assert tool_writeback["scope_kind"] == "runtime_private"
-    assert tool_writeback["committed_count"] == 1
-    assert tool_writeback["tool_names"] == ["web.search"]
+    # F067 已删除逐工具 private writeback；worker internal session 也不属于
+    # SessionMemoryExtractor 的可提取会话类型。工具事实可留在当前 task，不能越过
+    # 这个边界写入另一个 worker session 可召回的 private SoR。
+    assert "private_tool_writeback" not in first_frame.budget
     assert tool_llm_service.calls[0]["metadata"]["agent_runtime_id"] == worker_runtime_id
     assert tool_llm_service.calls[0]["metadata"]["agent_session_id"] == first_agent_session_id
     assert tool_llm_service.calls[0]["metadata"]["work_id"] == "work-alpha-tool-1"
-    assert tool_llm_service.tool_event_ids[0] in tool_writeback["event_ids"]
-    assert tool_llm_service.ignored_tool_event_ids[0] not in tool_writeback["event_ids"]
-    assert any(ref["ref_type"] == "memory_sor" for ref in first_frame.source_refs)
+    first_events = await store_group.event_store.get_events_for_task(_first_task_id)
+    first_event_ids = {event.event_id for event in first_events}
+    assert tool_llm_service.tool_event_ids[0] in first_event_ids
+    assert tool_llm_service.ignored_tool_event_ids[0] in first_event_ids
+    assert not any(ref["ref_type"] == "memory_sor" for ref in first_frame.source_refs)
 
     cursor = await store_group.conn.execute(
         """
@@ -2001,9 +2008,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
         (first_private_scope_ids[1],),
     )
     sor_row = await cursor.fetchone()
-    assert sor_row is not None
-    assert "worker_tool:web.search" in sor_row[0]
-    assert "agent-zero-playbook" in sor_row[1]
+    assert sor_row is None
 
     second_agent_session_id = build_agent_session_id(
         agent_runtime_id=worker_runtime_id,
@@ -2036,6 +2041,7 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
     assert "mode: hint_first" in joined
     assert "MemoryRecallHints:" in joined
     assert "memory.recall / memory.search / memory.read" in joined
+    assert "找到 agent-zero-playbook 的官方文档入口" not in joined
 
     await store_group.close()
 
@@ -2075,8 +2081,10 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -2099,7 +2107,6 @@ async def test_task_service_prompt_context_only_exposes_sanitized_control_metada
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
         dispatch_metadata=await service.get_latest_user_metadata(task_id),
     )
 
@@ -2160,8 +2167,10 @@ async def test_task_service_injects_runtime_hints_block_into_prompt_and_request_
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -2175,7 +2184,6 @@ async def test_task_service_injects_runtime_hints_block_into_prompt_and_request_
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
         dispatch_metadata={
             "clarification_category": "weather_location",
             "clarification_source_text": "今天天气怎么样？",
@@ -2341,8 +2349,10 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -2356,7 +2366,6 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
     )
 
     assert len(recall_calls) == 2
@@ -2371,18 +2380,14 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
     # F096 Phase C: 验证同步路径 + 延迟路径双 emit MEMORY_RECALL_COMPLETED
     # T-C-3 test_sync_path_emits_memory_recall_completed +
     #       test_dual_path_consistency
-    completed_events = [
-        ev for ev in events if ev.type is EventType.MEMORY_RECALL_COMPLETED
-    ]
+    completed_events = [ev for ev in events if ev.type is EventType.MEMORY_RECALL_COMPLETED]
     # 应有 2 条事件：sync 路径（Phase C 新增）+ delayed 路径（baseline F094 + Phase A）
     assert len(completed_events) >= 2, (
         f"sync + delayed 路径应各 emit 一次，实际 {len(completed_events)} 条"
     )
     # idempotency_key 互不相同（sync = recall_frame_id；delayed = delayed_recall_idempotency_key）
     idempotency_keys = {
-        ev.causality.idempotency_key
-        for ev in completed_events
-        if ev.causality is not None
+        ev.causality.idempotency_key for ev in completed_events if ev.causality is not None
     }
     assert len(idempotency_keys) >= 2, (
         f"sync vs delayed 路径 idempotency_key 应不同，实际 {idempotency_keys}"
@@ -2403,9 +2408,7 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
     # F096 Phase D: 验证 BEHAVIOR_PACK_LOADED + BEHAVIOR_PACK_USED emit
     # T-D-5 test_loaded_emits_on_cache_miss + test_used_emits_every_dispatch +
     #       test_loaded_used_pack_id_matches
-    loaded_events = [
-        ev for ev in events if ev.type is EventType.BEHAVIOR_PACK_LOADED
-    ]
+    loaded_events = [ev for ev in events if ev.type is EventType.BEHAVIOR_PACK_LOADED]
     used_events = [ev for ev in events if ev.type is EventType.BEHAVIOR_PACK_USED]
     # 至少 1 个 LOADED（首次 dispatch 必 cache miss）
     assert len(loaded_events) >= 1, "首次 dispatch 必 emit LOADED（cache miss）"
@@ -2460,9 +2463,7 @@ async def test_task_service_persists_delayed_recall_as_durable_artifacts_and_eve
     )
     # 应至少 2 条 RecallFrame：sync 路径（已 baseline）+ delayed 路径（F096 新增）
     assert len(recall_frames) >= 2
-    delayed_frames = [
-        f for f in recall_frames if f.metadata.get("source") == "delayed_recall"
-    ]
+    delayed_frames = [f for f in recall_frames if f.metadata.get("source") == "delayed_recall"]
     assert len(delayed_frames) == 1
     delayed_frame = delayed_frames[0]
     # H2 闭环：agent_session_id / agent_runtime_id 强一致派生（非 fallback 空）
@@ -2528,7 +2529,14 @@ async def test_f096_audit_chain_profile_runtime_recallframe_consistency(
     await store_group.conn.commit()
 
     async def fake_recall_memory(
-        self, *, scope_ids, query, policy=None, per_scope_limit=3, max_hits=4, hook_options=None,
+        self,
+        *,
+        scope_ids,
+        query,
+        policy=None,
+        per_scope_limit=3,
+        max_hits=4,
+        hook_options=None,
     ):
         return MemoryRecallResult(
             query=query,
@@ -2568,8 +2576,10 @@ async def test_f096_audit_chain_profile_runtime_recallframe_consistency(
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-audit",
@@ -2583,7 +2593,6 @@ async def test_f096_audit_chain_profile_runtime_recallframe_consistency(
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
     )
 
     # === AC-F2 audit chain：四层身份对齐 ===
@@ -2633,9 +2642,7 @@ async def test_f096_audit_chain_profile_runtime_recallframe_consistency(
     )
 
     # MEMORY_RECALL_COMPLETED emit（sync 路径，Phase C）
-    completed_events = [
-        ev for ev in events if ev.type is EventType.MEMORY_RECALL_COMPLETED
-    ]
+    completed_events = [ev for ev in events if ev.type is EventType.MEMORY_RECALL_COMPLETED]
     assert len(completed_events) >= 1, "audit chain test 必有 MEMORY_RECALL_COMPLETED"
     completed_payload = completed_events[0].payload
     assert completed_payload.get("agent_runtime_id") == runtime_id_from_recall, (
@@ -2667,9 +2674,7 @@ async def test_task_service_delayed_recall_save_recall_frame_failure_does_not_bl
             name="Alpha Agent",
             persona_summary="你负责 Alpha 项目的需求连续性与交付推进。",
             instruction_overlays=["回答前必须对齐当前 project 的长期约束。"],
-            context_budget_policy={
-                "memory_recall": {"prefetch_mode": "detailed_prefetch"}
-            },
+            context_budget_policy={"memory_recall": {"prefetch_mode": "detailed_prefetch"}},
         )
     )
     await store_group.conn.commit()
@@ -2795,8 +2800,10 @@ async def test_task_service_delayed_recall_save_recall_frame_failure_does_not_bl
         fail_save_for_delayed,
     )
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -2810,7 +2817,6 @@ async def test_task_service_delayed_recall_save_recall_frame_failure_does_not_bl
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
     )
 
     # 关键断言：尽管 delayed 路径 save_recall_frame raise，
@@ -2848,7 +2854,6 @@ async def test_task_service_migrates_legacy_session_and_trims_prompt_budget(
             session_id="thread-alpha",
             thread_id="thread-alpha",
             project_id="project-alpha",
-
             task_ids=["legacy-task"],
             recent_turn_refs=["legacy-task"],
             rolling_summary=long_summary,
@@ -2904,8 +2909,10 @@ async def test_task_service_migrates_legacy_session_and_trims_prompt_budget(
 
     monkeypatch.setattr(MemoryService, "recall_memory", fake_recall_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -2919,7 +2926,6 @@ async def test_task_service_migrates_legacy_session_and_trims_prompt_budget(
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
     )
 
     task = await store_group.task_store.get_task(task_id)
@@ -2966,14 +2972,15 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
             selector_id="selector-web",
             surface="web",
             active_project_id="project-alpha",
-
             source="tests",
         )
     )
     await store_group.conn.commit()
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-runtime-drift",
@@ -2997,7 +3004,6 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
             project_id="project-alpha",
         ),
         project_id="project-alpha",
-
         hop_count=1,
         max_hops=3,
         worker_capability="llm_generation",
@@ -3011,7 +3017,6 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
             selector_id="selector-web",
             surface="web",
             active_project_id="project-beta",
-
             source="tests",
         )
     )
@@ -3020,7 +3025,6 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
     await service.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_service,
         runtime_context=frozen_context,
     )
 
@@ -3033,9 +3037,7 @@ async def test_task_service_prefers_frozen_runtime_context_over_live_selector(
     frames = await store_group.agent_context_store.list_context_frames(task_id=task_id, limit=5)
     assert len(frames) == 1
     assert frames[0].project_id == "project-alpha"
-    assert any(
-        ref["ref_type"] == "runtime_context" for ref in frames[0].source_refs
-    )
+    assert any(ref["ref_type"] == "runtime_context" for ref in frames[0].source_refs)
 
     await store_group.close()
 
@@ -3117,8 +3119,10 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
     )
     await store_group.conn.commit()
 
-    service = TaskService(store_group, SSEHub())
     llm_service = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+    )
 
     async def _send_message(text: str, idem: str) -> str:
         message = NormalizedMessage(
@@ -3148,7 +3152,6 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
         await service.process_task_with_llm(
             task_id=task_id,
             user_text=message.text,
-            llm_service=llm_service,
             dispatch_metadata=dispatch_metadata,
         )
         return task_id
@@ -3157,7 +3160,8 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
     await _send_message("Path B 第一条消息", "f077-msg-1")
 
     runtimes = await store_group.agent_context_store.list_agent_runtimes(
-        project_id="project-alpha", role=AgentRuntimeRole.WORKER,
+        project_id="project-alpha",
+        role=AgentRuntimeRole.WORKER,
     )
     assert [r.agent_runtime_id for r in runtimes] == [path_a_runtime_id], (
         f"Path B should reuse Path A's ULID runtime; got {[r.agent_runtime_id for r in runtimes]}"
@@ -3174,7 +3178,8 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
     await _send_message("Path B 第二条消息", "f077-msg-2")
 
     runtimes = await store_group.agent_context_store.list_agent_runtimes(
-        project_id="project-alpha", role=AgentRuntimeRole.WORKER,
+        project_id="project-alpha",
+        role=AgentRuntimeRole.WORKER,
     )
     direct_worker_sessions = await store_group.agent_context_store.list_agent_sessions(
         project_id="project-alpha",
@@ -3196,7 +3201,8 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
             f"composite-key runtime leaked: {runtime.agent_runtime_id}"
         )
     all_sessions = await store_group.agent_context_store.list_agent_sessions(
-        project_id="project-alpha", limit=20,
+        project_id="project-alpha",
+        limit=20,
     )
     for sess in all_sessions:
         assert not sess.agent_session_id.startswith("runtime:"), (
@@ -3241,12 +3247,8 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
     # 模拟"老库脏数据"：当时还没有 partial unique index，允许同 (project, role, profile)
     # 多条 active row 共存。直接 DROP 新的 unique index 后插入，重启时 init_db
     # 会重新跑迁移并恢复 index。
-    await store_group.conn.execute(
-        "DROP INDEX IF EXISTS idx_agent_runtimes_active_worker_unique"
-    )
-    await store_group.conn.execute(
-        "DROP INDEX IF EXISTS idx_agent_sessions_direct_worker_active"
-    )
+    await store_group.conn.execute("DROP INDEX IF EXISTS idx_agent_runtimes_active_worker_unique")
+    await store_group.conn.execute("DROP INDEX IF EXISTS idx_agent_sessions_direct_worker_active")
 
     # canonical ULID + 同 (project, role, worker_profile) 的 composite 双写
     canonical_runtime_id = "runtime-01CANONICALMIG0000000000"
@@ -3274,9 +3276,7 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
 
     # composite session 引用 composite runtime；canonical session 引用 canonical runtime
     canonical_session_id = "session-01CANONICALMIG0000000000"
-    composite_session_id = (
-        f"runtime:{composite_runtime_id}|kind:direct_worker|legacy:thread-mig"
-    )
+    composite_session_id = f"runtime:{composite_runtime_id}|kind:direct_worker|legacy:thread-mig"
     await store_group.agent_context_store.save_agent_session(
         AgentSession(
             agent_session_id=canonical_session_id,
@@ -3320,7 +3320,8 @@ async def test_composite_key_migration_merges_rows_into_ulid(tmp_path: Path) -> 
     store_group_2 = await create_store_group(db_path, artifacts_dir)
 
     runtimes = await store_group_2.agent_context_store.list_agent_runtimes(
-        project_id=project.project_id, role=AgentRuntimeRole.WORKER,
+        project_id=project.project_id,
+        role=AgentRuntimeRole.WORKER,
     )
     runtime_ids = sorted(r.agent_runtime_id for r in runtimes)
     # 期望：canonical 保留 + composite 合并到 canonical 后被删 + orphan 就地 rename 为新 ULID
@@ -3358,7 +3359,6 @@ async def test_f094_d2_worker_default_memory_recall_matches_baseline(
     """F094 D2 verbatim: 新建 Worker AgentProfile（无 existing memory_recall）时，
     `context_budget_policy["memory_recall"]` 5 个 key 与 F093 baseline 硬编码值
     完全一致（行为零变更）。"""
-    from octoagent.gateway.services.agent_context import AgentContextService
 
     store_group = await create_store_group(
         str(tmp_path / "f094-d2.db"),
@@ -3382,9 +3382,7 @@ async def test_f094_d2_worker_default_memory_recall_matches_baseline(
         )
         # 无 existing_profile：merged_memory_recall = defaults 全部
         # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（等价）。
-        _worker_d2 = await store_group.agent_context_store.get_agent_profile(
-            "singleton:f094-d2"
-        )
+        _worker_d2 = await store_group.agent_context_store.get_agent_profile("singleton:f094-d2")
         assert _worker_d2 is not None
         mirrored = build_worker_agent_profile(_worker_d2)
         assert mirrored is not None
@@ -3429,7 +3427,6 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
     """F094 D4 / D5 (Codex Phase D LOW-4 闭环): 覆盖 existing memory_recall 三类
     edge case：(1) 空 dict → 全 defaults；(2) 完整 5 key override → 全 existing；
     (3) 非 dict（非法）→ 触发 _memory_recall_preferences 防御 → 视为空。"""
-    from octoagent.gateway.services.agent_context import AgentContextService
 
     store_group = await create_store_group(
         str(tmp_path / "f094-d5-edge.db"),
@@ -3473,9 +3470,7 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
             "singleton:f094-d5-edge"
         )
         assert _worker_edge is not None
-        mirrored_empty = build_worker_agent_profile(
-            _worker_edge, existing_profile=existing_empty
-        )
+        mirrored_empty = build_worker_agent_profile(_worker_edge, existing_profile=existing_empty)
         assert mirrored_empty is not None
         assert mirrored_empty.context_budget_policy["memory_recall"] == baseline_defaults
 
@@ -3495,9 +3490,7 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
             persona_summary="",
             context_budget_policy={"memory_recall": full_override},
         )
-        mirrored_full = build_worker_agent_profile(
-            _worker_edge, existing_profile=existing_full
-        )
+        mirrored_full = build_worker_agent_profile(_worker_edge, existing_profile=existing_full)
         assert mirrored_full is not None
         assert mirrored_full.context_budget_policy["memory_recall"] == full_override
 
@@ -3511,9 +3504,7 @@ async def test_f094_d5_existing_profile_edge_cases(tmp_path: Path) -> None:
             persona_summary="",
             context_budget_policy={"memory_recall": "not_a_dict"},
         )
-        mirrored_bad = build_worker_agent_profile(
-            _worker_edge, existing_profile=existing_bad
-        )
+        mirrored_bad = build_worker_agent_profile(_worker_edge, existing_profile=existing_bad)
         assert mirrored_bad is not None
         assert mirrored_bad.context_budget_policy["memory_recall"] == baseline_defaults
     finally:
@@ -3531,7 +3522,6 @@ async def test_f094_d5_existing_profile_overrides_module_defaults(
     - scope_limit = 10（existing override）
     - 其他 4 key = defaults（hint_first / True / 4 / 8）
     """
-    from octoagent.gateway.services.agent_context import AgentContextService
 
     store_group = await create_store_group(
         str(tmp_path / "f094-d5.db"),
@@ -3565,9 +3555,7 @@ async def test_f094_d5_existing_profile_overrides_module_defaults(
             },
         )
         # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（等价）。
-        _worker_d5 = await store_group.agent_context_store.get_agent_profile(
-            "singleton:f094-d5"
-        )
+        _worker_d5 = await store_group.agent_context_store.get_agent_profile("singleton:f094-d5")
         assert _worker_d5 is not None
         mirrored = build_worker_agent_profile(_worker_d5, existing_profile=existing)
         assert mirrored is not None
@@ -3580,5 +3568,228 @@ async def test_f094_d5_existing_profile_overrides_module_defaults(
         assert memory_recall["planner_enabled"] is True
         assert memory_recall["per_scope_limit"] == 4
         assert memory_recall["max_hits"] == 8
+    finally:
+        await store_group.close()
+
+
+async def _seed_precomputed_completion_context(store_group, *, task_id: str) -> ContextFrame:
+    runtime_id = "runtime-precomputed-main"
+    agent_session_id = "agent-session-precomputed-main"
+    session_id = "session-precomputed-main"
+    frame = ContextFrame(
+        context_frame_id="context-frame-precomputed-main",
+        task_id=task_id,
+        session_id=session_id,
+        agent_runtime_id=runtime_id,
+        agent_session_id=agent_session_id,
+        project_id="project-alpha",
+        agent_profile_id="agent-profile-alpha",
+        recall_frame_id="recall-frame-precomputed-main",
+        recent_summary="已确认使用确定性回复。",
+    )
+    await store_group.agent_context_store.save_agent_runtime(
+        AgentRuntime(
+            agent_runtime_id=runtime_id,
+            role=AgentRuntimeRole.MAIN,
+            project_id="project-alpha",
+        )
+    )
+    await store_group.agent_context_store.save_agent_session(
+        AgentSession(
+            agent_session_id=agent_session_id,
+            agent_runtime_id=runtime_id,
+            kind=AgentSessionKind.MAIN_BOOTSTRAP,
+            project_id="project-alpha",
+            surface="web",
+            thread_id="thread-precomputed",
+            legacy_session_id=session_id,
+        )
+    )
+    await store_group.agent_context_store.save_session_context(
+        SessionContextState(
+            session_id=session_id,
+            thread_id="thread-precomputed",
+            project_id="project-alpha",
+            agent_runtime_id=runtime_id,
+            agent_session_id=agent_session_id,
+        )
+    )
+    await store_group.agent_context_store.save_context_frame(frame)
+    await store_group.conn.commit()
+    return frame
+
+
+def _install_precomputed_runtime_traps(monkeypatch, service: TaskService) -> None:
+    async def forbidden_async(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("precomputed completion reached a runtime capability")
+
+    def forbidden_sync(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("precomputed completion reached extraction")
+
+    for name in (
+        "_build_task_context",
+        "_call_llm_service",
+        "_record_context_compaction_once",
+        "_record_delayed_recall_once",
+        "_materialize_delayed_recall_once",
+    ):
+        monkeypatch.setattr(service, name, forbidden_async)
+    monkeypatch.setattr(MemoryService, "recall_memory", forbidden_async)
+    monkeypatch.setattr(
+        service._context_compaction,
+        "schedule_background_compaction",
+        forbidden_async,
+    )
+    monkeypatch.setattr(
+        service._agent_context,
+        "_spawn_session_memory_extraction",
+        forbidden_sync,
+    )
+
+
+async def _assert_precomputed_task_artifacts(
+    store_group,
+    *,
+    task_id: str,
+    result: ModelCallResult,
+) -> str:
+    task = await store_group.task_store.get_task(task_id)
+    assert task is not None
+    assert task.status is TaskStatus.SUCCEEDED
+    events = await store_group.event_store.get_events_for_task(task_id)
+    event_types = [item.type for item in events]
+    assert not {
+        EventType.MEMORY_RECALL_COMPLETED,
+        EventType.CONTEXT_COMPACTION_COMPLETED,
+    }.intersection(event_types)
+    completed = next(item for item in events if item.type is EventType.MODEL_CALL_COMPLETED)
+    assert completed.payload == {
+        "model_alias": result.model_alias,
+        "response_summary": result.content,
+        "duration_ms": result.duration_ms,
+        "token_usage": result.token_usage.model_dump(),
+        "artifact_ref": completed.payload["artifact_ref"],
+        "model_name": result.model_name,
+        "provider": result.provider,
+        "cost_usd": result.cost_usd,
+        "cost_unavailable": result.cost_unavailable,
+        "is_fallback": result.is_fallback,
+    }
+    checkpoints = [item for item in events if item.type is EventType.CHECKPOINT_SAVED]
+    assert [item.payload["node_id"] for item in checkpoints] == [
+        "state_running",
+        "model_call_started",
+        "response_persisted",
+        "task_succeeded",
+    ]
+    assert task.pointers.latest_checkpoint_id == checkpoints[-1].payload["checkpoint_id"]
+    artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+    assert [item.name for item in artifacts] == ["llm-response"]
+    artifact = artifacts[0]
+    content = await store_group.artifact_store.get_artifact_content(artifact.artifact_id)
+    assert content == result.content.encode("utf-8")
+    assert artifact.artifact_id == completed.payload["artifact_ref"]
+    return artifact.artifact_id
+
+
+async def _assert_precomputed_session_storage(
+    store_group,
+    *,
+    frame: ContextFrame,
+    task_id: str,
+    user_text: str,
+    response_text: str,
+    response_artifact_id: str,
+) -> None:
+    state = await store_group.agent_context_store.get_session_context(frame.session_id)
+    assert state is not None
+    assert state.task_ids == [task_id]
+    assert state.recent_turn_refs == [task_id]
+    assert state.recent_artifact_refs == [response_artifact_id]
+    assert state.last_context_frame_id == frame.context_frame_id
+    assert state.last_recall_frame_id == frame.recall_frame_id
+    session = await store_group.agent_context_store.get_agent_session(frame.agent_session_id)
+    assert session is not None
+    assert session.recent_transcript == [
+        {"role": "user", "content": user_text, "task_id": task_id},
+        {"role": "assistant", "content": response_text, "task_id": task_id},
+    ]
+    assert session.metadata["latest_model_reply_preview"] == response_text
+    turns = await store_group.agent_context_store.list_agent_session_turns(
+        agent_session_id=frame.agent_session_id,
+        limit=10,
+    )
+    assert [item.kind for item in turns] == [
+        AgentSessionTurnKind.USER_MESSAGE,
+        AgentSessionTurnKind.ASSISTANT_MESSAGE,
+    ]
+    assert turns[-1].artifact_ref == response_artifact_id
+
+
+async def test_storage_only_precomputed_completion_persists_exact_task_event_artifact_checkpoint_turn_and_session_without_model_or_extraction(  # noqa: E501
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    store_group = await create_store_group(
+        str(tmp_path / "f151-precomputed-completion.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await _seed_project_context(store_group)
+    service = TaskService(store_group, SSEHub(), storage_only=True)
+    operation = getattr(service, "complete_task_with_precomputed_result", None)
+    if not callable(operation):
+        pytest.fail(
+            "F151_PRECOMPUTED_COMPLETION_OPERATION_MISSING: storage-only operation absent",
+            pytrace=False,
+        )
+    assert "llm_service" not in inspect.signature(operation).parameters
+    _install_precomputed_runtime_traps(monkeypatch, service)
+
+    message = NormalizedMessage(
+        channel="web",
+        thread_id="thread-precomputed",
+        scope_id="chat:web:thread-precomputed",
+        text="请返回确定性的预计算答复。",
+        idempotency_key="f151-s081-precomputed",
+    )
+    task_id, created = await service.create_task(message)
+    assert created is True
+    frame = await _seed_precomputed_completion_context(store_group, task_id=task_id)
+    result = ModelCallResult(
+        content="这是确定性的预计算答复。",
+        model_alias="inline-reply",
+        model_name="agent-inline",
+        provider="inline",
+        duration_ms=1,
+        token_usage=TokenUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0),
+        cost_usd=0.0,
+        cost_unavailable=False,
+        is_fallback=False,
+        fallback_reason="",
+    )
+
+    try:
+        await operation(
+            task_id=task_id,
+            user_text=message.text,
+            result=result,
+            context_frame_id=frame.context_frame_id,
+            recent_summary=frame.recent_summary,
+        )
+        response_artifact_id = await _assert_precomputed_task_artifacts(
+            store_group,
+            task_id=task_id,
+            result=result,
+        )
+        await _assert_precomputed_session_storage(
+            store_group,
+            frame=frame,
+            task_id=task_id,
+            user_text=message.text,
+            response_text=result.content,
+            response_artifact_id=response_artifact_id,
+        )
     finally:
         await store_group.close()

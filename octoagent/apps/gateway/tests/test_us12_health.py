@@ -8,12 +8,31 @@
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
+
+
+class _AliasRegistry:
+    def resolve(self, alias: str) -> str:
+        assert alias == "main"
+        return "main"
+
+
+class _ProviderRouter:
+    def resolve_for_alias(
+        self,
+        alias: str,
+        *,
+        task_scope: str | None = None,
+    ) -> SimpleNamespace:
+        assert alias == "main"
+        assert task_scope is None
+        return SimpleNamespace(provider_id="openai", model_name="gpt-4o-mini")
 
 
 @pytest_asyncio.fixture
@@ -34,6 +53,8 @@ async def test_app(tmp_path: Path):
     app.state.store_group = store_group
     app.state.sse_hub = SSEHub()
     app.state.llm_service = LLMService()
+    app.state.alias_registry = _AliasRegistry()
+    app.state.provider_router = _ProviderRouter()
 
     yield app
 
@@ -68,14 +89,15 @@ class TestHealthCheck:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ready"
-        assert data["profile"] == "core"
+        assert "profile" not in data
         assert "checks" in data
         checks = data["checks"]
         assert checks["sqlite"] == "ok"
         assert checks["artifacts_dir"] == "ok"
         assert isinstance(checks["disk_space_mb"], int)
         assert checks["disk_space_mb"] > 0
-        assert checks["litellm_proxy"] == "skipped"
+        assert checks["provider_route"] == "ok"
+        assert "litellm_proxy" not in checks
 
         assert "subsystems" in data
         subsystems = data["subsystems"]
@@ -86,6 +108,11 @@ class TestHealthCheck:
         assert subsystems["tool_registry"] == "unavailable"
 
         assert data["diagnostics"]["tool_registry"]["diagnostics_count"] == 0
+        assert data["diagnostics"]["provider_route"] == {
+            "alias": "main",
+            "provider": "openai",
+            "model": "gpt-4o-mini",
+        }
 
     async def test_ready_sqlite_failure(self, test_app):
         """GET /ready SQLite 不可用时返回 503"""

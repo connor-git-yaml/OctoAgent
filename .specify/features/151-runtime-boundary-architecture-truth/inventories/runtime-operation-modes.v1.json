@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "base_sha": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc",
+  "purpose": "Machine allowlist for TaskService and AgentContextService operation modes. This is a gate artifact, not a runtime registry or service.",
+  "identity": {
+    "operation": ["service", "qualname"],
+    "constructor_callsite": ["path", "enclosing_qualname", "lexical_ordinal"],
+    "line_report_only": true
+  },
+  "default_policy": {
+    "unknown_operation": "deny",
+    "unknown_constructor_callsite": "deny",
+    "storage_only_reachable_runtime_capability": "deny",
+    "runtime_from_storage_only_callsite": "deny",
+    "capability_scan": ["MemoryRuntimeService", "ModelRerankerService(auto_load=True)", "LLMService", "ProviderRouter", "model_call", "background_task_spawn", "network"]
+  },
+  "operations": [
+    {"service":"TaskService","qualname":"register_terminal_state_callback","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["callback-lifecycle"]},
+    {"service":"TaskService","qualname":"unregister_terminal_state_callback","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["callback-lifecycle"]},
+    {"service":"TaskService","qualname":"create_task","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["task-store","event-store"]},
+    {"service":"TaskService","qualname":"append_user_message","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["event-store","artifact-store"]},
+    {"service":"TaskService","qualname":"append_structured_event","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["event-store"]},
+    {"service":"TaskService","qualname":"ensure_task_running","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["task-store","event-store"]},
+    {"service":"TaskService","qualname":"create_text_artifact","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["artifact-store","event-store"]},
+    {"service":"TaskService","qualname":"record_auxiliary_model_call","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["persist-model-result-only"]},
+    {"service":"TaskService","qualname":"complete_task_with_precomputed_result","visibility":"public-planned","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["task-store","event-store","artifact-store","checkpoint-store","session-storage-primitive"],"forbidden_capabilities":["LLMService","ProviderRouter","recall","compaction","extraction"]},
+    {"service":"TaskService","qualname":"process_task_with_llm","visibility":"public","allowed_modes":["runtime-bundle"],"capabilities":["final-llm","provider-router","recall","compaction","extraction"]},
+    {"service":"TaskService","qualname":"cancel_task","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["task-store","event-store"]},
+    {"service":"TaskService","qualname":"get_task","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["task-store-read"]},
+    {"service":"TaskService","qualname":"get_latest_user_metadata","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["event-store-read"]},
+    {"service":"TaskService","qualname":"get_latest_model_call_failure","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["event-store-read"]},
+    {"service":"TaskService","qualname":"get_latest_input_metadata","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["event-store-read"]},
+    {"service":"TaskService","qualname":"list_tasks","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["task-store-read"]},
+    {"service":"TaskService","qualname":"mark_running_task_failed_for_recovery","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["task-store","event-store"]},
+    {"service":"TaskService","qualname":"mark_running_task_cancelled_for_runtime","visibility":"public","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["task-store","event-store"]},
+    {"service":"TaskService","qualname":"_write_state_transition","visibility":"production-called-private","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["task-store","event-store"]},
+    {"service":"AgentContextService","qualname":"record_tool_call_turn","visibility":"public-mixin","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["session-turn-store"]},
+    {"service":"AgentContextService","qualname":"record_tool_result_turn","visibility":"public-mixin","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["session-turn-store"]},
+    {"service":"AgentContextService","qualname":"persist_response_context_storage","visibility":"private-planned-shared-primitive","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["session-context-store","session-turn-store","session-store"],"forbidden_capabilities":["SessionMemoryExtractor","model_call","background_task_spawn"]},
+    {"service":"AgentContextService","qualname":"record_response_context","visibility":"public-mixin","allowed_modes":["runtime-bundle"],"capabilities":["session-storage-primitive","SessionMemoryExtractor"]},
+    {"service":"AgentContextService","qualname":"build_agent_session_replay_projection","visibility":"public-mixin","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["session-store-read","session-turn-store-read"]},
+    {"service":"AgentContextService","qualname":"render_agent_session_replay_block","visibility":"public-mixin","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["pure-projection"]},
+    {"service":"AgentContextService","qualname":"record_compaction_context","visibility":"public-mixin","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["session-context-store"]},
+    {"service":"AgentContextService","qualname":"record_delayed_recall_state","visibility":"public-mixin","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["session-context-store"]},
+    {"service":"AgentContextService","qualname":"resolve_project_scope","visibility":"public-mixin","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["project-store-read","workspace-store-read"]},
+    {"service":"AgentContextService","qualname":"_resolve_project_scope","visibility":"production-called-private","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["project-store-read","workspace-store-read"]},
+    {"service":"AgentContextService","qualname":"_resolve_agent_profile","visibility":"production-called-private","allowed_modes":["storage-only","runtime-bundle"],"capabilities":["profile-store-read"]},
+    {"service":"AgentContextService","qualname":"build_task_context","visibility":"public","allowed_modes":["runtime-bundle"],"capabilities":["memory-runtime","recall","prompt-assembly"]},
+    {"service":"AgentContextService","qualname":"build_recall_planning_context","visibility":"public","allowed_modes":["runtime-bundle"],"capabilities":["memory-runtime","recall","prompt-assembly"]},
+    {"service":"AgentContextService","qualname":"get_memory_retrieval_profile","visibility":"public-mixin","allowed_modes":["runtime-bundle"],"capabilities":["memory-runtime"]},
+    {"service":"AgentContextService","qualname":"get_memory_service","visibility":"public-mixin","allowed_modes":["runtime-bundle"],"capabilities":["memory-runtime"]},
+    {"service":"AgentContextService","qualname":"get_consolidation_service","visibility":"public-mixin","allowed_modes":["runtime-bundle"],"capabilities":["memory-runtime"]},
+    {"service":"AgentContextService","qualname":"get_derived_extraction_service","visibility":"public-mixin","allowed_modes":["runtime-bundle"],"capabilities":["model","extraction"]},
+    {"service":"AgentContextService","qualname":"get_tom_extraction_service","visibility":"public-mixin","allowed_modes":["runtime-bundle"],"capabilities":["model","extraction"]},
+    {"service":"AgentContextService","qualname":"get_profile_generator_service","visibility":"public-mixin","allowed_modes":["runtime-bundle"],"capabilities":["model","profile-generation"]},
+    {"service":"AgentContextService","qualname":"get_session_memory_extractor","visibility":"public-mixin","allowed_modes":["runtime-bundle"],"capabilities":["model","extraction"]},
+    {"service":"AgentContextService","qualname":"get_reranker_service","visibility":"public-mixin","allowed_modes":["runtime-bundle"],"capabilities":["model-reranker"]},
+    {"service":"AgentContextService","qualname":"_spawn_session_memory_extraction","visibility":"called-private","allowed_modes":["runtime-bundle"],"capabilities":["background-task-spawn","extraction"]},
+    {"service":"AgentContextService","qualname":"_ensure_memory_namespaces","visibility":"called-private","allowed_modes":["runtime-bundle"],"capabilities":["memory-runtime","memory-store"]}
+  ],
+  "task_service_constructor_universe": {
+    "baseline_count": 48,
+    "target_count": 45,
+    "target_modes": {"runtime-bundle": 3, "storage-only": 42},
+    "owner_slice_for_all_target_and_deleted_callsites": "S084-constructor-transaction",
+    "deleted_duplicates": [
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py","enclosing_qualname":"OrchestratorService._dispatch_direct_execution","lexical_ordinal":1,"line_report_only":1227},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py","enclosing_qualname":"OrchestratorService._dispatch_owner_self_worker_execution","lexical_ordinal":1,"line_report_only":1319}
+    ],
+    "prior_phase_removed_callsites": [
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/worker_service.py","enclosing_qualname":"WorkerProfileDomainService._handle_worker_spawn_from_profile","lexical_ordinal":1,"line_report_only":1355,"owner_slice":"S062-taskrunner-no-fallback","replacement":"TaskRunner.launch_child_task"}
+    ],
+    "runtime_bundle_callsites": [
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/worker_runtime.py","enclosing_qualname":"WorkerRuntime.run","lexical_ordinal":1,"line_report_only":512,"operations":["process_task_with_llm","get_task","mark_running_task_cancelled_for_runtime","mark_running_task_failed_for_recovery"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py","enclosing_qualname":"OrchestratorService._dispatch_direct_execution","lexical_ordinal":2,"line_report_only":1268,"operations":["append_structured_event","ensure_task_running","process_task_with_llm"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py","enclosing_qualname":"OrchestratorService._dispatch_owner_self_worker_execution","lexical_ordinal":2,"line_report_only":1343,"operations":["append_structured_event","ensure_task_running","process_task_with_llm"]}
+    ],
+    "storage_only_callsites_by_file": [
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/routes/tasks.py","callsites":[{"enclosing_qualname":"list_tasks","lexical_ordinal":1,"line_report_only":128},{"enclosing_qualname":"get_task_detail","lexical_ordinal":1,"line_report_only":158}],"count":2,"operations":["list_tasks","get_task"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/routes/cancel.py","callsites":[{"enclosing_qualname":"cancel_task","lexical_ordinal":1,"line_report_only":40}],"count":1,"operations":["cancel_task","get_task"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/routes/message.py","callsites":[{"enclosing_qualname":"receive_message","lexical_ordinal":1,"line_report_only":65}],"count":1,"operations":["create_task","get_task"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/routes/chat.py","callsites":[{"enclosing_qualname":"send_chat_message","lexical_ordinal":1,"line_report_only":451}],"count":1,"operations":["append_user_message","create_task"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/execution_console.py","callsites":[{"enclosing_qualname":"ExecutionConsoleService.emit_log","lexical_ordinal":1,"line_report_only":221},{"enclosing_qualname":"ExecutionConsoleService.emit_step","lexical_ordinal":1,"line_report_only":250},{"enclosing_qualname":"ExecutionConsoleService.request_input","lexical_ordinal":1,"line_report_only":301},{"enclosing_qualname":"ExecutionConsoleService.mark_waiting_approval","lexical_ordinal":1,"line_report_only":370},{"enclosing_qualname":"ExecutionConsoleService.mark_running_from_waiting_approval","lexical_ordinal":1,"line_report_only":420},{"enclosing_qualname":"ExecutionConsoleService.attach_input","lexical_ordinal":1,"line_report_only":493},{"enclosing_qualname":"ExecutionConsoleService.record_cancel_request","lexical_ordinal":1,"line_report_only":595},{"enclosing_qualname":"ExecutionConsoleService._append_status_event","lexical_ordinal":1,"line_report_only":667}],"count":8,"operations":["_write_state_transition","append_structured_event","create_text_artifact","get_task"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/task_runner.py","callsites":[
+        {"enclosing_qualname":"TaskRunner.shutdown","lexical_ordinal":1,"line_report_only":183},
+        {"enclosing_qualname":"TaskRunner.launch_child_task","lexical_ordinal":1,"line_report_only":236},
+        {"enclosing_qualname":"TaskRunner._emit_subagent_delegation_init_if_needed","lexical_ordinal":1,"line_report_only":356},
+        {"enclosing_qualname":"TaskRunner._recover_orphan_running_jobs","lexical_ordinal":1,"line_report_only":420},
+        {"enclosing_qualname":"TaskRunner._recover_orphan_waiting_approval_jobs","lexical_ordinal":1,"line_report_only":472},
+        {"enclosing_qualname":"TaskRunner._recover_one_orphan_job","lexical_ordinal":1,"line_report_only":704},
+        {"enclosing_qualname":"TaskRunner.cancel_task","lexical_ordinal":1,"line_report_only":807},
+        {"enclosing_qualname":"TaskRunner.attach_input","lexical_ordinal":1,"line_report_only":895},
+        {"enclosing_qualname":"TaskRunner.attach_input","lexical_ordinal":2,"line_report_only":900},
+        {"enclosing_qualname":"TaskRunner._run_job","lexical_ordinal":1,"line_report_only":972},
+        {"enclosing_qualname":"TaskRunner._monitor_loop_step","lexical_ordinal":1,"line_report_only":1151},
+        {"enclosing_qualname":"TaskRunner._monitor_loop_step","lexical_ordinal":2,"line_report_only":1250},
+        {"enclosing_qualname":"TaskRunner._notify_completion","lexical_ordinal":1,"line_report_only":1299},
+        {"enclosing_qualname":"TaskRunner._close_subagent_session_if_needed","lexical_ordinal":1,"line_report_only":1373}
+      ],"count":14,"operations":["create_task","get_task","get_latest_user_metadata","mark_running_task_cancelled_for_runtime","mark_running_task_failed_for_recovery"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py","callsites":[{"enclosing_qualname":"OrchestratorService._prepare_single_loop_request","lexical_ordinal":1,"line_report_only":819},{"enclosing_qualname":"OrchestratorService._dispatch_inline_decision","lexical_ordinal":1,"line_report_only":1141},{"enclosing_qualname":"OrchestratorService._ensure_task_failed","lexical_ordinal":1,"line_report_only":2619},{"enclosing_qualname":"OrchestratorService._ensure_task_rejected","lexical_ordinal":1,"line_report_only":2661},{"enclosing_qualname":"OrchestratorService._ensure_task_waiting","lexical_ordinal":1,"line_report_only":2747}],"count":5,"operations":["append_structured_event","complete_task_with_precomputed_result","_write_state_transition"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/_deps.py","callsites":[{"enclosing_qualname":"current_parent","lexical_ordinal":1,"line_report_only":111},{"enclosing_qualname":"resolve_runtime_project_context","lexical_ordinal":1,"line_report_only":138}],"count":2,"operations":["get_task"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/misc_tools.py","callsites":[{"enclosing_qualname":"register","lexical_ordinal":1,"line_report_only":58}],"count":1,"operations":["create_text_artifact"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/delegation_plane.py","callsites":[{"enclosing_qualname":"DelegationPlaneService.__init__","lexical_ordinal":1,"line_report_only":122}],"count":1,"operations":["append_structured_event"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/telegram.py","callsites":[{"enclosing_qualname":"TelegramGatewayService._ingest_text_context","lexical_ordinal":1,"line_report_only":875}],"count":1,"operations":["create_task"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/discord.py","callsites":[{"enclosing_qualname":"DiscordGatewayService._ingest_command","lexical_ordinal":1,"line_report_only":272}],"count":1,"operations":["create_task"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/slack.py","callsites":[{"enclosing_qualname":"SlackGatewayService._ingest_event","lexical_ordinal":1,"line_report_only":285}],"count":1,"operations":["create_task"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/dispatch_service.py","callsites":[{"enclosing_qualname":"A2ADispatchMixin._resolve_target_agent_profile","lexical_ordinal":1,"line_report_only":990}],"count":1,"operations":["append_structured_event"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/operator_actions.py","callsites":[{"enclosing_qualname":"OperatorActionService.__init__","lexical_ordinal":1,"line_report_only":149}],"count":1,"operations":["create_task","append_structured_event"]},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/session_service.py","callsites":[{"enclosing_qualname":"SessionDomainService._handle_session_interrupt","lexical_ordinal":1,"line_report_only":1484}],"count":1,"operations":["cancel_task"]}
+    ]
+  },
+  "agent_context_constructor_universe": {
+    "direct_target_count": 3,
+    "direct_storage_only_callsites": [
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/agent_session_turn_hook.py","enclosing_qualname":"AgentSessionTurnHook.__init__","lexical_ordinal":1,"operations":["record_tool_call_turn","record_tool_result_turn"],"owner_slice":"S083-storage-purity"},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py","enclosing_qualname":"OrchestratorService._resolve_single_loop_tool_selection","lexical_ordinal":1,"operations":["_resolve_project_scope","_resolve_agent_profile"],"owner_slice":"S084-constructor-transaction"},
+      {"path":"octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py","enclosing_qualname":"OrchestratorService._build_main_recent_conversation_block","lexical_ordinal":1,"operations":["build_agent_session_replay_projection"],"owner_slice":"S084-constructor-transaction"}
+    ],
+    "task_service_derived_rule": "runtime-bundle TaskService may construct one runtime-bundle AgentContextService; storage-only TaskService constructs none",
+    "storage_only_constructor_forbidden_side_effects": {"MemoryRuntimeService":0,"ModelRerankerService_auto_load":0,"background_task_spawn":0,"network":0}
+  },
+  "gate": {
+    "definition_universe": "all public methods plus private methods called outside their defining service or explicitly reachable from a listed storage operation",
+    "callsite_resolution": "AST assignment/attribute/inline-constructor flow; every production TaskService and direct AgentContextService constructor must resolve to exactly one target mode",
+    "storage_reachability": "build a final-source interprocedural call graph from each listed storage-only operation and constructor, following self/attribute calls, mixin dispatch and constructor-created attributes; any reachable MemoryRuntimeService, reranker auto_load, model/Router call, background spawn or network edge fails. Labels alone never satisfy this check",
+    "callsite_owner_resolution": "materialize all 48 baseline TaskService identities (45 target, two T084 duplicate deletions and one S062 TaskRunner consolidation) and all three direct AgentContext identities; group owner_slice or entry owner_slice must resolve to exactly one RGR scope whose exact path+symbol selector contains the identity; missing, multiple or candidate-only owners fail",
+    "behavior_evidence_resolution": "join every one of the 144 test TaskService identities and 31 AgentContext identities to a collectable deterministic selector and passing result; helper identities require reverse-call fixture/test reachability; file existence or collect>0 is not behavior evidence",
+    "planned_diff_owner_slices": ["S002-manifest-integrity","S081-precomputed","S083-bundle-xor","S083-storage-purity","S084-constructor-transaction","S084-test-constructors"]
+  },
+  "self_check": {
+    "operation_count": 42,
+    "unique_operation_identity_count": 42,
+    "task_service_baseline_constructor_count": 48,
+    "task_service_target_constructor_count": 45,
+    "task_service_runtime_target_count": 3,
+    "task_service_storage_target_count": 42,
+    "task_service_unique_target_identity_count": 45,
+    "task_service_deleted_duplicate_count": 2,
+    "task_service_prior_phase_removed_count": 1,
+    "agent_context_direct_target_count": 3,
+    "task_runner_exact_storage_callsite_count": 14,
+    "unknown_operation_target_count": 0,
+    "unknown_constructor_target_count": 0,
+    "planned_production_constructor_identity_count": 51,
+    "unique_rgr_owner_count_for_planned_constructor_identities": 51,
+    "task_service_target_owner_identity_count": 45,
+    "task_service_deleted_owner_identity_count": 2,
+    "agent_context_target_owner_identity_count": 3,
+    "constructor_owner_missing_or_multiple_count": 0,
+    "storage_capability_reachability_violation_target_count": 0
+  }
+}

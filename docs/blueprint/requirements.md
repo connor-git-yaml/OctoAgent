@@ -87,7 +87,7 @@
   - 默认通过主 Agent 下发的 A2A context capsule 获得任务上下文，而不是直接读取完整用户历史
   - 可调用 Skill Pipeline（Graph）执行确定性子流程
   - 可创建 Subagent 处理子任务（H3-A）；**F098 关闭 D14**：Worker 现可委托 Worker（H3-B A2A 真 P2P）
-  - 可隔离执行环境（Docker/SSH）
+  - 可通过统一 runtime backend 执行；当前只有 Inline/Graph，Docker/SSH 隔离仍未实现且必须 fail closed
   - 可回传事件与产物
   - 可被中断/取消，并推进终态
   - F099 三工具：`worker.ask_back` / `worker.request_input` / `worker.escalate_permission`，统一 emit `CONTROL_METADATA_UPDATED` 审计事件
@@ -156,15 +156,15 @@
 - FR-MEM-4（可选）：文档知识库增量更新（doc_id@version）
   - doc_hash 检测变更，chunk 内容寻址，增量嵌入
 
-#### 5.1.6 执行层（JobRunner & Sandboxing）
+#### 5.1.6 执行层（Runtime Backend）
 
-- FR-EXEC-1（必须）：JobRunner 抽象
-  - backend：local_docker（默认），ssh（可选），remote_gpu（可选）
-  - 统一语义：start/stream_logs/cancel/status/artifacts/attach_input
+- FR-EXEC-1（必须）：统一 RuntimeBackend 抽象
+  - 当前 backend：inline（默认）与 graph（确定性编排）
+  - 统一语义：execute/cancel/budget/result；Docker、SSH、remote GPU 不属于当前已实现集合
 
-- FR-EXEC-2（必须）：默认隔离执行
-  - 代码执行、脚本运行默认进 Docker
-  - 默认禁网；按需开网（白名单）
+- FR-EXEC-2（必须）：执行边界诚实且 fail closed
+  - 当前代码执行不宣称容器隔离；ToolBroker、Policy Engine 与 PathAccessPolicy 负责现役安全门禁
+  - 请求未实现的隔离 backend 必须失败，禁止静默回退到 Inline 后报告隔离成功
 
 - FR-EXEC-3（应该）：Watchdog
   - 检测无进展（基于事件/日志/心跳）
@@ -176,7 +176,7 @@
 
 #### 5.1.7 模型与认证（Provider）
 
-- FR-LLM-1（必须，[M1]）：统一模型出口（LiteLLM Proxy）
+- FR-LLM-1（必须，[M1]）：统一模型出口（ProviderRouter direct transports）
   - 业务侧只用 model alias，不写厂商型号
   - 支持 fallback、限流、成本统计
 

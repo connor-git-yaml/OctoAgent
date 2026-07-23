@@ -1,0 +1,2049 @@
+{
+  "version": 1,
+  "base_sha": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc",
+  "scope": "provider/dx source projected through namespace-migration.md to gateway.services.operations",
+  "roles_are_legacy_tags_not_clean_layers": true,
+  "role_counts": {
+    "application": 13,
+    "domain": 5,
+    "store": 9,
+    "adapter": 6
+  },
+  "relative_import_nodes": {
+    "total": 62,
+    "eager": 59,
+    "deferred": 3,
+    "cross_role": 41
+  },
+  "cross_role_import_counts": {
+    "application->domain": 11,
+    "application->store": 11,
+    "application->adapter": 6,
+    "store->domain": 4,
+    "store->application": 2,
+    "adapter->domain": 2,
+    "adapter->store": 2,
+    "adapter->application": 3,
+    "domain->other": 0
+  },
+  "direct_name_call_ceiling": {
+    "total": 147,
+    "by_direction": {
+      "application->domain": 97,
+      "application->store": 12,
+      "application->adapter": 10,
+      "store->application": 3,
+      "adapter->application": 18,
+      "adapter->domain": 6,
+      "adapter->store": 1
+    },
+    "note": "Only statically resolvable ImportedSymbol(...) calls; reference.factory and obj.method are reported separately and this is not a complete call graph.",
+    "identity": [
+      "path",
+      "qualname",
+      "kind",
+      "target",
+      "lexical_ordinal"
+    ],
+    "line_is_identity": false,
+    "derived_by_direction": {
+      "adapter->application": 18,
+      "adapter->domain": 6,
+      "adapter->store": 1,
+      "application->adapter": 10,
+      "application->domain": 97,
+      "application->store": 12,
+      "store->application": 3
+    }
+  },
+  "imports": [
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/backup_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "backup_audit",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 45,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/backup_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "recovery_status_store",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 47,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/channel_verifier.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/channel_verifier.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "onboarding_models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 11,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/doctor.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 21,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/doctor.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "onboarding_models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 22,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/doctor.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "service_manager",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 23,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/doctor.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "sleep_probe",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 30,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/doctor.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "telegram_verifier",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 31,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/doctor_remediation.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor_remediation.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 12,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/doctor_remediation.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor_remediation.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "onboarding_models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 13,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/import_source_store.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_source_store.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "import_workbench_models",
+      "source_role": "store",
+      "target_role": "domain",
+      "line_report_only": 12,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/import_workbench_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_workbench_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "import_mapping_store",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 43,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/import_workbench_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_workbench_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "import_source_store",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 44,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/import_workbench_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_workbench_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "import_workbench_models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 45,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/onboarding_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 20,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/onboarding_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "onboarding_models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 21,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/onboarding_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "onboarding_store",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 30,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/onboarding_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "telegram_verifier",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 32,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/onboarding_store.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_store.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "onboarding_models",
+      "source_role": "store",
+      "target_role": "domain",
+      "line_report_only": 13,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/project_migration.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/project_migration.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "recovery_status_store",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 59,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/project_selector.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/project_selector.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "control_plane_models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 18,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/project_selector.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/project_selector.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "secret_status_store",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 20,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/secret_refs.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_refs.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "secret_models",
+      "source_role": "adapter",
+      "target_role": "domain",
+      "line_report_only": 16,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/secret_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "secret_models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 30,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/secret_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "secret_refs",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 38,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/secret_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "secret_status_store",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 39,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/secret_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "update_status_store",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 41,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/secret_status_store.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_status_store.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "secret_models",
+      "source_role": "store",
+      "target_role": "domain",
+      "line_report_only": 15,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/service_manager.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/service_manager.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "update_status_store",
+      "source_role": "adapter",
+      "target_role": "store",
+      "line_report_only": 47,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/setup_governance_adapter.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/setup_governance_adapter.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "wizard_session",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 25,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/telegram_verifier.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/telegram_verifier.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "channel_verifier",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 12,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/telegram_verifier.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/telegram_verifier.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "onboarding_models",
+      "source_role": "adapter",
+      "target_role": "domain",
+      "line_report_only": 19,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/telegram_verifier.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/telegram_verifier.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "telegram_pairing",
+      "source_role": "adapter",
+      "target_role": "store",
+      "line_report_only": 25,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/update_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "service_manager",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 36,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/update_service.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "update_status_store",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 37,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/update_status_store.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "backup_service",
+      "source_role": "store",
+      "target_role": "application",
+      "line_report_only": 26,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/update_status_store.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "runtime_descriptor_defaults",
+      "source_role": "store",
+      "target_role": "application",
+      "line_report_only": 27,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/update_worker.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_worker.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "update_service",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 9,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/wizard_session.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/wizard_session.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "control_plane_models",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 25,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/wizard_session.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/wizard_session.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "wizard_session_store",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 31,
+      "lexical_ordinal": 1
+    },
+    {
+      "source_path": "octoagent/packages/provider/src/octoagent/provider/dx/wizard_session_store.py",
+      "projected_path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/wizard_session_store.py",
+      "qualname": "<module>",
+      "kind": "import.eager",
+      "target": "control_plane_models",
+      "source_role": "store",
+      "target_role": "domain",
+      "line_report_only": 15,
+      "lexical_ordinal": 1
+    }
+  ],
+  "scc": {
+    "eager": [],
+    "full": [
+      [
+        "doctor",
+        "secret_service",
+        "update_service"
+      ]
+    ]
+  },
+  "policy": {
+    "domain_cross_role_imports": 0,
+    "existing_import_and_call_tuples": "all exact tuple sets may decrease only; equal-count replacement fails set difference",
+    "new_f151_seams": "domain/contracts <- application/adapters <- composition",
+    "unknown_or_expanded_edge": "fail and return to design gate"
+  },
+  "calls": [
+    {
+      "path": "backup_service.py",
+      "qualname": "BackupService.__init__",
+      "kind": "call.direct",
+      "target": "recovery_status_store.RecoveryStatusStore",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 121,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "backup_service.py",
+      "qualname": "BackupService.create_bundle",
+      "kind": "call.direct",
+      "target": "backup_audit.BackupAuditRecorder",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 146,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "channel_verifier.py",
+      "qualname": "build_missing_verifier_availability",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 62,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.__init__",
+      "kind": "call.direct",
+      "target": "service_manager.build_service_manager",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 70,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.__init__",
+      "kind": "call.direct",
+      "target": "service_manager.resolve_instance_root",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 70,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.__init__",
+      "kind": "call.direct",
+      "target": "telegram_verifier.TelegramOnboardingVerifier",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 63,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner._load_config_safe",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 302,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner._load_config_safe",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 311,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner._load_telegram_config_safe",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 326,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner._resolve_front_door_mode",
+      "kind": "call.direct",
+      "target": "service_manager.resolve_instance_root",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 754,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_credential_expiry",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 272,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_credential_expiry",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 280,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_credential_valid",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 249,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_credential_valid",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 255,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_db_writable",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 218,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_db_writable",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 230,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_db_writable",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 237,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_env_file",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 185,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_env_file",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 192,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_env_file",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 198,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_front_door_exposure",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 707,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_front_door_exposure",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 714,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_front_door_exposure",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 722,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_front_door_exposure",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 729,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_front_door_exposure",
+      "kind": "call.direct",
+      "target": "service_manager.resolve_instance_root",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 702,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_octoagent_yaml_valid",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 345,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_octoagent_yaml_valid",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 354,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_python_version",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 141,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_python_version",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 147,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_secret_bindings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 465,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_secret_bindings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 476,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_secret_bindings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 485,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_secret_bindings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 493,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_secret_bindings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 501,
+      "lexical_ordinal": 5
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_service_status",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 519,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_service_status",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 526,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_service_status",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 535,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_service_status",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 542,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_service_status",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 553,
+      "lexical_ordinal": 5
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_service_status",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 566,
+      "lexical_ordinal": 6
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_service_status",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 577,
+      "lexical_ordinal": 7
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_service_status",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 589,
+      "lexical_ordinal": 8
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_service_status",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 595,
+      "lexical_ordinal": 9
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_sleep_settings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 617,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_sleep_settings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 624,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_sleep_settings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 650,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_sleep_settings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 657,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_sleep_settings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 667,
+      "lexical_ordinal": 5
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_sleep_settings",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 677,
+      "lexical_ordinal": 6
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_telegram_config",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 372,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_telegram_config",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 381,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_telegram_config",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 387,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_telegram_readiness",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 431,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_telegram_readiness",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 440,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_telegram_readiness",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 447,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_telegram_readiness",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 454,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_telegram_token",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 401,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_telegram_token",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 411,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_telegram_token",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 417,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_uv_installed",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 165,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.check_uv_installed",
+      "kind": "call.direct",
+      "target": "models.CheckResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 173,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "doctor.py",
+      "qualname": "DoctorRunner.run_all_checks",
+      "kind": "call.direct",
+      "target": "models.DoctorReport",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 131,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor_remediation.py",
+      "qualname": "_command_action",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 56,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "doctor_remediation.py",
+      "qualname": "_manual_action",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 76,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "import_workbench_service.py",
+      "qualname": "ImportWorkbenchService.__init__",
+      "kind": "call.direct",
+      "target": "import_mapping_store.ImportMappingStore",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 93,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "import_workbench_service.py",
+      "qualname": "ImportWorkbenchService.__init__",
+      "kind": "call.direct",
+      "target": "import_source_store.ImportSourceStore",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 92,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "import_workbench_service.py",
+      "qualname": "ImportWorkbenchService._build_resume_entries",
+      "kind": "call.direct",
+      "target": "import_workbench_models.ImportResumeEntry",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 923,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "import_workbench_service.py",
+      "qualname": "ImportWorkbenchService._build_run_document",
+      "kind": "call.direct",
+      "target": "import_workbench_models.ImportMemoryEffectSummary",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 845,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "import_workbench_service.py",
+      "qualname": "ImportWorkbenchService._build_run_document",
+      "kind": "call.direct",
+      "target": "import_workbench_models.ImportRunDocument",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 819,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "import_workbench_service.py",
+      "qualname": "ImportWorkbenchService.detect_source",
+      "kind": "call.direct",
+      "target": "import_workbench_models.ImportSourceDocument",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 198,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "import_workbench_service.py",
+      "qualname": "ImportWorkbenchService.get_workbench",
+      "kind": "call.direct",
+      "target": "import_workbench_models.ImportWorkbenchDocument",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 119,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "import_workbench_service.py",
+      "qualname": "ImportWorkbenchService.get_workbench",
+      "kind": "call.direct",
+      "target": "import_workbench_models.ImportWorkbenchSummary",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 122,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "import_workbench_service.py",
+      "qualname": "ImportWorkbenchService.preview",
+      "kind": "call.direct",
+      "target": "import_workbench_models.ImportRunDocument",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 285,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "import_workbench_service.py",
+      "qualname": "ImportWorkbenchService.run",
+      "kind": "call.direct",
+      "target": "import_workbench_models.ImportRunDocument",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 365,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "onboarding_service.py",
+      "qualname": "OnboardingService.__init__",
+      "kind": "call.direct",
+      "target": "onboarding_store.OnboardingSessionStore",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 62,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "onboarding_service.py",
+      "qualname": "OnboardingService.__init__",
+      "kind": "call.direct",
+      "target": "telegram_verifier.build_builtin_verifier_registry",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 65,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "onboarding_service.py",
+      "qualname": "OnboardingService._run_doctor",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 311,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "onboarding_service.py",
+      "qualname": "OnboardingService._run_first_message",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 352,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "onboarding_service.py",
+      "qualname": "OnboardingService._run_provider_runtime",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 172,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "onboarding_service.py",
+      "qualname": "OnboardingService._run_provider_runtime",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 197,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "onboarding_service.py",
+      "qualname": "OnboardingService._run_provider_runtime",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 215,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "onboarding_service.py",
+      "qualname": "OnboardingService._run_provider_runtime",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 235,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "project_migration.py",
+      "qualname": "ProjectWorkspaceMigrationService._discover_backup_metadata",
+      "kind": "call.direct",
+      "target": "recovery_status_store.RecoveryStatusStore",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 830,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "project_selector.py",
+      "qualname": "ProjectSelectorService.__init__",
+      "kind": "call.direct",
+      "target": "secret_status_store.SecretStatusStore",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 69,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "project_selector.py",
+      "qualname": "ProjectSelectorService._build_selector_document",
+      "kind": "call.direct",
+      "target": "control_plane_models.ProjectCandidate",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 258,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "project_selector.py",
+      "qualname": "ProjectSelectorService._build_selector_document",
+      "kind": "call.direct",
+      "target": "control_plane_models.ProjectCandidate",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 274,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "project_selector.py",
+      "qualname": "ProjectSelectorService._build_selector_document",
+      "kind": "call.direct",
+      "target": "control_plane_models.ProjectSelectorDocument",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 272,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_refs.py",
+      "qualname": "resolve_secret_ref",
+      "kind": "call.direct",
+      "target": "secret_models.ResolvedSecretRef",
+      "source_role": "adapter",
+      "target_role": "domain",
+      "line_report_only": 121,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_refs.py",
+      "qualname": "resolve_secret_ref",
+      "kind": "call.direct",
+      "target": "secret_models.ResolvedSecretRef",
+      "source_role": "adapter",
+      "target_role": "domain",
+      "line_report_only": 154,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "secret_refs.py",
+      "qualname": "resolve_secret_ref",
+      "kind": "call.direct",
+      "target": "secret_models.ResolvedSecretRef",
+      "source_role": "adapter",
+      "target_role": "domain",
+      "line_report_only": 182,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "secret_refs.py",
+      "qualname": "resolve_secret_ref",
+      "kind": "call.direct",
+      "target": "secret_models.ResolvedSecretRef",
+      "source_role": "adapter",
+      "target_role": "domain",
+      "line_report_only": 211,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.__init__",
+      "kind": "call.direct",
+      "target": "secret_status_store.SecretStatusStore",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 82,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.__init__",
+      "kind": "call.direct",
+      "target": "update_status_store.UpdateStatusStore",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 83,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService._binding_to_ref",
+      "kind": "call.direct",
+      "target": "secret_models.SecretRef",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 490,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.apply",
+      "kind": "call.direct",
+      "target": "secret_models.SecretApplyRun",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 227,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.apply",
+      "kind": "call.direct",
+      "target": "secret_refs.resolve_secret_ref",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 241,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.audit",
+      "kind": "call.direct",
+      "target": "secret_models.SecretAuditReport",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 90,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.audit",
+      "kind": "call.direct",
+      "target": "secret_refs.inspect_secret_ref",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 120,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.audit",
+      "kind": "call.direct",
+      "target": "secret_refs.resolve_secret_ref",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 122,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.configure",
+      "kind": "call.direct",
+      "target": "secret_models.SecretConfigureSummary",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 200,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.reload",
+      "kind": "call.direct",
+      "target": "secret_models.RuntimeSecretMaterialization",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 328,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.reload",
+      "kind": "call.direct",
+      "target": "secret_models.SecretReloadResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 352,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.reload",
+      "kind": "call.direct",
+      "target": "secret_models.SecretReloadResult",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 388,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "secret_service.py",
+      "qualname": "SecretService.reload",
+      "kind": "call.direct",
+      "target": "secret_refs.resolve_secret_ref",
+      "source_role": "application",
+      "target_role": "adapter",
+      "line_report_only": 321,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "service_manager.py",
+      "qualname": "ServiceManager.__init__",
+      "kind": "call.direct",
+      "target": "update_status_store.UpdateStatusStore",
+      "source_role": "adapter",
+      "target_role": "store",
+      "line_report_only": 830,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier._load_telegram_config",
+      "kind": "call.direct",
+      "target": "channel_verifier.VerifierAvailability",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 447,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier._load_telegram_config",
+      "kind": "call.direct",
+      "target": "channel_verifier.VerifierAvailability",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 463,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.availability",
+      "kind": "call.direct",
+      "target": "channel_verifier.VerifierAvailability",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 129,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.availability",
+      "kind": "call.direct",
+      "target": "channel_verifier.VerifierAvailability",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 134,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.run_readiness",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 140,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.run_readiness",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 152,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.run_readiness",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 175,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.run_readiness",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 195,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.run_readiness",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 216,
+      "lexical_ordinal": 5
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.verify_first_message",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 231,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.verify_first_message",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 243,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.verify_first_message",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 266,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.verify_first_message",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 304,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.verify_first_message",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 320,
+      "lexical_ordinal": 5
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.verify_first_message",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 341,
+      "lexical_ordinal": 6
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "TelegramOnboardingVerifier.verify_first_message",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelStepResult",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 373,
+      "lexical_ordinal": 7
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "_command_action",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "adapter",
+      "target_role": "domain",
+      "line_report_only": 40,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "_manual_action",
+      "kind": "call.direct",
+      "target": "onboarding_models.NextAction",
+      "source_role": "adapter",
+      "target_role": "domain",
+      "line_report_only": 60,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "telegram_verifier.py",
+      "qualname": "build_builtin_verifier_registry",
+      "kind": "call.direct",
+      "target": "channel_verifier.ChannelVerifierRegistry",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 488,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "update_service.py",
+      "qualname": "UpdateService.__init__",
+      "kind": "call.direct",
+      "target": "update_status_store.UpdateStatusStore",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 148,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "update_status_store.py",
+      "qualname": "UpdateStatusStore.__init__",
+      "kind": "call.direct",
+      "target": "backup_service.resolve_data_dir",
+      "source_role": "store",
+      "target_role": "application",
+      "line_report_only": 40,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "update_status_store.py",
+      "qualname": "UpdateStatusStore.__init__",
+      "kind": "call.direct",
+      "target": "backup_service.resolve_project_root",
+      "source_role": "store",
+      "target_role": "application",
+      "line_report_only": 36,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "update_status_store.py",
+      "qualname": "UpdateStatusStore._normalize_descriptor_if_needed",
+      "kind": "call.direct",
+      "target": "runtime_descriptor_defaults.normalize_runtime_descriptor",
+      "source_role": "store",
+      "target_role": "application",
+      "line_report_only": 166,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "update_worker.py",
+      "qualname": "_run",
+      "kind": "call.direct",
+      "target": "update_service.UpdateService",
+      "source_role": "adapter",
+      "target_role": "application",
+      "line_report_only": 13,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService.__init__",
+      "kind": "call.direct",
+      "target": "wizard_session_store.WizardSessionStore",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 61,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._drive_cli",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardNextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 379,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._drive_cli",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 354,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._drive_cli",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 355,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._drive_cli",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 356,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._drive_cli",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 357,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._drive_cli",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 365,
+      "lexical_ordinal": 5
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._drive_cli",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 371,
+      "lexical_ordinal": 6
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._new_record",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardNextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 441,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._new_record",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardSessionDocument",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 416,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._new_record",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 423,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._new_record",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 429,
+      "lexical_ordinal": 2
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._new_record",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 435,
+      "lexical_ordinal": 3
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._new_record",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 436,
+      "lexical_ordinal": 4
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._new_record",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 437,
+      "lexical_ordinal": 5
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._new_record",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardStepState",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 438,
+      "lexical_ordinal": 6
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService._new_record",
+      "kind": "call.direct",
+      "target": "wizard_session_store.WizardSessionRecord",
+      "source_role": "application",
+      "target_role": "store",
+      "line_report_only": 450,
+      "lexical_ordinal": 1
+    },
+    {
+      "path": "wizard_session.py",
+      "qualname": "WizardSessionService.apply_current_session",
+      "kind": "call.direct",
+      "target": "control_plane_models.WizardNextAction",
+      "source_role": "application",
+      "target_role": "domain",
+      "line_report_only": 124,
+      "lexical_ordinal": 1
+    }
+  ],
+  "high_signal_call_ids": [
+    [
+      "update_status_store.py",
+      "UpdateStatusStore.__init__",
+      "call.direct",
+      "backup_service.resolve_project_root",
+      1
+    ],
+    [
+      "update_status_store.py",
+      "UpdateStatusStore.__init__",
+      "call.direct",
+      "backup_service.resolve_data_dir",
+      1
+    ],
+    [
+      "update_status_store.py",
+      "UpdateStatusStore._normalize_descriptor_if_needed",
+      "call.direct",
+      "runtime_descriptor_defaults.normalize_runtime_descriptor",
+      1
+    ],
+    [
+      "update_worker.py",
+      "_run",
+      "call.direct",
+      "update_service.UpdateService",
+      1
+    ]
+  ],
+  "self_check": {
+    "import_entry_count": 41,
+    "cross_role_import_count": 41,
+    "call_entry_count": 147,
+    "call_unique_identity_count": 147,
+    "call_derived_direction_total": 147,
+    "call_declared_total": 147,
+    "import_unique_identity_count": 41,
+    "import_declared_total": 41
+  },
+  "import_identity": [
+    "projected_path",
+    "qualname",
+    "kind",
+    "target",
+    "lexical_ordinal"
+  ],
+  "import_line_is_identity": false,
+  "import_projection": "source_path is mapped through namespace-migration.md to projected_path before set difference"
+}

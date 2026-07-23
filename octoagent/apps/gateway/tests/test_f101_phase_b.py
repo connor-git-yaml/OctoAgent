@@ -12,19 +12,13 @@ AC-C6: startup_recovery is_caller_worker_signal 恢复
 from __future__ import annotations
 
 import asyncio
-from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-
 from octoagent.core.models import (
-    ExecutionBackend,
-    ExecutionSessionState,
-    HumanInputPolicy,
     TaskStatus,
 )
 from octoagent.core.models.enums import ActorType, EventType
@@ -41,6 +35,8 @@ from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
 from ulid import ULID
+
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 # F142 件5a：xdist 分组——本文件含时序敏感断言（固定 sleep 窗口/性能阈值/状态机
 # 竞态，F083 归档债），`--dist=loadgroup` 下同组钉同一 worker 串行执行，
@@ -73,7 +69,7 @@ def sse_hub():
 
 async def _ensure_task(sg, task_id: str) -> Task:
     """确保审计/测试用 task 记录存在（外键约束要求）。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task = Task(
         task_id=task_id,
         created_at=now,
@@ -119,7 +115,7 @@ class TestApprovalGateSsePushFnInjection:
                 event_id=str(ULID()),
                 task_id=task_id,
                 task_seq=0,
-                ts=datetime.now(timezone.utc),
+                ts=datetime.now(UTC),
                 type=EventType.APPROVAL_REQUESTED,
                 actor=ActorType.SYSTEM,
                 payload={"session_id": session_id, **payload},
@@ -136,8 +132,9 @@ class TestApprovalGateSsePushFnInjection:
         # AC-C2 验收：sse_push_fn 不为 None，是可调用的异步函数
         assert gate._sse_push_fn is not None, "AC-C2: sse_push_fn 在 bootstrap 后不应为 None"
         assert callable(gate._sse_push_fn), "AC-C2: sse_push_fn 应为可调用对象"
-        assert asyncio.iscoroutinefunction(gate._sse_push_fn), \
+        assert asyncio.iscoroutinefunction(gate._sse_push_fn), (
             "AC-C2: sse_push_fn 应为异步函数（async def）"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +181,7 @@ class TestApprovalGateSSEIntegration:
                     event_id=str(ULID()),
                     task_id=task_id,
                     task_seq=_task_seq,
-                    ts=datetime.now(timezone.utc),
+                    ts=datetime.now(UTC),
                     type=EventType.APPROVAL_REQUESTED,
                     actor=ActorType.SYSTEM,
                     payload={"session_id": session_id, **payload},
@@ -219,14 +216,18 @@ class TestApprovalGateSSEIntegration:
         except asyncio.QueueEmpty:
             pytest.fail("B-9c: SSEHub 队列未收到 approval_requested 事件（SSE 推送失败）")
 
-        assert event.type == EventType.APPROVAL_REQUESTED, \
+        assert event.type == EventType.APPROVAL_REQUESTED, (
             f"B-9c: 事件类型应为 APPROVAL_REQUESTED，实际: {event.type}"
-        assert event.payload.get("handle_id") == handle.handle_id, \
+        )
+        assert event.payload.get("handle_id") == handle.handle_id, (
             "B-9c: payload 应含正确的 handle_id"
-        assert event.payload.get("type") == "approval_requested", \
+        )
+        assert event.payload.get("type") == "approval_requested", (
             "B-9c: payload.type 应为 approval_requested"
-        assert "测试审批请求" in event.payload.get("operation_summary", ""), \
+        )
+        assert "测试审批请求" in event.payload.get("operation_summary", ""), (
             "B-9c: payload 应含 operation_summary"
+        )
 
         # 清理
         await sse_hub.unsubscribe(task_id, queue)
@@ -293,7 +294,7 @@ class TestEscalatePermissionWaitingApproval:
 
         async def _intercepted_wait_for_decision(handle, timeout_seconds=300.0):
             # 在 wait_for_decision 被 await 期间读取 task 状态
-            task_svc = TaskService(store_group, sse_hub)
+            task_svc = TaskService(store_group, sse_hub, storage_only=True)
             current_task = await task_svc.get_task(task_id)
             if current_task is not None:
                 task_status_during_wait.append(current_task.status.value)
@@ -326,10 +327,11 @@ class TestEscalatePermissionWaitingApproval:
             await exec_ctx.mark_waiting_approval()
 
             # 验证 WAITING_APPROVAL 状态（在 wait_for_decision 之前）
-            task_svc = TaskService(store_group, sse_hub)
+            task_svc = TaskService(store_group, sse_hub, storage_only=True)
             task_before = await task_svc.get_task(task_id)
-            assert task_before is not None and task_before.status == TaskStatus.WAITING_APPROVAL, \
+            assert task_before is not None and task_before.status == TaskStatus.WAITING_APPROVAL, (
                 f"AC-C1: mark_waiting_approval 后 task 状态应为 WAITING_APPROVAL，实际: {task_before.status if task_before else 'None'}"
+            )
 
             # wait_for_decision（使用 intercepted 版本）
             try:
@@ -338,10 +340,11 @@ class TestEscalatePermissionWaitingApproval:
                 await exec_ctx.mark_running_from_waiting_approval()
 
         # 验证 wait_for_decision 结束后 RUNNING 恢复
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         task_after = await task_svc.get_task(task_id)
-        assert task_after is not None and task_after.status == TaskStatus.RUNNING, \
+        assert task_after is not None and task_after.status == TaskStatus.RUNNING, (
             f"AC-C1: decision 后 task 应恢复 RUNNING，实际: {task_after.status if task_after else 'None'}"
+        )
         assert decision == "approved", f"AC-C1: decision 应为 approved，实际: {decision}"
 
 
@@ -370,15 +373,13 @@ class TestApprovalTimeoutFailed:
         await _ensure_task(store_group, task_id)
 
         # 先创建 task_job_store entry
-        created = await store_group.task_job_store.create_job(
-            task_id, "test", None
-        )
+        created = await store_group.task_job_store.create_job(task_id, "test", None)
         assert created, "task_job 创建失败"
         await store_group.task_job_store.mark_running(task_id)
 
         # 直接将 task 状态设为 WAITING_APPROVAL，并更新 updated_at 为过去
-        from octoagent.core.models.enums import EventType as _ET, ActorType as _AT
-        task_svc = TaskService(store_group, sse_hub)
+
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
 
         # 写状态转移事件
         await task_svc._write_state_transition(
@@ -407,7 +408,7 @@ class TestApprovalTimeoutFailed:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_mock,
+            runtime_services=runtime_service_fixture(llm_mock).bundle,
             timeout_seconds=14400.0,
             monitor_interval_seconds=0.05,  # 极短 monitor interval
             approval_timeout_seconds=0.5,  # 极短 approval timeout
@@ -417,7 +418,9 @@ class TestApprovalTimeoutFailed:
 
         # 手动注册 task 到 running_jobs（模拟 monitor_loop 可见此 task）
         import asyncio as _asyncio
+
         from octoagent.gateway.services.task_runner import RunningJob
+
         _dummy_task = _asyncio.create_task(_asyncio.sleep(999))
         runner._running_jobs[task_id] = RunningJob(
             task=_dummy_task,
@@ -430,8 +433,9 @@ class TestApprovalTimeoutFailed:
         # 验证 task 状态 FAILED（AC-C3）
         task_final = await store_group.task_store.get_task(task_id)
         assert task_final is not None, "task 应存在"
-        assert task_final.status == TaskStatus.FAILED, \
+        assert task_final.status == TaskStatus.FAILED, (
             f"AC-C3: 超时后 task 应为 FAILED，实际: {task_final.status}"
+        )
 
         # 验证 _notify_completion 被调用（FAILED 终态通知）
         assert task_id in completed_tasks, "AC-C3: FAILED 后应调用 _notify_completion"
@@ -447,7 +451,7 @@ class TestApprovalTimeoutFailed:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -460,7 +464,7 @@ class TestApprovalTimeoutFailed:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             monitor_interval_seconds=0.05,
             approval_timeout_seconds=0.01,  # 极短
@@ -469,7 +473,9 @@ class TestApprovalTimeoutFailed:
         runner._mark_execution_terminal = AsyncMock()
 
         import asyncio as _asyncio
+
         from octoagent.gateway.services.task_runner import RunningJob
+
         _dummy = _asyncio.create_task(_asyncio.sleep(999))
         runner._running_jobs[task_id] = RunningJob(
             task=_dummy,
@@ -480,8 +486,9 @@ class TestApprovalTimeoutFailed:
 
         # WAITING_INPUT 不受 approval_timeout 影响
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.WAITING_INPUT, \
+        assert task_final is not None and task_final.status == TaskStatus.WAITING_INPUT, (
             f"AC-C3 边界：WAITING_INPUT 不应被改为 FAILED，实际: {task_final.status if task_final else 'None'}"
+        )
 
         runner._notify_completion.assert_not_called()
         _dummy.cancel()
@@ -498,20 +505,20 @@ class TestApprovalTimeoutFailed:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             approval_timeout_seconds=60.0,
         )
-        assert runner._approval_timeout_seconds == 60.0, \
-            "B-9d: approval_timeout_seconds 覆盖应生效"
+        assert runner._approval_timeout_seconds == 60.0, "B-9d: approval_timeout_seconds 覆盖应生效"
 
         # 默认值验证
         runner_default = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
         )
-        assert runner_default._approval_timeout_seconds == 300.0, \
+        assert runner_default._approval_timeout_seconds == 300.0, (
             "B-9d: 默认 approval_timeout_seconds 应为 300s"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -570,18 +577,21 @@ class TestApprovalRaceConditions:
         approve_result = results[1]
 
         # 场景1 核心断言：decision 明确（approved 或 rejected），不会是异常或 None
-        assert decision in ("approved", "rejected"), \
+        assert decision in ("approved", "rejected"), (
             f"B-9b 场景1: decision 应为明确值，实际: {decision}"
+        )
 
         # handle 应从 pending_handles 清除（不重复处理）
-        assert handle.handle_id not in gate._pending_handles, \
+        assert handle.handle_id not in gate._pending_handles, (
             "B-9b 场景1: decision 后 handle 应从 pending_handles 清除"
+        )
 
         # APPROVAL_DECIDED 事件只写入一次（幂等）
         events = await store_group.event_store.get_events_for_task(task_id)
         decided_events = [e for e in events if e.type == EventType.APPROVAL_DECIDED]
-        assert len(decided_events) <= 2, \
+        assert len(decided_events) <= 2, (
             f"B-9b 场景1: APPROVAL_DECIDED 不应重复写入，实际 {len(decided_events)} 条"
+        )
 
     @pytest.mark.asyncio
     async def test_b9b_scenario3_late_approve_after_timeout(self, store_group, sse_hub):
@@ -619,8 +629,7 @@ class TestApprovalRaceConditions:
             decision="approved",
             operator="late_test",
         )
-        assert late_result is False, \
-            "B-9b 场景3: late approve 应返回 False（handle 不存在）"
+        assert late_result is False, "B-9b 场景3: late approve 应返回 False（handle 不存在）"
 
     @pytest.mark.asyncio
     async def test_b9b_scenario2_monitor_and_timeout_concurrent(self, store_group, sse_hub):
@@ -638,7 +647,7 @@ class TestApprovalRaceConditions:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -659,7 +668,7 @@ class TestApprovalRaceConditions:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             monitor_interval_seconds=0.05,
             approval_timeout_seconds=1.0,
@@ -669,7 +678,9 @@ class TestApprovalRaceConditions:
         runner._mark_execution_terminal = AsyncMock()
 
         import asyncio as _asyncio
+
         from octoagent.gateway.services.task_runner import RunningJob
+
         _dummy = _asyncio.create_task(_asyncio.sleep(999))
         runner._running_jobs[task_id] = RunningJob(
             task=_dummy,
@@ -692,8 +703,9 @@ class TestApprovalRaceConditions:
 
         # 最终状态应为 FAILED（唯一终态）
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.FAILED, \
+        assert task_final is not None and task_final.status == TaskStatus.FAILED, (
             f"B-9b 场景2: 并发 FAILED 后 task 状态应为 FAILED，实际: {task_final.status if task_final else 'None'}"
+        )
 
         _dummy.cancel()
 
@@ -721,7 +733,7 @@ class TestStartupRecoveryIsCallerWorker:
         await _ensure_task(store_group, task_id)
 
         # 写入 CONTROL_METADATA_UPDATED 事件（携带 is_caller_worker_signal）
-        from octoagent.core.models import Event, EventCausality, EventType, ActorType
+        from octoagent.core.models import ActorType, Event, EventType
         from octoagent.core.models.payloads import ControlMetadataUpdatedPayload
         from ulid import ULID
 
@@ -744,15 +756,16 @@ class TestStartupRecoveryIsCallerWorker:
         )
 
         # 验证 get_latest_user_metadata 能读到 is_caller_worker_signal
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         latest_meta = await task_svc.get_latest_user_metadata(task_id)
-        assert latest_meta.get("is_caller_worker_signal") == "1", \
+        assert latest_meta.get("is_caller_worker_signal") == "1", (
             "AC-C6 前提：CONTROL_METADATA_UPDATED 后 get_latest_user_metadata 应含 is_caller_worker_signal=1"
+        )
 
         # 模拟 startup_recovery 读取逻辑（与 task_runner._recover_one_orphan_job 一致）
         _startup_state_snapshot: dict = {}
         try:
-            _task_svc_startup = TaskService(store_group, sse_hub)
+            _task_svc_startup = TaskService(store_group, sse_hub, storage_only=True)
             _latest_meta_startup = await _task_svc_startup.get_latest_user_metadata(task_id)
             if _latest_meta_startup.get("is_caller_worker_signal") == "1":
                 _startup_state_snapshot["is_caller_worker_signal"] = "1"
@@ -760,8 +773,9 @@ class TestStartupRecoveryIsCallerWorker:
             pass
 
         # AC-C6 核心断言：is_caller_worker_signal 已正确恢复到 state_snapshot
-        assert _startup_state_snapshot.get("is_caller_worker_signal") == "1", \
+        assert _startup_state_snapshot.get("is_caller_worker_signal") == "1", (
             "AC-C6: startup_recovery 应从 CONTROL_METADATA_UPDATED 历史事件恢复 is_caller_worker_signal=1"
+        )
 
     @pytest.mark.asyncio
     async def test_ac_c6_startup_recovery_no_signal(self, store_group, sse_hub):
@@ -779,15 +793,16 @@ class TestStartupRecoveryIsCallerWorker:
 
         _startup_state_snapshot: dict = {}
         try:
-            _task_svc_startup = TaskService(store_group, sse_hub)
+            _task_svc_startup = TaskService(store_group, sse_hub, storage_only=True)
             _latest_meta_startup = await _task_svc_startup.get_latest_user_metadata(task_id)
             if _latest_meta_startup.get("is_caller_worker_signal") == "1":
                 _startup_state_snapshot["is_caller_worker_signal"] = "1"
         except Exception:
             pass  # 允许无 metadata 时静默
 
-        assert "is_caller_worker_signal" not in _startup_state_snapshot, \
+        assert "is_caller_worker_signal" not in _startup_state_snapshot, (
             "AC-C6 边界：无信号时 snapshot 不应含 is_caller_worker_signal"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -831,8 +846,9 @@ class TestHigh01ProductionResolvePathBridged:
             operation_summary="HIGH-01 生产 resolve 路径测试",
             task_id=task_id,
         )
-        assert handle.handle_id in gate._pending_handles, \
+        assert handle.handle_id in gate._pending_handles, (
             "HIGH-01 前提：handle 应在 pending_handles 中"
+        )
 
         # 模拟 OperatorActionService._approval_gate 双 resolve 路径
         # 这里直接调用 resolve_approval 来模拟 OperatorActionService 的双 resolve 逻辑
@@ -862,12 +878,13 @@ class TestHigh01ProductionResolvePathBridged:
         decision, resolve_result = await asyncio.gather(wait_task, resolve_task)
 
         # HIGH-01 核心断言：
-        assert decision == "approved", \
+        assert decision == "approved", (
             f"HIGH-01: 生产 resolve 后 wait_for_decision 应返回 'approved'，实际: {decision}"
-        assert resolve_result is True, \
+        )
+        assert resolve_result is True, (
             "HIGH-01: resolve_approval 应返回 True（handle 存在且成功唤醒）"
-        assert _resolved_early.is_set(), \
-            "HIGH-01: 应在 timeout 前被唤醒（不应等待 5s timeout）"
+        )
+        assert _resolved_early.is_set(), "HIGH-01: 应在 timeout 前被唤醒（不应等待 5s timeout）"
 
     @pytest.mark.asyncio
     async def test_high01_operator_action_service_injects_approval_gate(self, store_group, sse_hub):
@@ -888,10 +905,10 @@ class TestHigh01ProductionResolvePathBridged:
             approval_gate=gate,
         )
 
-        assert svc._approval_gate is gate, \
+        assert svc._approval_gate is gate, (
             "HIGH-01: OperatorActionService._approval_gate 应等于注入的 gate"
-        assert svc._approval_gate is not None, \
-            "HIGH-01: 注入后 _approval_gate 不应为 None"
+        )
+        assert svc._approval_gate is not None, "HIGH-01: 注入后 _approval_gate 不应为 None"
 
     @pytest.mark.asyncio
     async def test_high01_deny_resolve_wakes_wait_as_rejected(self, store_group, sse_hub):
@@ -925,8 +942,9 @@ class TestHigh01ProductionResolvePathBridged:
 
         decision, deny_result = await asyncio.gather(wait_task, deny_task)
 
-        assert decision == "rejected", \
+        assert decision == "rejected", (
             f"HIGH-01 deny: wait_for_decision 应返回 'rejected'，实际: {decision}"
+        )
         assert deny_result is True, "HIGH-01 deny: resolve_approval 应返回 True"
 
 
@@ -958,7 +976,7 @@ class TestHigh02FinallyBlockRaceCondition:
         await _ensure_task(store_group, task_id)
 
         # 设置 task 状态为 WAITING_APPROVAL
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -978,18 +996,21 @@ class TestHigh02FinallyBlockRaceCondition:
 
         # 验证 task 已是 FAILED
         task_failed = await store_group.task_store.get_task(task_id)
-        assert task_failed is not None and task_failed.status == TaskStatus.FAILED, \
+        assert task_failed is not None and task_failed.status == TaskStatus.FAILED, (
             "HIGH-02 前提：task 应已被 monitor 推到 FAILED"
+        )
 
         # 调用 execution_console.mark_running_from_waiting_approval（模拟 finally 块）
         from octoagent.gateway.services.execution_console import ExecutionConsoleService
+
         console = ExecutionConsoleService(store_group=store_group, sse_hub=sse_hub)
         await console.mark_running_from_waiting_approval(task_id=task_id)
 
         # HIGH-02 核心断言：task 仍为 FAILED，不被重置
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.FAILED, \
+        assert task_final is not None and task_final.status == TaskStatus.FAILED, (
             f"HIGH-02: finally 调用后 task 应仍为 FAILED（不被重置），实际: {task_final.status if task_final else 'None'}"
+        )
 
     @pytest.mark.asyncio
     async def test_high02_finally_restores_when_still_waiting(self, store_group, sse_hub):
@@ -997,7 +1018,7 @@ class TestHigh02FinallyBlockRaceCondition:
         task_id = "test-task-high02-002"
         await _ensure_task(store_group, task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -1007,12 +1028,14 @@ class TestHigh02FinallyBlockRaceCondition:
         )
 
         from octoagent.gateway.services.execution_console import ExecutionConsoleService
+
         console = ExecutionConsoleService(store_group=store_group, sse_hub=sse_hub)
         await console.mark_running_from_waiting_approval(task_id=task_id)
 
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.RUNNING, \
+        assert task_final is not None and task_final.status == TaskStatus.RUNNING, (
             f"HIGH-02 正常路径：WAITING_APPROVAL → RUNNING 应成功，实际: {task_final.status if task_final else 'None'}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1041,7 +1064,7 @@ class TestHigh03MonitorCasFailureAbortsSideEffects:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -1062,7 +1085,7 @@ class TestHigh03MonitorCasFailureAbortsSideEffects:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             approval_timeout_seconds=1.0,
         )
@@ -1070,7 +1093,9 @@ class TestHigh03MonitorCasFailureAbortsSideEffects:
         runner._mark_execution_terminal = AsyncMock()
 
         import asyncio as _asyncio
+
         from octoagent.gateway.services.task_runner import RunningJob
+
         _dummy = _asyncio.create_task(_asyncio.sleep(999))
         runner._running_jobs[task_id] = RunningJob(
             task=_dummy,
@@ -1081,10 +1106,10 @@ class TestHigh03MonitorCasFailureAbortsSideEffects:
 
         # CAS 成功路径：task=FAILED，job 也被 mark_failed，notify 被调用
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.FAILED, \
+        assert task_final is not None and task_final.status == TaskStatus.FAILED, (
             "HIGH-03 CAS 成功：task 应为 FAILED"
-        assert task_id in notify_calls, \
-            "HIGH-03 CAS 成功：_notify_completion 应被调用"
+        )
+        assert task_id in notify_calls, "HIGH-03 CAS 成功：_notify_completion 应被调用"
 
         _dummy.cancel()
 
@@ -1112,7 +1137,7 @@ class TestHigh03MonitorCasFailureAbortsSideEffects:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             approval_timeout_seconds=1.0,
         )
@@ -1120,7 +1145,9 @@ class TestHigh03MonitorCasFailureAbortsSideEffects:
         runner._mark_execution_terminal = AsyncMock()
 
         import asyncio as _asyncio
+
         from octoagent.gateway.services.task_runner import RunningJob
+
         _dummy = _asyncio.create_task(_asyncio.sleep(999))
         runner._running_jobs[task_id] = RunningJob(
             task=_dummy,
@@ -1153,7 +1180,7 @@ class TestHigh03MonitorCasFailureAbortsSideEffects:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         # 先推到 WAITING_APPROVAL
         await task_svc._write_state_transition(
             task_id=task_id,
@@ -1183,14 +1210,15 @@ class TestHigh03MonitorCasFailureAbortsSideEffects:
 
         # 验证 task 已是 RUNNING
         task_before_monitor = await store_group.task_store.get_task(task_id)
-        assert task_before_monitor is not None and task_before_monitor.status == TaskStatus.RUNNING, \
-            "HIGH-03 前提：task 已被恢复为 RUNNING"
+        assert (
+            task_before_monitor is not None and task_before_monitor.status == TaskStatus.RUNNING
+        ), "HIGH-03 前提：task 已被恢复为 RUNNING"
 
         notify_calls: list[str] = []
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             approval_timeout_seconds=1.0,
         )
@@ -1198,7 +1226,9 @@ class TestHigh03MonitorCasFailureAbortsSideEffects:
         runner._mark_execution_terminal = AsyncMock()
 
         import asyncio as _asyncio
+
         from octoagent.gateway.services.task_runner import RunningJob
+
         _dummy = _asyncio.create_task(_asyncio.sleep(999))
         runner._running_jobs[task_id] = RunningJob(
             task=_dummy,
@@ -1218,8 +1248,9 @@ class TestHigh03MonitorCasFailureAbortsSideEffects:
         # 检查 approval_timeout 路径没有错误推 FAILED（CAS abort 正确）
         # 通过日志或事件验证比较复杂，这里用间接验证：
         # 即便 RUNNING 任务被全局 timeout 取消，_notify_completion 也仅被调用一次
-        assert len(notify_calls) <= 1, \
+        assert len(notify_calls) <= 1, (
             f"HIGH-03: _notify_completion 不应被调用多次，实际: {len(notify_calls)}"
+        )
 
         _dummy.cancel()
 
@@ -1253,7 +1284,7 @@ class TestHigh04StartupRecoveryWaitingApproval:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -1267,7 +1298,7 @@ class TestHigh04StartupRecoveryWaitingApproval:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             approval_timeout_seconds=300.0,
         )
@@ -1279,10 +1310,10 @@ class TestHigh04StartupRecoveryWaitingApproval:
 
         # HIGH-04 核心断言
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.FAILED, \
+        assert task_final is not None and task_final.status == TaskStatus.FAILED, (
             f"HIGH-04: startup_recovery 后 WAITING_APPROVAL task 应变为 FAILED，实际: {task_final.status if task_final else 'None'}"
-        assert task_id in notify_calls, \
-            "HIGH-04: FAILED 后应调用 _notify_completion"
+        )
+        assert task_id in notify_calls, "HIGH-04: FAILED 后应调用 _notify_completion"
 
     @pytest.mark.asyncio
     async def test_high04_startup_recovery_no_waiting_approval_jobs_noop(
@@ -1293,7 +1324,7 @@ class TestHigh04StartupRecoveryWaitingApproval:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
         )
         runner._notify_completion = AsyncMock(side_effect=lambda tid: notify_calls.append(tid))
         runner._mark_execution_terminal = AsyncMock()
@@ -1301,13 +1332,12 @@ class TestHigh04StartupRecoveryWaitingApproval:
         # 没有 WAITING_APPROVAL job，不 raise，不 notify
         await runner._recover_orphan_waiting_approval_jobs()
 
-        assert len(notify_calls) == 0, \
+        assert len(notify_calls) == 0, (
             "HIGH-04 边界：无 WAITING_APPROVAL job 时不应调用 _notify_completion"
+        )
 
     @pytest.mark.asyncio
-    async def test_high04_startup_recovery_reason_contains_restart(
-        self, store_group, sse_hub
-    ):
+    async def test_high04_startup_recovery_reason_contains_restart(self, store_group, sse_hub):
         """HIGH-04：recovery reason 含 'restart' 字样（标识重启清理）。"""
         task_id = "test-task-high04-003"
         await _ensure_task(store_group, task_id)
@@ -1315,7 +1345,7 @@ class TestHigh04StartupRecoveryWaitingApproval:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -1328,7 +1358,7 @@ class TestHigh04StartupRecoveryWaitingApproval:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             approval_timeout_seconds=300.0,
         )
         runner._notify_completion = AsyncMock()
@@ -1338,22 +1368,24 @@ class TestHigh04StartupRecoveryWaitingApproval:
 
         # 验证 FAILED 事件的 reason 含 restart 字样
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.FAILED, \
+        assert task_final is not None and task_final.status == TaskStatus.FAILED, (
             "HIGH-04: task 应为 FAILED"
+        )
 
         # 从 events 中验证 reason
         events = await store_group.event_store.get_events_for_task(task_id)
         state_transition_events = [
-            e for e in events
+            e
+            for e in events
             if e.type.value == "STATE_TRANSITION"
             and e.payload.get("to_status") in ("FAILED", "failed")
         ]
-        assert len(state_transition_events) >= 1, \
-            "HIGH-04: 应有 FAILED 状态转移事件"
+        assert len(state_transition_events) >= 1, "HIGH-04: 应有 FAILED 状态转移事件"
         last_failed = state_transition_events[-1]
         reason = last_failed.payload.get("reason", "")
-        assert "restart" in reason or "gateway" in reason, \
+        assert "restart" in reason or "gateway" in reason, (
             f"HIGH-04: FAILED reason 应含 'restart' 或 'gateway'，实际: {reason}"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1380,11 +1412,12 @@ class TestHigh01V3ApprovalManagerRegistration:
         3. approval_manager.resolve 成功 → approval_gate.resolve_approval 被唤醒
         4. wait_for_decision 立即返回 "approved"（不超时）
         """
+        from datetime import timedelta
+
+        from octoagent.core.models.enums import SideEffectLevel
         from octoagent.gateway.harness.approval_gate import ApprovalGate
         from octoagent.policy.approval_manager import ApprovalManager
         from octoagent.policy.models import ApprovalDecision, ApprovalRequest
-        from octoagent.core.models.enums import SideEffectLevel
-        from datetime import timedelta
 
         task_id = "test-task-high01-v3-001"
         await _ensure_task(store_group, task_id)
@@ -1426,8 +1459,9 @@ class TestHigh01V3ApprovalManagerRegistration:
         record = await manager.register(approval_request)
 
         # HIGH-01 v3 核心前提：ApprovalManager 已有该 approval_id
-        assert manager.get_approval(handle.handle_id) is not None, \
+        assert manager.get_approval(handle.handle_id) is not None, (
             "HIGH-01 v3：注册后 ApprovalManager 应能找到该 approval_id"
+        )
 
         # 3. 模拟 Web resolve 链路：先 approval_manager.resolve → 再 approval_gate.resolve_approval
         async def _simulate_web_resolve():
@@ -1439,8 +1473,9 @@ class TestHigh01V3ApprovalManagerRegistration:
                 decision=ApprovalDecision.ALLOW_ONCE,
                 resolved_by="user:web",
             )
-            assert resolve_result is True, \
+            assert resolve_result is True, (
                 "HIGH-01 v3：approval_manager.resolve 应返回 True（approval_id 存在）"
+            )
 
             # Web 路由：再 approval_gate.resolve_approval（唤醒等待协程）
             gate_result = await gate.resolve_approval(
@@ -1453,26 +1488,23 @@ class TestHigh01V3ApprovalManagerRegistration:
             )
             return resolve_result, gate_result
 
-        wait_task = asyncio.create_task(
-            gate.wait_for_decision(handle, timeout_seconds=5.0)
-        )
+        wait_task = asyncio.create_task(gate.wait_for_decision(handle, timeout_seconds=5.0))
         resolve_task = asyncio.create_task(_simulate_web_resolve())
 
-        decision, (manager_result, gate_gate_result) = await asyncio.gather(
-            wait_task, resolve_task
-        )
+        decision, (manager_result, gate_gate_result) = await asyncio.gather(wait_task, resolve_task)
 
         # HIGH-01 v3 核心断言：
-        assert decision == "approved", \
+        assert decision == "approved", (
             f"HIGH-01 v3：完整 production resolve 链路后 wait_for_decision 应返回 approved，实际: {decision}"
-        assert manager_result is True, \
-            "HIGH-01 v3：approval_manager.resolve 应成功（不再 404）"
+        )
+        assert manager_result is True, "HIGH-01 v3：approval_manager.resolve 应成功（不再 404）"
 
     @pytest.mark.asyncio
     async def test_high01_v3_tool_deps_has_approval_manager_field(self, store_group, sse_hub):
         """HIGH-01 v3：ToolDeps 有 _approval_manager 字段（构造函数兼容性）。"""
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from pathlib import Path
+
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         deps = ToolDeps(
             project_root=Path("/tmp"),
@@ -1485,26 +1517,31 @@ class TestHigh01V3ApprovalManagerRegistration:
         )
 
         # HIGH-01 v3：_approval_manager 字段存在，默认为 None
-        assert hasattr(deps, "_approval_manager"), \
+        assert hasattr(deps, "_approval_manager"), (
             "HIGH-01 v3：ToolDeps 应有 _approval_manager 字段"
-        assert deps._approval_manager is None, \
-            "HIGH-01 v3：_approval_manager 默认值应为 None"
+        )
+        assert deps._approval_manager is None, "HIGH-01 v3：_approval_manager 默认值应为 None"
 
         # 可以设置 ApprovalManager 实例
         from octoagent.policy.approval_manager import ApprovalManager
+
         manager = ApprovalManager()
         deps._approval_manager = manager
-        assert deps._approval_manager is manager, \
+        assert deps._approval_manager is manager, (
             "HIGH-01 v3：_approval_manager 可以绑定 ApprovalManager 实例"
+        )
 
     @pytest.mark.asyncio
-    async def test_high01_v3_approval_manager_register_deny_wakes_correctly(self, store_group, sse_hub):
+    async def test_high01_v3_approval_manager_register_deny_wakes_correctly(
+        self, store_group, sse_hub
+    ):
         """HIGH-01 v3 deny 路径：用户拒绝 → wait_for_decision 收到 rejected。"""
+        from datetime import timedelta
+
+        from octoagent.core.models.enums import SideEffectLevel
         from octoagent.gateway.harness.approval_gate import ApprovalGate
         from octoagent.policy.approval_manager import ApprovalManager
         from octoagent.policy.models import ApprovalDecision, ApprovalRequest
-        from octoagent.core.models.enums import SideEffectLevel
-        from datetime import timedelta
 
         task_id = "test-task-high01-v3-002"
         await _ensure_task(store_group, task_id)
@@ -1522,16 +1559,18 @@ class TestHigh01V3ApprovalManagerRegistration:
         )
 
         _now = datetime.now(UTC)
-        await manager.register(ApprovalRequest(
-            approval_id=handle.handle_id,
-            task_id=task_id,
-            tool_name="worker.escalate_permission",
-            tool_args_summary="deny test",
-            risk_explanation="test",
-            policy_label="worker.escalate_permission",
-            side_effect_level=SideEffectLevel.IRREVERSIBLE,
-            expires_at=_now + timedelta(seconds=300),
-        ))
+        await manager.register(
+            ApprovalRequest(
+                approval_id=handle.handle_id,
+                task_id=task_id,
+                tool_name="worker.escalate_permission",
+                tool_args_summary="deny test",
+                risk_explanation="test",
+                policy_label="worker.escalate_permission",
+                side_effect_level=SideEffectLevel.IRREVERSIBLE,
+                expires_at=_now + timedelta(seconds=300),
+            )
+        )
 
         async def _simulate_deny():
             await asyncio.sleep(0.05)
@@ -1553,8 +1592,9 @@ class TestHigh01V3ApprovalManagerRegistration:
         deny_task = asyncio.create_task(_simulate_deny())
 
         decision, _ = await asyncio.gather(wait_task, deny_task)
-        assert decision == "rejected", \
+        assert decision == "rejected", (
             f"HIGH-01 v3 deny：wait_for_decision 应返回 rejected，实际: {decision}"
+        )
 
 
 class TestHigh02V3FinallyConditionalRestore:
@@ -1576,7 +1616,7 @@ class TestHigh02V3FinallyConditionalRestore:
         task_id = "test-task-high02-v3-001"
         await _ensure_task(store_group, task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -1586,6 +1626,7 @@ class TestHigh02V3FinallyConditionalRestore:
         )
 
         from octoagent.gateway.services.execution_console import ExecutionConsoleService
+
         console = ExecutionConsoleService(store_group=store_group, sse_hub=sse_hub)
 
         # 模拟 v3 finally 块逻辑：decision == "approved" → 恢复 RUNNING
@@ -1594,8 +1635,9 @@ class TestHigh02V3FinallyConditionalRestore:
             await console.mark_running_from_waiting_approval(task_id=task_id)
 
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.RUNNING, \
+        assert task_final is not None and task_final.status == TaskStatus.RUNNING, (
             f"HIGH-02 v3：approved 后 task 应恢复 RUNNING，实际: {task_final.status if task_final else 'None'}"
+        )
 
     @pytest.mark.asyncio
     async def test_high02_v3_rejected_does_not_restore(self, store_group, sse_hub):
@@ -1610,7 +1652,7 @@ class TestHigh02V3FinallyConditionalRestore:
         task_id = "test-task-high02-v3-002"
         await _ensure_task(store_group, task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -1620,6 +1662,7 @@ class TestHigh02V3FinallyConditionalRestore:
         )
 
         from octoagent.gateway.services.execution_console import ExecutionConsoleService
+
         console = ExecutionConsoleService(store_group=store_group, sse_hub=sse_hub)
 
         # 模拟 v3 finally 块逻辑：decision != "approved" → 不恢复
@@ -1629,8 +1672,9 @@ class TestHigh02V3FinallyConditionalRestore:
         # else: 不调 mark_running_from_waiting_approval
 
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.WAITING_APPROVAL, \
+        assert task_final is not None and task_final.status == TaskStatus.WAITING_APPROVAL, (
             f"HIGH-02 v3：rejected 后 task 应保持 WAITING_APPROVAL（不恢复 RUNNING），实际: {task_final.status if task_final else 'None'}"
+        )
 
     @pytest.mark.asyncio
     async def test_high02_v3_timeout_does_not_restore(self, store_group, sse_hub):
@@ -1645,7 +1689,7 @@ class TestHigh02V3FinallyConditionalRestore:
         await _ensure_task(store_group, task_id)
         await _ensure_task(store_group, "_approval_gate_audit")
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -1655,6 +1699,7 @@ class TestHigh02V3FinallyConditionalRestore:
         )
 
         from octoagent.gateway.harness.approval_gate import ApprovalGate
+
         gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
 
         handle = await gate.request_approval(
@@ -1673,14 +1718,16 @@ class TestHigh02V3FinallyConditionalRestore:
             # v3 finally 块逻辑：仅 approved 才恢复
             if decision == "approved":
                 from octoagent.gateway.services.execution_console import ExecutionConsoleService
+
                 console = ExecutionConsoleService(store_group=store_group, sse_hub=sse_hub)
                 await console.mark_running_from_waiting_approval(task_id=task_id)
 
         assert decision == "rejected", "timeout 应返回 rejected"
 
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.WAITING_APPROVAL, \
+        assert task_final is not None and task_final.status == TaskStatus.WAITING_APPROVAL, (
             f"HIGH-02 v3：timeout 后 task 应保持 WAITING_APPROVAL（不恢复 RUNNING），实际: {task_final.status if task_final else 'None'}"
+        )
 
 
 class TestHigh04V3StartupRecoveryRestartMonitor:
@@ -1703,7 +1750,8 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
         - task 仍为 WAITING_APPROVAL（不被推 FAILED）
         - task_id 被加入 _running_jobs（monitor 接管）
         """
-        from octoagent.core.models.enums import EventType as _ET, ActorType as _AT
+        from octoagent.core.models.enums import ActorType as _AT
+        from octoagent.core.models.enums import EventType as _ET
         from octoagent.core.models.event import Event, EventCausality
         from ulid import ULID
 
@@ -1712,7 +1760,7 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -1740,7 +1788,7 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
                 "operation_summary": "HIGH-04 v3 test",
             },
             trace_id=f"trace-{task_id}",
-            causality=EventCausality(idempotency_key=f"test-approval-001"),
+            causality=EventCausality(idempotency_key="test-approval-001"),
         )
         await store_group.event_store.append_event_committed(
             approval_event, update_task_pointer=False
@@ -1749,7 +1797,7 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             approval_timeout_seconds=300.0,  # 300s timeout，30s elapsed → 未超时
         )
@@ -1760,12 +1808,14 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
 
         # HIGH-04 v3 核心断言：未超时 → 重启 monitor，task 仍为 WAITING_APPROVAL
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.WAITING_APPROVAL, \
+        assert task_final is not None and task_final.status == TaskStatus.WAITING_APPROVAL, (
             f"HIGH-04 v3：30s elapsed / 300s timeout → 应重启 monitor，task 仍为 WAITING_APPROVAL，实际: {task_final.status if task_final else 'None'}"
+        )
 
         # task_id 被加入 _running_jobs
-        assert task_id in runner._running_jobs, \
+        assert task_id in runner._running_jobs, (
             "HIGH-04 v3：未超时时 task_id 应被加入 _running_jobs（monitor 接管）"
+        )
 
         # _notify_completion 不被调用（因为没有推 FAILED）
         runner._notify_completion.assert_not_called()
@@ -1785,7 +1835,8 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
         - task 状态为 FAILED
         - reason 含 "timeout_after_300s"
         """
-        from octoagent.core.models.enums import EventType as _ET, ActorType as _AT
+        from octoagent.core.models.enums import ActorType as _AT
+        from octoagent.core.models.enums import EventType as _ET
         from octoagent.core.models.event import Event, EventCausality
         from ulid import ULID
 
@@ -1794,7 +1845,7 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -1822,7 +1873,7 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
                 "operation_summary": "HIGH-04 v3 timeout test",
             },
             trace_id=f"trace-{task_id}",
-            causality=EventCausality(idempotency_key=f"test-approval-002"),
+            causality=EventCausality(idempotency_key="test-approval-002"),
         )
         await store_group.event_store.append_event_committed(
             approval_event, update_task_pointer=False
@@ -1832,7 +1883,7 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             approval_timeout_seconds=300.0,  # 300s timeout，500s elapsed → 已超时
         )
@@ -1843,21 +1894,26 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
 
         # HIGH-04 v3 核心断言：已超时 → 推 FAILED
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.FAILED, \
+        assert task_final is not None and task_final.status == TaskStatus.FAILED, (
             f"HIGH-04 v3：500s elapsed / 300s timeout → 应推 FAILED，实际: {task_final.status if task_final else 'None'}"
+        )
         assert task_id in notify_calls, "HIGH-04 v3：FAILED 后应调用 _notify_completion"
 
         # 验证 reason 格式
         events = await store_group.event_store.get_events_for_task(task_id)
         failed_events = [
-            e for e in events
-            if getattr(e, "type", None) is not None and e.type.value == "STATE_TRANSITION"
-            and isinstance(e.payload, dict) and e.payload.get("to_status") in ("FAILED", "failed")
+            e
+            for e in events
+            if getattr(e, "type", None) is not None
+            and e.type.value == "STATE_TRANSITION"
+            and isinstance(e.payload, dict)
+            and e.payload.get("to_status") in ("FAILED", "failed")
         ]
         if failed_events:
             reason = failed_events[-1].payload.get("reason", "")
-            assert "timeout_after_300s" in reason, \
+            assert "timeout_after_300s" in reason, (
                 f"HIGH-04 v3：reason 应含 'timeout_after_300s'，实际: {reason}"
+            )
 
     @pytest.mark.asyncio
     async def test_high04_v3_no_approval_event_fallback_gateway_restart(self, store_group, sse_hub):
@@ -1867,7 +1923,7 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -1883,7 +1939,7 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             approval_timeout_seconds=300.0,
         )
@@ -1894,8 +1950,9 @@ class TestHigh04V3StartupRecoveryRestartMonitor:
 
         # fallback 路径：无事件 → 推 FAILED（保守策略）
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.FAILED, \
+        assert task_final is not None and task_final.status == TaskStatus.FAILED, (
             f"HIGH-04 v3 fallback：无 APPROVAL_REQUESTED 事件应推 FAILED，实际: {task_final.status if task_final else 'None'}"
+        )
         assert task_id in notify_calls
 
 
@@ -1945,8 +2002,9 @@ class TestNM01V3DualResolveSessionIdOperationType:
 
         # N-M-01 核心断言：allowlist 被更新（因为 session_id + operation_type 均非空）
         allowlist_hit = gate.check_allowlist("test-session-nm01", "worker.escalate_permission")
-        assert allowlist_hit is True, \
+        assert allowlist_hit is True, (
             "N-M-01 v3：传 session_id + operation_type 后 allowlist 应被更新（check_allowlist 返回 True）"
+        )
 
     @pytest.mark.asyncio
     async def test_nm01_empty_operation_type_allowlist_not_updated(self, store_group, sse_hub):
@@ -1980,9 +2038,10 @@ class TestNM01V3DualResolveSessionIdOperationType:
         )
 
         # 空 operation_type → allowlist 不更新
-        allowlist_hit = gate.check_allowlist("test-session-nm01-empty", "worker.escalate_permission")
-        assert allowlist_hit is False, \
-            "N-M-01 对比：空 operation_type 时 allowlist 不应被更新"
+        allowlist_hit = gate.check_allowlist(
+            "test-session-nm01-empty", "worker.escalate_permission"
+        )
+        assert allowlist_hit is False, "N-M-01 对比：空 operation_type 时 allowlist 不应被更新"
 
 
 class TestNM02V3RunJobTerminalDedup:
@@ -2010,7 +2069,7 @@ class TestNM02V3RunJobTerminalDedup:
         await store_group.task_job_store.mark_running(task_id)
 
         # 模拟 monitor 推 FAILED
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -2035,6 +2094,7 @@ class TestNM02V3RunJobTerminalDedup:
 
         # 模拟 _run_job 终态处理逻辑（N-M-02 v3 去重 check）
         from octoagent.gateway.services.task_runner import _TERMINAL_JOB_STATUSES
+
         notify_calls: list[str] = []
 
         async def _simulate_run_job_terminal_check():
@@ -2054,10 +2114,10 @@ class TestNM02V3RunJobTerminalDedup:
             return "other"
 
         result = await _simulate_run_job_terminal_check()
-        assert result == "skipped_double_notify", \
+        assert result == "skipped_double_notify", (
             f"N-M-02 v3：job 已是终态时应跳过 double-notify，实际返回: {result}"
-        assert task_id not in notify_calls, \
-            "N-M-02 v3：跳过去重时不应调用 _notify_completion"
+        )
+        assert task_id not in notify_calls, "N-M-02 v3：跳过去重时不应调用 _notify_completion"
 
     @pytest.mark.asyncio
     async def test_nm02_normal_notify_when_job_not_terminal(self, store_group, sse_hub):
@@ -2073,7 +2133,7 @@ class TestNM02V3RunJobTerminalDedup:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -2084,6 +2144,7 @@ class TestNM02V3RunJobTerminalDedup:
         # job 仍是 RUNNING（模拟 monitor 只改了 task 状态但 job 还未标记）
 
         from octoagent.gateway.services.task_runner import _TERMINAL_JOB_STATUSES
+
         notify_calls: list[str] = []
 
         async def _simulate_run_job_not_terminal_job():
@@ -2100,10 +2161,8 @@ class TestNM02V3RunJobTerminalDedup:
             return "other"
 
         result = await _simulate_run_job_not_terminal_job()
-        assert result == "notified", \
-            f"N-M-02 v3：job 非终态时应正常 notify，实际返回: {result}"
-        assert task_id in notify_calls, \
-            "N-M-02 v3：正常路径应调用 _notify_completion"
+        assert result == "notified", f"N-M-02 v3：job 非终态时应正常 notify，实际返回: {result}"
+        assert task_id in notify_calls, "N-M-02 v3：正常路径应调用 _notify_completion"
 
 
 # ---------------------------------------------------------------------------
@@ -2135,7 +2194,6 @@ class TestHigh02V4MonitorScansDatabase:
 
         注意：使用 mock task.updated_at 绕过数据库 updated_at 精度限制。
         """
-        from unittest.mock import AsyncMock as _AM
 
         task_id = "test-task-high02-v4-001"
         await _ensure_task(store_group, task_id)
@@ -2143,7 +2201,7 @@ class TestHigh02V4MonitorScansDatabase:
         await store_group.task_job_store.mark_running(task_id)
 
         # 将 task 转移到 WAITING_APPROVAL（task_job_store 状态）
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -2157,7 +2215,7 @@ class TestHigh02V4MonitorScansDatabase:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             approval_timeout_seconds=300.0,
         )
@@ -2188,18 +2246,17 @@ class TestHigh02V4MonitorScansDatabase:
             store_group.task_store.get_task = original_get_task
 
         # HIGH-02 v4 核心断言 1：orphan WAITING_APPROVAL task 被 monitor 扫到（mock_get_task 被调用）
-        assert call_count["n"] > 0, \
+        assert call_count["n"] > 0, (
             "HIGH-02 v4：monitor 应扫到数据库中不在 _running_jobs 的 orphan WAITING_APPROVAL task"
+        )
 
         # HIGH-02 v4 核心断言 2：task 被推 FAILED
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.FAILED, \
-            (
-                f"HIGH-02 v4：orphan WAITING_APPROVAL task（不在 _running_jobs，updated_at=500s 前）"
-                f" 应被 monitor 扫到并推 FAILED，实际: {task_final.status if task_final else 'None'}"
-            )
-        assert task_id in notify_calls, \
-            "HIGH-02 v4：FAILED 后应调用 _notify_completion"
+        assert task_final is not None and task_final.status == TaskStatus.FAILED, (
+            f"HIGH-02 v4：orphan WAITING_APPROVAL task（不在 _running_jobs，updated_at=500s 前）"
+            f" 应被 monitor 扫到并推 FAILED，实际: {task_final.status if task_final else 'None'}"
+        )
+        assert task_id in notify_calls, "HIGH-02 v4：FAILED 后应调用 _notify_completion"
 
     @pytest.mark.asyncio
     async def test_high02_v4_monitor_in_running_jobs_not_duplicated(self, store_group, sse_hub):
@@ -2217,7 +2274,7 @@ class TestHigh02V4MonitorScansDatabase:
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -2231,7 +2288,7 @@ class TestHigh02V4MonitorScansDatabase:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             timeout_seconds=14400.0,
             approval_timeout_seconds=300.0,  # 300s，task.updated_at = 刚刚，未超时
         )
@@ -2250,13 +2307,11 @@ class TestHigh02V4MonitorScansDatabase:
 
         # 未超时断言：task 仍是 WAITING_APPROVAL
         task_check = await store_group.task_store.get_task(task_id)
-        assert task_check is not None and task_check.status == TaskStatus.WAITING_APPROVAL, \
-            (
-                f"HIGH-02 v4：300s timeout / task.updated_at=刚刚 → 不应推 FAILED，"
-                f"实际: {task_check.status if task_check else 'None'}"
-            )
-        assert task_id not in notify_calls, \
-            "HIGH-02 v4：未超时时不应调用 _notify_completion"
+        assert task_check is not None and task_check.status == TaskStatus.WAITING_APPROVAL, (
+            f"HIGH-02 v4：300s timeout / task.updated_at=刚刚 → 不应推 FAILED，"
+            f"实际: {task_check.status if task_check else 'None'}"
+        )
+        assert task_id not in notify_calls, "HIGH-02 v4：未超时时不应调用 _notify_completion"
 
 
 class TestHigh04V4DeadApprovalExpire:
@@ -2272,7 +2327,9 @@ class TestHigh04V4DeadApprovalExpire:
     """
 
     @pytest.mark.asyncio
-    async def test_high04_v4_startup_recovery_expires_approval_manager_entry(self, store_group, sse_hub):
+    async def test_high04_v4_startup_recovery_expires_approval_manager_entry(
+        self, store_group, sse_hub
+    ):
         """HIGH-04 v4：startup_recovery 处理未超时 WAITING_APPROVAL task 时，
         同时 expire ApprovalManager entry（HIGH-04 PARTIAL 闭环）。
 
@@ -2286,17 +2343,17 @@ class TestHigh04V4DeadApprovalExpire:
         - startup_recovery 将 task 注册到 _running_jobs（monitor 继续跟踪）
         - ApprovalManager entry 被标记为 EXPIRED（用户再 approve → resolve 返回 False）
         """
-        from octoagent.policy.approval_manager import ApprovalManager
-        from octoagent.policy.models import ApprovalRequest, ApprovalStatus
         from octoagent.core.models.enums import SideEffectLevel
         from octoagent.core.models.event import Event, EventCausality
+        from octoagent.policy.approval_manager import ApprovalManager
+        from octoagent.policy.models import ApprovalRequest, ApprovalStatus
 
         task_id = "test-task-high04-v4-001"
         await _ensure_task(store_group, task_id)
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -2309,7 +2366,9 @@ class TestHigh04V4DeadApprovalExpire:
         # 写入 APPROVAL_REQUESTED 事件（100s 前，< 300s timeout → 未超时）
         _100s_ago = datetime.now(UTC) - timedelta(seconds=100)
         next_seq = await store_group.event_store.get_next_task_seq(task_id)
-        from octoagent.core.models.enums import EventType as _ET, ActorType as _AT
+        from octoagent.core.models.enums import ActorType as _AT
+        from octoagent.core.models.enums import EventType as _ET
+
         approval_event = Event(
             event_id=str(ULID()),
             task_id=task_id,
@@ -2325,7 +2384,7 @@ class TestHigh04V4DeadApprovalExpire:
                 "operation_summary": "HIGH-04 v4 dead approval test",
             },
             trace_id=f"trace-{task_id}",
-            causality=EventCausality(idempotency_key=f"test-approval-v4-001"),
+            causality=EventCausality(idempotency_key="test-approval-v4-001"),
         )
         await store_group.event_store.append_event_committed(
             approval_event, update_task_pointer=False
@@ -2352,15 +2411,16 @@ class TestHigh04V4DeadApprovalExpire:
 
         # 验证前提：ApprovalManager entry 处于 PENDING
         record_before = manager.get_approval("test-handle-v4-001")
-        assert record_before is not None and record_before.status == ApprovalStatus.PENDING, \
+        assert record_before is not None and record_before.status == ApprovalStatus.PENDING, (
             "HIGH-04 v4 前提：ApprovalManager entry 应是 PENDING"
+        )
 
         # 创建 TaskRunner（注入 approval_manager）
         notify_calls: list[str] = []
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             approval_manager=manager,
             timeout_seconds=14400.0,
             approval_timeout_seconds=300.0,  # 100s elapsed < 300s → 未超时
@@ -2373,26 +2433,30 @@ class TestHigh04V4DeadApprovalExpire:
 
         # HIGH-04 v4 核心断言：ApprovalManager entry 已被 expire（即使 task 未超时）
         record_after = manager.get_approval("test-handle-v4-001")
-        assert record_after is not None, \
+        assert record_after is not None, (
             "HIGH-04 v4：expire 后 approval entry 应仍可查（状态变为 EXPIRED）"
-        assert record_after.status == ApprovalStatus.EXPIRED, \
-            (
-                f"HIGH-04 v4：startup_recovery 应将 dead approval 标记为 EXPIRED，"
-                f"实际: {record_after.status}"
-            )
+        )
+        assert record_after.status == ApprovalStatus.EXPIRED, (
+            f"HIGH-04 v4：startup_recovery 应将 dead approval 标记为 EXPIRED，"
+            f"实际: {record_after.status}"
+        )
 
         # 追加断言：entry 已 EXPIRED → 用户再 approve → resolve 返回 False（不假成功）
         from octoagent.policy.models import ApprovalDecision
+
         resolve_result = await manager.resolve(
             approval_id="test-handle-v4-001",
             decision=ApprovalDecision.ALLOW_ONCE,
             resolved_by="user:web:late_approve",
         )
-        assert resolve_result is False, \
+        assert resolve_result is False, (
             "HIGH-04 v4：entry EXPIRED 后 resolve() 应返回 False（不假成功），实际返回 True"
+        )
 
     @pytest.mark.asyncio
-    async def test_high04_v4_startup_recovery_expired_timeout_also_expires_manager(self, store_group, sse_hub):
+    async def test_high04_v4_startup_recovery_expired_timeout_also_expires_manager(
+        self, store_group, sse_hub
+    ):
         """HIGH-04 v4：已超时的 WAITING_APPROVAL task → 推 FAILED + expire ApprovalManager。
 
         场景（重启，已超时）：
@@ -2407,17 +2471,17 @@ class TestHigh04V4DeadApprovalExpire:
         注意：先 register（写当前时间的 APPROVAL_REQUESTED），再写 500s 前的测试 event（更高
         task_seq），使 _get_approval_requested_created_at 取到 500s 前的时间戳（max task_seq）。
         """
-        from octoagent.policy.approval_manager import ApprovalManager
-        from octoagent.policy.models import ApprovalRequest, ApprovalStatus
         from octoagent.core.models.enums import SideEffectLevel
         from octoagent.core.models.event import Event, EventCausality
+        from octoagent.policy.approval_manager import ApprovalManager
+        from octoagent.policy.models import ApprovalRequest, ApprovalStatus
 
         task_id = "test-task-high04-v4-002"
         await _ensure_task(store_group, task_id)
         await store_group.task_job_store.create_job(task_id, "test", None)
         await store_group.task_job_store.mark_running(task_id)
 
-        task_svc = TaskService(store_group, sse_hub)
+        task_svc = TaskService(store_group, sse_hub, storage_only=True)
         await task_svc._write_state_transition(
             task_id=task_id,
             from_status=TaskStatus.RUNNING,
@@ -2450,7 +2514,9 @@ class TestHigh04V4DeadApprovalExpire:
         # _get_approval_requested_created_at 取 max(task_seq)，即此处写入的 _500s_ago 事件
         _500s_ago = datetime.now(UTC) - timedelta(seconds=500)
         next_seq = await store_group.event_store.get_next_task_seq(task_id)
-        from octoagent.core.models.enums import EventType as _ET, ActorType as _AT
+        from octoagent.core.models.enums import ActorType as _AT
+        from octoagent.core.models.enums import EventType as _ET
+
         approval_event = Event(
             event_id=str(ULID()),
             task_id=task_id,
@@ -2466,7 +2532,7 @@ class TestHigh04V4DeadApprovalExpire:
                 "operation_summary": "HIGH-04 v4 timeout expired test",
             },
             trace_id=f"trace-{task_id}",
-            causality=EventCausality(idempotency_key=f"test-approval-v4-002"),
+            causality=EventCausality(idempotency_key="test-approval-v4-002"),
         )
         await store_group.event_store.append_event_committed(
             approval_event, update_task_pointer=False
@@ -2476,7 +2542,7 @@ class TestHigh04V4DeadApprovalExpire:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=MagicMock(),
+            runtime_services=runtime_service_fixture(MagicMock()).bundle,
             approval_manager=manager,
             timeout_seconds=14400.0,
             approval_timeout_seconds=300.0,  # 500s elapsed > 300s → 已超时
@@ -2488,17 +2554,17 @@ class TestHigh04V4DeadApprovalExpire:
 
         # 断言 1：task 被推 FAILED
         task_final = await store_group.task_store.get_task(task_id)
-        assert task_final is not None and task_final.status == TaskStatus.FAILED, \
+        assert task_final is not None and task_final.status == TaskStatus.FAILED, (
             f"HIGH-04 v4：500s elapsed → 应推 FAILED，实际: {task_final.status if task_final else 'None'}"
+        )
         assert task_id in notify_calls, "HIGH-04 v4：FAILED 后应调用 _notify_completion"
 
         # 断言 2：ApprovalManager entry 同时被 EXPIRED（防止用户 approve 假成功）
         record_after = manager.get_approval("test-handle-v4-002")
-        assert record_after is not None and record_after.status == ApprovalStatus.EXPIRED, \
-            (
-                f"HIGH-04 v4：已超时路径应同时 expire ApprovalManager entry，"
-                f"实际: {record_after.status if record_after else 'None'}"
-            )
+        assert record_after is not None and record_after.status == ApprovalStatus.EXPIRED, (
+            f"HIGH-04 v4：已超时路径应同时 expire ApprovalManager entry，"
+            f"实际: {record_after.status if record_after else 'None'}"
+        )
 
 
 class TestNewHigh01V4ApprovalManagerTimeout:
@@ -2522,9 +2588,9 @@ class TestNewHigh01V4ApprovalManagerTimeout:
         - 模拟 300s 后立即触发（通过 expires_at = now-1s 使 timer_s <= 0）
         - 验证 entry 变为 EXPIRED（timer 按 expires_at 触发，非 600s 后）
         """
+        from octoagent.core.models.enums import SideEffectLevel
         from octoagent.policy.approval_manager import ApprovalManager
         from octoagent.policy.models import ApprovalRequest, ApprovalStatus
-        from octoagent.core.models.enums import SideEffectLevel
 
         task_id = "test-task-new-high01-v4-001"
         await _ensure_task(store_group, task_id)
@@ -2558,11 +2624,10 @@ class TestNewHigh01V4ApprovalManagerTimeout:
         # NEW-HIGH-01 v4 核心断言：entry 应已变为 EXPIRED（timer 按 expires_at 触发）
         record = manager.get_approval("test-approval-new-high01-v4-001")
         assert record is not None, "NEW-HIGH-01 v4：注册后 entry 应存在"
-        assert record.status == ApprovalStatus.EXPIRED, \
-            (
-                f"NEW-HIGH-01 v4：expires_at 已过期时应立即触发 timeout（EXPIRED），"
-                f"实际: {record.status}（若仍 PENDING 则 v4 timer 修复未生效）"
-            )
+        assert record.status == ApprovalStatus.EXPIRED, (
+            f"NEW-HIGH-01 v4：expires_at 已过期时应立即触发 timeout（EXPIRED），"
+            f"实际: {record.status}（若仍 PENDING 则 v4 timer 修复未生效）"
+        )
 
     @pytest.mark.asyncio
     async def test_new_high01_v4_timer_300s_not_600s(self, store_group, sse_hub):
@@ -2576,9 +2641,9 @@ class TestNewHigh01V4ApprovalManagerTimeout:
         此测试模拟 "expires_at = now+300s，等到 350s 后，entry 应已 EXPIRED" 行为。
         由于不能 sleep 350s，改为：设 expires_at = now+0.05s，sleep(0.1)，验证已 EXPIRED。
         """
+        from octoagent.core.models.enums import SideEffectLevel
         from octoagent.policy.approval_manager import ApprovalManager
         from octoagent.policy.models import ApprovalRequest, ApprovalStatus
-        from octoagent.core.models.enums import SideEffectLevel
 
         task_id = "test-task-new-high01-v4-002"
         await _ensure_task(store_group, task_id)
@@ -2605,19 +2670,19 @@ class TestNewHigh01V4ApprovalManagerTimeout:
 
         # 注册后立即检查：应仍是 PENDING（50ms 未到）
         record_initial = manager.get_approval("test-approval-new-high01-v4-002")
-        assert record_initial is not None and record_initial.status == ApprovalStatus.PENDING, \
+        assert record_initial is not None and record_initial.status == ApprovalStatus.PENDING, (
             "NEW-HIGH-01 v4：注册后立即检查应是 PENDING"
+        )
 
         # 等待 100ms（> 50ms expires_at），timer 应已触发
         await asyncio.sleep(0.12)
 
         # v4 修复核心断言：按 expires_at（50ms）触发，而非 600s 后
         record_expired = manager.get_approval("test-approval-new-high01-v4-002")
-        assert record_expired is not None and record_expired.status == ApprovalStatus.EXPIRED, \
-            (
-                f"NEW-HIGH-01 v4：expires_at 50ms 到期后 entry 应为 EXPIRED（按 expires_at 触发），"
-                f"实际: {record_expired.status if record_expired else 'None'}（若 PENDING 则 timer 仍用 default_timeout_s=600s）"
-            )
+        assert record_expired is not None and record_expired.status == ApprovalStatus.EXPIRED, (
+            f"NEW-HIGH-01 v4：expires_at 50ms 到期后 entry 应为 EXPIRED（按 expires_at 触发），"
+            f"实际: {record_expired.status if record_expired else 'None'}（若 PENDING 则 timer 仍用 default_timeout_s=600s）"
+        )
 
 
 class TestNM01V4DualResolveSessionId:
@@ -2644,9 +2709,9 @@ class TestNM01V4DualResolveSessionId:
         - 注册到 ApprovalManager
         - 通过 get_approval 读取 record，验证 request.session_id = "test-session"
         """
+        from octoagent.core.models.enums import SideEffectLevel
         from octoagent.policy.approval_manager import ApprovalManager
         from octoagent.policy.models import ApprovalRequest
-        from octoagent.core.models.enums import SideEffectLevel
 
         task_id = "test-task-nm01-v4-001"
         await _ensure_task(store_group, task_id)
@@ -2673,14 +2738,15 @@ class TestNM01V4DualResolveSessionId:
         # N-M-01 v4 基础设施断言：session_id 字段持久化到 ApprovalManager entry
         record = manager.get_approval("test-approval-nm01-v4-001")
         assert record is not None, "N-M-01 v4：注册后应能找到 record"
-        assert record.request.session_id == "test-session-nm01-v4", \
-            (
-                f"N-M-01 v4：ApprovalRequest.session_id 应被持久化到 ApprovalManager entry，"
-                f"实际: {record.request.session_id!r}（若为空则 v4 模型新增字段未生效）"
-            )
+        assert record.request.session_id == "test-session-nm01-v4", (
+            f"N-M-01 v4：ApprovalRequest.session_id 应被持久化到 ApprovalManager entry，"
+            f"实际: {record.request.session_id!r}（若为空则 v4 模型新增字段未生效）"
+        )
 
     @pytest.mark.asyncio
-    async def test_nm01_v4_approval_gate_allowlist_updated_with_session_id(self, store_group, sse_hub):
+    async def test_nm01_v4_approval_gate_allowlist_updated_with_session_id(
+        self, store_group, sse_hub
+    ):
         """N-M-01 v4：当 session_id 和 operation_type 均非空时 ApprovalGate.allowlist 被更新。
 
         此测试验证 ApprovalGate.resolve_approval 的 allowlist 更新逻辑
@@ -2719,12 +2785,13 @@ class TestNM01V4DualResolveSessionId:
         )
 
         # N-M-01 v4 allowlist 断言：session_id 非空 + operation_type 非空 → allowlist 更新
-        allowlist_hit = gate.check_allowlist("test-session-nm01-v4-002", "worker.escalate_permission")
-        assert allowlist_hit is True, \
-            (
-                "N-M-01 v4：session_id 和 operation_type 均非空时 allowlist 应被更新，"
-                "实际未更新（check_allowlist 返回 False）"
-            )
+        allowlist_hit = gate.check_allowlist(
+            "test-session-nm01-v4-002", "worker.escalate_permission"
+        )
+        assert allowlist_hit is True, (
+            "N-M-01 v4：session_id 和 operation_type 均非空时 allowlist 应被更新，"
+            "实际未更新（check_allowlist 返回 False）"
+        )
 
     @pytest.mark.asyncio
     async def test_nm01_v4_session_id_from_record_integration(self, store_group, sse_hub):
@@ -2737,9 +2804,9 @@ class TestNM01V4DualResolveSessionId:
         4. 调用 ApprovalGate.resolve_approval 传入非空 session_id
         5. 验证 allowlist 被更新
         """
+        from octoagent.core.models.enums import SideEffectLevel
         from octoagent.policy.approval_manager import ApprovalManager
         from octoagent.policy.models import ApprovalRequest
-        from octoagent.core.models.enums import SideEffectLevel
 
         task_id = "test-task-nm01-v4-003"
         await _ensure_task(store_group, task_id)
@@ -2785,8 +2852,9 @@ class TestNM01V4DualResolveSessionId:
 
         # 从 record 读取 session_id（v4 双 resolve 应使用此值而非空字符串）
         session_id_from_record = record.request.session_id
-        assert session_id_from_record == "test-session-nm01-v4-003", \
+        assert session_id_from_record == "test-session-nm01-v4-003", (
             f"N-M-01 v4 集成：record.request.session_id 应是 'test-session-nm01-v4-003'，实际: {session_id_from_record!r}"
+        )
 
         # 调用 ApprovalGate.resolve_approval（使用从 record 读取的 session_id）
         await gate.resolve_approval(
@@ -2799,9 +2867,10 @@ class TestNM01V4DualResolveSessionId:
         )
 
         # N-M-01 v4 核心断言：从 record.request.session_id 读取后 allowlist 被更新
-        allowlist_hit = gate.check_allowlist("test-session-nm01-v4-003", "worker.escalate_permission")
-        assert allowlist_hit is True, \
-            (
-                "N-M-01 v4 集成：从 record.request.session_id 读取非空 session_id 后 allowlist 应被更新，"
-                "实际未更新——说明 v4 双 resolve 路径仍使用空字符串（N-M-01 PARTIAL 未完全闭环）"
-            )
+        allowlist_hit = gate.check_allowlist(
+            "test-session-nm01-v4-003", "worker.escalate_permission"
+        )
+        assert allowlist_hit is True, (
+            "N-M-01 v4 集成：从 record.request.session_id 读取非空 session_id 后 allowlist 应被更新，"
+            "实际未更新——说明 v4 双 resolve 路径仍使用空字符串（N-M-01 PARTIAL 未完全闭环）"
+        )

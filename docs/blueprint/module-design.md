@@ -13,31 +13,17 @@ octoagent/
   pyproject.toml
   uv.lock
   apps/
-    gateway/                 # OctoGateway
-    kernel/                  # OctoKernel
-    workers/
-      ops/
-      research/
-      dev/
+    gateway/                 # 唯一 Gateway application runtime
   packages/
     core/                    # domain models + event store + common utils
     protocol/                # A2A-lite envelope + NormalizedMessage
     tooling/                 # 工具 schema 反射 + ToolBroker + permission + path_policy
     memory/                  # SoR/Fragments/Vault + arbitration
-    provider/                # litellm client wrappers + cost model
+    provider/                # ProviderRouter + direct transports + cost model
     policy/                  # 审批管理 + Override 持久化
     skills/                  # SkillRunner + Manifest + Pipeline + Deferred Tools
   frontend/                    # React + Vite Web UI（M0 起步）
-  plugins/
-    channels/
-      telegram/
-      web/
-      wechat_import/
-    tools/
-      filesystem/
-      docker/
-      ssh/
-      web/
+  # 当前没有独立 plugins workspace；渠道与工具能力分别位于 Gateway / tooling
   data/
     sqlite/                  # local db
     artifacts/               # artifact files
@@ -67,7 +53,7 @@ octoagent/
 - ChannelAdapter lifecycle（start/stop）
 - 入站消息 normalization（NormalizedMessage）
 - 出站消息发送（Telegram/Web）
-- SSE/WS stream 转发（从 Kernel 订阅）
+- SSE/WS stream 转发（消费同一 application runtime 的事件）
 
 F105 v0.1 落地的渠道抽象层（`gateway/channels/`，详见 `docs/codebase-architecture/platform-gateway.md`）：
 
@@ -82,13 +68,9 @@ F105 v0.1 落地的渠道抽象层（`gateway/channels/`，详见 `docs/codebase
 - `GET /api/stream/task/{task_id}`（SSE 事件流）
 - `POST /api/approve/{approval_id}`（审批决策）
 
-内部调用（Gateway → Kernel）：
+内部调用保持为 Gateway service/application 边界，不再通过第二个物理 runtime 或 `/kernel/*` 网络协议转发。
 
-- `POST /kernel/ingest_message`
-- `GET /kernel/stream/task/{task_id}`
-- `POST /kernel/approvals/{approval_id}/decision`
-
-### 9.4 apps/kernel
+### 9.4 Gateway 内的协调、策略与记忆角色
 
 职责：
 
@@ -108,17 +90,19 @@ F105 v0.1 落地的渠道抽象层（`gateway/channels/`，详见 `docs/codebase
 - `DailyRoutineService`（F102 新增）：cron 触发 + 9 步执行 + LLM/fallback 双路径（LLM token budget 截断 max_input ≤ 2000 字符 + max_output ≤ 512 token）；4 EventType（ROUTINE_TRIGGERED/COMPLETED/FAILED/SKIPPED）挂在 `_daily_routine_audit` task；USER.md 4 机器可读字段（daily_summary_time / routine_active / summary_channels / user_timezone[F115]，时区按 USER.md > env OCTOAGENT_USER_TIMEZONE > UTC 降级，每次读 config 派生不缓存）
 - `OrchestratorService` D7 拆分（F098）：`A2ADispatchMixin` 提取到 `dispatch_service.py`（15 helpers / 972 行），orchestrator.py 3623→2733 行（-890）
 
-### 9.5 workers/*
+### 9.5 Gateway 内的 Worker runtime 角色
 
-每个 worker 是自治智能体（Free Loop），具备：
+这些是同一 Gateway application host 内的逻辑角色，不对应独立源码树或必需的进程/容器。
 
-- 独立运行（进程/容器均可）
+每个 worker 是自治智能体（Free Loop）的逻辑运行角色，具备：
+
+- 在同一 Gateway application host 内拥有独立的运行身份、预算与取消信号；当前不对应独立进程或容器
 - 拥有自己的工作目录（project workspace）
 - 拥有自己的 `WorkerSession`、`WorkerMemory`、Recall/compaction 状态与 effective context frame
 - 拥有自己的 persona / instruction overlays / tool set / capability set / permission set / auth context
 - Skill Runner（Pydantic AI）+ Skill Pipeline（pydantic-graph）
 - Tool Broker（schema、动态注入、执行编排）
-- 暴露内部 RPC（HTTP/gRPC 均可；MVP 用 HTTP）
+- 通过 application service 与 durable A2A record 协作；当前不存在 Worker 专用 HTTP/gRPC 网络边界
 
 #### Worker 完整对等性（M5 阶段 1 引入，详见 [agent-collaboration-philosophy.md](agent-collaboration-philosophy.md) H2）
 

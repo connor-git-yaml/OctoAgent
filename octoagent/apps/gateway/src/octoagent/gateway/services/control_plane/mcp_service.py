@@ -6,36 +6,26 @@
 
 from __future__ import annotations
 
-import asyncio
-from collections import defaultdict
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import octoagent.gateway.services.control_plane as _cp_pkg  # 通过 package 引用以支持 monkeypatch
 import structlog
 from octoagent.core.models import (
     ActionRequestEnvelope,
     ActionResultEnvelope,
-    CapabilityPackDocument,
     ControlPlaneCapability,
     ControlPlaneDegradedState,
-    ControlPlaneResourceRef,
-    ControlPlaneSurface,
     ControlPlaneTargetRef,
     McpProviderCatalogDocument,
     McpProviderItem,
     SkillGovernanceDocument,
-    SkillGovernanceItem,
-    UpdateTriggerSource,
 )
-from octoagent.provider.auth.credentials import ApiKeyCredential
-import octoagent.gateway.services.control_plane as _cp_pkg  # 通过 package 引用以支持 monkeypatch
 from octoagent.provider.auth.oauth_provider import OAuthProviderRegistry
 from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
-from octoagent.gateway.services.config.config_wizard import load_config
-from pydantic import SecretStr
 
 from ..mcp_registry import McpServerConfig
 from ._base import ControlPlaneContext, DomainServiceBase
@@ -110,9 +100,7 @@ class McpDomainService(DomainServiceBase):
         # Feature 058: 合并安装注册表数据
         install_records: dict[str, Any] = {}
         if self._mcp_installer is not None:
-            install_records = {
-                r.server_id: r for r in self._mcp_installer.list_installs()
-            }
+            install_records = {r.server_id: r for r in self._mcp_installer.list_installs()}
 
         items: list[McpProviderItem] = []
         for config in mcp_registry.list_configs():
@@ -152,9 +140,7 @@ class McpDomainService(DomainServiceBase):
                     install_source=str(install.install_source) if install else "",
                     install_version=install.version if install else "",
                     install_path=install.install_path if install else "",
-                    installed_at=(
-                        install.installed_at.isoformat() if install else ""
-                    ),
+                    installed_at=(install.installed_at.isoformat() if install else ""),
                 )
             )
         return McpProviderCatalogDocument(
@@ -234,7 +220,8 @@ class McpDomainService(DomainServiceBase):
             raise self._action_error("MCP_INSTALL_FAILED", err_msg) from exc
 
         # 计算预期 server_id
-        from ..mcp_installer import _slugify_server_id, InstallSource as _IS
+        from ..mcp_installer import InstallSource as _IS
+        from ..mcp_installer import _slugify_server_id
 
         server_id = _slugify_server_id(_IS(install_source), package_name)
 
@@ -433,35 +420,19 @@ class McpDomainService(DomainServiceBase):
             auth_mode="oauth",
             credential=credential,
             is_default=(
-                existing.is_default
-                if existing is not None
-                else store.get_default_profile() is None
+                existing.is_default if existing is not None else store.get_default_profile() is None
             ),
             created_at=existing.created_at if existing is not None else now,
             updated_at=now,
         )
         store.set_profile(profile)
         self._write_env_values(
-            self._ctx.project_root / ".env.litellm",
+            self._ctx.project_root / ".env",
             {
                 env_name: credential.access_token.get_secret_value(),
             },
         )
-
-        # Feature 081 P4：OAuth 成功后不再同步 litellm-config.yaml
-        # （Provider 直连后 ProviderRouter 直接读 octoagent.yaml）
-
-        activation_data = await self._activate_runtime_after_config_change(
-            request=request,
-            failure_code="OPENAI_OAUTH_ACTIVATION_FAILED",
-            failure_prefix="OpenAI Auth 已连接，但真实模型激活失败",
-            raise_on_failure=False,
-        )
-
         message = "OpenAI Auth 已连接，已写入本地凭证。"
-        runtime_message = str(activation_data.get("runtime_reload_message", "")).strip()
-        if runtime_message:
-            message = runtime_message
 
         return self._completed_result(
             request=request,
@@ -473,7 +444,6 @@ class McpDomainService(DomainServiceBase):
                 "env_name": env_name,
                 "expires_at": credential.expires_at.isoformat(),
                 "account_id": credential.account_id or "",
-                "activation": activation_data,
             },
             resource_refs=[
                 self._resource_ref("setup_governance", "setup:governance"),
@@ -537,91 +507,6 @@ class McpDomainService(DomainServiceBase):
         content = "\n".join(rendered).rstrip()
         path.write_text(f"{content}\n" if content else "", encoding="utf-8")
         path.chmod(0o600)
-
-    async def _activate_runtime_after_config_change(
-        self,
-        *,
-        request: ActionRequestEnvelope,
-        failure_code: str,
-        failure_prefix: str,
-        raise_on_failure: bool,
-    ) -> dict[str, Any]:
-        """触发 runtime reload（Feature 081 后不再启动 LiteLLM Proxy）。
-
-        Feature 081 P4 修复（Codex F1）：跳过 ``start_proxy()`` 调用；保留
-        managed runtime 的 reload 分支以让 Gateway 重读新 yaml + 重建
-        ProviderRouter alias 缓存。``failure_*`` 参数仍接受但不触发，保留
-        以最小化调用方改动。
-        """
-        activation_service = _cp_pkg.RuntimeActivationService(self._ctx.project_root)
-        managed_runtime = activation_service.has_managed_runtime()
-
-        activation_data: dict[str, Any] = {
-            "project_root": str(self._ctx.project_root),
-            "source_root": str(self._ctx.project_root),
-            "compose_file": "",
-            "proxy_url": "",
-            "managed_runtime": managed_runtime,
-            "warnings": [],
-            "runtime_reload_mode": "none",
-            "runtime_reload_message": "凭证已写入，Provider 直连已就绪。",
-            "activation_succeeded": True,
-        }
-
-        update_service = self._ctx.update_service
-        if managed_runtime and update_service is not None:
-            if request.surface == ControlPlaneSurface.CLI:
-                await update_service.restart(
-                    trigger_source=self._map_update_source(request.surface)
-                )
-                activation_data["runtime_reload_mode"] = "managed_restart_completed"
-                activation_data["runtime_reload_message"] = (
-                    "已自动重启托管实例，真实模型会在新进程里生效。"
-                )
-            else:
-                asyncio.create_task(
-                    self._restart_runtime_after_delay(
-                        delay_seconds=2.0,
-                        trigger_source=self._map_update_source(request.surface),
-                    )
-                )
-                activation_data["runtime_reload_mode"] = "managed_restart_scheduled"
-                activation_data["runtime_reload_message"] = (
-                    "凭证已写入，当前实例会在几秒内自动重启并切到真实模型（Provider 直连）。"
-                )
-        else:
-            activation_data["runtime_reload_mode"] = "manual_restart_required"
-            activation_data["runtime_reload_message"] = (
-                "凭证已写入（Provider 直连）；如果当前 Gateway 正在运行，请手动重启后再开始真实对话。"
-            )
-        return activation_data
-
-    async def _restart_runtime_after_delay(
-        self,
-        *,
-        delay_seconds: float,
-        trigger_source: UpdateTriggerSource,
-    ) -> None:
-        update_service = self._ctx.update_service
-        if update_service is None:
-            return
-        await asyncio.sleep(delay_seconds)
-        try:
-            await update_service.restart(trigger_source=trigger_source)
-        except Exception as exc:  # pragma: no cover
-            log.warning(
-                "mcp_oauth_restart_failed",
-                error_type=type(exc).__name__,
-                error=str(exc),
-            )
-
-    @staticmethod
-    def _map_update_source(surface: ControlPlaneSurface) -> UpdateTriggerSource:
-        mapping = {
-            ControlPlaneSurface.WEB: UpdateTriggerSource.WEB,
-            ControlPlaneSurface.CLI: UpdateTriggerSource.CLI,
-        }
-        return mapping.get(surface, UpdateTriggerSource.SYSTEM)
 
     @staticmethod
     def _normalize_provider_id(value: str) -> str:

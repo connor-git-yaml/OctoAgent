@@ -15,7 +15,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -30,7 +29,6 @@ from octoagent.core.models import (
     EventType,
     NormalizedMessage,
     SubagentDelegation,
-    Task,
     TaskStatus,
 )
 from octoagent.core.models.agent_context import (
@@ -44,6 +42,7 @@ from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 # ---------------------------------------------------------------------------
 # 辅助工具
@@ -106,7 +105,7 @@ async def _create_task_with_delegation(
     store_group, sse_hub: SSEHub, *, parent_task_id: str | None = None
 ) -> tuple[str, SubagentDelegation]:
     """创建子任务，并写入 SubagentDelegation 到 control_metadata（模拟 B-1 写入）。"""
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     msg = NormalizedMessage(
         text="subagent child task for Phase B test",
         idempotency_key=f"child-b-{datetime.now().timestamp()}",
@@ -129,7 +128,9 @@ async def _create_task_with_delegation(
     return task_id, delegation
 
 
-async def _create_agent_runtime(store_group, *, runtime_id: str, role: AgentRuntimeRole = AgentRuntimeRole.WORKER) -> AgentRuntime:
+async def _create_agent_runtime(
+    store_group, *, runtime_id: str, role: AgentRuntimeRole = AgentRuntimeRole.WORKER
+) -> AgentRuntime:
     """在 store 中创建 AgentRuntime。"""
     runtime = AgentRuntime(
         agent_runtime_id=runtime_id,
@@ -145,7 +146,7 @@ async def _create_runner(store_group, sse_hub: SSEHub) -> TaskRunner:
     return TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=None,
+        runtime_services=runtime_service_fixture(None).bundle,
         timeout_seconds=60,
     )
 
@@ -177,7 +178,7 @@ async def test_ensure_session_creates_subagent_internal(tmp_path: Path) -> None:
     session_state.agent_runtime_id = ""
 
     # AgentContextService 仅需 store（不需要真实的 project root）
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
     session = await svc._ensure_agent_session(
         request=request,
         task=task,
@@ -214,7 +215,7 @@ async def test_ensure_session_fills_parent_worker_runtime_id(tmp_path: Path) -> 
     session_state.agent_session_id = ""
     session_state.agent_runtime_id = ""
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
     session = await svc._ensure_agent_session(
         request=request,
         task=task,
@@ -241,7 +242,7 @@ async def test_ensure_session_worker_no_parent_is_direct_worker(tmp_path: Path) 
     store_group = await create_store_group(str(tmp_path / "b-03.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
 
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     msg = NormalizedMessage(
         text="worker task for regression",
         idempotency_key=f"worker-regression-{datetime.now().timestamp()}",
@@ -259,7 +260,7 @@ async def test_ensure_session_worker_no_parent_is_direct_worker(tmp_path: Path) 
     session_state.agent_session_id = ""
     session_state.agent_runtime_id = ""
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
     session = await svc._ensure_agent_session(
         request=request,
         task=task,
@@ -285,7 +286,7 @@ async def test_ensure_session_worker_with_parent_is_worker_internal(tmp_path: Pa
     store_group = await create_store_group(str(tmp_path / "b-04.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
 
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     msg = NormalizedMessage(
         text="worker internal task for regression",
         idempotency_key=f"worker-internal-{datetime.now().timestamp()}",
@@ -297,13 +298,15 @@ async def test_ensure_session_worker_with_parent_is_worker_internal(tmp_path: Pa
     runtime = await _create_agent_runtime(store_group, runtime_id="runtime-worker-b04")
 
     # 有 parent_agent_session_id → WORKER_INTERNAL
-    request = _make_request(target_kind="worker", parent_agent_session_id="session-parent-b04", work_id="work-b04")
+    request = _make_request(
+        target_kind="worker", parent_agent_session_id="session-parent-b04", work_id="work-b04"
+    )
     session_state = MagicMock()
     session_state.session_id = "legacy-session-b04"
     session_state.agent_session_id = ""
     session_state.agent_runtime_id = ""
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
     session = await svc._ensure_agent_session(
         request=request,
         task=task,
@@ -329,7 +332,7 @@ async def test_ensure_session_main_agent_is_main_bootstrap(tmp_path: Path) -> No
     store_group = await create_store_group(str(tmp_path / "b-05.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
 
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     msg = NormalizedMessage(
         text="main agent task for regression",
         idempotency_key=f"main-regression-{datetime.now().timestamp()}",
@@ -350,7 +353,7 @@ async def test_ensure_session_main_agent_is_main_bootstrap(tmp_path: Path) -> No
     session_state.agent_session_id = ""
     session_state.agent_runtime_id = ""
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
     session = await svc._ensure_agent_session(
         request=request,
         task=task,
@@ -424,7 +427,7 @@ async def test_ensure_session_backfills_child_agent_session_id(tmp_path: Path) -
     session_state.agent_session_id = ""
     session_state.agent_runtime_id = ""
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
     session = await svc._ensure_agent_session(
         request=request,
         task=task,
@@ -465,7 +468,7 @@ async def test_p2_3_event_emitted_before_session_save(tmp_path: Path) -> None:
     store_group = await create_store_group(str(tmp_path / "b-08.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
 
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     msg = NormalizedMessage(
         text="parent task for P2-3 test",
         idempotency_key=f"parent-p2-3-{datetime.now().timestamp()}",
@@ -504,17 +507,24 @@ async def test_p2_3_event_emitted_before_session_save(tmp_path: Path) -> None:
     store_group.event_store.append_event_committed = tracked_emit
     store_group.agent_context_store.save_agent_session = tracked_save
 
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": delegation.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.SUCCEEDED,
-            "updated_at": _NOW,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": delegation.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.SUCCEEDED,
+                    "updated_at": _NOW,
+                },
+            )(),
+        ),
     ):
         await runner._close_subagent_session_if_needed(parent_task_id)
 
@@ -542,7 +552,7 @@ async def test_p2_4_dispatch_exception_triggers_cleanup(tmp_path: Path) -> None:
     sse_hub = SSEHub()
 
     # 创建父任务（子任务中写 delegation）
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     msg = NormalizedMessage(
         text="parent task for P2-4 test",
         idempotency_key=f"parent-p2-4-{datetime.now().timestamp()}",
@@ -561,8 +571,12 @@ async def test_p2_4_dispatch_exception_triggers_cleanup(tmp_path: Path) -> None:
     runner._close_subagent_session_if_needed = tracked_cleanup
 
     # 模拟 dispatch exception（orchestrator._ensure_task_failed 无需真实 orchestrator）
-    with patch.object(runner._orchestrator, "_ensure_task_failed", new_callable=AsyncMock), \
-         patch.object(runner._orchestrator, "dispatch", side_effect=RuntimeError("模拟 dispatch 失败")):
+    with (
+        patch.object(runner._orchestrator, "_ensure_task_failed", new_callable=AsyncMock),
+        patch.object(
+            runner._orchestrator, "dispatch", side_effect=RuntimeError("模拟 dispatch 失败")
+        ),
+    ):
         # 直接调用 _run_job（内部 try-except 捕获 dispatch 异常后应调用 cleanup）
         await runner._run_job(
             task_id=parent_task_id,
@@ -589,7 +603,7 @@ async def test_spawn_to_cleanup_end_to_end(tmp_path: Path) -> None:
     sse_hub = SSEHub()
 
     # 1. 创建父任务
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     parent_msg = NormalizedMessage(
         text="parent task for e2e test",
         idempotency_key=f"parent-e2e-b-{datetime.now().timestamp()}",
@@ -611,7 +625,7 @@ async def test_spawn_to_cleanup_end_to_end(tmp_path: Path) -> None:
     session_state.agent_session_id = ""
     session_state.agent_runtime_id = ""
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
     session = await svc._ensure_agent_session(
         request=request,
         task=child_task,
@@ -635,22 +649,31 @@ async def test_spawn_to_cleanup_end_to_end(tmp_path: Path) -> None:
     # 5. 模拟 cleanup（子任务进入终态）
     runner = await _create_runner(store_group, sse_hub)
 
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": updated_delegation.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.SUCCEEDED,
-            "updated_at": _NOW,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": updated_delegation.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.SUCCEEDED,
+                    "updated_at": _NOW,
+                },
+            )(),
+        ),
     ):
         await runner._close_subagent_session_if_needed(child_task_id)
 
     # 6. 验证 session 已 CLOSED
-    closed_session = await store_group.agent_context_store.get_agent_session(session.agent_session_id)
+    closed_session = await store_group.agent_context_store.get_agent_session(
+        session.agent_session_id
+    )
     assert closed_session is not None
     assert closed_session.status == AgentSessionStatus.CLOSED, (
         f"E2E 失败：session status 期望 CLOSED，实际 {closed_session.status}"
@@ -675,14 +698,12 @@ async def test_p1_2_emit_before_enqueue_no_race(tmp_path: Path) -> None:
     SubagentDelegation USER_MESSAGE event。验证 spawn 后第一时间已能从 task 事件流读到 delegation
     （消除 child runtime 启动前 race 窗口）。
     """
-    store_group = await create_store_group(
-        str(tmp_path / "p1-2.db"), str(tmp_path / "art")
-    )
+    store_group = await create_store_group(str(tmp_path / "p1-2.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
     runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=None,
+        runtime_services=runtime_service_fixture(None).bundle,
         timeout_seconds=60,
     )
 
@@ -714,7 +735,8 @@ async def test_p1_2_emit_before_enqueue_no_race(tmp_path: Path) -> None:
     # 历史 baseline 用 USER_MESSAGE marker text，F098 改用独立 event type 避免污染对话历史。
     events = await store_group.event_store.get_events_for_task(task_id)
     delegation_events = [
-        e for e in events
+        e
+        for e in events
         if e.type is EventType.CONTROL_METADATA_UPDATED
         and e.payload.get("control_metadata", {}).get("subagent_delegation")
     ]
@@ -726,9 +748,11 @@ async def test_p1_2_emit_before_enqueue_no_race(tmp_path: Path) -> None:
     # 但事件流已含 delegation 证明 race 已消除）
     delegation_event = delegation_events[0]
     delegation_dict = delegation_event.payload["control_metadata"]["subagent_delegation"]
-    delegation = SubagentDelegation.model_validate_json(delegation_dict) if isinstance(
-        delegation_dict, str
-    ) else SubagentDelegation.model_validate(delegation_dict)
+    delegation = (
+        SubagentDelegation.model_validate_json(delegation_dict)
+        if isinstance(delegation_dict, str)
+        else SubagentDelegation.model_validate(delegation_dict)
+    )
     assert delegation.delegation_id == raw_init["delegation_id"]
     assert delegation.child_task_id == task_id, (
         f"P1-2 闭环：child_task_id 应为真实 task_id={task_id}，实际 {delegation.child_task_id}"
@@ -743,14 +767,12 @@ async def test_p1_1_emit_preserves_target_kind(tmp_path: Path) -> None:
     让 merge_control_metadata 取最新 USER_MESSAGE 时仍能读到 turn-scoped 信号，
     _ensure_agent_session 走第 4 路 SUBAGENT_INTERNAL。
     """
-    store_group = await create_store_group(
-        str(tmp_path / "p1-1.db"), str(tmp_path / "art")
-    )
+    store_group = await create_store_group(str(tmp_path / "p1-1.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
     runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=None,
+        runtime_services=runtime_service_fixture(None).bundle,
         timeout_seconds=60,
     )
 
@@ -777,7 +799,8 @@ async def test_p1_1_emit_preserves_target_kind(tmp_path: Path) -> None:
     # F098 Phase E: 改用 CONTROL_METADATA_UPDATED 事件（P1-1 修复）。
     events = await store_group.event_store.get_events_for_task(task_id)
     delegation_events = [
-        e for e in events
+        e
+        for e in events
         if e.type is EventType.CONTROL_METADATA_UPDATED
         and e.payload.get("control_metadata", {}).get("subagent_delegation")
     ]
@@ -804,16 +827,14 @@ async def test_p2_5_cleanup_skips_non_terminal_task(tmp_path: Path) -> None:
     防止 dispatch exception / shutdown 兜底等路径在 task 仍 RUNNING 时调用 cleanup
     导致 subagent session 被提前关闭。
     """
-    store_group = await create_store_group(
-        str(tmp_path / "p2-5.db"), str(tmp_path / "art")
-    )
+    store_group = await create_store_group(str(tmp_path / "p2-5.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
     parent_task_id = await _create_parent_task_simple(store_group, sse_hub)
 
     runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=None,
+        runtime_services=runtime_service_fixture(None).bundle,
         timeout_seconds=60,
     )
 
@@ -825,17 +846,24 @@ async def test_p2_5_cleanup_skips_non_terminal_task(tmp_path: Path) -> None:
         agent_runtime_id=_CALLER_RUNTIME_ID,
     )
 
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": delegation.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.RUNNING,  # 非终态
-            "updated_at": _NOW,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": delegation.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.RUNNING,  # 非终态
+                    "updated_at": _NOW,
+                },
+            )(),
+        ),
     ):
         await runner._close_subagent_session_if_needed(parent_task_id)
 
@@ -863,14 +891,12 @@ async def test_p2_6_caller_unknown_when_no_execution_context(tmp_path: Path) -> 
     防止 launch_child_task 在非 execution context 路径（如 worker plan apply / control-plane spawn）
     把 task_id 误填为 caller_agent_runtime_id 导致 parent_worker_runtime_id 失去意义。
     """
-    store_group = await create_store_group(
-        str(tmp_path / "p2-6.db"), str(tmp_path / "art")
-    )
+    store_group = await create_store_group(str(tmp_path / "p2-6.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
     runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=None,
+        runtime_services=runtime_service_fixture(None).bundle,
         timeout_seconds=60,
     )
 
@@ -880,7 +906,7 @@ async def test_p2_6_caller_unknown_when_no_execution_context(tmp_path: Path) -> 
         "parent_task_id": "task-parent-p2-6",
         "parent_work_id": "work-parent-p2-6",
         "caller_agent_runtime_id": "",  # 空字符串，无 execution context
-        "caller_project_id": "",        # 同样空字符串
+        "caller_project_id": "",  # 同样空字符串
         "spawned_by": "worker_plan_apply",
     }
     message = NormalizedMessage(
@@ -899,7 +925,8 @@ async def test_p2_6_caller_unknown_when_no_execution_context(tmp_path: Path) -> 
     # F098 Phase E: 改用 CONTROL_METADATA_UPDATED 事件（P1-1 修复）。
     events = await store_group.event_store.get_events_for_task(task_id)
     delegation_events = [
-        e for e in events
+        e
+        for e in events
         if e.type is EventType.CONTROL_METADATA_UPDATED
         and e.payload.get("control_metadata", {}).get("subagent_delegation")
     ]
@@ -915,7 +942,7 @@ async def test_p2_6_caller_unknown_when_no_execution_context(tmp_path: Path) -> 
         f"实际 {delegation.caller_agent_runtime_id!r}"
     )
     assert delegation.caller_agent_runtime_id != task_id, (
-        f"P2-6 闭环失败：caller_agent_runtime_id 不应 fallback 为 task_id"
+        "P2-6 闭环失败：caller_agent_runtime_id 不应 fallback 为 task_id"
     )
 
     await store_group.close()
@@ -927,7 +954,7 @@ async def test_p2_6_caller_unknown_when_no_execution_context(tmp_path: Path) -> 
 
 async def _create_parent_task_simple(store_group, sse_hub: SSEHub) -> str:
     """创建简单父 task 用于 cleanup 测试。"""
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     msg = NormalizedMessage(
         text="parent task for cleanup test",
         idempotency_key=f"parent-cleanup-{datetime.now().timestamp()}",

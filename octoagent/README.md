@@ -68,14 +68,14 @@ The intended onboarding path is:
 
 1. Install the managed local instance.
 2. Start OctoAgent in `echo` mode and verify the Web flow.
-3. Switch to a real provider with `octo setup`.
+3. Connect a real provider with `octo setup`.
 4. Ask a freshness or research-style question.
 5. Inspect the result in Chat, Workbench, and Control Plane.
 
 This sequence gives you a clean separation between:
 
 - “does the product boot and behave correctly?”
-- “is my provider and LiteLLM configuration healthy?”
+- “is my Provider connection healthy?”
 
 ### Prerequisites
 
@@ -87,11 +87,7 @@ Minimum requirements:
 - npm
 - [uv](https://docs.astral.sh/uv/)
 
-Required for real provider mode:
-
-- Docker Desktop or another working Docker daemon
-
-You do **not** need Docker just to test the default `echo` mode.
+Provider connections do not require a local proxy or Docker daemon.
 
 ### Installation
 
@@ -159,7 +155,7 @@ When the readiness endpoint returns `status: ready`, open:
 
 ### 1. Start in `echo` mode first
 
-The default installation starts in `echo` mode on purpose. This lets you verify the Web UI, task ledger, and runtime wiring before introducing provider credentials or Docker-based LiteLLM.
+The default installation starts in `echo` mode on purpose. This lets you verify the Web UI, task ledger, and runtime wiring before introducing Provider credentials.
 
 Typical first-run flow:
 
@@ -183,8 +179,8 @@ The setup flow is the main onboarding command for non-developers. It can:
 - configure a custom provider with `--provider custom` and `--base-url`
 - collect or connect credentials
 - write configuration to the managed instance
-- prepare LiteLLM proxy state
-- activate the runtime and run live verification
+- persist the canonical Provider route
+- run live verification
 
 Common presets:
 
@@ -269,8 +265,7 @@ The managed install keeps your personal instance under `~/.octoagent`.
 Key files and directories:
 
 - `~/.octoagent/octoagent.yaml`
-- `~/.octoagent/litellm-config.yaml`
-- `~/.octoagent/.env.litellm`
+- `~/.octoagent/.env`
 - `~/.octoagent/data/sqlite`
 - `~/.octoagent/data/artifacts`
 - `~/.octoagent/app`
@@ -285,14 +280,9 @@ It typically updates:
   - provider entries
   - model aliases
   - memory alias bindings
-  - runtime mode
   - front-door access mode
-- `.env.litellm`
+- CredentialStore / `.env`
   - provider API keys
-  - `LITELLM_MASTER_KEY`
-  - proxy-related environment variables
-- `litellm-config.yaml`
-  - generated proxy-side routing config
 
 `octo setup` is the recommended human-facing path because it can save config and activate the managed runtime in one flow.
 
@@ -309,12 +299,8 @@ Important sections:
   - these alias keys are also what the Gateway runtime consumes directly
 - `memory`
   - binds `reasoning_model_alias` / `expand_model_alias` / `embedding_model_alias` / `rerank_model_alias` to existing aliases in `model_aliases`
-- `runtime`
-  - controls `echo` vs `litellm`, proxy URL, and master key env names
 - `front_door`
   - controls whether the owner-facing APIs stay loopback-only or require bearer / trusted proxy protection
-
-`litellm-config.yaml` is derived from `octoagent.yaml`. Do not treat it as the primary configuration surface.
 
 ### Memory configuration model
 
@@ -335,13 +321,7 @@ Do **not** store raw API keys in `octoagent.yaml`.
 The intended split is:
 
 - tracked config in `octoagent.yaml`
-- secret values in `.env.litellm` or runtime environment variables
-
-### `octo config sync`
-
-`octo config sync` only regenerates `litellm-config.yaml` from `octoagent.yaml`.
-
-It does **not** guarantee runtime restart or live activation. If you want the higher-level "save and enable real model" flow, prefer `octo setup`.
+- secret values in CredentialStore, `.env`, or runtime environment variables
 
 For custom providers that need an explicit `base_url`, `octo setup` can also take the direct custom path:
 
@@ -355,15 +335,9 @@ The Web `Settings` page, `octo project edit --wizard`, and the lower-level CLI s
 octo config provider add siliconflow --name "SiliconFlow" --api-key-env SILICONFLOW_API_KEY --base-url https://api.siliconflow.cn/v1
 ```
 
-### Docker and LiteLLM
+### Provider verification
 
-For real providers, OctoAgent uses a local LiteLLM proxy by default. That means:
-
-- Docker must be running
-- the proxy must be reachable on the configured URL
-- `octo-doctor --live` should pass before you trust runtime answers
-
-If the proxy is healthy, you should see:
+Provider calls go through the configured Provider adapter directly. Verify credentials and routing before you trust runtime answers:
 
 ```bash
 octo-doctor --live
@@ -453,7 +427,7 @@ octoagent/
 - uv workspace
 - pytest / pytest-asyncio
 - ruff
-- Docker + LiteLLM Proxy
+- Direct Provider adapters
 <!-- speckit:section:tech-stack:end -->
 
 <!-- speckit:section:testing -->

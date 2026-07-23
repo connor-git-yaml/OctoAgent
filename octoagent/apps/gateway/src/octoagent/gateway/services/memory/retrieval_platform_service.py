@@ -18,6 +18,9 @@ from octoagent.core.models import (
     RetrievalCorpusState,
     RetrievalPlatformDocument,
 )
+from octoagent.gateway.services.config.config_schema import ModelAlias
+from octoagent.gateway.services.config.config_wizard import load_config
+from octoagent.gateway.services.operations.backup_service import resolve_project_root
 from octoagent.memory import (
     MemoryBackendStatus,
     MemoryMaintenanceCommand,
@@ -26,11 +29,8 @@ from octoagent.memory import (
     SqliteMemoryStore,
 )
 from octoagent.memory.models.integration import MemoryMaintenanceRunStatus
-from octoagent.gateway.services.config.config_schema import ModelAlias
-from octoagent.gateway.services.config.config_wizard import load_config
 from ulid import ULID
 
-from octoagent.provider.dx.backup_service import resolve_project_root
 from .memory_backend_resolver import MemoryBackendResolver
 from .memory_retrieval_profile import (
     build_memory_retrieval_profile,
@@ -91,13 +91,17 @@ class RetrievalPlatformService:
             desired_profile=runtime_profile.desired_profile,
         )
         self._store.save(snapshot)
-        corpora = self._build_corpus_states(snapshot, desired_profile=runtime_profile.desired_profile)
+        corpora = self._build_corpus_states(
+            snapshot, desired_profile=runtime_profile.desired_profile
+        )
         latest_updated_at = max(
             [item.updated_at for item in snapshot.generations if item.updated_at is not None]
             + [item.updated_at for item in snapshot.build_jobs if item.updated_at is not None]
             + [datetime.now(tz=UTC)]
         )
-        warnings = list(dict.fromkeys(runtime_profile.warnings + self._collect_snapshot_warnings(snapshot)))
+        warnings = list(
+            dict.fromkeys(runtime_profile.warnings + self._collect_snapshot_warnings(snapshot))
+        )
         return RetrievalPlatformDocument(
             active_project_id=selection.project.project_id if selection.project is not None else "",
             active_workspace_id="",
@@ -115,7 +119,9 @@ class RetrievalPlatformService:
             ),
             warnings=warnings,
             summary={
-                "active_generation_count": sum(1 for item in snapshot.generations if item.is_active),
+                "active_generation_count": sum(
+                    1 for item in snapshot.generations if item.is_active
+                ),
                 "pending_generation_count": sum(
                     1
                     for item in snapshot.generations
@@ -281,7 +287,6 @@ class RetrievalPlatformService:
         self._store.save(snapshot)
         return await self.get_document(
             active_project_id=selection.project.project_id if selection.project else "",
-
         )
 
     async def cancel_generation(
@@ -300,7 +305,9 @@ class RetrievalPlatformService:
         )
         generation = self._find_generation(snapshot, generation_id)
         if generation is None:
-            raise RetrievalPlatformError("RETRIEVAL_GENERATION_NOT_FOUND", "找不到对应 generation。")
+            raise RetrievalPlatformError(
+                "RETRIEVAL_GENERATION_NOT_FOUND", "找不到对应 generation。"
+            )
         if generation.is_active:
             raise RetrievalPlatformError(
                 "RETRIEVAL_ACTIVE_GENERATION_IMMUTABLE",
@@ -330,7 +337,6 @@ class RetrievalPlatformService:
         self._store.save(snapshot)
         return await self.get_document(
             active_project_id=selection.project.project_id if selection.project else "",
-
         )
 
     async def cutover_generation(
@@ -349,7 +355,9 @@ class RetrievalPlatformService:
         )
         generation = self._find_generation(snapshot, generation_id)
         if generation is None:
-            raise RetrievalPlatformError("RETRIEVAL_GENERATION_NOT_FOUND", "找不到对应 generation。")
+            raise RetrievalPlatformError(
+                "RETRIEVAL_GENERATION_NOT_FOUND", "找不到对应 generation。"
+            )
         if generation.status != IndexGenerationStatus.READY_TO_CUTOVER:
             raise RetrievalPlatformError(
                 "RETRIEVAL_GENERATION_NOT_READY",
@@ -381,7 +389,6 @@ class RetrievalPlatformService:
         self._store.save(snapshot)
         return await self.get_document(
             active_project_id=selection.project.project_id if selection.project else "",
-
         )
 
     async def rollback_generation(
@@ -434,11 +441,12 @@ class RetrievalPlatformService:
         rollback_generation.updated_at = now
         rollback_generation.activated_at = now
         rollback_generation.rollback_deadline = None
-        snapshot.cancelled_targets[rollback_generation.corpus_kind.value] = current_active.profile_id
+        snapshot.cancelled_targets[rollback_generation.corpus_kind.value] = (
+            current_active.profile_id
+        )
         self._store.save(snapshot)
         return await self.get_document(
             active_project_id=selection.project.project_id if selection.project else "",
-
         )
 
     async def _resolve_runtime_profile(
@@ -465,9 +473,7 @@ class RetrievalPlatformService:
         if config is not None:
             configured_alias = config.memory.embedding_model_alias.strip()
             if configured_alias:
-                alias_signature = self._alias_signature(
-                    config.model_aliases.get(configured_alias)
-                )
+                alias_signature = self._alias_signature(config.model_aliases.get(configured_alias))
         desired_profile = self._profile_for_target(
             target=desired_target,
             configured_alias=configured_alias,
@@ -725,7 +731,10 @@ class RetrievalPlatformService:
                 corpus_state = "migration_running"
                 summary = "新的 embedding 正在后台重建，切换前查询仍走旧索引。"
             warnings.extend(pending_generation.warnings)
-        elif active_generation is not None and active_generation.profile_id != desired_profile.profile_id:
+        elif (
+            active_generation is not None
+            and active_generation.profile_id != desired_profile.profile_id
+        ):
             corpus_state = "migration_deferred"
             summary = "你已经改了 embedding 配置，但当前仍保留旧索引；需要手动重新发起迁移。"
 
@@ -874,13 +883,14 @@ class RetrievalPlatformService:
         )
         if any(item.profile_id == legacy_profile_id for item in snapshot.profiles):
             snapshot.profiles = [
-                item
-                for item in snapshot.profiles
-                if item.profile_id != legacy_profile_id
+                item for item in snapshot.profiles if item.profile_id != legacy_profile_id
             ]
             snapshot.profiles.append(current_profile)
         for generation in snapshot.generations:
-            if generation.profile_id != legacy_profile_id or generation.profile_target != legacy_target:
+            if (
+                generation.profile_id != legacy_profile_id
+                or generation.profile_target != legacy_target
+            ):
                 continue
             generation.profile_id = current_profile.profile_id
             generation.profile_target = current_profile.target

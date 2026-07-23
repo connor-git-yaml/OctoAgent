@@ -64,7 +64,7 @@ async def _build_services(tmp_path: Path):
         sse_hub=sse_hub,
         capability_pack=capability_pack,
     )
-    task_service = TaskService(store_group, sse_hub)
+    task_service = TaskService(store_group, sse_hub, storage_only=True)
     return store_group, task_service, delegation_plane
 
 
@@ -103,7 +103,6 @@ async def test_prepare_dispatch_routes_dev_request_and_persists_work(
     await store_group.close()
 
 
-
 async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
     store_group, task_service, delegation_plane = await _build_services(tmp_path)
     task_id, _ = await task_service.create_task(
@@ -123,7 +122,6 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
             ),
             thread_id="thread-context",
             project_id="project-default",
-            
             task_ids=[task_id],
             last_context_frame_id="context-frame-1",
         )
@@ -137,7 +135,6 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
                 project_id="project-default",
             ),
             project_id="project-default",
-            
             agent_profile_id="agent-profile-default",
             owner_profile_id="owner-profile-default",
         )
@@ -165,17 +162,14 @@ async def test_prepare_dispatch_inherits_context_refs(tmp_path: Path) -> None:
     assert plan.dispatch_envelope.metadata["context_frame_id"] == "context-frame-1"
     assert plan.dispatch_envelope.runtime_context is not None
     assert (
-        plan.dispatch_envelope.runtime_context.session_owner_profile_id
-        == "agent-profile-default"
+        plan.dispatch_envelope.runtime_context.session_owner_profile_id == "agent-profile-default"
     )
     assert plan.dispatch_envelope.runtime_context.agent_profile_id == "agent-profile-default"
     assert plan.dispatch_envelope.runtime_context.delegation_target_profile_id == ""
     assert plan.dispatch_envelope.runtime_context.context_frame_id == "context-frame-1"
     assert plan.dispatch_envelope.runtime_context.project_id == "project-default"
     assert "runtime_context_json" in plan.dispatch_envelope.metadata
-    assert (
-        plan.work.metadata["runtime_context"]["context_frame_id"] == "context-frame-1"
-    )
+    assert plan.work.metadata["runtime_context"]["context_frame_id"] == "context-frame-1"
 
     await store_group.close()
 
@@ -273,7 +267,6 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
 
     base_pack = await delegation_plane._capability_pack.get_pack(
         project_id="project-default",
-        
     )
     # Feature 057: 验证 disabled skill 从 pack 的 skills 列表中被过滤
     assert "coding-agent" not in {item.skill_id for item in base_pack.skills}
@@ -305,9 +298,7 @@ async def test_prepare_dispatch_uses_agent_profile_capability_selection_for_tool
     assert plan.work.delegation_target_profile_id == ""
     assert plan.work.selected_worker_type == "ops"
     assert plan.tool_selection.effective_tool_universe is not None
-    assert (
-        plan.tool_selection.effective_tool_universe.profile_id == agent_profile.profile_id
-    )
+    assert plan.tool_selection.effective_tool_universe.profile_id == agent_profile.profile_id
     assert plan.tool_selection.selected_tools, "selected_tools 不应为空"
 
     await store_group.close()
@@ -425,7 +416,6 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             session_id=alpha_session_id,
             thread_id="thread-shared",
             project_id="project-default",
-            
             task_ids=[alpha_task_id],
             last_context_frame_id="context-frame-alpha",
         )
@@ -435,7 +425,6 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             session_id=beta_session_id,
             thread_id="thread-shared",
             project_id="project-default",
-            
             task_ids=[beta_task_id],
             last_context_frame_id="context-frame-beta",
         )
@@ -446,7 +435,6 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             task_id=alpha_task_id,
             session_id=alpha_session_id,
             project_id="project-default",
-            
             agent_profile_id="agent-profile-alpha",
             owner_profile_id="owner-profile-default",
         )
@@ -457,7 +445,6 @@ async def test_prepare_dispatch_uses_scope_aware_session_key(tmp_path: Path) -> 
             task_id=beta_task_id,
             session_id=beta_session_id,
             project_id="project-default",
-            
             agent_profile_id="agent-profile-beta",
             owner_profile_id="owner-profile-default",
         )
@@ -790,8 +777,11 @@ async def test_mark_dispatched_rejects_terminal_work(tmp_path: Path) -> None:
     )
     plan = await delegation_plane.prepare_dispatch(
         OrchestratorRequest(
-            task_id=task_id, trace_id=f"trace-{task_id}",
-            user_text="test", worker_capability="llm_generation", metadata={},
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="test",
+            worker_capability="llm_generation",
+            metadata={},
         )
     )
     # 通过 cancel 让 work 进入终态（CREATED → CANCELLED 合法）
@@ -799,7 +789,9 @@ async def test_mark_dispatched_rejects_terminal_work(tmp_path: Path) -> None:
     # 对已 CANCELLED 的 work 做 mark_dispatched → 应抛出
     with pytest.raises(WorkTransitionError):
         await delegation_plane.mark_dispatched(
-            work_id=plan.work.work_id, worker_id="w2", dispatch_id="d2",
+            work_id=plan.work.work_id,
+            worker_id="w2",
+            dispatch_id="d2",
         )
     await store_group.close()
 
@@ -812,14 +804,19 @@ async def test_escalate_rejects_created_work(tmp_path: Path) -> None:
     )
     plan = await delegation_plane.prepare_dispatch(
         OrchestratorRequest(
-            task_id=task_id, trace_id=f"trace-{task_id}",
-            user_text="test", worker_capability="llm_generation", metadata={},
+            task_id=task_id,
+            trace_id=f"trace-{task_id}",
+            user_text="test",
+            worker_capability="llm_generation",
+            metadata={},
         )
     )
     # work 目前是 CREATED，不能直接 escalate（需要先 RUNNING）
     with pytest.raises(WorkTransitionError):
         await delegation_plane.escalate_work(plan.work.work_id, reason="test")
     await store_group.close()
+
+
 # ── F117 测试辅助（worker 镜像播种）────────────────────────────────────
 # 运行时统一读 agent_profiles(kind=worker) 镜像；生产中镜像由 publish/_sync 写。本 helper
 # 把 worker 配置 AgentProfile 写成镜像（kind=worker + source_* 标记）反映生产状态。

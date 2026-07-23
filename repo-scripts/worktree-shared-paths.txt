@@ -8,11 +8,9 @@ _research
 .specify/project-context.md
 .specify/project-context.yaml
 octoagent/.env
-octoagent/.env.litellm
 octoagent/.python-version
 octoagent/.venv
 octoagent/packages/provider/.env
-octoagent/packages/provider/.env.litellm
 
 # Claude Code 本地配置（hooks / permissions / pre-commit gate 等）。
 # git-untracked 但每个 worktree 都需要——之前漏挂导致新建 worktree 时

@@ -24,6 +24,19 @@ from octoagent.core.store import create_store_group
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
+
+class _DelegatingLLM:
+    """保持 bundle identity 稳定，同时让各用例注入自己的确定性行为。"""
+
+    def __init__(self) -> None:
+        self.delegate = None
+
+    async def call(self, *args, **kwargs):
+        assert self.delegate is not None
+        return await self.delegate.call(*args, **kwargs)
+
 
 @pytest_asyncio.fixture
 async def service_with_store(tmp_path: Path):
@@ -35,9 +48,14 @@ async def service_with_store(tmp_path: Path):
         str(tmp_path / "test.db"),
         str(tmp_path / "artifacts"),
     )
-    service = TaskService(store_group, SSEHub())
+    runtime_llm = _DelegatingLLM()
+    service = TaskService(
+        store_group,
+        SSEHub(),
+        runtime_services=runtime_service_fixture(runtime_llm).bundle,
+    )
 
-    yield service, store_group
+    yield service, store_group, runtime_llm
 
     await store_group.close()
     os.environ.pop("OCTOAGENT_DB_PATH", None)
@@ -49,7 +67,7 @@ class TestTaskServiceHardening:
     async def test_idempotency_integrity_conflict_returns_existing_task(
         self, service_with_store, monkeypatch
     ):
-        service, store_group = service_with_store
+        service, store_group, _runtime_llm = service_with_store
         first_msg = NormalizedMessage(
             text="first",
             idempotency_key="idem-race-001",
@@ -84,7 +102,7 @@ class TestTaskServiceHardening:
     async def test_create_task_initial_events_atomic_rollback(
         self, service_with_store, monkeypatch
     ):
-        service, store_group = service_with_store
+        service, store_group, _runtime_llm = service_with_store
         real_append = store_group.event_store.append_event
         call_count = 0
 
@@ -110,10 +128,8 @@ class TestTaskServiceHardening:
         events = await store_group.event_store.get_all_events()
         assert events == []
 
-    async def test_append_event_retries_on_task_seq_conflict(
-        self, service_with_store, monkeypatch
-    ):
-        service, store_group = service_with_store
+    async def test_append_event_retries_on_task_seq_conflict(self, service_with_store, monkeypatch):
+        service, store_group, _runtime_llm = service_with_store
         task_id, _ = await service.create_task(
             NormalizedMessage(
                 text="seq-retry",
@@ -155,7 +171,7 @@ class TestTaskServiceHardening:
         assert any(e.event_id == "01JRETRY000000000000000001" for e in events)
 
     async def test_process_task_skips_on_state_conflict(self, service_with_store):
-        service, store_group = service_with_store
+        service, store_group, runtime_llm = service_with_store
         task_id, _ = await service.create_task(
             NormalizedMessage(
                 text="state-conflict",
@@ -172,10 +188,10 @@ class TestTaskServiceHardening:
                 raise AssertionError("llm should not be called")
 
         llm = NeverCalledLLM()
+        runtime_llm.delegate = llm
         await service.process_task_with_llm(
             task_id=task_id,
             user_text="should-skip",
-            llm_service=llm,
         )
 
         task = await store_group.task_store.get_task(task_id)
@@ -187,10 +203,8 @@ class TestTaskServiceHardening:
         assert EventType.MODEL_CALL_STARTED not in event_types
         assert llm.called is False
 
-    async def test_llm_failure_event_hides_internal_error_detail(
-        self, service_with_store
-    ):
-        service, store_group = service_with_store
+    async def test_llm_failure_event_hides_internal_error_detail(self, service_with_store):
+        service, store_group, _runtime_llm = service_with_store
         task_id, _ = await service.create_task(
             NormalizedMessage(
                 text="fail-mask",
@@ -226,7 +240,7 @@ class TestTaskServiceHardening:
         assert task.status == TaskStatus.FAILED
 
     async def test_terminal_transition_cleans_up_task_lock(self, service_with_store):
-        service, _ = service_with_store
+        service, _, _runtime_llm = service_with_store
         task_id, _ = await service.create_task(
             NormalizedMessage(
                 text="cleanup-lock",
@@ -239,7 +253,7 @@ class TestTaskServiceHardening:
     async def test_force_failed_when_failure_event_write_fails(
         self, service_with_store, monkeypatch
     ):
-        service, store_group = service_with_store
+        service, store_group, _runtime_llm = service_with_store
         task_id, _ = await service.create_task(
             NormalizedMessage(
                 text="force-failed",
@@ -272,7 +286,7 @@ class TestTaskServiceHardening:
     async def test_get_latest_user_metadata_preserves_child_runtime_hints_across_followups(
         self, service_with_store
     ):
-        service, _store_group = service_with_store
+        service, _store_group, _runtime_llm = service_with_store
         task_id, created = await service.create_task(
             NormalizedMessage(
                 text="child objective",
@@ -308,7 +322,7 @@ class TestTaskServiceHardening:
         """
         from octoagent.skills import SkillAuthError
 
-        service, store_group = service_with_store
+        service, store_group, runtime_llm = service_with_store
         task_id, _ = await service.create_task(
             NormalizedMessage(
                 text="auth-fail",
@@ -323,10 +337,10 @@ class TestTaskServiceHardening:
                     "请重新授权后重试: refresh_token_reused"
                 )
 
+        runtime_llm.delegate = AuthBrokenLLM()
         await service.process_task_with_llm(
             task_id=task_id,
             user_text="hello",
-            llm_service=AuthBrokenLLM(),
         )
 
         task = await store_group.task_store.get_task(task_id)
@@ -340,14 +354,12 @@ class TestTaskServiceHardening:
         assert failed_events[0].payload["error_category"] == "auth_error"
         assert "重新授权" in failed_events[0].payload["error_message"]
 
-    async def test_direct_path_llm_call_error_401_marks_auth_category(
-        self, service_with_store
-    ):
+    async def test_direct_path_llm_call_error_401_marks_auth_category(self, service_with_store):
         """直连路径（FallbackManager re-raise 的 LLMCallError 401）同样标注
         error_category=auth_error（Codex re-review MEDIUM）。"""
         from octoagent.provider import ProviderLLMCallError
 
-        service, store_group = service_with_store
+        service, store_group, runtime_llm = service_with_store
         task_id, _ = await service.create_task(
             NormalizedMessage(
                 text="auth-fail-direct",
@@ -364,10 +376,10 @@ class TestTaskServiceHardening:
                     status_code=401,
                 )
 
+        runtime_llm.delegate = DirectAuthBrokenLLM()
         await service.process_task_with_llm(
             task_id=task_id,
             user_text="hello",
-            llm_service=DirectAuthBrokenLLM(),
         )
 
         task = await store_group.task_store.get_task(task_id)
@@ -380,9 +392,7 @@ class TestTaskServiceHardening:
         assert failed_events[0].payload["error_type"] == "LLMCallError"
         assert failed_events[0].payload["error_category"] == "auth_error"
 
-    async def test_llm_failure_while_waiting_approval_keeps_state(
-        self, service_with_store
-    ):
+    async def test_llm_failure_while_waiting_approval_keeps_state(self, service_with_store):
         """LLM 失败时 task 已进 WAITING_APPROVAL → 不得强推 FAILED。
 
         状态机上 WAITING_APPROVAL → FAILED 不合法（审批有自己的
@@ -390,7 +400,7 @@ class TestTaskServiceHardening:
         TaskStatusConflictError 分支应保留现状并记录日志，
         MODEL_CALL_FAILED 事件仍须落盘供审计。
         """
-        service, store_group = service_with_store
+        service, store_group, _runtime_llm = service_with_store
         task_id, _ = await service.create_task(
             NormalizedMessage(
                 text="approval-conflict",
@@ -436,7 +446,7 @@ class TestTaskServiceHardening:
         _force_mark_failed_without_event 把一个合法运行中的任务无事件
         覆写成 FAILED。
         """
-        service, store_group = service_with_store
+        service, store_group, _runtime_llm = service_with_store
         task_id, _ = await service.create_task(
             NormalizedMessage(
                 text="recheck-fail",
@@ -481,9 +491,7 @@ class TestTaskServiceHardening:
             force_mark_calls.append(tid)
             await real_force_mark(tid)
 
-        monkeypatch.setattr(
-            service, "_force_mark_failed_without_event", tracked_force_mark
-        )
+        monkeypatch.setattr(service, "_force_mark_failed_without_event", tracked_force_mark)
 
         await service._handle_llm_failure(
             task_id=task_id,
@@ -498,6 +506,5 @@ class TestTaskServiceHardening:
         task = await real_get_task(task_id)
         assert task is not None
         assert task.status == TaskStatus.RUNNING, (
-            "re-read 失败不得触发 force_mark：合法 resume 的 RUNNING 任务"
-            f"被覆写为 {task.status}"
+            f"re-read 失败不得触发 force_mark：合法 resume 的 RUNNING 任务被覆写为 {task.status}"
         )

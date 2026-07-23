@@ -22,7 +22,7 @@ async def _prepare_running_task(tmp_path: Path):
         str(tmp_path / "resume.db"),
         str(tmp_path / "artifacts"),
     )
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     msg = NormalizedMessage(text="resume test", idempotency_key="resume-001")
     task_id, created = await task_service.create_task(msg)
     assert created is True
@@ -83,7 +83,7 @@ class TestResumeEngine:
                 "model_call_started",
                 "success",
                 1,
-                "\"corrupted-raw-string\"",
+                '"corrupted-raw-string"',
                 None,
                 now,
                 now,

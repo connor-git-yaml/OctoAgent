@@ -17,34 +17,32 @@ from pathlib import Path
 from typing import Any
 
 import structlog
-
 from octoagent.core.behavior_workspace import (
     BOOTSTRAP_COMPLETED_MARKER,
     get_behavior_file_review_modes,
     mark_onboarding_completed,
 )
 from octoagent.core.models.behavior import BehaviorReviewMode
-from pydantic import BaseModel
-
-from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
-from octoagent.gateway.harness.tool_registry import ToolEntry
-from octoagent.gateway.harness.tool_registry import register as _registry_register
 from octoagent.core.models.tool_results import (
     BehaviorWriteFileResult,
     CanvasWriteResult,
 )
+from octoagent.gateway.harness.tool_registry import ToolEntry
+from octoagent.gateway.harness.tool_registry import register as _registry_register
+from octoagent.tooling import SideEffectLevel, reflect_tool_schema, tool_contract
+from pydantic import BaseModel
 
 from ..execution_context import get_current_execution_context
 from ._deps import ToolDeps, current_parent
 
 # 各工具 entrypoints 声明（Feature 084 D1 根治）
 _TOOL_ENTRYPOINTS: dict[str, frozenset[str]] = {
-    "pdf.inspect":         frozenset({"agent_runtime"}),
-    "image.inspect":       frozenset({"agent_runtime"}),
-    "tts.speak":           frozenset({"agent_runtime"}),
-    "canvas.write":        frozenset({"agent_runtime"}),
+    "pdf.inspect": frozenset({"agent_runtime"}),
+    "image.inspect": frozenset({"agent_runtime"}),
+    "tts.speak": frozenset({"agent_runtime"}),
+    "canvas.write": frozenset({"agent_runtime"}),
     "behavior.write_file": frozenset({"agent_runtime"}),
-    "skills":              frozenset({"agent_runtime", "web"}),
+    "skills": frozenset({"agent_runtime", "web"}),
 }
 
 _log = structlog.get_logger()
@@ -53,9 +51,14 @@ _log = structlog.get_logger()
 async def register(broker, deps: ToolDeps) -> None:
     """注册所有媒体与行为工具。"""
     from octoagent.skills.tools import SkillsTool as _SkillsTool
+
     from ..task_service import TaskService
 
-    task_service = TaskService(deps.stores, project_root=deps.project_root)
+    task_service = TaskService(
+        deps.stores,
+        project_root=deps.project_root,
+        storage_only=True,
+    )
 
     # 预构建 review_mode 查找表（file_id -> BehaviorReviewMode）
     _behavior_review_modes = get_behavior_file_review_modes(include_advanced=True)
@@ -79,7 +82,7 @@ async def register(broker, deps: ToolDeps) -> None:
                 raw = part.split(":", 1)[1].strip()
                 # project-default -> default
                 if raw.startswith("project-"):
-                    return raw[len("project-"):]
+                    return raw[len("project-") :]
                 return raw or "default"
         return "default"
 
@@ -255,7 +258,8 @@ async def register(broker, deps: ToolDeps) -> None:
 
         # 查找 review_mode
         review_mode = _behavior_review_modes.get(
-            file_id, BehaviorReviewMode.REVIEW_REQUIRED,
+            file_id,
+            BehaviorReviewMode.REVIEW_REQUIRED,
         )
 
         # proposal 模式：review_required 且未确认时返回 proposal（status="skipped"）
@@ -380,15 +384,11 @@ async def register(broker, deps: ToolDeps) -> None:
             _bwf_snapshot_store = getattr(deps, "_snapshot_store", None)
             if _bwf_snapshot_store is not None:
                 try:
-                    _bwf_update_live = getattr(
-                        _bwf_snapshot_store, "update_live_state", None
-                    )
+                    _bwf_update_live = getattr(_bwf_snapshot_store, "update_live_state", None)
                     if _bwf_update_live is not None:
                         _bwf_update_live("USER.md", content)
                 except Exception:
-                    _bwf_log.warning(
-                        "behavior_write_live_state_sync_failed", exc_info=True
-                    )
+                    _bwf_log.warning("behavior_write_live_state_sync_failed", exc_info=True)
 
         return BehaviorWriteFileResult(
             status="written",
@@ -455,11 +455,7 @@ async def register(broker, deps: ToolDeps) -> None:
         )
 
         # 写回 AgentSession.metadata，持久化 loaded_skill_names
-        if (
-            action in ("load", "unload")
-            and agent_session_id
-            and session_metadata is not None
-        ):
+        if action in ("load", "unload") and agent_session_id and session_metadata is not None:
             try:
                 agent_session = await deps.stores.agent_context_store.get_agent_session(
                     agent_session_id
@@ -468,7 +464,8 @@ async def register(broker, deps: ToolDeps) -> None:
                     agent_session.metadata["loaded_skill_names"] = session_metadata.get(
                         "loaded_skill_names", []
                     )
-                    from datetime import datetime, UTC
+                    from datetime import UTC, datetime
+
                     agent_session.updated_at = datetime.now(UTC)
                     await deps.stores.agent_context_store.save_agent_session(agent_session)
             except Exception as exc:
@@ -488,18 +485,20 @@ async def register(broker, deps: ToolDeps) -> None:
 
     # 向 ToolRegistry 注册 ToolEntry（Feature 084 T013 — entrypoints 迁移）
     for _name, _handler, _sel in (
-        ("pdf.inspect",         pdf_inspect,         SideEffectLevel.NONE),
-        ("image.inspect",       image_inspect,       SideEffectLevel.NONE),
-        ("tts.speak",           tts_speak,           SideEffectLevel.REVERSIBLE),
-        ("canvas.write",        canvas_write,        SideEffectLevel.REVERSIBLE),
+        ("pdf.inspect", pdf_inspect, SideEffectLevel.NONE),
+        ("image.inspect", image_inspect, SideEffectLevel.NONE),
+        ("tts.speak", tts_speak, SideEffectLevel.REVERSIBLE),
+        ("canvas.write", canvas_write, SideEffectLevel.REVERSIBLE),
         ("behavior.write_file", behavior_write_file, SideEffectLevel.REVERSIBLE),
-        ("skills",              skills,              SideEffectLevel.NONE),
+        ("skills", skills, SideEffectLevel.NONE),
     ):
-        _registry_register(ToolEntry(
-            name=_name,
-            entrypoints=_TOOL_ENTRYPOINTS[_name],
-            toolset="core",
-            handler=_handler,
-            schema=BaseModel,
-            side_effect_level=_sel,
-        ))
+        _registry_register(
+            ToolEntry(
+                name=_name,
+                entrypoints=_TOOL_ENTRYPOINTS[_name],
+                toolset="core",
+                handler=_handler,
+                schema=BaseModel,
+                side_effect_level=_sel,
+            )
+        )

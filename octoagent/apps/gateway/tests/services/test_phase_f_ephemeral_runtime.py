@@ -36,7 +36,6 @@ from octoagent.core.models.agent_context import (
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.agent_context import AgentContextService
 
-
 _NOW = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
 _PROJECT_ID = "proj-phase-f-001"
 _DELEGATION_ID = "01J0F00000000000000000DELG"
@@ -117,10 +116,8 @@ async def _save_caller_worker_runtime(store_group, *, profile_id: str) -> AgentR
 @pytest.mark.asyncio
 async def test_subagent_path_target_kind_signal_skips_find_active_runtime(tmp_path: Path) -> None:
     """AC-F1: target_kind=subagent → 不复用 caller worker active runtime。"""
-    store_group = await create_store_group(
-        str(tmp_path / "f-1.db"), str(tmp_path / "art")
-    )
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    store_group = await create_store_group(str(tmp_path / "f-1.db"), str(tmp_path / "art"))
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     # 1. 模拟 caller worker 已有 active runtime
     caller_profile = _make_agent_profile(profile_id="profile-caller-worker", kind="worker")
@@ -161,10 +158,8 @@ async def test_subagent_path_target_kind_signal_skips_find_active_runtime(tmp_pa
 @pytest.mark.asyncio
 async def test_subagent_path_profile_kind_signal_skips_find_active_runtime(tmp_path: Path) -> None:
     """AC-F2: agent_profile.kind=subagent（无 target_kind 信号）→ 不复用（fallback 信号）。"""
-    store_group = await create_store_group(
-        str(tmp_path / "f-2.db"), str(tmp_path / "art")
-    )
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    store_group = await create_store_group(str(tmp_path / "f-2.db"), str(tmp_path / "art"))
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     caller_profile = _make_agent_profile(profile_id="profile-caller-w2", kind="worker")
     await store_group.agent_context_store.save_agent_profile(caller_profile)
@@ -198,10 +193,8 @@ async def test_subagent_path_profile_kind_signal_skips_find_active_runtime(tmp_p
 @pytest.mark.asyncio
 async def test_subagent_runtime_metadata_contains_delegation_id(tmp_path: Path) -> None:
     """AC-F3: subagent AgentRuntime.metadata 含 subagent_delegation_id（audit 关联）。"""
-    store_group = await create_store_group(
-        str(tmp_path / "f-3.db"), str(tmp_path / "art")
-    )
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    store_group = await create_store_group(str(tmp_path / "f-3.db"), str(tmp_path / "art"))
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     subagent_profile = _make_agent_profile(profile_id="profile-ephemeral-sub-3", kind="subagent")
     await store_group.agent_context_store.save_agent_profile(subagent_profile)
@@ -230,10 +223,8 @@ async def test_subagent_runtime_metadata_contains_delegation_id(tmp_path: Path) 
 @pytest.mark.asyncio
 async def test_main_path_still_uses_find_active_runtime(tmp_path: Path) -> None:
     """AC-F4: main 路径行为不变（regression 防护）。"""
-    store_group = await create_store_group(
-        str(tmp_path / "f-4.db"), str(tmp_path / "art")
-    )
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    store_group = await create_store_group(str(tmp_path / "f-4.db"), str(tmp_path / "art"))
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     main_profile = _make_agent_profile(profile_id="profile-main", kind="main")
     await store_group.agent_context_store.save_agent_profile(main_profile)
@@ -268,10 +259,8 @@ async def test_main_path_still_uses_find_active_runtime(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_worker_path_still_uses_find_active_runtime(tmp_path: Path) -> None:
     """AC-F5: worker 路径（非 subagent）仍走 find_active_runtime 复用（regression）。"""
-    store_group = await create_store_group(
-        str(tmp_path / "f-5.db"), str(tmp_path / "art")
-    )
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    store_group = await create_store_group(str(tmp_path / "f-5.db"), str(tmp_path / "art"))
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     worker_profile = _make_agent_profile(profile_id="profile-worker-non-sub", kind="worker")
     await store_group.agent_context_store.save_agent_profile(worker_profile)
@@ -307,10 +296,8 @@ async def test_worker_path_still_uses_find_active_runtime(tmp_path: Path) -> Non
 @pytest.mark.asyncio
 async def test_multiple_subagents_independent_runtimes(tmp_path: Path) -> None:
     """AC-F6: 多个 subagent spawn 各自独立 runtime（不互相复用）。"""
-    store_group = await create_store_group(
-        str(tmp_path / "f-6.db"), str(tmp_path / "art")
-    )
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    store_group = await create_store_group(str(tmp_path / "f-6.db"), str(tmp_path / "art"))
+    svc = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     project = type("Project", (), {"project_id": _PROJECT_ID})()
 

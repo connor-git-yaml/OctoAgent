@@ -118,6 +118,7 @@ class CapabilityPackService(
         preferred_tool_index_backend: str = "auto",
         approval_override_cache: ApprovalOverrideCacheProtocol | None = None,
         provider_router: Any | None = None,
+        user_skills_dir: Path | None = None,
     ) -> None:
         self._project_root = project_root
         self._stores = store_group
@@ -153,8 +154,10 @@ class CapabilityPackService(
         )
         # Feature 057: SKILL.md 文件系统驱动的 Skill 发现服务
         # 三级目录：内置 (skills/) > 用户 (~/.octoagent/skills/) > 项目 ({project}/skills/)
-        _repo_root = Path(__file__).resolve().parents[7]  # .../octoagent/apps/gateway/src/octoagent/gateway/services -> repo root
-        _user_skills_dir = Path.home() / ".octoagent" / "skills"
+        _repo_root = (
+            Path(__file__).resolve().parents[7]
+        )  # .../octoagent/apps/gateway/src/octoagent/gateway/services -> repo root
+        _user_skills_dir = user_skills_dir or Path.home() / ".octoagent" / "skills"
         _project_skills_dir = project_root / "skills"
         self._skill_discovery = SkillDiscovery(
             builtin_dir=_repo_root / "skills",
@@ -246,6 +249,7 @@ class CapabilityPackService(
         # F086 T2：删 _resolve_tool_entrypoints thin proxy（F084 D1 修复后留下的）
         # 直接从 ToolRegistry 一次性取 name → entrypoints map，避免 O(N²) 查找
         from octoagent.gateway.harness.tool_registry import get_registry as _get_registry
+
         _registry_entries = _get_registry()._snapshot_entries()
         _entrypoints_map: dict[str, list[str]] = {
             e.name: sorted(e.entrypoints) for e in _registry_entries
@@ -272,9 +276,7 @@ class CapabilityPackService(
                 availability_reason=self._resolve_tool_availability_reason(meta.name),
                 install_hint=self._resolve_tool_install_hint(meta.name),
                 entrypoints=_resolve_entrypoints_for(meta.name),
-                metadata=self._enrich_mcp_metadata(
-                    dict(meta.metadata), mcp_install_source_map
-                ),
+                metadata=self._enrich_mcp_metadata(dict(meta.metadata), mcp_install_source_map),
             )
             for meta in metas
         ]
@@ -668,7 +670,9 @@ class CapabilityPackService(
                 bundled = tool_by_name.get(tool_name)
                 if bundled is None:
                     continue
-                if not _profile_allows(self._coerce_tool_profile(bundled.tool_profile), context_profile):
+                if not _profile_allows(
+                    self._coerce_tool_profile(bundled.tool_profile), context_profile
+                ):
                     continue
                 if bundled.availability not in {
                     BuiltinToolAvailabilityStatus.AVAILABLE,
@@ -727,11 +731,7 @@ class CapabilityPackService(
                 for tool_name in mounted_names
                 if tool_name in self._profile_first_discovery_tool_names()
             ]
-            + [
-                hit.tool_name
-                for hit in discovery.hits
-                if hit.tool_name in mounted_names
-            ]
+            + [hit.tool_name for hit in discovery.hits if hit.tool_name in mounted_names]
         )
         recommended_tools = list(discovery_entrypoints or mounted_names[:6])
 
@@ -1045,7 +1045,7 @@ class CapabilityPackService(
         plan_id: str = "",
         extra_control_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        
+
         if self._task_runner is None:
             raise RuntimeError("task runner is not bound for child task launch")
         # F098 Phase C: Worker→Worker A2A 解禁（H2 完整对等性）。
@@ -1092,10 +1092,7 @@ class CapabilityPackService(
             explicit_caller_project = ""
             if extra_control_metadata:
                 explicit_caller_runtime = str(
-                    extra_control_metadata.get(
-                        "synthetic_caller_agent_runtime_id", ""
-                    )
-                    or ""
+                    extra_control_metadata.get("synthetic_caller_agent_runtime_id", "") or ""
                 )
                 explicit_caller_project = str(
                     extra_control_metadata.get("synthetic_caller_project_id", "") or ""
@@ -1107,9 +1104,7 @@ class CapabilityPackService(
                 "parent_task_id": parent_task.task_id,
                 "parent_work_id": parent_work.work_id,
                 "caller_agent_runtime_id": caller_agent_runtime_id,
-                "caller_project_id": (
-                    parent_work.project_id or explicit_caller_project or ""
-                ),
+                "caller_project_id": (parent_work.project_id or explicit_caller_project or ""),
                 "spawned_by": spawned_by,
             }
 
@@ -1129,8 +1124,7 @@ class CapabilityPackService(
                     pass
                 if not caller_surface:
                     caller_surface = str(
-                        getattr(getattr(parent_task, "requester", None), "channel", "")
-                        or ""
+                        getattr(getattr(parent_task, "requester", None), "channel", "") or ""
                     )
                 base_control_metadata["__caller_runtime_hints__"] = {
                     "surface": caller_surface,
@@ -1224,9 +1218,7 @@ class CapabilityPackService(
         if project is None:
             return set(), set()
         metadata = (
-            dict(project.metadata)
-            if isinstance(getattr(project, "metadata", None), dict)
-            else {}
+            dict(project.metadata) if isinstance(getattr(project, "metadata", None), dict) else {}
         )
         raw_selection = metadata.get("skill_selection")
         if not isinstance(raw_selection, Mapping):
@@ -1310,9 +1302,7 @@ class CapabilityPackService(
         if self._mcp_installer is None:
             return {}
         records = self._mcp_installer.list_installs()
-        auto_count = sum(
-            1 for r in records if r.install_source and r.install_source != "manual"
-        )
+        auto_count = sum(1 for r in records if r.install_source and r.install_source != "manual")
         return {
             "auto_installed_count": auto_count,
             "manual_count": (
@@ -1400,16 +1390,10 @@ class CapabilityPackService(
             if selection_state(item_id=f"skill:{skill.skill_id}", enabled_by_default=True)[0]
         ]
         governed_skill_tool_names = {
-            tool_name
-            for skill in pack.skills
-            for tool_name in skill.tools_allowed
-            if tool_name
+            tool_name for skill in pack.skills for tool_name in skill.tools_allowed if tool_name
         }
         enabled_skill_tool_names = {
-            tool_name
-            for skill in skills
-            for tool_name in skill.tools_allowed
-            if tool_name
+            tool_name for skill in skills for tool_name in skill.tools_allowed if tool_name
         }
 
         tools: list[BundledToolDefinition] = []

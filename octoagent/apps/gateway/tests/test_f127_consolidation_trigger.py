@@ -34,6 +34,8 @@ from octoagent.gateway.services.memory_consolidation import (
     MemoryConsolidationService,
 )
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 # ============================================================
 # Fakes
 # ============================================================
@@ -69,9 +71,7 @@ class _FakePlane:
         raise_exc: Exception | None = None,
     ) -> None:
         self.calls: list[dict[str, Any]] = []
-        self._result = result or SpawnChildResult(
-            status="written", task_id="child-task-1"
-        )
+        self._result = result or SpawnChildResult(status="written", task_id="child-task-1")
         self._raise_exc = raise_exc
 
     async def spawn_child(self, **kwargs: Any) -> SpawnChildResult:
@@ -129,12 +129,8 @@ def _build_service(
     )
 
 
-async def _events_of_type(
-    store_group: StoreGroup, event_type: EventType
-) -> list[Any]:
-    events = await store_group.event_store.get_events_for_task(
-        CONSOLIDATION_ROOT_TASK_ID
-    )
+async def _events_of_type(store_group: StoreGroup, event_type: EventType) -> list[Any]:
+    events = await store_group.event_store.get_events_for_task(CONSOLIDATION_ROOT_TASK_ID)
     return [e for e in events if e.type == event_type]
 
 
@@ -196,22 +192,15 @@ class TestRunConsolidation:
         svc = _build_service(store_group, user_md=_USER_MD_DISABLED, plane=plane)
         await svc._run_consolidation()
         assert plane.calls == []  # 未 spawn
-        skipped = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
-        )
+        skipped = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED)
         assert len(skipped) == 1
         assert skipped[0].payload["reason"] == "disabled"
         # root task 确实被 in-flow ensure 出来了（FK 目标存在）
-        assert (
-            await store_group.task_store.get_task(CONSOLIDATION_ROOT_TASK_ID)
-            is not None
-        )
+        assert await store_group.task_store.get_task(CONSOLIDATION_ROOT_TASK_ID) is not None
 
     async def test_written_emits_triggered(self, store_group):
         """FR-A3/A4：active=True + spawn written → TRIGGERED + child_task_id。"""
-        plane = _FakePlane(
-            result=SpawnChildResult(status="written", task_id="child-xyz")
-        )
+        plane = _FakePlane(result=SpawnChildResult(status="written", task_id="child-xyz"))
         svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)
         await svc._run_consolidation()
         # spawn 被调用一次，参数正确
@@ -229,9 +218,7 @@ class TestRunConsolidation:
         assert call["parent_task"].task_id == CONSOLIDATION_ROOT_TASK_ID
         assert call["parent_work"].work_id == CONSOLIDATION_ROOT_WORK_ID
         # TRIGGERED 事件
-        triggered = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED
-        )
+        triggered = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED)
         assert len(triggered) == 1
         assert triggered[0].payload["child_task_id"] == "child-xyz"
         # config 透传：window_days/max_facts 进 payload
@@ -249,15 +236,11 @@ class TestRunConsolidation:
         )
         svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)
         await svc._run_consolidation()  # 不应抛
-        skipped = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
-        )
+        skipped = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED)
         assert len(skipped) == 1
         assert skipped[0].payload["reason"] == "capacity"
         # 未写 TRIGGERED
-        triggered = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED
-        )
+        triggered = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED)
         assert triggered == []
 
     async def test_spawn_raise_skips_gracefully(self, store_group):
@@ -265,9 +248,7 @@ class TestRunConsolidation:
         plane = _FakePlane(raise_exc=RuntimeError("task runner not bound"))
         svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)
         await svc._run_consolidation()  # 不应抛
-        skipped = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
-        )
+        skipped = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED)
         assert len(skipped) == 1
         assert skipped[0].payload["reason"] == "spawn_error"
         # 运行标志已复位（finally），可再次触发
@@ -297,9 +278,7 @@ class TestRunConsolidation:
 
         # 第二次触发（应立即 skip）
         await svc._run_consolidation()
-        skipped = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
-        )
+        skipped = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED)
         assert len(skipped) == 1
         assert skipped[0].payload["reason"] == "already_running"
         # 第二次没有 spawn（只有 first 的一次 call）
@@ -344,9 +323,7 @@ class TestRunConsolidation:
 
         # 不 spawn（持久态 child 拦下）
         assert plane.calls == []
-        skipped = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
-        )
+        skipped = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED)
         assert len(skipped) == 1
         assert skipped[0].payload["reason"] == "already_running"
 
@@ -358,9 +335,7 @@ class TestRunConsolidation:
             WorkStatus,
         )
 
-        plane = _FakePlane(
-            result=SpawnChildResult(status="written", task_id="child-new")
-        )
+        plane = _FakePlane(result=SpawnChildResult(status="written", task_id="child-new"))
         svc = _build_service(store_group, user_md=_USER_MD_ACTIVE, plane=plane)
         _, root_work = await svc._ensure_consolidation_root()
         done_child = Work(
@@ -377,9 +352,7 @@ class TestRunConsolidation:
         await svc._run_consolidation()
         # 终态 child 不拦，正常派新一轮
         assert len(plane.calls) == 1
-        triggered = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED
-        )
+        triggered = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED)
         assert len(triggered) == 1
 
 
@@ -441,9 +414,7 @@ class TestNFR3RestrictedToolProfile:
         )
         # 最受限等级（minimal=0 < standard=1 < privileged=2）
         assert CONSOLIDATION_TOOL_PROFILE in _PROFILE_LEVELS
-        assert _PROFILE_LEVELS[CONSOLIDATION_TOOL_PROFILE] == min(
-            _PROFILE_LEVELS.values()
-        )
+        assert _PROFILE_LEVELS[CONSOLIDATION_TOOL_PROFILE] == min(_PROFILE_LEVELS.values())
 
 
 class TestFinding1NamespaceInjection:
@@ -541,9 +512,7 @@ class TestFinding3DescendantExclusion:
     用户原则）。expand_internal_work_ids 用 BFS 把后代一并纳入排除集。
     """
 
-    def _make_work(
-        self, work_id: str, parent_work_id: str | None = None
-    ):
+    def _make_work(self, work_id: str, parent_work_id: str | None = None):
         from octoagent.core.models.delegation import (
             DelegationTargetKind,
             Work,
@@ -589,13 +558,11 @@ class TestFinding3DescendantExclusion:
         )
 
         assert expand_internal_work_ids([]) == set(SYSTEM_INTERNAL_WORK_IDS)
-        assert expand_internal_work_ids(
-            [self._make_work(CONSOLIDATION_ROOT_WORK_ID)]
-        ) == set(SYSTEM_INTERNAL_WORK_IDS)
+        assert expand_internal_work_ids([self._make_work(CONSOLIDATION_ROOT_WORK_ID)]) == set(
+            SYSTEM_INTERNAL_WORK_IDS
+        )
 
-    async def test_delegation_document_excludes_consolidation_child(
-        self, store_group
-    ):
+    async def test_delegation_document_excludes_consolidation_child(self, store_group):
         """集成：get_delegation_document 不暴露巩固 root 的 child Work（finding-3）。
 
         构造 [巩固 root, 巩固 child, 用户委派 Work] 三条，验证返回 document 的 works
@@ -611,9 +578,7 @@ class TestFinding3DescendantExclusion:
         )
 
         root_work = self._make_work(CONSOLIDATION_ROOT_WORK_ID)
-        child_work = self._make_work(
-            "cons-child-leak", parent_work_id=CONSOLIDATION_ROOT_WORK_ID
-        )
+        child_work = self._make_work("cons-child-leak", parent_work_id=CONSOLIDATION_ROOT_WORK_ID)
         user_work = self._make_work("user-delegation-1")
 
         class _FakeDelegationPlane:
@@ -668,9 +633,7 @@ class TestSystemTaskExclusion:
         await store_group.conn.commit()
         return task
 
-    async def test_list_tasks_exclude_internal_filters_system_channel(
-        self, store_group
-    ):
+    async def test_list_tasks_exclude_internal_filters_system_channel(self, store_group):
         """store list_tasks(exclude_internal=True) 排除 channel=="system"；默认忠实保留。"""
         await self._create_task(store_group, "user-task-1", "telegram")
         await self._create_task(store_group, CONSOLIDATION_ROOT_TASK_ID, "system")
@@ -695,16 +658,10 @@ class TestSystemTaskExclusion:
         win_start = now - timedelta(hours=1)
         win_end = now + timedelta(hours=1)
         mid = now  # 落在窗内
-        await self._create_task(
-            store_group, "user-in-window", "web", created_at=mid
-        )
-        await self._create_task(
-            store_group, CONSOLIDATION_ROOT_TASK_ID, "system", created_at=mid
-        )
+        await self._create_task(store_group, "user-in-window", "web", created_at=mid)
+        await self._create_task(store_group, CONSOLIDATION_ROOT_TASK_ID, "system", created_at=mid)
 
-        faithful = await store_group.task_store.list_tasks_in_time_range(
-            win_start, win_end
-        )
+        faithful = await store_group.task_store.list_tasks_in_time_range(win_start, win_end)
         assert CONSOLIDATION_ROOT_TASK_ID in {t.task_id for t in faithful}
 
         filtered = await store_group.task_store.list_tasks_in_time_range(
@@ -712,9 +669,7 @@ class TestSystemTaskExclusion:
         )
         assert {t.task_id for t in filtered} == {"user-in-window"}
 
-    async def test_task_service_list_tasks_excludes_consolidation_root(
-        self, store_group
-    ):
+    async def test_task_service_list_tasks_excludes_consolidation_root(self, store_group):
         """集成：TaskService.list_tasks（/api/tasks 后端）不返回巩固 root Task。"""
         from octoagent.gateway.services.task_service import TaskService
 
@@ -723,7 +678,7 @@ class TestSystemTaskExclusion:
         await svc._ensure_consolidation_root()
         await self._create_task(store_group, "real-user-task", "telegram")
 
-        task_service = TaskService(store_group)
+        task_service = TaskService(store_group, storage_only=True)
         tasks = await task_service.list_tasks()
         ids = {t.task_id for t in tasks}
         assert "real-user-task" in ids
@@ -737,17 +692,13 @@ class TestSystemTaskExclusion:
         from octoagent.core.models.enums import TaskStatus
 
         # 用户 FAILED task + 巩固 child FAILED task（channel="system"）
-        await self._create_task(
-            store_group, "user-failed", "telegram", status=TaskStatus.FAILED
-        )
+        await self._create_task(store_group, "user-failed", "telegram", status=TaskStatus.FAILED)
         await self._create_task(
             store_group, "cons-child-failed", "system", status=TaskStatus.FAILED
         )
 
         # 默认忠实：两条都在
-        faithful = await store_group.task_store.list_tasks_by_statuses(
-            [TaskStatus.FAILED]
-        )
+        faithful = await store_group.task_store.list_tasks_by_statuses([TaskStatus.FAILED])
         assert {"user-failed", "cons-child-failed"} <= {t.task_id for t in faithful}
 
         # exclude_internal：只剩用户 FAILED
@@ -783,7 +734,7 @@ class TestSystemTaskNotificationSuppression:
         runner = TaskRunner(
             store_group=store_group,
             sse_hub=SSEHub(),
-            llm_service=LLMService(),
+            runtime_services=runtime_service_fixture(LLMService()).bundle,
             timeout_seconds=60,
             monitor_interval_seconds=5,
             completion_notifier=_completion_notifier,
@@ -839,9 +790,7 @@ class TestSystemTaskNotificationSuppression:
         assert len(notif_calls) == 1, "普通 task 应推 NotificationService"
         assert notifier_calls == ["user-task-1"], "普通 task 应走渠道扇出"
 
-    async def test_audit_worker_error_suppress_emits_event_no_notify(
-        self, store_group
-    ):
+    async def test_audit_worker_error_suppress_emits_event_no_notify(self, store_group):
         """audit_worker_error(suppress_notification=True)：仍 emit WORKER_ERROR 事件
         （审计/可观测 Constitution #2/#8），但不推用户通知。
         """
@@ -856,7 +805,7 @@ class TestSystemTaskNotificationSuppression:
                 notif_calls.append(kwargs)
 
         await self._create_task(store_group, "cons-child-err", "system")
-        task_service = TaskService(store_group)
+        task_service = TaskService(store_group, storage_only=True)
 
         event = await audit_worker_error(
             task_service,
@@ -888,7 +837,7 @@ class TestSystemTaskNotificationSuppression:
                 notif_calls.append(kwargs)
 
         await self._create_task(store_group, "user-worker-err", "telegram")
-        task_service = TaskService(store_group)
+        task_service = TaskService(store_group, storage_only=True)
 
         await audit_worker_error(
             task_service,
@@ -998,9 +947,7 @@ class TestPhaseCDiscoveryWiring:
         runner = _RecordingRunner()
         svc = self._build_with_runner(store_group, runner)
         await svc._run_consolidation()
-        events = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
-        )
+        events = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED)
         assert len(events) == 1
         assert events[0].payload["facts_reviewed"] == 3
         assert events[0].payload["proposals_made"] == 1
@@ -1043,15 +990,11 @@ class TestPhaseCDiscoveryWiring:
         svc = self._build_with_runner(store_group, runner)
         await svc._run_consolidation()
         assert runner.calls == [], "无 scope 不应调 runner"
-        completed = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
-        )
+        completed = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED)
         assert len(completed) == 1
         assert completed[0].payload["fallback"] is True
         # 不应有 FAILED（没记忆可整理是正常空运行非失败）
-        failed = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_FAILED
-        )
+        failed = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_FAILED)
         assert failed == []
 
     async def test_runner_exception_emits_failed_no_crash(self, store_group):
@@ -1060,9 +1003,7 @@ class TestPhaseCDiscoveryWiring:
         runner = _RecordingRunner(raise_exc=RuntimeError("discovery boom"))
         svc = self._build_with_runner(store_group, runner)
         await svc._run_consolidation()  # 不应抛
-        failed = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_FAILED
-        )
+        failed = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_FAILED)
         assert len(failed) == 1
         assert failed[0].payload["error_type"] == "RuntimeError"
 
@@ -1082,14 +1023,10 @@ class TestPhaseCDiscoveryWiring:
         )
         await svc._run_consolidation()
         # spawn 成功 → TRIGGERED 仍 emit
-        triggered = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED
-        )
+        triggered = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_TRIGGERED)
         assert len(triggered) == 1
         # 但无 COMPLETED（Phase B 不跑发现端）
-        completed = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
-        )
+        completed = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED)
         assert completed == []
 
 
@@ -1099,9 +1036,7 @@ class TestPhaseCDiscoveryWiring:
 
 
 class TestConfigDiskFirst:
-    async def test_disk_user_md_wins_over_stale_snapshot(
-        self, store_group, tmp_path: Path
-    ):
+    async def test_disk_user_md_wins_over_stale_snapshot(self, store_group, tmp_path: Path):
         """盘上 USER.md（consolidation_active=false）优先于 stale snapshot live
         state（active）——盘外编辑对 cron 即时可见（F146 件①行为变更锚）。"""
         from octoagent.core.behavior_workspace import resolve_write_path_by_file_id
@@ -1118,9 +1053,7 @@ class TestConfigDiskFirst:
         config = svc._read_config()
         assert config.consolidation_active is False  # 盘赢
 
-    async def test_snapshot_fallback_when_disk_missing(
-        self, store_group, tmp_path: Path
-    ):
+    async def test_snapshot_fallback_when_disk_missing(self, store_group, tmp_path: Path):
         """盘上无 USER.md → snapshot live state 兜底（#6 降级链原样）。"""
         svc = _build_service(
             store_group,
@@ -1143,8 +1076,7 @@ class TestCronHotReload:
         user_md = resolve_write_path_by_file_id(project_root, "USER.md")
         user_md.parent.mkdir(parents=True, exist_ok=True)
         user_md.write_text(
-            "- **consolidation_active**: false\n"
-            f'- **consolidation_time**: "{time_value}"\n',
+            f'- **consolidation_active**: false\n- **consolidation_time**: "{time_value}"\n',
             encoding="utf-8",
         )
 

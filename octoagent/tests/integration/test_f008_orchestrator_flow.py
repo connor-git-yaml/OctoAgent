@@ -12,6 +12,8 @@ from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 
 @pytest_asyncio.fixture
 async def f008_app(tmp_path: Path):
@@ -31,7 +33,7 @@ async def f008_app(tmp_path: Path):
     task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=llm_service,
+        runtime_services=runtime_service_fixture(llm_service).bundle,
         timeout_seconds=60,
         monitor_interval_seconds=0.05,
     )

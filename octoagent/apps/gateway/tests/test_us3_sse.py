@@ -11,6 +11,8 @@ import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
@@ -19,6 +21,8 @@ from octoagent.core.models.payloads import StateTransitionPayload
 from octoagent.core.store import create_store_group
 from octoagent.core.store.transaction import append_event_and_update_task, append_event_only
 from octoagent.gateway.services.sse_hub import SSEHub
+
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 
 @pytest_asyncio.fixture
@@ -39,9 +43,16 @@ async def test_app(tmp_path: Path):
         str(tmp_path / "test.db"),
         str(tmp_path / "artifacts"),
     )
+    sse_hub = SSEHub()
+    runtime_fixture = runtime_service_fixture(None)
     app.state.store_group = store_group
-    app.state.sse_hub = SSEHub()
-    app.state.llm_service = None
+    app.state.sse_hub = sse_hub
+    app.state.llm_service = runtime_fixture.llm_service
+    app.state.runtime_services = runtime_fixture.bundle
+    app.state.task_runner = SimpleNamespace(
+        _runtime_services=runtime_fixture.bundle,
+        enqueue=AsyncMock(),
+    )
 
     yield app
 
@@ -70,9 +81,7 @@ class TestSSE:
         data = resp.json()
         assert data["error"]["code"] == "TASK_NOT_FOUND"
 
-    async def test_sse_receives_history_for_terminal_task(
-        self, client: AsyncClient, test_app
-    ):
+    async def test_sse_receives_history_for_terminal_task(self, client: AsyncClient, test_app):
         """已终态的任务：连接后接收所有历史事件并关闭"""
         # 创建任务
         resp = await client.post(
@@ -136,13 +145,11 @@ class TestSSE:
 
         # SSE 连接 -- 应该收到所有历史事件后关闭
         events_received = []
-        async with client.stream(
-            "GET", f"/api/stream/task/{task_id}"
-        ) as response:
+        async with client.stream("GET", f"/api/stream/task/{task_id}") as response:
             assert response.status_code == 200
             async for line in response.aiter_lines():
                 if line.startswith("data:"):
-                    data = json.loads(line[len("data:"):].strip())
+                    data = json.loads(line[len("data:") :].strip())
                     events_received.append(data)
 
         # 验证收到了所有事件
@@ -152,9 +159,7 @@ class TestSSE:
         assert events_received[3]["type"] == "STATE_TRANSITION"
         assert events_received[3]["final"] is True
 
-    async def test_sse_after_event_id_skips_replayed_history(
-        self, client: AsyncClient, test_app
-    ):
+    async def test_sse_after_event_id_skips_replayed_history(self, client: AsyncClient, test_app):
         """续聊游标：只回放指定事件之后的新历史，避免把旧回复重放给新一轮对话。"""
         resp = await client.post(
             "/api/message",
@@ -219,7 +224,7 @@ class TestSSE:
             assert response.status_code == 200
             async for line in response.aiter_lines():
                 if line.startswith("data:"):
-                    data = json.loads(line[len("data:"):].strip())
+                    data = json.loads(line[len("data:") :].strip())
                     events_received.append(data)
 
         assert len(events_received) == 1
@@ -358,9 +363,7 @@ class TestSSE:
         events_received: list[dict] = []
 
         async def reader() -> None:
-            async with client.stream(
-                "GET", f"/api/stream/task/{task_id}"
-            ) as response:
+            async with client.stream("GET", f"/api/stream/task/{task_id}") as response:
                 assert response.status_code == 200
                 async for line in response.aiter_lines():
                     if line.startswith("data:"):
@@ -386,17 +389,13 @@ class TestSSE:
 
         await asyncio.wait_for(read_task, timeout=5.0)
 
-        overlap_hits = [
-            e for e in events_received if e["event_id"] == overlap_event.event_id
-        ]
+        overlap_hits = [e for e in events_received if e["event_id"] == overlap_event.event_id]
         assert len(overlap_hits) == 1, (
             f"overlap event should be yielded exactly once, got {len(overlap_hits)}"
         )
         assert overlap_hits[0]["type"] == "MODEL_CALL_COMPLETED"
 
-        succeeded_hits = [
-            e for e in events_received if e["event_id"] == succeeded_event.event_id
-        ]
+        succeeded_hits = [e for e in events_received if e["event_id"] == succeeded_event.event_id]
         assert len(succeeded_hits) == 1
         assert succeeded_hits[0]["final"] is True
 
@@ -468,23 +467,17 @@ class TestSSE:
         events_received: list[dict] = []
 
         async def reader() -> None:
-            async with client.stream(
-                "GET", f"/api/stream/task/{task_id}"
-            ) as response:
+            async with client.stream("GET", f"/api/stream/task/{task_id}") as response:
                 assert response.status_code == 200
                 async for line in response.aiter_lines():
                     if line.startswith("data:"):
-                        events_received.append(
-                            json.loads(line[len("data:") :].strip())
-                        )
+                        events_received.append(json.loads(line[len("data:") :].strip()))
 
         # 若 SSE 层没正确处理终态 overlap，reader 会永远挂着心跳，
         # 这里用超时守住回归
         await asyncio.wait_for(reader(), timeout=3.0)
 
-        terminal_hits = [
-            e for e in events_received if e["event_id"] == succeeded_event.event_id
-        ]
+        terminal_hits = [e for e in events_received if e["event_id"] == succeeded_event.event_id]
         assert len(terminal_hits) == 1
         assert terminal_hits[0]["type"] == "STATE_TRANSITION"
         assert terminal_hits[0]["final"] is True
@@ -517,8 +510,7 @@ class TestSSE:
             await hub.broadcast(task_id, event)
 
         assert queue in hub._subscribers.get(task_id, set()), (
-            "500 个 event 突发下订阅者不应被踢掉，"
-            "证明 queue_maxsize 默认值足以缓冲短时爆发"
+            "500 个 event 突发下订阅者不应被踢掉，证明 queue_maxsize 默认值足以缓冲短时爆发"
         )
         assert queue.qsize() == 500
 

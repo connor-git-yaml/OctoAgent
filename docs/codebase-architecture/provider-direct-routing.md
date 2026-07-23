@@ -9,7 +9,7 @@
 | 阶段 | 主路径 | 状态 |
 |------|-------|------|
 | Feature 014 | LiteLLM Proxy（子进程 + Docker Compose） | 已退役 |
-| Feature 080 | Provider 直连抽象（与 LiteLLM Proxy 并存） | 已合并 |
+| Feature 080 | 历史过渡：Provider 直连抽象与 LiteLLM Proxy 并存 | 已合并 |
 | Feature 081 | LiteLLM Proxy 完全退役 | ✅ |
 
 ## 2. 当前架构
@@ -24,11 +24,7 @@
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
-│  OctoKernel      │  Task/Event/Artifact 中枢
-└────────┬─────────┘
-         │
-┌────────▼─────────┐
-│  Workers         │  Free Loop 自治智能体
+│ Gateway Runtime  │  Task/Event/Artifact + Agent/Worker 逻辑角色
 └────────┬─────────┘
          │
 ┌────────▼─────────┐
@@ -57,7 +53,7 @@ LLM 调用栈深度从历史 4 层缩短到 2 层：
 
 | 历史（LiteLLM Proxy） | 当前（Provider 直连） |
 |--------|--------|
-| Skill → LiteLLMSkillClient → ChatCompletionsProvider → LiteLLM Proxy → Provider | Skill → ProviderClient → Provider |
+| 历史：Skill → LiteLLMSkillClient → ChatCompletionsProvider → LiteLLM Proxy → Provider | Skill → ProviderClient → Provider |
 
 ## 4. 核心组件
 
@@ -114,31 +110,25 @@ providers:
       env: OPENROUTER_API_KEY
 ```
 
-### 5.2 RuntimeConfig
+### 5.2 Runtime 配置退役
 
-```yaml
-runtime:
-  # Feature 081 后保留为 deprecated 字段（运行时被忽略，仅供 legacy yaml 兼容）：
-  # llm_mode / litellm_proxy_url / master_key_env
-  # 用户跑 `octo config migrate-080` 可一键升级到 v2 schema
-```
+`RuntimeConfig` 及 `runtime.llm_mode`、`litellm_proxy_url`、`master_key_env`
+已删除。当前配置只有 `providers[]`、`model_aliases` 与独立凭证引用；旧键在模型校验前
+fail closed，不再保留运行时兼容字段。
 
 ## 6. 历史 yaml 兼容性
 
 老 v1 yaml（含 ``runtime.llm_mode`` / ``litellm_proxy_url`` / ``master_key_env``）启动时：
 
-1. ``load_config`` 在 raw YAML 层调用 ``detect_legacy_yaml_keys``，命中 legacy keys 时
-   log warning 引导用户跑 ``octo config migrate-080``
-2. Pydantic 解析仍然成功（deprecated 字段保留默认值）
-3. 运行时不再消费这些字段（ProviderRouter 直连）
+1. ``load_config`` 在 raw YAML 层识别退役键；
+2. 在模型校验前返回明确错误与迁移提示；
+3. 运行时不会消费或静默保留这些字段。
 
 `octo config migrate-080`：
 
 - yaml 迁移：v1 → v2（推断 transport，转 ``auth_type+api_key_env`` → ``auth.kind+env``）
-- 凭证迁移：``.env.litellm`` → ``.env``（合并已存在键不覆盖）
-- 自动备份原文件 → ``*.bak.080-{kind}-{timestamp}``
-- ``--dry-run`` 仅打印 diff，不写文件
-- 幂等：v2 yaml + 缺 ``.env.litellm`` → 重复跑直接 skip
+历史 `migrate-080` 命令已随 Provider DX relocation/retirement 删除；当前使用
+`octo config` 或 Web Settings 直接维护 v2 配置，遇到旧键需显式移除后再保存。
 
 ## 7. 已删除文件清单（Feature 081 P4）
 

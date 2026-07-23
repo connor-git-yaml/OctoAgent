@@ -51,6 +51,9 @@ DelegationMode = Literal[
 # - "auto": 由系统按 delegation_mode 推断（保留扩展位）
 RecallPlannerMode = Literal["full", "skip", "auto"]
 
+# Worker 单次 dispatch 的实现后端；与持久化 Console/Event 的 inline|docker 域分离。
+WorkerBackendKind = Literal["graph", "inline"]
+
 
 class RuntimeControlContext(BaseModel):
     """一次运行链路的冻结控制上下文。"""
@@ -97,7 +100,8 @@ class RuntimeControlContext(BaseModel):
     # 覆盖 recall_planner_mode 的默认决议结果。
     # True → 始终 full（用于 H1 完整决策环——主 Agent 自跑长 context 复杂查询时设 True）
     # False（默认）→ 按 recall_planner_mode 正常决议（行为兼容 F091 baseline）
-    # 上层 producer：orchestrator._prepare_single_loop_request 接受 metadata["force_full_recall"] hint
+    # 上层 producer：orchestrator._prepare_single_loop_request
+    # 接受 metadata["force_full_recall"] hint
     # 上层 producer（潜在）：chat 路由 / API 参数 / 调试工具（推 F101 / 独立 Feature）
     force_full_recall: bool = Field(
         default=False,
@@ -147,9 +151,7 @@ class OrchestratorRequest(BaseModel):
     @model_validator(mode="after")
     def _validate_hops(self) -> "OrchestratorRequest":
         if self.hop_count > self.max_hops:
-            raise ValueError(
-                f"hop_count({self.hop_count}) cannot exceed max_hops({self.max_hops})"
-            )
+            raise ValueError(f"hop_count({self.hop_count}) cannot exceed max_hops({self.max_hops})")
         return self
 
 
@@ -183,9 +185,7 @@ class DispatchEnvelope(BaseModel):
     @model_validator(mode="after")
     def _validate_hops(self) -> "DispatchEnvelope":
         if self.hop_count > self.max_hops:
-            raise ValueError(
-                f"hop_count({self.hop_count}) cannot exceed max_hops({self.max_hops})"
-            )
+            raise ValueError(f"hop_count({self.hop_count}) cannot exceed max_hops({self.max_hops})")
         return self
 
 
@@ -202,7 +202,7 @@ class WorkerResult(BaseModel):
     error_message: str | None = Field(default=None, description="错误详情")
     loop_step: int = Field(default=0, ge=0, description="执行步数")
     max_steps: int = Field(default=0, ge=0, description="最大执行步数")
-    backend: str = Field(default="inline", description="执行后端")
+    backend: WorkerBackendKind = Field(default="inline", description="瞬时执行后端")
     tool_profile: str = Field(default="standard", description="工具权限级别")
 
 
@@ -224,7 +224,7 @@ class WorkerDispatchState(BaseModel):
     budget_exhausted: bool = Field(default=False, description="预算是否耗尽")
 
     tool_profile: str = Field(default="standard", description="工具权限级别")
-    backend: str = Field(default="inline", description="执行后端")
+    backend: WorkerBackendKind = Field(default="inline", description="瞬时执行后端")
 
     @model_validator(mode="after")
     def _validate_loop(self) -> "WorkerDispatchState":

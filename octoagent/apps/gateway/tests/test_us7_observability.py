@@ -9,12 +9,16 @@ import os
 import sys
 import types
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
+
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 
 @pytest_asyncio.fixture
@@ -32,9 +36,16 @@ async def test_app(tmp_path: Path):
         str(tmp_path / "test.db"),
         str(tmp_path / "artifacts"),
     )
+    sse_hub = SSEHub()
+    runtime_fixture = runtime_service_fixture(LLMService())
     app.state.store_group = store_group
-    app.state.sse_hub = SSEHub()
-    app.state.llm_service = LLMService()
+    app.state.sse_hub = sse_hub
+    app.state.llm_service = runtime_fixture.llm_service
+    app.state.runtime_services = runtime_fixture.bundle
+    app.state.task_runner = SimpleNamespace(
+        _runtime_services=runtime_fixture.bundle,
+        enqueue=AsyncMock(),
+    )
 
     yield app
 

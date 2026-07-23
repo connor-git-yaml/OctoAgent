@@ -23,14 +23,17 @@ from octoagent.core.models import (
 from octoagent.core.store import create_store_group
 from octoagent.core.store.transaction import create_task_with_initial_events
 from octoagent.gateway.services.llm_service import LLMService
+from octoagent.gateway.services.operations.backup_service import BackupService
+from octoagent.gateway.services.operations.update_service import UpdateActionError
 from octoagent.gateway.services.sse_hub import SSEHub
-from octoagent.provider.dx.backup_service import BackupService
-from octoagent.provider.dx.update_service import UpdateActionError
 from ulid import ULID
 
 
 async def _seed_project(store_group, project_root: Path) -> None:
-    (project_root / "octoagent.yaml").write_text("config_version: 1\n", encoding="utf-8")
+    (project_root / "octoagent.yaml").write_text(
+        "config_version: 1\nupdated_at: '2026-07-22'\n",
+        encoding="utf-8",
+    )
     (project_root / "litellm-config.yaml").write_text("model_list: []\n", encoding="utf-8")
 
     now = datetime.now(tz=UTC)
@@ -355,9 +358,7 @@ class TestOpsApi:
         assert payload["error"]["code"] == "VERIFY_FAILED"
         assert payload["summary"]["failure_report"]["message"] == "ready timeout"
 
-    async def test_tool_registry_diagnostics_returns_items(
-        self, client: AsyncClient, test_app
-    ):
+    async def test_tool_registry_diagnostics_returns_items(self, client: AsyncClient, test_app):
         from octoagent.tooling.models import RegistryDiagnostic
 
         app, _, _ = test_app

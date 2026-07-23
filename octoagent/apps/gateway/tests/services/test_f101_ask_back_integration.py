@@ -19,20 +19,18 @@ AC-C4 cross-check (MED-01 修订):
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import pytest_asyncio
-
 from octoagent.core.models import (
-    ExecutionBackend,
     HumanInputPolicy,
     TaskStatus,
 )
-from octoagent.core.models.enums import ActorType, EventType
+from octoagent.core.models.enums import EventType
 from octoagent.core.models.task import RequesterInfo, Task, TaskPointers
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.execution_console import ExecutionConsoleService
@@ -42,7 +40,6 @@ from octoagent.gateway.services.execution_context import (
 )
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
-
 
 # ---------------------------------------------------------------------------
 # 公共 fixture
@@ -69,7 +66,7 @@ def sse_hub():
 
 async def _ensure_task(sg, task_id: str, status: TaskStatus = TaskStatus.RUNNING) -> Task:
     """确保测试用 task 记录存在（外键约束要求）。"""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task = Task(
         task_id=task_id,
         created_at=now,
@@ -133,7 +130,6 @@ class TestAskBackIntegrationChain:
             backend_job_id="backend-job-001",
             interactive=True,
             input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
-            backend=ExecutionBackend.DOCKER,
             worker_id="test-worker",
         )
 
@@ -149,8 +145,8 @@ class TestAskBackIntegrationChain:
         )
 
         # 构建 ToolDeps（真实 task_store + event_store）
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         # 捕获 event_store 真实调用（MED-01 cross-check）
         event_store_call_count = [0]
@@ -238,10 +234,7 @@ class TestAskBackIntegrationChain:
 
         # 3. EventStore 真实查询：CONTROL_METADATA_UPDATED 存在（FR-C4 完整事件链）
         events = await store_group.event_store.get_events_for_task(task_id)
-        ctrl_events = [
-            e for e in events
-            if e.type == EventType.CONTROL_METADATA_UPDATED
-        ]
+        ctrl_events = [e for e in events if e.type == EventType.CONTROL_METADATA_UPDATED]
         assert len(ctrl_events) >= 1, (
             f"EventStore 应包含 CONTROL_METADATA_UPDATED 事件，实际事件类型: {[e.type for e in events]}"
         )
@@ -300,7 +293,7 @@ class TestAskBackIntegrationChain:
             event_id=str(_uuid.uuid4()).replace("-", ""),
             task_id=task_id,
             task_seq=user_msg_seq,
-            ts=datetime.now(timezone.utc),
+            ts=datetime.now(UTC),
             type=EventType.USER_MESSAGE,
             actor=_ActorType.USER,
             payload=_UserMessagePayload(
@@ -322,7 +315,6 @@ class TestAskBackIntegrationChain:
             backend_job_id="backend-job-chain",
             interactive=True,
             input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
-            backend=ExecutionBackend.DOCKER,
             worker_id="test-worker-chain",
         )
 
@@ -336,8 +328,8 @@ class TestAskBackIntegrationChain:
             is_caller_worker=True,
         )
 
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         deps = ToolDeps(
             project_root=MagicMock(),
@@ -461,16 +453,17 @@ class TestAskBackIntegrationChain:
             backend_job_id="backend-job-signal",
             interactive=True,
             input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
-            backend=ExecutionBackend.DOCKER,
             worker_id="test-worker-signal",
         )
 
         # 模拟 worker_runtime 首次 dispatch 写入 is_caller_worker_signal
         # （正常路径由 worker_runtime._dispatch_worker_task 写入）
-        from octoagent.core.models.enums import EventType as ET, ActorType as AT
+        import uuid
+
+        from octoagent.core.models.enums import ActorType as AT
+        from octoagent.core.models.enums import EventType as ET
         from octoagent.core.models.event import Event
         from octoagent.core.models.payloads import ControlMetadataUpdatedPayload
-        import uuid
 
         signal_event = Event(
             event_id=str(uuid.uuid4()).replace("-", ""),
@@ -500,8 +493,8 @@ class TestAskBackIntegrationChain:
             is_caller_worker=True,
         )
 
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.connection_metadata import merge_control_metadata
 
         deps = ToolDeps(
@@ -538,9 +531,7 @@ class TestAskBackIntegrationChain:
                 if t is not None and t.status == TaskStatus.WAITING_INPUT:
                     break
                 await asyncio.sleep(0.05)
-            await console.attach_input(
-                task_id=task_id, text="信号恢复测试答案", actor="user"
-            )
+            await console.attach_input(task_id=task_id, text="信号恢复测试答案", actor="user")
 
         await asyncio.gather(_run(), _attach())
 
@@ -577,8 +568,8 @@ class TestNonWorkerGuard:
         - log.debug 调用（M-1 修复）
         - 工具按降级返回 ""（不 raise）
         """
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         mock_event_store = AsyncMock()
         mock_event_store.get_next_task_seq = AsyncMock(return_value=1)
@@ -625,6 +616,7 @@ class TestNonWorkerGuard:
             side_effect=RuntimeError("no execution context"),
         ):
             import octoagent.gateway.services.builtin_tools.ask_back_tools as _mod
+
             original_debug = _mod.log.debug
             _mod.log.debug = patched_debug
             try:
@@ -635,20 +627,15 @@ class TestNonWorkerGuard:
 
         # AC-C5 核心断言：
         # 1. ask_back 返回 "" 降级值（不 raise）
-        assert result == "", (
-            f"guard 失败后 ask_back 应降级返回 ''，实际: {result!r}"
-        )
+        assert result == "", f"guard 失败后 ask_back 应降级返回 ''，实际: {result!r}"
 
         # 2. log.debug 被调用（M-1 修复后 broad-catch 加 log.debug）
         # 注意：RuntimeError 在 get_current_execution_context() 时抛出，
         # 会被 guard 的 except Exception as exc 捕获，触发 log.debug
         debug_logged = any(
-            "guard failed" in str(call[0]) or "guard" in str(call[0])
-            for call in debug_calls
+            "guard failed" in str(call[0]) or "guard" in str(call[0]) for call in debug_calls
         )
-        assert debug_logged, (
-            f"guard 失败时应调用 log.debug，实际 debug_calls: {debug_calls}"
-        )
+        assert debug_logged, f"guard 失败时应调用 log.debug，实际 debug_calls: {debug_calls}"
 
     @pytest.mark.asyncio
     async def test_ac_c5_non_worker_task_not_running_returns_empty(self, store_group, sse_hub):
@@ -660,8 +647,8 @@ class TestNonWorkerGuard:
         - ask_back 返回 ""（降级）
         - log.debug 记录 non_worker_task_not_running
         """
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         task_id = "test-ac-c5-non-worker-001"
         # 创建 WAITING_INPUT 状态的 task
@@ -705,9 +692,7 @@ class TestNonWorkerGuard:
             result = await handlers["worker.ask_back"](question="非 worker 非 RUNNING 测试")
 
         # 非 RUNNING task 的非 worker 路径应返回 ""（FR-C5 选项 A 降级）
-        assert result == "", (
-            f"非 worker 路径 task 非 RUNNING 时应返回 ''，实际: {result!r}"
-        )
+        assert result == "", f"非 worker 路径 task 非 RUNNING 时应返回 ''，实际: {result!r}"
 
     # -------------------------------------------------------------------------
     # D-L1 修复：参数化三工具非 worker guard 覆盖（FR-C5 SHOULD 补全对称性）
@@ -732,8 +717,8 @@ class TestNonWorkerGuard:
         - 三工具均按降级路径执行：ask_back/request_input 返回 ""，escalate_permission 返回 "rejected"
         - log.debug 均被调用（M-1 修复后 broad-catch 加 log.debug）
         """
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         mock_event_store = AsyncMock()
         mock_event_store.get_next_task_seq = AsyncMock(return_value=1)
@@ -774,6 +759,7 @@ class TestNonWorkerGuard:
             side_effect=RuntimeError("no execution context"),
         ):
             import octoagent.gateway.services.builtin_tools.ask_back_tools as _mod
+
             original_debug = _mod.log.debug
             _mod.log.debug = patched_debug
             try:
@@ -797,8 +783,7 @@ class TestNonWorkerGuard:
 
         # 验证 log.debug 被调用（M-1 修复可观测性）
         debug_logged = any(
-            "guard failed" in str(call[0]) or "guard" in str(call[0])
-            for call in debug_calls
+            "guard failed" in str(call[0]) or "guard" in str(call[0]) for call in debug_calls
         )
         assert debug_logged, (
             f"{tool_name} guard 失败时应调用 log.debug，实际 debug_calls: {debug_calls}"
@@ -823,8 +808,8 @@ class TestNonWorkerGuard:
         - task 状态为 WAITING_INPUT（非 RUNNING）
         - 三工具均按降级路径执行：ask_back/request_input 返回 ""，escalate_permission 返回 "rejected"
         """
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.execution_context import (
             ExecutionRuntimeContext as _ERC,
         )
@@ -905,10 +890,12 @@ class TestSourceKindsAll:
         # 使用模块导入方式（通过 sys.path）
         try:
             from octoagent.core.models import source_kinds as sk_module
+
             source_kinds_path = sk_module.__file__
         except Exception:
             # fallback: 直接路径
             import pathlib
+
             source_kinds_path = str(
                 pathlib.Path(__file__).parents[6]
                 / "packages/core/src/octoagent/core/models/source_kinds.py"
@@ -987,9 +974,7 @@ class TestAskBackServiceLayerCrossCheck:
     """
 
     @pytest.mark.asyncio
-    async def test_med01_task_service_write_called_through_ask_back(
-        self, store_group, sse_hub
-    ):
+    async def test_med01_task_service_write_called_through_ask_back(self, store_group, sse_hub):
         """MED-01: ask_back 链路下 TaskService._write_state_transition 真实被调用。
 
         设计：spy TaskService._write_state_transition，确认 ask_back →
@@ -1007,7 +992,6 @@ class TestAskBackServiceLayerCrossCheck:
             backend_job_id="backend-job-med01",
             interactive=True,
             input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
-            backend=ExecutionBackend.DOCKER,
             worker_id="test-worker-med01",
         )
 
@@ -1021,19 +1005,21 @@ class TestAskBackServiceLayerCrossCheck:
             is_caller_worker=True,
         )
 
-        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
         from octoagent.gateway.services.builtin_tools import ask_back_tools
+        from octoagent.gateway.services.builtin_tools._deps import ToolDeps
 
         # spy _write_state_transition（真实 TaskService 方法）
         state_transitions: list[dict] = []
         original_write = TaskService._write_state_transition
 
         async def spy_write_state_transition(self, **kwargs):
-            state_transitions.append({
-                "task_id": kwargs.get("task_id"),
-                "from_status": str(kwargs.get("from_status")),
-                "to_status": str(kwargs.get("to_status")),
-            })
+            state_transitions.append(
+                {
+                    "task_id": kwargs.get("task_id"),
+                    "from_status": str(kwargs.get("from_status")),
+                    "to_status": str(kwargs.get("to_status")),
+                }
+            )
             return await original_write(self, **kwargs)
 
         deps = ToolDeps(
@@ -1061,13 +1047,15 @@ class TestAskBackServiceLayerCrossCheck:
         await ask_back_tools.register(CaptureBroker(), deps)
 
         async def _run():
-            with bind_execution_context(runtime_ctx):
-                with patch.object(
+            with (
+                bind_execution_context(runtime_ctx),
+                patch.object(
                     TaskService,
                     "_write_state_transition",
                     new=spy_write_state_transition,
-                ):
-                    return await handlers["worker.ask_back"](question="MED-01 cross-check 问题")
+                ),
+            ):
+                return await handlers["worker.ask_back"](question="MED-01 cross-check 问题")
 
         async def _attach():
             for _ in range(40):
@@ -1087,8 +1075,7 @@ class TestAskBackServiceLayerCrossCheck:
 
         # 验证 RUNNING→WAITING_INPUT 转移被记录
         running_to_waiting = [
-            t for t in state_transitions
-            if "WAITING_INPUT" in t.get("to_status", "")
+            t for t in state_transitions if "WAITING_INPUT" in t.get("to_status", "")
         ]
         assert len(running_to_waiting) >= 1, (
             f"MED-01 cross-check: 应有 RUNNING→WAITING_INPUT 状态转移，"

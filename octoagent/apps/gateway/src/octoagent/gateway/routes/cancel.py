@@ -37,7 +37,7 @@ async def cancel_task(
     - 终态任务返回 409 Conflict
     - 不存在的任务返回 404
     """
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     existing = await service.get_task(task_id)
     if existing is None:
         return JSONResponse(

@@ -1,0 +1,3791 @@
+{
+  "version": 1,
+  "base_sha": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc",
+  "node_manifest": "rgr-slices.md",
+  "ownership_rule": "Same-phase same-hunk overlaps use all-required shared groups. Cross-phase overlaps require pairwise-disjoint AST/JSON key selectors; repeated selectors, semantic aliases for one hunk and unpartitioned ownership fail.",
+  "selector_grammar": {
+    "syntax": "<anchor-kind>:<stable-name>[/<structured-kind>:<stable-name>|/<registered-predicate-id>]*",
+    "anchor_kinds": ["class", "function", "handler", "route", "action", "tool", "call", "dependency", "export", "atomic"],
+    "structured_segment_kinds": ["method", "branch", "call", "parameter", "field", "key"],
+    "registered_predicate_ids": ["ExceptHandler", "TaskRunner-preflight", "active-attempt-claim", "assignment-target-parse", "constructor-mode", "core", "descriptor-entry-validation", "descriptor-read-only", "dirty-preflight", "dirty-safe-command", "error-envelope", "explicit-descriptor-migration", "fields", "final-skill-runner-identity", "graph-preflight", "graph-projection", "graph-race-terminalization", "historical-backend-decoder", "injected-runner", "legacy-runtime-exclusion", "manifest-integrity", "mode-XOR", "raw-event-projection", "request-503", "retired-fields-absence", "retired-quality", "selector-parse", "shared-service-attrs-and-setters", "source-checkout-guard", "target-kind-parse", "task-runner-preflight", "uvicorn-call", "whole-batch-preflight", "workspace-dirty-preflight"],
+    "predicate_registry_contract": "each registered predicate id has exactly one checker resolver over base/final AST or structured JSON; unregistered tails and duplicate resolvers fail",
+    "resolution": "parse base and final AST/JSON; every selector must resolve nonempty in its declared state, every changed hunk must be covered, non-shared selectors on one path must be disjoint, and duplicate or nonexistent selectors fail",
+    "shared_subgroup": "equal nonempty subgroup means every member is required for a hunk matching that selector"
+  },
+  "slices": {
+    "S001-import-direction": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "symbols": [
+        "import-direction"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 0
+    },
+    "S002-retired-quality": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "inventory_ref": [
+        "config-retirement.md",
+        "architecture-quality.md",
+        "cross-role-edges.v1.json"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 0
+    },
+    "S002-manifest-integrity": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "artifact_paths": [
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/cross-role-edges.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/test-ownership.md",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/f150-scope.md",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/rgr-slice-scopes.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/stage-commands.md",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/namespace-migration.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/provider-test-rehome.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/planned-diff.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/active-artifacts.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/artifact-lifecycle.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/evidence-producers.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/authority-docs.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/tree-delete-expansion.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/stage-command-matrix.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/runtime-operation-modes.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/agent-context-test-constructors.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/runtime-test-behavior-owners.v1.json"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 0,
+      "machine_expansion": {
+        "source": "inventories/active-artifacts.v1.json",
+        "fields": ["current[]", "superseded.*.path"],
+        "path_prefix": ".specify/features/151-runtime-boundary-architecture-truth/",
+        "ownership_kind": "current-and-superseded-governance-artifact-not-behavior-hunk"
+      }
+    },
+    "S003-complexity-checker": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 0
+    },
+    "S004-evidence-checker": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "symbols": [
+        "tdd-evidence run",
+        "tdd-evidence verify",
+        "tdd-evidence recover-index",
+        "finalize-verification"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 0
+    },
+    "S004-junit-parser": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "symbols": [
+        "tdd-evidence pytest-junit aggregate"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 0
+    },
+    "S006-committed-worktree-clean": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "symbols": [
+        "function:validate_v2_index/committed-mode"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "exact_test_nodeids": [
+        "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_dirty_behavior_change_requires_slice_when_head_is_unchanged"
+      ],
+      "phase": 0
+    },
+    "S006-index-amendment-integrity": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "symbols": [
+        "function:validate_record_order/t006-amendment-tail",
+        "function:validate_through_task/t006-frontier",
+        "function:run_formal/corrective-red-adoption"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "exact_test_nodeids": [
+        "octoagent/tests/gate/test_runtime_architecture.py::TestTddEvidence::test_t006_index_amendment_adopts_exact_two_reds_and_preserves_prior_chain"
+      ],
+      "phase": 0
+    },
+    "S007-local-coverage": {
+      "paths": [
+        "repo-scripts/check-changed-lines-coverage.py"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-changed-lines-coverage.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_check_changed_lines_coverage.py"
+      ],
+      "phase": 0
+    },
+    "S008-fresh-exempt": {
+      "paths": [
+        "repo-scripts/check-changed-lines-coverage.py"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-changed-lines-coverage.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_check_changed_lines_coverage.py"
+      ],
+      "phase": 0
+    },
+    "S011-clean-wheel": {
+      "paths": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "symbols": [
+        "function:command_provider",
+        "function:command_gateway_relocation",
+        "class:CleanWheelArgumentParser/method:error",
+        "function:parse_cli_args",
+        "function:build_parser/branch:provider",
+        "function:build_parser/branch:gateway-relocation"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_clean_wheel_contract.py"
+      ],
+      "production_edit_budget": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "forbidden_production_owner_slices": [
+        "S012-standard-backend-scaffold",
+        "S012-import-classification-inventory",
+        "S012-child-isolation-observation",
+        "S017-namespace-atomic",
+        "S045-service-guard",
+        "S045-update-guard",
+        "S045-install-guard",
+        "S045-bench-guard",
+        "S064-config-exit",
+        "S064-runtime-exit",
+        "S064-security-exit",
+        "S064-startup-entry",
+        "S070-clean-wheel-full"
+      ],
+      "phase": 0
+    },
+    "S012-dependency-selector-semantics": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "symbols": [
+        "function:check_rgr_selectors",
+        "function:resolve_dependency_partition",
+        "function:resolve_pyproject_dependency",
+        "function:resolve_uv_lock_dependency"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "production_edit_budget": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "semantic_contract": {
+        "entrypoint": "check_rgr_selectors(repo, scope)",
+        "parsers": [
+          "tomllib worktree pyproject and uv.lock",
+          "tomllib base-ref merge-base pyproject and uv.lock"
+        ],
+        "identity": "path + dependency anchor + semantic key + transition",
+        "clean_accept": "Hatchling absent to exact dev 1.29.0 add and SDK present to absent delete resolve as two disjoint semantic keys on each path",
+        "reject_cases": [
+          "wrong dependency group or runtime dependency leak",
+          "wrong Hatchling pin",
+          "lock package missing or version drift",
+          "Hatchling transitive lock closure missing",
+          "same semantic key claimed by two owners",
+          "unknown dependency selector or alias",
+          "base/final transition inversion",
+          "changed semantic key has no owner"
+        ],
+        "current_state": "RESOLVED/PASS after accepted RED/GREEN/REFACTOR and fresh check_rgr_selectors(repo, scope) semantic revalidation"
+      },
+      "phase": 0
+    },
+    "S012-standard-backend-scaffold": {
+      "paths": [
+        "octoagent/pyproject.toml",
+        "octoagent/uv.lock",
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "symbols": [
+        "function:validate_standard_backend_scaffold",
+        "function:build_workspace_wheels",
+        "function:install_workspace_wheels",
+        "function:read_wheel_metadata",
+        "function:validate_workspace_origins"
+      ],
+      "resolved_paths": [
+        "octoagent/pyproject.toml",
+        "octoagent/uv.lock",
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_clean_wheel_contract.py"
+      ],
+      "production_edit_budget": [
+        "octoagent/pyproject.toml",
+        "octoagent/uv.lock",
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "standard_backend_scaffold": {
+        "root_dev_dependency": {
+          "path": "octoagent/pyproject.toml",
+          "group": "dependency-groups.dev",
+          "exact_requirement": "hatchling==1.29.0",
+          "runtime_requires_dist_allowed": false
+        },
+        "lock": {
+          "path": "octoagent/uv.lock",
+          "writer": "uv lock",
+          "manual_edit": "forbidden",
+          "required_package": "hatchling==1.29.0",
+          "pyproject_lock_drift": "fail"
+        },
+        "workspace_build": {
+          "backend": "hatchling.build",
+          "call": "hatchling.build.build_wheel",
+          "current_workspace_distributions": [
+            "octoagent-core",
+            "octoagent-provider",
+            "octoagent-protocol",
+            "octoagent-tooling",
+            "octoagent-skills",
+            "octoagent-policy",
+            "octoagent-memory",
+            "octoagent-sdk",
+            "octoagent-gateway"
+          ],
+          "wheel_tag": "py3-none-any",
+          "metadata_source": "real wheel archive METADATA",
+          "manual_zip_wheel_metadata_record_or_source_copy": "forbidden"
+        },
+        "isolated_install": {
+          "installer": "uv pip install",
+          "required_options": ["--offline", "--no-deps", "--target"],
+          "inputs": "only local wheels built in the same transaction",
+          "uv_cache_dir": "transaction temporary root",
+          "home_xdg_tmp": "transaction temporary root",
+          "ambient_pythonpath": "forbidden",
+          "uv_sync": "forbidden",
+          "host_cache_or_home_read": "forbidden"
+        },
+        "provider_target": {
+          "build_set": "all current workspace distributions",
+          "install_set": "provider workspace dependency closure from same-transaction local wheels",
+          "gateway_discoverable": false
+        },
+        "gateway_target": {
+          "build_set": "all current workspace distributions",
+          "install_set": "gateway workspace dependency closure from same-transaction local wheels",
+          "all_workspace_module_origins": "isolated target"
+        },
+        "third_party_policy": "current locked project environment may provide third-party dependencies; every OctoAgent workspace module origin must still be under the isolated target",
+        "runtime_product_code_diff": 0,
+        "provider_gateway_manifest_diff": 0,
+        "negative_controls": [
+          "root dev pin missing",
+          "root dev pin version drift",
+          "hatchling appears in Provider or Gateway runtime Requires-Dist",
+          "lock omits hatchling 1.29.0 or drifts from pyproject",
+          "workspace build backend is not hatchling.build",
+          "manual wheel, METADATA or RECORD construction is present",
+          "installer reads host cache or HOME",
+          "source or editable workspace origin leaks into isolated execution",
+          "locked scaffold is unavailable but checker reports PASS"
+        ]
+      },
+      "test_contract": {
+        "typed_pure_seam": "validate_standard_backend_scaffold(tmp_repo)",
+        "new_cli_command_or_parser": "forbidden",
+        "existing_clean_wheel_symbol_ast_predecessor_snapshot": {
+          "symbol_count": 32,
+          "algorithm": "sha256(UTF-8 JSON {qualified_symbol: ast.dump(node,include_attributes=False)}, sort_keys=true, separators=(',',':'))",
+          "aggregate_sha256": "244ccc7c0b466d71b8affbc5c44a93679daece42209c14a0430e21d054f689a7",
+          "mutation_policy": "the 32-symbol map identifies the accepted predecessor T011 contract. A reviewed S011 semantic rewrite may change only owned helpers/nodes, immediately supersedes the old direct RED for release use, and requires a fresh main-owned successor RED/binding; the standard-backend exact node/helpers remain unchanged"
+        }
+      },
+      "forbidden_production_owner_slices": [
+        "S017-namespace-atomic",
+        "S045-service-guard",
+        "S045-update-guard",
+        "S045-install-guard",
+        "S045-bench-guard",
+        "S064-config-exit",
+        "S064-runtime-exit",
+        "S064-security-exit",
+        "S064-startup-entry",
+        "S070-clean-wheel-full"
+      ],
+      "phase": 0
+    },
+    "S012-import-classification-inventory": {
+      "paths": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "symbols": [
+        "function:classify_distribution_imports",
+        "function:classify_import_context",
+        "function:build_dependency_inventory"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_clean_wheel_contract.py"
+      ],
+      "production_edit_budget": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "semantic_contract": {
+        "file_universe": "installed files owned by the evaluated distribution; scanning every Python file in target is forbidden",
+        "occurrence_fields": [
+          "distribution",
+          "source_file",
+          "line",
+          "syntax",
+          "import_root",
+          "resolved_distribution",
+          "context",
+          "workspace_owner"
+        ],
+        "contexts": [
+          "runtime-required",
+          "optional-lazy",
+          "type-checking",
+          "test-plugin",
+          "workspace-owned"
+        ],
+        "rules": {
+          "runtime-required": "unconditional module or function-body import outside TYPE_CHECKING, optional ImportError boundary and test-plugin module",
+          "optional-lazy": "literal import guarded by an executable optional availability or ImportError/ModuleNotFoundError boundary; function-local alone does not imply optional",
+          "type-checking": "import dominated by if TYPE_CHECKING and not executed at runtime",
+          "test-plugin": "import in an installed test/plugin module whose entry is explicitly development-only; it never satisfies runtime Requires-Dist",
+          "workspace-owned": "octoagent import root resolved by the workspace distribution map and additionally classified by its execution context"
+        },
+        "preliminary_accept": "source manifest equals real wheel METADATA, every occurrence is classified and mapped, current manifest/runtime deltas are emitted exactly, final_verdict is null and final_owner is T070",
+        "preliminary_reject": [
+          "unknown or ambiguous context",
+          "nonliteral dynamic import without a separately resolved executable edge",
+          "installed availability substituted for observed import evidence",
+          "path or module-name allowlist changes a context result",
+          "a target-wide file scan contaminates one distribution with another",
+          "a manifest delta is hidden or reported as final PASS"
+        ]
+      },
+      "phase": 0
+    },
+    "S012-child-isolation-observation": {
+      "paths": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "symbols": [
+        "function:run_isolated_probe",
+        "function:validate_child_observation"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_clean_wheel_contract.py"
+      ],
+      "production_edit_budget": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "observation_contract": {
+        "producer": "the same external-cwd isolated child that imports installed workspace modules",
+        "exact_observed_fields": [
+          "cwd",
+          "sys_path",
+          "environment",
+          "enable_user_site",
+          "user_site",
+          "prefix",
+          "base_prefix",
+          "workspace_origins"
+        ],
+        "required_environment": [
+          "HOME",
+          "XDG_CONFIG_HOME",
+          "XDG_CACHE_HOME",
+          "TMPDIR",
+          "UV_CACHE_DIR",
+          "PYTHONNOUSERSITE",
+          "PYTHONPATH"
+        ],
+        "validation": "parent validates child-emitted facts against transaction paths; it may not reconstruct or replace the observation",
+        "reject_cases": [
+          "repo or source checkout appears in child sys.path",
+          "host HOME XDG TMP or cache appears in child environment",
+          "ambient PYTHONPATH or enabled user-site appears",
+          "workspace origin is outside isolated target",
+          "required observation field missing or extra",
+          "child stdout contains anything except the exact observation object"
+        ]
+      },
+      "phase": 0
+    },
+    "S013-complexity-snapshot": {
+      "paths": [
+        "repo-scripts/runtime-architecture-ceiling.v1.json",
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_paths": [
+        "repo-scripts/runtime-architecture-ceiling.v1.json",
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 0
+    },
+    "S017-namespace-atomic": {
+      "inventory_ref": [
+        "namespace-migration.md#source-target-manifest",
+        "provider-test-rehome.v1.json"
+      ],
+      "machine_expansions": [
+        {"source":"inventories/namespace-migration.v1.json","fields":["moves.source","moves.target","deletes.source"]},
+        {"source":"inventories/provider-test-rehome.v1.json","fields":["moves.source","moves.target","deletes.source","exceptions.*.path"]}
+      ],
+      "atomic_evidence": {
+        "t029_snapshot": "base source normalized content/AST + source-to-target projection + target snapshot/verified patch + three exceptions + per-file hashes",
+        "post_t029": "current target symbol changes require stable scope ownership and complete RGR evidence",
+        "final": "source zero + target complete + shim zero + replay T029 snapshot against base; do not compare current target raw hash as relocation truth",
+        "negative_oracles": [
+          "business change embedded at T029 fails",
+          "post-T029 target change with owning slice evidence passes",
+          "post-T029 target change without owning slice evidence fails"
+        ]
+      },
+      "resolved_paths": [
+        "octoagent/packages/provider/src/octoagent/provider/dx/cli.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/auth_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/attest_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/backup_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/behavior_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/chat_import_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/cleanup_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/config_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/project_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/secret_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/service_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/update_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/console_output.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/install_bootstrap.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/memory_commands.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/config_bootstrap.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/backup_audit.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/backup_service.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/channel_verifier.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/chat_import_service.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/control_plane_models.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/doctor.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/doctor_remediation.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/import_mapping_store.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/import_source_store.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/import_workbench_models.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/import_workbench_service.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/models.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/onboarding_models.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/onboarding_service.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/onboarding_store.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/project_migration.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/project_selector.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/recovery_status_store.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/runtime_descriptor_defaults.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/secret_models.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/secret_refs.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/secret_service.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/secret_status_store.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/service_manager.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/setup_governance_adapter.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/sleep_probe.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/telegram_pairing.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/telegram_verifier.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/update_service.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/update_status_store.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/update_worker.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/wizard_session.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/wizard_session_store.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/__init__.py",
+        "octoagent/packages/provider/src/octoagent/provider/dx/runtime_activation.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/cli.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/auth_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/attest_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/backup_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/behavior_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/chat_import_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/cleanup_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/config_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/project_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/secret_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/service_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/update_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/console_output.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/install_bootstrap.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/memory_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_bootstrap.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_audit.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/channel_verifier.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/chat_import_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/control_plane_models.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor_remediation.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_mapping_store.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_source_store.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_workbench_models.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_workbench_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/models.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_models.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_store.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/project_migration.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/project_selector.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/recovery_status_store.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/runtime_descriptor_defaults.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_models.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_refs.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_status_store.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/service_manager.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/setup_governance_adapter.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/sleep_probe.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/telegram_pairing.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/telegram_verifier.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_worker.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/wizard_session.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/wizard_session_store.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/ops.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/__init__.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/_coordinator.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/import_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/memory/_memory_console_base.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/memory/memory_backend_resolver.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/memory/memory_runtime_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/memory/retrieval_platform_service.py",
+        "octoagent/packages/provider/src/octoagent/provider/__init__.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py",
+        "octoagent/apps/gateway/tests/integration/test_reinstall_path.py",
+        "octoagent/apps/gateway/tests/services/operations/test_operations_models.py",
+        "octoagent/apps/gateway/tests/services/operations/test_setup_governance_adapter.py",
+        "octoagent/apps/gateway/tests/services/operations/test_update_worker.py",
+        "octoagent/apps/gateway/tests/services/test_behavior_restore.py",
+        "octoagent/apps/gateway/tests/services/test_behavior_write_golden.py",
+        "octoagent/apps/gateway/tests/services/test_control_plane_registry.py",
+        "octoagent/apps/gateway/tests/test_f105_harness_wiring.py",
+        "octoagent/apps/gateway/tests/test_f131_outbound_spool.py",
+        "octoagent/apps/gateway/tests/test_f131_polling_reliability.py",
+        "octoagent/apps/gateway/tests/test_f133_voice_async.py",
+        "octoagent/apps/gateway/tests/test_f135_behavior_tool_exposure.py",
+        "octoagent/apps/gateway/tests/test_f136_write_approval.py",
+        "octoagent/apps/gateway/tests/test_ops_api.py",
+        "octoagent/apps/gateway/tests/test_telegram_voice.py",
+        "octoagent/packages/memory/tests/migrations/test_migration_094.py",
+        "octoagent/packages/skills/tests/test_provider_model_client.py",
+        "octoagent/tests/gate/test_lane_orchestrator.py"
+      ],
+      "phase": 1
+    },
+    "S015-route-url": {
+      "paths": [
+        "octoagent/packages/provider/src/octoagent/provider/provider_route.py"
+      ],
+      "symbols": [
+        "ProviderRoute.api_base"
+      ],
+      "resolved_paths": [
+        "octoagent/packages/provider/src/octoagent/provider/provider_route.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/packages/provider/tests/test_provider_route.py"
+      ],
+      "phase": 1
+    },
+    "S015-route-auth": {
+      "paths": [
+        "octoagent/packages/provider/src/octoagent/provider/provider_route.py"
+      ],
+      "symbols": [
+        "ProviderAuthRoute"
+      ],
+      "resolved_paths": [
+        "octoagent/packages/provider/src/octoagent/provider/provider_route.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/packages/provider/tests/test_provider_route.py"
+      ],
+      "phase": 1
+    },
+    "S016-resolver": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/provider_route_resolver.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/provider_route_resolver.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_provider_route_resolver.py"
+      ],
+      "phase": 1
+    },
+    "S016-router-seam": {
+      "paths": [
+        "octoagent/packages/provider/src/octoagent/provider/provider_router.py"
+      ],
+      "resolved_paths": [
+        "octoagent/packages/provider/src/octoagent/provider/provider_router.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/packages/provider/tests/test_provider_router.py"
+      ],
+      "phase": 1
+    },
+    "S029-skill-user-root-isolation": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/capability_pack.py"
+      ],
+      "symbols": [
+        "class:OctoHarness/method:__init__/parameter:user_skills_dir",
+        "class:OctoHarness/method:__init__/field:_user_skills_dir",
+        "class:OctoHarness/method:_bootstrap_capability_pack/call:CapabilityPackService",
+        "class:CapabilityPackService/method:__init__/parameter:user_skills_dir",
+        "class:CapabilityPackService/method:__init__/call:SkillDiscovery"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/capability_pack.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_skills_api.py",
+        "octoagent/apps/gateway/tests/e2e/test_skill_system_e2e.py",
+        "octoagent/packages/skills/tests/test_skill_discovery.py"
+      ],
+      "exact_test_nodeids": [
+        "octoagent/apps/gateway/tests/test_skills_api.py::TestUninstallSkill::test_full_lifespan_apps_isolate_user_skill_roots"
+      ],
+      "production_edit_budget": [
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/capability_pack.py"
+      ],
+      "forbidden_production_owner_slices": [
+        "S041-env-tombstone",
+        "S042-files",
+        "S085-composition",
+        "S088-shutdown"
+      ],
+      "phase": 1
+    },
+    "S029-test-determinism": {
+      "paths": [
+        "octoagent/apps/gateway/tests/harness/test_threat_scanner_boundary.py",
+        "octoagent/tests/integration/test_sc3_projection.py"
+      ],
+      "protocol": "characterization",
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/harness/test_threat_scanner_boundary.py",
+        "octoagent/tests/integration/test_sc3_projection.py"
+      ],
+      "exact_test_nodeids": [
+        "octoagent/apps/gateway/tests/harness/test_threat_scanner_boundary.py::TestPerformanceBenchmark::test_1000_scan_average_under_1ms",
+        "octoagent/apps/gateway/tests/harness/test_threat_scanner_boundary.py::TestPerformanceBenchmark::test_malicious_scan_under_1ms",
+        "octoagent/apps/gateway/tests/harness/test_threat_scanner_boundary.py::TestPerformanceBenchmark::test_long_content_scan_under_1ms",
+        "octoagent/tests/integration/test_sc3_projection.py::TestSC3Projection::test_rebuild_preserves_task_state"
+      ],
+      "owns_changed_hunks": false,
+      "phase": 1
+    },
+    "S030-secret-runner": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_refs.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_refs.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/operations/test_secret_refs.py"
+      ],
+      "phase": 1
+    },
+    "S031-update-unstaged": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/runtime_descriptor_defaults.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py"
+      ],
+      "shared_file": "update-safety",
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/runtime_descriptor_defaults.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/operations/test_runtime_descriptor_defaults.py",
+        "octoagent/tests/integration/test_update_workspace_safety.py"
+      ],
+      "phase": 1
+    },
+    "S031-update-staged": {
+      "inventory_ref": [
+        "rgr-slice-scopes.v1.json#S031-update-unstaged"
+      ],
+      "shared_file": "update-safety",
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/runtime_descriptor_defaults.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/operations/test_runtime_descriptor_defaults.py",
+        "octoagent/tests/integration/test_update_workspace_safety.py"
+      ],
+      "phase": 1
+    },
+    "S031-update-untracked": {
+      "inventory_ref": [
+        "rgr-slice-scopes.v1.json#S031-update-unstaged"
+      ],
+      "shared_file": "update-safety",
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/runtime_descriptor_defaults.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/operations/test_runtime_descriptor_defaults.py",
+        "octoagent/tests/integration/test_update_workspace_safety.py"
+      ],
+      "phase": 1
+    },
+    "S032-telegram-rmw": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/telegram_pairing.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/telegram_pairing.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/operations/test_telegram_pairing.py"
+      ],
+      "phase": 1
+    },
+    "S033-claim": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py"
+      ],
+      "symbols": [
+        "try_claim_active_attempt"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/operations/test_update_status_store.py"
+      ],
+      "phase": 1
+    },
+    "S033-release": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py"
+      ],
+      "symbols": [
+        "same-owner update",
+        "compare-and-release"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/operations/test_update_status_store.py"
+      ],
+      "phase": 1
+    },
+    "S033-worker": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/operations/test_update_service.py"
+      ],
+      "phase": 1
+    },
+    "S034-backup-audit": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_audit.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_audit.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/operations/test_backup_audit.py"
+      ],
+      "phase": 1
+    },
+    "S036-relocation-post-snapshot-coverage": {
+      "paths": [
+        "repo-scripts/check-changed-lines-coverage.py"
+      ],
+      "symbols": [
+        "function:_verify_snapshot_bytes"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-changed-lines-coverage.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_check_changed_lines_coverage.py"
+      ],
+      "exact_test_nodeids": [
+        "octoagent/tests/gate/test_check_changed_lines_coverage.py::TestRelocationPostSnapshotCoverage::test_post_snapshot_target_changes_use_base_source_to_final_target"
+      ],
+      "phase": 1
+    },
+    "S040-yaml-tombstone": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py",
+        "octoagent/tests/fixtures/local-instance/octoagent.yaml.template"
+      ],
+      "symbols": [
+        "OctoAgentConfig.from_yaml"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py",
+        "octoagent/tests/fixtures/local-instance/octoagent.yaml.template"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/config/test_config_schema.py"
+      ],
+      "phase": 2
+    },
+    "S040-yaml-supported": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py"
+      ],
+      "symbols": [
+        "OctoAgentConfig.from_yaml"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/config/test_config_schema.py"
+      ],
+      "phase": 2
+    },
+    "S041-env-tombstone": {
+      "inventory_ref": [
+        "config-retirement.md#environment"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_bootstrap.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_config_retirement_f151.py"
+      ],
+      "phase": 2
+    },
+    "S042-files": {
+      "inventory_ref": [
+        "config-retirement.md#files"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_bootstrap.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_service.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_config_retirement_f151.py"
+      ],
+      "phase": 2
+    },
+    "S042-files-early-preflight": {
+      "inventory_ref": [
+        "config-retirement.md#files"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/main.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_config_retirement_f151.py"
+      ],
+      "phase": 2
+    },
+    "S042-recovery": {
+      "inventory_ref": [
+        "config-retirement.md#reauth-downgrade"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/auth_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/cli.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_bootstrap.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_config_retirement_f151.py"
+      ],
+      "phase": 2
+    },
+    "S043-settings": {
+      "paths": [
+        "octoagent/frontend/src/domains/settings/SettingsPage.tsx"
+      ],
+      "resolved_paths": [
+        "octoagent/frontend/src/domains/settings/SettingsPage.tsx"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/frontend/src/domains/settings/SettingsPage.test.tsx"
+      ],
+      "phase": 2
+    },
+    "S043-pending": {
+      "paths": [
+        "octoagent/frontend/src/domains/settings/SettingsPage.tsx",
+        "octoagent/frontend/src/domains/settings/PendingChangesBar.tsx"
+      ],
+      "resolved_paths": [
+        "octoagent/frontend/src/domains/settings/SettingsPage.tsx",
+        "octoagent/frontend/src/domains/settings/PendingChangesBar.tsx"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/frontend/src/domains/settings/SettingsPage.phase079.test.tsx"
+      ],
+      "phase": 2
+    },
+    "S043-home": {
+      "paths": [
+        "octoagent/frontend/src/domains/home/HomePage.tsx",
+        "octoagent/frontend/src/components/shell/WorkbenchLayout.tsx"
+      ],
+      "resolved_paths": [
+        "octoagent/frontend/src/domains/home/HomePage.tsx",
+        "octoagent/frontend/src/components/shell/WorkbenchLayout.tsx"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/frontend/src/components/shell/WorkbenchLayout.test.tsx"
+      ],
+      "behavior_watch_paths": [
+        "octoagent/frontend/src/domains/home/HomePage.test.tsx"
+      ],
+      "phase": 2
+    },
+    "S043-app": {
+      "paths": [
+        "octoagent/frontend/src/App.tsx",
+        "octoagent/frontend/src/domains/settings/shared.tsx"
+      ],
+      "resolved_paths": [
+        "octoagent/frontend/src/App.tsx",
+        "octoagent/frontend/src/domains/settings/shared.tsx"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/frontend/src/App.test.tsx"
+      ],
+      "phase": 2
+    },
+    "S044-ready": {
+      "inventory_ref": [
+        "production-startup.md",
+        "wheel-dependencies.md"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/health.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_f151_readiness.py"
+      ],
+      "behavior_watch_paths": [
+        "octoagent/apps/gateway/tests/test_us12_health.py"
+      ],
+      "phase": 2
+    },
+    "S045-service-guard": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/service_commands.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/service_commands.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/cli/test_service_commands.py"
+      ],
+      "phase": 2
+    },
+    "S045-update-guard": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/update_commands.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/update_commands.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/cli/test_update_commands.py"
+      ],
+      "phase": 2
+    },
+    "S045-install-guard": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/install_bootstrap.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/install_bootstrap.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/cli/test_install_bootstrap.py"
+      ],
+      "phase": 2
+    },
+    "S045-bench-guard": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/bench_commands.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/bench_commands.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "benchmarks/tests/unit/test_octo_runner.py"
+      ],
+      "phase": 2
+    },
+    "S046-provider-error": {
+      "paths": [
+        "octoagent/packages/provider/src/octoagent/provider/exceptions.py",
+        "octoagent/packages/provider/src/octoagent/provider/fallback.py"
+      ],
+      "resolved_paths": [
+        "octoagent/packages/provider/src/octoagent/provider/exceptions.py",
+        "octoagent/packages/provider/src/octoagent/provider/fallback.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/packages/provider/tests/test_fallback.py"
+      ],
+      "phase": 2
+    },
+    "S046-bench": {
+      "paths": [
+        "benchmarks/runner/octo_runner.py"
+      ],
+      "protocol": "characterization",
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "benchmarks/tests/unit/test_octo_runner.py"
+      ],
+      "phase": 2,
+      "behavior_watch_paths": [
+        "benchmarks/runner/octo_runner.py"
+      ],
+      "owns_changed_hunks": false
+    },
+    "S046-config-sync-cli": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/config_commands.py"
+      ],
+      "symbols": ["function:register_config_commands/config-sync-removal"],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/config_commands.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/cli/test_config_memory_commands.py"
+      ],
+      "phase": 2
+    },
+    "S046-activate-option": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/config_commands.py"
+      ],
+      "symbols": ["function:provider_add", "function:provider_disable"],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/config_commands.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/cli/test_config_provider_activation.py"
+      ],
+      "phase": 2
+    },
+    "S046-config-sync-tool": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/config_tools.py",
+        "octoagent/packages/core/src/octoagent/core/models/tool_results.py",
+        "octoagent/packages/core/src/octoagent/core/models/__init__.py"
+      ],
+      "symbols": ["function:config_sync", "class:ConfigSyncResult", "export:ConfigSyncResult"],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/config_tools.py",
+        "octoagent/packages/core/src/octoagent/core/models/tool_results.py",
+        "octoagent/packages/core/src/octoagent/core/models/__init__.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_config_retirement_f151.py"
+      ],
+      "phase": 2
+    },
+    "S046-control-plane-fields": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/mcp_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/setup_config_io.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/setup_service.py",
+        "octoagent/packages/core/src/octoagent/core/models/tool_results.py"
+      ],
+      "symbols": ["setup-result:provider_env_names", "setup-result:retired-fields-absent"],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/mcp_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/setup_config_io.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/setup_service.py",
+        "octoagent/packages/core/src/octoagent/core/models/tool_results.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/control_plane/test_setup_projection_f151.py"
+      ],
+      "phase": 2
+    },
+    "S047-retirement-atomic": {
+      "inventory_ref": [
+        "config-retirement.md",
+        "namespace-migration.md"
+      ],
+      "globs": [
+        "octoagent/packages/sdk/**"
+      ],
+      "resolved_paths": [
+        "octoagent/.env.example",
+        "octoagent/.gitignore",
+        "octoagent/README.md",
+        "octoagent/octoagent.yaml",
+        "octoagent/octoagent.yaml.example",
+        "octoagent/pyproject.toml",
+        "octoagent/packages/provider/pyproject.toml",
+        "octoagent/apps/gateway/pyproject.toml",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/behavior_commands.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/dotenv_loader.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/frontdoor_exposure.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor_remediation.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/project_migration.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_service.py",
+        "octoagent/packages/core/src/octoagent/core/behavior_templates/TOOLS.md",
+        "octoagent/scripts/doctor-octo-home.sh",
+        "octoagent/scripts/run-octo-home.sh",
+        "octoagent/tests/AGENTS.md",
+        "octoagent/uv.lock",
+        "octoagent/.env.litellm.example",
+        "repo-scripts/worktree-shared-paths.txt"
+      ],
+      "resolved_globs": [
+        "octoagent/packages/sdk/**",
+        "skills/llm-config/**"
+      ],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py",
+        "octoagent/apps/gateway/tests/cli/test_setup_command.py",
+        "octoagent/apps/gateway/tests/test_us6_health_llm.py"
+      ],
+      "phase": 2
+    },
+    "S060-work-split": {
+      "inventory_ref": [
+        "execution-semantics.md#work.split"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/work_service.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_selector_preflight.py"
+      ],
+      "phase": 3
+    },
+    "S060-spawn-profile": {
+      "inventory_ref": [
+        "execution-semantics.md#worker.spawn_from_profile"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/worker_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/worker_profile_ops.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_selector_preflight.py"
+      ],
+      "phase": 3
+    },
+    "S060-worker-apply": {
+      "inventory_ref": [
+        "execution-semantics.md#worker.apply"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/work_service.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_selector_preflight.py"
+      ],
+      "phase": 3
+    },
+    "S060-tool-spawn": {
+      "inventory_ref": [
+        "execution-semantics.md#subagents.spawn"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/delegation_tools.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/builtin_tools/test_subagents_spawn_delegation.py"
+      ],
+      "phase": 3
+    },
+    "S060-domain-types": {
+      "inventory_ref": [
+        "execution-semantics.md#four-domains"
+      ],
+      "resolved_paths": [
+        "octoagent/packages/core/src/octoagent/core/models/delegation.py",
+        "octoagent/packages/core/src/octoagent/core/models/orchestrator.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/worker_runtime.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_selector_preflight.py"
+      ],
+      "phase": 3
+    },
+    "S061-apply-batch": {
+      "inventory_ref": [
+        "execution-semantics.md#worker.apply"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/work_service.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_selector_preflight.py"
+      ],
+      "phase": 3
+    },
+    "S061-tool-batch": {
+      "inventory_ref": [
+        "execution-semantics.md#subagents.spawn"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/delegation_tools.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/builtin_tools/test_subagents_spawn_delegation.py"
+      ],
+      "phase": 3
+    },
+    "S062-runner": {
+      "inventory_ref": [
+        "execution-semantics.md#worker.spawn_from_profile"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/worker_service.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_selector_preflight.py"
+      ],
+      "phase": 3
+    },
+    "S062-graph": {
+      "inventory_ref": [
+        "execution-semantics.md#worker.spawn_from_profile"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/worker_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/worker_runtime.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_selector_preflight.py"
+      ],
+      "phase": 3
+    },
+    "S063-work-http": {
+      "inventory_ref": [
+        "execution-semantics.md#control-plane-http"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/integration/test_f151_runtime_boundary_flow.py"
+      ],
+      "phase": 3
+    },
+    "S063-spawn-http": {
+      "inventory_ref": [
+        "execution-semantics.md#control-plane-http"
+      ],
+      "protocol": "characterization",
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/integration/test_f151_runtime_boundary_flow.py"
+      ],
+      "behavior_watch_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py"
+      ],
+      "owns_changed_hunks": false,
+      "phase": 3
+    },
+    "S063-apply-http": {
+      "inventory_ref": [
+        "execution-semantics.md#control-plane-http"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/integration/test_f151_runtime_boundary_flow.py"
+      ],
+      "phase": 3
+    },
+    "S064-config-exit": {
+      "inventory_ref": [
+        "f150-scope.md",
+        "production-startup.md"
+      ],
+      "symbols": [
+        "module-entry:typed-import-boundary",
+        "main"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/__main__.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/main.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/integration/test_f151_gateway_startup_fail_closed.py"
+      ],
+      "phase": 3
+    },
+    "S064-runtime-exit": {
+      "inventory_ref": [
+        "f150-scope.md",
+        "production-startup.md"
+      ],
+      "symbols": [
+        "function:_resolve_front_door_mode/branch:load-config-before-env-mode",
+        "function:main/branch:runtime-config-error-exit78"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/__main__.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/main.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/integration/test_f151_gateway_startup_fail_closed.py"
+      ],
+      "phase": 3
+    },
+    "S064-security-exit": {
+      "inventory_ref": [
+        "f150-scope.md",
+        "production-startup.md"
+      ],
+      "symbols": [
+        "module-entry:typed-import-boundary",
+        "main"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/__main__.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/main.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/integration/test_f151_gateway_startup_fail_closed.py"
+      ],
+      "phase": 3
+    },
+    "S064-startup-entry": {
+      "inventory_ref": [
+        "production-startup.md"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/__main__.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/main.py",
+        "octoagent/scripts/install-octo-home.sh",
+        "octoagent/scripts/install-octo.sh",
+        "octoagent/scripts/run-octo-home.sh",
+        "octoagent/apps/gateway/src/octoagent/gateway/cli/install_bootstrap.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/service_manager.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/cli/test_install_bootstrap.py",
+        "octoagent/apps/gateway/tests/test_main.py",
+        "octoagent/apps/gateway/tests/services/operations/test_service_manager.py",
+        "octoagent/tests/gate/test_runtime_architecture.py",
+        "octoagent/tests/integration/test_f151_gateway_startup_fail_closed.py"
+      ],
+      "phase": 3
+    },
+    "S064-descriptor-read": {
+      "inventory_ref": [
+        "production-startup.md"
+      ],
+      "symbols": [
+        "class:UpdateStatusStore/method:load_runtime_descriptor",
+        "class:UpdateStatusStore/method:migrate_runtime_descriptor",
+        "class:UpdateStatusStore/method:repair_runtime_descriptor",
+        "class:ServiceManager/method:start",
+        "class:ServiceManager/method:restart"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/service_manager.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/operations/test_update_status_store.py",
+        "octoagent/apps/gateway/tests/services/operations/test_service_manager.py"
+      ],
+      "phase": 3
+    },
+    "S065-request-503": {
+      "inventory_ref": [
+        "execution-semantics.md#error-matrix"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/deps.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/integration/test_f151_runtime_boundary_flow.py"
+      ],
+      "phase": 3
+    },
+    "S066-graph-race": {
+      "inventory_ref": [
+        "execution-semantics.md#graph-race"
+      ],
+      "protocol": "characterization",
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/integration/test_f151_runtime_boundary_flow.py"
+      ],
+      "behavior_watch_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/worker_runtime.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/task_runner.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py"
+      ],
+      "owns_changed_hunks": false,
+      "phase": 3
+    },
+    "S067-register": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/execution_console.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/worker_runtime.py"
+      ],
+      "symbols": [
+        "register_session"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/execution_console.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/worker_runtime.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_execution_console_projection.py",
+        "octoagent/apps/gateway/tests/services/test_f101_ask_back_integration.py",
+        "octoagent/apps/gateway/tests/services/test_f101_phase_f_acceptance.py"
+      ],
+      "phase": 3
+    },
+    "S067-unknown": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/execution_console.py"
+      ],
+      "symbols": [
+        "historical backend decoder"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/execution_console.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_execution_console_projection.py"
+      ],
+      "phase": 3
+    },
+    "S067-graph": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/execution_console.py"
+      ],
+      "symbols": [
+        "runtime_kind projection"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/execution_console.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_execution_console_projection.py",
+        "octoagent/packages/protocol/tests/test_a2a_models.py"
+      ],
+      "phase": 3
+    },
+    "S068-raw-history": {
+      "inventory_ref": [
+        "execution-semantics.md#historical-event"
+      ],
+      "protocol": "characterization",
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/integration/test_f151_runtime_boundary_flow.py"
+      ],
+      "behavior_watch_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/execution_console.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/execution.py",
+        "octoagent/packages/core/src/octoagent/core/models/payloads.py"
+      ],
+      "owns_changed_hunks": false,
+      "phase": 3
+    },
+    "S069-model-absence": {
+      "inventory_ref": [
+        "execution-semantics.md#D-01"
+      ],
+      "resolved_paths": [
+        "octoagent/packages/core/src/octoagent/core/models/execution.py",
+        "octoagent/packages/core/src/octoagent/core/models/__init__.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/packages/core/tests/test_execution_models.py",
+        "octoagent/packages/core/tests/test_models.py"
+      ],
+      "phase": 3
+    },
+    "S070-clean-wheel-full": {
+      "paths": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "symbols": [
+        "function:command_gateway_full",
+        "function:command_all",
+        "function:build_parser/branch:gateway-full",
+        "function:build_parser/branch:all"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_clean_wheel_contract.py"
+      ],
+      "production_edit_budget": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "consumed_owner_slices": [
+        "S017-namespace-atomic",
+        "S045-service-guard",
+        "S045-update-guard",
+        "S045-install-guard",
+        "S045-bench-guard",
+        "S064-config-exit",
+        "S064-runtime-exit",
+        "S064-security-exit",
+        "S064-startup-entry"
+      ],
+      "phase": 3
+    },
+    "S070-direct-dependency-closure": {
+      "paths": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "symbols": [
+        "function:validate_final_direct_dependency_closure"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_clean_wheel_contract.py"
+      ],
+      "production_edit_budget": [
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "consumed_owner_tasks": {
+        "namespace_and_test_rehome": "T017-T029",
+        "manifest_and_lock": "T023",
+        "source_guards": "T045",
+        "startup_entry": "T064"
+      },
+      "final_contract": {
+        "provider_requires_dist": "1 workspace + 6 third-party",
+        "gateway_requires_dist": "7 workspace + 25 third-party",
+        "runtime_required": "must be a direct requirement",
+        "optional_lazy": "must be owned by a declared extra or an executable fallback",
+        "type_checking_or_test_plugin": "must not create a runtime requirement",
+        "workspace_owned": "must resolve to the owning same-transaction wheel and isolated target origin",
+        "unknown_missing_unexpected_or_unowned_count": 0
+      },
+      "phase": 3
+    },
+    "S080-inline-reply": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py"
+      ],
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_orchestrator.py"
+      ],
+      "phase": 4,
+      "behavior_watch_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py"
+      ],
+      "owns_changed_hunks": false
+    },
+    "S080-graph-exception": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py"
+      ],
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_orchestrator.py"
+      ],
+      "phase": 4,
+      "behavior_watch_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py"
+      ],
+      "owns_changed_hunks": false
+    },
+    "S080-graph-error": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py"
+      ],
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_orchestrator.py"
+      ],
+      "phase": 4,
+      "behavior_watch_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py"
+      ],
+      "owns_changed_hunks": false
+    },
+    "S081-precomputed": {
+      "artifact_paths": [
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/runtime-operation-modes.v1.json"
+      ],
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/agent_context_session_replay.py"
+      ],
+      "symbols": [
+        "complete_task_with_precomputed_result"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/agent_context_session_replay.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_task_service_context_integration.py"
+      ],
+      "owned_test_paths": [
+        "octoagent/apps/gateway/tests/services/test_agent_context_session_replay_paths.py"
+      ],
+      "phase": 4
+    },
+    "S082-inline-adapter-removal": {
+      "protocol": "refactor-of-green",
+      "refactor_of": [
+        "S080-inline-reply",
+        "S080-graph-exception",
+        "S080-graph-error",
+        "S081-precomputed"
+      ],
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_orchestrator.py",
+        "octoagent/apps/gateway/tests/test_task_service_context_integration.py"
+      ],
+      "phase": 4
+    },
+    "S083-bundle-xor": {
+      "artifact_paths": [
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/runtime-operation-modes.v1.json"
+      ],
+      "inventory_ref": [
+        "runtime-bundle.md#mode-invariants"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/runtime_service_bundle.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/agent_context.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_service_bundle.py"
+      ],
+      "phase": 4
+    },
+    "S083-storage-purity": {
+      "artifact_paths": [
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/runtime-operation-modes.v1.json"
+      ],
+      "inventory_ref": [
+        "runtime-bundle.md#mode-invariants",
+        "agent-context-test-constructors.v1.json"
+      ],
+      "symbols": [
+        "class:AgentContextService/method:__init__/storage-only",
+        "class:AgentContextMemoryServiceMixin/method:get_reranker_service",
+        "class:AgentSessionTurnHook/method:__init__/constructor-mode"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/agent_context.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/agent_context_memory_services.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/agent_session_turn_hook.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_service_bundle.py"
+      ],
+      "phase": 4
+    },
+    "S084-shadowed-test": {
+      "paths": [
+        "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+        "octoagent/apps/gateway/tests/services/test_runtime_service_bundle.py"
+      ],
+      "symbols": [
+        "duplicate test qualname gate"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+        "octoagent/apps/gateway/tests/services/test_runtime_service_bundle.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_service_bundle.py"
+      ],
+      "phase": 4
+    },
+    "S084-restored-behavior": {
+      "paths": [
+        "octoagent/apps/gateway/tests/test_task_service_context_integration.py"
+      ],
+      "symbols": [
+        "test_worker_tool_writeback_and_private_memory_are_isolated_across_sessions",
+        "test_task_service_prompt_context_only_exposes_sanitized_control_metadata"
+      ],
+      "protocol": "characterization-after-rename",
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/test_task_service_context_integration.py"
+      ],
+      "phase": 4,
+      "behavior_watch_paths": [
+        "octoagent/apps/gateway/tests/test_task_service_context_integration.py"
+      ],
+      "owns_changed_hunks": false
+    },
+    "S084-constructor-transaction": {
+      "inventory_ref": [
+        "runtime-bundle.md",
+        "runtime-test-constructors.v1.json"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/_deps.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/misc_tools.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/delegation_plane.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/execution_console.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/cancel.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/tasks.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/telegram.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/discord.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/slack.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/task_runner.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/dispatch_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operator_actions.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/worker_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/session_service.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/chat.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/message.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/worker_runtime.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_service_bundle.py"
+      ],
+      "phase": 4
+    },
+    "S084-test-constructors": {
+      "artifact_paths": [
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/runtime-test-constructors.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/agent-context-test-constructors.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/provider-test-rehome.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/runtime-test-behavior-owners.v1.json",
+        ".specify/features/151-runtime-boundary-architecture-truth/inventories/runtime-operation-modes.v1.json"
+      ],
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/services/test_runtime_service_bundle.py"
+      ],
+      "phase": 4,
+      "owned_test_paths": [
+        "octoagent/apps/gateway/tests/e2e_live/helpers/factories.py",
+        "octoagent/apps/gateway/tests/services/test_agent_context_phase_b.py",
+        "octoagent/apps/gateway/tests/services/test_agent_context_phase_c.py",
+        "octoagent/apps/gateway/tests/services/test_agent_context_phase_f.py",
+        "octoagent/apps/gateway/tests/services/test_phase_f_ephemeral_runtime.py",
+        "octoagent/apps/gateway/tests/services/test_phase_g_atomic_cleanup.py",
+        "octoagent/apps/gateway/tests/services/test_phase_h_terminal_callback.py",
+        "octoagent/apps/gateway/tests/services/test_session_memory_spawn.py",
+        "octoagent/apps/gateway/tests/services/test_task_runner_subagent_cleanup.py",
+        "octoagent/apps/gateway/tests/test_capability_pack_tools.py",
+        "octoagent/apps/gateway/tests/test_chat_force_full_recall.py",
+        "octoagent/apps/gateway/tests/test_chat_send_route.py",
+        "octoagent/apps/gateway/tests/test_context_compaction.py",
+        "octoagent/apps/gateway/tests/test_control_plane_api.py",
+        "octoagent/apps/gateway/tests/test_delegation_plane.py",
+        "octoagent/apps/gateway/tests/test_discord_service.py",
+        "octoagent/apps/gateway/tests/test_execution_api.py",
+        "octoagent/apps/gateway/tests/test_f101_phase_b.py",
+        "octoagent/apps/gateway/tests/test_f105_channel_adapter.py",
+        "octoagent/apps/gateway/tests/test_f127_consolidation_trigger.py",
+        "octoagent/apps/gateway/tests/test_operator_actions.py",
+        "octoagent/apps/gateway/tests/test_operator_inbox_api.py",
+        "octoagent/apps/gateway/tests/test_operator_inbox_service.py",
+        "octoagent/apps/gateway/tests/test_orchestrator.py",
+        "octoagent/apps/gateway/tests/test_resume_api.py",
+        "octoagent/apps/gateway/tests/test_resume_engine.py",
+        "octoagent/apps/gateway/tests/test_slack_service.py",
+        "octoagent/apps/gateway/tests/test_task_runner.py",
+        "octoagent/apps/gateway/tests/test_task_service_context_integration.py",
+        "octoagent/apps/gateway/tests/test_task_service_hardening.py",
+        "octoagent/apps/gateway/tests/test_telegram_operator_actions.py",
+        "octoagent/apps/gateway/tests/test_telegram_service.py",
+        "octoagent/apps/gateway/tests/test_us8_cancel.py",
+        "octoagent/apps/gateway/tests/test_us3_sse.py",
+        "octoagent/apps/gateway/tests/test_us4_llm_echo.py",
+        "octoagent/apps/gateway/tests/test_us7_observability.py",
+        "octoagent/apps/gateway/tests/test_worker_runtime.py",
+        "octoagent/apps/gateway/tests/test_worker_session_turn_isolation.py",
+        "octoagent/apps/gateway/tests/services/operations/test_telegram_verifier.py",
+        "octoagent/tests/integration/test_f009_worker_runtime_flow.py",
+        "octoagent/tests/integration/test_f010_checkpoint_resume.py",
+        "octoagent/tests/integration/test_f013_checkpoint.py",
+        "octoagent/tests/integration/test_f013_watchdog.py",
+        "octoagent/tests/integration/test_f023_m2_acceptance.py",
+        "octoagent/tests/integration/test_f031_m3_acceptance.py",
+        "octoagent/tests/integration/test_f033_agent_context_continuity.py",
+        "octoagent/tests/integration/test_sc2_durability.py",
+        "octoagent/tests/integration/test_sc6_cancel.py",
+        "octoagent/apps/gateway/tests/runtime_service_fixtures.py",
+        "octoagent/apps/gateway/tests/test_bootstrap_simplification.py",
+        "octoagent/apps/gateway/tests/test_f105_conversation_binding.py",
+        "octoagent/tests/integration/conftest.py",
+        "octoagent/tests/integration/test_f008_orchestrator_flow.py"
+      ]
+    },
+    "S085-composition": {
+      "inventory_ref": [
+        "runtime-bundle.md#composition"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/llm_service.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/harness/test_runtime_service_bundle_composition.py"
+      ],
+      "phase": 4
+    },
+    "S085-lifespan-startup": {
+      "inventory_ref": [
+        "production-startup.md#lifespan-composition-failure"
+      ],
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/integration/test_f151_gateway_startup_fail_closed.py"
+      ],
+      "phase": 4,
+      "behavior_watch_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/main.py"
+      ],
+      "owns_changed_hunks": false
+    },
+    "S086-route-preflight": {
+      "paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/chat.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/message.py"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/chat.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/message.py"
+      ],
+      "resolved_globs": [],
+    "test_paths": [
+      "octoagent/apps/gateway/tests/routes/test_runtime_service_wiring.py"
+    ],
+    "phase": 4,
+    "owned_test_paths": [
+      "octoagent/apps/gateway/tests/test_us1_message_creation.py",
+      "octoagent/apps/gateway/tests/test_lifespan.py"
+    ]
+  },
+    "S087-local-close": {
+      "inventory_ref": [
+        "runtime-bundle.md#teardown"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/services/llm_service.py",
+        "octoagent/packages/skills/src/octoagent/skills/runner.py"
+      ],
+      "resolved_globs": [
+        "octoagent/packages/skills/src/**/provider_model_client.py"
+      ],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/harness/test_runtime_service_bundle_composition.py"
+      ],
+      "phase": 4
+    },
+    "S088-shutdown": {
+      "inventory_ref": [
+        "runtime-bundle.md#teardown"
+      ],
+      "resolved_paths": [
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/runtime_service_bundle.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/apps/gateway/tests/harness/test_final_drain_background_tasks.py"
+      ],
+      "phase": 4
+    },
+    "S100-workflow": {
+      "paths": [
+        "repo-scripts/lane.py",
+        ".githooks/pre-commit"
+      ],
+      "globs": [
+        ".github/workflows/*.yml"
+      ],
+      "resolved_paths": [
+        "repo-scripts/lane.py",
+        ".githooks/pre-commit"
+      ],
+      "resolved_globs": [
+        ".github/workflows/*.yml"
+      ],
+      "test_paths": [
+        "octoagent/tests/gate/test_f151_ci_wiring.py",
+        "octoagent/tests/gate/test_lane_orchestrator.py"
+      ],
+      "phase": 5
+    },
+    "S104-docs": {
+      "inventory_ref": [
+        "active-artifacts.v1.json#current",
+        "planned-diff.v1.json#exact_additional_paths",
+        "authority-docs.v1.json#documents"
+      ],
+      "resolved_paths": [
+        ".specify/memory/constitution.md",
+        "docs/blueprint.md",
+        "docs/blueprint/milestones.md",
+        "docs/blueprint/architecture-audit.md",
+        "docs/blueprint/core-design.md",
+        "docs/blueprint/deployment-and-ops.md",
+        "docs/blueprint/module-design.md",
+        "docs/blueprint/api-and-protocol.md",
+        "docs/blueprint/architecture-tradeoffs.md",
+        "docs/blueprint/architecture-overview.md",
+        "docs/blueprint/requirements.md",
+        "docs/blueprint/appendix.md",
+        "docs/blueprint/testing-strategy.md",
+        "docs/codebase-architecture/README.md",
+        "docs/codebase-architecture/modules/02-gateway-runtime-and-control-plane.md",
+        "docs/codebase-architecture/modules/03-provider-and-llm-stack.md",
+        "docs/codebase-architecture/provider-direct-routing.md"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 5
+    },
+    "S103-rerun": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 5
+    },
+    "S103-quarantine": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "inventory_ref": [
+        "quarantine manifest"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py",
+        "octoagent/tests/quarantine.json"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 5
+    },
+    "S103-existing-report": {
+      "paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "symbols": [
+        "class:QuarantineReport",
+        "function:validate_v2_index/key:record33-release-exclusion"
+      ],
+      "resolved_paths": [
+        "repo-scripts/check-runtime-architecture.py"
+      ],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/tests/gate/test_runtime_architecture.py"
+      ],
+      "phase": 5
+    },
+    "S123-task-detail-sse-stability": {
+      "protocol": "characterization",
+      "resolved_paths": [],
+      "resolved_globs": [],
+      "test_paths": [
+        "octoagent/frontend/src/pages/TaskDetail.test.tsx"
+      ],
+      "behavior_watch_paths": [],
+      "owns_changed_hunks": false,
+      "phase": 6
+    }
+  },
+  "declared_new_globs": [],
+  "overlap_groups": [
+    {
+      "id": "shared-b3d6e15f359e",
+      "path": "repo-scripts/check-changed-lines-coverage.py",
+      "members": [
+        "S007-local-coverage",
+        "S008-fresh-exempt"
+      ],
+      "policy": "all members required; same task/barrier and same implementation hunk"
+    },
+    {
+      "id": "shared-6dc4aaf6fddf",
+      "path": "octoagent/packages/provider/src/octoagent/provider/provider_route.py",
+      "members": [
+        "S015-route-auth",
+        "S015-route-url"
+      ],
+      "policy": "all members required; same task/barrier and same implementation hunk"
+    },
+    {
+      "id": "shared-e4845e03d494",
+      "path": "octoagent/frontend/src/domains/settings/SettingsPage.tsx",
+      "members": [
+        "S043-pending",
+        "S043-settings"
+      ],
+      "policy": "all members required; same task/barrier and same implementation hunk"
+    }
+  ],
+  "schema": {
+    "resolved_paths": "exact repository paths",
+    "resolved_globs": "repository globs expanded with nonzero match or declared-new state",
+    "test_paths": "derived from exact node_manifest nodeids",
+    "overlap_groups": "all overlapping exact paths must have one group or disjoint AST/JSON symbol selectors",
+    "owned_test_paths": "exact constructor/AgentContext owner test files, never broad test globs",
+    "symbol_partitions": "cross-phase path ownership by stable AST qualname plus descendant semantic key; selectors must be pairwise disjoint and repeated or aliased hunk ownership fails",
+    "dependency_partition_states": "structured TOML/lock selectors declare required_absent/required_nonempty per named state and explicit add/delete transitions; resolution compares merge-base/base-ref with the worktree semantic coordinate rather than prefix or line presence",
+    "production_edit_budget": "exact paths the slice may modify; consumed or forbidden owner slices never transfer their production ownership"
+  },
+  "self_check": {
+    "markdown_slice_count": 103,
+    "scope_slice_count": 103,
+    "id_sets_equal": true,
+    "empty_scope_count": 0,
+    "unresolved_natural_language_ref_count": 0,
+    "selector_anchor_kind_count": 10,
+    "selector_structured_segment_kind_count": 6,
+    "selector_registered_predicate_count": 34,
+    "selector_unregistered_or_duplicate_resolver_count": 0,
+    "overlap_path_count": 42,
+    "overlap_group_count": 3,
+    "changed_nonempty_required_zero": "must_fail",
+    "broad_declared_new_glob_count": 0,
+    "declared_new_path_count": 127,
+    "declared_new_existing_in_base_count": 0,
+    "cross_phase_overlap_count": 25,
+    "cross_phase_partitioned_member_count": 95,
+    "cross_phase_unresolved_count": 0,
+    "same_phase_overlap_group_count": 3,
+    "s084_exact_constructor_owner_test_path_count": 44,
+    "s084_behavior_owner_selector_count": 45,
+    "s084_behavior_file_selector_count": 42,
+    "s084_behavior_node_selector_count": 3,
+    "declared_new_is_not_ownership": true,
+    "symbol_partition_path_count": 40,
+    "unpartitioned_overlap_member_count": 0,
+    "s011_production_edit_budget_count": 1,
+    "s011_runtime_product_code_path_count": 0,
+    "s011_provider_gateway_manifest_path_count": 0,
+    "t012_new_corrective_slice_count": 4,
+    "t012_combined_implementation_path_count": 4,
+    "t012_standard_backend_implementation_path_count": 3,
+    "t012_dependency_selector_implementation_path_count": 1,
+    "standard_backend_dependency_selector_count": 4,
+    "standard_backend_dependency_selector_unique_count": 4,
+    "standard_backend_pre_t012_required_absent_count": 2,
+    "standard_backend_pre_t012_required_nonempty_count": 2,
+    "standard_backend_t012_required_nonempty_count": 4,
+    "standard_backend_t048_required_nonempty_count": 2,
+    "standard_backend_t048_required_absent_count": 2,
+    "standard_backend_transition_count": 4,
+    "standard_backend_current_semantic_resolver_status": "RESOLVED/PASS: S012-dependency-selector-semantics completed RED/GREEN/REFACTOR and direct check_rgr_selectors(repo, scope) fresh semantic revalidation resolved both dependency paths as ('pre_T012', 'pre_T012')",
+    "standard_backend_dependency_semantic_resolver_missing_path_count": 0,
+    "s070_production_path_outside_clean_wheel_checker_count": 0,
+    "clean_wheel_pairwise_disjoint_selector_count": 21,
+    "clean_wheel_repeated_selector_count": 0,
+    "runtime_checker_new_dependency_selector_member_count": 1,
+    "clean_wheel_checker_new_standard_backend_member_count": 1,
+    "clean_wheel_checker_new_import_inventory_member_count": 1,
+    "clean_wheel_checker_new_child_observation_member_count": 1,
+    "clean_wheel_checker_final_dependency_member_count": 1,
+    "t012_preliminary_import_final_verdict_count": 0,
+    "t070_final_direct_dependency_owner_count": 1,
+    "s029_skill_user_root_production_path_count": 2,
+    "s029_skill_user_root_selector_count": 5,
+    "s029_skill_user_root_test_path_count": 3,
+    "s029_test_determinism_path_count": 2,
+    "s029_test_determinism_node_count": 4,
+    "predecessor_clean_wheel_symbol_ast_count": 32,
+    "predecessor_clean_wheel_symbol_ast_aggregate_sha256": "244ccc7c0b466d71b8affbc5c44a93679daece42209c14a0430e21d054f689a7",
+    "predecessor_clean_wheel_contract_release_state_after_rewrite": "SUPERSEDED_HISTORY_NOT_RELEASE_EVIDENCE"
+  },
+  "declared_new_paths": [
+    ".specify/features/151-runtime-boundary-architecture-truth/evidence/bootstrap-anchor.v1.json",
+    ".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v1.json",
+    ".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v2.json",
+    ".specify/features/151-runtime-boundary-architecture-truth/verification-report.md",
+    ".pre-commit-config.yaml",
+    "octoagent/apps/gateway/src/octoagent/gateway/__main__.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/attest_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/auth_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/backup_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/behavior_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/chat_import_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/cleanup_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/cli.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/config_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/console_output.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/install_bootstrap.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/memory_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/project_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/secret_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/service_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/cli/update_commands.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_bootstrap.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/config/provider_route_resolver.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_audit.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_service.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/channel_verifier.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/chat_import_service.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/control_plane_models.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor_remediation.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_mapping_store.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_source_store.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_workbench_models.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/import_workbench_service.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/models.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_models.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_service.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/onboarding_store.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/project_migration.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/project_selector.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/recovery_status_store.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/runtime_descriptor_defaults.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_models.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_refs.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_service.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_status_store.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/service_manager.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/setup_governance_adapter.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/sleep_probe.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/telegram_pairing.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/telegram_verifier.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_worker.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/wizard_session.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/operations/wizard_session_store.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/runtime_service_bundle.py",
+    "octoagent/apps/gateway/tests/cli/test_attest_commands.py",
+    "octoagent/apps/gateway/tests/cli/test_backup_commands.py",
+    "octoagent/apps/gateway/tests/cli/test_behavior_commands.py",
+    "octoagent/apps/gateway/tests/cli/test_chat_import_commands.py",
+    "octoagent/apps/gateway/tests/cli/test_console_output.py",
+    "octoagent/apps/gateway/tests/cli/test_doctor.py",
+    "octoagent/apps/gateway/tests/cli/test_f111_behavior_compact_cli.py",
+    "octoagent/apps/gateway/tests/cli/test_install_bootstrap.py",
+    "octoagent/apps/gateway/tests/cli/test_onboard.py",
+    "octoagent/apps/gateway/tests/cli/test_paste_token_command.py",
+    "octoagent/apps/gateway/tests/cli/test_project_commands.py",
+    "octoagent/apps/gateway/tests/cli/test_project_migration_cli.py",
+    "octoagent/apps/gateway/tests/cli/test_setup_command.py",
+    "octoagent/apps/gateway/tests/cli/test_service_commands.py",
+    "octoagent/apps/gateway/tests/cli/test_update_commands.py",
+    "octoagent/apps/gateway/tests/harness/test_runtime_service_bundle_composition.py",
+    "octoagent/apps/gateway/tests/routes/test_runtime_service_wiring.py",
+    "octoagent/apps/gateway/tests/services/config/test_config_schema.py",
+    "octoagent/apps/gateway/tests/services/config/test_config_wizard.py",
+    "octoagent/apps/gateway/tests/services/config/test_dotenv_loader.py",
+    "octoagent/apps/gateway/tests/services/config/test_config_bootstrap.py",
+    "octoagent/apps/gateway/tests/services/memory/test_memory_console_service.py",
+    "octoagent/apps/gateway/tests/services/memory/test_memory_retrieval_profile.py",
+    "octoagent/apps/gateway/tests/services/operations/test_backup_audit.py",
+    "octoagent/apps/gateway/tests/services/operations/test_backup_service.py",
+    "octoagent/apps/gateway/tests/services/operations/test_channel_verifier.py",
+    "octoagent/apps/gateway/tests/services/operations/test_chat_import_service.py",
+    "octoagent/apps/gateway/tests/services/operations/test_doctor_frontdoor.py",
+    "octoagent/apps/gateway/tests/services/operations/test_doctor_remediation.py",
+    "octoagent/apps/gateway/tests/services/operations/test_doctor_service_checks.py",
+    "octoagent/apps/gateway/tests/services/operations/test_import_workbench_service.py",
+    "octoagent/apps/gateway/tests/services/operations/test_memory_backend_resolver.py",
+    "octoagent/apps/gateway/tests/services/operations/test_onboarding_models.py",
+    "octoagent/apps/gateway/tests/services/operations/test_onboarding_store.py",
+    "octoagent/apps/gateway/tests/services/operations/test_operations_models.py",
+    "octoagent/apps/gateway/tests/services/operations/test_project_migration.py",
+    "octoagent/apps/gateway/tests/services/operations/test_recovery_status_store.py",
+    "octoagent/apps/gateway/tests/services/operations/test_retrieval_platform_service.py",
+    "octoagent/apps/gateway/tests/services/operations/test_runtime_descriptor_defaults.py",
+    "octoagent/apps/gateway/tests/services/operations/test_secret_refs.py",
+    "octoagent/apps/gateway/tests/services/operations/test_secret_service.py",
+    "octoagent/apps/gateway/tests/services/operations/test_service_manager.py",
+    "octoagent/apps/gateway/tests/services/operations/test_setup_governance_adapter.py",
+    "octoagent/apps/gateway/tests/services/operations/test_telegram_pairing.py",
+    "octoagent/apps/gateway/tests/services/operations/test_telegram_verifier.py",
+    "octoagent/apps/gateway/tests/services/operations/test_update_service.py",
+    "octoagent/apps/gateway/tests/services/operations/test_update_status_store.py",
+    "octoagent/apps/gateway/tests/services/operations/test_update_worker.py",
+    "octoagent/apps/gateway/tests/services/operations/test_wizard_session.py",
+    "octoagent/apps/gateway/tests/services/test_execution_console_projection.py",
+    "octoagent/apps/gateway/tests/services/test_runtime_selector_preflight.py",
+    "octoagent/apps/gateway/tests/services/test_runtime_service_bundle.py",
+    "octoagent/apps/gateway/tests/test_config_retirement_f151.py",
+    "octoagent/apps/gateway/tests/test_f151_readiness.py",
+    "octoagent/apps/gateway/tests/test_provider_route_resolver.py",
+    "octoagent/apps/gateway/tests/cli/test_config_memory_commands.py",
+    "octoagent/apps/gateway/tests/cli/test_config_provider_activation.py",
+    "octoagent/apps/gateway/tests/services/control_plane/test_setup_projection_f151.py",
+    "octoagent/packages/core/tests/test_execution_models.py",
+    "octoagent/packages/provider/src/octoagent/provider/provider_route.py",
+    "octoagent/packages/provider/tests/test_provider_route.py",
+    "octoagent/tests/gate/test_clean_wheel_contract.py",
+    "octoagent/tests/gate/test_f151_ci_wiring.py",
+    "octoagent/tests/gate/test_runtime_architecture.py",
+    "octoagent/tests/integration/test_f151_gateway_startup_fail_closed.py",
+    "octoagent/tests/integration/test_f151_runtime_boundary_flow.py",
+    "octoagent/tests/integration/test_update_workspace_safety.py",
+    "repo-scripts/check-clean-wheel.py",
+    "repo-scripts/check-runtime-architecture.py",
+    "repo-scripts/runtime-architecture-ceiling.v1.json"
+  ],
+  "symbol_partitions": [
+    {
+      "path": "octoagent/pyproject.toml",
+      "members": [
+        {
+          "slice": "S012-standard-backend-scaffold",
+          "ast_or_key_selectors": [
+            "dependency:root-dev-build-scaffold/key:hatchling==1.29.0"
+          ]
+        },
+        {
+          "slice": "S047-retirement-atomic",
+          "ast_or_key_selectors": [
+            "dependency:root-sdk-retirement/key:octoagent-sdk"
+          ]
+        }
+      ],
+      "declared_states": {
+        "pre_T012": {
+          "required_absent_selectors": [
+            "dependency:root-dev-build-scaffold/key:hatchling==1.29.0"
+          ],
+          "required_nonempty_selectors": [
+            "dependency:root-sdk-retirement/key:octoagent-sdk"
+          ],
+          "facts": {
+            "hatchling_exact_dev_pin": "absent",
+            "octoagent_sdk_dev_and_workspace_entries": "present"
+          }
+        },
+        "T012_target": {
+          "required_nonempty_selectors": [
+            "dependency:root-dev-build-scaffold/key:hatchling==1.29.0",
+            "dependency:root-sdk-retirement/key:octoagent-sdk"
+          ],
+          "required_absent_selectors": [],
+          "facts": {
+            "hatchling_exact_dev_pin": "present exactly once",
+            "octoagent_sdk_dev_and_workspace_entries": "present"
+          }
+        },
+        "T048_target": {
+          "required_nonempty_selectors": [
+            "dependency:root-dev-build-scaffold/key:hatchling==1.29.0"
+          ],
+          "required_absent_selectors": [
+            "dependency:root-sdk-retirement/key:octoagent-sdk"
+          ],
+          "facts": {
+            "hatchling_exact_dev_pin": "present exactly once",
+            "octoagent_sdk_dev_and_workspace_entries": "absent"
+          }
+        }
+      },
+      "transitions": [
+        {
+          "from": "pre_T012",
+          "to": "T012_target",
+          "required_add_selectors": [
+            "dependency:root-dev-build-scaffold/key:hatchling==1.29.0"
+          ],
+          "required_delete_selectors": []
+        },
+        {
+          "from": "T012_target",
+          "to": "T048_target",
+          "required_add_selectors": [],
+          "required_delete_selectors": [
+            "dependency:root-sdk-retirement/key:octoagent-sdk"
+          ]
+        }
+      ],
+      "policy": "S012 resolves the absent-to-present root dev scaffold delta; S047 resolves the later present-to-absent SDK retirement delta. Each transition owns one disjoint structured key; requiring an absent coordinate as nonempty, an alias, duplicate ownership or a cross-key claim fails."
+    },
+    {
+      "path": "octoagent/uv.lock",
+      "members": [
+        {
+          "slice": "S012-standard-backend-scaffold",
+          "ast_or_key_selectors": [
+            "dependency:lock-dev-build-scaffold/key:hatchling==1.29.0"
+          ]
+        },
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "dependency:lock-provider-gateway-rehome/key:litellm-proxy-closure"
+          ]
+        },
+        {
+          "slice": "S047-retirement-atomic",
+          "ast_or_key_selectors": [
+            "dependency:lock-sdk-retirement/key:octoagent-sdk"
+          ]
+        }
+      ],
+      "declared_states": {
+        "pre_T012": {
+          "required_absent_selectors": [
+            "dependency:lock-dev-build-scaffold/key:hatchling==1.29.0"
+          ],
+          "required_nonempty_selectors": [
+            "dependency:lock-sdk-retirement/key:octoagent-sdk",
+            "dependency:lock-provider-gateway-rehome/key:litellm-proxy-closure"
+          ],
+          "facts": {
+            "hatchling_exact_locked_package": "absent",
+            "octoagent_sdk_lock_entries": "present",
+            "litellm_proxy_closure_packages": "present exactly once as the frozen 30-package set"
+          }
+        },
+        "T012_target": {
+          "required_nonempty_selectors": [
+            "dependency:lock-dev-build-scaffold/key:hatchling==1.29.0",
+            "dependency:lock-sdk-retirement/key:octoagent-sdk",
+            "dependency:lock-provider-gateway-rehome/key:litellm-proxy-closure"
+          ],
+          "required_absent_selectors": [],
+          "facts": {
+            "hatchling_exact_locked_package": "present with uv-generated transitive closure",
+            "octoagent_sdk_lock_entries": "present",
+            "litellm_proxy_closure_packages": "present exactly once as the frozen 30-package set"
+          }
+        },
+        "T023_target": {
+          "required_nonempty_selectors": [
+            "dependency:lock-dev-build-scaffold/key:hatchling==1.29.0",
+            "dependency:lock-sdk-retirement/key:octoagent-sdk"
+          ],
+          "required_absent_selectors": [
+            "dependency:lock-provider-gateway-rehome/key:litellm-proxy-closure"
+          ],
+          "facts": {
+            "hatchling_exact_locked_package": "present with uv-generated transitive closure",
+            "octoagent_sdk_lock_entries": "present",
+            "litellm_proxy_closure_packages": "absent"
+          }
+        },
+        "T048_target": {
+          "required_nonempty_selectors": [
+            "dependency:lock-dev-build-scaffold/key:hatchling==1.29.0"
+          ],
+          "required_absent_selectors": [
+            "dependency:lock-sdk-retirement/key:octoagent-sdk",
+            "dependency:lock-provider-gateway-rehome/key:litellm-proxy-closure"
+          ],
+          "facts": {
+            "hatchling_exact_locked_package": "present with uv-generated transitive closure",
+            "octoagent_sdk_lock_entries": "absent",
+            "litellm_proxy_closure_packages": "absent"
+          }
+        }
+      },
+      "transitions": [
+        {
+          "from": "pre_T012",
+          "to": "T012_target",
+          "required_add_selectors": [
+            "dependency:lock-dev-build-scaffold/key:hatchling==1.29.0"
+          ],
+          "required_delete_selectors": []
+        },
+        {
+          "from": "T012_target",
+          "to": "T023_target",
+          "required_add_selectors": [],
+          "required_delete_selectors": [
+            "dependency:lock-provider-gateway-rehome/key:litellm-proxy-closure"
+          ]
+        },
+        {
+          "from": "T023_target",
+          "to": "T048_target",
+          "required_add_selectors": [],
+          "required_delete_selectors": [
+            "dependency:lock-sdk-retirement/key:octoagent-sdk"
+          ]
+        }
+      ],
+      "policy": "S012 resolves the uv-generated Hatchling package and transitive closure add delta; S017 owns only the exact 30-package litellm proxy closure deletion at T023; S047 resolves the later SDK lock deletion delta. Manual lock edits, partial or mixed proxy closure state, extra unowned package keys, aliases, inverted states, drift or cross-coordinate claims fail."
+    },
+    {
+      "path": "repo-scripts/check-clean-wheel.py",
+      "members": [
+        {
+          "slice": "S011-clean-wheel",
+          "ast_or_key_selectors": [
+            "function:command_provider",
+            "function:command_gateway_relocation",
+            "class:CleanWheelArgumentParser/method:error",
+            "function:parse_cli_args",
+            "function:build_parser/branch:provider",
+            "function:build_parser/branch:gateway-relocation"
+          ]
+        },
+        {
+          "slice": "S012-standard-backend-scaffold",
+          "ast_or_key_selectors": [
+            "function:validate_standard_backend_scaffold",
+            "function:build_workspace_wheels",
+            "function:install_workspace_wheels",
+            "function:read_wheel_metadata",
+            "function:validate_workspace_origins"
+          ]
+        },
+        {
+          "slice": "S012-import-classification-inventory",
+          "ast_or_key_selectors": [
+            "function:classify_distribution_imports",
+            "function:classify_import_context",
+            "function:build_dependency_inventory"
+          ]
+        },
+        {
+          "slice": "S012-child-isolation-observation",
+          "ast_or_key_selectors": [
+            "function:run_isolated_probe",
+            "function:validate_child_observation"
+          ]
+        },
+        {
+          "slice": "S070-clean-wheel-full",
+          "ast_or_key_selectors": [
+            "function:command_gateway_full",
+            "function:command_all",
+            "function:build_parser/branch:gateway-full",
+            "function:build_parser/branch:all"
+          ]
+        },
+        {
+          "slice": "S070-direct-dependency-closure",
+          "ast_or_key_selectors": [
+            "function:validate_final_direct_dependency_closure"
+          ]
+        }
+      ],
+      "declared_states": {
+        "T012_target": {
+          "required_nonempty_selectors": [
+            "function:command_provider",
+            "function:command_gateway_relocation",
+            "class:CleanWheelArgumentParser/method:error",
+            "function:parse_cli_args",
+            "function:build_parser/branch:provider",
+            "function:build_parser/branch:gateway-relocation",
+            "function:validate_standard_backend_scaffold",
+            "function:build_workspace_wheels",
+            "function:install_workspace_wheels",
+            "function:read_wheel_metadata",
+            "function:validate_workspace_origins",
+            "function:classify_distribution_imports",
+            "function:classify_import_context",
+            "function:build_dependency_inventory",
+            "function:run_isolated_probe",
+            "function:validate_child_observation"
+          ],
+          "required_absent_selectors": [
+            "function:command_gateway_full",
+            "function:command_all",
+            "function:build_parser/branch:gateway-full",
+            "function:build_parser/branch:all",
+            "function:validate_final_direct_dependency_closure"
+          ],
+          "full_and_all_semantics": "CleanWheelArgumentParser.error returns typed CLEAN_WHEEL_PHASE_NOT_READY before any full, startup or source-guard execution"
+        },
+        "T070_target": {
+          "required_nonempty_selectors": [
+            "function:command_provider",
+            "function:command_gateway_relocation",
+            "class:CleanWheelArgumentParser/method:error",
+            "function:parse_cli_args",
+            "function:build_parser/branch:provider",
+            "function:build_parser/branch:gateway-relocation",
+            "function:validate_standard_backend_scaffold",
+            "function:build_workspace_wheels",
+            "function:install_workspace_wheels",
+            "function:read_wheel_metadata",
+            "function:validate_workspace_origins",
+            "function:classify_distribution_imports",
+            "function:classify_import_context",
+            "function:build_dependency_inventory",
+            "function:run_isolated_probe",
+            "function:validate_child_observation",
+            "function:command_gateway_full",
+            "function:command_all",
+            "function:build_parser/branch:gateway-full",
+            "function:build_parser/branch:all",
+            "function:validate_final_direct_dependency_closure"
+          ],
+          "full_and_all_semantics": "real execution after accepted S070 RGR"
+        }
+      },
+      "policy": "S011 owns six preliminary command/defer selectors; T012 owns five standard-backend, three import-classification and two child-observation selectors; T070 owns four full/all plus one final dependency-closure selector. All twenty-one are pairwise disjoint; repeated or aliased selectors, inferred child facts, early final closure or missing owning RGR evidence fail."
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/models/__init__.py",
+      "members": [
+        {"slice":"S046-config-sync-tool","ast_or_key_selectors":["export:ConfigSyncResult"]},
+        {"slice":"S069-model-absence","ast_or_key_selectors":["export:JobSpec","export:ExecutionRuntimeRecord"]}
+      ],
+      "policy": "export names are pairwise disjoint and each changed export must resolve to one owner"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/cli/config_commands.py",
+      "members": [
+        {"slice":"S017-namespace-atomic","ast_or_key_selectors":["atomic:source-target-content-hash+import-projection"]},
+        {"slice":"S046-config-sync-cli","ast_or_key_selectors":["function:register_config_commands/branch:config-sync-removal"]},
+        {"slice":"S046-activate-option","ast_or_key_selectors":["function:provider_add/parameter:activate","function:provider_disable/parameter:activate"]}
+      ],
+      "policy": "source state is atomic; post-T029 function selectors are disjoint and require their own RGR evidence"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/models/tool_results.py",
+      "members": [
+        {"slice":"S046-config-sync-tool","ast_or_key_selectors":["class:ConfigSyncResult"]},
+        {"slice":"S046-control-plane-fields","ast_or_key_selectors":["class:SetupResult/field:provider_env_names","class:SetupResult/retired-fields-absence"]}
+      ],
+      "policy": "class selectors are pairwise disjoint; nonexistent or duplicate resolution fails"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/__main__.py",
+      "members": [
+        {
+          "slice": "S064-config-exit",
+          "ast_or_key_selectors": [
+            "function:main/branch:config-error-exit78"
+          ],
+          "shared_subgroup": "startup-exit78-boundary"
+        },
+        {
+          "slice": "S064-runtime-exit",
+          "ast_or_key_selectors": [
+            "function:main/branch:runtime-config-error-exit78"
+          ],
+          "shared_subgroup": "startup-exit78-boundary"
+        },
+        {
+          "slice": "S064-security-exit",
+          "ast_or_key_selectors": [
+            "function:main/branch:security-error-exit78"
+          ],
+          "shared_subgroup": "startup-exit78-boundary"
+        },
+        {
+          "slice": "S064-startup-entry",
+          "ast_or_key_selectors": [
+            "class:GatewayStartOptions",
+            "function:parse_start_options",
+            "function:main/uvicorn-call"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/cli/auth_commands.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S042-recovery",
+          "ast_or_key_selectors": [
+            "function:canonical_reauth_command"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/cli/cli.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S042-recovery",
+          "ast_or_key_selectors": [
+            "function:setup_recovery_composition"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/cli/install_bootstrap.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S045-install-guard",
+          "ast_or_key_selectors": [
+            "function:run_install_bootstrap/source-checkout-guard"
+          ]
+        },
+        {
+          "slice": "S064-startup-entry",
+          "ast_or_key_selectors": [
+            "function:_build_runtime_descriptor",
+            "function:run_install_bootstrap/explicit-descriptor-migration"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/cli/service_commands.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S045-service-guard",
+          "ast_or_key_selectors": [
+            "handler:install",
+            "handler:uninstall/source-checkout-guard"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/cli/update_commands.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S045-update-guard",
+          "ast_or_key_selectors": [
+            "handler:update",
+            "handler:restart",
+            "handler:stop/source-checkout-guard"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+      "members": [
+        {
+          "slice": "S029-skill-user-root-isolation",
+          "ast_or_key_selectors": [
+            "class:OctoHarness/method:__init__/parameter:user_skills_dir",
+            "class:OctoHarness/method:__init__/field:_user_skills_dir",
+            "class:OctoHarness/method:_bootstrap_capability_pack/call:CapabilityPackService"
+          ]
+        },
+        {
+          "slice": "S041-env-tombstone",
+          "ast_or_key_selectors": [
+            "class:OctoHarness/method:_bootstrap_paths/call:validate_loaded_environment"
+          ]
+        },
+        {
+          "slice": "S042-files",
+          "ast_or_key_selectors": [
+            "class:OctoHarness/method:_bootstrap_paths/call:detect_legacy_runtime_files"
+          ]
+        },
+        {
+          "slice": "S085-composition",
+          "ast_or_key_selectors": [
+            "class:OctoHarness/method:_bootstrap_executors"
+          ]
+        },
+        {
+          "slice": "S088-shutdown",
+          "ast_or_key_selectors": [
+            "class:OctoHarness/method:shutdown"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/main.py",
+      "members": [
+        {
+          "slice": "S042-files-early-preflight",
+          "ast_or_key_selectors": [
+            "function:create_app/call:detect_legacy_runtime_files"
+          ]
+        },
+        {
+          "slice": "S064-config-exit",
+          "ast_or_key_selectors": [
+            "function:_resolve_front_door_mode/ExceptHandler"
+          ],
+          "shared_subgroup": "front-door-config-load-and-propagate"
+        },
+        {
+          "slice": "S064-runtime-exit",
+          "ast_or_key_selectors": [
+            "function:_resolve_front_door_mode/branch:load-config-before-env-mode"
+          ],
+          "shared_subgroup": "front-door-config-load-and-propagate"
+        },
+        {
+          "slice": "S064-security-exit",
+          "ast_or_key_selectors": [
+            "function:_enforce_front_door_exposure/ExceptHandler"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/chat.py",
+      "members": [
+        {
+          "slice": "S084-constructor-transaction",
+          "ast_or_key_selectors": [
+            "call:TaskService/constructor-mode"
+          ]
+        },
+        {
+          "slice": "S086-route-preflight",
+          "ast_or_key_selectors": [
+            "route:chat-send/TaskRunner-preflight"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py",
+      "members": [
+        {
+          "slice": "S063-apply-http",
+          "ast_or_key_selectors": [
+            "action:worker.apply/error-envelope"
+          ]
+        },
+        {
+          "slice": "S063-work-http",
+          "ast_or_key_selectors": [
+            "action:work.split/error-envelope"
+          ]
+        },
+        {
+          "slice": "S065-request-503",
+          "ast_or_key_selectors": [
+            "dependency:front-door-runtime/request-503"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/message.py",
+      "members": [
+        {
+          "slice": "S084-constructor-transaction",
+          "ast_or_key_selectors": [
+            "call:TaskService/constructor-mode"
+          ]
+        },
+        {
+          "slice": "S086-route-preflight",
+          "ast_or_key_selectors": [
+            "route:message-send/TaskRunner-preflight"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/agent_context.py",
+      "members": [
+        {
+          "slice": "S083-bundle-xor",
+          "ast_or_key_selectors": [
+            "class:AgentContextService/method:__init__/mode-XOR",
+            "class:AgentContextService/shared-service-attrs-and-setters"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/builtin_tools/delegation_tools.py",
+      "members": [
+        {
+          "slice": "S060-tool-spawn",
+          "ast_or_key_selectors": [
+            "tool:subagents.spawn/target-kind-parse"
+          ]
+        },
+        {
+          "slice": "S061-tool-batch",
+          "ast_or_key_selectors": [
+            "tool:subagents.spawn/whole-batch-preflight"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_bootstrap.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S041-env-tombstone",
+          "ast_or_key_selectors": [
+            "function:validate_loaded_environment"
+          ]
+        },
+        {
+          "slice": "S042-files",
+          "ast_or_key_selectors": [
+            "function:detect_legacy_runtime_files"
+          ]
+        },
+        {
+          "slice": "S042-recovery",
+          "ast_or_key_selectors": [
+            "function:build_canonical_reauth_config"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py",
+      "members": [
+        {
+          "slice": "S016-resolver",
+          "ast_or_key_selectors": [
+            "class:ProviderEntry",
+            "class:ProviderConfig"
+          ]
+        },
+        {
+          "slice": "S040-yaml-supported",
+          "ast_or_key_selectors": [
+            "class:OctoAgentConfig/method:from_yaml/key:supported-normalization"
+          ]
+        },
+        {
+          "slice": "S040-yaml-tombstone",
+          "ast_or_key_selectors": [
+            "class:OctoAgentConfig/method:from_yaml/key:retired-runtime"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/work_service.py",
+      "members": [
+        {
+          "slice": "S060-work-split",
+          "ast_or_key_selectors": [
+            "action:work.split/target-kind-parse"
+          ]
+        },
+        {
+          "slice": "S060-worker-apply",
+          "ast_or_key_selectors": [
+            "action:worker.apply/assignment-target-parse"
+          ]
+        },
+        {
+          "slice": "S061-apply-batch",
+          "ast_or_key_selectors": [
+            "action:worker.apply/whole-batch-preflight"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/worker_service.py",
+      "members": [
+        {
+          "slice": "S060-spawn-profile",
+          "ast_or_key_selectors": [
+            "class:WorkerControlService/selector-parse"
+          ]
+        },
+        {
+          "slice": "S062-graph",
+          "ast_or_key_selectors": [
+            "class:WorkerControlService/graph-preflight"
+          ]
+        },
+        {
+          "slice": "S062-runner",
+          "ast_or_key_selectors": [
+            "class:WorkerControlService/task-runner-preflight"
+          ]
+        },
+        {
+          "slice": "S084-constructor-transaction",
+          "ast_or_key_selectors": [
+            "call:TaskService/constructor-mode"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/execution_console.py",
+      "members": [
+        {
+          "slice": "S067-graph",
+          "ast_or_key_selectors": [
+            "class:ExecutionConsoleService/graph-projection"
+          ]
+        },
+        {
+          "slice": "S067-register",
+          "ast_or_key_selectors": [
+            "class:ExecutionConsoleService/method:register_session"
+          ]
+        },
+        {
+          "slice": "S067-unknown",
+          "ast_or_key_selectors": [
+            "class:ExecutionConsoleService/historical-backend-decoder"
+          ]
+        },
+        {
+          "slice": "S068-raw-history",
+          "ast_or_key_selectors": [
+            "class:ExecutionConsoleService/raw-event-projection"
+          ]
+        },
+        {
+          "slice": "S084-constructor-transaction",
+          "ast_or_key_selectors": [
+            "call:TaskService/constructor-mode"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/llm_service.py",
+      "members": [
+        {
+          "slice": "S085-composition",
+          "ast_or_key_selectors": [
+            "class:LLMService/method:__init__/final-skill-runner-identity"
+          ]
+        },
+        {
+          "slice": "S087-local-close",
+          "ast_or_key_selectors": [
+            "class:LLMService/method:aclose"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_audit.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S034-backup-audit",
+          "ast_or_key_selectors": [
+            "class:BackupAuditRecorder"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/backup_service.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S042-files",
+          "ast_or_key_selectors": [
+            "class:BackupService/legacy-runtime-exclusion"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/runtime_descriptor_defaults.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S031-update-staged",
+          "ast_or_key_selectors": [
+            "function:build_safe_workspace_sync_command/dirty-preflight"
+          ],
+          "shared_subgroup": "dirty-three"
+        },
+        {
+          "slice": "S031-update-unstaged",
+          "ast_or_key_selectors": [
+            "function:build_safe_workspace_sync_command/dirty-preflight"
+          ],
+          "shared_subgroup": "dirty-three"
+        },
+        {
+          "slice": "S031-update-untracked",
+          "ast_or_key_selectors": [
+            "function:build_safe_workspace_sync_command/dirty-preflight"
+          ],
+          "shared_subgroup": "dirty-three"
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/secret_refs.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S030-secret-runner",
+          "ast_or_key_selectors": [
+            "function:resolve_exec_reference/injected-runner"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/service_manager.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S064-startup-entry",
+          "ast_or_key_selectors": [
+            "function:validate_start_command",
+            "class:ServiceManager/method:build_spec"
+          ]
+        },
+        {
+          "slice": "S064-descriptor-read",
+          "ast_or_key_selectors": [
+            "class:ServiceManager/method:start/descriptor-read-only",
+            "class:ServiceManager/method:restart/descriptor-read-only"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/telegram_pairing.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S032-telegram-rmw",
+          "ast_or_key_selectors": [
+            "class:TelegramStateStore/method:_mutate_state"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_service.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S031-update-staged",
+          "ast_or_key_selectors": [
+            "class:UpdateService/workspace-dirty-preflight"
+          ],
+          "shared_subgroup": "dirty-three-service-preflight"
+        },
+        {
+          "slice": "S031-update-unstaged",
+          "ast_or_key_selectors": [
+            "class:UpdateService/workspace-dirty-preflight"
+          ],
+          "shared_subgroup": "dirty-three-service-preflight"
+        },
+        {
+          "slice": "S031-update-untracked",
+          "ast_or_key_selectors": [
+            "class:UpdateService/workspace-dirty-preflight"
+          ],
+          "shared_subgroup": "dirty-three-service-preflight"
+        },
+        {
+          "slice": "S033-worker",
+          "ast_or_key_selectors": [
+            "class:UpdateService/method:apply/active-attempt-claim"
+          ]
+        },
+        {
+          "slice": "S064-startup-entry",
+          "ast_or_key_selectors": [
+            "class:UpdateService/method:_run_restart_phase/descriptor-entry-validation"
+          ],
+          "shared_subgroup": "runtime-descriptor-restart"
+        },
+        {
+          "slice": "S064-descriptor-read",
+          "ast_or_key_selectors": [
+            "class:UpdateService/method:_run_restart_phase/descriptor-entry-validation"
+          ],
+          "shared_subgroup": "runtime-descriptor-restart"
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/update_status_store.py",
+      "members": [
+        {
+          "slice": "S017-namespace-atomic",
+          "ast_or_key_selectors": [
+            "atomic:source-target-content-hash+import-projection"
+          ]
+        },
+        {
+          "slice": "S031-update-staged",
+          "ast_or_key_selectors": [
+            "class:UpdateStatusStore/method:migrate_runtime_descriptor/dirty-safe-command"
+          ],
+          "shared_subgroup": "dirty-three-status"
+        },
+        {
+          "slice": "S031-update-unstaged",
+          "ast_or_key_selectors": [
+            "class:UpdateStatusStore/method:migrate_runtime_descriptor/dirty-safe-command"
+          ],
+          "shared_subgroup": "dirty-three-status"
+        },
+        {
+          "slice": "S031-update-untracked",
+          "ast_or_key_selectors": [
+            "class:UpdateStatusStore/method:migrate_runtime_descriptor/dirty-safe-command"
+          ],
+          "shared_subgroup": "dirty-three-status"
+        },
+        {
+          "slice": "S033-claim",
+          "ast_or_key_selectors": [
+            "class:UpdateStatusStore/method:try_claim_active_attempt"
+          ]
+        },
+        {
+          "slice": "S033-release",
+          "ast_or_key_selectors": [
+            "class:UpdateStatusStore/method:compare_and_release_active_attempt",
+            "class:UpdateStatusStore/method:update_active_attempt_if_owner"
+          ]
+        },
+        {
+          "slice": "S064-descriptor-read",
+          "ast_or_key_selectors": [
+            "class:UpdateStatusStore/method:load_runtime_descriptor",
+            "class:UpdateStatusStore/method:migrate_runtime_descriptor",
+            "class:UpdateStatusStore/method:repair_runtime_descriptor"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py",
+      "members": [
+        {
+          "slice": "S067-register",
+          "ast_or_key_selectors": [
+            "class:OrchestratorService/method:_register_owner_self_execution_session/call:register_session"
+          ]
+        },
+        {
+          "slice": "S066-graph-race",
+          "ast_or_key_selectors": [
+            "class:OrchestratorService/method:_dispatch_delegate_graph/branch:WorkerBackendUnavailableError-terminalization"
+          ]
+        },
+        {
+          "slice": "S082-inline-adapter-removal",
+          "ast_or_key_selectors": [
+            "class:OrchestratorService/method:_dispatch_inline_decision/call:complete_task_with_precomputed_result",
+            "class:OrchestratorService/method:_dispatch_delegate_graph/call:complete_task_with_precomputed_result"
+          ]
+        },
+        {
+          "slice": "S084-constructor-transaction",
+          "ast_or_key_selectors": [
+            "call:TaskService/constructor-mode"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/runtime_service_bundle.py",
+      "members": [
+        {
+          "slice": "S083-bundle-xor",
+          "ast_or_key_selectors": [
+            "class:RuntimeServiceBundle/fields",
+            "class:RuntimeServiceBundle/method:__post_init__"
+          ]
+        },
+        {
+          "slice": "S088-shutdown",
+          "ast_or_key_selectors": [
+            "class:RuntimeServiceBundle/method:aclose"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py",
+      "members": [
+        {
+          "slice": "S081-precomputed",
+          "ast_or_key_selectors": [
+            "class:TaskService/method:complete_task_with_precomputed_result"
+          ]
+        },
+        {
+          "slice": "S082-inline-adapter-removal",
+          "ast_or_key_selectors": [
+            "class:TaskService/method:process_task_with_llm/parameter:llm_service"
+          ]
+        },
+        {
+          "slice": "S083-bundle-xor",
+          "ast_or_key_selectors": [
+            "class:TaskService/method:__init__/mode-XOR"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/task_runner.py",
+      "members": [
+        {
+          "slice": "S066-graph-race",
+          "ast_or_key_selectors": [
+            "class:TaskRunner/graph-race-terminalization"
+          ]
+        },
+        {
+          "slice": "S084-constructor-transaction",
+          "ast_or_key_selectors": [
+            "call:TaskService/constructor-mode"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/worker_runtime.py",
+      "members": [
+        {
+          "slice": "S067-register",
+          "ast_or_key_selectors": [
+            "class:WorkerRuntime/method:run/call:register_session"
+          ]
+        },
+        {
+          "slice": "S060-domain-types",
+          "ast_or_key_selectors": [
+            "class:WorkerDispatchState",
+            "class:WorkerDispatchResult"
+          ]
+        },
+        {
+          "slice": "S062-graph",
+          "ast_or_key_selectors": [
+            "class:WorkerRuntime/graph-preflight"
+          ]
+        },
+        {
+          "slice": "S066-graph-race",
+          "ast_or_key_selectors": [
+            "class:WorkerRuntime/method:run/branch:backend-unavailable"
+          ]
+        },
+        {
+          "slice": "S084-constructor-transaction",
+          "ast_or_key_selectors": [
+            "call:TaskService/constructor-mode"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    },
+    {
+      "path": "repo-scripts/check-changed-lines-coverage.py",
+      "members": [
+        {
+          "slice": "S007-local-coverage",
+          "ast_or_key_selectors": [
+            "function:collect_added_lines",
+            "function:_collect_local_added_lines"
+          ]
+        },
+        {
+          "slice": "S008-fresh-exempt",
+          "ast_or_key_selectors": [
+            "function:_full_main",
+            "function:_read_lcov_snapshot"
+          ]
+        },
+        {
+          "slice": "S036-relocation-post-snapshot-coverage",
+          "ast_or_key_selectors": [
+            "function:_verify_snapshot_bytes"
+          ]
+        }
+      ],
+      "policy": "S007 final-worktree collection, S008 full-contract freshness/outcome and S036 post-snapshot relocation validation own pairwise-disjoint stable functions"
+    },
+    {
+      "path": "repo-scripts/check-runtime-architecture.py",
+      "members": [
+        {
+          "slice": "S001-import-direction",
+          "ast_or_key_selectors": [
+            "function:command_import_direction",
+            "class:ImportDirectionScanner"
+          ]
+        },
+        {
+          "slice": "S002-manifest-integrity",
+          "ast_or_key_selectors": [
+            "class:MachineManifestLoader",
+            "function:command_quality_smells/manifest-integrity"
+          ]
+        },
+        {
+          "slice": "S002-retired-quality",
+          "ast_or_key_selectors": [
+            "function:command_retired_terms",
+            "function:command_quality_smells/retired-quality"
+          ]
+        },
+        {
+          "slice": "S003-complexity-checker",
+          "ast_or_key_selectors": [
+            "function:command_complexity",
+            "class:ComplexityScanner"
+          ]
+        },
+        {
+          "slice": "S004-evidence-checker",
+          "ast_or_key_selectors": [
+            "function:command_tdd_evidence_run",
+            "function:command_tdd_evidence_verify",
+            "function:command_tdd_evidence_recover_index",
+            "function:command_finalize_verification",
+            "class:EvidenceVerifier/core",
+            "function:validate_evidence_index_schema",
+            "function:validate_evidence_chain"
+          ],
+          "shared_subgroup": "tdd-evidence-verifier"
+        },
+        {
+          "slice": "S006-committed-worktree-clean",
+          "ast_or_key_selectors": [
+            "function:validate_v2_index/branch:mode==committed"
+          ]
+        },
+        {
+          "slice": "S006-index-amendment-integrity",
+          "ast_or_key_selectors": [
+            "function:validate_record_order/key:required_t006_amendment_tail",
+            "function:validate_through_task/key:T006",
+            "function:run_formal/branch:adopt-corrective-red"
+          ]
+        },
+        {
+          "slice": "S004-junit-parser",
+          "ast_or_key_selectors": [
+            "class:EvidenceVerifier/method:parse_pytest_junit"
+          ],
+          "shared_subgroup": "tdd-evidence-verifier"
+        },
+        {
+          "slice": "S013-complexity-snapshot",
+          "ast_or_key_selectors": [
+            "class:ComplexitySnapshotInstaller"
+          ]
+        },
+        {
+          "slice": "S012-dependency-selector-semantics",
+          "ast_or_key_selectors": [
+            "function:check_rgr_selectors",
+            "function:resolve_dependency_partition",
+            "function:resolve_pyproject_dependency",
+            "function:resolve_uv_lock_dependency"
+          ]
+        },
+        {
+          "slice": "S103-existing-report",
+          "ast_or_key_selectors": [
+            "class:QuarantineReport",
+            "function:validate_v2_index/key:record33-release-exclusion"
+          ]
+        },
+        {
+          "slice": "S103-quarantine",
+          "ast_or_key_selectors": [
+            "class:QuarantineDiff"
+          ]
+        },
+        {
+          "slice": "S103-rerun",
+          "ast_or_key_selectors": [
+            "class:EvidenceVerifier/method:rerun_verdict"
+          ]
+        }
+      ],
+      "policy": "match stable AST/key selector; equal shared_subgroup means all those members required"
+    }
+  ],
+  "stage_negative_fixtures": [
+    {
+      "stage": "T049",
+      "oracle": "Phase2 hunk never requires Phase3/4 slices"
+    },
+    {
+      "stage": "T070",
+      "oracle": "Phase3 hunk never requires Phase4 slices; C11 is allowed only after S070-clean-wheel-full evidence is complete"
+    },
+    {
+      "stage": "T049-clean-wheel",
+      "oracle": "T049 may require C09 and C10 but any C11, gateway full or all execution before T070 fails"
+    },
+    {
+      "stage": "clean-wheel-symbol-owner",
+      "oracle": "S011 six preliminary selectors, S012 five standard-backend selectors and S070 four full/all selectors are pairwise disjoint; any repeated or aliased hunk, early full branch, missing selector or missing owning RGR evidence fails"
+    },
+    {
+      "stage": "T012-production-budget",
+      "oracle": "T012 combined implementation diff may touch exactly repo-scripts/check-runtime-architecture.py plus the three standard-backend paths octoagent/pyproject.toml, octoagent/uv.lock and repo-scripts/check-clean-wheel.py; Provider/Gateway manifests, runtime product code, namespace, guard or startup owner paths fail"
+    },
+    {
+      "stage": "T012-dependency-selector-semantics",
+      "oracle": "prefix-only selector acceptance, absent coordinates required as nonempty, alias/duplicate ownership, wrong group or pin, lock drift, inverted transition or an unowned changed semantic key fails; after resolver REFACTOR fresh semantic revalidation must resolve both dependency paths with unresolved equal to zero"
+    },
+    {
+      "stage": "T012-rgr-order",
+      "oracle": "implementation before the fresh S011 successor direct RED and the two new import/child REDs fails; S011 GREEN before standard-backend, import-classification and child-observation GREEN/REFACTOR fails; reusing the superseded root/review/binding fails"
+    },
+    {
+      "stage": "T012-standard-backend",
+      "oracle": "missing or drifting Hatchling pin/lock, runtime dependency leakage, non-hatchling backend, manual wheel or METADATA construction, host cache/HOME fallback, source/editable workspace leakage or PASS without an installed locked scaffold fails"
+    },
+    {
+      "stage": "same-phase-shared",
+      "oracle": "omitting any member of a truly shared group fails"
+    },
+    {
+      "stage": "declared-new",
+      "oracle": "a changed path with declared-new status but no slice ownership still fails"
+    },
+    {
+      "stage": "T029",
+      "oracle": "a business hunk embedded in the relocation snapshot fails"
+    },
+    {
+      "stage": "post-T029-authorized",
+      "oracle": "a target symbol change with owning slice evidence passes"
+    },
+    {
+      "stage": "post-T029-unowned",
+      "oracle": "the same target symbol change without owning slice evidence fails"
+    }
+  ]
+}

@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
 from octoagent.core.models import UpdateTriggerSource
-from octoagent.provider.dx.backup_service import BackupService, resolve_project_root
-from octoagent.provider.dx.update_service import UpdateActionError
+from octoagent.gateway.services.operations.backup_service import BackupService, resolve_project_root
+from octoagent.gateway.services.operations.update_service import UpdateActionError
 from pydantic import BaseModel
 from starlette.responses import JSONResponse
 
@@ -49,7 +49,7 @@ def _get_update_status_store(request: Request) -> Any | None:
         return store
 
     try:
-        from octoagent.provider.dx.update_status_store import UpdateStatusStore
+        from octoagent.gateway.services.operations.update_status_store import UpdateStatusStore
     except Exception:
         return None
 
@@ -77,7 +77,7 @@ def _get_update_service(request: Request) -> Any | None:
         return service
 
     try:
-        from octoagent.provider.dx.update_service import UpdateService
+        from octoagent.gateway.services.operations.update_service import UpdateService
     except Exception:
         return None
 
@@ -214,6 +214,7 @@ async def get_auth_diagnostics(request: Request):
     """
     from octoagent.provider import CredentialStore
     from octoagent.provider.auth.codex_cli_bridge import read_codex_cli_auth
+
     from ..services.config.drift_check import detect_auth_config_drift
 
     store = CredentialStore()
@@ -316,10 +317,10 @@ async def get_frontend_version():
     - dist 不存在（dev 模式 / 未构建）→ 返回 build_id="dev"
     - meta 解析失败 → build_id="unknown"，客户端理应 no-op 避免误告警
     """
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     path = _resolve_frontend_index_path()
-    now_iso = datetime.now(tz=timezone.utc).isoformat()
+    now_iso = datetime.now(tz=UTC).isoformat()
     if path is None:
         return {"build_id": "dev", "served_at": now_iso}
     try:
@@ -443,13 +444,17 @@ async def update_apply(
             trigger_source=UpdateTriggerSource.WEB,
             wait=body.wait,
         )
-        if body.wait and (
-            failure_response := _ops_summary_failure_response(
-                error_code="UPDATE_APPLY_FAILED",
-                status_code=500,
-                summary=summary,
+        if (
+            body.wait
+            and (
+                failure_response := _ops_summary_failure_response(
+                    error_code="UPDATE_APPLY_FAILED",
+                    status_code=500,
+                    summary=summary,
+                )
             )
-        ) is not None:
+            is not None
+        ):
             return failure_response
         return JSONResponse(status_code=202, content=_model_dump(summary))
     except Exception as exc:

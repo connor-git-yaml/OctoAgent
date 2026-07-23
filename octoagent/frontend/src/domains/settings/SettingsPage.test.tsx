@@ -497,7 +497,7 @@ describe("SettingsPage", () => {
     expect(draft.config.providers[0].base_url).toBe("https://siliconflow.example.com/v1");
   });
 
-  it("保存时会自动补齐内部 LiteLLM 运行配置", async () => {
+  it("omits retired runtime fields from canonical save payload", async () => {
     const snapshot = buildSettingsSnapshot();
     const submitAction = vi.fn().mockResolvedValue({
       data: {
@@ -523,10 +523,12 @@ describe("SettingsPage", () => {
     await waitFor(() => expect(submitAction).toHaveBeenCalledWith("setup.review", expect.anything()));
 
     const draft = submitAction.mock.calls[0][1].draft;
-    expect(draft.config.runtime.llm_mode).toBe("litellm");
-    expect(draft.config.runtime.litellm_proxy_url).toBe("http://localhost:4000");
-    expect(draft.config.runtime.master_key_env).toBe("LITELLM_MASTER_KEY");
-    expect(draft.secret_values.LITELLM_MASTER_KEY).toBeTruthy();
+    expect(draft.config.providers).toHaveLength(1);
+    expect(draft.config.model_aliases).toHaveProperty("main");
+    expect(draft.config, "payload仍含旧字段").not.toHaveProperty("runtime");
+    expect(draft.secret_values, "payload仍含旧字段").not.toHaveProperty(
+      "LITELLM_MASTER_KEY"
+    );
   });
 
   it("retrieval platform 迁移 UI 暂未启用（void retrievalPlatform）", () => {

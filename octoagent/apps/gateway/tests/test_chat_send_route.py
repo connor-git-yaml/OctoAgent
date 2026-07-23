@@ -29,6 +29,8 @@ from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 # F142 件5a：xdist 分组——本文件含时序敏感断言（固定 sleep 窗口/性能阈值/状态机
 # 竞态，F083 归档债），`--dist=loadgroup` 下同组钉同一 worker 串行执行，
 # 解锁其余测试 `-n auto` 并行（本地全量与 CI 双提速）。
@@ -53,7 +55,7 @@ async def test_app(tmp_path: Path):
     task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=llm_service,
+        runtime_services=runtime_service_fixture(llm_service).bundle,
         timeout_seconds=60,
         monitor_interval_seconds=0.05,
     )
@@ -86,7 +88,8 @@ class TestChatSendRoute:
         client: AsyncClient,
         test_app,
     ) -> None:
-        await _save_worker_with_mirror(test_app.state.store_group.agent_context_store, 
+        await _save_worker_with_mirror(
+            test_app.state.store_group.agent_context_store,
             AgentProfile(
                 profile_id="worker-profile-finance",
                 project_id="",
@@ -94,7 +97,7 @@ class TestChatSendRoute:
                 summary="finance direct session",
                 model_alias="cheap",
                 status=AgentProfileStatus.ACTIVE,
-            )
+            ),
         )
         await test_app.state.store_group.conn.commit()
 
@@ -288,7 +291,7 @@ class TestChatSendRoute:
         )
         await store_group.project_store.create_project(project)
 
-        task_service = TaskService(store_group, test_app.state.sse_hub)
+        task_service = TaskService(store_group, test_app.state.sse_hub, storage_only=True)
         task_id, created = await task_service.create_task(
             NormalizedMessage(
                 channel="web",
@@ -359,7 +362,8 @@ class TestChatSendRoute:
         await store_group.project_store.create_project(project)
 
         worker_profile_id = "worker-profile-legacy"
-        await _save_worker_with_mirror(store_group.agent_context_store, 
+        await _save_worker_with_mirror(
+            store_group.agent_context_store,
             AgentProfile(
                 profile_id=worker_profile_id,
                 project_id=project.project_id,
@@ -367,10 +371,10 @@ class TestChatSendRoute:
                 summary="legacy polluted worker owner",
                 model_alias="cheap",
                 status=AgentProfileStatus.ACTIVE,
-            )
+            ),
         )
 
-        task_service = TaskService(store_group, test_app.state.sse_hub)
+        task_service = TaskService(store_group, test_app.state.sse_hub, storage_only=True)
         task_id, created = await task_service.create_task(
             NormalizedMessage(
                 channel="web",
@@ -482,17 +486,13 @@ class TestChatSendRoute:
         payload = second_detail.json()
         events = payload["events"]
         user_events = [e for e in events if e["type"] == "USER_MESSAGE"]
-        model_completed_events = [
-            e for e in events if e["type"] == "MODEL_CALL_COMPLETED"
-        ]
+        model_completed_events = [e for e in events if e["type"] == "MODEL_CALL_COMPLETED"]
 
         assert len(user_events) >= first_user_count + 1
         assert len(model_completed_events) >= 2
         assert payload["task"]["status"] == "SUCCEEDED"
 
-    async def test_continue_chat_with_unknown_task_returns_404(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_continue_chat_with_unknown_task_returns_404(self, client: AsyncClient) -> None:
         resp = await client.post(
             "/api/chat/send",
             json={"message": "unknown", "task_id": "task-not-exists"},
@@ -530,6 +530,8 @@ class TestChatSendRoute:
 
         assert resp.status_code == 500
         assert resp.json()["detail"]["code"] == "CHAT_TASK_ENQUEUE_FAILED"
+
+
 # ── F117 测试辅助（worker 镜像播种）────────────────────────────────────
 # 运行时统一读 agent_profiles(kind=worker) 镜像；生产中镜像由 publish/_sync 写。本 helper
 # 把 worker 配置 AgentProfile 写成镜像（kind=worker + source_* 标记）反映生产状态。

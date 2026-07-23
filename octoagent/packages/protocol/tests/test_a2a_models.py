@@ -12,8 +12,8 @@ from octoagent.core.models import (
     DispatchEnvelope,
     PartType,
     TaskStatus,
-    WorkerResult,
     WorkerDispatchState,
+    WorkerResult,
 )
 from octoagent.protocol import (
     A2AArtifactMapper,
@@ -293,7 +293,7 @@ class TestAdaptersAndFixtures:
             error_message="worker timed out",
             loop_step=2,
             max_steps=5,
-            backend="docker",
+            backend="graph",
             tool_profile="privileged",
         )
         artifact = Artifact(
@@ -310,7 +310,7 @@ class TestAdaptersAndFixtures:
             worker_id="worker.ops",
             loop_step=2,
             max_steps=5,
-            backend="docker",
+            backend="graph",
         )
 
         result_message = build_result_message(
@@ -332,7 +332,7 @@ class TestAdaptersAndFixtures:
             idempotency_key="task-001:update:0001",
             message_id="task-001-update-0001",
             timestamp_ms=2,
-            backend="docker",
+            backend="graph",
             loop_step=2,
             max_steps=5,
         )

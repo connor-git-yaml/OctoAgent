@@ -18,12 +18,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-
 from octoagent.core.models.agent_context import (
     _user_md_substantively_filled,
     sync_owner_profile_from_user_md,
 )
-
 
 # ---------------------------------------------------------------------------
 # T070 验收
@@ -34,8 +32,9 @@ def test_reinstall_clean_state_user_md_missing(tmp_path: Path) -> None:
     """重装清空后 USER.md 不存在 → 实质填充判定 False（bootstrap_completed = False）。"""
     user_md = tmp_path / "behavior" / "system" / "USER.md"
     assert not user_md.exists(), "前置：USER.md 应该不存在"
-    assert _user_md_substantively_filled(user_md) is False, \
+    assert _user_md_substantively_filled(user_md) is False, (
         "重装后 USER.md 不存在时 bootstrap_completed 必须是 False（防 F35 真用户感知错误）"
+    )
 
 
 def test_reinstall_user_md_too_short_below_threshold(tmp_path: Path) -> None:
@@ -44,8 +43,7 @@ def test_reinstall_user_md_too_short_below_threshold(tmp_path: Path) -> None:
     user_md.parent.mkdir(parents=True, exist_ok=True)
     # < 100 字符的占位内容
     user_md.write_text("# 待填写\n", encoding="utf-8")
-    assert _user_md_substantively_filled(user_md) is False, \
-        "USER.md 内容 < 100 字符时不算实质填充"
+    assert _user_md_substantively_filled(user_md) is False, "USER.md 内容 < 100 字符时不算实质填充"
 
 
 def test_reinstall_user_md_filled_substantively(tmp_path: Path) -> None:
@@ -66,8 +64,9 @@ def test_reinstall_user_md_filled_substantively(tmp_path: Path) -> None:
     assert len(content) > 100, f"测试前提：内容必须 > 100 字符，实际 {len(content)}"
     user_md.write_text(content, encoding="utf-8")
 
-    assert _user_md_substantively_filled(user_md) is True, \
+    assert _user_md_substantively_filled(user_md) is True, (
         "USER.md 实质填充后 bootstrap_completed 信号必须切换为 True（F084 完成路径）"
+    )
 
 
 @pytest.mark.asyncio
@@ -119,7 +118,7 @@ def test_reinstall_no_legacy_bootstrap_session_imports() -> None:
         "octoagent.gateway.services.bootstrap_integrity",
         "octoagent.gateway.services.user_md_renderer",
         "octoagent.gateway.services.builtin_tools.bootstrap_tools",
-        "octoagent.provider.dx.bootstrap_commands",
+        "octoagent.gateway.cli.bootstrap_commands",
     ]
     import importlib
 
@@ -132,7 +131,9 @@ def test_reinstall_no_legacy_bootstrap_session_class() -> None:
     """BootstrapSession 类应该已从 octoagent.core.models.agent_context 删除（F084 Phase 4）。"""
     from octoagent.core.models import agent_context
 
-    assert not hasattr(agent_context, "BootstrapSession"), \
+    assert not hasattr(agent_context, "BootstrapSession"), (
         "BootstrapSession 类应已被 F084 Phase 4 删除"
-    assert not hasattr(agent_context, "BootstrapSessionStatus"), \
+    )
+    assert not hasattr(agent_context, "BootstrapSessionStatus"), (
         "BootstrapSessionStatus 枚举应已被 F084 Phase 4 删除"
+    )

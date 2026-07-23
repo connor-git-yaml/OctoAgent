@@ -27,7 +27,7 @@ from octoagent.gateway.services.execution_context import (
     ExecutionRuntimeContext,
     bind_execution_context,
 )
-from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
+from octoagent.gateway.services.operations.project_migration import ProjectWorkspaceMigrationService
 
 TASK_ID = "task-f136"
 SESSION_ID = "session-f136"
@@ -166,9 +166,7 @@ async def test_first_call_confirmed_true_gated_until_approval(tmp_path: Path) ->
     """AC-1a：首调 confirmed=true（无前置 proposal）不再直写——落盘前审批卡片必须先出现，
     且 pending 期间文件不存在；用户批准后才写入。"""
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     user_md = tmp_path / USER_MD_REL
     try:
         call = await _capture_behavior_tool(tmp_path, store_group, approval_gate=gate)
@@ -193,9 +191,7 @@ async def test_first_call_confirmed_true_gated_until_approval(tmp_path: Path) ->
 async def test_reject_leaves_file_untouched(tmp_path: Path) -> None:
     """AC-1b：用户拒绝 → 不落盘，返回 APPROVAL_REJECTED。"""
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     user_md = tmp_path / USER_MD_REL
     try:
         call = await _capture_behavior_tool(tmp_path, store_group, approval_gate=gate)
@@ -219,9 +215,7 @@ async def test_reject_leaves_file_untouched(tmp_path: Path) -> None:
 
 async def test_approved_write_lands_with_version_and_events(tmp_path: Path) -> None:
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     manager = _RecordingApprovalManager()
     notifications = _RecordingNotificationService()
     try:
@@ -284,9 +278,7 @@ async def test_approved_write_lands_with_version_and_events(tmp_path: Path) -> N
 async def test_reject_restores_running(tmp_path: Path) -> None:
     """AC-3：显式拒绝恢复 RUNNING——一次写入被否决不应终结对话（与 escalate 的刻意差异）。"""
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     console = _RecordingConsole()
     try:
         call = await _capture_behavior_tool(
@@ -309,13 +301,9 @@ async def test_timeout_rejects_without_running_restore(
 ) -> None:
     """AC-4：超时 → APPROVAL_TIMEOUT 不落盘、不恢复 RUNNING
     （终态归 task_runner，F101 HIGH-02 v3）。"""
-    monkeypatch.setattr(
-        write_approval, "BEHAVIOR_WRITE_APPROVAL_TIMEOUT_SECONDS", 0.05
-    )
+    monkeypatch.setattr(write_approval, "BEHAVIOR_WRITE_APPROVAL_TIMEOUT_SECONDS", 0.05)
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     console = _RecordingConsole()
     user_md = tmp_path / USER_MD_REL
     try:
@@ -381,9 +369,7 @@ async def test_review_mode_none_writes_without_gate(
 
 async def test_each_confirmed_write_requires_fresh_approval(tmp_path: Path) -> None:
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     try:
         call = await _capture_behavior_tool(tmp_path, store_group, approval_gate=gate)
         result1, handle1 = await asyncio.gather(
@@ -412,9 +398,7 @@ async def test_each_confirmed_write_requires_fresh_approval(tmp_path: Path) -> N
 async def test_proposal_step_does_not_consult_gate(tmp_path: Path) -> None:
     """AC-8 补充：confirmed=false proposal 步不产生审批请求（行为不变，不触盘）。"""
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     try:
         call = await _capture_behavior_tool(tmp_path, store_group, approval_gate=gate)
         result = await call(file_id="USER.md", content="draft\n", confirmed=False)
@@ -430,9 +414,7 @@ async def test_approval_manager_dual_registration(tmp_path: Path) -> None:
     """AC-9：审批同步注册 ApprovalManager（approval_id=handle_id）——
     Web resolve 依赖，缺注册则 404。"""
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     manager = _RecordingApprovalManager()
     try:
         call = await _capture_behavior_tool(
@@ -467,9 +449,7 @@ async def test_allow_always_does_not_shortcircuit_next_write(tmp_path: Path) -> 
     from octoagent.policy.models import ApprovalDecision
 
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     manager = ApprovalManager()  # 真实覆盖逻辑
 
     async def _resolve_manager_and_gate(decision: ApprovalDecision) -> None:
@@ -482,8 +462,7 @@ async def test_allow_always_does_not_shortcircuit_next_write(tmp_path: Path) -> 
                 assert ok is True, "resolve 必须成功——短路会导致 approval_id 不在 pending"
                 gate_decision = (
                     "approved"
-                    if decision
-                    in (ApprovalDecision.ALLOW_ONCE, ApprovalDecision.ALLOW_ALWAYS)
+                    if decision in (ApprovalDecision.ALLOW_ONCE, ApprovalDecision.ALLOW_ALWAYS)
                     else "rejected"
                 )
                 await gate.resolve_approval(
@@ -540,9 +519,7 @@ async def test_approved_user_md_write_syncs_live_state(tmp_path: Path) -> None:
             return self.live.get(key)
 
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     snapshot_store = _RecordingSnapshotStore()
     try:
         call = await _capture_behavior_tool(
@@ -573,9 +550,7 @@ async def test_rejected_user_md_write_does_not_touch_live_state(tmp_path: Path) 
             return self.live.get(key)
 
     store_group = await _setup(tmp_path)
-    gate = ApprovalGate(
-        event_store=store_group.event_store, task_store=store_group.task_store
-    )
+    gate = ApprovalGate(event_store=store_group.event_store, task_store=store_group.task_store)
     snapshot_store = _RecordingSnapshotStore()
     try:
         call = await _capture_behavior_tool(

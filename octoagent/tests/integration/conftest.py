@@ -11,6 +11,11 @@ from octoagent.core.store import create_store_group
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 
+from apps.gateway.tests.runtime_service_fixtures import (
+    runtime_service_fixture,
+    start_runtime_task_runner,
+)
+
 
 @pytest_asyncio.fixture
 async def integration_app(tmp_path: Path):
@@ -27,12 +32,22 @@ async def integration_app(tmp_path: Path):
         str(tmp_path / "test.db"),
         str(tmp_path / "artifacts"),
     )
+    sse_hub = SSEHub()
+    llm_service = LLMService()
+    runtime_fixture, task_runner = await start_runtime_task_runner(
+        store_group,
+        sse_hub,
+        llm_service,
+    )
     app.state.store_group = store_group
-    app.state.sse_hub = SSEHub()
-    app.state.llm_service = LLMService()
+    app.state.sse_hub = sse_hub
+    app.state.llm_service = llm_service
+    app.state.runtime_services = runtime_fixture.bundle
+    app.state.task_runner = task_runner
 
     yield app
 
+    await task_runner.shutdown()
     await store_group.close()
     os.environ.pop("OCTOAGENT_DB_PATH", None)
     os.environ.pop("OCTOAGENT_ARTIFACTS_DIR", None)
@@ -49,6 +64,7 @@ async def client(integration_app) -> AsyncGenerator[AsyncClient, None]:
 
 
 # --- T001: poll_until 工具函数（F013 FR-009 时序稳定性）---
+
 
 async def poll_until(
     condition: Callable[[], Awaitable[bool]],
@@ -75,6 +91,7 @@ async def poll_until(
 
 
 # --- T002: app_with_checkpoint fixture（F013 场景 B 使用）---
+
 
 @pytest_asyncio.fixture
 async def app_with_checkpoint(tmp_path: Path):
@@ -109,6 +126,7 @@ async def app_with_checkpoint(tmp_path: Path):
 
 
 # --- T003: watchdog_integration_app fixture（F013 场景 C 使用）---
+
 
 @pytest_asyncio.fixture
 async def watchdog_integration_app(tmp_path: Path):
@@ -162,14 +180,18 @@ async def watchdog_integration_app(tmp_path: Path):
     # fixture 为 function-scoped，每次测试均获得独立的 CooldownRegistry 实例（FR-010）
     await store_group.close()
     for key in (
-        "OCTOAGENT_DB_PATH", "OCTOAGENT_ARTIFACTS_DIR", "LOGFIRE_SEND_TO_LOGFIRE",
-        "WATCHDOG_NO_PROGRESS_CYCLES", "WATCHDOG_SCAN_INTERVAL_SECONDS",
+        "OCTOAGENT_DB_PATH",
+        "OCTOAGENT_ARTIFACTS_DIR",
+        "LOGFIRE_SEND_TO_LOGFIRE",
+        "WATCHDOG_NO_PROGRESS_CYCLES",
+        "WATCHDOG_SCAN_INTERVAL_SECONDS",
         "WATCHDOG_COOLDOWN_SECONDS",
     ):
         os.environ.pop(key, None)
 
 
 # --- T004: watchdog_client fixture（F013 场景 C 使用）---
+
 
 @pytest_asyncio.fixture
 async def watchdog_client(watchdog_integration_app) -> AsyncGenerator[AsyncClient, None]:
@@ -184,6 +206,7 @@ async def watchdog_client(watchdog_integration_app) -> AsyncGenerator[AsyncClien
 # --- F013 场景 A/D 专用：含完整 TaskRunner 的集成 app ---
 # 场景 A（消息路由全链路）和场景 D（追踪贯通）需要 TaskRunner 产生
 # ORCH_DECISION / WORKER_DISPATCHED / WORKER_RETURNED 事件
+
 
 @pytest_asyncio.fixture
 async def full_integration_app(tmp_path: Path):
@@ -212,7 +235,7 @@ async def full_integration_app(tmp_path: Path):
     task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=llm_service,
+        runtime_services=runtime_service_fixture(llm_service).bundle,
         timeout_seconds=60,
         monitor_interval_seconds=0.05,
     )
@@ -243,6 +266,7 @@ async def full_client(full_integration_app) -> AsyncGenerator[AsyncClient, None]
 
 # --- F013 共享工具：任务状态检查谓词 ---
 
+
 def make_task_succeeded_checker(task_id: str, store_group) -> Callable[[], Awaitable[bool]]:
     """返回判断指定任务是否达到 SUCCEEDED 状态的异步谓词，供 poll_until 使用。
 
@@ -255,7 +279,9 @@ def make_task_succeeded_checker(task_id: str, store_group) -> Callable[[], Await
     Returns:
         异步谓词，任务状态为 SUCCEEDED 时返回 True
     """
+
     async def _checker() -> bool:
         task = await store_group.task_store.get_task(task_id)
         return task is not None and task.status == "SUCCEEDED"
+
     return _checker

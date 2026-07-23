@@ -21,8 +21,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from octoagent.core.behavior_workspace import BEHAVIOR_FILE_BUDGETS
 from octoagent.core.models.capability import ToolIndexQuery
 from octoagent.core.store import create_store_group
@@ -33,7 +31,7 @@ from octoagent.gateway.services.execution_context import (
     ExecutionRuntimeContext,
     bind_execution_context,
 )
-from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
+from octoagent.gateway.services.operations.project_migration import ProjectWorkspaceMigrationService
 from octoagent.tooling import ToolBroker
 from octoagent.tooling.models import CoreToolSet
 
@@ -146,9 +144,7 @@ class _AutoApproveGate:
         return "approved"
 
 
-async def _capture_behavior_tool(
-    tmp_path: Path, store_group: Any, *, approval_gate: Any = None
-):
+async def _capture_behavior_tool(tmp_path: Path, store_group: Any, *, approval_gate: Any = None):
     """misc_tools 注册捕获 handler 直调（test_behavior_write_golden 同款）。"""
     captured: dict[str, Any] = {}
 
@@ -221,9 +217,7 @@ async def test_behavior_write_confirmed_records_version(tmp_path: Path) -> None:
         store_group=store_group,
     ).ensure_default_project()
     try:
-        call = await _capture_behavior_tool(
-            tmp_path, store_group, approval_gate=_AutoApproveGate()
-        )
+        call = await _capture_behavior_tool(tmp_path, store_group, approval_gate=_AutoApproveGate())
         content = "# USER\n喜欢喝美式\n时区 Asia/Shanghai\n"
         result = await call(file_id="USER.md", content=content, confirmed=True)
         assert result.status == "written"

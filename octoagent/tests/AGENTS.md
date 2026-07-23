@@ -83,7 +83,7 @@ cd octoagent && uv run --project . --no-sync python -m pytest [选择器]
 
 # worktree 验证（强制 PYTHONPATH 锁，防共享 venv editable 指向漂移 → 假 0 regression）
 cd <worktree>/octoagent && env PYTHONNOUSERSITE=1 \
-  PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/packages/sdk/src:$(pwd)/apps/gateway/src" \
+  PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" \
   uv run --project . --no-sync python -m pytest [选择器]
 ```
 

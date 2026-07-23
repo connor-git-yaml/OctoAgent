@@ -257,6 +257,8 @@ def _resolve_action_status_code(code: str, status: ControlPlaneActionStatus) -> 
         return 503
     if code.endswith("_NOT_ALLOWED"):
         return 403
+    if code == "WORKER_RUNTIME_SELECTOR_UNSUPPORTED":
+        return 422
     if code.endswith("_MISMATCH"):
         return 409
     if code.endswith("_FAILED"):

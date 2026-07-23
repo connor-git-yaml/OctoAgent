@@ -1,6 +1,6 @@
 # OctoAgent 统一配置文件
 # 此文件安全纳入版本管理（不含凭证）
-# 凭证由 .env.litellm 管理（已在 .gitignore）
+# 凭证由 CredentialStore 或 .env 管理（已在 .gitignore）
 # NEVER 在此文件存储 API Key 明文 — 使用 api_key_env 存储环境变量名
 #
 config_version: 1
@@ -22,10 +22,6 @@ model_aliases:
     model: gpt-5.4
     description: 低成本模型（GPT-5.4，轻量推理）
     thinking_level: low
-runtime:
-  llm_mode: litellm
-  litellm_proxy_url: http://localhost:4000
-  master_key_env: LITELLM_MASTER_KEY
 front_door:
   mode: loopback
   bearer_token_env: OCTOAGENT_FRONTDOOR_TOKEN

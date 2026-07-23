@@ -16,7 +16,7 @@ class TestSC6Cancel:
         # 创建任务（不触发 LLM，保持 CREATED 状态）
         sg = integration_app.state.store_group
         sse_hub = integration_app.state.sse_hub
-        service = TaskService(sg, sse_hub)
+        service = TaskService(sg, sse_hub, storage_only=True)
 
         msg = NormalizedMessage(
             text="Cancel E2E test",
@@ -40,9 +40,9 @@ class TestSC6Cancel:
         assert "STATE_TRANSITION" in event_types
 
         cancel_events = [
-            e for e in data["events"]
-            if e["type"] == "STATE_TRANSITION"
-            and e["payload"].get("to_status") == "CANCELLED"
+            e
+            for e in data["events"]
+            if e["type"] == "STATE_TRANSITION" and e["payload"].get("to_status") == "CANCELLED"
         ]
         assert len(cancel_events) == 1
 
@@ -50,7 +50,7 @@ class TestSC6Cancel:
         """取消终态任务返回 409"""
         sg = integration_app.state.store_group
         sse_hub = integration_app.state.sse_hub
-        service = TaskService(sg, sse_hub)
+        service = TaskService(sg, sse_hub, storage_only=True)
 
         from octoagent.core.models.enums import TaskStatus
 

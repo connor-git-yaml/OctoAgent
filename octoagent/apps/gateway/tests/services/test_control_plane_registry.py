@@ -18,9 +18,9 @@ from octoagent.gateway.services.control_plane._base import (
     ControlPlaneContext,
     DomainServiceBase,
 )
+from octoagent.gateway.services.operations.project_migration import ProjectWorkspaceMigrationService
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.sse_hub import SSEHub
-from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 
 
 async def _bare_service(tmp_path: Path):

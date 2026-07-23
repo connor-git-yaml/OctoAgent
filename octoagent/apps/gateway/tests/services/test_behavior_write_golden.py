@@ -38,11 +38,10 @@ from octoagent.gateway.services.execution_context import (
     ExecutionRuntimeContext,
     bind_execution_context,
 )
+from octoagent.gateway.services.operations.project_migration import ProjectWorkspaceMigrationService
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.sse_hub import SSEHub
-from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from ulid import ULID
-
 
 USER_MD_BUDGET = BEHAVIOR_FILE_BUDGETS["USER.md"]
 
@@ -175,9 +174,7 @@ async def test_action_write_user_md_syncs_live_state(tmp_path: Path) -> None:
     notifications quiet hours / user_profile.read 等读点无需重启即读到新内容。"""
     snapshot_store = _RecordingSnapshotStore()
     snapshot_store.live["USER.md"] = "# 旧内容\n"
-    control_plane, store_group = await _make_control_plane(
-        tmp_path, snapshot_store=snapshot_store
-    )
+    control_plane, store_group = await _make_control_plane(tmp_path, snapshot_store=snapshot_store)
     try:
         new_content = "# 用户偏好\n改成早上 7 点提醒\n"
         result = await control_plane.execute_action(
@@ -217,7 +214,7 @@ async def test_action_write_budget_exceeded_golden(tmp_path: Path) -> None:
         )
         assert result.code == "BUDGET_EXCEEDED"
         # 错误消息格式与收口前逐字一致（含三个数字字段）
-        assert f"内容超出字符预算 7 字符" in result.message
+        assert "内容超出字符预算 7 字符" in result.message
         assert f"当前 {over}/预算 {USER_MD_BUDGET}" in result.message
     finally:
         await store_group.close()
@@ -309,14 +306,13 @@ async def test_tool_write_bootstrap_marker_golden(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_action_write_oserror_golden(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_action_write_oserror_golden(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """写入异常包装留在 control_plane caller（FILE_WRITE_ERROR 契约）。"""
     from octoagent.gateway.services.control_plane import worker_service as ws_module
 
     control_plane, store_group = await _make_control_plane(tmp_path)
     try:
+
         def _boom(pending: Any, content: str) -> None:
             raise OSError("disk full")
 
@@ -331,9 +327,7 @@ async def test_action_write_oserror_golden(
 
 
 @pytest.mark.asyncio
-async def test_tool_write_oserror_golden(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_tool_write_oserror_golden(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """写入异常包装留在 builtin tool caller（rejected BehaviorWriteFileResult 契约）。"""
     import octoagent.core.behavior_workspace as bw
 

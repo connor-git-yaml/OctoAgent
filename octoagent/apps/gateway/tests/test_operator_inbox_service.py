@@ -16,6 +16,7 @@ from octoagent.core.models import (
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.operator_actions import OperatorActionService
 from octoagent.gateway.services.operator_inbox import OperatorInboxService
 from octoagent.gateway.services.sse_hub import SSEHub
@@ -23,7 +24,6 @@ from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.watchdog.config import WatchdogConfig
 from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalRequest
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from octoagent.tooling.models import SideEffectLevel
 
 
@@ -49,7 +49,7 @@ async def test_operator_inbox_aggregates_four_item_types(tmp_path: Path) -> None
         str(tmp_path / "gateway.db"),
         str(tmp_path / "artifacts"),
     )
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     approval_manager = ApprovalManager(event_store=store_group.event_store)
     state_store = TelegramStateStore(tmp_path)
     watchdog_config = WatchdogConfig(
@@ -156,7 +156,7 @@ async def test_operator_inbox_hides_acknowledged_alert(tmp_path: Path) -> None:
         str(tmp_path / "gateway.db"),
         str(tmp_path / "artifacts"),
     )
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     task_id = await _create_task(task_service, "alert-hide")
     await task_service._write_state_transition(
         task_id=task_id,
@@ -209,7 +209,7 @@ async def test_operator_inbox_hides_retryable_failure_after_retry_succeeds(
         str(tmp_path / "gateway.db"),
         str(tmp_path / "artifacts"),
     )
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     task_id = await _create_task(task_service, "retry-hide")
     await task_service._write_state_transition(
         task_id=task_id,

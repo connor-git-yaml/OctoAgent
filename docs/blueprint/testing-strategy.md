@@ -171,7 +171,7 @@ Feature 083 采用实用主义策略：
 
 - **task 全流程**：从 `ingest_message` → task 创建 → Worker 派发 → stream events → 终态
 - **approval flow**：ask → approve → resume；ask → reject → REJECTED 终态（对齐 C4 / C7）
-- **worker 执行**：JobRunner docker backend 启动 / 执行 / 产物回收 / 超时处理
+- **worker 执行**：当前 Inline/Graph backend 的启动 / 执行 / 产物回收 / 超时处理；未实现的 Docker backend 不进入通过矩阵
 - **memory arbitration**：WriteProposal → 冲突检测 → commit；SoR current/superseded 转换一致性（对齐 S5）
 - **Skill Pipeline checkpoint**：
   - 正常路径：Pipeline 从起点到终点，验证每个节点 checkpoint 写入
@@ -195,7 +195,7 @@ Feature 083 采用实用主义策略：
 
 ### 13.6 安全与策略测试（Security & Policy）
 
-- **Docker 沙箱隔离**：验证工具执行在容器内，无法访问宿主文件系统 / 网络（除白名单）
+- **隔离能力负向门禁**：在真实隔离 backend 尚未实现时，要求配置与运行时 fail closed，禁止用 Inline 执行伪装 Docker 沙箱；未来实现后再增加宿主文件系统与网络隔离验收
 - **secrets 不泄漏**：验证 Vault 中的 secrets 不出现在 LLM 上下文、Event payload、日志输出中（对齐 C5）
 - **Two-Phase 门禁端到端**：不可逆操作必须经历 Plan → Gate → Execute；跳过 Gate 的请求被拒绝（对齐 C4）
 - **工具权限分级**：

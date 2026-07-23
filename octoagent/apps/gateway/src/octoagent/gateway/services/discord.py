@@ -25,7 +25,6 @@ from typing import Any
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-
 from octoagent.core.models import TaskStatus
 from octoagent.core.models.message import NormalizedMessage
 
@@ -130,9 +129,7 @@ class DiscordGatewayService:
         config = self._get_discord_config()
         public_key = str(getattr(config, "public_key", "") or "").strip()
         if not public_key:
-            return DiscordIngestResult(
-                status="blocked", detail="discord_public_key_unavailable"
-            )
+            return DiscordIngestResult(status="blocked", detail="discord_public_key_unavailable")
 
         if not self._verify_signature(raw_body, headers, public_key):
             return DiscordIngestResult(
@@ -148,9 +145,7 @@ class DiscordGatewayService:
 
         interaction_type = interaction.get("type")
         if interaction_type == _INTERACTION_PING:
-            return DiscordIngestResult(
-                status="pong", response_payload={"type": _RESPONSE_PONG}
-            )
+            return DiscordIngestResult(status="pong", response_payload={"type": _RESPONSE_PONG})
         if interaction_type != _INTERACTION_APPLICATION_COMMAND:
             return DiscordIngestResult(
                 status="unsupported",
@@ -184,9 +179,7 @@ class DiscordGatewayService:
         except (ValueError, InvalidSignature):
             return False
 
-    async def _ingest_command(
-        self, interaction: dict[str, Any]
-    ) -> DiscordIngestResult:
+    async def _ingest_command(self, interaction: dict[str, Any]) -> DiscordIngestResult:
         config = self._get_discord_config()
 
         guild_id = str(interaction.get("guild_id", "") or "")
@@ -197,24 +190,22 @@ class DiscordGatewayService:
             user_obj = member.get("user") if isinstance(member, dict) else None
         if not isinstance(user_obj, dict):
             return DiscordIngestResult(
-                status="ignored", detail="missing_user",
+                status="ignored",
+                detail="missing_user",
                 response_payload=_ephemeral_message("无法识别用户。"),
             )
         sender = str(user_obj.get("id", "") or "")
-        sender_name = str(
-            user_obj.get("global_name") or user_obj.get("username") or sender
-        )
+        sender_name = str(user_obj.get("global_name") or user_obj.get("username") or sender)
         interaction_id = str(interaction.get("id", "") or "")
         if not channel_id or not sender or not interaction_id:
             return DiscordIngestResult(
-                status="ignored", detail="missing_required_fields",
+                status="ignored",
+                detail="missing_required_fields",
                 response_payload=_ephemeral_message("交互数据不完整。"),
             )
 
         # 授权（spec D5 修订版：DM 看 allow_users；guild 双条件，空 allowlist = 拒）
-        allow_users = {
-            str(item) for item in (getattr(config, "allow_users", []) or [])
-        }
+        allow_users = {str(item) for item in (getattr(config, "allow_users", []) or [])}
         if sender not in allow_users:
             return DiscordIngestResult(
                 status="unauthorized",
@@ -229,9 +220,7 @@ class DiscordGatewayService:
                 return DiscordIngestResult(
                     status="unauthorized",
                     detail="channel_not_allowed",
-                    response_payload=_ephemeral_message(
-                        "此频道未被授权使用 OctoAgent。"
-                    ),
+                    response_payload=_ephemeral_message("此频道未被授权使用 OctoAgent。"),
                 )
 
         data = interaction.get("data")
@@ -269,21 +258,17 @@ class DiscordGatewayService:
             idempotency_key=f"discord:{interaction_id}",
         )
 
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         task_id, created = await service.create_task(message)
         await self._maybe_enqueue(task_id, text, created)
-        await self._record_conversation_binding(
-            channel_id, scope_id, "guild" if guild_id else "dm"
-        )
+        await self._record_conversation_binding(channel_id, scope_id, "guild" if guild_id else "dm")
         return DiscordIngestResult(
             status="accepted" if created else "duplicate",
             task_id=task_id,
             created=created,
             response_payload={
                 "type": _RESPONSE_CHANNEL_MESSAGE,
-                "data": {
-                    "content": f"已受理，任务 {task_id} 处理中。完成后我会在此频道回复。"
-                },
+                "data": {"content": f"已受理，任务 {task_id} 处理中。完成后我会在此频道回复。"},
             },
         )
 

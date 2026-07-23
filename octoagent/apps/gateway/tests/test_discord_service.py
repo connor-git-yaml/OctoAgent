@@ -51,9 +51,7 @@ class FakeTaskRunner:
         self.enqueued: list[tuple[str, str]] = []
         self.fail_next: bool = False
 
-    async def enqueue(
-        self, task_id: str, user_text: str, model_alias: str | None = None
-    ) -> None:
+    async def enqueue(self, task_id: str, user_text: str, model_alias: str | None = None) -> None:
         if self.fail_next:
             self.fail_next = False
             raise RuntimeError("模拟 enqueue 失败")
@@ -151,13 +149,9 @@ async def test_invalid_signature_rejected(tmp_path: Path) -> None:
     assert result.status == "signature_invalid"
 
     # 缺 header / 非 hex 同样拒绝
-    assert (
-        await service.handle_interaction_request(body, {})
-    ).status == "signature_invalid"
+    assert (await service.handle_interaction_request(body, {})).status == "signature_invalid"
     garbled = {"X-Signature-Ed25519": "zz-not-hex", "X-Signature-Timestamp": "1"}
-    assert (
-        await service.handle_interaction_request(body, garbled)
-    ).status == "signature_invalid"
+    assert (await service.handle_interaction_request(body, garbled)).status == "signature_invalid"
     await store_group.close()
 
 
@@ -200,9 +194,7 @@ async def test_command_creates_task_idempotent(tmp_path: Path) -> None:
     assert task.scope_id == "chat:discord:CH1"
 
     events = await store_group.event_store.get_events_for_task(first.task_id)
-    user_messages = [
-        e for e in events if str(getattr(e.type, "value", e.type)) == "USER_MESSAGE"
-    ]
+    user_messages = [e for e in events if str(getattr(e.type, "value", e.type)) == "USER_MESSAGE"]
     metadata = user_messages[0].payload.get("metadata", {})
     assert metadata.get("discord_interaction_id") == "I001"
     assert metadata.get("discord_channel_id") == "CH1"
@@ -274,9 +266,7 @@ async def test_guild_channel_authorization_matrix(tmp_path: Path) -> None:
     # 空 allowed_channels：guild 拒
     service, store_group = await _build_service(tmp_path, task_runner=runner)
     guild_body = _command_body(guild_id="G1", channel_id="CH_G")
-    result = await service.handle_interaction_request(
-        guild_body, _signed_headers(guild_body)
-    )
+    result = await service.handle_interaction_request(guild_body, _signed_headers(guild_body))
     assert result.status == "unauthorized"
     assert result.response_payload["data"]["flags"] == 64
     await store_group.close()
@@ -285,9 +275,7 @@ async def test_guild_channel_authorization_matrix(tmp_path: Path) -> None:
     service2, store_group2 = await _build_service(
         tmp_path, task_runner=runner, allowed_channels=["CH_G"]
     )
-    accepted = await service2.handle_interaction_request(
-        guild_body, _signed_headers(guild_body)
-    )
+    accepted = await service2.handle_interaction_request(guild_body, _signed_headers(guild_body))
     assert accepted.status == "accepted"
     binding = await store_group2.conversation_binding_store.get("discord", "CH_G")
     assert binding is not None
@@ -300,9 +288,7 @@ async def test_unsupported_type_and_empty_text(tmp_path: Path) -> None:
     """非 command 交互 → unsupported ephemeral；空 options 文本 → ignored。"""
     service, store_group = await _build_service(tmp_path)
     component = json.dumps({"type": 3, "id": "I9"}).encode()
-    result = await service.handle_interaction_request(
-        component, _signed_headers(component)
-    )
+    result = await service.handle_interaction_request(component, _signed_headers(component))
     assert result.status == "unsupported"
     assert result.response_payload["data"]["flags"] == 64
 
@@ -325,9 +311,7 @@ async def test_notify_task_result_rest_message(tmp_path: Path) -> None:
     """US-3 AC-5：discord 来源 task 完成 → REST create_message；他渠道 no-op。"""
     runner = FakeTaskRunner()
     api = FakeDiscordApiClient()
-    service, store_group = await _build_service(
-        tmp_path, task_runner=runner, api_client=api
-    )
+    service, store_group = await _build_service(tmp_path, task_runner=runner, api_client=api)
     body = _command_body()
     result = await service.handle_interaction_request(body, _signed_headers(body))
     assert result.task_id is not None
@@ -345,7 +329,7 @@ async def test_notify_task_result_rest_message(tmp_path: Path) -> None:
     from octoagent.core.models.message import NormalizedMessage
     from octoagent.gateway.services.task_service import TaskService
 
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     web_task_id, _ = await task_service.create_task(
         NormalizedMessage(
             channel="web",

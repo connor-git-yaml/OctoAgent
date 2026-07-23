@@ -142,7 +142,6 @@ class ExecutionConsoleService:
         backend_job_id: str,
         interactive: bool,
         input_policy: HumanInputPolicy,
-        backend: ExecutionBackend = ExecutionBackend.DOCKER,
         worker_id: str = "",
         metadata: dict[str, Any] | None = None,
         message: str = "",
@@ -152,7 +151,7 @@ class ExecutionConsoleService:
         session = ExecutionConsoleSession(
             session_id=session_id,
             task_id=task_id,
-            backend=backend,
+            backend=ExecutionBackend.INLINE,
             backend_job_id=backend_job_id,
             state=ExecutionSessionState.RUNNING,
             interactive=interactive,
@@ -218,7 +217,7 @@ class ExecutionConsoleService:
         if state is None or state.session.session_id != session_id:
             return
         state.log_index += 1
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         await service.append_structured_event(
             task_id=task_id,
             event_type=EventType.EXECUTION_LOG,
@@ -247,7 +246,7 @@ class ExecutionConsoleService:
         state.session.updated_at = datetime.now(UTC)
         if summary:
             state.session.metadata["step_summary"] = summary
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         await service.append_structured_event(
             task_id=task_id,
             event_type=EventType.EXECUTION_STEP,
@@ -298,7 +297,7 @@ class ExecutionConsoleService:
         state.session.can_attach_input = True
         state.session.can_cancel = True
 
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         task = await service.get_task(task_id)
         if task is not None and task.status == TaskStatus.RUNNING:
             await service._write_state_transition(
@@ -365,9 +364,10 @@ class ExecutionConsoleService:
         确保 task 状态正确反映"等待用户审批"的中间状态。
 
         对应恢复方法：mark_running_from_waiting_approval（decision 返回后调用）。
-        H2 说明：终态（FAILED/SUCCEEDED）由 task_runner 负责，此方法仅处理 RUNNING→WAITING_APPROVAL 中间转移。
+        H2 说明：终态（FAILED/SUCCEEDED）由 task_runner 负责；本方法仅处理
+        RUNNING→WAITING_APPROVAL 中间转移。
         """
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         task = await service.get_task(task_id)
         if task is None or task.status != TaskStatus.RUNNING:
             return  # 非 RUNNING 状态不做转移（幂等）
@@ -417,7 +417,7 @@ class ExecutionConsoleService:
         超时场景（decision="rejected"）同样恢复为 RUNNING，由 worker 决定后续行为；
         FAILED 终态由 task_runner 超时监控（FR-C3）负责，不在此处处理。
         """
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         task = await service.get_task(task_id)
         if task is None or task.status != TaskStatus.WAITING_APPROVAL:
             return  # 非 WAITING_APPROVAL 状态不做转移（幂等，防止 double recovery）
@@ -490,7 +490,7 @@ class ExecutionConsoleService:
         )
 
         preview = text[:80]
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         artifact = await service.create_text_artifact(
             task_id=task_id,
             name="human-input",
@@ -500,20 +500,21 @@ class ExecutionConsoleService:
             session_id=session.session_id,
             source="human-input",
         )
-        await service.append_structured_event(
+        attached_payload = ExecutionInputAttachedPayload(
+            session_id=session.session_id,
+            request_id=pending_request.request_id,
+            actor=actor,
+            preview=preview,
+            text_length=len(text),
+            approval_id=pending_request.approval_id,
+            artifact_id=artifact.artifact_id,
+            attached_at=datetime.now(UTC),
+        ).model_dump(mode="json")
+        await self._ensure_input_attached_event(
+            service=service,
             task_id=task_id,
-            event_type=EventType.EXECUTION_INPUT_ATTACHED,
-            actor=ActorType.USER,
-            payload=ExecutionInputAttachedPayload(
-                session_id=session.session_id,
-                request_id=pending_request.request_id,
-                actor=actor,
-                preview=preview,
-                text_length=len(text),
-                approval_id=pending_request.approval_id,
-                artifact_id=artifact.artifact_id,
-                attached_at=datetime.now(UTC),
-            ).model_dump(mode="json"),
+            request_id=pending_request.request_id,
+            payload=attached_payload,
         )
         await service._write_state_transition(
             task_id=task_id,
@@ -533,6 +534,12 @@ class ExecutionConsoleService:
             session=session,
             status=ExecutionSessionState.RUNNING,
             message="human input attached",
+        )
+        await self._ensure_input_attached_event(
+            service=service,
+            task_id=task_id,
+            request_id=pending_request.request_id,
+            payload=attached_payload,
         )
 
         delivered_live = False
@@ -581,6 +588,42 @@ class ExecutionConsoleService:
             approval_id=pending_request.approval_id,
         )
 
+    async def _ensure_input_attached_event(
+        self,
+        *,
+        service: TaskService,
+        task_id: str,
+        request_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """幂等写入并确认人工输入审计事件已持久化。"""
+        idempotency_key = f"execution-input-attached:{task_id}:{request_id}"
+        for attempt in range(1, 4):
+            await service.append_structured_event(
+                task_id=task_id,
+                event_type=EventType.EXECUTION_INPUT_ATTACHED,
+                actor=ActorType.USER,
+                payload=payload,
+                idempotency_key=idempotency_key,
+            )
+            events = await self._stores.event_store.get_events_for_task(task_id)
+            if any(
+                event.type == EventType.EXECUTION_INPUT_ATTACHED
+                and event.causality.idempotency_key == idempotency_key
+                for event in events
+            ):
+                return
+            log.warning(
+                "execution_input_attached_event_not_durable",
+                task_id=task_id,
+                request_id=request_id,
+                attempt=attempt,
+            )
+        raise ExecutionInputError(
+            "input attached event was not durably persisted",
+            code="INPUT_EVENT_NOT_DURABLE",
+        )
+
     async def record_cancel_request(
         self,
         *,
@@ -592,7 +635,7 @@ class ExecutionConsoleService:
         session = await self.get_session(task_id)
         if session is None:
             return
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         await service.append_structured_event(
             task_id=task_id,
             event_type=EventType.EXECUTION_CANCEL_REQUESTED,
@@ -664,7 +707,7 @@ class ExecutionConsoleService:
         status: ExecutionSessionState,
         message: str,
     ) -> None:
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         await service.append_structured_event(
             task_id=task_id,
             event_type=EventType.EXECUTION_STATUS_CHANGED,
@@ -755,17 +798,13 @@ class ExecutionConsoleService:
         session = ExecutionConsoleSession(
             session_id=latest_session_id,
             task_id=task_id,
-            backend=ExecutionBackend(latest_status_payload.backend),
+            backend=self._decode_historical_backend(latest_status_payload.backend),
             backend_job_id=latest_status_payload.backend_job_id,
             state=self._map_task_to_execution_state(task.status),
             interactive=latest_status_payload.interactive,
             input_policy=HumanInputPolicy(latest_status_payload.input_policy),
             current_step=step_payload.step_name if step_payload else "",
-            requested_input=(
-                pending_request.prompt
-                if pending_request is not None
-                else None
-            ),
+            requested_input=(pending_request.prompt if pending_request is not None else None),
             pending_approval_id=(
                 pending_request.approval_id
                 if pending_request is not None and pending_request.approval_id
@@ -783,15 +822,19 @@ class ExecutionConsoleService:
             ),
             started_at=started_at,
             updated_at=updated_at,
-            finished_at=updated_at if task.status in {
+            finished_at=updated_at
+            if task.status
+            in {
                 TaskStatus.SUCCEEDED,
                 TaskStatus.FAILED,
                 TaskStatus.CANCELLED,
                 TaskStatus.REJECTED,
-            } else None,
+            }
+            else None,
             live=False,
             can_attach_input=task.status == TaskStatus.WAITING_INPUT,
-            can_cancel=task.status not in {
+            can_cancel=task.status
+            not in {
                 TaskStatus.SUCCEEDED,
                 TaskStatus.FAILED,
                 TaskStatus.CANCELLED,
@@ -800,6 +843,17 @@ class ExecutionConsoleService:
             metadata=metadata,
         )
         return session
+
+    @staticmethod
+    def _decode_historical_backend(raw_backend: str) -> ExecutionBackend:
+        """解码持久化 backend；新写入只允许 inline，旧值继续可读。"""
+        try:
+            return ExecutionBackend(raw_backend)
+        except ValueError as exc:
+            raise ExecutionInputError(
+                f"unknown historical execution backend: {raw_backend}",
+                code="EXECUTION_BACKEND_UNKNOWN",
+            ) from exc
 
     async def _read_task_with_waiting_input_retry(
         self,

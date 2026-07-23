@@ -20,9 +20,9 @@ from octoagent.gateway.channels import (
     WebChannelAdapter,
 )
 from octoagent.gateway.services.notification import NotificationService
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.telegram import TelegramGatewayService
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 
 from .test_telegram_service import FakeTelegramBotClient
 

@@ -4,26 +4,17 @@ version = "0.1.0"
 description = "OctoAgent Provider -- LLM 调用抽象层"
 requires-python = ">=3.12"
 dependencies = [
-    "litellm[proxy]>=1.80,<2.0",
+    "litellm>=1.80,<2.0",
     "httpx>=0.27,<1.0",
     "pydantic>=2.10,<3.0",
     "structlog>=25.1,<26.0",
     "octoagent-core",
-    "octoagent-memory",
-    "click>=8.1,<9.0",
-    "rich>=13.0,<14.0",
-    "questionary>=2.0,<3.0",
-    "python-dotenv>=1.0,<2.0",
     "filelock>=3.12,<4.0",
-    "keyring>=25.0,<26.0",
-    "pyyaml>=6.0,<7.0",
-    "lancedb>=0.21,<1.0",
-    "jieba>=0.42,<1.0",
+    "python-ulid>=3.1,<4.0",
 ]
 
 [tool.uv.sources]
 octoagent-core = { workspace = true }
-octoagent-memory = { workspace = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -31,9 +22,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/octoagent"]
-
-[project.scripts]
-octo = "octoagent.provider.dx.cli:main"
 
 # F137 硬闸 deny 主布线：安装本包的 venv 内所有 pytest 会话自动加载本插件，
 # 测试默认拒绝真 LLM 网络调用（octoagent/conftest.py 为冗余次选布线，覆盖
@@ -46,8 +34,4 @@ octoagent_model_request_gate = "octoagent.provider.testing.pytest_model_request_
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
-]
-local-embedding = [
-    "sentence-transformers>=3.4,<4.0",
-    "torch>=2.6,<3.0",
 ]

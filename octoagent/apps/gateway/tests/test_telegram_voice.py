@@ -24,11 +24,11 @@ from octoagent.gateway.services.config.config_schema import (
     TelegramChannelConfig,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.telegram import TelegramGatewayService
 from octoagent.gateway.services.telegram_client import TelegramBotClient
 from octoagent.gateway.voice import SttResult, TtsResult
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 
 
 def _write_config(project_root: Path, **telegram_overrides: object) -> None:
@@ -135,6 +135,7 @@ class FakeVoiceBotClient:
         """F110 TTS 出站：记录 send_voice 调用（AC-B1~B6）。"""
         if self._send_voice_raises:
             from octoagent.gateway.services.telegram_client import TelegramBotApiError
+
             raise TelegramBotApiError("fake send_voice failure", status_code=400)
         self.send_voice_calls.append(
             _VoiceSent(chat_id=str(chat_id), audio=voice, reply_to_message_id=reply_to_message_id)
@@ -156,8 +157,10 @@ class FakeTtsService:
         raises: bool = False,
     ) -> None:
         self._available = available
-        self._result = result if result is not None else TtsResult(
-            ok=True, audio=b"OggS\x00fake-tts", backend="fake", duration_ms=42
+        self._result = (
+            result
+            if result is not None
+            else TtsResult(ok=True, audio=b"OggS\x00fake-tts", backend="fake", duration_ms=42)
         )
         self._raises = raises
         self.synthesize_calls = 0
@@ -177,8 +180,10 @@ class FakeSttService:
 
     def __init__(self, *, available: bool = True, result: SttResult | None = None) -> None:
         self._available = available
-        self._result = result if result is not None else SttResult(
-            ok=True, text="明天提醒我开会", backend="fake"
+        self._result = (
+            result
+            if result is not None
+            else SttResult(ok=True, text="明天提醒我开会", backend="fake")
         )
         self.transcribe_calls = 0
 
@@ -554,9 +559,7 @@ async def test_voice_transcription_observable(
         await _drain_voice(service)  # F133:转写观测日志由后台 worker 产生
 
     lines = [
-        r.getMessage()
-        for r in caplog.records
-        if "telegram_voice_transcribed" in r.getMessage()
+        r.getMessage() for r in caplog.records if "telegram_voice_transcribed" in r.getMessage()
     ]
     assert lines, "应有成功转写观测日志"
     assert "backend=faster-whisper" in lines[0]
@@ -615,6 +618,7 @@ async def test_bot_client_send_voice_multipart(tmp_path: Path) -> None:
     assert "multipart" in content_type.lower(), f"Content-Type 应为 multipart，实际: {content_type}"
     # 返回值为 TelegramMessage
     from octoagent.gateway.services.telegram_client import TelegramMessage
+
     assert isinstance(result, TelegramMessage)
     assert result.message_id == 100
 
@@ -805,6 +809,7 @@ async def test_voice_on_command_sets_voice_mode(tmp_path: Path) -> None:
 # ============================================================
 
 # ---- _build_task_and_set_done：helpers for notify_task_result 测试 ----
+
 
 async def _prime_voice_mode(service: TelegramGatewayService, store_group: object) -> None:
     """在 binding 中写 voice_mode=True，模拟用户已开启 voice session。"""
@@ -1081,9 +1086,7 @@ async def test_notify_task_result_degrades_on_tts_timeout(tmp_path: Path) -> Non
     """
     bot = FakeVoiceBotClient()
     stt = FakeSttService()
-    tts = FakeTtsService(
-        result=TtsResult(ok=False, reason="tts_timeout", backend="fake")
-    )
+    tts = FakeTtsService(result=TtsResult(ok=False, reason="tts_timeout", backend="fake"))
     service, store_group, _ = await _build_service(
         tmp_path, bot_client=bot, stt_service=stt, tts_service=tts
     )

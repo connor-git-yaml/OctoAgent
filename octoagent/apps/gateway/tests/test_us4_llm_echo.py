@@ -17,6 +17,8 @@ from octoagent.core.store import create_store_group
 from octoagent.gateway.services.llm_service import LLMService
 from octoagent.gateway.services.sse_hub import SSEHub
 
+from apps.gateway.tests.runtime_service_fixtures import start_runtime_task_runner
+
 # F142 件5a：xdist 分组——本文件含时序敏感断言（固定 sleep 窗口/性能阈值/状态机
 # 竞态，F083 归档债），`--dist=loadgroup` 下同组钉同一 worker 串行执行，
 # 解锁其余测试 `-n auto` 并行（本地全量与 CI 双提速）。
@@ -41,12 +43,22 @@ async def test_app(tmp_path: Path):
         str(tmp_path / "test.db"),
         str(tmp_path / "artifacts"),
     )
+    sse_hub = SSEHub()
+    llm_service = LLMService()
+    runtime_fixture, task_runner = await start_runtime_task_runner(
+        store_group,
+        sse_hub,
+        llm_service,
+    )
     app.state.store_group = store_group
-    app.state.sse_hub = SSEHub()
-    app.state.llm_service = LLMService()
+    app.state.sse_hub = sse_hub
+    app.state.llm_service = llm_service
+    app.state.runtime_services = runtime_fixture.bundle
+    app.state.task_runner = task_runner
 
     yield app
 
+    await task_runner.shutdown()
     await store_group.close()
     os.environ.pop("OCTOAGENT_DB_PATH", None)
     os.environ.pop("OCTOAGENT_ARTIFACTS_DIR", None)
@@ -140,9 +152,7 @@ class TestLLMEcho:
         assert content is not None
         assert b"Echo:" in content
 
-    async def test_echo_model_call_events_have_artifact_ref(
-        self, client: AsyncClient, test_app
-    ):
+    async def test_echo_model_call_events_have_artifact_ref(self, client: AsyncClient, test_app):
         """MODEL_CALL_COMPLETED 事件包含 artifact_ref"""
         resp = await client.post(
             "/api/message",
@@ -163,9 +173,7 @@ class TestLLMEcho:
         assert "artifact_ref" in completed_events[0].payload
         assert completed_events[0].payload["artifact_ref"] is not None
 
-    async def test_state_transitions_correct_order(
-        self, client: AsyncClient, test_app
-    ):
+    async def test_state_transitions_correct_order(self, client: AsyncClient, test_app):
         """状态流转顺序正确：CREATED -> RUNNING -> SUCCEEDED"""
         resp = await client.post(
             "/api/message",

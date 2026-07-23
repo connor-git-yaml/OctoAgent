@@ -1,0 +1,208 @@
+{
+  "version": 1,
+  "retirement_task": "T048",
+  "profiles": {
+    "pre-sdk": {
+      "pythonpath_components": ["octoagent/packages/core/src","octoagent/packages/provider/src","octoagent/packages/protocol/src","octoagent/packages/tooling/src","octoagent/packages/skills/src","octoagent/packages/policy/src","octoagent/packages/memory/src","octoagent/packages/sdk/src","octoagent/apps/gateway/src"],
+      "sdk_component_count": 1
+    },
+    "post-sdk": {
+      "pythonpath_components": ["octoagent/packages/core/src","octoagent/packages/provider/src","octoagent/packages/protocol/src","octoagent/packages/tooling/src","octoagent/packages/skills/src","octoagent/packages/policy/src","octoagent/packages/memory/src","octoagent/apps/gateway/src"],
+      "sdk_component_count": 0
+    },
+    "isolated": {"pythonpath_components": [], "sdk_component_count": 0}
+  },
+  "command_profiles": {
+    "C01":"pre-sdk","C01-post":"post-sdk","C02":"pre-sdk","C02-post":"post-sdk","C03":"post-sdk","C03-retired-behavior":"post-sdk","C04":"post-sdk","C05":"post-sdk","C06-early":"pre-sdk","C06-final":"post-sdk","C07":"post-sdk","C08-safety":"pre-sdk","C08-safety-post":"post-sdk","C08-execution":"post-sdk","C08-startup":"post-sdk","C09":"isolated","C10":"isolated","C11":"isolated","C12-pre":"pre-sdk","C12-post":"post-sdk","C13":"post-sdk","C14":"post-sdk","C15-pre":"pre-sdk","C15-post":"post-sdk","C16":"isolated","C17":"post-sdk","C19-pre":"pre-sdk","C19-post":"post-sdk","C20-pre":"pre-sdk","C20-post":"post-sdk","C20-bootstrap":"pre-sdk","C20-recover":"pre-sdk","C20-amend":"pre-sdk","C21":"pre-sdk","C21-post":"post-sdk","C22":"post-sdk","C23":"post-sdk","C24":"post-sdk","C084":"post-sdk","C25":"post-sdk"
+  },
+  "stages": [
+    {"stage_task":"T005","sdk_state":"present","commands":["C20-recover"],"hard_preconditions":["T005_CORRECTIVE_RED_REVIEW accepted","main supplied corrective aggregate sha256","main supplied a nonempty unique --main-review-message-id with the required T005 corrective review prefix","rejected v1/index/run bytes unchanged"],"recovery_execution":"C20-recover may be re-entered only with the exact same argv and advances artifact-lifecycle R0-R4 hash states; any unrecognized mixed state fails without mutation"},
+    {"stage_task":"T006","sdk_state":"present","commands":["C20-amend"],"hard_preconditions":["both T006 corrective RED reviews accepted","main supplied the canonical combined aggregate for the exact dirty and index-integrity REDs","main supplied one nonempty unique --main-review-message-id with the required T006 index-amendment review prefix","canonical v2 records 1-20 and 12 formal runs unchanged"],"append_execution":"C20-amend is the existing tdd-evidence run command with one parent RED adoption input; one atomic replace appends records 21-22 together, then formal GREEN 23-24 and REFACTOR 25-26 follow in dirty then index-integrity slice order; records 1-20 and existing runs remain unchanged"},
+    {
+      "stage_task": "T012",
+      "sdk_state": "present",
+      "commands": ["C09", "C10"],
+      "hard_preconditions": [
+        "this corrective GATE_DESIGN is approved",
+        "this corrective GATE_TASKS is approved",
+        "S012 dependency resolver RED/GREEN/REFACTOR and fresh semantic unresolved=0 are accepted",
+        "record33 remains chain-required and release-excluded"
+      ],
+      "required_rgr_order": [
+        "S012-dependency-selector-semantics RED",
+        "S012-dependency-selector-semantics GREEN",
+        "S012-dependency-selector-semantics REFACTOR",
+        "S012-standard-backend-scaffold RED",
+        "fresh S011 successor direct RED",
+        "S012-import-classification-inventory RED",
+        "S012-child-isolation-observation RED",
+        "S012-standard-backend-scaffold GREEN",
+        "S012-import-classification-inventory GREEN",
+        "S012-child-isolation-observation GREEN",
+        "S012-standard-backend-scaffold REFACTOR",
+        "S012-import-classification-inventory REFACTOR",
+        "S012-child-isolation-observation REFACTOR",
+        "S011-clean-wheel GREEN",
+        "S011-clean-wheel REFACTOR"
+      ],
+      "test_code_review": {
+        "exact_nodes": [
+          "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_provider_wheel_isolated_import_and_requires_dist",
+          "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_gateway_relocation_level_runs_three_help_and_namespace_checks",
+          "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_gateway_full_runs_external_cwd_host_readiness_and_sigterm",
+          "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_gateway_full_maps_invalid_startup_to_exit_78_before_uvicorn",
+          "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_source_managed_commands_exit_69_before_side_effects",
+          "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_standard_backend_scaffold_is_locked_offline_and_never_synthesizes_wheels",
+          "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_import_inventory_classifies_runtime_optional_type_checking_plugin_and_workspace_ownership",
+          "octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_isolated_child_reports_actual_environment_paths_and_workspace_origins"
+        ],
+        "predecessor_clean_wheel_symbol_count": 32,
+        "predecessor_clean_wheel_symbol_ast_aggregate_sha256": "244ccc7c0b466d71b8affbc5c44a93679daece42209c14a0430e21d054f689a7",
+        "predecessor_release_state_after_owned_rewrite": "SUPERSEDED_HISTORY_NOT_RELEASE_EVIDENCE",
+        "standard_backend_node_and_helpers": "must remain normalized-AST equal to accepted RED contract"
+      },
+      "phase_preconditions": {
+        "dependency_resolver_state": [
+          "accepted RED/GREEN/REFACTOR",
+          "fresh machine semantic revalidation reports unresolved=0"
+        ],
+        "corrective_test_rewrite": [
+          "all eight clean-wheel exact nodes pass code review and collect before behavior execution",
+          "standard-backend node/helpers remain unchanged",
+          "old S011 raw and record33 remain immutable but old direct RED becomes release-ineligible"
+        ],
+        "fresh_reds": [
+          "main-owned S011 successor direct RED uses a fresh exact root, review id and binding",
+          "S012 import-classification and child-observation formal REDs are accepted"
+        ],
+        "standard_backend_implementation": [
+          "accepted S012-standard-backend-scaffold RED remains valid",
+          "all fresh corrective REDs are accepted",
+          "main approves this corrective GATE_DESIGN and GATE_TASKS"
+        ],
+        "shared_venv_scaffold": [
+          "octoagent/pyproject.toml root dev dependency is exactly hatchling==1.29.0",
+          "octoagent/uv.lock is the reviewed standard uv lock result",
+          "main owns the one-time offline shared-venv install"
+        ],
+        "s011_green": [
+          "fresh S011 successor direct RED accepted",
+          "S012 standard-backend, import-classification and child-observation GREEN and REFACTOR accepted"
+        ]
+      },
+      "allowed_implementation_paths": [
+        "repo-scripts/check-runtime-architecture.py",
+        "octoagent/pyproject.toml",
+        "octoagent/uv.lock",
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "standard_backend_implementation_paths": [
+        "octoagent/pyproject.toml",
+        "octoagent/uv.lock",
+        "repo-scripts/check-clean-wheel.py"
+      ],
+      "runtime_product_code_diff_count": 0,
+      "provider_gateway_manifest_diff_count": 0,
+      "standard_backend": {"backend":"hatchling.build","call":"hatchling.build.build_wheel","workspace_wheel_count":9,"wheel_tag":"py3-none-any","metadata_source":"real wheel archive"},
+      "standard_installer": {"command":"uv pip install","offline":true,"no_deps":true,"target":"transaction-local","wheel_source":"transaction-local-only"},
+      "preliminary_dependency_contract": {
+        "manifest_equals_real_wheel_metadata": true,
+        "scan_universe": "installed files owned by the evaluated distribution only",
+        "contexts": ["runtime-required","optional-lazy","type-checking","test-plugin","workspace-owned"],
+        "current_manifest_runtime_delta": "exact and non-suppressed",
+        "final_verdict": null,
+        "final_owner": "T070"
+      },
+      "isolation": {"producer":"same real external-cwd child that imports installed workspace modules","observed_fields":["cwd","ordered sys.path","exact env","site and user-site","prefix and base_prefix","workspace origins"],"uv_cache":"transaction-local","home":"transaction-local","xdg":"transaction-local","tmp":"transaction-local","child_pythonpath":"isolated-target-only","host_cache_or_home_fallback":"reject","source_or_editable_origin":"reject","parent_inference":"reject"},
+      "replacement_red_migration": {"old_aggregate_sha256":"2405581c676b28dea56f9ca66b13e22abeafb386e75ea680e03f246226db84da","old_test_sha256":"294b2e57189d79b622f7048da1e6f5a33cb00982fc7fbebec1fb04b069f238f5","old_binding_sha256":"61047efa7dfeadb6d20f45664a1cd83e825356b11c460d8958ccc9963139f061","state_after_test_rewrite":"SUPERSEDED_HISTORY_NOT_RELEASE_EVIDENCE","successor":"fresh main-owned exact direct RED protocol, raw, review id and binding","reuse_old_root_raw_review_or_binding":"reject"},
+      "batch_authorization_boundary": {"ordered_phases":["test rewrite","fresh S011 successor direct RED and two new S012 REDs","checker/scaffold implementation","three S012 GREEN","three S012 REFACTOR","S011 GREEN and REFACTOR"],"continuous_if":["reversible","hermetic","local","machine-scoped"],"hard_stop_if":["test contract contradiction","scope or authority change","external or destructive operation","architecture fork"]},
+      "forbidden": ["manual wheel or zip writer","synthetic METADATA or RECORD","source tree copy","uv sync","command_gateway_full","command_all","full or all parser branch","target-wide Python file scan","installed availability used as import evidence","unknown import context accepted","parent-reconstructed child facts","suppressed manifest delta"]
+    },
+    {"stage_task":"T014","sdk_state":"present","commands":["C06-early","C20-pre"]},
+    {"stage_task":"T029","sdk_state":"present","commands":["C01","C02","C09","C10","C12-pre","C15-pre","C19-pre","C20-pre"],"exact_command_environment":{"F151_COVERAGE_STAGE":"T029"}},
+    {"stage_task":"T036","sdk_state":"present","commands":["C21","C08-safety","C15-pre","C19-pre","C20-pre"],"exact_command_environment":{"F151_COVERAGE_STAGE":"T036"}},
+    {"stage_task":"T049","sdk_state":"retired","commands":["C03","C03-retired-behavior","C07","C09","C10","C13","C16","C17","C19-post","C20-post"],"exact_command_environment":{"F151_COVERAGE_STAGE":"T049"},"clean_wheel_level":"preliminary only; full/all forbidden"},
+    {"stage_task":"T070","sdk_state":"retired","commands":["C04","C08-execution","C08-startup","C22","C11","C13","C14","C15-post","C19-post","C20-post"],"exact_command_environment":{"F151_COVERAGE_STAGE":"T070"},"clean_wheel_precondition":"S070-clean-wheel-full and S070-direct-dependency-closure RED/GREEN/REFACTOR complete after T017-T029/T023/T045/T049/T064 owners"},
+    {"stage_task":"T084","sdk_state":"retired","commands":["C084","C20-post"]},
+    {"stage_task":"T090","sdk_state":"retired","commands":["C05","C084","C07","C08-execution","C08-startup","C14","C15-post","C19-post","C20-post"],"exact_command_environment":{"F151_COVERAGE_STAGE":"T090"}},
+    {"stage_task":"T102","sdk_state":"retired","commands":["C06-final","C20-post"]},
+    {"stage_task":"T105","sdk_state":"retired","commands":["C06-final","C12-post","C13","C14","C15-post","C19-post","C20-post"],"exact_command_environment":{"F151_COVERAGE_STAGE":"T105"}},
+    {"stage_task":"T120","sdk_state":"retired","commands":["C01-post","C02-post","C03","C03-retired-behavior","C04","C05","C06-final","C07","C08-safety-post","C08-execution","C08-startup","C11","C12-post","C13","C14","C15-post","C16","C17","C20-post","C21-post","C22","C084"]},
+    {"stage_task":"T121","sdk_state":"retired","commands":["C23"]},
+    {"stage_task":"T122","sdk_state":"retired","commands":["C19-post","C16"],"exact_command_environment":{"F151_COVERAGE_STAGE":"T122"},"freshness_binding":{"stage_task":"T122","required_start_fields":["start_utc","start_head_sha","start_head_tree","start_worktree_fingerprint"],"report_stage_must_equal":"T122"}},
+    {"stage_task":"T123","sdk_state":"retired","commands":["C24"]},
+    {"stage_task":"T124","sdk_state":"retired","commands":["C25"]}
+  ],
+  "gate": {
+    "command_source": "testing-matrix.md exact backtick argv indexed by command id",
+    "profile_match": "parse actual PYTHONPATH components and compare exact ordered array",
+    "post_retirement_sdk_reference": "fail in argv, cwd, selector, testpath, env or metadata",
+    "pre_retirement_sdk_missing": "fail for non-isolated commands",
+    "undeclared_command_or_stage": "fail",
+    "stage_order": "stage_task <= T048 requires present; stage_task > T048 requires retired",
+    "coverage_instance": "for a stage containing C19, prefix the testing-matrix transaction with env F151_COVERAGE_STAGE=<exact_command_environment value>; missing, mismatched or nonliteral value fails",
+    "automatic_verify_external_access": "fail if any registered automatic stage/producer command is C18, lane.py baseline, real-LLM/live, reads host credentials/default HOME as authorization, or can incur external cost",
+    "t012_standard_backend": "fail unless the exact three-file standard-backend budget, root dev hatchling==1.29.0 pin, reviewed standard uv lock, hatchling.build backend, nine transaction-local wheels, real archive METADATA, standard offline/no-deps target installer and actual child-observed isolated workspace origins all hold",
+    "t012_dependency_semantics": "fail unless the runtime architecture checker owns and resolves the exact absent-to-present Hatchling and present-to-absent SDK semantic transitions; prefix-only acceptance is not a pass",
+    "t012_import_semantics": "fail unless every owned installed-file import occurrence is context-classified, current deltas are exact, final_verdict is null and parent inference or target-wide contamination is rejected",
+    "t012_release_order": "fail if implementation precedes fresh S011 successor/import/child REDs or S011 GREEN precedes all three S012 corrective GREEN/REFACTOR phases"
+  },
+  "negative_fixtures": [
+    "T049 or later command containing octoagent/packages/sdk/src fails",
+    "T029 or T036 non-isolated command missing the SDK component fails",
+    "using C12-pre, C15-pre or C20-pre after T048 fails",
+    "using C12-post, C15-post or C20-post before T048 fails",
+    "a C19 stage with missing or mismatched F151_COVERAGE_STAGE fails",
+    "T122 reusing T105 coverage or a report whose stage, start tree or start UTC differs from the T122 invocation fails",
+    "T120 using any pre-SDK command id or SDK path fails",
+    "a committed verification report without the T124 C25 producer fails",
+    "T005 C20-recover missing --main-review-message-id, using an empty/unknown value, or reusing an anchor/rejected/T006 review id fails before any path mutation",
+    "T006 C20-amend missing either exact RED, using a child instead of parent root, wrong per-slice or combined aggregate, missing/reused review id, corrupting any prior record/run, adding an extra/unindexed run, or accepting a duplicate/wrong-order/non-prefix six-record tail fails with zero prior byte changes",
+    "T049 missing C09/C10 or containing C11, gateway full or all fails; T070 missing C11 or lacking complete S070-clean-wheel-full evidence fails",
+    "a full/all clean-wheel command before T029 namespace, T045 source guards, T049 absence and T064 startup owners are complete fails",
+    "a C20-recover interruption at any declared R0-R4 transition must resume under the same argv; an undeclared mixed source/quarantine/temp/final state fails",
+    "T124/C25/report cannot be listed as a prerequisite of its own C25 producer; only T120-T123 plus T124 input closure may be required",
+    "C18, lane.py baseline, a live/credential-bearing command, or an authorization inferred from default HOME, credential presence or skip in any F151 automatic stage fails",
+    "a command present in stage-commands.md but absent here fails",
+    "T012 pin missing or drifted, Hatchling present in Provider/Gateway runtime dependencies, lock missing or inconsistent with pyproject, build backend not hatchling.build, manual wheel/METADATA/RECORD builder, host state fallback, source/editable workspace origin, target-wide file scan, installed availability substituted for import evidence, unknown context, parent-inferred child facts, hidden manifest delta, or locked scaffold absent while reporting PASS fails",
+    "T012 modifying a path outside repo-scripts/check-runtime-architecture.py, octoagent/pyproject.toml, octoagent/uv.lock and repo-scripts/check-clean-wheel.py, or modifying Provider/Gateway manifests or runtime product code, fails",
+    "S011 GREEN before its fresh successor direct RED or before standard-backend/import-classification/child-observation GREEN and REFACTOR fails",
+    "reusing the superseded T011 root, raw, review id or binding for the rewritten contract fails",
+    "a dependency selector accepted only by prefix, an absent coordinate required as nonempty, wrong group/pin, lock drift, alias/duplicate owner, inverted transition or changed semantic key without an owner fails"
+  ],
+  "self_check": {
+    "profile_count": 3,
+    "command_count": 40,
+    "stage_count": 17,
+    "pre_stage_count": 6,
+    "post_stage_count": 11,
+    "post_stage_sdk_reference_count": 0,
+    "pre_nonisolated_missing_sdk_count": 0,
+    "unknown_command_count": 0,
+    "coverage_stage_instance_count": 7,
+    "coverage_stage_missing_exact_environment_count": 0,
+    "automatic_live_or_external_cost_command_count": 0,
+    "recover_explicit_main_review_id_option_count": 1,
+    "recover_reentrant_state_machine_count": 1,
+    "append_only_amendment_command_count": 1,
+    "finalize_self_dependency_count": 0,
+    "t012_standard_backend_command_count": 2,
+    "t012_implementation_path_count": 4,
+    "t012_standard_backend_implementation_path_count": 3,
+    "t012_dependency_resolver_implementation_path_count": 1,
+    "t012_new_rgr_slice_count": 4,
+    "t012_required_rgr_order_entry_count": 15,
+    "t012_runtime_product_code_diff_count": 0,
+    "t012_provider_gateway_manifest_diff_count": 0,
+    "t012_workspace_wheel_count": 9,
+    "t012_host_state_fallback_count": 0,
+    "t012_preliminary_final_verdict_count": 0,
+    "t012_clean_wheel_exact_selector_count": 21,
+    "t012_successor_replacement_protocol_count": 1,
+    "t049_preliminary_clean_wheel_command_count": 2,
+    "t049_full_or_all_command_count": 0,
+    "first_full_clean_wheel_stage": "T070",
+    "t070_full_clean_wheel_command_count": 1,
+    "automatic_all_stage_count": 1
+  }
+}

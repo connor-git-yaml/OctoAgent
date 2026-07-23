@@ -32,23 +32,27 @@ from octoagent.core.models import (
 )
 from octoagent.core.store import create_store_group
 from octoagent.core.store.transaction import create_task_with_initial_events
-from octoagent.gateway.services.task_service import TaskService
-from octoagent.provider.dx.backup_service import BackupService
-from octoagent.provider.dx.cli import main as provider_cli
+from octoagent.gateway.cli.cli import main as provider_cli
 from octoagent.gateway.services.config.config_schema import (
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
-    RuntimeConfig,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
-from octoagent.provider.dx.doctor import DoctorRunner
-from octoagent.provider.dx.models import CheckLevel, CheckResult, CheckStatus, DoctorReport
-from octoagent.provider.dx.project_selector import ProjectSelectorService
-from octoagent.provider.dx.recovery_status_store import RecoveryStatusStore
-from octoagent.provider.dx.secret_service import SecretService
-from octoagent.provider.dx.update_service import UpdateService
-from octoagent.provider.dx.update_status_store import UpdateStatusStore
+from octoagent.gateway.services.operations.backup_service import BackupService
+from octoagent.gateway.services.operations.doctor import DoctorRunner
+from octoagent.gateway.services.operations.models import (
+    CheckLevel,
+    CheckResult,
+    CheckStatus,
+    DoctorReport,
+)
+from octoagent.gateway.services.operations.project_selector import ProjectSelectorService
+from octoagent.gateway.services.operations.recovery_status_store import RecoveryStatusStore
+from octoagent.gateway.services.operations.secret_service import SecretService
+from octoagent.gateway.services.operations.update_service import UpdateService
+from octoagent.gateway.services.operations.update_status_store import UpdateStatusStore
+from octoagent.gateway.services.task_service import TaskService
 from ulid import ULID
 
 
@@ -83,11 +87,6 @@ def _write_secret_runtime_config(project_root: Path) -> None:
                 "main": ModelAlias(provider="openrouter", model="openrouter/auto"),
                 "cheap": ModelAlias(provider="openrouter", model="openrouter/auto"),
             },
-            runtime=RuntimeConfig(
-                llm_mode="litellm",
-                litellm_proxy_url="http://localhost:4000",
-                master_key_env="LITELLM_MASTER_KEY",
-            ),
         ),
         project_root,
     )
@@ -126,7 +125,7 @@ def _write_wechat_export(path: Path, media_root: Path) -> None:
 
 
 async def _create_task(app, *, text: str, thread_id: str) -> str:
-    task_service = TaskService(app.state.store_group, app.state.sse_hub)
+    task_service = TaskService(app.state.store_group, app.state.sse_hub, storage_only=True)
     task_id, created = await task_service.create_task(
         NormalizedMessage(
             channel="web",
@@ -384,26 +383,18 @@ async def test_m3_project_isolation_secret_import_and_automation_acceptance(
             store_group=app.state.store_group,
             environ={
                 "OPENROUTER_ALPHA": "alpha-secret",
-                "MASTER_ALPHA": "alpha-master",
                 "OPENROUTER_BETA": "beta-secret",
-                "MASTER_BETA": "beta-master",
             },
         )
-        for project_ref, provider_env, master_env in [
-            (alpha.slug, "OPENROUTER_ALPHA", "MASTER_ALPHA"),
-            (beta.slug, "OPENROUTER_BETA", "MASTER_BETA"),
+        for project_ref, provider_env in [
+            (alpha.slug, "OPENROUTER_ALPHA"),
+            (beta.slug, "OPENROUTER_BETA"),
         ]:
             await secret_service.configure(
                 project_ref=project_ref,
                 source_type=SecretRefSourceType.ENV,
                 locator={"env_name": provider_env},
                 target_keys=["providers.openrouter.api_key_env"],
-            )
-            await secret_service.configure(
-                project_ref=project_ref,
-                source_type=SecretRefSourceType.ENV,
-                locator={"env_name": master_env},
-                target_keys=["runtime.master_key_env"],
             )
             await secret_service.apply(project_ref=project_ref)
             await secret_service.reload(project_ref=project_ref)
@@ -421,11 +412,9 @@ async def test_m3_project_isolation_secret_import_and_automation_acceptance(
         )
         assert {item.ref_locator["env_name"] for item in alpha_bindings} == {
             "OPENROUTER_ALPHA",
-            "MASTER_ALPHA",
         }
         assert {item.ref_locator["env_name"] for item in beta_bindings} == {
             "OPENROUTER_BETA",
-            "MASTER_BETA",
         }
 
         async with AsyncClient(
@@ -674,15 +663,32 @@ async def test_m3_update_backup_restore_drill_acceptance(
         def poll():
             return None
 
-    monkeypatch.setattr("octoagent.provider.dx.update_service.httpx.AsyncClient.get", fake_get)
-    monkeypatch.setattr("octoagent.provider.dx.update_service.os.kill", fake_kill)
-    monkeypatch.setattr("octoagent.provider.dx.update_service.subprocess.Popen", DummyPopen)
+    monkeypatch.setattr(
+        "octoagent.gateway.services.operations.update_service.httpx.AsyncClient.get", fake_get
+    )
+    monkeypatch.setattr("octoagent.gateway.services.operations.update_service.os.kill", fake_kill)
+    monkeypatch.setattr(
+        "octoagent.gateway.services.operations.update_service.subprocess.Popen", DummyPopen
+    )
+
+    clean_status_command = [
+        "git",
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+    ]
+
+    def command_runner(command: list[str], cwd: Path) -> str:
+        commands.append((command, cwd))
+        if command == clean_status_command:
+            return ""
+        return "ok"
 
     service = UpdateService(
         tmp_path,
         status_store=status_store,
         doctor_factory=lambda _root: _PassingDoctorRunner(_report_with_status(CheckStatus.PASS)),
-        command_runner=lambda command, cwd: commands.append((command, cwd)) or "ok",
+        command_runner=command_runner,
     )
 
     preview = await service.preview(trigger_source="cli")
@@ -702,6 +708,10 @@ async def test_m3_update_backup_restore_drill_acceptance(
     assert latest_backup.bundle_id == bundle.bundle_id
     assert restore_plan.compatible is True
     assert recovery_summary.ready_for_restore is True
-    assert commands[0][0] == ["uv", "sync"]
+    assert commands[:2] == [
+        (clean_status_command, tmp_path.resolve()),
+        (clean_status_command, tmp_path.resolve()),
+    ]
+    assert commands[2][0] == ["uv", "sync"]
     assert killed == [(4321, signal.SIGTERM)]
     assert launched

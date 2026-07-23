@@ -8,6 +8,8 @@ from pathlib import Path
 from octoagent.core.models import (
     A2AConversation,
     A2AConversationStatus,
+    AgentDecision,
+    AgentDecisionMode,
     AgentProfile,
     AgentProfileOriginKind,
     AgentProfileStatus,
@@ -41,6 +43,8 @@ from octoagent.provider import ModelCallResult, TokenUsage
 from octoagent.tooling import ToolBroker
 from octoagent.tooling.models import SideEffectLevel
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 
 async def _build_context(
     tmp_path: Path,
@@ -54,11 +58,11 @@ async def _build_context(
     )
     sse_hub = SSEHub()
     resolved_llm_service = llm_service or LLMService()
-    task_service = TaskService(store_group, sse_hub)
+    task_service = TaskService(store_group, sse_hub, storage_only=True)
     orchestrator = OrchestratorService(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=resolved_llm_service,
+        runtime_services=runtime_service_fixture(resolved_llm_service).bundle,
         approval_manager=approval_manager,
     )
     return store_group, task_service, orchestrator
@@ -218,14 +222,13 @@ async def _build_freshness_context(
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-
             source="tests",
         )
     )
     await store_group.conn.commit()
 
     sse_hub = SSEHub()
-    task_service = TaskService(store_group, sse_hub)
+    task_service = TaskService(store_group, sse_hub, storage_only=True)
     tool_broker = ToolBroker(event_store=store_group.event_store)
     capability_pack = CapabilityPackService(
         project_root=tmp_path,
@@ -243,16 +246,308 @@ async def _build_freshness_context(
     orchestrator = OrchestratorService(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=resolved_llm_service,
+        runtime_services=runtime_service_fixture(resolved_llm_service).bundle,
         delegation_plane=delegation_plane,
     )
     return store_group, task_service, orchestrator
 
 
+class _ForbiddenModelCallService:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def call(self, *args, **kwargs) -> ModelCallResult:
+        del args, kwargs
+        self.calls += 1
+        raise AssertionError("deterministic inline reply must not call the configured model")
+
+
+class _GraphStartStub:
+    def __init__(self, *, result: str = "", error: Exception | None = None) -> None:
+        self._result = result
+        self._error = error
+        self.calls: list[dict[str, object]] = []
+
+    async def execute(self, **kwargs) -> str:
+        self.calls.append(dict(kwargs))
+        if self._error is not None:
+            raise self._error
+        return self._result
+
+
+def _force_routing_decision(monkeypatch, orchestrator, decision: AgentDecision) -> None:
+    async def resolve(_request):
+        return decision, {}
+
+    monkeypatch.setattr(orchestrator, "_resolve_routing_decision", resolve)
+
+
+async def _assert_inline_event_contract(store_group, *, task_id: str, expected_content: str) -> str:
+    events = await store_group.event_store.get_events_for_task(task_id)
+    event_types = [item.type for item in events]
+    assert event_types.count("MODEL_CALL_STARTED") == 1
+    assert event_types.count("MODEL_CALL_COMPLETED") == 1
+    assert event_types.count("ARTIFACT_CREATED") == 1
+    assert not {"CONTEXT_COMPACTED", "MEMORY_EXTRACTION_COMPLETED"}.intersection(event_types)
+    completed = next(item for item in events if item.type == "MODEL_CALL_COMPLETED")
+    assert completed.payload == {
+        "model_alias": "main",
+        "response_summary": expected_content,
+        "duration_ms": 1,
+        "token_usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0,
+        },
+        "artifact_ref": completed.payload["artifact_ref"],
+        "model_name": "agent-inline",
+        "provider": "inline",
+        "cost_usd": 0.0,
+        "cost_unavailable": False,
+        "is_fallback": False,
+    }
+    checkpoint_events = [item for item in events if item.type == "CHECKPOINT_SAVED"]
+    assert [item.payload["node_id"] for item in checkpoint_events] == [
+        "state_running",
+        "model_call_started",
+        "response_persisted",
+        "task_succeeded",
+    ]
+    task = await store_group.task_store.get_task(task_id)
+    assert task is not None
+    assert task.status == TaskStatus.SUCCEEDED
+    assert task.pointers.latest_checkpoint_id == checkpoint_events[-1].payload["checkpoint_id"]
+    return str(completed.payload["artifact_ref"])
+
+
+async def _assert_inline_artifact_contract(
+    store_group, *, task_id: str, artifact_ref: str, expected_content: str
+) -> None:
+    artifacts = await store_group.artifact_store.list_artifacts_for_task(task_id)
+    assert sorted(item.name for item in artifacts) == [
+        "llm-request-context",
+        "llm-response",
+    ]
+    response_artifacts = [item for item in artifacts if item.name == "llm-response"]
+    assert len(response_artifacts) == 1
+    response_artifact = response_artifacts[0]
+    assert response_artifact.artifact_id == artifact_ref
+    assert response_artifact.description == "LLM 响应内容"
+    assert response_artifact.size == len(expected_content.encode("utf-8"))
+    content = await store_group.artifact_store.get_artifact_content(response_artifact.artifact_id)
+    assert content == expected_content.encode("utf-8")
+
+
+async def _assert_inline_session_contract(
+    store_group,
+    *,
+    task_id: str,
+    user_text: str,
+    expected_content: str,
+    response_artifact_id: str,
+) -> None:
+    frames = await store_group.agent_context_store.list_context_frames(
+        task_id=task_id,
+        limit=10,
+    )
+    assert len(frames) == 1
+    frame = frames[0]
+    assert frame.agent_runtime_id
+    assert frame.agent_session_id
+    assert frame.recall_frame_id
+    session_context = await store_group.agent_context_store.get_session_context(frame.session_id)
+    assert session_context is not None
+    assert task_id in session_context.task_ids
+    assert session_context.last_recall_frame_id == frame.recall_frame_id
+
+    session = await store_group.agent_context_store.get_agent_session(frame.agent_session_id)
+    assert session is not None
+    assert session.recent_transcript[-2:] == [
+        {"role": "user", "content": user_text, "task_id": task_id},
+        {"role": "assistant", "content": expected_content, "task_id": task_id},
+    ]
+    assert session.metadata["latest_model_reply_preview"] == expected_content
+    turns = await store_group.agent_context_store.list_agent_session_turns(
+        agent_session_id=frame.agent_session_id,
+        limit=10,
+    )
+    assert [item.kind.value for item in turns[-2:]] == [
+        "user_message",
+        "assistant_message",
+    ]
+    assert turns[-1].artifact_ref == response_artifact_id
+
+
+async def _assert_exact_inline_result(
+    store_group,
+    *,
+    task_id: str,
+    user_text: str,
+    expected_content: str,
+) -> None:
+    artifact_ref = await _assert_inline_event_contract(
+        store_group,
+        task_id=task_id,
+        expected_content=expected_content,
+    )
+    await _assert_inline_artifact_contract(
+        store_group,
+        task_id=task_id,
+        artifact_ref=artifact_ref,
+        expected_content=expected_content,
+    )
+    await _assert_inline_session_contract(
+        store_group,
+        task_id=task_id,
+        user_text=user_text,
+        expected_content=expected_content,
+        response_artifact_id=artifact_ref,
+    )
+
+
+async def test_non_direct_reply_persists_exact_precomputed_result_without_model_call(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    model = _ForbiddenModelCallService()
+    store_group, task_service, orchestrator = await _build_context(
+        tmp_path,
+        llm_service=model,
+    )
+    expected = "请补充要查询的城市。"
+    decision = AgentDecision(
+        mode=AgentDecisionMode.ASK_ONCE,
+        category="weather_location",
+        reply_prompt=expected,
+    )
+    _force_routing_decision(monkeypatch, orchestrator, decision)
+
+    try:
+        message = NormalizedMessage(
+            text="今天天气怎么样？",
+            idempotency_key="f151-s080-inline-reply",
+        )
+        task_id, created = await task_service.create_task(message)
+        assert created is True
+
+        result = await orchestrator.dispatch(task_id=task_id, user_text=message.text)
+
+        assert result.status == TaskStatus.SUCCEEDED
+        assert result.summary == "agent_clarification:weather_location"
+        assert model.calls == 0
+        await _assert_exact_inline_result(
+            store_group,
+            task_id=task_id,
+            user_text=message.text,
+            expected_content=expected,
+        )
+    finally:
+        await store_group.close()
+
+
+async def test_graph_start_exception_uses_exact_deterministic_inline_fallback_without_model_call(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    model = _ForbiddenModelCallService()
+    store_group, task_service, orchestrator = await _build_context(
+        tmp_path,
+        llm_service=model,
+    )
+    graph = _GraphStartStub(error=RuntimeError("graph unavailable"))
+    orchestrator._graph_pipeline_tool = graph
+    expected = "工作流暂时无法启动，请稍后再试。"
+    decision = AgentDecision(
+        mode=AgentDecisionMode.DELEGATE_GRAPH,
+        category="graph_start",
+        reply_prompt=expected,
+        pipeline_id="daily-briefing",
+        pipeline_params={"region": "cn"},
+    )
+    _force_routing_decision(monkeypatch, orchestrator, decision)
+
+    try:
+        message = NormalizedMessage(
+            text="运行日报工作流",
+            idempotency_key="f151-s080-graph-exception",
+        )
+        task_id, created = await task_service.create_task(message)
+        assert created is True
+
+        result = await orchestrator.dispatch(task_id=task_id, user_text=message.text)
+
+        assert result.status == TaskStatus.SUCCEEDED
+        assert graph.calls == [
+            {
+                "action": "start",
+                "pipeline_id": "daily-briefing",
+                "params": {"region": "cn"},
+                "task_id": task_id,
+            }
+        ]
+        assert model.calls == 0
+        await _assert_exact_inline_result(
+            store_group,
+            task_id=task_id,
+            user_text=message.text,
+            expected_content=expected,
+        )
+    finally:
+        await store_group.close()
+
+
+async def test_graph_start_error_result_uses_exact_deterministic_inline_fallback_without_model_call(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    model = _ForbiddenModelCallService()
+    store_group, task_service, orchestrator = await _build_context(
+        tmp_path,
+        llm_service=model,
+    )
+    graph = _GraphStartStub(result="Error: pipeline disabled")
+    orchestrator._graph_pipeline_tool = graph
+    expected = "该工作流当前不可用，请稍后再试。"
+    decision = AgentDecision(
+        mode=AgentDecisionMode.DELEGATE_GRAPH,
+        category="graph_start",
+        reply_prompt=expected,
+        pipeline_id="disabled-flow",
+    )
+    _force_routing_decision(monkeypatch, orchestrator, decision)
+
+    try:
+        message = NormalizedMessage(
+            text="运行停用的工作流",
+            idempotency_key="f151-s080-graph-error",
+        )
+        task_id, created = await task_service.create_task(message)
+        assert created is True
+
+        result = await orchestrator.dispatch(task_id=task_id, user_text=message.text)
+
+        assert result.status == TaskStatus.SUCCEEDED
+        assert graph.calls == [
+            {
+                "action": "start",
+                "pipeline_id": "disabled-flow",
+                "params": {},
+                "task_id": task_id,
+            }
+        ]
+        assert model.calls == 0
+        await _assert_exact_inline_result(
+            store_group,
+            task_id=task_id,
+            user_text=message.text,
+            expected_content=expected,
+        )
+    finally:
+        await store_group.close()
+
+
 class TestOrchestrator:
-    async def test_dispatch_success_writes_control_plane_events(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_dispatch_success_writes_control_plane_events(self, tmp_path: Path) -> None:
         store_group, task_service, orchestrator = await _build_context(tmp_path)
 
         msg = NormalizedMessage(text="hello orchestrator", idempotency_key="f008-orch-001")
@@ -413,7 +708,7 @@ class TestOrchestrator:
             str(tmp_path / "artifacts-a2a"),
         )
         sse_hub = SSEHub()
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
 
         seen: dict[str, DispatchEnvelope] = {}
 
@@ -436,7 +731,7 @@ class TestOrchestrator:
         orchestrator = OrchestratorService(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=LLMService(),
+            runtime_services=runtime_service_fixture(LLMService()).bundle,
             workers={"llm_generation": _CaptureWorker()},
         )
 
@@ -461,7 +756,6 @@ class TestOrchestrator:
                 trace_id=f"trace-{task_id}",
                 session_id="session-a2a",
                 project_id="project-default",
-
                 tool_profile="minimal",
                 work_id="work-a2a",
             ),
@@ -472,7 +766,6 @@ class TestOrchestrator:
                     trace_id=f"trace-{task_id}",
                     session_id="session-a2a",
                     project_id="project-default",
-    
                     tool_profile="minimal",
                     work_id="work-a2a",
                 ).model_dump_json(),
@@ -492,15 +785,14 @@ class TestOrchestrator:
         assert captured.metadata["agent_session_id"]
         assert captured.runtime_context is not None
         assert captured.runtime_context.session_id == "session-a2a"
-        assert captured.runtime_context.metadata["agent_session_id"] == captured.metadata[
-            "agent_session_id"
-        ]
+        assert (
+            captured.runtime_context.metadata["agent_session_id"]
+            == captured.metadata["agent_session_id"]
+        )
 
         await store_group.close()
 
-    async def test_routing_hop_guard_fails_before_dispatch(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_routing_hop_guard_fails_before_dispatch(self, tmp_path: Path) -> None:
         store_group, task_service, orchestrator = await _build_context(tmp_path)
 
         msg = NormalizedMessage(text="hop guard", idempotency_key="f008-orch-002")
@@ -532,9 +824,7 @@ class TestOrchestrator:
 
         await store_group.close()
 
-    async def test_high_risk_task_denied_without_approval(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_high_risk_task_denied_without_approval(self, tmp_path: Path) -> None:
         store_group, task_service, orchestrator = await _build_context(tmp_path)
 
         msg = NormalizedMessage(text="high risk", idempotency_key="f008-orch-003")
@@ -567,9 +857,7 @@ class TestOrchestrator:
 
         await store_group.close()
 
-    async def test_high_risk_task_allowed_with_valid_approval_id(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_high_risk_task_allowed_with_valid_approval_id(self, tmp_path: Path) -> None:
         store_group = await create_store_group(
             str(tmp_path / "orchestrator-approved.db"),
             str(tmp_path / "artifacts-approved"),
@@ -577,11 +865,11 @@ class TestOrchestrator:
         sse_hub = SSEHub()
         llm_service = LLMService()
         approval_manager = ApprovalManager(event_store=store_group.event_store)
-        task_service = TaskService(store_group, sse_hub)
+        task_service = TaskService(store_group, sse_hub, storage_only=True)
         orchestrator = OrchestratorService(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_service,
+            runtime_services=runtime_service_fixture(llm_service).bundle,
             approval_manager=approval_manager,
         )
 
@@ -839,7 +1127,8 @@ class TestOrchestrator:
             runtime_context = llm_service.calls[0].get("runtime_context")
             if runtime_context is not None:
                 assert runtime_context.delegation_mode == "main_inline"
-            # F100 Final review HIGH-1 验证：patched runtime_context 同步覆盖 metadata["runtime_context_json"]
+            # F100 Final review HIGH-1 验证：patched runtime_context 同步覆盖
+            # metadata["runtime_context_json"]。
             # （避免 LLMService 通过 runtime_context_from_metadata 读到 stale unspecified）
             assert "runtime_context_json" in metadata
             from octoagent.gateway.services.runtime_control import decode_runtime_context
@@ -963,6 +1252,7 @@ class TestOrchestrator:
             assert "用户正在补充天气地点。" in block
         finally:
             await store_group.close()
+
 
 # ── F117 测试辅助（worker 镜像播种）────────────────────────────────────
 # 运行时统一读 agent_profiles(kind=worker) 镜像；生产中镜像由 publish/_sync 写。本 helper

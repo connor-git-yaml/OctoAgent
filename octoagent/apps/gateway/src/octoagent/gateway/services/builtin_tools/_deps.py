@@ -31,6 +31,7 @@ class WorkerMemoryNamespaceNotResolved(Exception):
       未跑或被破坏，需要显式 fail-fast 让上游可观测）
     """
 
+
 _MEMORY_BINDING_TYPES = {
     ProjectBindingType.SCOPE,
     ProjectBindingType.MEMORY_SCOPE,
@@ -63,10 +64,16 @@ class ToolDeps:
     _snapshot_store: Any = None  # F084 Phase 2 T022-T025
     _graph_pipeline_tool: Any = None  # GraphPipelineTool 实例（lifespan 内 late-bind）
     _approval_gate: Any = None  # F099 Phase B: ApprovalGate 实例（worker.escalate_permission 使用）
-    _approval_manager: Any = None  # F101 Phase B HIGH-01 v3: ApprovalManager 实例（escalate_permission 注册用）
-    _notification_service: Any = None  # F101 Phase C T-C-07: NotificationService 实例（WAITING_APPROVAL 通知用）
+    _approval_manager: Any = (
+        None  # F101 Phase B HIGH-01 v3: ApprovalManager 实例（escalate_permission 注册用）
+    )
+    _notification_service: Any = (
+        None  # F101 Phase C T-C-07: NotificationService 实例（WAITING_APPROVAL 通知用）
+    )
     _workspace_git: Any = None  # F107 W2: WorkspaceGitStore（file-mutating 工具写前快照）
-    _automation_scheduler: Any = None  # F132: AutomationSchedulerService（cron 工具落盘后 sync_job/remove_job）
+    _automation_scheduler: Any = (
+        None  # F132: AutomationSchedulerService（cron 工具落盘后 sync_job/remove_job）
+    )
 
     @property
     def workspace_git(self):
@@ -108,7 +115,11 @@ class ToolDeps:
 async def current_parent(deps: ToolDeps) -> tuple[TaskService, Any, Any]:
     """返回 (TaskService, execution_context, task)。"""
     context = get_current_execution_context()
-    task_service = TaskService(deps.stores, project_root=deps.project_root)
+    task_service = TaskService(
+        deps.stores,
+        project_root=deps.project_root,
+        storage_only=True,
+    )
     task = await deps.stores.task_store.get_task(context.task_id)
     if task is None:
         raise RuntimeError("current task not found for builtin tool")
@@ -135,7 +146,11 @@ async def resolve_runtime_project_context(
         task_service, _context, task = await current_parent(deps)
     except Exception:
         task = None
-        task_service = TaskService(deps.stores, project_root=deps.project_root)
+        task_service = TaskService(
+            deps.stores,
+            project_root=deps.project_root,
+            storage_only=True,
+        )
     if task is not None:
         project, workspace = await task_service._agent_context.resolve_project_scope(
             task=task,
@@ -237,6 +252,7 @@ async def resolve_memory_scope_ids(
             scope_ids.append(candidate)
         else:
             import structlog
+
             structlog.get_logger(__name__).warning(
                 "memory_scope_outside_binding",
                 explicit_scope_id=candidate,
@@ -308,10 +324,7 @@ def resolve_and_check_path(
     result = check_path_access(resolved, global_instance_root, current_project_slug)
 
     if result.verdict == PathVerdict.DENY:
-        raise RuntimeError(
-            f"访问被拒绝: {result.reason}。"
-            f"该路径包含系统内部文件，Agent 不可访问。"
-        )
+        raise RuntimeError(f"访问被拒绝: {result.reason}。该路径包含系统内部文件，Agent 不可访问。")
 
     if result.verdict == PathVerdict.NEEDS_APPROVAL:
         # 灰名单路径（instance root 外）— 仍然允许访问，

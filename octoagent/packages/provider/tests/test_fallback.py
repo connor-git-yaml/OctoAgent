@@ -7,9 +7,11 @@
 from unittest.mock import AsyncMock
 
 import pytest
-from octoagent.provider.exceptions import ProviderError, ProxyUnreachableError
+from octoagent.provider.exceptions import ProviderError
 from octoagent.provider.fallback import FallbackManager
 from octoagent.provider.models import ModelCallResult
+
+PROVIDER_ERROR_ORACLE = "F151_PROVIDER_ERROR_COLLAPSE_MISSING"
 
 
 def _make_result(content: str = "ok", is_fallback: bool = False) -> ModelCallResult:
@@ -36,9 +38,7 @@ def mock_primary():
 def mock_fallback():
     """Mock EchoMessageAdapter"""
     adapter = AsyncMock()
-    adapter.complete = AsyncMock(
-        return_value=_make_result("echo response", is_fallback=False)
-    )
+    adapter.complete = AsyncMock(return_value=_make_result("echo response", is_fallback=False))
     return adapter
 
 
@@ -61,13 +61,9 @@ class TestFallbackManagerPrimarySuccess:
 class TestFallbackManagerPrimaryFailure:
     """Primary 失败场景"""
 
-    async def test_proxy_unreachable_triggers_fallback(
-        self, mock_primary, mock_fallback
-    ):
-        """ProxyUnreachableError 触发 fallback"""
-        mock_primary.complete.side_effect = ProxyUnreachableError(
-            "http://localhost:4000", ConnectionError("refused")
-        )
+    async def test_provider_failure_triggers_fallback(self, mock_primary, mock_fallback):
+        """ProviderError 触发 fallback。"""
+        mock_primary.complete.side_effect = ProviderError("provider unavailable")
         fm = FallbackManager(primary=mock_primary, fallback=mock_fallback)
         messages = [{"role": "user", "content": "test"}]
 
@@ -77,9 +73,7 @@ class TestFallbackManagerPrimaryFailure:
         assert result.fallback_reason != ""
         mock_fallback.complete.assert_called_once()
 
-    async def test_provider_error_triggers_fallback(
-        self, mock_primary, mock_fallback
-    ):
+    async def test_provider_error_triggers_fallback(self, mock_primary, mock_fallback):
         """ProviderError 触发 fallback"""
         mock_primary.complete.side_effect = ProviderError("model unavailable")
         fm = FallbackManager(primary=mock_primary, fallback=mock_fallback)
@@ -89,9 +83,7 @@ class TestFallbackManagerPrimaryFailure:
 
         assert result.is_fallback is True
 
-    async def test_generic_exception_triggers_fallback(
-        self, mock_primary, mock_fallback
-    ):
+    async def test_generic_exception_triggers_fallback(self, mock_primary, mock_fallback):
         """通用异常也触发 fallback"""
         mock_primary.complete.side_effect = RuntimeError("unexpected")
         fm = FallbackManager(primary=mock_primary, fallback=mock_fallback)
@@ -107,9 +99,7 @@ class TestFallbackManagerBothFail:
 
     async def test_both_fail_raises_provider_error(self, mock_primary, mock_fallback):
         """双方失败抛出 ProviderError"""
-        mock_primary.complete.side_effect = ProxyUnreachableError(
-            "http://localhost:4000", ConnectionError("refused")
-        )
+        mock_primary.complete.side_effect = ProviderError("provider unavailable")
         mock_fallback.complete.side_effect = RuntimeError("echo also failed")
 
         fm = FallbackManager(primary=mock_primary, fallback=mock_fallback)
@@ -120,9 +110,7 @@ class TestFallbackManagerBothFail:
 
     async def test_no_fallback_configured(self, mock_primary):
         """未配置 fallback 时直接抛 ProviderError"""
-        mock_primary.complete.side_effect = ProxyUnreachableError(
-            "http://localhost:4000", ConnectionError("refused")
-        )
+        mock_primary.complete.side_effect = ProviderError("provider unavailable")
         fm = FallbackManager(primary=mock_primary, fallback=None)
         messages = [{"role": "user", "content": "test"}]
 
@@ -139,9 +127,7 @@ class TestFallbackManagerLazyProbe:
         messages = [{"role": "user", "content": "test"}]
 
         # 第一次: primary 失败，使用 fallback
-        mock_primary.complete.side_effect = ProxyUnreachableError(
-            "http://localhost:4000", ConnectionError("refused")
-        )
+        mock_primary.complete.side_effect = ProviderError("provider unavailable")
         result1 = await fm.call_with_fallback(messages)
         assert result1.is_fallback is True
 
@@ -160,8 +146,9 @@ class TestFallbackManagerLazyProbe:
         await fm.call_with_fallback(messages, model_alias="cheap")
 
         call_kwargs = mock_primary.complete.call_args
-        assert call_kwargs.kwargs.get("model_alias") == "cheap" or \
-               (len(call_kwargs.args) > 1 and call_kwargs.args[1] == "cheap")
+        assert call_kwargs.kwargs.get("model_alias") == "cheap" or (
+            len(call_kwargs.args) > 1 and call_kwargs.args[1] == "cheap"
+        )
 
 
 class TestFallbackManagerAuthError:
@@ -193,9 +180,7 @@ class TestFallbackManagerAuthError:
         assert exc_info.value is auth_error
         mock_fallback.complete.assert_not_called()
 
-    async def test_non_auth_llm_error_still_falls_back(
-        self, mock_primary, mock_fallback
-    ):
+    async def test_non_auth_llm_error_still_falls_back(self, mock_primary, mock_fallback):
         """回归护栏：非 auth 的 LLMCallError（如 500）保持 fallback 语义。"""
         from octoagent.provider.provider_client import LLMCallError
 
@@ -209,3 +194,20 @@ class TestFallbackManagerAuthError:
 
         assert result.is_fallback is True
         mock_fallback.complete.assert_called_once()
+
+
+async def test_provider_fallback_uses_provider_error_without_proxy_compatibility_subclass(
+    mock_primary, mock_fallback
+) -> None:
+    """Provider fallback 只保留统一的 ProviderError 边界。"""
+    from octoagent.provider import exceptions
+
+    if hasattr(exceptions, "ProxyUnreachableError"):
+        pytest.fail(PROVIDER_ERROR_ORACLE, pytrace=False)
+
+    mock_primary.complete.side_effect = ProviderError("provider unavailable")
+    manager = FallbackManager(primary=mock_primary, fallback=mock_fallback)
+    result = await manager.call_with_fallback([{"role": "user", "content": "test"}])
+
+    assert result.is_fallback is True
+    mock_fallback.complete.assert_called_once()

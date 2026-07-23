@@ -113,9 +113,11 @@ class ProviderModelClient:
         # 构造确定性占位（仅记录有 artifact_ref=可 read-back 恢复的 tool 结果）。
         self._fold_meta: dict[str, dict[str, dict[str, str]]] = {}
 
-    async def close(self) -> None:
-        """关闭底层 router 持有的 http_client。"""
-        await self._router.aclose()
+    async def aclose(self) -> None:
+        """释放本客户端持有的会话状态，不关闭共享 ProviderRouter。"""
+        self._histories.clear()
+        self._last_access.clear()
+        self._fold_meta.clear()
 
     def clear_history(self, key: str) -> None:
         """task 终态后由 SkillRunner 调用。

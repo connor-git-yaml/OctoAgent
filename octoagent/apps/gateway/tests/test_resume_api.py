@@ -39,7 +39,7 @@ async def client(test_app) -> AsyncClient:
 
 
 async def _create_task_with_status(test_app, key: str, to_status: TaskStatus | None = None) -> str:
-    service = TaskService(test_app.state.store_group, test_app.state.sse_hub)
+    service = TaskService(test_app.state.store_group, test_app.state.sse_hub, storage_only=True)
     msg = NormalizedMessage(text="resume api", idempotency_key=key)
     task_id, created = await service.create_task(msg)
     assert created is True

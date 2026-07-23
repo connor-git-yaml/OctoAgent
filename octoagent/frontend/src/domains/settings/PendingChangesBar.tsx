@@ -26,7 +26,6 @@ interface PendingChangesBarProps {
 const CATEGORY_LABELS: Record<string, string> = {
   providers: "Provider 列表",
   model_aliases: "模型别名",
-  runtime: "Runtime / Proxy",
   secrets: "未保存的凭证",
 };
 
@@ -34,7 +33,11 @@ function renderCategories(categories: string[]): string {
   if (categories.length === 0) {
     return "一些配置";
   }
-  return categories
+  const activeCategories = categories.filter((category) => category !== "runtime");
+  if (activeCategories.length === 0) {
+    return "一些配置";
+  }
+  return activeCategories
     .map((cat) => CATEGORY_LABELS[cat] ?? cat)
     .join("、");
 }

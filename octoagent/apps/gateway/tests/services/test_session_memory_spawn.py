@@ -16,6 +16,8 @@ import pytest
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.agent_context import AgentContextService
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 
 @pytest.fixture(autouse=True)
 def _restore_shared_background_tasks():
@@ -31,14 +33,21 @@ async def make_service(tmp_path):
     created = []
     idx = 0
 
-    async def _factory():
+    async def _factory(*, background_tasks: set | None = None):
         nonlocal idx
         idx += 1
         store_group = await create_store_group(
             str(tmp_path / f"sm-{idx}.db"), str(tmp_path / "art")
         )
         created.append(store_group)
-        return AgentContextService(store_group, project_root=tmp_path)
+        return AgentContextService(
+            store_group,
+            project_root=tmp_path,
+            runtime_services=runtime_service_fixture(
+                MagicMock(),
+                background_tasks=background_tasks,
+            ).bundle,
+        )
 
     yield _factory
     for sg in created:
@@ -61,9 +70,8 @@ def test_set_background_tasks_injects_shared_set():
 @pytest.mark.asyncio
 async def test_spawn_registers_task_then_auto_discards(make_service):
     """在途时 task 注册进 drain 集合；完成后经 done 回调自动移除（不无界增长）。"""
-    svc = await make_service()
     bg: set = set()
-    AgentContextService.set_background_tasks(bg)
+    svc = await make_service(background_tasks=bg)
 
     started = asyncio.Event()
     release = asyncio.Event()
@@ -90,9 +98,8 @@ async def test_spawn_registers_task_then_auto_discards(make_service):
 @pytest.mark.asyncio
 async def test_spawn_done_callback_survives_cancellation(make_service):
     """drain 超时会 cancel task：done 回调先判 cancelled，不得因 t.exception() raise。"""
-    svc = await make_service()
     bg: set = set()
-    AgentContextService.set_background_tasks(bg)
+    svc = await make_service(background_tasks=bg)
 
     started = asyncio.Event()
 
@@ -118,7 +125,7 @@ async def test_spawn_done_callback_survives_cancellation(make_service):
 async def test_spawn_without_injected_set_degrades_gracefully(make_service):
     """未注入 background_tasks（_shared_background_tasks=None）→ 仍 spawn，不崩。"""
     svc = await make_service()
-    AgentContextService.set_background_tasks(None)
+    svc._background_tasks = None
 
     release = asyncio.Event()
 
@@ -138,7 +145,6 @@ async def test_spawn_without_injected_set_degrades_gracefully(make_service):
 async def test_spawn_returns_none_when_extractor_unavailable(make_service):
     """extractor 不可用 → 返回 None，不创建 task、不崩。"""
     svc = await make_service()
-    AgentContextService.set_background_tasks(set())
     svc.get_session_memory_extractor = lambda: None  # type: ignore[method-assign]
 
     task = svc._spawn_session_memory_extraction(agent_session=MagicMock(), project=None)

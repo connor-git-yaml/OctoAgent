@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -31,12 +30,13 @@ from octoagent.core.models.agent_context import (
     AgentSession,
     AgentSessionKind,
 )
-from octoagent.core.models.enums import ActorType, TaskStatus
+from octoagent.core.models.enums import TaskStatus
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 # ---------------------------------------------------------------------------
 # 辅助工具
@@ -76,7 +76,7 @@ def _make_delegation(
 
 async def _create_parent_task(store_group, sse_hub: SSEHub) -> str:
     """创建父任务并返回 task_id（用于 EventStore parent_task_id）。"""
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     msg = NormalizedMessage(
         text="parent task for subagent cleanup test",
         idempotency_key=f"parent-{datetime.now().timestamp()}",
@@ -90,12 +90,14 @@ async def _create_runner(store_group, sse_hub: SSEHub) -> TaskRunner:
     return TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=None,
+        runtime_services=runtime_service_fixture(None).bundle,
         timeout_seconds=60,
     )
 
 
-async def _create_subagent_session(store_group, *, agent_session_id: str, agent_runtime_id: str) -> AgentSession:
+async def _create_subagent_session(
+    store_group, *, agent_session_id: str, agent_runtime_id: str
+) -> AgentSession:
     """在 store 中创建一个 SUBAGENT_INTERNAL AgentSession（Phase B 完成后才会真实存在，测试用）。"""
     # 首先创建 AgentRuntime（agent_session 需要 FK 关联）
     runtime = AgentRuntime(
@@ -143,17 +145,24 @@ async def test_cleanup_on_succeeded_closes_session(tmp_path: Path) -> None:
         agent_runtime_id=_CALLER_RUNTIME_ID,
     )
 
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": delegation.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.SUCCEEDED,
-            "updated_at": _NOW,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": delegation.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.SUCCEEDED,
+                    "updated_at": _NOW,
+                },
+            )(),
+        ),
     ):
         await runner._close_subagent_session_if_needed(parent_task_id)
 
@@ -186,17 +195,24 @@ async def test_cleanup_on_failed_closes_session(tmp_path: Path) -> None:
         agent_runtime_id=_CALLER_RUNTIME_ID,
     )
 
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": delegation.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.FAILED,
-            "updated_at": _NOW,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": delegation.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.FAILED,
+                    "updated_at": _NOW,
+                },
+            )(),
+        ),
     ):
         await runner._close_subagent_session_if_needed(parent_task_id)
 
@@ -228,17 +244,24 @@ async def test_cleanup_on_cancelled_closes_session(tmp_path: Path) -> None:
         agent_runtime_id=_CALLER_RUNTIME_ID,
     )
 
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": delegation.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.CANCELLED,
-            "updated_at": _NOW,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": delegation.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.CANCELLED,
+                    "updated_at": _NOW,
+                },
+            )(),
+        ),
     ):
         await runner._close_subagent_session_if_needed(parent_task_id)
 
@@ -271,17 +294,24 @@ async def test_cleanup_idempotent_already_closed_session(tmp_path: Path) -> None
         agent_runtime_id=_CALLER_RUNTIME_ID,
     )
 
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": delegation.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.SUCCEEDED,
-            "updated_at": _NOW,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": delegation.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.SUCCEEDED,
+                    "updated_at": _NOW,
+                },
+            )(),
+        ),
     ):
         await runner._close_subagent_session_if_needed(parent_task_id)
 
@@ -293,22 +323,31 @@ async def test_cleanup_idempotent_already_closed_session(tmp_path: Path) -> None
     # 第二次 cleanup：delegation.closed_at 已设置（幂等保护 step 4 触发 early return）
     later_time = datetime(2026, 5, 10, 14, 0, 0, tzinfo=UTC)
     delegation_closed = _make_delegation(parent_task_id=parent_task_id, closed_at=_NOW)
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": delegation_closed.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.SUCCEEDED,
-            "updated_at": later_time,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": delegation_closed.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.SUCCEEDED,
+                    "updated_at": later_time,
+                },
+            )(),
+        ),
     ):
         # 第二次调用不应 raise
         await runner._close_subagent_session_if_needed(parent_task_id)
 
-    session_after_second = await store_group.agent_context_store.get_agent_session(_CHILD_SESSION_ID)
+    session_after_second = await store_group.agent_context_store.get_agent_session(
+        _CHILD_SESSION_ID
+    )
     assert session_after_second is not None
     # session 不应被第二次调用修改（幂等保证）
     assert session_after_second.status == AgentSessionStatus.CLOSED
@@ -332,7 +371,6 @@ async def test_cleanup_preserves_recall_frames(tmp_path: Path) -> None:
     由于 Phase B/F 完成前没有真实 Subagent RecallFrame，
     此测试创建一个普通 RecallFrame（agent_runtime_id=caller）验证不被删除。
     """
-    from octoagent.core.models import AgentSession as AS
     from octoagent.core.models.agent_context import RecallFrame
 
     store_group = await create_store_group(str(tmp_path / "e-05.db"), str(tmp_path / "art"))
@@ -360,17 +398,24 @@ async def test_cleanup_preserves_recall_frames(tmp_path: Path) -> None:
 
     delegation = _make_delegation(parent_task_id=parent_task_id)
 
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": delegation.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.SUCCEEDED,
-            "updated_at": _NOW,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": delegation.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.SUCCEEDED,
+                    "updated_at": _NOW,
+                },
+            )(),
+        ),
     ):
         await runner._close_subagent_session_if_needed(parent_task_id)
 
@@ -457,17 +502,24 @@ async def test_subagent_completed_event_emitted(tmp_path: Path) -> None:
         agent_runtime_id=_CALLER_RUNTIME_ID,
     )
 
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": delegation.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.SUCCEEDED,
-            "updated_at": _NOW,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": delegation.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.SUCCEEDED,
+                    "updated_at": _NOW,
+                },
+            )(),
+        ),
     ):
         await runner._close_subagent_session_if_needed(parent_task_id)
 
@@ -479,7 +531,9 @@ async def test_subagent_completed_event_emitted(tmp_path: Path) -> None:
     payload = evt.payload
     assert payload["delegation_id"] == _DELEGATION_ID
     assert payload["child_task_id"] == _CHILD_TASK_ID
-    assert payload["terminal_status"] == "SUCCEEDED"  # TaskStatus.SUCCEEDED.value = "SUCCEEDED"（大写）
+    assert (
+        payload["terminal_status"] == "SUCCEEDED"
+    )  # TaskStatus.SUCCEEDED.value = "SUCCEEDED"（大写）
     assert payload["parent_task_id"] == parent_task_id
     assert payload["child_agent_session_id"] == _CHILD_SESSION_ID
 
@@ -529,19 +583,28 @@ async def test_cleanup_skips_when_session_not_found(tmp_path: Path) -> None:
     runner = await _create_runner(store_group, sse_hub)
 
     # child_agent_session_id 填写了 ID，但实际 store 中没有这个 session（Phase B 前）
-    delegation = _make_delegation(parent_task_id=parent_task_id, child_agent_session_id="session-not-exist-phase-b")
+    delegation = _make_delegation(
+        parent_task_id=parent_task_id, child_agent_session_id="session-not-exist-phase-b"
+    )
 
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value={"subagent_delegation": delegation.model_dump_json()},
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=type("Task", (), {
-            "status": TaskStatus.SUCCEEDED,
-            "updated_at": _NOW,
-        })(),
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value={"subagent_delegation": delegation.model_dump_json()},
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=type(
+                "Task",
+                (),
+                {
+                    "status": TaskStatus.SUCCEEDED,
+                    "updated_at": _NOW,
+                },
+            )(),
+        ),
     ):
         # 不应 raise（session=None 时 if 判断 False，跳过 save + commit）
         await runner._close_subagent_session_if_needed(parent_task_id)
@@ -655,20 +718,27 @@ async def test_cleanup_idempotent_via_event_store_check(tmp_path: Path) -> None:
 
     # 模拟传入相同的 delegation（closed_at 始终是 None — 模拟未持久化场景）
     metadata_return = {"subagent_delegation": delegation.model_dump_json()}
-    task_return = type("Task", (), {
-        "status": TaskStatus.SUCCEEDED,
-        "updated_at": _NOW,
-    })()
+    task_return = type(
+        "Task",
+        (),
+        {
+            "status": TaskStatus.SUCCEEDED,
+            "updated_at": _NOW,
+        },
+    )()
 
     # 第一次 cleanup
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value=metadata_return,
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=task_return,
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value=metadata_return,
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=task_return,
+        ),
     ):
         await runner._close_subagent_session_if_needed(parent_task_id)
 
@@ -681,14 +751,17 @@ async def test_cleanup_idempotent_via_event_store_check(tmp_path: Path) -> None:
     )
 
     # 第二次 cleanup（同样 delegation，closed_at 仍是 None — 模拟进程重启或 _notify_completion 多次调用）
-    with patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
-        new_callable=AsyncMock,
-        return_value=metadata_return,
-    ), patch(
-        "octoagent.gateway.services.task_runner.TaskService.get_task",
-        new_callable=AsyncMock,
-        return_value=task_return,
+    with (
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_latest_user_metadata",
+            new_callable=AsyncMock,
+            return_value=metadata_return,
+        ),
+        patch(
+            "octoagent.gateway.services.task_runner.TaskService.get_task",
+            new_callable=AsyncMock,
+            return_value=task_return,
+        ),
     ):
         await runner._close_subagent_session_if_needed(parent_task_id)
 

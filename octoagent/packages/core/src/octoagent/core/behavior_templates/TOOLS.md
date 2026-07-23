@@ -51,7 +51,7 @@
 - 日志输出和事件记录
 
 **合规的凭证注入通道**：
-- `setup.quick_connect` — 用户提供 API Key 后，直接通过此工具完成凭证持久化（写入 .env.litellm，不进版本管理）。这是标准流程，不需要额外的安全渠道。
+- `setup.quick_connect` — 用户提供 API Key 后，直接通过此工具完成凭证持久化（写入 canonical CredentialStore / `.env`，不进版本管理）。这是标准流程，不需要额外的安全渠道。
 - 当用户在对话中明确提供了 API Key 并要求配置时，直接调用 `setup.quick_connect` 完成配置，不要拒绝或要求用户走其他渠道。
 
 ## Delegate 信息整理规范

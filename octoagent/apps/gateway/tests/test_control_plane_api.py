@@ -57,6 +57,7 @@ from octoagent.gateway.services.config.config_schema import (
     ProviderEntry,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
+from octoagent.gateway.services.operations.project_selector import ProjectSelectorService
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import (
     EvidenceRef,
@@ -70,7 +71,6 @@ from octoagent.memory import (
 from octoagent.provider.auth.credentials import OAuthCredential
 from octoagent.provider.auth.environment import EnvironmentContext
 from octoagent.provider.auth.store import CredentialStore
-from octoagent.provider.dx.project_selector import ProjectSelectorService
 from pydantic import SecretStr
 from ulid import ULID
 
@@ -115,7 +115,7 @@ async def _create_task(
     thread_id: str = "thread-control",
     scope_id: str = "project:project-default:chat:web:thread-control",
 ) -> str:
-    task_service = TaskService(app.state.store_group, app.state.sse_hub)
+    task_service = TaskService(app.state.store_group, app.state.sse_hub, storage_only=True)
     task_id, created = await task_service.create_task(
         NormalizedMessage(
             channel="web",
@@ -152,7 +152,6 @@ async def _create_project_with_scope_binding(
         ProjectBinding(
             binding_id=str(ULID()),
             project_id=project.project_id,
-
             binding_type=ProjectBindingType.SCOPE,
             binding_key=scope_id,
             binding_value=scope_id,
@@ -205,7 +204,6 @@ async def _seed_memory(app) -> dict[str, str]:
         ProjectBinding(
             binding_id=str(ULID()),
             project_id=project.project_id,
-
             binding_type=ProjectBindingType.MEMORY_SCOPE,
             binding_key=scope_id,
             binding_value=scope_id,
@@ -295,7 +293,6 @@ async def _seed_context_resources(app) -> None:
     runtime = AgentRuntime(
         agent_runtime_id="runtime-main-default",
         project_id=project.project_id,
-
         agent_profile_id="agent-profile-default",
         role=AgentRuntimeRole.MAIN,
         name="Default Agent",
@@ -306,7 +303,6 @@ async def _seed_context_resources(app) -> None:
         agent_runtime_id=runtime.agent_runtime_id,
         kind=AgentSessionKind.MAIN_BOOTSTRAP,
         project_id=project.project_id,
-
         surface="web",
         thread_id="thread-control-context",
         legacy_session_id="thread-control-context",
@@ -316,7 +312,6 @@ async def _seed_context_resources(app) -> None:
     project_namespace = MemoryNamespace(
         namespace_id="memory-namespace-project-default",
         project_id=project.project_id,
-
         agent_runtime_id=runtime.agent_runtime_id,
         kind=MemoryNamespaceKind.PROJECT_SHARED,
         name="Project Shared",
@@ -326,7 +321,6 @@ async def _seed_context_resources(app) -> None:
     private_namespace = MemoryNamespace(
         namespace_id="memory-namespace-main-default",
         project_id=project.project_id,
-
         agent_runtime_id=runtime.agent_runtime_id,
         kind=MemoryNamespaceKind.AGENT_PRIVATE,
         name="Agent Private",
@@ -386,7 +380,6 @@ async def _seed_context_resources(app) -> None:
             agent_session_id=agent_session.agent_session_id,
             thread_id="thread-control-context",
             project_id=project.project_id,
-
             task_ids=[seeded_task_id],
             rolling_summary="控制面可以直接看到 recent summary。",
             last_context_frame_id="context-frame-default",
@@ -401,7 +394,6 @@ async def _seed_context_resources(app) -> None:
             context_frame_id="context-frame-default",
             task_id=seeded_task_id,
             project_id=project.project_id,
-
             query="project alpha next step",
             recent_summary="控制面可以直接看到 recent summary。",
             memory_namespace_ids=[
@@ -440,7 +432,6 @@ async def _seed_context_resources(app) -> None:
             agent_runtime_id=runtime.agent_runtime_id,
             agent_session_id=agent_session.agent_session_id,
             project_id=project.project_id,
-
             agent_profile_id="agent-profile-default",
             owner_profile_id="owner-profile-default",
             owner_overlay_id="owner-overlay-default",
@@ -502,7 +493,6 @@ async def _seed_context_resources(app) -> None:
             task_id=seeded_task_id,
             work_id="work-weather-default",
             project_id=project.project_id,
-
             source_agent_runtime_id=runtime.agent_runtime_id,
             source_agent_session_id=agent_session.agent_session_id,
             target_agent_runtime_id="runtime-worker-research-default",
@@ -527,7 +517,6 @@ async def _seed_context_resources(app) -> None:
             task_id=seeded_task_id,
             work_id="work-weather-default",
             project_id=project.project_id,
-
             source_agent_runtime_id=runtime.agent_runtime_id,
             source_agent_session_id=agent_session.agent_session_id,
             target_agent_runtime_id="runtime-worker-research-default",
@@ -552,7 +541,6 @@ async def _seed_context_resources(app) -> None:
             task_id=seeded_task_id,
             work_id="work-weather-default",
             project_id=project.project_id,
-
             source_agent_runtime_id="runtime-worker-research-default",
             source_agent_session_id="agent-session-worker-research-default",
             target_agent_runtime_id=runtime.agent_runtime_id,
@@ -697,7 +685,9 @@ class TestControlPlaneApi:
             payload["resources"]["context_continuity"]["agent_runtimes"][0]["agent_runtime_id"]
             == "runtime-main-default"
         )
-        assert payload["resources"]["context_continuity"]["agent_sessions"][0]["agent_session_id"]  # 非空即可，ID 格式已改为动态生成
+        assert payload["resources"]["context_continuity"]["agent_sessions"][0][
+            "agent_session_id"
+        ]  # 非空即可，ID 格式已改为动态生成
         assert {
             item["kind"] for item in payload["resources"]["context_continuity"]["memory_namespaces"]
         } == {"project_shared", "agent_private"}
@@ -719,7 +709,7 @@ class TestControlPlaneApi:
         assert frame["project_id"]
         # workspace 概念已废弃，workspace_id 为空
         assert frame["agent_runtime_id"] == "runtime-main-default"
-        assert frame["agent_session_id"] # 动态生成 ID
+        assert frame["agent_session_id"]  # 动态生成 ID
         assert frame["recall_frame_id"] == "recall-frame-default"
         assert set(frame["memory_namespace_ids"]) == {
             "memory-namespace-project-default",
@@ -741,11 +731,7 @@ class TestControlPlaneApi:
         # 如果有其他类型的 session 则验证其结构
         if sessions:
             default_session = next(
-                (
-                    item
-                    for item in sessions
-                    if item["project_id"] == "project-default"
-                ),
+                (item for item in sessions if item["project_id"] == "project-default"),
                 sessions[0],
             )
             assert default_session["channel"]
@@ -766,7 +752,8 @@ class TestControlPlaneApi:
         owner_resp = await control_plane_client.get("/api/control/resources/owner-profile")
         bootstrap_resp = await control_plane_client.get("/api/control/resources/bootstrap-session")
         context_resp = await control_plane_client.get("/api/control/resources/context-frames")
-        # commit b6a1556 连同 /advanced 页面一起删了 policy-profiles / wizard / pipelines / automation / import-workbench 的独立资源端点；保留 skill-governance / setup-governance。
+        # commit b6a1556 连同 /advanced 页面一起删除了多组独立资源端点；
+        # 这里只保留 skill-governance / setup-governance。
         skill_resp = await control_plane_client.get("/api/control/resources/skill-governance")
         setup_resp = await control_plane_client.get("/api/control/resources/setup-governance")
         assert profiles_resp.status_code == 200
@@ -819,7 +806,6 @@ class TestControlPlaneApi:
                 route_reason="delegation_strategy=main_owned_freshness",
                 owner_id="main.agent",
                 project_id=project.project_id,
-    
                 selected_tools=[],
                 metadata={
                     "delegation_strategy": "main_owned_freshness",
@@ -858,9 +844,7 @@ class TestControlPlaneApi:
         assert runtime_summary["research_child_task_id"] == "task-freshness-child"
         assert runtime_summary["research_tool_profile"] == "standard"
         assert runtime_summary["research_a2a_conversation_id"] == "a2a-freshness-child"
-        assert runtime_summary["research_main_agent_session_id"] == (
-            "agent-session-main-default"
-        )
+        assert runtime_summary["research_main_agent_session_id"] == ("agent-session-main-default")
         assert runtime_summary["research_worker_agent_session_id"] == (
             "agent-session-worker-research-child"
         )
@@ -940,7 +924,7 @@ class TestControlPlaneApi:
         control_plane_app,
         control_plane_client: AsyncClient,
     ) -> None:
-        """workspace 概念废弃后，context frames 不再按 workspace 过滤，返回所有 project 级 frames。"""
+        """workspace 废弃后，context frames 返回所有 project 级 frames。"""
         await _seed_context_resources(control_plane_app)
         store_group = control_plane_app.state.store_group
         project = await store_group.project_store.get_default_project()
@@ -1457,7 +1441,6 @@ class TestControlPlaneApi:
                 limit=5,
                 worker_type="ops",
                 project_id=default_project.project_id,
-    
             ),
             worker_type="ops",
         )
@@ -1716,8 +1699,7 @@ class TestControlPlaneApi:
         assert resp.status_code == 200
         result = resp.json()["result"]
         assert result["code"] == "SETUP_APPLIED"
-        # F081 cleanup：返回字段名 litellm_env_names 仍兼容保留，但内容只有 provider api_key。
-        assert result["data"]["saved_secrets"]["litellm_env_names"] == [
+        assert result["data"]["saved_secrets"]["provider_env_names"] == [
             "OPENROUTER_API_KEY",
         ]
         assert result["data"]["saved_secrets"]["profile_names"] == ["openrouter-default"]
@@ -1741,8 +1723,10 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
         seeded_control_plane,
     ) -> None:
-        """Feature 081 P4 修复（Codex F1）：v2 schema yaml（``auth: {kind: api_key, env: ...}``
-        而非 ``auth_type`` + ``api_key_env``）的 secret 必须能正确持久化到 .env + auth-profiles.json。
+        """v2 schema yaml 的 secret 必须正确持久化。
+
+        v2 使用 ``auth: {kind: api_key, env: ...}``，而非旧的
+        ``auth_type`` + ``api_key_env``。
 
         修复前：``_save_runtime_secret_values`` 用 ``provider.api_key_env`` 读字段；
         v2 yaml 中 ``api_key_env`` 是 default ""，``litellm_targets`` 不含真实 env 名 →
@@ -1765,7 +1749,7 @@ class TestControlPlaneApi:
                         "config": {
                             "config_version": 2,
                             "providers": [
-                                # v2 schema：仅用 transport / api_base / auth；不写 auth_type/api_key_env
+                                # v2 schema 只用 transport / api_base / auth。
                                 {
                                     "id": "openrouter",
                                     "name": "OpenRouter",
@@ -1806,7 +1790,7 @@ class TestControlPlaneApi:
 
         # 关键断言：v2 schema 下 secret 仍然落盘
         saved = result["data"]["saved_secrets"]
-        assert "OPENROUTER_API_KEY" in saved["litellm_env_names"], (
+        assert "OPENROUTER_API_KEY" in saved["provider_env_names"], (
             f"v2 schema 下 OPENROUTER_API_KEY 应写入 .env；实际 saved={saved}"
         )
         assert "openrouter-default" in saved["profile_names"], (
@@ -1823,31 +1807,14 @@ class TestControlPlaneApi:
         assert profile is not None, "v2 schema 下应该写出 openrouter-default profile"
         assert profile.credential.key.get_secret_value() == "sk-v2-secret"
 
-    async def test_setup_quick_connect_returns_activation_summary(
+    async def test_setup_quick_connect_returns_saved_config_without_activation_summary(
         self,
         control_plane_app,
         control_plane_client: AsyncClient,
         seeded_control_plane,
         monkeypatch,
     ) -> None:
-        """Feature 081 P4 修复（Codex F1）：quick_connect 不再启动 LiteLLM Proxy；
-        仅持久化 yaml + 触发 managed runtime reload（如适用）。
-        """
-        from octoagent.gateway.services import control_plane as control_plane_module
-
-        class FakeActivationService:
-            def __init__(self, project_root: Path) -> None:
-                self.project_root = project_root
-
-            def has_managed_runtime(self) -> bool:
-                return False
-
-        monkeypatch.setattr(
-            control_plane_module,
-            "RuntimeActivationService",
-            FakeActivationService,
-        )
-
+        """quick_connect 只保存配置与凭证，不再投影退役的 runtime activation。"""
         resp = await control_plane_client.post(
             "/api/control/actions",
             json={
@@ -1901,10 +1868,7 @@ class TestControlPlaneApi:
         assert resp.status_code == 200
         result = resp.json()["result"]
         assert result["code"] == "SETUP_QUICK_CONNECTED"
-        # Feature 081 P4：proxy_url 不再有意义（Provider 直连，无 Proxy URL）
-        assert result["data"]["activation"]["proxy_url"] == ""
-        assert result["data"]["activation"]["activation_succeeded"] is True
-        assert result["data"]["activation"]["runtime_reload_mode"] == "manual_restart_required"
+        assert "activation" not in result["data"]
         assert result["data"]["review"]["ready"] is True
 
     async def test_provider_oauth_openai_codex_persists_profile_and_env(
@@ -1939,64 +1903,6 @@ class TestControlPlaneApi:
             "run_auth_code_pkce_flow",
             fake_run_auth_code_pkce_flow,
         )
-
-        scheduled_restarts: list[dict[str, object]] = []
-
-        class FakeActivationService:
-            def __init__(self, project_root: Path) -> None:
-                self.project_root = project_root
-
-            def has_managed_runtime(self) -> bool:
-                return True
-
-            async def start_proxy(self):
-                return type(
-                    "Activation",
-                    (),
-                    {
-                        "project_root": str(self.project_root),
-                        "source_root": str(self.project_root / "app" / "octoagent"),
-                        "compose_file": str(
-                            self.project_root / "app" / "octoagent" / "docker-compose.litellm.yml"
-                        ),
-                        "proxy_url": "http://localhost:4000",
-                        "managed_runtime": True,
-                        "warnings": [],
-                    },
-                )()
-
-        async def fake_restart_runtime_after_delay(
-            *,
-            delay_seconds: float,
-            trigger_source,
-        ) -> None:
-            scheduled_restarts.append(
-                {
-                    "delay_seconds": delay_seconds,
-                    "trigger_source": trigger_source,
-                }
-            )
-
-        original_create_task = asyncio.create_task
-        background_tasks: list[asyncio.Task[None]] = []
-
-        def fake_create_task(coro):
-            task = original_create_task(coro)
-            background_tasks.append(task)
-            return task
-
-        monkeypatch.setattr(
-            control_plane_module,
-            "RuntimeActivationService",
-            FakeActivationService,
-        )
-        monkeypatch.setattr(
-            control_plane_app.state.control_plane_service._mcp_service,
-            "_restart_runtime_after_delay",
-            fake_restart_runtime_after_delay,
-        )
-        monkeypatch.setattr(control_plane_module.asyncio, "create_task", fake_create_task)
-
         resp = await control_plane_client.post(
             "/api/control/actions",
             json={
@@ -2019,9 +1925,7 @@ class TestControlPlaneApi:
         assert result["code"] == "OPENAI_OAUTH_CONNECTED"
         assert result["data"]["account_id"] == "acct-openai"
         assert result["data"]["env_name"] == "OPENAI_API_KEY"
-        assert result["data"]["activation"]["activation_succeeded"] is True
-        assert result["data"]["activation"]["runtime_reload_mode"] == "managed_restart_scheduled"
-        assert "自动重启" in result["message"]
+        assert "activation" not in result["data"]
 
         store = CredentialStore(control_plane_app.state.project_root / "auth-profiles.json")
         profile = store.get_profile("openai-codex-default")
@@ -2030,7 +1934,7 @@ class TestControlPlaneApi:
         assert profile.auth_mode == "oauth"
         assert profile.credential.access_token.get_secret_value() == "oauth-access-token"
 
-        env_path = control_plane_app.state.project_root / ".env.litellm"
+        env_path = control_plane_app.state.project_root / ".env"
         assert env_path.exists()
         assert "OPENAI_API_KEY=oauth-access-token" in env_path.read_text(encoding="utf-8")
 
@@ -2039,20 +1943,6 @@ class TestControlPlaneApi:
         )
         assert setup_doc.provider_runtime.details["openai_oauth_connected"] is True
         assert setup_doc.provider_runtime.details["openai_oauth_profile"] == "openai-codex-default"
-
-        assert background_tasks
-        await asyncio.gather(*background_tasks)
-        assert scheduled_restarts == [
-            {
-                "delay_seconds": 2.0,
-                "trigger_source": control_plane_module.UpdateTriggerSource.WEB,
-            }
-        ]
-
-    # Feature 081 P4 修复（Codex F1）：删除 test_provider_oauth_openai_codex_preserves_auth_when_activation_fails
-    # 测试。原测试基于"Proxy 启动失败时 OAuth credential 仍持久化"的恢复保证；
-    # P4 后 _activate_runtime_after_config_change 不再启动 Proxy，"activation_fails"
-    # 场景已不可达。Auth 持久化的 happy path 由 test_provider_oauth_openai_codex_persists_profile_and_env 覆盖。
 
     # ────────────────────────── Feature 079 Phase 2 ──────────────────────────
     async def test_setup_oauth_and_apply_atomic_persists_both_credential_and_config(
@@ -2093,52 +1983,6 @@ class TestControlPlaneApi:
             "run_auth_code_pkce_flow",
             fake_run_auth_code_pkce_flow,
         )
-
-        class FakeActivationService:
-            def __init__(self, project_root: Path) -> None:
-                self.project_root = project_root
-
-            def has_managed_runtime(self) -> bool:
-                return True
-
-            async def start_proxy(self):
-                return type(
-                    "Activation",
-                    (),
-                    {
-                        "project_root": str(self.project_root),
-                        "source_root": str(self.project_root / "app" / "octoagent"),
-                        "compose_file": str(
-                            self.project_root / "app" / "octoagent" / "docker-compose.litellm.yml"
-                        ),
-                        "proxy_url": "http://localhost:4000",
-                        "managed_runtime": True,
-                        "warnings": [],
-                    },
-                )()
-
-        async def fake_restart_runtime_after_delay(*, delay_seconds, trigger_source):
-            return None
-
-        monkeypatch.setattr(
-            control_plane_module,
-            "RuntimeActivationService",
-            FakeActivationService,
-        )
-        monkeypatch.setattr(
-            control_plane_app.state.control_plane_service._mcp_service,
-            "_restart_runtime_after_delay",
-            fake_restart_runtime_after_delay,
-        )
-        # 防止 proxy_manager.restart 在 setup.apply 后触发真实网络
-        if control_plane_app.state.control_plane_service._proxy_manager is not None:
-            async def fake_restart(*args, **kwargs):
-                return None
-            monkeypatch.setattr(
-                control_plane_app.state.control_plane_service._proxy_manager,
-                "restart",
-                fake_restart,
-            )
 
         resp = await control_plane_client.post(
             "/api/control/actions",
@@ -2193,18 +2037,14 @@ class TestControlPlaneApi:
         assert result["code"] == "SETUP_OAUTH_AND_APPLIED"
         assert result["data"]["apply_blocked"] is False
         # OAuth 部分：credential 已写入 auth-profiles.json
-        store = CredentialStore(
-            control_plane_app.state.project_root / "auth-profiles.json"
-        )
+        store = CredentialStore(control_plane_app.state.project_root / "auth-profiles.json")
         profile = store.get_profile("openai-codex-default")
         assert profile is not None
         assert profile.provider == "openai-codex"
         # Apply 部分：providers[] / model_aliases 进了 octoagent.yaml
         config_doc = await control_plane_app.state.control_plane_service.get_config_schema()
         assert config_doc.current_value["providers"][0]["id"] == "openai-codex"
-        assert (
-            config_doc.current_value["model_aliases"]["main"]["model"] == "gpt-5.4"
-        )
+        assert config_doc.current_value["model_aliases"]["main"]["model"] == "gpt-5.4"
 
     async def test_setup_oauth_and_apply_blocked_after_oauth_preserves_credential(
         self,
@@ -2244,51 +2084,6 @@ class TestControlPlaneApi:
             fake_run_auth_code_pkce_flow,
         )
 
-        class FakeActivationService:
-            def __init__(self, project_root: Path) -> None:
-                self.project_root = project_root
-
-            def has_managed_runtime(self) -> bool:
-                return True
-
-            async def start_proxy(self):
-                return type(
-                    "Activation",
-                    (),
-                    {
-                        "project_root": str(self.project_root),
-                        "source_root": str(self.project_root / "app" / "octoagent"),
-                        "compose_file": str(
-                            self.project_root / "app" / "octoagent" / "docker-compose.litellm.yml"
-                        ),
-                        "proxy_url": "http://localhost:4000",
-                        "managed_runtime": True,
-                        "warnings": [],
-                    },
-                )()
-
-        async def fake_restart_runtime_after_delay(*, delay_seconds, trigger_source):
-            return None
-
-        monkeypatch.setattr(
-            control_plane_module,
-            "RuntimeActivationService",
-            FakeActivationService,
-        )
-        monkeypatch.setattr(
-            control_plane_app.state.control_plane_service._mcp_service,
-            "_restart_runtime_after_delay",
-            fake_restart_runtime_after_delay,
-        )
-        if control_plane_app.state.control_plane_service._proxy_manager is not None:
-            async def fake_restart(*args, **kwargs):
-                return None
-            monkeypatch.setattr(
-                control_plane_app.state.control_plane_service._proxy_manager,
-                "restart",
-                fake_restart,
-            )
-
         # 构造 draft 故意触发 blocking：main alias 引用了不存在的 provider "ghost"
         resp = await control_plane_client.post(
             "/api/control/actions",
@@ -2320,9 +2115,7 @@ class TestControlPlaneApi:
         assert result["data"]["apply_blocked"] is True
         assert result["data"]["apply_error_message"]
         # 关键：OAuth credential 已保留（不会因为 apply blocking 就丢掉）
-        store = CredentialStore(
-            control_plane_app.state.project_root / "auth-profiles.json"
-        )
+        store = CredentialStore(control_plane_app.state.project_root / "auth-profiles.json")
         profile = store.get_profile("openai-codex-default")
         assert profile is not None
         assert profile.credential.access_token.get_secret_value() == "oauth-at-blocked"
@@ -2540,7 +2333,9 @@ class TestControlPlaneApi:
         )
         assert reloaded_default is not None
         assert reloaded_default.default_agent_profile_id == original_default_profile_id
-        agent_profiles = await control_plane_app.state.store_group.agent_context_store.list_agent_profiles()
+        agent_profiles = (
+            await control_plane_app.state.store_group.agent_context_store.list_agent_profiles()
+        )
         assert all(profile.name != "错误 alias Agent" for profile in agent_profiles)
 
     async def test_policy_engine_uses_persisted_selected_project_profile_on_restart(
@@ -2625,7 +2420,7 @@ class TestControlPlaneApi:
         assert "channels.telegram.group_policy" in hints
         assert "channels.telegram.group_allow_users" in hints
 
-    async def test_retrieval_platform_keeps_old_embedding_active_until_cancelled_generation_is_resolved(
+    async def test_retrieval_platform_keeps_old_embedding_until_cancelled_generation_resolved(
         self,
         control_plane_client: AsyncClient,
         seeded_control_plane,
@@ -2635,7 +2430,7 @@ class TestControlPlaneApi:
         baseline_memory = next(
             item for item in baseline.json()["corpora"] if item["corpus_kind"] == "memory"
         )
-        # 无任何 active generation 时，active_profile_target 回落为 desired_profile.target（即 engine-default）
+        # 无 active generation 时，active target 回落为 desired target。
         assert baseline_memory["active_profile_target"] == "engine-default"
 
         save_config(
@@ -3128,7 +2923,6 @@ class TestControlPlaneApi:
 
         assert run_resp.status_code == 200
         run_payload = run_resp.json()["result"]["data"]
-        run_id = run_payload["resource_id"]
         assert run_payload["status"] == "completed"
         assert run_payload["summary"]["imported_count"] == 1
         assert run_payload["summary"]["attachment_artifact_count"] == 1
@@ -3452,10 +3246,8 @@ class TestControlPlaneApi:
         )
         task = await control_plane_app.state.store_group.task_store.get_task(task_id)
         assert task is not None
-        project = (
-            await control_plane_app.state.store_group.project_store.resolve_project_for_scope(
-                task.scope_id
-            )
+        project = await control_plane_app.state.store_group.project_store.resolve_project_for_scope(
+            task.scope_id
         )
         assert project is not None
         expected_session_id = build_scope_aware_session_id(
@@ -3536,7 +3328,6 @@ class TestControlPlaneApi:
             ProjectBinding(
                 binding_id=str(ULID()),
                 project_id=project.project_id,
-    
                 binding_type=ProjectBindingType.SCOPE,
                 binding_key="scope-control-alt",
                 binding_value="scope-control-alt",
@@ -3707,7 +3498,8 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
     ) -> None:
         profile_id = "worker-profile-direct-research"
-        await _save_worker_with_mirror(control_plane_app.state.store_group.agent_context_store, 
+        await _save_worker_with_mirror(
+            control_plane_app.state.store_group.agent_context_store,
             AgentProfile(
                 profile_id=profile_id,
                 project_id="",
@@ -3715,7 +3507,7 @@ class TestControlPlaneApi:
                 summary="direct research root",
                 model_alias="cheap",
                 status=AgentProfileStatus.ACTIVE,
-            )
+            ),
         )
         await control_plane_app.state.store_group.conn.commit()
 
@@ -3751,7 +3543,8 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
     ) -> None:
         profile_id = "worker-profile-fin-direct"
-        await _save_worker_with_mirror(control_plane_app.state.store_group.agent_context_store, 
+        await _save_worker_with_mirror(
+            control_plane_app.state.store_group.agent_context_store,
             AgentProfile(
                 profile_id=profile_id,
                 project_id="",
@@ -3759,7 +3552,7 @@ class TestControlPlaneApi:
                 summary="finance direct session",
                 model_alias="cheap",
                 status=AgentProfileStatus.ACTIVE,
-            )
+            ),
         )
         await control_plane_app.state.store_group.conn.commit()
 
@@ -3872,7 +3665,8 @@ class TestControlPlaneApi:
         )
 
         profile_id = "worker-profile-project-default-octoagent"
-        await _save_worker_with_mirror(store_group.agent_context_store, 
+        await _save_worker_with_mirror(
+            store_group.agent_context_store,
             AgentProfile(
                 profile_id=profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -3881,7 +3675,7 @@ class TestControlPlaneApi:
                 summary="default project owner session",
                 model_alias="cheap",
                 status=AgentProfileStatus.ACTIVE,
-            )
+            ),
         )
         await store_group.conn.commit()
 
@@ -3952,7 +3746,8 @@ class TestControlPlaneApi:
         )
 
         profile_id = "worker-profile-project-default-octoagent"
-        await _save_worker_with_mirror(store_group.agent_context_store, 
+        await _save_worker_with_mirror(
+            store_group.agent_context_store,
             AgentProfile(
                 profile_id=profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -3961,7 +3756,7 @@ class TestControlPlaneApi:
                 summary="default project owner session",
                 model_alias="cheap",
                 status=AgentProfileStatus.ACTIVE,
-            )
+            ),
         )
         await store_group.conn.commit()
 
@@ -4019,7 +3814,8 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
     ) -> None:
         profile_id = "worker-profile-finance-anchor"
-        await _save_worker_with_mirror(control_plane_app.state.store_group.agent_context_store, 
+        await _save_worker_with_mirror(
+            control_plane_app.state.store_group.agent_context_store,
             AgentProfile(
                 profile_id=profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -4028,7 +3824,7 @@ class TestControlPlaneApi:
                 summary="finance direct session",
                 model_alias="cheap",
                 status=AgentProfileStatus.ACTIVE,
-            )
+            ),
         )
         await control_plane_app.state.store_group.conn.commit()
 
@@ -4052,8 +3848,6 @@ class TestControlPlaneApi:
         create_payload = create_resp.json()["result"]["data"]
         projected_session_id = create_payload["session_id"]
         thread_id = create_payload["thread_id"]
-        project_id = create_payload["project_id"]
-
         send_resp = await control_plane_client.post(
             "/api/chat/send",
             json={
@@ -4099,7 +3893,8 @@ class TestControlPlaneApi:
         control_plane_client: AsyncClient,
     ) -> None:
         profile_id = "worker-profile-finance-continue"
-        await _save_worker_with_mirror(control_plane_app.state.store_group.agent_context_store, 
+        await _save_worker_with_mirror(
+            control_plane_app.state.store_group.agent_context_store,
             AgentProfile(
                 profile_id=profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -4108,7 +3903,7 @@ class TestControlPlaneApi:
                 summary="finance direct session",
                 model_alias="cheap",
                 status=AgentProfileStatus.ACTIVE,
-            )
+            ),
         )
         await control_plane_app.state.store_group.conn.commit()
 
@@ -4171,7 +3966,8 @@ class TestControlPlaneApi:
         assert project is not None
 
         worker_profile_id = "worker-profile-finance-delegated"
-        await _save_worker_with_mirror(store_group.agent_context_store, 
+        await _save_worker_with_mirror(
+            store_group.agent_context_store,
             AgentProfile(
                 profile_id=worker_profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -4180,7 +3976,7 @@ class TestControlPlaneApi:
                 summary="delegated worker projection",
                 model_alias="cheap",
                 status=AgentProfileStatus.ACTIVE,
-            )
+            ),
         )
 
         thread_id = "thread-delegated-finance"
@@ -4190,7 +3986,7 @@ class TestControlPlaneApi:
             thread_id=thread_id,
             scope_id=f"project:{project.project_id}:chat:web:{thread_id}",
         )
-        task_service = TaskService(store_group, control_plane_app.state.sse_hub)
+        task_service = TaskService(store_group, control_plane_app.state.sse_hub, storage_only=True)
         await task_service.append_user_message(
             task_id=task_id,
             text="继续当前主会话",
@@ -4209,7 +4005,6 @@ class TestControlPlaneApi:
             AgentRuntime(
                 agent_runtime_id="runtime-delegated-main",
                 project_id=project.project_id,
-    
                 agent_profile_id="agent-profile-default",
                 role=AgentRuntimeRole.MAIN,
                 name="Delegated Main Runtime",
@@ -4221,7 +4016,6 @@ class TestControlPlaneApi:
                 agent_runtime_id="runtime-delegated-main",
                 kind=AgentSessionKind.DIRECT_WORKER,
                 project_id=project.project_id,
-    
                 thread_id=thread_id,
                 legacy_session_id=thread_id,
             )
@@ -4233,7 +4027,6 @@ class TestControlPlaneApi:
                 agent_session_id="agent-session-delegated-main",
                 thread_id=thread_id,
                 project_id=project.project_id,
-    
                 task_ids=[task_id],
             )
         )
@@ -4247,7 +4040,6 @@ class TestControlPlaneApi:
                 target_kind=DelegationTargetKind.WORKER,
                 selected_worker_type="finance",
                 project_id=project.project_id,
-    
                 session_owner_profile_id="agent-profile-default",
                 delegation_target_profile_id=worker_profile_id,
                 turn_executor_kind="worker",
@@ -4281,7 +4073,8 @@ class TestControlPlaneApi:
         assert project is not None
 
         worker_profile_id = "worker-profile-legacy-finance"
-        await _save_worker_with_mirror(store_group.agent_context_store, 
+        await _save_worker_with_mirror(
+            store_group.agent_context_store,
             AgentProfile(
                 profile_id=worker_profile_id,
                 scope=AgentProfileScope.PROJECT,
@@ -4290,7 +4083,7 @@ class TestControlPlaneApi:
                 summary="legacy polluted worker profile",
                 model_alias="cheap",
                 status=AgentProfileStatus.ACTIVE,
-            )
+            ),
         )
 
         thread_id = "thread-legacy-polluted"
@@ -4300,7 +4093,7 @@ class TestControlPlaneApi:
             thread_id=thread_id,
             scope_id=f"project:{project.project_id}:chat:web:{thread_id}",
         )
-        task_service = TaskService(store_group, control_plane_app.state.sse_hub)
+        task_service = TaskService(store_group, control_plane_app.state.sse_hub, storage_only=True)
         await task_service.append_user_message(
             task_id=task_id,
             text="继续旧会话",
@@ -4316,7 +4109,6 @@ class TestControlPlaneApi:
             AgentRuntime(
                 agent_runtime_id="runtime-legacy-polluted",
                 project_id=project.project_id,
-    
                 agent_profile_id="agent-profile-default",
                 role=AgentRuntimeRole.MAIN,
                 name="Legacy Polluted Runtime",
@@ -4328,7 +4120,6 @@ class TestControlPlaneApi:
                 agent_runtime_id="runtime-legacy-polluted",
                 kind=AgentSessionKind.DIRECT_WORKER,
                 project_id=project.project_id,
-    
                 thread_id=thread_id,
                 legacy_session_id=thread_id,
             )
@@ -4340,7 +4131,6 @@ class TestControlPlaneApi:
                 agent_session_id="agent-session-legacy-polluted",
                 thread_id=thread_id,
                 project_id=project.project_id,
-    
                 task_ids=[task_id],
             )
         )
@@ -4458,7 +4248,6 @@ class TestControlPlaneApi:
             AgentRuntime(
                 agent_runtime_id="runtime-reset-legacy",
                 project_id=project.project_id,
-    
                 agent_profile_id="agent-profile-default",
                 role=AgentRuntimeRole.MAIN,
                 name="Reset Legacy Runtime",
@@ -4470,7 +4259,6 @@ class TestControlPlaneApi:
                 agent_runtime_id="runtime-reset-legacy",
                 kind=AgentSessionKind.MAIN_BOOTSTRAP,
                 project_id=project.project_id,
-    
                 thread_id="thread-reset-legacy",
                 legacy_session_id="thread-reset-legacy",
                 recent_transcript=[
@@ -4522,7 +4310,6 @@ class TestControlPlaneApi:
                 agent_session_id="agent-session-reset-legacy",
                 thread_id="thread-reset-legacy",
                 project_id=project.project_id,
-    
                 task_ids=[task_id],
                 recent_turn_refs=[task_id],
                 recent_artifact_refs=["artifact-reset-legacy"],
@@ -5296,7 +5083,9 @@ class TestControlPlaneApi:
         review_payload = review_resp.json()["result"]["data"]["review"]
         assert review_payload["can_save"] is False
         assert review_payload["ready"] is False
-        assert any("model_alias 必须引用已存在的模型别名" in item for item in review_payload["save_errors"])
+        assert any(
+            "model_alias 必须引用已存在的模型别名" in item for item in review_payload["save_errors"]
+        )
 
     async def test_worker_profile_create_round_trips_runtime_kinds(
         self,
@@ -5332,9 +5121,7 @@ class TestControlPlaneApi:
         assert create_resp.status_code == 200
         profile_id = create_resp.json()["result"]["data"]["profile_id"]
 
-        profiles_resp = await control_plane_client.get(
-            "/api/control/resources/worker-profiles"
-        )
+        profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
         assert profiles_resp.status_code == 200
         created = next(
             item for item in profiles_resp.json()["profiles"] if item["profile_id"] == profile_id
@@ -5376,9 +5163,7 @@ class TestControlPlaneApi:
         assert create_resp.status_code == 200
         profile_id = create_resp.json()["result"]["data"]["profile_id"]
 
-        profiles_resp = await control_plane_client.get(
-            "/api/control/resources/worker-profiles"
-        )
+        profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
         assert profiles_resp.status_code == 200
         created = next(
             item for item in profiles_resp.json()["profiles"] if item["profile_id"] == profile_id
@@ -5479,7 +5264,6 @@ class TestControlPlaneApi:
                 target_kind=DelegationTargetKind.SUBAGENT,
                 selected_worker_type="research",
                 project_id=project.project_id,
-    
                 requested_agent_profile_id=profile.profile_id,
                 requested_agent_profile_version=1,
                 effective_profile_snapshot_id="worker-snapshot:worker-profile-runtime-alpha:1",
@@ -5584,7 +5368,6 @@ class TestControlPlaneApi:
                 target_kind=DelegationTargetKind.WORKER,
                 selected_worker_type="ops",
                 project_id=project.project_id,
-    
                 requested_agent_profile_id=profile.profile_id,
                 requested_agent_profile_version=1,
                 effective_profile_snapshot_id="worker-snapshot:worker-profile-root-agent-project:1",
@@ -5629,7 +5412,6 @@ class TestControlPlaneApi:
                 target_kind=DelegationTargetKind.ACP_RUNTIME,
                 selected_worker_type="ops",
                 project_id=project.project_id,
-    
                 requested_agent_profile_id=profile.profile_id,
                 requested_agent_profile_version=1,
                 effective_profile_snapshot_id="worker-snapshot:worker-profile-root-agent-project:1",
@@ -5746,7 +5528,6 @@ class TestControlPlaneApi:
                 target_kind=DelegationTargetKind.WORKER,
                 selected_worker_type="general",
                 project_id=project.project_id,
-    
                 session_owner_profile_id=profile.profile_id,
                 delegation_target_profile_id="",
                 turn_executor_kind="worker",
@@ -5757,7 +5538,9 @@ class TestControlPlaneApi:
         )
         await store_group.conn.commit()
 
-        worker_profiles_resp = await control_plane_client.get("/api/control/resources/worker-profiles")
+        worker_profiles_resp = await control_plane_client.get(
+            "/api/control/resources/worker-profiles"
+        )
         assert worker_profiles_resp.status_code == 200
         payload = worker_profiles_resp.json()
         target = next(
@@ -5816,6 +5599,8 @@ class TestF096RecallFramesEndpoint:
         payload = resp.json()
         assert payload["limit"] == 10
         assert payload["offset"] == 5
+
+
 # ── F117 测试辅助（worker 镜像播种）────────────────────────────────────
 # 运行时统一读 agent_profiles(kind=worker) 镜像；生产中镜像由 publish/_sync 写。本 helper
 # 把 worker 配置 AgentProfile 写成镜像（kind=worker + source_* 标记）反映生产状态。

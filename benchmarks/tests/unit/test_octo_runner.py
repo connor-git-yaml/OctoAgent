@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import asyncio
-import datetime as dt
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -35,13 +34,6 @@ from benchmarks.runner.llm_judge import (
     ProviderRouterJudgeAdapter,
     StubJudgeAdapter,
 )
-
-
-# pytest-asyncio strict 模式：用 pytestmark 让所有 async 测试自动 asyncio mode.
-# worktree 根没有 pyproject.toml 继承 octoagent/ 的 auto 模式，所以显式标记。
-# 同步测试 PytestWarning 无害（不影响 pass 数）；CI strict 时可在 conftest 里
-# 改用 collection_modifyitems 钩子只标 async。
-pytestmark = pytest.mark.asyncio
 from benchmarks.runner.scorer import BenchmarkRunScore, TaskVerdict
 from benchmarks.runner.store import (
     RESULT_ERROR,
@@ -49,6 +41,64 @@ from benchmarks.runner.store import (
     RESULT_PASS,
     RESULT_TIMEOUT,
 )
+
+
+# pytest-asyncio strict 模式：用 pytestmark 让所有 async 测试自动 asyncio mode.
+# worktree 根没有 pyproject.toml 继承 octoagent/ 的 auto 模式，所以显式标记。
+# 同步测试 PytestWarning 无害（不影响 pass 数）；CI strict 时可在 conftest 里
+# 改用 collection_modifyitems 钩子只标 async。
+pytestmark = pytest.mark.asyncio
+
+
+async def test_source_checkout_required_before_side_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from octoagent.gateway.cli import bench_commands
+    from benchmarks.runner import cli as bench_cli
+
+    checkout = tmp_path / "checkout"
+    project = checkout / "octoagent"
+    (checkout / ".git").mkdir(parents=True)
+    (checkout / "benchmarks" / "runner").mkdir(parents=True)
+    (checkout / "benchmarks" / "runner" / "cli.py").write_text("", encoding="utf-8")
+    (project / "scripts").mkdir(parents=True)
+    (project / "pyproject.toml").write_text(
+        "[project]\nname='octoagent'\n", encoding="utf-8"
+    )
+    (project / "uv.lock").write_text("version = 1\n", encoding="utf-8")
+    (project / "scripts" / "install-octo.sh").write_text(
+        "#!/bin/sh\n", encoding="utf-8"
+    )
+    calls: list[tuple[str, ...]] = []
+    monkeypatch.setattr(
+        bench_cli,
+        "main",
+        lambda argv: calls.append(tuple(argv)) or 0,
+    )
+
+    monkeypatch.chdir(project)
+    with pytest.raises(SystemExit) as accepted:
+        bench_commands.app(["list-baselines"])
+    assert accepted.value.code == 0
+    accepted_call_count = len(calls)
+
+    wheel_root = tmp_path / "installed-wheel"
+    wheel_root.mkdir()
+    monkeypatch.chdir(wheel_root)
+    failures: list[str] = []
+    try:
+        bench_commands.app(["list-baselines"])
+    except SystemExit as exc:
+        if exc.code != 69:
+            failures.append(f"exit={exc.code}")
+        if "SOURCE_CHECKOUT_REQUIRED" not in str(exc):
+            failures.append("missing typed error")
+    else:
+        failures.append("wheel invocation accepted")
+    if len(calls) != accepted_call_count:
+        failures.append("benchmark runner side effect reached")
+    assert not failures, "F151_BENCH_SOURCE_GUARD_MISSING: " + "; ".join(failures)
 
 
 # ---------------------------------------------------------------------------
@@ -196,7 +246,10 @@ def test_raw_dict_returns_empty_when_no_raw():
 
 def test_total_tokens_sum_input_output_excludes_cache_read():
     """合计 input + output；不含 cache_read（避免缓存命中拉低真实成本）。"""
-    assert octo_runner._total_tokens({"input": 100, "output": 50, "cache_read": 200}) == 150
+    assert (
+        octo_runner._total_tokens({"input": 100, "output": 50, "cache_read": 200})
+        == 150
+    )
 
 
 def test_total_tokens_missing_keys_treated_as_zero():
@@ -206,7 +259,9 @@ def test_total_tokens_missing_keys_treated_as_zero():
 
 def test_outcome_from_score_pass_verdict_maps_to_result_pass():
     bench = _make_score(verdict=TaskVerdict.PASS, pass_fail=1.0, weighted=1.0)
-    outcome = octo_runner._outcome_from_score(bench, started_at=0.0, token_usage={"input": 5, "output": 3, "cache_read": 0})
+    outcome = octo_runner._outcome_from_score(
+        bench, started_at=0.0, token_usage={"input": 5, "output": 3, "cache_read": 0}
+    )
     assert outcome.result == RESULT_PASS
     assert outcome.score == 1.0
     assert outcome.token_input == 5
@@ -215,7 +270,9 @@ def test_outcome_from_score_pass_verdict_maps_to_result_pass():
 
 
 def test_outcome_from_score_fail_verdict_maps_to_result_fail():
-    bench = _make_score(verdict=TaskVerdict.FAIL, pass_fail=0.0, weighted=0.0, error="boom")
+    bench = _make_score(
+        verdict=TaskVerdict.FAIL, pass_fail=0.0, weighted=0.0, error="boom"
+    )
     outcome = octo_runner._outcome_from_score(
         bench, started_at=0.0, token_usage={"input": 0, "output": 0, "cache_read": 0}
     )
@@ -265,7 +322,9 @@ def test_read_token_field_top_level_key():
 
 def test_read_token_field_alternate_names():
     assert (
-        octo_runner._read_token_field({"prompt_tokens": 11}, ("input_tokens", "prompt_tokens"))
+        octo_runner._read_token_field(
+            {"prompt_tokens": 11}, ("input_tokens", "prompt_tokens")
+        )
         == 11
     )
 
@@ -281,14 +340,23 @@ def test_read_token_field_no_match_returns_zero():
 
 def test_read_token_field_invalid_type_treated_as_zero():
     """非数字字符串 / None 不抛错，返回 0。"""
-    assert octo_runner._read_token_field({"input_tokens": "not a number"}, ("input_tokens",)) == 0
+    assert (
+        octo_runner._read_token_field(
+            {"input_tokens": "not a number"}, ("input_tokens",)
+        )
+        == 0
+    )
 
 
 # Codex MED-3 闭环：production schema token_usage 嵌套支持
 def test_read_token_field_prefers_production_token_usage_nested():
     """production ModelCallCompletedPayload schema: payload.token_usage.prompt_tokens."""
     payload = {
-        "token_usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150}
+        "token_usage": {
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+        }
     }
     # 优先读 token_usage.prompt_tokens（不是顶层 prompt_tokens）
     assert octo_runner._read_token_field(payload, ("prompt_tokens",)) == 100
@@ -309,13 +377,25 @@ def test_normalize_provider_usage_real_provider_schema():
 
 
 def test_normalize_provider_usage_empty_dict_safe():
-    assert octo_runner._normalize_provider_usage({}) == {"input": 0, "output": 0, "cache_read": 0}
+    assert octo_runner._normalize_provider_usage({}) == {
+        "input": 0,
+        "output": 0,
+        "cache_read": 0,
+    }
 
 
 def test_normalize_provider_usage_non_dict_safe():
     """非 dict（None / str）→ 全 0，不抛错。"""
-    assert octo_runner._normalize_provider_usage(None) == {"input": 0, "output": 0, "cache_read": 0}
-    assert octo_runner._normalize_provider_usage("garbage") == {"input": 0, "output": 0, "cache_read": 0}
+    assert octo_runner._normalize_provider_usage(None) == {
+        "input": 0,
+        "output": 0,
+        "cache_read": 0,
+    }
+    assert octo_runner._normalize_provider_usage("garbage") == {
+        "input": 0,
+        "output": 0,
+        "cache_read": 0,
+    }
 
 
 # Codex MED-1 闭环：WAITING_INPUT / WAITING_APPROVAL → TaskBlockedOnInputError
@@ -403,7 +483,9 @@ async def test_run_tau_bench_task_raises_not_integrated():
         await octo_runner._run_tau_bench_task(handle, task=task, iteration=1)
 
 
-async def test_runner_fn_tau_bench_returns_infra_error(monkeypatch, patched_harness_session):
+async def test_runner_fn_tau_bench_returns_infra_error(
+    monkeypatch, patched_harness_session
+):
     """runner_fn 接 TauBenchNotIntegratedError → INFRA_ERROR outcome（不进分母）。"""
 
     async def _raise(task_meta, iteration, rubrics, started_at):
@@ -418,7 +500,9 @@ async def test_runner_fn_tau_bench_returns_infra_error(monkeypatch, patched_harn
     assert "tau" in (out.error_message or "").lower()
 
 
-async def test_runner_fn_missing_instance_config_returns_infra_error(monkeypatch, patched_harness_session):
+async def test_runner_fn_missing_instance_config_returns_infra_error(
+    monkeypatch, patched_harness_session
+):
     """runner_fn 接 MissingInstanceConfigError → INFRA_ERROR（不进分母）。"""
 
     async def _raise(task_meta, iteration, rubrics, started_at):
@@ -453,17 +537,12 @@ def test_is_infra_error_classifies_provider_error():
         CredentialError,
         CredentialNotFoundError,
         ProviderError,
-        ProxyUnreachableError,
     )
 
     assert octo_runner._is_infra_error(ProviderError("x"))
     assert octo_runner._is_infra_error(CredentialError("x"))
     assert octo_runner._is_infra_error(CredentialNotFoundError("x"))
     assert octo_runner._is_infra_error(AuthenticationError("x", status_code=401))
-    # ProxyUnreachableError 是 ProviderError 子类，签名为 (proxy_url, original_error)
-    assert octo_runner._is_infra_error(
-        ProxyUnreachableError("http://x", RuntimeError("conn"))
-    )
 
 
 def test_is_infra_error_classifies_network_layer():
@@ -479,12 +558,16 @@ def test_is_infra_error_rejects_generic_runtime_error():
     assert not octo_runner._is_infra_error(ValueError("bad input"))
 
 
-async def test_runner_fn_provider_error_maps_to_infra_error(monkeypatch, patched_harness_session):
+async def test_runner_fn_provider_error_maps_to_infra_error(
+    monkeypatch, patched_harness_session
+):
     """Codex round 2 HIGH：GAIA → CredentialError 透传 → INFRA_ERROR（不 ERROR）."""
     from octoagent.provider.exceptions import CredentialNotFoundError
 
     async def _raise(task_meta, iteration, rubrics, started_at):
-        raise CredentialNotFoundError("SILICONFLOW_API_KEY not set", provider="siliconflow")
+        raise CredentialNotFoundError(
+            "SILICONFLOW_API_KEY not set", provider="siliconflow"
+        )
 
     monkeypatch.setattr(octo_runner, "_run_tier2_gaia", _raise)
     task = FakeGaiaTaskMeta(task_id="T2-GAIA-X", domain="gaia_fallback")
@@ -495,7 +578,9 @@ async def test_runner_fn_provider_error_maps_to_infra_error(monkeypatch, patched
     assert "CredentialNotFoundError" in (out.error_message or "")
 
 
-async def test_runner_fn_generic_runtime_error_maps_to_result_error(monkeypatch, patched_harness_session):
+async def test_runner_fn_generic_runtime_error_maps_to_result_error(
+    monkeypatch, patched_harness_session
+):
     """generic RuntimeError → RESULT_ERROR（不吞掉 scorer / runner bug）."""
 
     async def _raise(task_meta, iteration, rubrics, started_at):
@@ -574,13 +659,20 @@ async def test_run_tier1_fetch_events_connection_error_propagates(monkeypatch):
     @asynccontextmanager
     async def _fake_session(**kwargs):
         async with _fake_harness_session(
-            store_group=fake_sg, task_runner=fake_task_runner, provider_router=MagicMock()
+            store_group=fake_sg,
+            task_runner=fake_task_runner,
+            provider_router=MagicMock(),
         ) as handle:
             yield handle
 
     monkeypatch.setattr(octo_runner, "octo_harness_session", _fake_session)
 
-    task = FakeYamlTaskMeta(task_id="T1-CE", tier=1, domain="memory", raw={"prompt": "p", "timeout_seconds": 5})
+    task = FakeYamlTaskMeta(
+        task_id="T1-CE",
+        tier=1,
+        domain="memory",
+        raw={"prompt": "p", "timeout_seconds": 5},
+    )
     out = await octo_runner.runner_fn(task, iteration=1)
 
     # _run_tier1 不再 swallow → ConnectionError 透传到 runner_fn 顶层
@@ -616,14 +708,19 @@ async def test_run_tier3_fetch_events_provider_error_propagates(monkeypatch):
     @asynccontextmanager
     async def _fake_session(**kwargs):
         async with _fake_harness_session(
-            store_group=fake_sg, task_runner=fake_task_runner, provider_router=MagicMock()
+            store_group=fake_sg,
+            task_runner=fake_task_runner,
+            provider_router=MagicMock(),
         ) as handle:
             yield handle
 
     monkeypatch.setattr(octo_runner, "octo_harness_session", _fake_session)
 
     task = FakeYamlTaskMeta(
-        task_id="T3-CE", tier=3, domain="philosophy_h1", raw={"prompt": "p", "timeout_seconds": 5}
+        task_id="T3-CE",
+        tier=3,
+        domain="philosophy_h1",
+        raw={"prompt": "p", "timeout_seconds": 5},
     )
     out = await octo_runner.runner_fn(task, iteration=1)
 
@@ -716,9 +813,17 @@ async def test_provider_router_chat_uses_resolve_for_alias_and_client_call():
     router = MagicMock()
     fake_client = MagicMock()
     fake_client.call = AsyncMock(
-        return_value=("Pydantic 是 Python 数据验证库", [], {"usage": {"input_tokens": 12, "output_tokens": 8}})
+        return_value=(
+            "Pydantic 是 Python 数据验证库",
+            [],
+            {"usage": {"input_tokens": 12, "output_tokens": 8}},
+        )
     )
-    fake_resolved = MagicMock(client=fake_client, model_name="deepseek-ai/DeepSeek-V3.2", provider_id="siliconflow")
+    fake_resolved = MagicMock(
+        client=fake_client,
+        model_name="deepseek-ai/DeepSeek-V3.2",
+        provider_id="siliconflow",
+    )
     router.resolve_for_alias = MagicMock(return_value=fake_resolved)
 
     messages = [
@@ -784,7 +889,9 @@ async def test_provider_router_chat_no_system_message():
 
 
 def test_normalize_chat_response_dict_text_key():
-    r = octo_runner._normalize_chat_response({"text": "hi", "usage": {"input_tokens": 5}})
+    r = octo_runner._normalize_chat_response(
+        {"text": "hi", "usage": {"input_tokens": 5}}
+    )
     assert r["text"] == "hi"
     assert r["usage"]["input_tokens"] == 5
 
@@ -857,7 +964,9 @@ def patched_harness_session(monkeypatch: pytest.MonkeyPatch):
 
 async def test_runner_fn_tier1_dispatches_to_run_tier1(patched_harness_session):
     """tier=1 → 调用 _run_tier1（mock 路径）。"""
-    task = FakeYamlTaskMeta(task_id="T1-MEM", tier=1, domain="memory", raw={"prompt": "p"})
+    task = FakeYamlTaskMeta(
+        task_id="T1-MEM", tier=1, domain="memory", raw={"prompt": "p"}
+    )
 
     async def _fake_tier1(task_meta, iteration, rubrics, started_at):
         return octo_runner.TaskExecutionOutcome(
@@ -870,7 +979,9 @@ async def test_runner_fn_tier1_dispatches_to_run_tier1(patched_harness_session):
     assert out.score == 1.0
 
 
-async def test_runner_fn_tier2_tau_domain_dispatches_to_run_tier2_tau(patched_harness_session):
+async def test_runner_fn_tier2_tau_domain_dispatches_to_run_tier2_tau(
+    patched_harness_session,
+):
     """tier=2 + domain 含 tau → _run_tier2_tau。"""
     task = FakeTauTaskMeta(task_id="T2-TAU-1", domain="tau_bench_airline")
     invoked: dict[str, Any] = {}
@@ -889,7 +1000,9 @@ async def test_runner_fn_tier2_tau_domain_dispatches_to_run_tier2_tau(patched_ha
     assert out.result == RESULT_PASS
 
 
-async def test_runner_fn_tier2_gaia_domain_dispatches_to_run_tier2_gaia(patched_harness_session):
+async def test_runner_fn_tier2_gaia_domain_dispatches_to_run_tier2_gaia(
+    patched_harness_session,
+):
     """tier=2 + domain 含 gaia → _run_tier2_gaia。"""
     task = FakeGaiaTaskMeta(task_id="T2-GAIA-1", domain="gaia_fallback")
     invoked: dict[str, Any] = {}
@@ -1211,7 +1324,9 @@ def test_score_tier1_accepts_external_judge_trigger():
     # 不传 → 默认行为
     out_default = score_tier1(task, [])
     # 传 stub trigger → 行为应一致（无 expected events → PASS）
-    out_with_stub = score_tier1(task, [], judge_trigger=LLMJudgeTrigger(adapter=StubJudgeAdapter()))
+    out_with_stub = score_tier1(
+        task, [], judge_trigger=LLMJudgeTrigger(adapter=StubJudgeAdapter())
+    )
     assert out_default.verdict == TaskVerdict.PASS
     assert out_with_stub.verdict == TaskVerdict.PASS
 
@@ -1238,7 +1353,9 @@ def test_score_tier1_partial_path_uses_external_trigger():
             {"event_type": "B", "required_fields": {}},
         ],
     }
-    actual = [{"event_type": "A", "payload": {}}]  # 1/2 hit → match_ratio=0.5 → judge 触发
+    actual = [
+        {"event_type": "A", "payload": {}}
+    ]  # 1/2 hit → match_ratio=0.5 → judge 触发
     spy_trigger = LLMJudgeTrigger(adapter=_SpyAdapter())
     out = score_tier1(task, actual, judge_trigger=spy_trigger)
     assert call_count["n"] == 1
@@ -1260,7 +1377,9 @@ def test_score_dispatch_forwards_judge_trigger_to_tier1():
 
     def _spy(task, actual_events, rubric=None, token_usage=None, judge_trigger=None):
         captured["judge_trigger"] = judge_trigger
-        return _real_score_tier1(task, actual_events, rubric, token_usage, judge_trigger)
+        return _real_score_tier1(
+            task, actual_events, rubric, token_usage, judge_trigger
+        )
 
     with patch("benchmarks.runner.score_dispatch.score_tier1", new=_spy):
         task = {"task_id": "T", "tier": 1, "domain": "memory", "expected_events": []}
@@ -1282,7 +1401,15 @@ async def test_octo_harness_session_creates_isolated_tmpdir(monkeypatch):
     captured_paths: list[Any] = []
 
     class _FakeOctoHarness:
-        def __init__(self, *, project_root, credential_store, llm_adapter, mcp_servers_dir, data_dir):
+        def __init__(
+            self,
+            *,
+            project_root,
+            credential_store,
+            llm_adapter,
+            mcp_servers_dir,
+            data_dir,
+        ):
             captured_paths.append(project_root)
             captured_paths.append(data_dir)
 
@@ -1343,7 +1470,9 @@ def test_resolve_template_root_env_when_no_explicit(tmp_path, monkeypatch):
     assert octo_runner._resolve_template_root(None) == env_root
 
 
-def test_resolve_template_root_returns_none_when_nothing_available(tmp_path, monkeypatch):
+def test_resolve_template_root_returns_none_when_nothing_available(
+    tmp_path, monkeypatch
+):
     """都缺时 → None（caller fail-fast）."""
     monkeypatch.delenv("OCTOAGENT_BENCH_TEMPLATE_ROOT", raising=False)
     fake_home = tmp_path / "no_octoagent_dir"
@@ -1356,7 +1485,9 @@ async def test_session_raises_missing_config_when_template_root_none(monkeypatch
     monkeypatch.delenv("OCTOAGENT_BENCH_TEMPLATE_ROOT", raising=False)
     monkeypatch.setattr(octo_runner.Path, "home", lambda: Path("/nonexistent/x"))
 
-    with pytest.raises(octo_runner.MissingInstanceConfigError, match="No instance template_root"):
+    with pytest.raises(
+        octo_runner.MissingInstanceConfigError, match="No instance template_root"
+    ):
         async with octo_runner.octo_harness_session(require_config=True) as _:
             pass
 
@@ -1365,7 +1496,9 @@ async def test_session_raises_missing_config_when_yaml_absent(tmp_path):
     """template_root 存在但没 octoagent.yaml → MissingInstanceConfigError."""
     empty_root = tmp_path / "empty_instance"
     empty_root.mkdir()
-    with pytest.raises(octo_runner.MissingInstanceConfigError, match="Instance config not found"):
+    with pytest.raises(
+        octo_runner.MissingInstanceConfigError, match="Instance config not found"
+    ):
         async with octo_runner.octo_harness_session(
             template_root=empty_root, require_config=True
         ) as _:
@@ -1382,7 +1515,9 @@ async def test_session_raises_missing_config_when_bench_alias_absent(tmp_path):
         "model_aliases:\n  main:\n    provider: foo\n    model: m\n",
         encoding="utf-8",
     )
-    with pytest.raises(octo_runner.MissingInstanceConfigError, match="Bench alias 'bench' not found"):
+    with pytest.raises(
+        octo_runner.MissingInstanceConfigError, match="Bench alias 'bench' not found"
+    ):
         async with octo_runner.octo_harness_session(
             template_root=template_root, require_config=True, bench_model_alias="bench"
         ) as _:
@@ -1406,7 +1541,9 @@ def test_rewrite_main_alias_to_bench_overwrites_main_and_cheap(tmp_path):
         "  bench:\n    provider: siliconflow\n    model: deepseek-ai/DeepSeek-V3.2\n",
         encoding="utf-8",
     )
-    rewritten_text = octo_runner._rewrite_main_alias_to_bench(yaml_path, bench_alias="bench")
+    rewritten_text = octo_runner._rewrite_main_alias_to_bench(
+        yaml_path, bench_alias="bench"
+    )
     assert rewritten_text is not None
     parsed = _yaml.safe_load(rewritten_text)
     assert parsed["model_aliases"]["main"]["provider"] == "siliconflow"
@@ -1433,7 +1570,9 @@ def test_materialize_instance_config_copies_behavior_files(tmp_path):
     src = tmp_path / "src"
     (src / "behavior" / "system").mkdir(parents=True)
     (src / "behavior" / "system" / "USER.md").write_text("host user", encoding="utf-8")
-    (src / "behavior" / "system" / "MEMORY.md.template").write_text("tpl memory", encoding="utf-8")
+    (src / "behavior" / "system" / "MEMORY.md.template").write_text(
+        "tpl memory", encoding="utf-8"
+    )
     (src / "octoagent.yaml").write_text(
         "model_aliases:\n  bench:\n    provider: siliconflow\n    model: m\n",
         encoding="utf-8",

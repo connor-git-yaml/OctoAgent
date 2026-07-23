@@ -20,6 +20,7 @@ from octoagent.core.models import (
     VaultAccessRequestItem,
     VaultRetrievalAuditItem,
 )
+from octoagent.gateway.services.operations.backup_service import resolve_project_root
 from octoagent.memory import (
     MemoryBackendStatus,
     MemoryService,
@@ -27,7 +28,6 @@ from octoagent.memory import (
     VaultAccessGrantStatus,
 )
 
-from octoagent.provider.dx.backup_service import resolve_project_root
 from .memory_backend_resolver import MemoryBackendResolver
 
 _log = structlog.get_logger()
@@ -141,6 +141,7 @@ class MemoryConsoleBase:
                 store = self._stores.memory_store if hasattr(self._stores, "memory_store") else None
                 if store is None:
                     from octoagent.memory.store.memory_store import SqliteMemoryStore as _Store
+
                     store = _Store(self._stores.conn)
                 all_scopes = await store.list_scope_ids()
                 if all_scopes:
@@ -268,8 +269,7 @@ class MemoryConsoleBase:
             allowed=False,
             reason_code="MEMORY_PERMISSION_SCOPE_UNBOUND",
             message=(
-                f"{action_id} 包含未绑定到当前 project 的 scope: "
-                f"{', '.join(invalid_scope_ids)}"
+                f"{action_id} 包含未绑定到当前 project 的 scope: {', '.join(invalid_scope_ids)}"
             ),
             project_id=context.project.project_id,
             scope_id=invalid_scope_ids[0],
@@ -387,9 +387,7 @@ class MemoryConsoleBase:
             evidence_refs=[item.model_dump(mode="json") for item in sor.evidence_refs],
             metadata=sor.metadata,
             proposal_refs=(
-                [str(sor.metadata.get("proposal_id"))]
-                if sor.metadata.get("proposal_id")
-                else []
+                [str(sor.metadata.get("proposal_id"))] if sor.metadata.get("proposal_id") else []
             ),
             retrieval_backend=retrieval_backend,
         )

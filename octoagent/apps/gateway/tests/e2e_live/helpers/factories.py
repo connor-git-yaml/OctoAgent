@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import shutil
 from collections.abc import AsyncIterator
+from datetime import UTC
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +46,6 @@ async def octo_harness_e2e(
     P3 起每个 case 自行决定 bootstrap 时机；本 fixture 仅提供构造好的 harness 实例。
     """
     from fastapi import FastAPI
-
     from octoagent.gateway.harness.octo_harness import OctoHarness
 
     # e2e 实例 root 在 tmp 下，绝不动宿主
@@ -94,7 +94,7 @@ async def octo_harness_e2e(
 
 async def _ensure_audit_task(sg: Any, task_id: str) -> None:
     """确保审计 task 存在（外键约束）。从旧 acceptance_scenarios 复制。"""
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from octoagent.core.models.task import RequesterInfo, Task, TaskPointers
 
@@ -104,7 +104,7 @@ async def _ensure_audit_task(sg: Any, task_id: str) -> None:
             return
     except Exception:
         pass
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     task = Task(
         task_id=task_id,
         created_at=now,
@@ -120,11 +120,11 @@ async def _ensure_audit_task(sg: Any, task_id: str) -> None:
 async def _insert_turn_events(conn: Any, turns: list[dict[str, Any]]) -> None:
     """向 events 表写入模拟 turn 事件。从旧 acceptance_scenarios 复制。"""
     import time
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     from ulid import ULID
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     try:
         await conn.execute(
             """
@@ -263,7 +263,7 @@ async def submit_message_with_control_metadata(
 
     sg = app.state.store_group
     sse_hub = app.state.sse_hub
-    service = TaskService(sg, sse_hub)
+    service = TaskService(sg, sse_hub, storage_only=True)
     task_id, _ = await service.create_task(msg)
 
     task_runner = getattr(app.state, "task_runner", None)

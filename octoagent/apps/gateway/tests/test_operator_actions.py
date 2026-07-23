@@ -17,12 +17,12 @@ from octoagent.core.models import (
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.operator_actions import OperatorActionService
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.policy.approval_manager import ApprovalManager
 from octoagent.policy.models import ApprovalRequest
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from octoagent.tooling.models import SideEffectLevel
 
 
@@ -45,7 +45,7 @@ async def _create_base_task(tmp_path: Path, text: str = "hello") -> tuple:
         str(tmp_path / "gateway.db"),
         str(tmp_path / "artifacts"),
     )
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     task_id, created = await task_service.create_task(
         NormalizedMessage(
             channel="web",
@@ -159,9 +159,7 @@ async def test_retry_task_creates_successor_and_records_audit(tmp_path: Path) ->
     assert runner.enqueued[0][0] == result.retry_launch.result_task_id
     assert events[-1].type == EventType.OPERATOR_ACTION_RECORDED
     assert events[-1].payload["result_task_id"] == result.retry_launch.result_task_id
-    retry_user_event = next(
-        event for event in retry_events if event.type == EventType.USER_MESSAGE
-    )
+    retry_user_event = next(event for event in retry_events if event.type == EventType.USER_MESSAGE)
     assert retry_user_event.payload["control_metadata"]["retry_source_task_id"] == task_id
     assert retry_user_event.payload["control_metadata"]["retry_action_source"] == "web"
     assert retry_user_event.payload["control_metadata"]["retry_actor_id"] == "user:web"

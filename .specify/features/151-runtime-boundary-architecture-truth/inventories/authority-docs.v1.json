@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "feature_id": "F151",
+  "purpose": "Exact active authority set that can state runtime, package, Provider or backend truth. This set is scanned semantically in full, not limited to documents changed by F151.",
+  "documents": [
+    {"path":".specify/memory/constitution.md","kind":"constitution","action":"modify","disposition":"canonical F151 rules"},
+    {"path":"docs/blueprint.md","kind":"blueprint-index","action":"modify","disposition":"replace active Proxy/kernel/physical worker/package claims; historical statements require explicit retired labeling"},
+    {"path":"docs/blueprint/milestones.md","kind":"blueprint-authority","action":"modify","disposition":"F151 status and acceptance truth"},
+    {"path":"docs/blueprint/architecture-audit.md","kind":"blueprint-authority","action":"modify","disposition":"section 14.14 closure and historical evidence labeling"},
+    {"path":"docs/blueprint/core-design.md","kind":"blueprint-authority","action":"modify","disposition":"single Gateway runtime and direct Provider transport truth"},
+    {"path":"docs/blueprint/deployment-and-ops.md","kind":"blueprint-authority","action":"modify","disposition":"canonical production entry and no Proxy deployment"},
+    {"path":"docs/blueprint/module-design.md","kind":"blueprint-authority","action":"modify","disposition":"real package/namespace and dependency truth"},
+    {"path":"docs/blueprint/api-and-protocol.md","kind":"blueprint-authority","action":"modify","disposition":"replace active Gateway-to-Kernel, Kernel-to-Worker and /kernel/* protocol claims with the single Gateway runtime and current Control Plane/API truth; explicit history remains labeled"},
+    {"path":"docs/blueprint/architecture-tradeoffs.md","kind":"blueprint-authority","action":"modify","disposition":"remove Docker-as-current-last-line-of-defense claims while retaining explicitly historical tradeoff records"},
+    {"path":"docs/blueprint/architecture-overview.md","kind":"blueprint-authority","action":"modify","disposition":"remove current-runtime kernel/worker/Proxy topology"},
+    {"path":"docs/blueprint/requirements.md","kind":"blueprint-authority","action":"modify","disposition":"remove mandatory/active retired dependencies and backend claims"},
+    {"path":"docs/blueprint/appendix.md","kind":"blueprint-authority","action":"modify","disposition":"mark retained history explicitly; current glossary follows direct Provider and single runtime"},
+    {"path":"docs/blueprint/testing-strategy.md","kind":"blueprint-authority","action":"modify","disposition":"remove Proxy/Docker-as-current test architecture claims"},
+    {"path":"docs/codebase-architecture/README.md","kind":"implementation-index","action":"modify","disposition":"implementation architecture index"},
+    {"path":"docs/codebase-architecture/modules/02-gateway-runtime-and-control-plane.md","kind":"implementation-architecture","action":"modify","disposition":"single Gateway runtime; no physical kernel/worker package; Docker historical projection only"},
+    {"path":"docs/codebase-architecture/modules/03-provider-and-llm-stack.md","kind":"implementation-architecture","action":"modify","disposition":"ProviderRouter/direct transports and Provider-to-Gateway zero import"},
+    {"path":"docs/codebase-architecture/provider-direct-routing.md","kind":"implementation-architecture","action":"modify","disposition":"ProviderRoute canonical DTO and direct routing"}
+  ],
+  "index_derivation": {
+    "root_index": "docs/blueprint.md",
+    "root_link_extractor": "Markdown inline links ending in .md, fragment stripped, resolved relative to root_index, deduplicated in first-seen order",
+    "root_unique_markdown_link_count": 18,
+    "root_candidates": [
+      {"path":"docs/blueprint/requirements.md","classification":"included"},
+      {"path":"docs/blueprint/architecture-overview.md","classification":"included"},
+      {"path":"docs/blueprint/core-design.md","classification":"included"},
+      {"path":"docs/blueprint/module-design.md","classification":"included"},
+      {"path":"docs/blueprint/api-and-protocol.md","classification":"included"},
+      {"path":"docs/blueprint/architecture-tradeoffs.md","classification":"included"},
+      {"path":"docs/blueprint/deployment-and-ops.md","classification":"included"},
+      {"path":"docs/blueprint/testing-strategy.md","classification":"included"},
+      {"path":"docs/blueprint/milestones.md","classification":"included"},
+      {"path":"docs/blueprint/architecture-audit.md","classification":"included"},
+      {"path":"docs/blueprint/agent-collaboration-philosophy.md","classification":"excluded-domain-semantics","reason":"logical Agent/Worker collaboration semantics only; Worker terminology alone is not a physical package, Provider transport, production entry or backend deployment claim"},
+      {"path":"docs/blueprint/appendix.md","classification":"included"},
+      {"path":"docs/codebase-architecture/README.md","classification":"included"},
+      {"path":"docs/codebase-architecture/harness-and-context.md","classification":"excluded-implementation-detail","reason":"context/harness behavior only; no physical package, Proxy transport or selectable Docker backend declaration"},
+      {"path":"docs/codebase-architecture/e2e-testing.md","classification":"excluded-test-detail","reason":"scenario/lane behavior only; current runtime test truth is owned by testing-strategy and implementation index"},
+      {"path":"docs/codebase-architecture/provider-direct-routing.md","classification":"included"},
+      {"path":"docs/codebase-architecture/testing-concurrency.md","classification":"excluded-test-detail","reason":"test isolation and scheduling only"},
+      {"path":"docs/codebase-architecture/message-model.md","classification":"excluded-domain-semantics","reason":"persisted message/work semantics; logical Worker values are not physical package or backend deployment claims"}
+    ],
+    "implementation_index": "docs/codebase-architecture/README.md",
+    "implementation_index_required_truth_paths": ["docs/codebase-architecture/modules/02-gateway-runtime-and-control-plane.md", "docs/codebase-architecture/modules/03-provider-and-llm-stack.md", "docs/codebase-architecture/provider-direct-routing.md"],
+    "derivation_gate": "re-extract both indexes at verification; any new or reclassified link capable of stating runtime/package/provider/backend truth must be added to documents[] with an exact disposition, otherwise fail"
+  },
+  "current_truth": {
+    "provider": "ProviderRouter plus typed direct transports; no LiteLLM Proxy production path",
+    "runtime": "one Gateway runtime; Inline/Graph selector semantics do not imply physical kernel/worker packages",
+    "packages": "no apps/kernel, management/kernel, management/worker or workers/* production package",
+    "backend": "new console/event writes are inline; docker is accepted only by historical raw Event decode/projection"
+  },
+  "semantic_gate": {
+    "scan_set": "all documents[] regardless of whether their bytes changed",
+    "history_allowed": "only when the enclosing heading/table row/paragraph explicitly labels the claim historical, retired or no longer active",
+    "active_claims_forbidden": ["LiteLLM Proxy as required/current production component", "OctoKernel or Workers as current physical packages", "apps/kernel or workers/* as current path", "packages/provider LiteLLM client as current", "Docker as selectable current execution runtime"],
+    "table_rule": "a completion/mandatory/current table row with a checkmark or equivalent active status fails even if another paragraph says retired",
+    "diagram_rule": "Mermaid/current runtime chain containing a retired component fails unless the entire diagram is explicitly historical",
+    "unlisted_authority_file": "fail when the active authority index links a Markdown document capable of stating runtime/package/provider/backend truth but documents[] omits it"
+  },
+  "negative_fixtures": [
+    "an explicitly historical retired Proxy paragraph passes",
+    "a current/required Proxy statement fails",
+    "a checked completion table row for an old kernel/worker/Proxy fact fails",
+    "a current Mermaid runtime chain through LiteLLM Proxy fails",
+    "an authority-index-linked runtime truth Markdown absent from documents[] fails"
+  ],
+  "self_check": {
+    "document_count": 17,
+    "unique_path_count": 17,
+    "baseline_s104_document_count": 9,
+    "round9_added_document_count": 6,
+    "round10_added_document_count": 2,
+    "root_index_unique_markdown_link_count": 18,
+    "root_index_unclassified_link_count": 0,
+    "glob_count": 0,
+    "unresolved_disposition_count": 0,
+    "active_retired_claim_target_count": 0
+  }
+}

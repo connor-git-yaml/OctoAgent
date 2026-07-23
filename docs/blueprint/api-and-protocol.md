@@ -4,26 +4,17 @@
 
 ---
 
-### 10.1 Gateway ↔ Kernel（HTTP）
+### 10.1 Gateway application API（HTTP）
 
-- `POST /kernel/ingest_message`
-  - body: NormalizedMessage
-  - returns: `{task_id}`
+- 当前只有 `apps/gateway` 这一 application host，不存在独立 Kernel 服务，也不存在 `/kernel/*` 内部网络协议。
+- 渠道与 Web 通过 Gateway 的公开 `/api/*` 路由创建消息、查询任务、取消任务、处理审批与消费 SSE。
+- 具体 path 以 `apps/gateway/src/octoagent/gateway/routes/` 和生成的 OpenAPI 为单一事实源；Blueprint 不再复制一套可能漂移的 route 清单。
 
-- `GET /kernel/tasks/{task_id}`
-  - returns: Task（当前状态快照）
+内部协调、TaskRunner、Policy、Memory 与 Worker runtime 角色通过同一进程内的 application service 调用，并共享 SQLite/Event/Work 事实源。
 
-- `POST /kernel/tasks/{task_id}/cancel`
-  - returns: `{ok, task_id}`
+SSE 的终止信号仍由终态事件携带 `"final": true`；客户端据此关闭连接。
 
-- `GET /kernel/stream/task/{task_id}`
-  - SSE events: Event（json）
-  - 终止信号：终态事件携带 `"final": true`，客户端据此关闭连接（对齐 A2A SSE 规范）
-
-- `POST /kernel/approvals/{approval_id}/decision`
-  - body: `{decision: approve|reject, comment?: str}`
-
-### 10.2 Kernel ↔ Worker（A2A-Lite Envelope）
+### 10.2 Gateway runtime 内逻辑 Agent 间的 A2A-Lite Envelope
 
 ```yaml
 A2AMessage:
@@ -62,7 +53,7 @@ A2AMessage:
 
 #### 10.2.1 A2A 状态映射（A2A TaskState Compatibility）
 
-OctoAgent 内部状态是 A2A 协议的**超集**。内部通信（Kernel ↔ Worker）使用完整状态；对外暴露 A2A 接口时通过映射层转换。
+OctoAgent 内部状态是 A2A 协议的**超集**。同一 Gateway runtime 内的逻辑 Agent 通信使用完整状态；对外暴露 A2A 接口时通过映射层转换。
 
 ```yaml
 # OctoAgent → A2A TaskState 映射

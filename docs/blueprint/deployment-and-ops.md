@@ -16,64 +16,53 @@
 
 #### 12.1.1 开发拓扑（单进程）
 
-MVP 开发阶段采用单进程模式，降低调试复杂度：
+开发阶段采用单进程模式，降低调试复杂度：
 
-- Gateway / Kernel / Worker 全部运行在同一 Python 进程内（FastAPI sub-app 或模块化路由）
+- Gateway application runtime 在同一 Python 进程内承载协调、策略、Worker runtime 等逻辑角色
 - SQLite 文件直接读写本地 `./data/sqlite/`
-- LiteLLM Proxy 单独容器运行（唯一外部依赖）
-- 不需要 Docker 网络编排，本地 `localhost` 通信即可
+- ProviderRouter 从进程内使用 direct transports 调用模型 Provider
+- 不需要 Docker 网络编排
 
 ```
-[ 本地进程: Gateway + Kernel + Workers ]
-          ↓ HTTP
-[ Docker: litellm-proxy :4000 ]
-          ↓
+[ 本地进程: Gateway application runtime ]
+          ↓ ProviderRouter direct transports
+[ Model Provider APIs ]
 [ SQLite: ./data/sqlite/octoagent.db ]
 [ Artifacts: ./data/artifacts/ ]
 ```
 
-#### 12.1.2 生产拓扑（Docker Compose 多容器）
+#### 12.1.2 生产拓扑（单 Gateway application host）
 
-长期运行场景采用容器化部署，每个服务独立隔离：
+当前单用户常驻实例由 OS 原生 service 托管一个 Gateway application host；公网入口如启用，
+只由受信 reverse proxy 回源 loopback。协调、策略、Worker runtime 与数据存储不是独立网络服务。
 
 ```
                     ┌──────────────────────┐
-                    │   reverse-proxy      │  :443 (HTTPS)
-                    │   (caddy / nginx)    │
+                    │ trusted reverse proxy│  可选 :443
                     └──────┬───────────────┘
                            │
-              ┌────────────┼────────────────┐
-              ▼            ▼                ▼
-        ┌──────────┐ ┌──────────┐   ┌─────────────┐
-        │ gateway  │ │ kernel   │   │ worker-ops  │
-        │ :9000    │ │ :9001    │   │ (内部端口)  │
-        └──────────┘ └──────────┘   └─────────────┘
-              │            │                │
-              └────────────┼────────────────┘
-                           ▼
+                           ▼ loopback
                     ┌──────────────┐
-                    │ litellm-proxy│  :4000 (内部)
-                    └──────────────┘
+                    │   gateway    │  单 application host
+                    │    :9000     │
+                    └──────┬───────┘
                            │
               ┌────────────┴────────────┐
               ▼                         ▼
-     [ volume: ./data ]         [ Docker Socket ]
-     sqlite / artifacts / vault   (JobRunner 沙箱)
+     [ instance data ]          [ Provider APIs ]
+     sqlite / artifacts / vault   direct transports
 ```
 
 服务清单：
 
 | 服务 | 镜像 | 端口 | 说明 |
 |------|------|------|------|
-| reverse-proxy | caddy:2-alpine | 443, 80 | HTTPS 终止（Telegram webhook 要求）；自动 Let's Encrypt |
-| octo-gateway | 自建 | 9000（内部） | 渠道适配 + SSE 转发 |
-| octo-kernel | 自建 | 9001（内部） | Orchestrator + Policy + Event Store |
-| octo-worker-* | 自建 | 无外部端口 | Worker 进程；MVP 可先内置在 kernel 中 |
-| litellm-proxy | ghcr.io/berriai/litellm | 4000（内部） | 模型网关 |
+| trusted reverse proxy | 外部受信组件 | 443, 80 | 可选 TLS/Access 边界，只回源 loopback |
+| octo-gateway | 项目安装环境 | 9000（loopback） | 唯一 application host、渠道、SSE 与 runtime |
 
-#### 12.1.3 Docker-in-Docker 策略（执行沙箱 vs 部署容器）
+#### 12.1.3 历史退役方案：Docker-in-Docker 与执行沙箱
 
-系统存在**两层 Docker 使用**，必须明确区分：
+以下内容记录早期蓝图曾设想的两层 Docker 使用，当前不再现役，也不是交付或安全承诺：
 
 - **部署层**：系统自身的容器化（docker-compose 管理）
 - **执行层**：JobRunner 为 Worker 创建的沙箱容器（FR-EXEC-1/2）
@@ -97,7 +86,7 @@ volumes:
 **部署拓扑简化**：
 
 - **不再启动 `litellm-proxy` 服务**（移除内部 `:4000` 端口）：`octoagent/docker-compose.litellm.yml` 已删除；生产 `docker-compose.yml` 应同步移除 `litellm-proxy` 服务条目（见 §12.2 参考配置注释）
-- **不再依赖 Docker daemon**（LiteLLM Proxy 时代的 `octoagent/provider/dx/docker_daemon.py` 已删除）：开发拓扑（§12.1.1）单进程启动无需 Docker；生产拓扑（§12.1.2）仅 JobRunner 沙箱仍用 Docker Socket
+- **不再依赖 Docker daemon**（LiteLLM Proxy 时代的 `octoagent/provider/dx/docker_daemon.py` 已删除）：开发与生产拓扑均为单 Gateway application host；当前没有 JobRunner Docker sandbox
 - **Gateway 启动时间**：~10s → **~5s**（无 LiteLLM Proxy 子进程等待 + 无 docker-compose 启动）
 
 **3 种 transport 直连**（详见 §8.9.2）：
@@ -144,14 +133,16 @@ volumes:
 - **无编排需求**：Blueprint §0 锁定单用户深度，无多实例/横向扩展/多服务编排场景——Docker Compose 多容器（§12.1.2）解决的是编排问题，此处不存在。
 - **崩溃自愈 + 开机自启已由 OS 覆盖**：F129 `octo service {install,uninstall,status}`（launchd/systemd user unit，三态幂等 + 旧进程交接 + /ready 校验）已给出容器编排的核心卖点（进程守护、崩溃重启、开机自启），无需容器运行时。
 - **远程触达不依赖容器网络**：F150 使用出站 Cloudflare Tunnel 回源 loopback，无需为 Gateway 开放容器端口或公网监听。
-- **容器徒增复杂度无对应收益**：镜像构建/维护、卷挂载（`~/.octoagent` 数据 + behavior + secrets）、凭证注入、时区、以及 JobRunner 沙箱的 **Docker-in-Docker 嵌套**（部署容器内再起沙箱容器，见 §12.1.3）都是净增运维面，换不到单用户场景下的实际好处。
-- **JobRunner 执行沙箱仍用 Docker**：注意区分——**执行层**沙箱（§12.1.3 执行隔离）继续用 Docker Socket 挂载，这与"**部署层**是否容器化"是两回事；不做容器交付不影响执行沙箱隔离。
+- **容器徒增复杂度无对应收益**：镜像构建/维护、卷挂载（`~/.octoagent` 数据 + behavior + secrets）、凭证注入、时区，以及历史 Docker-in-Docker 设想都会扩大单用户运维面。
+- **执行沙箱尚未实现**：当前 Worker runtime 只有 Inline/Graph backend，不得把 §12.1.3 的历史文本或 Docker Socket 挂载当作现役隔离能力。
 
 **触发重评条件**（届时重开本节）：迁移到 NAS / 需要多实例 / 需与其他服务在同一编排栈共存 / 面向多用户开放（当前 Blueprint §0 明确排除）。
 
 **不产出任何 `Dockerfile` / `docker-compose` 部署制品**（本仓当前也无——§12.2 参考配置是历史蓝图文本，非实际交付物）。
 
-### 12.2 Docker Compose 参考配置
+### 12.2 历史退役的 Docker Compose 参考配置
+
+> 以下配置仅保留早期蓝图的审计背景，当前交付不使用，也不得据此推导物理 kernel、worker 或 Docker sandbox。
 
 ```yaml
 # docker-compose.yml（生产参考）
@@ -401,19 +392,19 @@ OpsEventTypes:
 | 崩溃位置 | 恢复方式 | 触发条件 |
 |----------|---------|---------|
 | Skill Pipeline 节点内 | 从最后 checkpoint 确定性恢复 | 进程重启后扫描未完成 checkpoint |
-| Worker Free Loop 内 | 重启 Loop，Event 历史注入上下文，LLM 自主判断续接点 | Docker restart policy 自动拉起 |
+| Worker Free Loop 内 | 重启 Loop，Event 历史注入上下文，LLM 自主判断续接点 | OS user service 重启 Gateway 后恢复 |
 | Orchestrator Free Loop 内 | 重启 Loop，扫描未完成 Task，重新派发或等待人工确认 | 同上 |
 | Gateway | 无状态，直接重启；客户端 SSE 断线重连 | 同上 |
-| LiteLLM Proxy | 容器自动重启；期间 kernel 走 fallback 或进入冷却 | 同上 |
+| Provider API | ProviderRouter 按策略 fallback 或进入冷却 | 调用失败/超时/限流 |
 
 #### 12.5.2 系统级故障
 
 | 故障 | 检测方式 | 应对策略 |
 |------|---------|---------|
 | 磁盘空间不足 | `/ready` 检查 `disk_space_mb` | warn 告警 → 暂停新 task 创建 → critical 时拒绝写入 |
-| OOM（内存溢出） | Docker OOM killer 日志 | `deploy.resources.limits` 限制；OOM 后容器自动重启 |
+| OOM（内存溢出） | OS service 与进程日志 | 限制任务预算；进程异常后由 launchd/systemd user unit 重启 |
 | 网络断开 | litellm 健康检查失败 | 进入降级模式：已有 task 暂停；新 task 排队；HEALTH_DEGRADED 事件 |
-| 宿主机重启 | Docker `restart: unless-stopped` | 全部容器按依赖顺序自动拉起；kernel 启动时执行恢复扫描 |
+| 宿主机重启 | launchd/systemd user unit 状态 | Gateway application host 启动并执行恢复扫描 |
 | SQLite 损坏 | 启动时 `PRAGMA integrity_check` | 自动切换到最近备份；CRITICAL 告警通知 Owner |
 
 #### 12.5.3 应用级故障
@@ -654,12 +645,9 @@ OctoAgent Environment Check
 ✅ uv installed
 ✅ .env exists
 ✅ octoagent.yaml exists
-✅ litellm-config.yaml synced from octoagent.yaml
-✅ OCTOAGENT_LLM_MODE = litellm
-✅ LITELLM_MASTER_KEY configured
-✅ Docker daemon running
-✅ litellm-proxy container healthy
-✅ LiteLLM Proxy reachable (http://localhost:4000/health)
+✅ Provider routes valid
+✅ Provider credentials resolvable
+✅ Provider direct transport ready
 ✅ SQLite DB writable
 ✅ data/artifacts/ directory exists
 ⚠️  Provider credential present but not validated (use --live to test)
@@ -670,7 +658,7 @@ All checks passed! Run `octo start` to launch.
 检查项分级：
 
 - **必须通过**（❌ 阻断启动）：Python 版本、.env 存在、DB 可写
-- **建议通过**（⚠️ 可降级运行）：Docker、Proxy 可达、Provider 凭证有效性
+- **建议通过**（⚠️ 可降级运行）：Provider route、凭证与 live transport 可达
 - `--live` 标志：发送一个 cheap 模型 ping 请求验证端到端连通性
 - M2 扩展：对 Telegram pairing / webhook、JobRunner、backup 最近验证时间输出可执行修复建议
 
@@ -690,34 +678,29 @@ M2 在 `octo config` / `octo doctor` 之上补齐**首次使用闭环**：
 - 每一步都给出修复动作，而不是只打印错误；
 - 最终摘要应明确告知"系统已可用"还是"仍有阻塞项"。
 
-#### 12.9.4 dotenv 自动加载（M1）
+#### 12.9.4 Gateway 唯一生产入口与静态预检（M11 / F151）
 
-当前问题：`uvicorn` 不自动加载 `.env`，开发者必须手动 `source .env`。
+Gateway 的生产与受管服务入口统一为 `python -m octoagent.gateway`。入口只接受
+`--help`、`--host`、`--port`；重复或未知参数在导入应用前以 usage exit 64 失败。
+完成参数解析后，入口只导入一次 `octoagent.gateway.main.app`，而
+`main.app = create_app()` 是唯一静态配置与安全预检边界：
 
-解决方案：
+- 完整配置加载先于 front-door 环境变量覆盖；malformed、retired 或 unknown runtime
+  配置稳定映射为 `GATEWAY_RUNTIME_CONFIG_INVALID` / exit 78；
+- 已有安全暴露拒绝保持 `GATEWAY_SECURITY_CONFIG_INVALID` / exit 78；
+- 两类失败均发生在 Uvicorn 启动前；成功时 Uvicorn 接收同一 app instance 与解析后的
+  exact host/port；
+- 真正的运行期 composition failure 继续由 lifespan fail closed，不与静态预检混合。
 
-- Gateway `main.py` 启动时使用 `python-dotenv` 自动加载 `.env`（已在 M1 依赖中）
-- 加载优先级：环境变量 > `.env` 文件（不覆盖已设置的环境变量）
-- 仅在开发模式加载（生产环境由 Docker `env_file` 注入）
-
-```python
-# apps/gateway/src/octoagent/gateway/main.py
-from dotenv import load_dotenv
-load_dotenv()  # 开发便利；生产环境由容器 env_file 覆盖
-```
+受管 descriptor 的普通 load/start/restart 是只读操作：canonical、legacy、invalid schema
+或 invalid JSON 都不得创建 lock、corrupted copy 或改写原文件。只有显式 install/update
+transaction 可以执行 atomic migrate/repair。
 
 #### 12.9.5 `octo start` — 一键启动（M2）
 
-统一启动入口，根据 `.env` 配置自动决定启动方式：
-
-- `echo` 模式：仅启动 Gateway（uvicorn）
-- `litellm` 模式：先确认 litellm-proxy 容器运行 → 启动 Gateway
-- `full` 模式（M2+）：`docker compose up -d` 启动全部服务
-
-Docker daemon 未运行时，由 `octoagent.provider.dx.docker_daemon.ensure_docker_daemon`
-统一检测并在 macOS / Linux 下自动启动（macOS: `open -a "Docker Desktop"`；
-Linux: `systemctl --user start docker` → `sudo -n systemctl start docker`）。
-超时仍未就绪则降级至直接进程路径，不阻断 gateway 启动。相关环境变量：
-`OCTOAGENT_AUTOSTART_DOCKER=0` 禁用预热；`OCTOAGENT_DOCKER_DAEMON_TIMEOUT` 调整超时（秒）。
+`octo start`、安装脚本生成的 managed descriptor 与 `scripts/run-octo-home.sh` 都必须调用
+`python -m octoagent.gateway --host ... --port ...`，不得直接执行 `uvicorn main:app`。
+Gateway 通过 ProviderRouter 直连模型提供商；历史 LiteLLM Proxy / Docker daemon 自动启动
+路径已经退役，不再作为 Gateway 启动分支或降级路径。
 
 ---

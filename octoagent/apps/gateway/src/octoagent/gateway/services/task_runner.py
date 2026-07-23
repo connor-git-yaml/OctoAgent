@@ -44,6 +44,7 @@ from .execution_console import (
 )
 from .orchestrator import OrchestratorService
 from .resume_engine import ResumeEngine
+from .runtime_service_bundle import RuntimeServiceBundle
 from .task_service import TaskService
 from .worker_audit_logger import (
     audit_worker_error,
@@ -84,7 +85,7 @@ class TaskRunner:
         self,
         store_group: StoreGroup,
         sse_hub,
-        llm_service,
+        runtime_services: RuntimeServiceBundle,
         approval_manager=None,
         timeout_seconds: float = 14400.0,  # 4 小时，需大于 Worker max_execution
         monitor_interval_seconds: float = 5.0,
@@ -98,7 +99,7 @@ class TaskRunner:
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
-        self._llm_service = llm_service
+        self._runtime_services = runtime_services
         self._timeout_seconds = timeout_seconds
         self._monitor_interval_seconds = monitor_interval_seconds
         self._approval_timeout_seconds = approval_timeout_seconds  # FR-C3b
@@ -120,7 +121,7 @@ class TaskRunner:
         self._orchestrator = OrchestratorService(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_service,
+            runtime_services=runtime_services,
             approval_manager=approval_manager,
             delegation_plane=delegation_plane,
             worker_runtime_config=worker_runtime_config,
@@ -180,7 +181,7 @@ class TaskRunner:
             running = list(self._running_jobs.items())
             self._running_jobs.clear()
 
-        task_service = TaskService(self._stores, self._sse_hub)
+        task_service = TaskService(self._stores, self._sse_hub, storage_only=True)
         for task_id, running_job in running:
             self._cancellation_registry.cancel(task_id)
             running_job.task.cancel()
@@ -233,7 +234,7 @@ class TaskRunner:
         model_alias: str | None = None,
     ) -> tuple[str, bool]:
         """创建并启动 child task。"""
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         task_id, created = await service.create_task(message)
         # F097 Phase B-1（Codex P1-2 闭环）：在 create_task 后、enqueue 前
         # emit SubagentDelegation USER_MESSAGE event。消除 race —— child runtime
@@ -280,9 +281,7 @@ class TaskRunner:
                             kind=MemoryNamespaceKind.AGENT_PRIVATE,
                         )
                     )
-                    caller_memory_namespace_ids = [
-                        ns.namespace_id for ns in caller_namespaces
-                    ]
+                    caller_memory_namespace_ids = [ns.namespace_id for ns in caller_namespaces]
                     if caller_memory_namespace_ids:
                         log.debug(
                             "subagent_delegation_caller_namespaces_found",
@@ -322,6 +321,7 @@ class TaskRunner:
             from octoagent.core.models.payloads import (
                 ControlMetadataUpdatedPayload as _ControlMetadataUpdatedPayload,
             )
+
             from .connection_metadata import normalize_control_metadata as _normalize
 
             # F097 Phase D Round 2 修复保留：merge_control_metadata 取最新 USER_MESSAGE +
@@ -353,7 +353,11 @@ class TaskRunner:
                 delegation_event, update_task_pointer=False
             )
         except Exception as exc:
-            _task_svc_init = TaskService(self._stores, self._sse_hub)
+            _task_svc_init = TaskService(
+                self._stores,
+                self._sse_hub,
+                storage_only=True,
+            )
             try:
                 _task_meta = await _task_svc_init.get_latest_user_metadata(task_id)
             except Exception:
@@ -417,7 +421,7 @@ class TaskRunner:
         if not jobs:
             return
 
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         await asyncio.gather(*[self._recover_one_orphan_job(j, service) for j in jobs])
 
     async def _get_approval_requested_created_at(self, task_id: str) -> datetime | None:
@@ -428,14 +432,14 @@ class TaskRunner:
         """
         try:
             from octoagent.core.models.enums import EventType as _EventType
+
             _getter = getattr(self._stores.event_store, "get_events_for_task", None)
             if not callable(_getter):
                 return None
             events = await _getter(task_id)
             # 取最新的 APPROVAL_REQUESTED 事件（task_seq 最大）
             approval_events = [
-                e for e in events
-                if getattr(e, "type", None) == _EventType.APPROVAL_REQUESTED
+                e for e in events if getattr(e, "type", None) == _EventType.APPROVAL_REQUESTED
             ]
             if not approval_events:
                 return None
@@ -443,8 +447,7 @@ class TaskRunner:
             ts = getattr(latest, "ts", None)
             if ts is None:
                 return None
-            from datetime import timezone as _tz
-            return ts.replace(tzinfo=_tz.utc) if ts.tzinfo is None else ts
+            return ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts
         except Exception:
             return None
 
@@ -469,7 +472,7 @@ class TaskRunner:
         if not jobs:
             return
 
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         _now = datetime.now(UTC)
 
         for job in jobs:
@@ -491,9 +494,8 @@ class TaskRunner:
 
                 # fallback：若无 APPROVAL_REQUESTED 事件，用 task.updated_at
                 if approval_requested_at is None:
-                    from datetime import timezone as _tz
                     approval_requested_at_candidate = (
-                        task.updated_at.replace(tzinfo=_tz.utc)
+                        task.updated_at.replace(tzinfo=UTC)
                         if task.updated_at.tzinfo is None
                         else task.updated_at
                     )
@@ -528,6 +530,7 @@ class TaskRunner:
 
                     # 注册到 _running_jobs，让 monitor 继续跟踪
                     import asyncio as _asyncio
+
                     _placeholder_task = _asyncio.create_task(_asyncio.sleep(999_999))
                     self._running_jobs[job.task_id] = RunningJob(
                         task=_placeholder_task,
@@ -586,7 +589,9 @@ class TaskRunner:
             pending_list = self._approval_manager.get_pending_approvals()
             for _rec in pending_list:
                 if _rec.request.task_id == task_id:
-                    expired = await self._approval_manager.expire_dead_approval(_rec.request.approval_id)
+                    expired = await self._approval_manager.expire_dead_approval(
+                        _rec.request.approval_id
+                    )
                     if expired:
                         log.info(
                             "recover_waiting_approval_expired_approval_manager",
@@ -604,7 +609,7 @@ class TaskRunner:
 
     async def _recover_waiting_approval_push_failed(
         self,
-        service: "TaskService",
+        service: TaskService,
         task_id: str,
         reason: str,
     ) -> None:
@@ -701,7 +706,11 @@ class TaskRunner:
             # resume 路径如无信号，WorkerRuntime 仍回退到无条件 True（worker 子任务路径）。
             _startup_state_snapshot: dict = dict(resume_result.state_snapshot or {})
             try:
-                _task_svc_startup = TaskService(self._stores, self._sse_hub)
+                _task_svc_startup = TaskService(
+                    self._stores,
+                    self._sse_hub,
+                    storage_only=True,
+                )
                 _latest_meta_startup = await _task_svc_startup.get_latest_user_metadata(job.task_id)
                 if _latest_meta_startup.get("is_caller_worker_signal") == "1":
                     _startup_state_snapshot["is_caller_worker_signal"] = "1"
@@ -715,7 +724,9 @@ class TaskRunner:
                 user_text=job.user_text,
                 model_alias=job.model_alias,
                 resume_from_node=resume_result.resumed_from_node,
-                resume_state_snapshot=_startup_state_snapshot if _startup_state_snapshot else resume_result.state_snapshot,
+                resume_state_snapshot=_startup_state_snapshot
+                if _startup_state_snapshot
+                else resume_result.state_snapshot,
             )
             return
 
@@ -804,7 +815,7 @@ class TaskRunner:
 
         async with self._lock:
             running = self._running_jobs.get(task_id)
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         if running is None:
             job = await self._stores.task_job_store.get_job(task_id)
             if job is not None and job.status in _DEFERRED_JOB_STATUSES:
@@ -892,12 +903,16 @@ class TaskRunner:
             "input_request_id": result.request_id,
         }
         try:
-            _task_svc = TaskService(self._stores, self._sse_hub)
+            _task_svc = TaskService(self._stores, self._sse_hub, storage_only=True)
             _latest_meta = await _task_svc.get_latest_user_metadata(task_id)
             if _latest_meta.get("is_caller_worker_signal") == "1":
                 _resume_snapshot["is_caller_worker_signal"] = "1"
         except Exception:
-            _task_svc_for_audit = TaskService(self._stores, self._sse_hub)
+            _task_svc_for_audit = TaskService(
+                self._stores,
+                self._sse_hub,
+                storage_only=True,
+            )
             try:
                 _resume_meta = await _task_svc_for_audit.get_latest_user_metadata(task_id)
             except Exception:
@@ -969,7 +984,7 @@ class TaskRunner:
         resume_state_snapshot: dict[str, Any] | None = None,
         dispatch_envelope: DispatchEnvelope | None = None,
     ) -> None:
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         try:
             if dispatch_envelope is None:
                 metadata = await service.get_latest_user_metadata(task_id)
@@ -979,7 +994,8 @@ class TaskRunner:
                     model_alias=model_alias,
                     resume_from_node=resume_from_node,
                     resume_state_snapshot=resume_state_snapshot,
-                    tool_profile=str(metadata.get("tool_profile", "standard")).strip() or "standard",
+                    tool_profile=str(metadata.get("tool_profile", "standard")).strip()
+                    or "standard",
                     metadata=metadata,
                 )
             else:
@@ -1032,7 +1048,9 @@ class TaskRunner:
                 log.warning("run_job_mark_failed_fallback", task_id=task_id, exc_info=True)
             try:
                 await self._orchestrator._ensure_task_failed(
-                    task_id, f"trace-{task_id}", error_summary,
+                    task_id,
+                    f"trace-{task_id}",
+                    error_summary,
                 )
             except Exception:
                 log.warning("run_job_mark_task_failed_fallback", task_id=task_id, exc_info=True)
@@ -1112,10 +1130,7 @@ class TaskRunner:
            修复：扫数据库 task_job_store["WAITING_APPROVAL"]，合并到检查集合。
         """
         threshold = datetime.now(UTC) - timedelta(seconds=self._timeout_seconds)
-        _approval_threshold = (
-            datetime.now(UTC)
-            - timedelta(seconds=self._approval_timeout_seconds)
-        )
+        _approval_threshold = datetime.now(UTC) - timedelta(seconds=self._approval_timeout_seconds)
 
         # 收集所有 running job 的 task_id，同时区分超时类型
         all_running_ids: list[str] = []
@@ -1132,7 +1147,9 @@ class TaskRunner:
         # → 下次 monitor tick _running_jobs 无此 task_id，但数据库 task_job 仍是 WAITING_APPROVAL。
         # 这类 orphan task 需要 monitor 通过数据库查询兜底推 FAILED。
         try:
-            _db_waiting_approval_jobs = await self._stores.task_job_store.list_jobs(["WAITING_APPROVAL"])
+            _db_waiting_approval_jobs = await self._stores.task_job_store.list_jobs(
+                ["WAITING_APPROVAL"]
+            )
             for _wa_job in _db_waiting_approval_jobs:
                 if _wa_job.task_id not in running_ids_set:
                     # 不在 _running_jobs，但数据库 task_job 是 WAITING_APPROVAL → orphan
@@ -1148,7 +1165,7 @@ class TaskRunner:
         if not all_running_ids:
             return
 
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
 
         # F101 Phase B FR-C3 + HIGH-02 v4：先检查 WAITING_APPROVAL 超时（approval_timeout_seconds）
         # 此检查覆盖：
@@ -1160,8 +1177,7 @@ class TaskRunner:
                 continue
             # 计算 task.updated_at 是否超出 approval_timeout_seconds
             if task.updated_at.tzinfo is None:
-                from datetime import timezone as _tz
-                _task_updated = task.updated_at.replace(tzinfo=_tz.utc)
+                _task_updated = task.updated_at.replace(tzinfo=UTC)
             else:
                 _task_updated = task.updated_at
             if _task_updated >= _approval_threshold:
@@ -1247,7 +1263,11 @@ class TaskRunner:
                 message="worker runtime timeout",
             )
             await self._notify_completion(task_id)
-            _task_svc_to = TaskService(self._stores, self._sse_hub)
+            _task_svc_to = TaskService(
+                self._stores,
+                self._sse_hub,
+                storage_only=True,
+            )
             try:
                 _to_meta = await _task_svc_to.get_latest_user_metadata(task_id)
             except Exception:
@@ -1283,8 +1303,7 @@ class TaskRunner:
         try:
             _ch_task = await self._stores.task_store.get_task(task_id)
             _is_system_task = (
-                _ch_task is not None
-                and _ch_task.requester.channel == _SYSTEM_INTERNAL_TASK_CHANNEL
+                _ch_task is not None and _ch_task.requester.channel == _SYSTEM_INTERNAL_TASK_CHANNEL
             )
         except Exception:
             _is_system_task = False
@@ -1295,17 +1314,20 @@ class TaskRunner:
         if self._notification_service is not None and not _is_system_task:
             try:
                 from .notification import NotificationPriority as _NotificationPriority
+
                 # 读取 task 获取状态和标题
-                task_svc = TaskService(self._stores, self._sse_hub)
+                task_svc = TaskService(
+                    self._stores,
+                    self._sse_hub,
+                    storage_only=True,
+                )
                 _task = await task_svc.get_task(task_id)
                 _status_str = (
                     _task.status.value
                     if _task is not None and hasattr(_task.status, "value")
                     else ("UNKNOWN" if _task is None else str(_task.status))
                 )
-                _title = (
-                    (_task.title or "") if _task is not None else ""
-                )
+                _title = (_task.title or "") if _task is not None else ""
                 # 按终态决定优先级：FAILED → HIGH；SUCCEEDED → LOW；其他 → LOW
                 if _status_str == "FAILED":
                     _priority = _NotificationPriority.HIGH
@@ -1314,11 +1336,7 @@ class TaskRunner:
                 # F101 Phase C v3 Issue 1：从 task.pointers.latest_event_id 读取真实
                 # state_transition_event_id，确保同一 task 不同 transition 产生不同
                 # notification_id（M4-1 约束）。
-                _event_id = (
-                    (_task.pointers.latest_event_id or "")
-                    if _task is not None
-                    else ""
-                )
+                _event_id = (_task.pointers.latest_event_id or "") if _task is not None else ""
                 # F101 Phase C v3 Issue 2：从 execution_console 读取 session_id，
                 # 供 list_active(session_id) Web 刷新使用（FR-B5 H3）。
                 _session_id: str | None = None
@@ -1370,7 +1388,7 @@ class TaskRunner:
         """
         try:
             # 1. 通过 TaskService 读取 control_metadata，取出 subagent_delegation
-            service = TaskService(self._stores, self._sse_hub)
+            service = TaskService(self._stores, self._sse_hub, storage_only=True)
             control_metadata = await service.get_latest_user_metadata(task_id)
             raw_delegation = control_metadata.get("subagent_delegation")
             if not raw_delegation:
@@ -1408,9 +1426,7 @@ class TaskRunner:
                 return
             terminal_at = task.updated_at if task.updated_at else datetime.now(tz=UTC)
             terminal_status_str = (
-                task.status.value
-                if hasattr(task.status, "value")
-                else str(task.status)
+                task.status.value if hasattr(task.status, "value") else str(task.status)
             )
 
             # 6. F097 Phase E (Codex P1-2 闭环) + Phase B-4 (Codex P2-4 缓解):
@@ -1419,9 +1435,7 @@ class TaskRunner:
             # 则跳过 emit 但**仍尝试 close session**（P2-4 缓解：避免事件 OK + session
             # 因 first cleanup 失败留在 ACTIVE 永久状态）。
             idempotency_key = f"subagent_completed:{delegation.delegation_id}"
-            existing_task = await self._stores.event_store.check_idempotency_key(
-                idempotency_key
-            )
+            existing_task = await self._stores.event_store.check_idempotency_key(idempotency_key)
             should_emit_event = existing_task is None
             if not should_emit_event:
                 log.info(

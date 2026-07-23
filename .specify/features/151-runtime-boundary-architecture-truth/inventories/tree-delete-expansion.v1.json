@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "base_sha": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc",
+  "purpose": "Base-bound exact expansion of every F151 tree/glob deletion. Directory or glob placeholders never count as Git changed paths.",
+  "expansions": [
+    {
+      "source_pattern": "octoagent/packages/sdk/**",
+      "pattern_kind": "tracked-tree-delete",
+      "owner_slice": "S047-retirement-atomic",
+      "entries": [
+        {"path":"octoagent/packages/sdk/README.md","mode":"100644","object_type":"blob","base_object_id":"725fbde1fa06a2d6bdc641126a8e056965f73c47"},
+        {"path":"octoagent/packages/sdk/pyproject.toml","mode":"100644","object_type":"blob","base_object_id":"5346daff8e5631d7ff92e6dab5d1352e5cdcf2e0"},
+        {"path":"octoagent/packages/sdk/src/octoagent_sdk/__init__.py","mode":"100644","object_type":"blob","base_object_id":"f2381df46ee787260984f1b1ec0f2fe9056ecff2"},
+        {"path":"octoagent/packages/sdk/src/octoagent_sdk/_agent.py","mode":"100644","object_type":"blob","base_object_id":"821f24580eb46b7302e744cf69ff3884bee2a4a0"},
+        {"path":"octoagent/packages/sdk/src/octoagent_sdk/_tool.py","mode":"100644","object_type":"blob","base_object_id":"6c5278e1cfd54aed00ef9e33b157659385c2d5d2"},
+        {"path":"octoagent/packages/sdk/tests/test_sdk.py","mode":"100644","object_type":"blob","base_object_id":"01a6fb90df96f734d29e9bfb9fa1bbf21b34960b"}
+      ]
+    },
+    {
+      "source_pattern": "skills/llm-config/**",
+      "pattern_kind": "tracked-tree-delete",
+      "owner_slice": "S047-retirement-atomic",
+      "entries": [
+        {"path":"skills/llm-config/SKILL.md","mode":"100644","object_type":"blob","base_object_id":"e7ce107ec3e50d783dde279a866863375e9bcf9f"}
+      ]
+    },
+    {
+      "source_pattern": "octoagent/.env.litellm.example",
+      "pattern_kind": "tracked-exact-delete",
+      "owner_slice": "S047-retirement-atomic",
+      "entries": [
+        {"path":"octoagent/.env.litellm.example","mode":"100644","object_type":"blob","base_object_id":"e1b1cc73b03882c75db0328ed47b4e2bd82ee60a"}
+      ]
+    }
+  ],
+  "gate": {
+    "expansion_command": "tracked-tree-delete uses git ls-tree -r <base_sha> -- <literal-tree-prefix>; tracked-exact-delete uses git ls-tree <base_sha> -- <exact-repository-relative-path>; no Python glob or Git pathspec wildcard is used",
+    "required_source_patterns": "exact set of S047 resolved_globs for tree prefixes plus S047 resolved_paths whose exact_additional action is delete; every source_pattern is bijective with one of those declarations",
+    "changed_path_materialization": "use entries[].path only; deduplicate paths shared by exact and glob sources",
+    "base_object_verification": "mode, object type and object id must exactly match git ls-tree at base_sha",
+    "unknown_or_empty_pattern": "fail",
+    "directory_placeholder_as_changed_path": "fail",
+    "new_or_untracked_targets": "must be exact declared_new_paths; globs cannot create ownership"
+  },
+  "negative_fixtures": [
+    "SDK expansion missing any of the six base tracked files fails",
+    "skills/llm-config directory placeholder without SKILL.md fails",
+    "base object id mismatch fails",
+    "glob gains or loses a base tracked match without manifest update fails",
+    "a zero-directory dotfile represented by ** or PurePath.match instead of an exact tracked path fails",
+    "an untracked target matched only by a glob remains unowned and fails"
+  ],
+  "self_check": {
+    "pattern_count": 3,
+    "tree_pattern_count": 2,
+    "exact_delete_pattern_count": 1,
+    "glob_pattern_count": 0,
+    "entry_count_before_dedup": 8,
+    "unique_exact_path_count": 8,
+    "sdk_tracked_file_count": 6,
+    "skill_tracked_file_count": 1,
+    "retired_env_tracked_file_count": 1,
+    "base_object_mismatch_count": 0,
+    "unexpanded_required_pattern_count": 0
+  }
+}

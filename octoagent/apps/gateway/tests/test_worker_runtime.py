@@ -18,6 +18,8 @@ from octoagent.gateway.services.worker_runtime import (
 )
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 
 class SlowLLMService:
     """用于 timeout/cancel 测试的慢速 LLM 服务。"""
@@ -80,7 +82,7 @@ async def _create_task_with_envelope(tmp_path: Path, key: str) -> tuple:
         str(tmp_path / f"{key}-artifacts"),
     )
     sse_hub = SSEHub()
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     msg = NormalizedMessage(text=f"{key}-task", idempotency_key=key)
     task_id, created = await service.create_task(msg)
     assert created is True
@@ -109,7 +111,7 @@ class TestWorkerRuntime:
         runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=SlowLLMService(delay_s=0.01),
+            runtime_services=runtime_service_fixture(SlowLLMService(delay_s=0.01)).bundle,
             config=WorkerRuntimeConfig(docker_mode="disabled"),
         )
         result = await runtime.run(envelope, worker_id="worker.test")
@@ -127,7 +129,7 @@ class TestWorkerRuntime:
         runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=SlowLLMService(delay_s=0.01),
+            runtime_services=runtime_service_fixture(SlowLLMService(delay_s=0.01)).bundle,
             config=WorkerRuntimeConfig(docker_mode="required"),
             docker_available_checker=lambda: False,
         )
@@ -146,7 +148,7 @@ class TestWorkerRuntime:
         runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=SlowLLMService(delay_s=0.3),
+            runtime_services=runtime_service_fixture(SlowLLMService(delay_s=0.3)).bundle,
             config=WorkerRuntimeConfig(
                 docker_mode="disabled",
                 max_execution_timeout_seconds=0.05,
@@ -162,9 +164,7 @@ class TestWorkerRuntime:
 
         await store_group.close()
 
-    async def test_auth_failure_marks_worker_result_not_retryable(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_auth_failure_marks_worker_result_not_retryable(self, tmp_path: Path) -> None:
         """凭证失效导致的 worker FAILED 必须 retryable=False。
 
         2026-06-12 production OAuth 断链回归：重新授权前重派只会再次快速
@@ -186,7 +186,7 @@ class TestWorkerRuntime:
         runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=AuthBrokenLLMService(),
+            runtime_services=runtime_service_fixture(AuthBrokenLLMService()).bundle,
             config=WorkerRuntimeConfig(docker_mode="disabled"),
         )
         result = await runtime.run(envelope, worker_id="worker.test")
@@ -197,9 +197,7 @@ class TestWorkerRuntime:
 
         await store_group.close()
 
-    async def test_direct_path_auth_failure_also_not_retryable(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_direct_path_auth_failure_also_not_retryable(self, tmp_path: Path) -> None:
         """直连路径凭证失效（LLMCallError 401，无 tool_selection 时
         FallbackManager re-raise）同样 retryable=False（Codex re-review MEDIUM）。
         """
@@ -221,7 +219,7 @@ class TestWorkerRuntime:
         runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=DirectAuthBrokenLLMService(),
+            runtime_services=runtime_service_fixture(DirectAuthBrokenLLMService()).bundle,
             config=WorkerRuntimeConfig(docker_mode="disabled"),
         )
         result = await runtime.run(envelope, worker_id="worker.test")
@@ -232,9 +230,7 @@ class TestWorkerRuntime:
 
         await store_group.close()
 
-    async def test_generic_failure_keeps_worker_result_retryable(
-        self, tmp_path: Path
-    ) -> None:
+    async def test_generic_failure_keeps_worker_result_retryable(self, tmp_path: Path) -> None:
         """回归护栏：非 auth 的普通失败保持 retryable=True 原语义。"""
         store_group, sse_hub, _, envelope = await _create_task_with_envelope(
             tmp_path, "f-credfail-worker-002"
@@ -247,7 +243,7 @@ class TestWorkerRuntime:
         runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=GenericBrokenLLMService(),
+            runtime_services=runtime_service_fixture(GenericBrokenLLMService()).bundle,
             config=WorkerRuntimeConfig(docker_mode="disabled"),
         )
         result = await runtime.run(envelope, worker_id="worker.test")
@@ -267,7 +263,7 @@ class TestWorkerRuntime:
         runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=SlowLLMService(delay_s=0.2),
+            runtime_services=runtime_service_fixture(SlowLLMService(delay_s=0.2)).bundle,
             config=WorkerRuntimeConfig(docker_mode="disabled"),
             cancellation_registry=cancellation_registry,
         )
@@ -296,15 +292,16 @@ class TestWorkerRuntime:
         runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_service,
+            runtime_services=runtime_service_fixture(llm_service).bundle,
             config=WorkerRuntimeConfig(docker_mode="disabled"),
         )
 
         result = await runtime.run(envelope, worker_id="worker.test")
 
         assert result.status == TaskStatus.SUCCEEDED
-        assert len(llm_service.calls) == 1
-        call = llm_service.calls[0]
+        task_calls = [call for call in llm_service.calls if "task_id" in call]
+        assert len(task_calls) == 1
+        call = task_calls[0]
         assert call["task_id"] == envelope.task_id
         assert call["trace_id"] == envelope.trace_id
         assert call["worker_capability"] == "ops"
@@ -332,7 +329,7 @@ class TestWorkerRuntime:
         runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=llm_service,
+            runtime_services=runtime_service_fixture(llm_service).bundle,
             config=WorkerRuntimeConfig(docker_mode="disabled"),
             execution_console=execution_console,
         )
@@ -341,7 +338,8 @@ class TestWorkerRuntime:
 
         assert result.status == TaskStatus.SUCCEEDED
         assert result.backend == "graph"
-        assert len(llm_service.calls) == 1
+        task_calls = [call for call in llm_service.calls if "task_id" in call]
+        assert len(task_calls) == 1
 
         session = await execution_console.get_session(envelope.task_id)
         assert session is not None
@@ -366,7 +364,7 @@ class TestWorkerRuntime:
         runtime = WorkerRuntime(
             store_group=store_group,
             sse_hub=sse_hub,
-            llm_service=CapturingLLMService(),
+            runtime_services=runtime_service_fixture(CapturingLLMService()).bundle,
             config=WorkerRuntimeConfig(docker_mode="required"),
             docker_available_checker=lambda: True,
         )
@@ -376,8 +374,7 @@ class TestWorkerRuntime:
         assert result.status == TaskStatus.FAILED
         assert result.error_type == "WorkerBackendUnavailableError"
         assert (
-            result.error_message
-            == "graph backend is unavailable when docker isolation is required"
+            result.error_message == "graph backend is unavailable when docker isolation is required"
         )
 
         await store_group.close()

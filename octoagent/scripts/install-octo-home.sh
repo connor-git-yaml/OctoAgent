@@ -6,7 +6,7 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 INSTANCE_ROOT="${OCTOAGENT_INSTANCE_ROOT:-$HOME/.octoagent}"
 
 cd "${PROJECT_ROOT}"
-exec uv run python -m octoagent.provider.dx.install_bootstrap \
+exec uv run python -m octoagent.gateway.cli.install_bootstrap \
   --project-root "${PROJECT_ROOT}" \
   --instance-root "${INSTANCE_ROOT}" \
   "$@"

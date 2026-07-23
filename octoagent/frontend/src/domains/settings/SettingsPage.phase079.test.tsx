@@ -12,6 +12,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import PendingChangesBar from "./PendingChangesBar";
 import SettingsPage from "./SettingsPage";
 
 interface MockWorkbench {
@@ -212,6 +213,40 @@ describe("SettingsPage · Feature 079 Phase 1", () => {
       ).toBeInTheDocument();
     });
     expect(screen.getByText(/未保存的变更/)).toBeInTheDocument();
+  });
+
+  it("pending changes use provider fields without runtime activation payload", async () => {
+    const pending = render(
+      <PendingChangesBar
+        hasChanges
+        categories={["providers", "runtime"]}
+        busy={false}
+        onSave={vi.fn()}
+      />
+    );
+    expect(screen.getByText(/Provider 列表/)).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Runtime \/ Proxy|runtime activation/i),
+      "PendingChangesBar仍发旧activation"
+    ).toBeNull();
+    pending.unmount();
+
+    const snapshot = buildMinimalSnapshot();
+    const submitAction = vi.fn().mockResolvedValue({
+      data: { review: snapshot.resources.setup_governance.review },
+    });
+    mockWorkbench = { snapshot, submitAction, busyActionId: null };
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>
+    );
+    const removeButton = screen.getAllByRole("button", { name: /移除|删除/ })[0]!;
+    await userEvent.click(removeButton);
+    await userEvent.click(await screen.findByRole("button", { name: "立即保存" }));
+    await waitFor(() => expect(submitAction).toHaveBeenCalledWith("setup.apply", expect.anything()));
+    const draft = submitAction.mock.calls[0]![1].draft;
+    expect(draft.config, "PendingChangesBar仍发旧activation").not.toHaveProperty("runtime");
   });
 
   // P1.2: workbench.error 存在（且之前触发过 setup.apply）时打开错误 modal

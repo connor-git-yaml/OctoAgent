@@ -52,9 +52,7 @@ class FakeTaskRunner:
         self.enqueued: list[tuple[str, str]] = []
         self.fail_next: bool = False
 
-    async def enqueue(
-        self, task_id: str, user_text: str, model_alias: str | None = None
-    ) -> None:
+    async def enqueue(self, task_id: str, user_text: str, model_alias: str | None = None) -> None:
         if self.fail_next:
             self.fail_next = False
             raise RuntimeError("模拟 enqueue 失败（落盘未入队窗口）")
@@ -175,11 +173,7 @@ async def test_dm_message_creates_task_and_binding(tmp_path: Path) -> None:
     assert task.scope_id == "chat:slack:D_DM1"
 
     events = await store_group.event_store.get_events_for_task(result.task_id)
-    user_messages = [
-        e
-        for e in events
-        if str(getattr(e.type, "value", e.type)) == "USER_MESSAGE"
-    ]
+    user_messages = [e for e in events if str(getattr(e.type, "value", e.type)) == "USER_MESSAGE"]
     assert user_messages, "应有 USER_MESSAGE 事件"
     metadata = user_messages[0].payload.get("metadata", {})
     assert metadata.get("slack_channel_id") == "D_DM1"
@@ -263,19 +257,13 @@ async def test_signature_and_timestamp_rejections(tmp_path: Path) -> None:
 
     bad_sig = dict(_signed_headers(body))
     bad_sig["X-Slack-Signature"] = "v0=" + "0" * 64
-    assert (await service.handle_event_request(body, bad_sig)).status == (
-        "signature_invalid"
-    )
+    assert (await service.handle_event_request(body, bad_sig)).status == ("signature_invalid")
 
     stale_ts = str(int(time.time()) - 3600)
     stale = _signed_headers(body, ts=stale_ts)
-    assert (await service.handle_event_request(body, stale)).status == (
-        "timestamp_stale"
-    )
+    assert (await service.handle_event_request(body, stale)).status == ("timestamp_stale")
 
-    assert (await service.handle_event_request(body, {})).status == (
-        "signature_invalid"
-    )
+    assert (await service.handle_event_request(body, {})).status == ("signature_invalid")
     await store_group.close()
 
 
@@ -285,15 +273,11 @@ async def test_blocked_and_disabled(tmp_path: Path) -> None:
     service, store_group = await _build_service(tmp_path)
     service._environ = {}  # 注入空 environ：SLACK_SIGNING_SECRET 不可解析
     body = _message_envelope()
-    assert (await service.handle_event_request(body, _signed_headers(body))).status == (
-        "blocked"
-    )
+    assert (await service.handle_event_request(body, _signed_headers(body))).status == ("blocked")
     await store_group.close()
 
     service2, store_group2 = await _build_service(tmp_path, enabled=False)
-    assert (
-        await service2.handle_event_request(body, _signed_headers(body))
-    ).status == "disabled"
+    assert (await service2.handle_event_request(body, _signed_headers(body))).status == "disabled"
     await store_group2.close()
 
 
@@ -304,9 +288,7 @@ async def test_unauthorized_and_bot_and_subtype_ignored(tmp_path: Path) -> None:
     service, store_group = await _build_service(tmp_path, task_runner=runner)
 
     bot = _message_envelope(extra_event={"bot_id": "B999"})
-    assert (await service.handle_event_request(bot, _signed_headers(bot))).status == (
-        "ignored"
-    )
+    assert (await service.handle_event_request(bot, _signed_headers(bot))).status == ("ignored")
 
     subtype = _message_envelope(extra_event={"subtype": "message_changed"})
     assert (
@@ -339,9 +321,7 @@ async def test_channel_authorization_matrix(tmp_path: Path) -> None:
     service2, store_group2 = await _build_service(
         tmp_path, task_runner=runner, allowed_channels=["C_PUB"]
     )
-    accepted = await service2.handle_event_request(
-        channel_msg, _signed_headers(channel_msg)
-    )
+    accepted = await service2.handle_event_request(channel_msg, _signed_headers(channel_msg))
     assert accepted.status == "accepted"
     binding = await store_group2.conversation_binding_store.get("slack", "C_PUB")
     assert binding is not None
@@ -370,9 +350,7 @@ async def test_notify_task_result_replies_in_thread(tmp_path: Path) -> None:
     """US-2 AC-6：完成回复回原 channel 原 thread（thread_ts=原 ts）。"""
     runner = FakeTaskRunner()
     api = FakeSlackApiClient()
-    service, store_group = await _build_service(
-        tmp_path, task_runner=runner, api_client=api
-    )
+    service, store_group = await _build_service(tmp_path, task_runner=runner, api_client=api)
     body = _message_envelope()
     result = await service.handle_event_request(body, _signed_headers(body))
     assert result.task_id is not None
@@ -400,7 +378,7 @@ async def test_foreign_channel_task_noop(tmp_path: Path) -> None:
     from octoagent.core.models.message import NormalizedMessage
     from octoagent.gateway.services.task_service import TaskService
 
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     task_id, _ = await task_service.create_task(
         NormalizedMessage(
             channel="web",

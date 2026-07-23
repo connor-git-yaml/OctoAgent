@@ -17,17 +17,14 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from octoagent.core.models import (
-    ContextRequestKind,
-    ContextResolveRequest,
     MemoryNamespace,
     MemoryNamespaceKind,
     NormalizedMessage,
     SubagentDelegation,
-    TaskStatus,
 )
 from octoagent.core.models.agent_context import (
     AgentRuntime,
@@ -41,6 +38,7 @@ from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.gateway.services.task_service import TaskService
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 # ---------------------------------------------------------------------------
 # 辅助工具
@@ -142,7 +140,7 @@ async def _create_task_with_delegation(
     delegation: SubagentDelegation,
 ) -> str:
     """创建子任务并写入 SubagentDelegation 到 control_metadata。"""
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     msg = NormalizedMessage(
         text="subagent child task for Phase F test",
         idempotency_key=f"child-f-{datetime.now().timestamp()}",
@@ -175,9 +173,7 @@ async def test_ensure_memory_namespaces_subagent_alpha_shared(tmp_path: Path) ->
     store_group = await create_store_group(str(tmp_path / "f-01.db"), str(tmp_path / "art"))
 
     # 创建 caller 的 AGENT_PRIVATE namespace（在 store 中）
-    caller_runtime = await _create_agent_runtime(
-        store_group, runtime_id=_CALLER_RUNTIME_ID
-    )
+    caller_runtime = await _create_agent_runtime(store_group, runtime_id=_CALLER_RUNTIME_ID)
     caller_ns = await _create_memory_namespace(
         store_group,
         namespace_id=_CALLER_NS_ID,
@@ -186,9 +182,7 @@ async def test_ensure_memory_namespaces_subagent_alpha_shared(tmp_path: Path) ->
     )
 
     # 创建 subagent 的 AgentRuntime 和 session
-    subagent_runtime = await _create_agent_runtime(
-        store_group, runtime_id="runtime-subagent-f01"
-    )
+    subagent_runtime = await _create_agent_runtime(store_group, runtime_id="runtime-subagent-f01")
     subagent_session = await _create_agent_session(
         store_group,
         session_id="session-subagent-f01",
@@ -203,7 +197,11 @@ async def test_ensure_memory_namespaces_subagent_alpha_shared(tmp_path: Path) ->
         caller_memory_namespace_ids=[_CALLER_NS_ID],
     )
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(
+        store_group,
+        project_root=tmp_path,
+        runtime_services=runtime_service_fixture(MagicMock()).bundle,
+    )
 
     # 调用 _ensure_memory_namespaces，传入 delegation（α 路径）
     namespaces = await svc._ensure_memory_namespaces(
@@ -244,9 +242,7 @@ async def test_ensure_memory_namespaces_worker_creates_own_namespace(tmp_path: P
     """
     store_group = await create_store_group(str(tmp_path / "f-02.db"), str(tmp_path / "art"))
 
-    worker_runtime = await _create_agent_runtime(
-        store_group, runtime_id="runtime-worker-f02"
-    )
+    worker_runtime = await _create_agent_runtime(store_group, runtime_id="runtime-worker-f02")
     worker_session = await _create_agent_session(
         store_group,
         session_id="session-worker-f02",
@@ -254,7 +250,11 @@ async def test_ensure_memory_namespaces_worker_creates_own_namespace(tmp_path: P
         kind=AgentSessionKind.WORKER_INTERNAL,
     )
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(
+        store_group,
+        project_root=tmp_path,
+        runtime_services=runtime_service_fixture(MagicMock()).bundle,
+    )
 
     # Worker 路径：_subagent_delegation=None（F094 行为）
     namespaces = await svc._ensure_memory_namespaces(
@@ -266,9 +266,7 @@ async def test_ensure_memory_namespaces_worker_creates_own_namespace(tmp_path: P
     )
 
     # 验证：worker 创建了自己独立的 AGENT_PRIVATE namespace
-    worker_private_ns = [
-        ns for ns in namespaces if ns.kind is MemoryNamespaceKind.AGENT_PRIVATE
-    ]
+    worker_private_ns = [ns for ns in namespaces if ns.kind is MemoryNamespaceKind.AGENT_PRIVATE]
     assert len(worker_private_ns) == 1, (
         f"Worker 路径应创建独立 AGENT_PRIVATE namespace，实际: {len(worker_private_ns)}"
     )
@@ -301,7 +299,11 @@ async def test_ensure_memory_namespaces_main_creates_own_namespace(tmp_path: Pat
         kind=AgentSessionKind.MAIN_BOOTSTRAP,
     )
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(
+        store_group,
+        project_root=tmp_path,
+        runtime_services=runtime_service_fixture(MagicMock()).bundle,
+    )
 
     # main 路径：不传 _subagent_delegation
     namespaces = await svc._ensure_memory_namespaces(
@@ -312,9 +314,7 @@ async def test_ensure_memory_namespaces_main_creates_own_namespace(tmp_path: Pat
         _subagent_delegation=None,
     )
 
-    main_private_ns = [
-        ns for ns in namespaces if ns.kind is MemoryNamespaceKind.AGENT_PRIVATE
-    ]
+    main_private_ns = [ns for ns in namespaces if ns.kind is MemoryNamespaceKind.AGENT_PRIVATE]
     assert len(main_private_ns) == 1, (
         f"main 路径应创建独立 AGENT_PRIVATE namespace，实际: {len(main_private_ns)}"
     )
@@ -332,9 +332,7 @@ async def test_ensure_memory_namespaces_subagent_empty_caller_ids(tmp_path: Path
     """降级行为: caller_memory_namespace_ids 为空时 subagent 不创建 AGENT_PRIVATE，不报错。"""
     store_group = await create_store_group(str(tmp_path / "f-04.db"), str(tmp_path / "art"))
 
-    subagent_runtime = await _create_agent_runtime(
-        store_group, runtime_id="runtime-subagent-f04"
-    )
+    subagent_runtime = await _create_agent_runtime(store_group, runtime_id="runtime-subagent-f04")
     subagent_session = await _create_agent_session(
         store_group,
         session_id="session-subagent-f04",
@@ -348,7 +346,11 @@ async def test_ensure_memory_namespaces_subagent_empty_caller_ids(tmp_path: Path
         caller_memory_namespace_ids=[],
     )
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(
+        store_group,
+        project_root=tmp_path,
+        runtime_services=runtime_service_fixture(MagicMock()).bundle,
+    )
 
     # 应不报错
     namespaces = await svc._ensure_memory_namespaces(
@@ -360,9 +362,7 @@ async def test_ensure_memory_namespaces_subagent_empty_caller_ids(tmp_path: Path
     )
 
     # 降级路径：subagent 没有 AGENT_PRIVATE namespace（只有可能的 PROJECT_SHARED）
-    subagent_private_ns = [
-        ns for ns in namespaces if ns.kind is MemoryNamespaceKind.AGENT_PRIVATE
-    ]
+    subagent_private_ns = [ns for ns in namespaces if ns.kind is MemoryNamespaceKind.AGENT_PRIVATE]
     assert len(subagent_private_ns) == 0, (
         f"空 caller_ids 时 subagent 不应有 AGENT_PRIVATE namespace，实际: {len(subagent_private_ns)}"
     )
@@ -393,9 +393,7 @@ async def test_spawn_fills_caller_memory_namespace_ids(tmp_path: Path) -> None:
     sse_hub = SSEHub()
 
     # 创建 caller 的 AGENT_PRIVATE namespace
-    caller_runtime = await _create_agent_runtime(
-        store_group, runtime_id=_CALLER_RUNTIME_ID
-    )
+    caller_runtime = await _create_agent_runtime(store_group, runtime_id=_CALLER_RUNTIME_ID)
     caller_ns = await _create_memory_namespace(
         store_group,
         namespace_id=_CALLER_NS_ID,
@@ -404,7 +402,7 @@ async def test_spawn_fills_caller_memory_namespace_ids(tmp_path: Path) -> None:
     )
 
     # 创建父任务
-    parent_svc = TaskService(store_group, sse_hub)
+    parent_svc = TaskService(store_group, sse_hub, storage_only=True)
     parent_msg = NormalizedMessage(
         text="parent task",
         idempotency_key="parent-f05",
@@ -436,7 +434,7 @@ async def test_spawn_fills_caller_memory_namespace_ids(tmp_path: Path) -> None:
     runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=None,
+        runtime_services=runtime_service_fixture(None).bundle,
         timeout_seconds=60,
     )
     child_task_id, created = await runner.launch_child_task(child_msg)
@@ -452,6 +450,7 @@ async def test_spawn_fills_caller_memory_namespace_ids(tmp_path: Path) -> None:
 
     if isinstance(raw_del, str):
         import json
+
         raw_del = json.loads(raw_del)
 
     caller_ns_ids = raw_del.get("caller_memory_namespace_ids", [])
@@ -474,11 +473,9 @@ async def test_spawn_caller_without_namespace_gets_empty_ids(tmp_path: Path) -> 
     sse_hub = SSEHub()
 
     # caller runtime 存在但没有 namespace
-    caller_runtime = await _create_agent_runtime(
-        store_group, runtime_id="runtime-caller-f06-no-ns"
-    )
+    caller_runtime = await _create_agent_runtime(store_group, runtime_id="runtime-caller-f06-no-ns")
 
-    parent_svc = TaskService(store_group, sse_hub)
+    parent_svc = TaskService(store_group, sse_hub, storage_only=True)
     parent_msg = NormalizedMessage(
         text="parent task",
         idempotency_key="parent-f06",
@@ -508,14 +505,15 @@ async def test_spawn_caller_without_namespace_gets_empty_ids(tmp_path: Path) -> 
     runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=None,
+        runtime_services=runtime_service_fixture(None).bundle,
         timeout_seconds=60,
     )
     child_task_id, created = await runner.launch_child_task(child_msg)
     assert created
 
-    from octoagent.gateway.services.connection_metadata import merge_control_metadata
     import json
+
+    from octoagent.gateway.services.connection_metadata import merge_control_metadata
 
     events = await store_group.event_store.get_events_for_task(child_task_id)
     control = merge_control_metadata(events)
@@ -546,7 +544,7 @@ async def test_spawn_unknown_caller_skips_namespace_query(tmp_path: Path) -> Non
     store_group = await create_store_group(str(tmp_path / "f-07.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
 
-    parent_svc = TaskService(store_group, sse_hub)
+    parent_svc = TaskService(store_group, sse_hub, storage_only=True)
     parent_msg = NormalizedMessage(
         text="parent task",
         idempotency_key="parent-f07",
@@ -577,14 +575,15 @@ async def test_spawn_unknown_caller_skips_namespace_query(tmp_path: Path) -> Non
     runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=None,
+        runtime_services=runtime_service_fixture(None).bundle,
         timeout_seconds=60,
     )
     child_task_id, created = await runner.launch_child_task(child_msg)
     assert created
 
-    from octoagent.gateway.services.connection_metadata import merge_control_metadata
     import json
+
+    from octoagent.gateway.services.connection_metadata import merge_control_metadata
 
     events = await store_group.event_store.get_events_for_task(child_task_id)
     control = merge_control_metadata(events)
@@ -625,9 +624,7 @@ async def test_subagent_memory_namespace_ids_match_caller(tmp_path: Path) -> Non
     )
 
     # 创建 subagent runtime 和 session
-    subagent_runtime = await _create_agent_runtime(
-        store_group, runtime_id="runtime-subagent-f08"
-    )
+    subagent_runtime = await _create_agent_runtime(store_group, runtime_id="runtime-subagent-f08")
     subagent_session = await _create_agent_session(
         store_group,
         session_id="session-subagent-f08",
@@ -641,7 +638,11 @@ async def test_subagent_memory_namespace_ids_match_caller(tmp_path: Path) -> Non
         caller_memory_namespace_ids=[_CALLER_NS_ID],
     )
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(
+        store_group,
+        project_root=tmp_path,
+        runtime_services=runtime_service_fixture(MagicMock()).bundle,
+    )
     namespaces = await svc._ensure_memory_namespaces(
         project=None,
         agent_runtime=subagent_runtime,
@@ -652,7 +653,9 @@ async def test_subagent_memory_namespace_ids_match_caller(tmp_path: Path) -> Non
 
     # 核心断言：subagent 获得的 private namespace ID = caller 的 namespace ID
     private_ns = [ns for ns in namespaces if ns.kind is MemoryNamespaceKind.AGENT_PRIVATE]
-    assert len(private_ns) == 1, f"subagent 应有 1 个 AGENT_PRIVATE namespace，实际: {len(private_ns)}"
+    assert len(private_ns) == 1, (
+        f"subagent 应有 1 个 AGENT_PRIVATE namespace，实际: {len(private_ns)}"
+    )
     assert private_ns[0].namespace_id == _CALLER_NS_ID, (
         f"subagent namespace ID 应等于 caller 的 {_CALLER_NS_ID}，实际: {private_ns[0].namespace_id}"
     )
@@ -682,9 +685,7 @@ async def test_p2_1_subagent_session_no_delegation_fails_closed(tmp_path: Path) 
     )
 
     # 创建 SUBAGENT_INTERNAL session 但不提供 SubagentDelegation
-    subagent_runtime = await _create_agent_runtime(
-        store_group, runtime_id="runtime-subagent-p21"
-    )
+    subagent_runtime = await _create_agent_runtime(store_group, runtime_id="runtime-subagent-p21")
     subagent_session = await _create_agent_session(
         store_group,
         session_id="session-subagent-p21",
@@ -692,7 +693,11 @@ async def test_p2_1_subagent_session_no_delegation_fails_closed(tmp_path: Path) 
         kind=AgentSessionKind.SUBAGENT_INTERNAL,
     )
 
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(
+        store_group,
+        project_root=tmp_path,
+        runtime_services=runtime_service_fixture(MagicMock()).bundle,
+    )
     namespaces = await svc._ensure_memory_namespaces(
         project=None,
         agent_runtime=subagent_runtime,
@@ -731,25 +736,19 @@ async def test_p2_2_subagent_memory_write_uses_caller_scope(tmp_path: Path) -> N
 
     端到端验证 α 语义在真实 memory.write 路径下生效（不只是 namespace_id 一致性）。
     """
-    store_group = await create_store_group(
-        str(tmp_path / "p2-2-e2e.db"), str(tmp_path / "art")
-    )
+    store_group = await create_store_group(str(tmp_path / "p2-2-e2e.db"), str(tmp_path / "art"))
 
     # 创建 caller AGENT_PRIVATE namespace 含 scope_id
-    caller_runtime = await _create_agent_runtime(
-        store_group, runtime_id="runtime-caller-p22"
-    )
+    caller_runtime = await _create_agent_runtime(store_group, runtime_id="runtime-caller-p22")
     caller_ns = await _create_memory_namespace(
         store_group,
-        namespace_id=f"ns-private-caller-p22",
+        namespace_id="ns-private-caller-p22",
         agent_runtime_id="runtime-caller-p22",
         kind=MemoryNamespaceKind.AGENT_PRIVATE,
     )
     # 注入 scope_ids（caller_ns 创建时通常有 memory_scope_ids）
     caller_ns_with_scope = caller_ns.model_copy(
-        update={
-            "memory_scope_ids": ["memory/private/runtime-caller-p22"]
-        }
+        update={"memory_scope_ids": ["memory/private/runtime-caller-p22"]}
     )
     await store_group.agent_context_store.save_memory_namespace(caller_ns_with_scope)
     await store_group.conn.commit()
@@ -762,9 +761,7 @@ async def test_p2_2_subagent_memory_write_uses_caller_scope(tmp_path: Path) -> N
     )
 
     # 创建 subagent SUBAGENT_INTERNAL session
-    subagent_runtime = await _create_agent_runtime(
-        store_group, runtime_id="runtime-subagent-p22"
-    )
+    subagent_runtime = await _create_agent_runtime(store_group, runtime_id="runtime-subagent-p22")
     subagent_session = await _create_agent_session(
         store_group,
         session_id="session-subagent-p22",
@@ -773,7 +770,11 @@ async def test_p2_2_subagent_memory_write_uses_caller_scope(tmp_path: Path) -> N
     )
 
     # 执行 _ensure_memory_namespaces 应返回 caller 共享 namespace（α 路径）
-    svc = AgentContextService(store_group, project_root=tmp_path)
+    svc = AgentContextService(
+        store_group,
+        project_root=tmp_path,
+        runtime_services=runtime_service_fixture(MagicMock()).bundle,
+    )
     namespaces = await svc._ensure_memory_namespaces(
         project=None,
         agent_runtime=subagent_runtime,
@@ -783,9 +784,7 @@ async def test_p2_2_subagent_memory_write_uses_caller_scope(tmp_path: Path) -> N
     )
 
     # 验证 1: subagent 拿到的 private namespace 是 caller 的
-    private_ns = [
-        ns for ns in namespaces if ns.kind is MemoryNamespaceKind.AGENT_PRIVATE
-    ]
+    private_ns = [ns for ns in namespaces if ns.kind is MemoryNamespaceKind.AGENT_PRIVATE]
     assert len(private_ns) == 1, (
         f"端到端 α 语义失败：subagent 应获得 1 个 caller AGENT_PRIVATE，实际 {len(private_ns)}"
     )

@@ -53,7 +53,7 @@ from octoagent.core.models import (
     Work,
 )
 from octoagent.core.models.agent_context import resolve_permission_preset
-from octoagent.provider.dx.backup_service import BackupService
+from octoagent.gateway.services.operations.backup_service import BackupService
 from ulid import ULID
 
 from ..agent_context import build_projected_session_id
@@ -181,7 +181,9 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
         return ControlPlaneDocument(
             resource_type="bootstrap_session",
             resource_id="bootstrap:current",
-            warnings=["bootstrap_session 状态机已在 F084 Phase 4 退役（USER.md 实质填充作为完成信号）。"],
+            warnings=[
+                "bootstrap_session 状态机已在 F084 Phase 4 退役（USER.md 实质填充作为完成信号）。"
+            ],
         )
 
     async def get_context_continuity_document(self) -> ContextContinuityDocument:
@@ -431,9 +433,10 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
             if project is None:
                 continue
             latest_metadata = await self._extract_latest_user_metadata(task.task_id)
-            if str(latest_metadata.get("parent_task_id", "")).strip() or str(
-                latest_metadata.get("parent_work_id", "")
-            ).strip():
+            if (
+                str(latest_metadata.get("parent_task_id", "")).strip()
+                or str(latest_metadata.get("parent_work_id", "")).strip()
+            ):
                 continue
             session_id = self._resolve_projected_session_id_for_task(
                 task=task,
@@ -512,18 +515,14 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
                 and session_owner_profile_id
             ):
                 # F117 Wave 2bc：读统一行 + is_worker_behavior_profile（baseline 用 worker_profile 存在=worker）
-                owner_agent_profile = (
-                    await self._stores.agent_context_store.get_agent_profile(
-                        session_owner_profile_id
-                    )
+                owner_agent_profile = await self._stores.agent_context_store.get_agent_profile(
+                    session_owner_profile_id
                 )
                 if owner_agent_profile is not None and is_worker_behavior_profile(
                     owner_agent_profile
                 ):
                     turn_executor_kind = TurnExecutorKind.WORKER.value
-            session_owner_name = await self._resolve_profile_display_name(
-                session_owner_profile_id
-            )
+            session_owner_name = await self._resolve_profile_display_name(session_owner_profile_id)
             session_items.append(
                 SessionProjectionItem(
                     session_id=session_id,
@@ -620,7 +619,9 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
                     title=project_name,
                     alias=agent_sess.alias,
                     status="created",
-                    channel="web" if agent_sess.surface in ("chat", "web", "") else agent_sess.surface,
+                    channel="web"
+                    if agent_sess.surface in ("chat", "web", "")
+                    else agent_sess.surface,
                     requester_id="",
                     project_id=agent_sess.project_id,
                     agent_profile_id=agent_profile_id,
@@ -648,7 +649,6 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
             reverse=True,
         )
         return session_items
-
 
     # ==================================================================
     # Session 解析辅助
@@ -901,9 +901,7 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
             use_focused_when_empty=True,
         )
         _, selected_project, _, _ = await self._resolve_selection()
-        requested_agent_profile_id = str(
-            request.params.get("agent_profile_id", "")
-        ).strip()
+        requested_agent_profile_id = str(request.params.get("agent_profile_id", "")).strip()
         if requested_agent_profile_id:
             matched_profile = await self._resolve_direct_session_worker_profile(
                 requested_agent_profile_id
@@ -951,7 +949,8 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
         )
 
     async def _handle_session_create_with_project(
-        self, request: ActionRequestEnvelope,
+        self,
+        request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         """创建新 Project + Session + 行为文件骨架，返回 session_id 和 conversation token。"""
         worker_profile_id = str(request.params.get("agent_profile_id", "")).strip()
@@ -1011,9 +1010,7 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
                 )
                 existing_owner_profile_id = ""
                 if existing_runtime is not None:
-                    existing_owner_profile_id = str(
-                        existing_runtime.agent_profile_id or ""
-                    ).strip()
+                    existing_owner_profile_id = str(existing_runtime.agent_profile_id or "").strip()
                 return self._completed_result(
                     request=request,
                     code="SESSION_OPENED_EXISTING_PROJECT",
@@ -1187,7 +1184,9 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
         )
         now = datetime.now(tz=UTC)
         reset_context = False
-        session_state = await self._stores.agent_context_store.get_session_context(session.session_id)
+        session_state = await self._stores.agent_context_store.get_session_context(
+            session.session_id
+        )
         if session_state is None and session.thread_id:
             session_states = await self._stores.agent_context_store.list_session_contexts(
                 project_id=session.project_id or None,
@@ -1405,13 +1404,16 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
         )
 
     async def _handle_session_set_alias(
-        self, request: ActionRequestEnvelope,
+        self,
+        request: ActionRequestEnvelope,
     ) -> ActionResultEnvelope:
         session = await self._resolve_session_projection_target(
             request,
             use_focused_when_empty=True,
         )
-        session_state = await self._stores.agent_context_store.get_session_context(session.session_id)
+        session_state = await self._stores.agent_context_store.get_session_context(
+            session.session_id
+        )
         if session_state is None and session.thread_id:
             session_states = await self._stores.agent_context_store.list_session_contexts(
                 project_id=session.project_id or None,
@@ -1481,7 +1483,11 @@ class SessionDomainService(SessionProjectionMixin, DomainServiceBase):
                 raise ControlPlaneActionError("TASK_CANCEL_NOT_ALLOWED", "当前状态不允许取消")
             task = await self._stores.task_store.get_task(task_id)
         else:
-            task = await TaskService(self._stores, self._ctx.sse_hub).cancel_task(task_id)
+            task = await TaskService(
+                self._stores,
+                self._ctx.sse_hub,
+                storage_only=True,
+            ).cancel_task(task_id)
             if task is None:
                 raise ControlPlaneActionError("TASK_NOT_FOUND", "任务不存在")
         return self._completed_result(

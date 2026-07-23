@@ -6,10 +6,11 @@ Store 实例通过 app.state 管理，在 lifespan 中初始化/清理。
 import os
 from pathlib import Path
 
-from fastapi import Depends, Request
+from fastapi import Depends, HTTPException, Request
 from octoagent.core.store import StoreGroup
 from octoagent.policy.approval_manager import ApprovalManager
 
+from .services.config.config_wizard import load_config
 from .services.frontdoor_auth import FrontDoorGuard
 
 
@@ -67,18 +68,37 @@ def get_control_plane_service(request: Request):
     return request.app.state.control_plane_service
 
 
+def _get_project_root(request: Request) -> Path:
+    project_root = getattr(
+        request.app.state,
+        "project_root",
+        Path(os.environ.get("OCTOAGENT_PROJECT_ROOT", str(Path.cwd()))),
+    )
+    return Path(project_root)
+
+
 def get_front_door_guard(request: Request):
     """从 app.state 获取 FrontDoorGuard。"""
     guard = getattr(request.app.state, "front_door_guard", None)
     if guard is None:
-        project_root = getattr(
-            request.app.state,
-            "project_root",
-            Path(os.environ.get("OCTOAGENT_PROJECT_ROOT", str(Path.cwd()))),
-        )
-        guard = FrontDoorGuard(Path(project_root))
+        guard = FrontDoorGuard(_get_project_root(request))
         request.app.state.front_door_guard = guard
     return guard
+
+
+def _validate_request_front_door_config(request: Request) -> None:
+    """在进入 owner-facing workload 前拒绝运行期已损坏的配置源。"""
+    try:
+        load_config(_get_project_root(request))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "FRONT_DOOR_CONFIG_INVALID",
+                "message": "front-door 配置无效，已拒绝开放 owner-facing API。",
+                "hint": "请检查 octoagent.yaml 的 front_door 配置或对应环境变量。",
+            },
+        ) from exc
 
 
 async def require_front_door_access(
@@ -86,6 +106,7 @@ async def require_front_door_access(
     guard=Depends(get_front_door_guard),
 ) -> None:
     """统一校验 owner-facing API 的 front-door 访问边界。"""
+    _validate_request_front_door_config(request)
     await guard.authorize(request)
 
 
@@ -96,5 +117,3 @@ def get_skill_discovery(request: Request):
     挂载到 app.state.skill_discovery 供路由依赖注入使用。
     """
     return request.app.state.skill_discovery
-
-

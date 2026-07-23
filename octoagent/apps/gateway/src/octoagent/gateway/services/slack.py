@@ -132,9 +132,7 @@ class SlackGatewayService:
 
         secret = self._resolve_signing_secret()
         if not secret:
-            return SlackIngestResult(
-                status="blocked", detail="slack_signing_secret_unavailable"
-            )
+            return SlackIngestResult(status="blocked", detail="slack_signing_secret_unavailable")
 
         verify_error = self._verify_signature(raw_body, headers, secret)
         if verify_error is not None:
@@ -168,37 +166,25 @@ class SlackGatewayService:
         timestamp = self._header(headers, "X-Slack-Request-Timestamp")
         signature = self._header(headers, "X-Slack-Signature")
         if not timestamp or not signature:
-            return SlackIngestResult(
-                status="signature_invalid", detail="missing_signature_headers"
-            )
+            return SlackIngestResult(status="signature_invalid", detail="missing_signature_headers")
         # 严格格式预校验（CODEX-F-M1）：畸形输入统一拒绝，不触达数值/比较层
         if not _TIMESTAMP_PATTERN.fullmatch(timestamp):
-            return SlackIngestResult(
-                status="signature_invalid", detail="malformed_timestamp"
-            )
+            return SlackIngestResult(status="signature_invalid", detail="malformed_timestamp")
         if not _SIGNATURE_PATTERN.fullmatch(signature):
-            return SlackIngestResult(
-                status="signature_invalid", detail="malformed_signature"
-            )
+            return SlackIngestResult(status="signature_invalid", detail="malformed_signature")
         ts_value = int(timestamp)
         if abs(time.time() - ts_value) > _TIMESTAMP_TOLERANCE_S:
-            return SlackIngestResult(
-                status="timestamp_stale", detail="timestamp_outside_tolerance"
-            )
+            return SlackIngestResult(status="timestamp_stale", detail="timestamp_outside_tolerance")
         base = b"%s:%s:%s" % (
             _SIGNATURE_VERSION.encode(),
             timestamp.encode(),
             raw_body,
         )
         expected = (
-            _SIGNATURE_VERSION
-            + "="
-            + hmac.new(secret.encode(), base, hashlib.sha256).hexdigest()
+            _SIGNATURE_VERSION + "=" + hmac.new(secret.encode(), base, hashlib.sha256).hexdigest()
         )
         if not hmac.compare_digest(expected.encode(), signature.encode()):
-            return SlackIngestResult(
-                status="signature_invalid", detail="signature_mismatch"
-            )
+            return SlackIngestResult(status="signature_invalid", detail="signature_mismatch")
         return None
 
     @staticmethod
@@ -238,9 +224,7 @@ class SlackGatewayService:
             return SlackIngestResult(status="ignored", detail="empty_or_partial_event")
 
         # 授权（spec D5：deny-all 默认；非 DM 双条件，空 allowlist = 拒）
-        allow_users = {
-            str(item) for item in (getattr(config, "allow_users", []) or [])
-        }
+        allow_users = {str(item) for item in (getattr(config, "allow_users", []) or [])}
         if sender not in allow_users:
             return SlackIngestResult(status="unauthorized", detail="user_not_allowed")
         if channel_type != "im":
@@ -248,18 +232,12 @@ class SlackGatewayService:
                 str(item) for item in (getattr(config, "allowed_channels", []) or [])
             }
             if channel not in allowed_channels:
-                return SlackIngestResult(
-                    status="unauthorized", detail="channel_not_allowed"
-                )
+                return SlackIngestResult(status="unauthorized", detail="channel_not_allowed")
 
         scope_id = f"chat:slack:{channel}"
-        thread_id = (
-            f"slack:{channel}:thread:{thread_ts}" if thread_ts else f"slack:{channel}"
-        )
+        thread_id = f"slack:{channel}:thread:{thread_ts}" if thread_ts else f"slack:{channel}"
         event_id = str(envelope.get("event_id", "") or "")
-        idempotency_key = (
-            f"slack:{event_id}" if event_id else f"slack:{channel}:{ts}"
-        )
+        idempotency_key = f"slack:{event_id}" if event_id else f"slack:{channel}:{ts}"
         metadata: dict[str, str] = {
             "slack_event_id": event_id,
             "slack_channel_id": channel,
@@ -282,7 +260,7 @@ class SlackGatewayService:
             idempotency_key=idempotency_key,
         )
 
-        service = TaskService(self._stores, self._sse_hub)
+        service = TaskService(self._stores, self._sse_hub, storage_only=True)
         task_id, created = await service.create_task(message)
         await self._maybe_enqueue(task_id, text, created)
         await self._record_conversation_binding(channel, scope_id, channel_type)
@@ -379,9 +357,10 @@ class SlackGatewayService:
             channel = str(metadata.get("slack_channel_id", "")).strip()
             if not channel:
                 continue
-            thread_ts = str(metadata.get("slack_thread_ts", "")).strip() or str(
-                metadata.get("slack_ts", "")
-            ).strip()
+            thread_ts = (
+                str(metadata.get("slack_thread_ts", "")).strip()
+                or str(metadata.get("slack_ts", "")).strip()
+            )
             target = {"channel": channel}
             if thread_ts:
                 target["thread_ts"] = thread_ts

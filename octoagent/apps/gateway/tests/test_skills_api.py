@@ -13,12 +13,15 @@
 
 from __future__ import annotations
 
-import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+
+SKILL_ROOT_ISOLATION_ORACLE = "F151_SKILL_USER_ROOT_ISOLATION_MISSING"
 
 
 def _configure_env(tmp_path: Path, monkeypatch):
@@ -32,6 +35,49 @@ def _configure_env(tmp_path: Path, monkeypatch):
     (tmp_path / "project").mkdir(parents=True, exist_ok=True)
 
 
+def _isolated_harness_factory(root: Path, user_skills_dir: Path):
+    """构造使用独立用户 Skill 根的 full-lifespan harness factory。"""
+    from octoagent.gateway.harness.octo_harness import OctoHarness
+
+    def factory() -> OctoHarness:
+        try:
+            return OctoHarness(
+                project_root=root / "project",
+                data_dir=root / "data",
+                mcp_servers_dir=root / "mcp-servers",
+                plugins_dir=root / "plugins",
+                user_skills_dir=user_skills_dir,
+            )
+        except TypeError as exc:
+            pytest.fail(
+                f"{SKILL_ROOT_ISOLATION_ORACLE}: {exc}",
+                pytrace=False,
+            )
+
+    return factory
+
+
+@asynccontextmanager
+async def _isolated_skills_client(
+    root: Path,
+    user_skills_dir: Path,
+) -> AsyncIterator[tuple[object, AsyncClient]]:
+    """启动一个显式隔离用户 Skill 根的完整 lifespan app。"""
+    from octoagent.gateway.main import create_app
+
+    app = create_app(
+        harness_factory=_isolated_harness_factory(root, user_skills_dir),
+    )
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client,
+    ):
+        yield app, client
+
+
 @pytest_asyncio.fixture
 async def skills_app(tmp_path: Path, monkeypatch):
     """创建完整 lifespan 的 FastAPI app，用于测试 Skills API。"""
@@ -39,7 +85,12 @@ async def skills_app(tmp_path: Path, monkeypatch):
 
     from octoagent.gateway.main import create_app
 
-    app = create_app()
+    app = create_app(
+        harness_factory=_isolated_harness_factory(
+            tmp_path,
+            tmp_path / "user-skills",
+        ),
+    )
     async with app.router.lifespan_context(app):
         yield app
 
@@ -264,6 +315,46 @@ class TestUninstallSkill:
         # 验证卸载后不存在
         get_resp = await skills_client.get("/api/skills/test-install-skill")
         assert get_resp.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_full_lifespan_apps_isolate_user_skill_roots(
+        self,
+        tmp_path: Path,
+        monkeypatch,
+    ) -> None:
+        """两个 full-lifespan app 的同名 Skill 必须互不影响。"""
+        _configure_env(tmp_path, monkeypatch)
+        root_a = tmp_path / "a"
+        root_b = tmp_path / "b"
+        skills_a = root_a / "skills"
+        skills_b = root_b / "skills"
+
+        async with (
+            _isolated_skills_client(root_a, skills_a) as (app_a, client_a),
+            _isolated_skills_client(root_b, skills_b) as (app_b, client_b),
+        ):
+            assert app_a.state.skill_discovery.user_dir == skills_a
+            assert app_b.state.skill_discovery.user_dir == skills_b
+            assert skills_a != skills_b
+
+            for client in (client_a, client_b):
+                response = await client.post(
+                    "/api/skills",
+                    json={"name": "test-install-skill", "content": VALID_SKILL_MD},
+                )
+                assert response.status_code == 201
+
+            file_a = skills_a / "test-install-skill" / "SKILL.md"
+            file_b = skills_b / "test-install-skill" / "SKILL.md"
+            assert file_a.read_text(encoding="utf-8") == VALID_SKILL_MD
+            assert file_b.read_text(encoding="utf-8") == VALID_SKILL_MD
+
+            deleted = await client_a.delete("/api/skills/test-install-skill")
+            assert deleted.status_code == 200
+            assert not file_a.exists()
+            assert file_b.read_text(encoding="utf-8") == VALID_SKILL_MD
+            assert (await client_a.get("/api/skills/test-install-skill")).status_code == 404
+            assert (await client_b.get("/api/skills/test-install-skill")).status_code == 200
 
     @pytest.mark.asyncio
     async def test_uninstall_builtin_skill(self, skills_client: AsyncClient):

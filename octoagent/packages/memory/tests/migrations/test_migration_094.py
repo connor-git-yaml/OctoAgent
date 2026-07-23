@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import aiosqlite
 import pytest
-
 from octoagent.memory.migrations.migration_094_worker_private import (
     _IDEMPOTENCY_KEY,
     _REASON,
@@ -52,17 +51,13 @@ async def test_e1_dry_run_returns_zero_with_reason(memory_db: str) -> None:
 async def test_e1_dry_run_does_not_modify_db(memory_db: str) -> None:
     """跑 dry-run 不应改变库内任何记录。"""
     async with aiosqlite.connect(memory_db) as conn:
-        cursor = await conn.execute(
-            "SELECT COUNT(*) FROM memory_maintenance_runs"
-        )
+        cursor = await conn.execute("SELECT COUNT(*) FROM memory_maintenance_runs")
         before = (await cursor.fetchone())[0]
 
     await run_dry_run(memory_db)
 
     async with aiosqlite.connect(memory_db) as conn:
-        cursor = await conn.execute(
-            "SELECT COUNT(*) FROM memory_maintenance_runs"
-        )
+        cursor = await conn.execute("SELECT COUNT(*) FROM memory_maintenance_runs")
         after = (await cursor.fetchone())[0]
     assert before == after
 
@@ -134,8 +129,7 @@ async def test_e3_apply_is_idempotent(memory_db: str) -> None:
     # 库内仅 1 条该 idempotency_key 的记录
     async with aiosqlite.connect(memory_db) as conn:
         cursor = await conn.execute(
-            "SELECT COUNT(*) FROM memory_maintenance_runs "
-            "WHERE idempotency_key = ?",
+            "SELECT COUNT(*) FROM memory_maintenance_runs WHERE idempotency_key = ?",
             (_IDEMPOTENCY_KEY,),
         )
         count = (await cursor.fetchone())[0]
@@ -158,8 +152,7 @@ async def test_e4_rollback_removes_audit_record(memory_db: str) -> None:
     # 审计记录已被删除
     async with aiosqlite.connect(memory_db) as conn:
         cursor = await conn.execute(
-            "SELECT COUNT(*) FROM memory_maintenance_runs "
-            "WHERE idempotency_key = ?",
+            "SELECT COUNT(*) FROM memory_maintenance_runs WHERE idempotency_key = ?",
             (_IDEMPOTENCY_KEY,),
         )
         count = (await cursor.fetchone())[0]
@@ -191,8 +184,7 @@ async def test_e4_rollback_unknown_run_id_returns_not_found(memory_db: str) -> N
 def test_cli_migrate_094_dry_run(memory_db_path_via_fixture, tmp_path) -> None:
     """E5: CLI 模板与 config migrate 一致——通过 click CliRunner 验证。"""
     from click.testing import CliRunner
-
-    from octoagent.provider.dx.memory_commands import memory
+    from octoagent.gateway.cli.memory_commands import memory
 
     runner = CliRunner()
     result = runner.invoke(
@@ -205,13 +197,10 @@ def test_cli_migrate_094_dry_run(memory_db_path_via_fixture, tmp_path) -> None:
     assert _REASON in result.output
 
 
-def test_cli_migrate_094_apply_then_idempotent(
-    memory_db_path_via_fixture, tmp_path
-) -> None:
+def test_cli_migrate_094_apply_then_idempotent(memory_db_path_via_fixture, tmp_path) -> None:
     """E5 CLI: apply 一次成功 + 二次幂等短路 + rollback 后再 apply。"""
     from click.testing import CliRunner
-
-    from octoagent.provider.dx.memory_commands import memory
+    from octoagent.gateway.cli.memory_commands import memory
 
     runner = CliRunner()
     result1 = runner.invoke(
@@ -229,13 +218,10 @@ def test_cli_migrate_094_apply_then_idempotent(
     assert "skipped" in result2.output
 
 
-def test_cli_migrate_094_rejects_no_action(
-    memory_db_path_via_fixture, tmp_path
-) -> None:
+def test_cli_migrate_094_rejects_no_action(memory_db_path_via_fixture, tmp_path) -> None:
     """E5 CLI: 必须指定 --dry-run / --apply / --rollback 中的一个。"""
     from click.testing import CliRunner
-
-    from octoagent.provider.dx.memory_commands import memory
+    from octoagent.gateway.cli.memory_commands import memory
 
     runner = CliRunner()
     result = runner.invoke(
@@ -245,14 +231,11 @@ def test_cli_migrate_094_rejects_no_action(
     assert result.exit_code == 2  # 互斥校验失败
 
 
-def test_cli_migrate_094_rollback_not_found_exits_1(
-    memory_db_path_via_fixture, tmp_path
-) -> None:
+def test_cli_migrate_094_rollback_not_found_exits_1(memory_db_path_via_fixture, tmp_path) -> None:
     """E5 CLI Codex Phase E LOW-3 闭环: rollback 未找到 run_id 时 exit code = 1
     （contract：rollback 失败是错误而非查询）。"""
     from click.testing import CliRunner
-
-    from octoagent.provider.dx.memory_commands import memory
+    from octoagent.gateway.cli.memory_commands import memory
 
     runner = CliRunner()
     result = runner.invoke(
@@ -270,14 +253,11 @@ def test_cli_migrate_094_rollback_not_found_exits_1(
     assert "not_found" in result.output
 
 
-def test_cli_migrate_094_dry_run_after_apply_exits_0(
-    memory_db_path_via_fixture, tmp_path
-) -> None:
+def test_cli_migrate_094_dry_run_after_apply_exits_0(memory_db_path_via_fixture, tmp_path) -> None:
     """E5 CLI Codex Phase E LOW-3 闭环: apply 后再跑 dry-run（已 applied）应返回
     exit 0 + 显示 already_applied_run_id（dry-run 是查询不是错误）。"""
     from click.testing import CliRunner
-
-    from octoagent.provider.dx.memory_commands import memory
+    from octoagent.gateway.cli.memory_commands import memory
 
     runner = CliRunner()
     apply_result = runner.invoke(
@@ -294,14 +274,12 @@ def test_cli_migrate_094_dry_run_after_apply_exits_0(
     assert "already_applied_run_id" in dry_result.output
 
 
-def test_cli_migrate_094_json_output(
-    memory_db_path_via_fixture, tmp_path
-) -> None:
+def test_cli_migrate_094_json_output(memory_db_path_via_fixture, tmp_path) -> None:
     """E5 CLI Codex Phase E LOW-3 闭环: --json-output 输出合法 JSON 字典。"""
-    from click.testing import CliRunner
     import json as _json
 
-    from octoagent.provider.dx.memory_commands import memory
+    from click.testing import CliRunner
+    from octoagent.gateway.cli.memory_commands import memory
 
     runner = CliRunner()
     result = runner.invoke(

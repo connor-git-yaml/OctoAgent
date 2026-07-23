@@ -28,6 +28,9 @@ on:
     paths:
       - "octoagent/**"
       - "repo-scripts/**"
+      - "docs/**"
+      - ".specify/memory/constitution.md"
+      - ".specify/features/151-runtime-boundary-architecture-truth/**"
       - ".github/workflows/feature-007-integration.yml"
   push:
     branches:
@@ -39,6 +42,9 @@ on:
     paths:
       - "octoagent/**"
       - "repo-scripts/**"
+      - "docs/**"
+      - ".specify/memory/constitution.md"
+      - ".specify/features/151-runtime-boundary-architecture-truth/**"
       - ".github/workflows/feature-007-integration.yml"
 
 concurrency:
@@ -46,6 +52,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  architecture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install architecture gate dependencies
+        run: uv sync --project octoagent --dev
+
+      - name: Resolve architecture merge base
+        id: architecture-base
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE="${{ github.event.before }}"
+          fi
+          if [[ -z "${BASE}" || "${BASE}" =~ ^0+$ ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
+            BASE="HEAD^"
+          fi
+          MERGE_BASE="$(git merge-base "${BASE}" HEAD)"
+          echo "base=${MERGE_BASE}" >> "${GITHUB_OUTPUT}"
+
+      - name: Run architecture gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results/architecture
+          env PYTHONNOUSERSITE=1 \
+            PYTHONPATH="$PWD/octoagent/packages/core/src:$PWD/octoagent/packages/provider/src:$PWD/octoagent/packages/protocol/src:$PWD/octoagent/packages/tooling/src:$PWD/octoagent/packages/skills/src:$PWD/octoagent/packages/policy/src:$PWD/octoagent/packages/memory/src:$PWD/octoagent/apps/gateway/src" \
+            uv run --project octoagent --no-sync python \
+            repo-scripts/check-runtime-architecture.py all \
+            --base-ref "${{ steps.architecture-base.outputs.base }}" \
+            2>&1 | tee test-results/architecture/architecture.txt
+
+      - name: Upload architecture report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: architecture-gate-report
+          path: test-results/architecture/architecture.txt
+          retention-days: 14
+
   backend-deterministic:
     runs-on: ubuntu-latest
     # F137 串行首跑实测 6m25s；F142 翻并行（本地 -n auto 串行 378s→~26s，
@@ -85,6 +149,15 @@ jobs:
         # CI 只验可解析性；需 PyYAML → uv sync 后跑）
         working-directory: .
         run: uv run --project octoagent --no-sync python repo-scripts/check-attestation.py
+
+      - name: Start fresh LCOV transaction
+        id: coverage-start
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f coverage.lcov
+          fresh_after_utc="$(python3 -c 'import datetime as d; print(d.datetime.now(d.UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z"))')"
+          echo "fresh_after_utc=${fresh_after_utc}" >> "${GITHUB_OUTPUT}"
 
       - name: Run deterministic test layers (L4+L3, gate=deny)
         # 教训沉淀（.githooks/pre-commit:83-91）：用 `uv run python -m pytest`
@@ -151,6 +224,26 @@ jobs:
           fi
           echo "base=${BASE}" >> "${GITHUB_OUTPUT}"
 
+      - name: Capture committed coverage identity
+        id: coverage-identity
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p octoagent/test-results/coverage
+          python3 - <<'PY' >> "${GITHUB_OUTPUT}"
+          import hashlib
+          import subprocess
+
+          def git(*args: str) -> bytes:
+              return subprocess.check_output(["git", *args])
+
+          status = git("status", "--porcelain=v2", "-z", "--untracked-files=all")
+          print(f"head={git('rev-parse', 'HEAD').decode().strip()}")
+          print(f"head_tree={git('rev-parse', 'HEAD^{tree}').decode().strip()}")
+          print(f"fingerprint={hashlib.sha256(status).hexdigest()}")
+          PY
+
       - name: Changed-lines coverage gate（新增可执行行 ≥90%）
         # F141 件4（cc-haha coverage.ts 范式）：git diff 新增行 ∩ lcov DA 记录
         # 机械计算；存量不背债（只算本次 push 新增行）；范围 = packages/*/src +
@@ -158,18 +251,57 @@ jobs:
         # [cov-exempt]（脚本内大声记录 sha+subject）。
         working-directory: .
         run: >
+          F151_COVERAGE_STAGE=CI
           python3 repo-scripts/check-changed-lines-coverage.py
           --lcov octoagent/coverage.lcov
           --base "${{ steps.diffbase.outputs.base }}"
+          --mode committed
+          --fresh-after-utc "${{ steps.coverage-start.outputs.fresh_after_utc }}"
+          --expected-stage-task CI
+          --expected-head-sha "${{ steps.coverage-identity.outputs.head }}"
+          --expected-head-tree "${{ steps.coverage-identity.outputs.head_tree }}"
+          --expected-worktree-fingerprint "${{ steps.coverage-identity.outputs.fingerprint }}"
+          --report-json octoagent/test-results/coverage/changed-lines.json
           --min-percent 90
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-junit
-          path: octoagent/test-results/
+          name: backend-coverage-and-junit
+          path: |
+            octoagent/test-results/
+            octoagent/test-results/coverage/changed-lines.json
+            octoagent/coverage.lcov
           retention-days: 14
+
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Dependencies
+        run: uv sync --project octoagent --dev
+
+      - name: Run benchmark unit contract
+        run: >
+          env PYTHONNOUSERSITE=1
+          PYTHONPATH="$PWD/octoagent/packages/core/src:$PWD/octoagent/packages/provider/src:$PWD/octoagent/packages/protocol/src:$PWD/octoagent/packages/tooling/src:$PWD/octoagent/packages/skills/src:$PWD/octoagent/packages/policy/src:$PWD/octoagent/packages/memory/src:$PWD/octoagent/apps/gateway/src:$PWD"
+          uv run --project octoagent --no-sync python -m pytest
+          benchmarks/tests/unit/test_octo_runner.py::test_source_checkout_required_before_side_effects
+          benchmarks/tests/unit/test_octo_runner.py::test_runner_fn_provider_error_maps_to_infra_error
 
   frontend:
     runs-on: ubuntu-latest
@@ -197,7 +329,10 @@ jobs:
       - name: vitest（单元/组件层）
         # F137 接线时点发现的 master 存量 11 failed / 6 文件欠账已由后续 fix task
         # 全部 triage 清零（11 处均为测试断言漂移，无真 UI 回归）——全量阻断。
-        run: npx vitest run
+        run: npm exec vitest -- run
+
+      - name: TypeScript build check
+        run: npm exec tsc -- -b
 
   # F140 L1 UI E2E：Playwright 薄输入 + 外部断言（真浏览器 → 真 gateway →
   # 脚本决策环 → 真工具执行 → event_store/文件系统断言）。零真 LLM / 零凭证

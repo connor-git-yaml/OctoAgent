@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -101,7 +101,7 @@ class SpawnChildResult:
     worker_plan_id: str = ""
     # status != "written" 时的失败字段
     error_code: str = ""  # gate 失败时由 DelegateResult.error_code 提供
-    reason: str = ""      # gate 失败 reason 或 launch raise 异常文本
+    reason: str = ""  # gate 失败 reason 或 launch raise 异常文本
 
 
 class DelegationPlaneService:
@@ -119,7 +119,7 @@ class DelegationPlaneService:
         self._stores = store_group
         self._sse_hub = sse_hub
         self._capability_pack = capability_pack
-        self._task_service = TaskService(store_group, sse_hub)
+        self._task_service = TaskService(store_group, sse_hub, storage_only=True)
         self._pipeline_engine = SkillPipelineEngine(
             store_group=store_group,
             event_recorder=self._record_event,
@@ -156,9 +156,7 @@ class DelegationPlaneService:
         requested_worker_type = self._coerce_worker_type(
             str(request.metadata.get("requested_worker_type", "")).strip()
         )
-        requested_agent_profile_id = resolve_delegation_target_profile_id(
-            request.metadata
-        )
+        requested_agent_profile_id = resolve_delegation_target_profile_id(request.metadata)
         try:
             requested_agent_profile_version = int(
                 str(request.metadata.get("requested_agent_profile_version", "0") or "0")
@@ -316,14 +314,10 @@ class DelegationPlaneService:
                 "session_owner_profile_id": session_owner_profile_id,
                 "inherited_context_owner_profile_id": inherited_agent_profile_id,
                 "delegation_target_profile_id": requested_agent_profile_id,
-                "turn_executor_kind": self._turn_executor_kind_for_target_kind(
-                    final_target_kind
-                ),
+                "turn_executor_kind": self._turn_executor_kind_for_target_kind(final_target_kind),
                 "agent_profile_id": session_owner_profile_id,
                 "context_frame_id": context_frame_id,
-                "delegation_mode": self.delegation_mode_for_target_kind(
-                    final_target_kind
-                ),
+                "delegation_mode": self.delegation_mode_for_target_kind(final_target_kind),
             }
         )
         updated_work = work.model_copy(
@@ -347,9 +341,7 @@ class DelegationPlaneService:
                 "requested_agent_profile_version": requested_agent_profile_version,
                 "effective_profile_snapshot_id": effective_profile_snapshot_id,
                 "pipeline_run_id": pipeline_run.run_id,
-                "turn_executor_kind": self._turn_executor_kind_for_target_kind(
-                    final_target_kind
-                ),
+                "turn_executor_kind": self._turn_executor_kind_for_target_kind(final_target_kind),
                 "metadata": {
                     **work.metadata,
                     "runtime_context": resolved_runtime_context.model_dump(mode="json"),
@@ -416,9 +408,7 @@ class DelegationPlaneService:
             model_alias=request.model_alias,
             resume_from_node=delegated_resume_from_node or None,
             resume_state_snapshot=(
-                dict(delegated_resume_state_snapshot)
-                if delegated_resume_state_snapshot
-                else None
+                dict(delegated_resume_state_snapshot) if delegated_resume_state_snapshot else None
             ),
             tool_profile=request.tool_profile,
             runtime_context=resolved_runtime_context,
@@ -428,9 +418,7 @@ class DelegationPlaneService:
                 "pipeline_run_id": pipeline_run.run_id,
                 "selected_worker_type": updated_work.selected_worker_type,
                 "selected_tools": list(selection.selected_tools),
-                "recommended_tools": list(
-                    selection.recommended_tools or selection.selected_tools
-                ),
+                "recommended_tools": list(selection.recommended_tools or selection.selected_tools),
                 "selected_tools_json": json.dumps(
                     selection.recommended_tools or selection.selected_tools,
                     ensure_ascii=False,
@@ -522,7 +510,9 @@ class DelegationPlaneService:
                     **result.metadata,
                 },
                 "updated_at": now,
-                "completed_at": now if result.status in WORK_TERMINAL_STATUSES else work.completed_at,
+                "completed_at": now
+                if result.status in WORK_TERMINAL_STATUSES
+                else work.completed_at,
             }
         )
         await self._stores.work_store.save_work(updated)
@@ -633,9 +623,12 @@ class DelegationPlaneService:
             return None
         # pipeline 恢复执行前，先将 work 转回 RUNNING
         if work.status != WorkStatus.RUNNING:
-            work = await self._transition_work(
-                work.work_id, status=WorkStatus.RUNNING, reason="pipeline_resumed"
-            ) or work
+            work = (
+                await self._transition_work(
+                    work.work_id, status=WorkStatus.RUNNING, reason="pipeline_resumed"
+                )
+                or work
+            )
         run = await self._pipeline_engine.resume_run(
             definition=self._build_definition(),
             run_id=work.pipeline_run_id,
@@ -652,9 +645,12 @@ class DelegationPlaneService:
             return None
         # pipeline 重试前，先将 work 转回 RUNNING
         if work.status != WorkStatus.RUNNING:
-            work = await self._transition_work(
-                work.work_id, status=WorkStatus.RUNNING, reason="pipeline_node_retried"
-            ) or work
+            work = (
+                await self._transition_work(
+                    work.work_id, status=WorkStatus.RUNNING, reason="pipeline_node_retried"
+                )
+                or work
+            )
         run = await self._pipeline_engine.retry_current_node(
             definition=self._build_definition(),
             run_id=work.pipeline_run_id,
@@ -771,9 +767,7 @@ class DelegationPlaneService:
                     "worker_capability": str(
                         run.state_snapshot.get("worker_capability", work.requested_capability)
                     ),
-                    "route_reason": str(
-                        run.state_snapshot.get("route_reason", work.route_reason)
-                    ),
+                    "route_reason": str(run.state_snapshot.get("route_reason", work.route_reason)),
                     "model_alias": str(state.get("model_alias", runtime_context.model_alias)),
                     "tool_profile": str(
                         state.get("tool_profile", runtime_context.tool_profile or "standard")
@@ -1038,13 +1032,9 @@ class DelegationPlaneService:
                 active_children = [
                     d.task_id
                     for d in descendants
-                    if (
-                        getattr(getattr(d, "status", None), "value",
-                                str(getattr(d, "status", "")))
-                    )
+                    if (getattr(getattr(d, "status", None), "value", str(getattr(d, "status", ""))))
                     not in _WORK_TERMINAL_VALUES
-                    and getattr(d, "parent_work_id", None)
-                    == getattr(parent_work, "work_id", None)
+                    and getattr(d, "parent_work_id", None) == getattr(parent_work, "work_id", None)
                 ]
             except Exception:
                 # 容错：list_descendant_works 失败时降级（与原 builtin_tools 容错一致）
@@ -1125,6 +1115,7 @@ class DelegationPlaneService:
             except Exception as exc:  # noqa: BLE001
                 # 与原 delegate_task_tool 一致：ERROR 级 log 标记 audit drop
                 import structlog as _structlog_module
+
                 _structlog_module.get_logger(__name__).error(
                     "spawn_child_audit_emit_failed",
                     parent_task_id=current_task_id or audit_task_fallback,
@@ -1238,9 +1229,7 @@ class DelegationPlaneService:
             summary=route_reason,
             state_patch={
                 "selected_worker_type": worker_type,
-                "worker_capability": worker_type
-                if worker_type != "general"
-                else "llm_generation",
+                "worker_capability": worker_type if worker_type != "general" else "llm_generation",
                 "target_kind": target_kind.value,
                 "route_reason": route_reason,
             },
@@ -1263,8 +1252,8 @@ class DelegationPlaneService:
         worker_type = str(state.get("selected_worker_type", "general"))
         metadata = state.get("metadata", {})
         requested_agent_profile_id = resolve_delegation_target_profile_id(metadata)
-        requested_profile_id = (
-            requested_agent_profile_id or resolve_session_owner_profile_id(metadata)
+        requested_profile_id = requested_agent_profile_id or resolve_session_owner_profile_id(
+            metadata
         )
         selection = await self._capability_pack.resolve_profile_first_tools(
             ToolIndexQuery(

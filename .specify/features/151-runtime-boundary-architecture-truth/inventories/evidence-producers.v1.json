@@ -1,0 +1,327 @@
+{
+  "version": 1,
+  "feature_id": "F151",
+  "purpose": "Machine closure between every evidence producer, its canonical lifecycle type, exact output directory and exact artifact-name set. Producers may not add aliases or caller-selected output roots.",
+  "canonical_formal_artifact_names": [
+    "junit.xml",
+    "stdout.txt",
+    "stderr.txt",
+    "exit-code.txt",
+    "invocation.json",
+    "tree.json"
+  ],
+  "local_producers": [
+    {
+      "producer_id": "phase0-pytest-bootstrap",
+      "lifecycle_type": "phase0-bootstrap",
+      "command_owner": "T001-T004 fixed bootstrap transaction",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/bootstrap/{slice_id}/RED/{artifact_name}",
+      "exact_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"]
+    },
+    {
+      "producer_id": "phase0-vitest-bootstrap",
+      "lifecycle_type": "phase0-bootstrap",
+      "command_owner": "T001-T004 fixed bootstrap transaction",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/bootstrap/{slice_id}/RED/{artifact_name}",
+      "exact_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"]
+    },
+    {
+      "producer_id": "formal-python-rgr",
+      "lifecycle_type": "formal-rgr",
+      "command_owner": "tdd-evidence run",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/runs/{slice_id}/{phase}/{artifact_name}",
+      "exact_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"]
+    },
+    {
+      "producer_id": "formal-frontend-rgr",
+      "lifecycle_type": "formal-rgr",
+      "command_owner": "tdd-evidence run",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/runs/{slice_id}/{phase}/{artifact_name}",
+      "exact_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"]
+    },
+    {
+      "producer_id": "t005-corrective-red-pytest",
+      "lifecycle_type": "corrective-red",
+      "command_owner": "T005 fixed standard pytest/JUnit transaction after Design/Tasks approval and before checker changes",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/corrective/T005-integrity-v2/{slice_id}/RED/{artifact_name}",
+      "exact_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"]
+    },
+    {
+      "producer_id": "t006-corrective-red-pytest",
+      "indexed_producer_id_pattern": "t006-corrective-red-pytest@<approval-binding-sha256>",
+      "lifecycle_type": "corrective-red",
+      "command_owner": "two T006 fixed standard pytest/JUnit RED transactions followed by one main-released C20-amend read-only adoption",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/corrective/T006-committed-mode-v1/{slice_id}/RED/{artifact_name}",
+      "exact_slice_ids": ["S006-committed-worktree-clean", "S006-index-amendment-integrity"],
+      "exact_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"]
+    },
+    {
+      "producer_id": "coverage-c19-pre",
+      "lifecycle_type": "coverage",
+      "command_owner": "C19-pre",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/coverage/{stage_task}/{artifact_name}",
+      "exact_artifact_names": ["coverage.lcov", "coverage-metadata.json", "stdout.txt", "stderr.txt", "exit-code.txt"]
+    },
+    {
+      "producer_id": "coverage-c19-post",
+      "lifecycle_type": "coverage",
+      "command_owner": "C19-post",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/coverage/{stage_task}/{artifact_name}",
+      "exact_artifact_names": ["coverage.lcov", "coverage-metadata.json", "stdout.txt", "stderr.txt", "exit-code.txt"]
+    },
+    {
+      "producer_id": "constructor-coverage-c084",
+      "lifecycle_type": "constructor-coverage",
+      "command_owner": "C084",
+      "path_template": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/special/C084/{artifact_name}",
+      "exact_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "selected-nodes.json"]
+    },
+    {
+      "producer_id": "atomic-namespace-before-t017",
+      "lifecycle_type": "atomic-namespace-before",
+      "command_owner": "T017 BEFORE snapshot",
+      "exact_relative_path": "local/atomic/S017-namespace-atomic/T017-BEFORE/atomic-namespace-before.v1.json",
+      "task_id": "T017",
+      "phase": "BEFORE",
+      "slice_id": "S017-namespace-atomic",
+      "exact_artifact_names": ["atomic-namespace-before.v1.json"]
+    },
+    {
+      "producer_id": "atomic-namespace-after-t029",
+      "lifecycle_type": "atomic-namespace-after",
+      "command_owner": "T029 AFTER snapshot",
+      "exact_relative_path": "local/atomic/S017-namespace-atomic/T029-AFTER/atomic-namespace-after.v1.json",
+      "task_id": "T029",
+      "phase": "AFTER",
+      "slice_id": "S017-namespace-atomic",
+      "exact_artifact_names": ["atomic-namespace-after.v1.json"]
+    }
+  ],
+  "main_owned_direct_corrective_protocols": [
+    {
+      "protocol_id": "t011-preliminary-direct-corrective-red",
+      "task_owner": "T011",
+      "execution_owner": "main reviewer",
+      "machine_contract_source": "artifact-lifecycle.v1.json#superseded_contract_evidence.release_replacement",
+      "machine_contract_equality": "cwd, ordered environment, ordered argv, exact command, invocation/tree schemas, nodeids, result counts, artifact maps, aggregate and attestation binding must equal the machine contract source exactly",
+      "command": "one direct pytest/JUnit transaction over the exact five S011 nodeids after phase-correct test rewrite; cwd, environment and argv are not caller-selectable",
+      "exact_root": "/tmp/f151-s011-clean-wheel-preliminary-red-main/RED",
+      "exact_artifact_names": ["junit.xml", "stdout.txt", "stderr.txt", "exit-code.txt", "invocation.json", "tree.json"],
+      "exact_environment_names_in_order": ["PYTHONNOUSERSITE", "PYTHONPATH", "LITELLM_LOCAL_MODEL_COST_MAP"],
+      "exact_node_count": 5,
+      "expected_exit_code": 1,
+      "expected_selected_count": 5,
+      "expected_failed_count": 5,
+      "expected_error_count": 0,
+      "expected_skipped_count": 0,
+      "expected_rerun_count": 0,
+      "expected_stderr_size_bytes": 0,
+      "expected_oracle_id": "F151_CLEAN_WHEEL_CONTRACT_MISSING",
+      "canonical_index_adoption": false,
+      "second_runner_or_index": false,
+      "required_acceptance_fields": ["artifact_sha256", "artifact_size_bytes", "artifact_aggregate_sha256", "test_sha256", "main_review_message_id", "main_attestation_binding_sha256"],
+      "accepted_binding": {
+        "artifact_sha256": {"junit.xml": "1491e6080eab7616fb895e6f026cccf7cf7e12a00be23a5e6e257a2f54f0f659", "stdout.txt": "e81ae3d6bf9d0e7b44055a6eaac39778be5f7bf9b492f322b92ff0a6e433dffb", "stderr.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "exit-code.txt": "4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865", "invocation.json": "3857b70b92e3dd932a12eab0f30f07a83d3c90a32518f808bc8f1064516c2b62", "tree.json": "6d1c080a2fb99f573a19371047b5d6cd18454f8abc7c78980026fc5cb1c21be7"},
+        "artifact_size_bytes": {"junit.xml": 2244, "stdout.txt": 1882, "stderr.txt": 0, "exit-code.txt": 2, "invocation.json": 3611, "tree.json": 19080},
+        "artifact_aggregate_sha256": "2405581c676b28dea56f9ca66b13e22abeafb386e75ea680e03f246226db84da",
+        "test_sha256": "294b2e57189d79b622f7048da1e6f5a33cb00982fc7fbebec1fb04b069f238f5",
+        "main_review_message_id": "main-f151-t011-replacement-red-review-2405581c676b28de-20260721",
+        "main_attestation_binding_sha256": "61047efa7dfeadb6d20f45664a1cd83e825356b11c460d8958ccc9963139f061"
+      },
+      "raw_retention": "the exact six /tmp artifacts remain immutable and readable through T012_REFACTOR_REVIEW; after main accepts the complete attestation, T103 validates the attestation maps and binding rather than depending on /tmp persistence",
+      "current_state": "SUPERSEDED_HISTORY_NOT_RELEASE_EVIDENCE",
+      "release_rule": "valid only for the accepted 294b2e test contract; once a requires-dist/isolation assertion changes this binding becomes SUPERSEDED_HISTORY_NOT_RELEASE_EVIDENCE and cannot satisfy the revised contract"
+    },
+    {
+      "protocol_id": "t011-preliminary-unowned-direct-red-v5",
+      "task_owner": "T012 corrective batch for the S011 revised contract",
+      "execution_owner": "main reviewer creates the root; the approved local batch executes the exact transaction",
+      "machine_contract_source": "artifact-lifecycle.v1.json#superseded_contract_evidence.release_replacement.contract_migration.successor_protocol",
+      "command": "one fresh direct pytest/JUnit transaction over the same five S011 nodeids after observable-delta test-code review",
+      "exact_root": "/tmp/f151-s011-clean-wheel-contract-v5-red-main/RED",
+      "exact_environment_names_in_order": [
+        "PYTHONNOUSERSITE",
+        "PYTHONPATH",
+        "LITELLM_LOCAL_MODEL_COST_MAP"
+      ],
+      "exact_node_count": 5,
+      "expected_exit_code": 1,
+      "expected_selected_count": 5,
+      "expected_failed_count": 5,
+      "expected_error_count": 0,
+      "expected_skipped_count": 0,
+      "expected_rerun_count": 0,
+      "expected_stderr_size_bytes": 0,
+      "expected_oracle_id": "F151_CLEAN_WHEEL_CONTRACT_MISSING",
+      "canonical_index_adoption": false,
+      "required_acceptance_fields": [
+        "artifact_sha256",
+        "artifact_size_bytes",
+        "artifact_aggregate_sha256",
+        "test_sha256",
+        "main_review_message_id",
+        "main_attestation_binding_sha256"
+      ],
+      "main_review_message_id": "main-f151-t012-final-unowned-v5-review-20260721",
+      "predecessor_selector_normalized_ast_aggregate_sha256": "4991ea7e70e35db207d64d6fa19651743f4d8656d842f9bd4b1add2d71cbe136",
+      "accepted_binding": {
+        "artifact_sha256": {"exit-code.txt":"4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865","invocation.json":"eb528d56a4de357b62c4bf3d462dfcdfc273ea03e6e75d8ac30d5d182487a438","junit.xml":"99edaa28106ffc66085fd2d117d16163ece4f718d55473fe41f920133547bae8","stderr.txt":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout.txt":"a138bcbdf769787b40b375562cffe795a56add9ac40daf7b7ef0adf7153fa1ec","tree.json":"39b9cbf5edd094cb446da152253deec5764f8a3f91e4f4bd8b3dc815dd6d662c"},
+        "artifact_size_bytes": {"exit-code.txt":2,"invocation.json":3462,"junit.xml":2212,"stderr.txt":0,"stdout.txt":1935,"tree.json":16967},
+        "artifact_aggregate_sha256": "7eae68d7a702b042088ad1c225ad93e5d9c30f7d65850fbdc5640c487a628521",
+        "execution_test_sha256": "8bf4ef435d8d403ccc94458112d9b1ff2fd088bc797e794a5bac2f2a9fae4535",
+        "current_test_sha256": "07b4b0e463979c4cb58adf6fdaa1a4423a1810c11c54c2cd6bf7fe18f64a8d77",
+        "main_review_message_id": "main-f151-t012-final-unowned-v5-review-20260721",
+        "main_attestation_binding_sha256": "311f207e3fbb2f138c1b9c274141ae3a004ff40a087a0ab95949f3d6718fec50",
+        "batch_attestation_binding_sha256": "fca3d946f3c245737cbf8bd0a153766e5922afa17566f85b2ad1815ffc8abaec"
+      },
+      "current_state": "ACCEPTED_V5_BATCH",
+      "old_protocol_reuse": "fail"
+    },
+    {
+      "protocol_id": "t012-import-unowned-direct-red-v5",
+      "task_owner": "T012 import classification corrective contract",
+      "execution_owner": "approved local grouped batch over a main-created empty root",
+      "exact_root": "/tmp/f151-s012-import-contract-v5-red-main/RED",
+      "exact_environment_names_in_order": ["PYTHONNOUSERSITE", "PYTHONPATH", "LITELLM_LOCAL_MODEL_COST_MAP"],
+      "exact_nodeids": ["octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_import_inventory_classifies_runtime_optional_type_checking_plugin_and_workspace_ownership"],
+      "expected_exit_code": 1,
+      "expected_selected_count": 1,
+      "expected_failed_count": 1,
+      "expected_error_count": 0,
+      "expected_skipped_count": 0,
+      "expected_rerun_count": 0,
+      "expected_stderr_size_bytes": 0,
+      "expected_oracle_id": "F151_DIRECT_DEPENDENCY_IMPORT_CLASSIFICATION_MISSING",
+      "main_review_message_id": "main-f151-t012-final-unowned-v5-review-20260721",
+      "canonical_index_adoption": false,
+      "accepted_binding": {
+        "artifact_sha256": {"exit-code.txt":"4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865","invocation.json":"c122459f16a16004bb352e9ffcca04b757634310d3f1c29fb2b1ef589ffdf650","junit.xml":"71105a65d634111af72aa0ce84cebf6f33bd5482329883aa077b322a78b3f7cb","stderr.txt":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout.txt":"9d0b7411efb9adbfc3563f97df50069926b6f8565beb8a9020de7a3c10ff6a74","tree.json":"3f044c74c7743dc287dba3f40e6ceb897057666c238805af538a7b527082c6af"},
+        "artifact_size_bytes": {"exit-code.txt":2,"invocation.json":2442,"junit.xml":719,"stderr.txt":0,"stdout.txt":665,"tree.json":16987},
+        "artifact_aggregate_sha256": "83ecf65292de1776a62afc0cf5e9476d63d0478ef0d6290525aa614a54336489",
+        "execution_test_sha256": "d35b617c306e25b1977d33f18347e397c0077ef589f1a1cd223543acb6cc4847",
+        "current_test_sha256": "07b4b0e463979c4cb58adf6fdaa1a4423a1810c11c54c2cd6bf7fe18f64a8d77",
+        "main_review_message_id": "main-f151-t012-final-unowned-v5-review-20260721",
+        "main_attestation_binding_sha256": "1e06064f13597ee5e9bfd7ddde733f3005155c686c5b12b5749b288bb6ecfd06",
+        "batch_attestation_binding_sha256": "fca3d946f3c245737cbf8bd0a153766e5922afa17566f85b2ad1815ffc8abaec"
+      },
+      "current_state": "ACCEPTED_V5_BATCH",
+      "v4_predecessor_state": "SUPERSEDED_HISTORY_NOT_RELEASE_EVIDENCE"
+      ,"unreached_test_fixture_correction": {
+        "s011_helper": "_assert_isolation permits only exact project sysconfig purelib among repo-contained sys.path entries",
+        "import_helper": "_assert_classification_rejects_unknown now uses a function parameter that cannot be statically enumerated",
+        "red_reuse_basis": "both accepted RED JUnit failures precede these helper branches; nodeids and oracle are unchanged"
+      }
+    },
+    {
+      "protocol_id": "t012-child-observation-direct-red-v4",
+      "task_owner": "T012 child observation corrective contract",
+      "execution_owner": "approved local grouped batch over the main-created v4 root",
+      "machine_contract_source": "artifact-lifecycle.v1.json#superseded_contract_evidence.release_replacement.contract_migration.successor_protocol.accepted_batch_binding.accepted_reds",
+      "exact_root": "/tmp/f151-s012-child-contract-v4-red-main/RED",
+      "exact_environment_names_in_order": ["PYTHONNOUSERSITE", "PYTHONPATH", "LITELLM_LOCAL_MODEL_COST_MAP"],
+      "exact_nodeids": ["octoagent/tests/gate/test_clean_wheel_contract.py::TestCleanWheelContract::test_isolated_child_reports_actual_environment_paths_and_workspace_origins"],
+      "expected_exit_code": 1,
+      "expected_selected_count": 1,
+      "expected_failed_count": 1,
+      "expected_error_count": 0,
+      "expected_skipped_count": 0,
+      "expected_rerun_count": 0,
+      "expected_stderr_size_bytes": 0,
+      "expected_oracle_id": "F151_CLEAN_WHEEL_CHILD_OBSERVATION_MISSING",
+      "canonical_index_adoption": false,
+      "selector_owned_helpers_ast_sha256": "eec1bb70c9e665c290137a31d4f2ea0f16d9f0465536823538970caff5a4cdfd",
+      "accepted_binding": {
+        "artifact_sha256": {"exit-code.txt":"4355a46b19d348dc2f57c046f8ef63d4538ebb936000f3c9ee954a27460dd865","invocation.json":"2ac47ab80423549e87073d0797efa01f7104b6ca27a8e8efda3bdd28102b3448","junit.xml":"f989562c1201dfe3999b356f447c41ba0997d76a3c570f52deb776d54bd023ed","stderr.txt":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","stdout.txt":"a528b7173bc00660867c5263953dbbd15338fce57091608097fce6494ab0d8dc","tree.json":"7bebe7d62090e0294a4c65b7ce9d4dd27e507721c1079db8661689d158cb1d09"},
+        "artifact_size_bytes": {"exit-code.txt":2,"invocation.json":2525,"junit.xml":653,"stderr.txt":0,"stdout.txt":602,"tree.json":19768},
+        "artifact_aggregate_sha256": "92fa08d79f880fe49c6a87fe7457ab17168a21ca8b4be9a1d48727ab3f72f2e0",
+        "execution_test_sha256": "8fd1a683f6fa4814b98cc42af366ba824a9e1d6cca1cd30994adff356e4a5b6a",
+        "current_test_sha256": "07b4b0e463979c4cb58adf6fdaa1a4423a1810c11c54c2cd6bf7fe18f64a8d77",
+        "main_review_message_id": "main-f151-t012-final-unowned-v5-review-20260721",
+        "main_attestation_binding_sha256": "c77ad4ff345c1cbbfe8f2182d68c3ccd85b92dafd28cd4e3bb0a7455f91a9bdd",
+        "batch_attestation_binding_sha256": "fca3d946f3c245737cbf8bd0a153766e5922afa17566f85b2ad1815ffc8abaec"
+      },
+      "current_state": "ACCEPTED_SELECTOR_LEVEL_PREDECESSOR"
+    }
+  ],
+  "committed_producer_refs": [
+    {"path":".specify/features/151-runtime-boundary-architecture-truth/evidence/.gitignore","producer_command_id":"ROUND10_DESIGN_PATCH"},
+    {"path":".specify/features/151-runtime-boundary-architecture-truth/evidence/bootstrap-anchor.v1.json","producer_command_id":"MAIN_PHASE0_ANCHOR_WRITE"},
+    {"path":".specify/features/151-runtime-boundary-architecture-truth/evidence/evidence-index.v2.json","producer_command_id":"C20-recover"},
+    {"path":".specify/features/151-runtime-boundary-architecture-truth/verification-report.md","producer_command_id":"C25"}
+  ],
+  "automatic_verify_command_policy": {
+    "full_suite_and_all_command_ids": ["C23", "C24"],
+    "stage_bindings": {"T121": ["C23"], "T123": ["C24"]},
+    "forbidden_command_ids": ["C18"],
+    "forbidden_command_patterns": ["repo-scripts/lane.py baseline", "real_llm live", "host credential", "external cost"],
+    "implicit_authorization_sources": []
+  },
+  "gate": {
+    "formal_output_root": ".specify/features/151-runtime-boundary-architecture-truth/evidence/local/runs",
+    "caller_output_override": "forbidden",
+    "producer_output_rule": "for each producer, actual relative paths must equal path_template expanded with registered identifiers and exact_artifact_names; missing or extra files fail",
+    "evidence_index_fields": ["producer_id", "lifecycle_type", "slice_id", "phase", "task_id", "cwd", "argv", "env", "mode", "base_ref", "base_sha", "head_sha", "head_tree_sha", "worktree_fingerprint", "fingerprint_scope", "fingerprint_files", "status_porcelain", "tree_captured_utc", "started_utc", "finished_utc", "exit_code", "expected_oracle_id", "expected_failing_nodeids", "observed_nodeids", "selected_count", "passed_count", "failed_count", "error_count", "skipped_count", "rerun_count", "artifact_paths", "artifact_sha256", "artifact_size_bytes", "artifact_aggregate_sha256", "previous_record_sha256", "record_sha256"],
+    "index_integrity_rule": "exact top-level/record/invocation/tree schemas; immutable-bootstrap-compatible 12-field tree with complete record cross-check; canonical JSON genesis-linked unique record hashes; exact eight-record prefix; accepted records 1-20 immutable; exact T006 two RED then two GREEN then two REFACTOR tail; actual canonical run set equals records in both directions; rejected v1 quarantine never enters valid records; records33/38/39 remain chain-valid and immutable while active release qualification comes only from the matching noncanonical S011 v5/import v5 direct bindings and child v4 selector attestation",
+    "stage_bidirectional_rule": "every C19 stage appears in artifact-lifecycle coverage.allowed_stage_tasks and every allowed coverage stage appears in stage-command-matrix with literal F151_COVERAGE_STAGE and C19 command; committed producer refs equal lifecycle committed paths",
+    "automatic_verify_rule": "C23 and C24 are the only F151 full-suite/all automatic verification commands; C18, lane.py baseline, real-LLM/live, host-credential and external-cost producers are unregistered and fail",
+    "recovery_amendment_and_finalize_rule": "C20-recover requires exact corrective aggregate plus explicit main review id and follows lifecycle R0-R4; C20-amend reuses tdd-evidence run, binds the exact two T006 RED per-slice aggregates through one canonical combined aggregate and one review id, appends both REDs atomically, and never rewrites records 1-20; C25 prerequisites are T120-T123 plus T124 input closure and exclude C25/report/T124 completion"
+  },
+  "negative_fixtures": [
+    "stdout.bin, stderr.bin or run.json under a formal run fails as an unknown artifact name",
+    "a formal run outside evidence/local/runs/{slice}/{phase} fails",
+    "a formal run missing invocation.json or tree.json fails",
+    "a producer emitting a proper subset or superset of its lifecycle exact set fails",
+    "a C19 stage missing from lifecycle or stage-command-matrix fails",
+    "a lifecycle committed path without exactly one producer command ref fails",
+    "a producer using C18, lane.py baseline, host credentials, network or external cost fails",
+    "default HOME, credential presence or skip cannot authorize an unregistered live producer",
+    "a producer accepting missing/duplicate record hashes, broken prior links or a false chain head fails",
+    "a tree that differs from the immutable bootstrap 12-field schema or any record/tree cross-field fails",
+    "a v2 prefix other than six bootstrap RED followed by two corrective RED identities fails",
+    "a recovery producer without an explicit unique main review id, or a finalize producer that depends on its own output, fails",
+    "an actual canonical run without a record or an indexed record without a run fails",
+    "a same-anchor corrupted index or ignored mode/base/through-task fails",
+    "record33 or its six artifacts changing, being omitted from the chain, or being counted as release evidence fails",
+    "a T011 direct corrective root with any cwd, ordered env, argv, exact-command, invocation/tree schema, path/name/node/count/oracle/stderr, per-artifact hash/size, aggregate, review or attestation mismatch fails and cannot become a canonical record",
+    "after the S011 test contract changes, accepting the old 240558 aggregate, old /tmp root, old review id or old 61047e binding for the successor protocol fails",
+    "a committed-mode verify with staged, unstaged or untracked fingerprint-scope state that passes fails the gate",
+    "a T006 corrective producer with the wrong parent root, missing/partial/mutated RED, wrong per-slice or combined aggregate, reused review id, approval binding, duplicate/order/frontier error or prior-record/run mutation fails"
+  ],
+  "self_check": {
+    "local_producer_count": 11,
+    "atomic_snapshot_local_producer_count": 2,
+    "atomic_snapshot_exact_path_count": 2,
+    "atomic_snapshot_type_producer_mismatch_count": 0,
+    "formal_producer_count": 2,
+    "formal_exact_artifact_count": 6,
+    "formal_producer_set_mismatch_count": 0,
+    "local_producer_lifecycle_mismatch_count": 0,
+    "committed_producer_ref_count": 4,
+    "unknown_alias_name_count": 0,
+    "automatic_verify_command_count": 2,
+    "automatic_live_or_external_cost_producer_count": 0,
+    "corrective_red_producer_count": 2,
+    "required_record_hash_field_count": 2,
+    "tree_exact_field_count": 12,
+    "record_tree_cross_field_count": 11,
+    "required_v2_prefix_count": 8,
+    "accepted_prior_record_count": 20,
+    "required_t006_tail_count": 6,
+    "main_owned_direct_corrective_protocol_count": 4,
+    "accepted_main_owned_direct_corrective_protocol_count": 3,
+    "pending_main_owned_direct_corrective_protocol_count": 0,
+    "superseded_main_owned_direct_corrective_protocol_count": 1,
+    "direct_corrective_canonical_index_adoption_count": 0,
+    "direct_corrective_ordered_environment_count": 3,
+    "direct_corrective_ordered_argv_count": 16,
+    "direct_corrective_exact_node_count": 5,
+    "direct_corrective_exact_artifact_count": 6,
+    "direct_corrective_invocation_exact_field_count": 11,
+    "direct_corrective_tree_exact_field_count": 12,
+    "direct_corrective_artifact_hash_map_count": 6,
+    "direct_corrective_artifact_size_map_count": 6,
+    "direct_corrective_required_acceptance_field_count": 6,
+    "direct_corrective_machine_contract_source_count": 1,
+    "superseded_contract_release_eligible_count": 0
+  }
+}

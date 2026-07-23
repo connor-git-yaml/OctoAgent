@@ -19,16 +19,16 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
-
 from octoagent.core.models import EventType, SubagentDelegation
 from octoagent.core.models.agent_context import AgentSession, AgentSessionKind, AgentSessionStatus
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 _NOW = datetime(2026, 5, 10, 12, 0, 0, tzinfo=UTC)
 
@@ -44,19 +44,16 @@ async def _setup_completed_subagent_task(tmp_path: Path) -> tuple:
     )
     from octoagent.core.models.payloads import (
         ControlMetadataUpdatedPayload,
-        StateTransitionPayload,
     )
     from ulid import ULID
 
-    store_group = await create_store_group(
-        str(tmp_path / "g-test.db"), str(tmp_path / "art")
-    )
+    store_group = await create_store_group(str(tmp_path / "g-test.db"), str(tmp_path / "art"))
     sse_hub = SSEHub()
 
     # 创建 parent task
     from octoagent.gateway.services.task_service import TaskService
 
-    service = TaskService(store_group, sse_hub)
+    service = TaskService(store_group, sse_hub, storage_only=True)
     parent_msg = NormalizedMessage(
         text="parent task g",
         idempotency_key=f"phase-g-parent-{datetime.now(UTC).timestamp()}",
@@ -121,12 +118,14 @@ async def _setup_completed_subagent_task(tmp_path: Path) -> tuple:
         trace_id=f"trace-{child_task_id}",
         causality=EventCausality(),
     )
-    await store_group.event_store.append_event_committed(delegation_event, update_task_pointer=False)
+    await store_group.event_store.append_event_committed(
+        delegation_event, update_task_pointer=False
+    )
 
     runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=None,
+        runtime_services=runtime_service_fixture(None).bundle,
         timeout_seconds=60,
     )
     return store_group, runner, parent_task_id, child_task_id, delegation
@@ -138,9 +137,13 @@ async def _setup_completed_subagent_task(tmp_path: Path) -> tuple:
 @pytest.mark.asyncio
 async def test_cleanup_emits_event_and_closes_session_atomic(tmp_path: Path):
     """AC-G1: cleanup 成功路径 → SUBAGENT_COMPLETED event 和 AgentSession CLOSED 同事务。"""
-    store_group, runner, parent_task_id, child_task_id, delegation = (
-        await _setup_completed_subagent_task(tmp_path)
-    )
+    (
+        store_group,
+        runner,
+        parent_task_id,
+        child_task_id,
+        delegation,
+    ) = await _setup_completed_subagent_task(tmp_path)
     try:
         await runner._close_subagent_session_if_needed(child_task_id)
 
@@ -167,9 +170,13 @@ async def test_cleanup_emits_event_and_closes_session_atomic(tmp_path: Path):
 @pytest.mark.asyncio
 async def test_cleanup_idempotent_via_idempotency_key(tmp_path: Path):
     """AC-G2: 重复 cleanup 触发不重复 emit event（idempotency_key 守护）。"""
-    store_group, runner, parent_task_id, child_task_id, delegation = (
-        await _setup_completed_subagent_task(tmp_path)
-    )
+    (
+        store_group,
+        runner,
+        parent_task_id,
+        child_task_id,
+        delegation,
+    ) = await _setup_completed_subagent_task(tmp_path)
     try:
         # 首次 cleanup
         await runner._close_subagent_session_if_needed(child_task_id)
@@ -211,9 +218,13 @@ async def test_cleanup_session_save_failure_audit_chain_preserved(tmp_path: Path
     后果：下次 cleanup 重试时 idempotency_key 守护 event 短路，重新尝试关 session。
     最终一致性达成：audit 永远存在 + session 最终 close。
     """
-    store_group, runner, parent_task_id, child_task_id, delegation = (
-        await _setup_completed_subagent_task(tmp_path)
-    )
+    (
+        store_group,
+        runner,
+        parent_task_id,
+        child_task_id,
+        delegation,
+    ) = await _setup_completed_subagent_task(tmp_path)
     try:
         # mock save_agent_session 抛异常
         async def failing_save(*args, **kwargs):

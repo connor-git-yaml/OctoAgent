@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from octoagent.core.models import OwnerProfile
 from octoagent.core.models.agent_context import AgentRuntime, AgentRuntimeRole
 from octoagent.core.store import create_store_group
@@ -22,6 +20,7 @@ from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_runner import TaskRunner
 from octoagent.tooling import ToolBroker
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 # ============================================================
 # 辅助函数
@@ -52,7 +51,6 @@ async def _setup_services(tmp_path: Path):
             selector_id="selector-web",
             surface="web",
             active_project_id="project-default",
-
             source="tests",
         )
     )
@@ -74,7 +72,7 @@ async def _setup_services(tmp_path: Path):
     task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=LLMService(),
+        runtime_services=runtime_service_fixture(LLMService()).bundle,
         delegation_plane=delegation_plane,
     )
     capability_pack.bind_delegation_plane(delegation_plane)
@@ -114,8 +112,7 @@ async def test_worker_bootstrap_is_shared_only(tmp_path: Path) -> None:
             # 只有 bootstrap:shared
             file_ids = [item["file_id"] for item in rendered]
             assert file_ids == ["bootstrap:shared"], (
-                f"worker_type {wtype} 的 bootstrap 应只有 shared，"
-                f"但得到 {file_ids}"
+                f"worker_type {wtype} 的 bootstrap 应只有 shared，但得到 {file_ids}"
             )
 
             # 内容包含核心元信息
@@ -141,7 +138,6 @@ async def test_role_card_present_on_agent_runtime(tmp_path: Path) -> None:
         runtime = AgentRuntime(
             agent_runtime_id="runtime-test-rolecard",
             project_id="project-default",
-
             agent_profile_id="agent-profile-default",
             role=AgentRuntimeRole.WORKER,
             name="Test Worker",
@@ -155,9 +151,7 @@ async def test_role_card_present_on_agent_runtime(tmp_path: Path) -> None:
         await store_group.agent_context_store.save_agent_runtime(runtime)
 
         # 读取验证
-        loaded = await store_group.agent_context_store.get_agent_runtime(
-            "runtime-test-rolecard"
-        )
+        loaded = await store_group.agent_context_store.get_agent_runtime("runtime-test-rolecard")
         assert loaded is not None
         assert "前端开发" in loaded.role_card
         assert loaded.permission_preset == "normal"
@@ -174,7 +168,6 @@ async def test_role_card_empty_by_default(tmp_path: Path) -> None:
         runtime = AgentRuntime(
             agent_runtime_id="runtime-test-empty-rolecard",
             project_id="project-default",
-
             agent_profile_id="agent-profile-default",
             role=AgentRuntimeRole.WORKER,
             name="Plain Worker",
@@ -212,9 +205,7 @@ async def test_no_worker_type_specific_templates_in_pack(tmp_path: Path) -> None
         }
 
         for f in pack.bootstrap_files:
-            assert f.file_id not in type_specific_ids, (
-                f"发现遗留的 Worker Type 模板: {f.file_id}"
-            )
+            assert f.file_id not in type_specific_ids, f"发现遗留的 Worker Type 模板: {f.file_id}"
 
         # 应该只有 1 个 bootstrap 文件
         assert len(pack.bootstrap_files) == 1
@@ -237,7 +228,15 @@ async def test_all_worker_types_share_unified_tool_groups(tmp_path: Path) -> Non
             )
 
         # 包含所有必要分组
-        required_groups = {"project", "filesystem", "terminal", "memory", "mcp", "skills", "runtime"}
+        required_groups = {
+            "project",
+            "filesystem",
+            "terminal",
+            "memory",
+            "mcp",
+            "skills",
+            "runtime",
+        }
         assert required_groups.issubset(set(general.default_tool_groups))
     finally:
         await task_runner.shutdown()

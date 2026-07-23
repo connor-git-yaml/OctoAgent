@@ -23,6 +23,8 @@ from octoagent.gateway.services.task_service import TaskService
 from octoagent.gateway.services.worker_runtime import WorkerRuntime, WorkerRuntimeConfig
 from octoagent.provider.models import ModelCallResult, TokenUsage
 
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
+
 # F142 件5a：xdist 分组——本文件含时序敏感断言（固定 sleep 窗口/性能阈值/状态机
 # 竞态，F083 归档债），`--dist=loadgroup` 下同组钉同一 worker 串行执行，
 # 解锁其余测试 `-n auto` 并行（本地全量与 CI 双提速）。
@@ -50,10 +52,12 @@ class RecordingLLMService:
                 **kwargs,
             }
         )
-        if metadata.get("context_compaction") == "true":
-            content = (
-                "压缩摘要：用户希望继续同一任务；保留已确认事实、上一轮回答和当前待处理问题。"
-            )
+        if "metadata" not in kwargs and kwargs.get("extra_body") == {
+            "enable_thinking": False
+        }:
+            content = "[]"
+        elif metadata.get("context_compaction") == "true":
+            content = "压缩摘要：用户希望继续同一任务；保留已确认事实、上一轮回答和当前待处理问题。"
         else:
             self._main_counter += 1
             content = f"assistant-response-{self._main_counter}"
@@ -111,11 +115,7 @@ class CrashBeforeModelStartedCheckpointTaskService(TaskService):
         trace_id: str,
         state_snapshot: dict[str, object],
     ) -> str:
-        if (
-            node_id == "model_call_started"
-            and self._compaction_recorded
-            and self._fail_once
-        ):
+        if node_id == "model_call_started" and self._compaction_recorded and self._fail_once:
             self._fail_once = False
             raise RuntimeError("inject crash before model_call_started checkpoint")
         return await super()._write_checkpoint(
@@ -178,7 +178,7 @@ async def route_app(tmp_path: Path):
     task_runner = TaskRunner(
         store_group=store_group,
         sse_hub=sse_hub,
-        llm_service=llm_service,
+        runtime_services=runtime_service_fixture(llm_service).bundle,
         timeout_seconds=60,
         monitor_interval_seconds=0.05,
     )
@@ -256,8 +256,10 @@ class TestContextCompaction:
             str(tmp_path / "compaction.db"),
             str(tmp_path / "compaction-artifacts"),
         )
-        service = TaskService(store_group, SSEHub())
         llm_service = RecordingLLMService()
+        service = TaskService(
+            store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+        )
         try:
             user_1 = "第一轮用户消息。" * 40
             user_2 = "第二轮用户消息。" * 40
@@ -270,31 +272,30 @@ class TestContextCompaction:
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_1,
-                llm_service=llm_service,
             )
 
             await service.append_user_message(task_id, user_2)
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_2,
-                llm_service=llm_service,
             )
 
             await service.append_user_message(task_id, user_3)
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_3,
-                llm_service=llm_service,
             )
 
             # Feature 060: fallback 链首选 compaction alias（默认值）
             compaction_calls = [
-                call for call in llm_service.calls
+                call
+                for call in llm_service.calls
                 if call.get("metadata", {}).get("context_compaction") == "true"
             ]
             assert len(compaction_calls) >= 1
             main_calls = [
-                call for call in llm_service.calls
+                call
+                for call in llm_service.calls
                 if call.get("metadata", {}).get("context_compaction") != "true"
             ]
             assert len(main_calls) >= 3
@@ -315,9 +316,7 @@ class TestContextCompaction:
             assert "context-compaction-summary" in artifact_names
             assert "llm-request-context" in artifact_names
 
-            cursor = await store_group.conn.execute(
-                "SELECT COUNT(*) FROM memory_maintenance_runs"
-            )
+            cursor = await store_group.conn.execute("SELECT COUNT(*) FROM memory_maintenance_runs")
             maintenance_count = (await cursor.fetchone())[0]
             assert maintenance_count >= 1
             frames = await store_group.agent_context_store.list_context_frames(
@@ -327,9 +326,7 @@ class TestContextCompaction:
             latest_frame = frames[0]
             namespaces = []
             for namespace_id in latest_frame.memory_namespace_ids:
-                namespace = await store_group.agent_context_store.get_memory_namespace(
-                    namespace_id
-                )
+                namespace = await store_group.agent_context_store.get_memory_namespace(namespace_id)
                 if namespace is not None:
                     namespaces.append(namespace)
             private_namespace = next(
@@ -363,7 +360,9 @@ class TestContextCompaction:
             )
             assert agent_session is not None
             assert "压缩摘要：" in agent_session.rolling_summary
-            assert agent_session.metadata["latest_compaction_summary"] in session_state.rolling_summary
+            assert (
+                agent_session.metadata["latest_compaction_summary"] in session_state.rolling_summary
+            )
             assert (
                 agent_session.metadata["latest_compaction_summary_artifact_id"]
                 == payload["summary_artifact_ref"]
@@ -395,8 +394,10 @@ class TestContextCompaction:
             str(tmp_path / "worker-artifacts"),
         )
         sse_hub = SSEHub()
-        service = TaskService(store_group, sse_hub)
         warmup_llm = RecordingLLMService()
+        service = TaskService(
+            store_group, sse_hub, runtime_services=runtime_service_fixture(warmup_llm).bundle
+        )
         try:
             user_1 = "主链第一轮消息。" * 40
             user_2 = "主链第二轮消息。" * 40
@@ -409,13 +410,11 @@ class TestContextCompaction:
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_1,
-                llm_service=warmup_llm,
             )
             await service.append_user_message(task_id, user_2)
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_2,
-                llm_service=warmup_llm,
             )
             await service.append_user_message(task_id, user_3)
 
@@ -423,7 +422,7 @@ class TestContextCompaction:
             runtime = WorkerRuntime(
                 store_group=store_group,
                 sse_hub=sse_hub,
-                llm_service=llm_service,
+                runtime_services=runtime_service_fixture(llm_service).bundle,
                 config=WorkerRuntimeConfig(docker_mode="disabled"),
             )
             envelope = DispatchEnvelope(
@@ -463,8 +462,10 @@ class TestContextCompaction:
             str(tmp_path / "degraded.db"),
             str(tmp_path / "degraded-artifacts"),
         )
-        service = TaskService(store_group, SSEHub())
         llm_service = FailingSummarizerLLMService()
+        service = TaskService(
+            store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+        )
 
         try:
             user_1 = "第一轮用户消息。" * 40
@@ -478,25 +479,23 @@ class TestContextCompaction:
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_1,
-                llm_service=llm_service,
             )
             await service.append_user_message(task_id, user_2)
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_2,
-                llm_service=llm_service,
             )
             await service.append_user_message(task_id, user_3)
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_3,
-                llm_service=llm_service,
             )
 
             # Feature 060: LLM summarizer 全部失败，但三层压缩的 Archive 层仍通过
             # 截断 fallback 保留部分内容。主模型调用仍应正常工作。
             main_calls = [
-                call for call in llm_service.calls
+                call
+                for call in llm_service.calls
                 if call.get("metadata", {}).get("context_compaction") != "true"
             ]
             assert len(main_calls) >= 3
@@ -521,8 +520,12 @@ class TestContextCompaction:
             str(tmp_path / "resume.db"),
             str(tmp_path / "resume-artifacts"),
         )
-        service = CrashBeforeModelStartedCheckpointTaskService(store_group, SSEHub())
         llm_service = RecordingLLMService()
+        service = CrashBeforeModelStartedCheckpointTaskService(
+            store_group,
+            SSEHub(),
+            runtime_services=runtime_service_fixture(llm_service).bundle,
+        )
 
         try:
             user_1 = "第一轮用户消息。" * 40
@@ -536,19 +539,16 @@ class TestContextCompaction:
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_1,
-                llm_service=llm_service,
             )
             await service.append_user_message(task_id, user_2)
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_2,
-                llm_service=llm_service,
             )
             await service.append_user_message(task_id, user_3)
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_3,
-                llm_service=llm_service,
             )
 
             latest_checkpoint = await store_group.checkpoint_store.get_latest_success(task_id)
@@ -562,9 +562,7 @@ class TestContextCompaction:
             started_count_before = sum(
                 1 for event in events_before if event.type is EventType.MODEL_CALL_STARTED
             )
-            cursor = await store_group.conn.execute(
-                "SELECT COUNT(*) FROM memory_maintenance_runs"
-            )
+            cursor = await store_group.conn.execute("SELECT COUNT(*) FROM memory_maintenance_runs")
             maintenance_before = (await cursor.fetchone())[0]
             cursor = await store_group.conn.execute("SELECT COUNT(*) FROM memory_fragments")
             fragments_before = (await cursor.fetchone())[0]
@@ -572,7 +570,6 @@ class TestContextCompaction:
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_3,
-                llm_service=llm_service,
                 resume_from_node="state_running",
                 resume_state_snapshot=latest_checkpoint.state_snapshot,
             )
@@ -584,9 +581,7 @@ class TestContextCompaction:
             started_count_after = sum(
                 1 for event in events_after if event.type is EventType.MODEL_CALL_STARTED
             )
-            cursor = await store_group.conn.execute(
-                "SELECT COUNT(*) FROM memory_maintenance_runs"
-            )
+            cursor = await store_group.conn.execute("SELECT COUNT(*) FROM memory_maintenance_runs")
             maintenance_after = (await cursor.fetchone())[0]
             cursor = await store_group.conn.execute("SELECT COUNT(*) FROM memory_fragments")
             fragments_after = (await cursor.fetchone())[0]
@@ -612,8 +607,10 @@ class TestContextCompaction:
             str(tmp_path / "bounded.db"),
             str(tmp_path / "bounded-artifacts"),
         )
-        service = TaskService(store_group, SSEHub())
         llm_service = RecordingLLMService()
+        service = TaskService(
+            store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+        )
 
         try:
             messages = [
@@ -629,19 +626,18 @@ class TestContextCompaction:
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=messages[0],
-                llm_service=llm_service,
             )
             for message in messages[1:]:
                 await service.append_user_message(task_id, message)
                 await service.process_task_with_llm(
                     task_id=task_id,
                     user_text=message,
-                    llm_service=llm_service,
                 )
 
             # Feature 060: 压缩调用通过 fallback 链，按 metadata 识别
             compaction_related_calls = [
-                call for call in llm_service.calls
+                call
+                for call in llm_service.calls
                 if call.get("metadata", {}).get("context_compaction") == "true"
             ]
             assert len(compaction_related_calls) >= 2
@@ -673,8 +669,10 @@ class TestContextCompaction:
             str(tmp_path / "alias.db"),
             str(tmp_path / "alias-artifacts"),
         )
-        service = TaskService(store_group, SSEHub())
         llm_service = RecordingLLMService()
+        service = TaskService(
+            store_group, SSEHub(), runtime_services=runtime_service_fixture(llm_service).bundle
+        )
 
         try:
             user_1 = "第一轮用户消息。" * 40
@@ -688,19 +686,16 @@ class TestContextCompaction:
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_1,
-                llm_service=llm_service,
             )
             await service.append_user_message(task_id, user_2)
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_2,
-                llm_service=llm_service,
             )
             await service.append_user_message(task_id, user_3)
             await service.process_task_with_llm(
                 task_id=task_id,
                 user_text=user_3,
-                llm_service=llm_service,
             )
 
             # Feature 060: fallback 链首选 compaction alias
@@ -711,9 +706,7 @@ class TestContextCompaction:
 
             events = await store_group.event_store.get_events_for_task(task_id)
             compaction_event = next(
-                event
-                for event in events
-                if event.type is EventType.CONTEXT_COMPACTION_COMPLETED
+                event for event in events if event.type is EventType.CONTEXT_COMPACTION_COMPLETED
             )
             # 实际使用的是 compaction alias（fallback 链第一级成功）
             assert compaction_event.payload["model_alias"] == "cheap-compaction"
@@ -769,6 +762,7 @@ class AliasSelectiveLLMService:
 def _make_fake_turns(count: int = 4) -> list:
     """生成 count 个交替 user/assistant 的 ConversationTurn 供测试用。"""
     from octoagent.gateway.services.context_compaction import ConversationTurn
+
     turns = []
     for i in range(count):
         role = "user" if i % 2 == 0 else "assistant"
@@ -794,9 +788,11 @@ class TestFallbackChain:
             summarizer_alias="my-summarizer",
         )
         service = ContextCompactionService(store_group, config=config)
+
         # 替换 _load_conversation_turns 直接返回假 turns
         async def _fake_load(task_id):
             return _make_fake_turns(4)
+
         service._load_conversation_turns = _fake_load
         llm = AliasSelectiveLLMService()
 
@@ -828,8 +824,10 @@ class TestFallbackChain:
             summarizer_alias="my-summarizer",
         )
         service = ContextCompactionService(store_group, config=config)
+
         async def _fake_load(task_id):
             return _make_fake_turns(4)
+
         service._load_conversation_turns = _fake_load
         llm = AliasSelectiveLLMService(fail_aliases={"my-compaction"})
 
@@ -861,8 +859,10 @@ class TestFallbackChain:
             summarizer_alias="my-summarizer",
         )
         service = ContextCompactionService(store_group, config=config)
+
         async def _fake_load(task_id):
             return _make_fake_turns(4)
+
         service._load_conversation_turns = _fake_load
         llm = AliasSelectiveLLMService(fail_aliases={"my-compaction", "my-summarizer"})
 
@@ -894,8 +894,10 @@ class TestFallbackChain:
             summarizer_alias="my-summarizer",
         )
         service = ContextCompactionService(store_group, config=config)
+
         async def _fake_load(task_id):
             return _make_fake_turns(4)
+
         service._load_conversation_turns = _fake_load
         llm = AliasSelectiveLLMService(fail_aliases={"my-compaction", "my-summarizer", "main"})
 
@@ -932,8 +934,10 @@ class TestFallbackChain:
             summarizer_alias="summarizer",
         )
         service = ContextCompactionService(store_group, config=config)
+
         async def _fake_load(task_id):
             return _make_fake_turns(4)
+
         service._load_conversation_turns = _fake_load
         llm = AliasSelectiveLLMService(fail_aliases={"summarizer"})
 
@@ -951,12 +955,8 @@ class TestFallbackChain:
             # 去重后只有 summarizer + main 两级
             assert compiled.fallback_chain == ["summarizer", "main"]
             # 验证 summarizer 只被调用了一次（在每个 batch 内），不重复
-            summarizer_calls = [
-                c for c in llm.calls if c["model_alias"] == "summarizer"
-            ]
-            main_calls = [
-                c for c in llm.calls if c["model_alias"] == "main"
-            ]
+            summarizer_calls = [c for c in llm.calls if c["model_alias"] == "summarizer"]
+            main_calls = [c for c in llm.calls if c["model_alias"] == "main"]
             # 至少有 summarizer 失败 + main 成功
             assert len(summarizer_calls) >= 1
             assert len(main_calls) >= 1
@@ -1084,6 +1084,7 @@ class TestTwoStageCompression:
 
         async def _fake_load(task_id):
             return turns
+
         service._load_conversation_turns = _fake_load
 
         llm = AliasSelectiveLLMService()
@@ -1096,7 +1097,8 @@ class TestTwoStageCompression:
             # 截断后应该在预算内，不需要 LLM 摘要
             if compiled.compacted:
                 assert compiled.compaction_reason in (
-                    "cheap_truncation_sufficient", "cheap_truncation_only",
+                    "cheap_truncation_sufficient",
+                    "cheap_truncation_only",
                     "history_over_budget",
                 )
                 # 如果只有截断阶段，LLM 调用应该为 0
@@ -1268,6 +1270,7 @@ class TestLayeredCompression:
         # 模拟 8 轮对话（4 user + 4 assistant）
         async def _fake_load(task_id):
             return _make_fake_turns(8)  # 8 轮 turn（user/assistant 交替）
+
         service._load_conversation_turns = _fake_load
 
         llm = RecordingLLMService()
@@ -1314,6 +1317,7 @@ class TestLayeredCompression:
 
         async def _fake_load(task_id):
             return _make_fake_turns(8)
+
         service._load_conversation_turns = _fake_load
 
         llm = RecordingLLMService()
@@ -1351,6 +1355,7 @@ class TestLayeredCompression:
 
         async def _fake_load(task_id):
             return _make_fake_turns(4)
+
         service._load_conversation_turns = _fake_load
 
         llm = RecordingLLMService()
@@ -1383,6 +1388,7 @@ class TestLayeredCompression:
 
         async def _fake_load(task_id):
             return _make_fake_turns(6)
+
         service._load_conversation_turns = _fake_load
 
         llm = RecordingLLMService()
@@ -1419,6 +1425,7 @@ class TestAsyncCompaction:
 
         async def _fake_load(task_id):
             return _make_fake_turns(6)
+
         service._load_conversation_turns = _fake_load
 
         llm = AliasSelectiveLLMService()
@@ -1476,6 +1483,7 @@ class TestAsyncCompaction:
 
         async def _fake_load(task_id):
             return _make_fake_turns(6)
+
         service._load_conversation_turns = _fake_load
 
         try:
@@ -1514,6 +1522,7 @@ class TestAsyncCompaction:
 
         async def _fake_load(task_id):
             return _make_fake_turns(6)
+
         service._load_conversation_turns = _fake_load
 
         try:
@@ -1566,6 +1575,7 @@ class TestAsyncCompaction:
 
         async def _fake_load(task_id):
             return _make_fake_turns(6)
+
         service._load_conversation_turns = _fake_load
 
         try:
@@ -1620,6 +1630,7 @@ class TestAsyncCompaction:
 
         async def _fake_load(task_id):
             return _make_fake_turns(6)
+
         service._load_conversation_turns = _fake_load
 
         llm = AliasSelectiveLLMService()
@@ -1690,6 +1701,7 @@ class TestAsyncCompaction:
 
         async def _fake_load(task_id):
             return _make_fake_turns(6)
+
         service._load_conversation_turns = _fake_load
 
         llm = AliasSelectiveLLMService()
@@ -1750,6 +1762,7 @@ class TestSubagentBypassAll:
 
         async def _fake_load(task_id):
             return _make_fake_turns(8)
+
         service._load_conversation_turns = _fake_load
 
         llm = RecordingLLMService()
@@ -1785,6 +1798,7 @@ class TestSubagentBypassAll:
 
         async def _fake_load(task_id):
             return _make_fake_turns(8)
+
         service._load_conversation_turns = _fake_load
 
         llm = AliasSelectiveLLMService()
@@ -1800,8 +1814,7 @@ class TestSubagentBypassAll:
             assert compiled.compacted is False
             # 无 LLM 压缩调用
             compaction_calls = [
-                c for c in llm.calls
-                if c.get("metadata", {}).get("context_compaction") == "true"
+                c for c in llm.calls if c.get("metadata", {}).get("context_compaction") == "true"
             ]
             assert len(compaction_calls) == 0
         finally:
@@ -1815,7 +1828,6 @@ class TestSubagentBypassAll:
         worker_runtime 会设置标记绕过注入。此处验证 _build_system_blocks
         在 progress_notes=None 时不生成 ProgressNotes 块。
         """
-        from octoagent.gateway.services.agent_context import AgentContextService
 
         store_group = await create_store_group(
             str(tmp_path / "sub-notes.db"),
@@ -1828,6 +1840,7 @@ class TestSubagentBypassAll:
 
             async def _fake_load(task_id):
                 return _make_fake_turns(4)
+
             service._load_conversation_turns = _fake_load
 
             llm = RecordingLLMService()
@@ -1852,7 +1865,8 @@ class TestAuditChainIntegrity:
     """
 
     async def test_layered_compression_event_contains_layers(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """三层压缩产出的 CompiledTaskContext 包含 layers 字段，可用于审计事件。"""
         store_group = await create_store_group(
@@ -1869,6 +1883,7 @@ class TestAuditChainIntegrity:
 
         async def _fake_load(task_id):
             return _make_fake_turns(8)
+
         service._load_conversation_turns = _fake_load
 
         llm = RecordingLLMService()
@@ -1893,7 +1908,8 @@ class TestAuditChainIntegrity:
             await _close_store_group(store_group)
 
     async def test_two_stage_compression_event_contains_phases(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """两阶段压缩的 CompiledTaskContext 包含 compaction_phases 字段。"""
         from octoagent.gateway.services.context_compaction import ConversationTurn
@@ -1921,6 +1937,7 @@ class TestAuditChainIntegrity:
 
         async def _fake_load(task_id):
             return turns
+
         service._load_conversation_turns = _fake_load
 
         llm = AliasSelectiveLLMService()
@@ -1938,14 +1955,17 @@ class TestAuditChainIntegrity:
                 for phase in compiled.compaction_phases:
                     assert "phase" in phase
                     assert phase["phase"] in (
-                        "cheap_truncation", "llm_summary",
-                        "cheap_truncation_sufficient", "cheap_truncation_only",
+                        "cheap_truncation",
+                        "llm_summary",
+                        "cheap_truncation_sufficient",
+                        "cheap_truncation_only",
                     )
         finally:
             await _close_store_group(store_group)
 
     async def test_fallback_chain_recorded_in_compiled_context(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """fallback 链信息完整记录到 CompiledTaskContext。"""
         store_group = await create_store_group(
@@ -1963,6 +1983,7 @@ class TestAuditChainIntegrity:
 
         async def _fake_load(task_id):
             return _make_fake_turns(6)
+
         service._load_conversation_turns = _fake_load
 
         # 使 compaction alias 失败以触发 fallback
@@ -1983,7 +2004,8 @@ class TestAuditChainIntegrity:
             await _close_store_group(store_group)
 
     async def test_async_compression_result_preserves_audit_fields(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """异步压缩结果保留所有审计字段（layers, phases, fallback_chain）。"""
         store_group = await create_store_group(
@@ -2000,6 +2022,7 @@ class TestAuditChainIntegrity:
 
         async def _fake_load(task_id):
             return _make_fake_turns(6)
+
         service._load_conversation_turns = _fake_load
 
         llm = AliasSelectiveLLMService()
@@ -2152,6 +2175,7 @@ class TestEdgeCaseRegression:
 
         async def _fake_load(task_id):
             return turns
+
         service._load_conversation_turns = _fake_load
 
         llm = RecordingLLMService()
@@ -2165,15 +2189,15 @@ class TestEdgeCaseRegression:
             assert compiled.compacted is False
             # 无 LLM 压缩调用
             compaction_calls = [
-                c for c in llm.calls
-                if c.get("metadata", {}).get("context_compaction") == "true"
+                c for c in llm.calls if c.get("metadata", {}).get("context_compaction") == "true"
             ]
             assert len(compaction_calls) == 0
         finally:
             await _close_store_group(store_group)
 
     async def test_background_compaction_long_timeout_returns_none(
-        self, tmp_path: Path,
+        self,
+        tmp_path: Path,
     ) -> None:
         """后台压缩超时 >10s 时 await 返回 None（使用短超时模拟）。"""
         store_group = await create_store_group(
@@ -2192,16 +2216,21 @@ class TestEdgeCaseRegression:
             async def call(self, prompt_or_messages, model_alias=None, **kwargs):
                 await asyncio.sleep(5.0)  # 远超 0.1s 超时
                 return ModelCallResult(
-                    content="慢速摘要", model_alias=model_alias or "main",
-                    model_name="slow-model", provider="mock",
+                    content="慢速摘要",
+                    model_alias=model_alias or "main",
+                    model_name="slow-model",
+                    provider="mock",
                     duration_ms=5000,
                     token_usage=TokenUsage(prompt_tokens=10, completion_tokens=10, total_tokens=20),
-                    cost_usd=0.0, cost_unavailable=False,
-                    is_fallback=False, fallback_reason="",
+                    cost_usd=0.0,
+                    cost_unavailable=False,
+                    is_fallback=False,
+                    fallback_reason="",
                 )
 
         async def _fake_load(task_id):
             return _make_fake_turns(6)
+
         service._load_conversation_turns = _fake_load
 
         try:
@@ -2213,7 +2242,8 @@ class TestEdgeCaseRegression:
             )
             # 使用极短 timeout 等待
             result = await service.await_compaction_result(
-                "sess-edge-timeout", timeout=0.05,
+                "sess-edge-timeout",
+                timeout=0.05,
             )
             # 超时返回 None
             assert result is None
@@ -2224,7 +2254,7 @@ class TestEdgeCaseRegression:
 
     async def test_progress_notes_merge_above_threshold(self) -> None:
         """进度笔记 >50 条时自动合并（使用低阈值 15 加速测试）。"""
-        from octoagent.core.models import Artifact, ArtifactPart, PartType
+        from octoagent.core.models import Artifact
         from octoagent.tooling.progress_note import (
             ProgressNoteInput,
             execute_progress_note,
@@ -2259,7 +2289,8 @@ class TestEdgeCaseRegression:
         for i in range(threshold + 2):
             await execute_progress_note(
                 input_data=ProgressNoteInput(
-                    step_id=f"step_{i}", description=f"步骤 {i}",
+                    step_id=f"step_{i}",
+                    description=f"步骤 {i}",
                 ),
                 task_id="task-merge-edge",
                 artifact_store=store,
@@ -2287,9 +2318,7 @@ class TestEdgeCaseRegression:
             skill_content = f"skill_{i} ---\n" + f"Skill {i} 指令内容。" * 100
             skill_sections.append(skill_content)
 
-        loaded_skills_content = skill_header + "\n\n--- Loaded Skill: ".join(
-            [""] + skill_sections
-        )
+        loaded_skills_content = skill_header + "\n\n--- Loaded Skill: ".join([""] + skill_sections)
 
         # 设置 500 token 的 Skill 预算（远小于 6*400=2400）
         skill_injection_budget = 500
@@ -2333,12 +2362,12 @@ class TestEdgeCaseRegression:
         # 测试各种极端参数组合
         test_cases = [
             # (max_tokens, skill_count, memory_top_k, notes_count)
-            (800, 0, 0, 0),       # 最小可用预算
-            (800, 5, 10, 10),     # 最小预算 + 大量组件
-            (2000, 10, 20, 50),   # 中等预算 + 极端组件数
-            (100000, 0, 0, 0),    # 极大预算
+            (800, 0, 0, 0),  # 最小可用预算
+            (800, 5, 10, 10),  # 最小预算 + 大量组件
+            (2000, 10, 20, 50),  # 中等预算 + 极端组件数
+            (100000, 0, 0, 0),  # 极大预算
             (100000, 20, 50, 100),  # 极大预算 + 极端组件
-            (500, 0, 0, 0),       # 低于最小对话预算
+            (500, 0, 0, 0),  # 低于最小对话预算
         ]
 
         for max_tokens, skill_count, memory_top_k, notes_count in test_cases:
@@ -2399,7 +2428,13 @@ class TestEdgeCaseRegression:
                 {"phase": "cheap_truncation", "messages_affected": 2, "tokens_saved": 100},
             ],
             layers=[
-                {"layer_id": "recent", "turns": 2, "token_count": 40, "max_tokens": 50, "entry_count": 2},
+                {
+                    "layer_id": "recent",
+                    "turns": 2,
+                    "token_count": 40,
+                    "max_tokens": 50,
+                    "entry_count": 2,
+                },
             ],
             compaction_version="v2",
         )
@@ -2430,7 +2465,12 @@ class TestEdgeCaseRegression:
             fallback_chain=["compaction", "summarizer"],
             compaction_phases=[
                 {"phase": "cheap_truncation", "messages_affected": 2, "tokens_saved": 100},
-                {"phase": "llm_summary", "messages_affected": 1, "tokens_saved": 200, "model_used": "compaction"},
+                {
+                    "phase": "llm_summary",
+                    "messages_affected": 1,
+                    "tokens_saved": 200,
+                    "model_used": "compaction",
+                },
             ],
             layers=[
                 {"layer_id": "recent", "turns": 2, "token_count": 100, "max_tokens": 150},

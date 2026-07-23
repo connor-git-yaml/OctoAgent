@@ -22,7 +22,6 @@ from octoagent.core.models import (
     ExecutionEventKind,
     ExecutionSessionState,
     HumanInputPolicy,
-    JobSpec,
     MessageAttachment,
     NormalizedMessage,
     PartType,
@@ -336,22 +335,6 @@ class TestArtifactModel:
 
 class TestExecutionModels:
     """Execution 模型测试"""
-
-    def test_job_spec_requires_command(self):
-        """JobSpec 至少要有一条命令"""
-        with pytest.raises(ValueError):
-            JobSpec(task_id="task-001", image="python:3.12-slim", command=[])
-
-    def test_job_spec_approval_policy_requires_interactive(self):
-        """approval-required 必须配合 interactive"""
-        with pytest.raises(ValueError):
-            JobSpec(
-                task_id="task-001",
-                image="python:3.12-slim",
-                command=["python", "-V"],
-                interactive=False,
-                input_policy=HumanInputPolicy.APPROVAL_REQUIRED,
-            )
 
     def test_execution_console_session_creation(self):
         """ExecutionConsoleSession 可正常创建"""

@@ -21,9 +21,9 @@ from octoagent.core.models import (
 )
 from octoagent.core.store import create_store_group
 from octoagent.gateway.services.control_plane import ControlPlaneService
+from octoagent.gateway.services.operations.project_migration import ProjectWorkspaceMigrationService
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.sse_hub import SSEHub
-from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
 from ulid import ULID
 
 
@@ -67,9 +67,7 @@ async def test_restore_proposal_does_not_write(tmp_path: Path) -> None:
 
         # confirmed=false → proposal，不写盘
         result = await cp.execute_action(
-            _restore_request(
-                {"file_id": "USER.md", "target_version": 1, "confirmed": False}
-            )
+            _restore_request({"file_id": "USER.md", "target_version": 1, "confirmed": False})
         )
         assert result.code == "BEHAVIOR_RESTORE_PROPOSAL"
         assert result.data["proposal"] is True
@@ -94,9 +92,7 @@ async def test_restore_confirmed_writes_and_records_new_version(tmp_path: Path) 
 
         # confirmed=true → 写盘 v1 + 记新版（v3 = v1 内容）
         result = await cp.execute_action(
-            _restore_request(
-                {"file_id": "USER.md", "target_version": 1, "confirmed": True}
-            )
+            _restore_request({"file_id": "USER.md", "target_version": 1, "confirmed": True})
         )
         assert result.code == "BEHAVIOR_RESTORED"
         assert result.data["restored_from_version"] == 1
@@ -118,9 +114,7 @@ async def test_restore_version_not_found(tmp_path: Path) -> None:
         key = behavior_version_key_for("USER.md")
         await sg.behavior_version_store.record_version(key, "only")
         result = await cp.execute_action(
-            _restore_request(
-                {"file_id": "USER.md", "target_version": 99, "confirmed": True}
-            )
+            _restore_request({"file_id": "USER.md", "target_version": 99, "confirmed": True})
         )
         assert result.code == "VERSION_NOT_FOUND"
     finally:
@@ -132,9 +126,7 @@ async def test_restore_invalid_target_version(tmp_path: Path) -> None:
     cp, sg = await _make_control_plane(tmp_path)
     try:
         result = await cp.execute_action(
-            _restore_request(
-                {"file_id": "USER.md", "target_version": "abc", "confirmed": False}
-            )
+            _restore_request({"file_id": "USER.md", "target_version": "abc", "confirmed": False})
         )
         assert result.code == "INVALID_PARAM"
     finally:
@@ -167,9 +159,7 @@ async def test_restore_user_md_syncs_live_state(tmp_path: Path) -> None:
         resolved.write_text("current-on-disk", encoding="utf-8")
 
         result = await cp.execute_action(
-            _restore_request(
-                {"file_id": "USER.md", "target_version": 1, "confirmed": True}
-            )
+            _restore_request({"file_id": "USER.md", "target_version": 1, "confirmed": True})
         )
         assert result.code == "BEHAVIOR_RESTORED"
         assert snapshot_store.live["USER.md"] == "v1-content"  # live state 已同步

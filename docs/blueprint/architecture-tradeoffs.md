@@ -29,7 +29,7 @@
 - mode 不是安全边界；安全边界分两层纵深防御：
   1. **工具级**（不可绕过）：ToolBroker + Policy Engine — 无论 Worker 走 Free Loop 直接调 Tool 还是走 Skill Pipeline，所有工具调用都必须经过此链路。
   2. **任务级**：Orchestrator Supervisor + Watchdog — 预算阈值、超时、无进展检测，提供全局监督。
-- 即使 Policy Engine 失效，Docker 隔离作为最后防线（§12.1 执行隔离）。
+- 当前没有 Docker 隔离这一“最后防线”；ToolBroker + Policy Engine 与任务级监督必须自身 fail closed，不能把未实现的 sandbox 当作安全背书。
 
 ### 11.4 Tool RAG 动态注入 vs 可预测性
 

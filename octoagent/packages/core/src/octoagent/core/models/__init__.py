@@ -99,6 +99,11 @@ from .behavior import (
 from .behavior import (
     RecallPlanMode as RecallPlanMode,
 )
+from .behavior_compact import (
+    BEHAVIOR_COMPACT_TERMINAL_STATUSES,
+    BehaviorCompactCandidate,
+    BehaviorCompactCandidateStatus,
+)
 from .capability import (
     BuiltinToolAvailabilityStatus,
     BundledCapabilityPack,
@@ -216,11 +221,6 @@ from .control_plane import (
     WorkerProfilesDocument,
     WorkProjectionItem,
 )
-from .behavior_compact import (
-    BEHAVIOR_COMPACT_TERMINAL_STATUSES,
-    BehaviorCompactCandidate,
-    BehaviorCompactCandidateStatus,
-)
 from .conversation_binding import ConversationBinding, ConversationBindingKind
 from .delegation import (
     TASK_TO_WORK_STATUS,
@@ -260,11 +260,9 @@ from .execution import (
     ExecutionBackend,
     ExecutionConsoleSession,
     ExecutionEventKind,
-    ExecutionRuntimeRecord,
     ExecutionSessionState,
     ExecutionStreamEvent,
     HumanInputPolicy,
-    JobSpec,
 )
 from .message import MessageAttachment, NormalizedMessage
 from .operator_inbox import (
@@ -379,7 +377,6 @@ from .tool_results import (
     ChildSpawnInfo,
     ConfigAddProviderResult,
     ConfigSetModelAliasResult,
-    ConfigSyncResult,
     CronMutationResult,
     FilesystemWriteTextResult,
     GraphPipelineResult,
@@ -572,8 +569,6 @@ __all__ = [
     "UpdateAttemptSummary",
     "utc_now",
     # Execution
-    "JobSpec",
-    "ExecutionRuntimeRecord",
     "ExecutionConsoleSession",
     "ExecutionStreamEvent",
     # Delegation / Work
@@ -683,6 +678,7 @@ __all__ = [
     "DelegationMode",
     "RecallPlannerMode",
     "RuntimeControlContext",
+    "TurnExecutorKind",
     "WorkerDispatchState",
     "WorkerResult",
     "WorkerRuntimeState",
@@ -780,7 +776,6 @@ __all__ = [
     "WriteResult",
     "ConfigAddProviderResult",
     "ConfigSetModelAliasResult",
-    "ConfigSyncResult",
     "CronMutationResult",
     "SetupQuickConnectResult",
     "McpInstallResult",

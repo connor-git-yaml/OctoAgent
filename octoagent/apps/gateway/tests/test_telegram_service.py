@@ -16,7 +16,15 @@ from octoagent.core.models import (
 )
 from octoagent.core.models.message import NormalizedMessage
 from octoagent.core.store import create_store_group
+from octoagent.gateway.services.config.config_schema import (
+    ChannelsConfig,
+    OctoAgentConfig,
+    TelegramChannelConfig,
+)
+from octoagent.gateway.services.config.config_wizard import save_config
 from octoagent.gateway.services.control_plane import ControlPlaneService
+from octoagent.gateway.services.operations.project_migration import ProjectWorkspaceMigrationService
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
 from octoagent.gateway.services.operator_actions import OperatorActionService
 from octoagent.gateway.services.operator_inbox import OperatorInboxService
 from octoagent.gateway.services.sse_hub import SSEHub
@@ -25,15 +33,6 @@ from octoagent.gateway.services.telegram import (
     TelegramApprovalBroadcaster,
     TelegramGatewayService,
 )
-from octoagent.policy.approval_manager import ApprovalManager
-from octoagent.policy.models import ApprovalRequest
-from octoagent.gateway.services.config.config_schema import (
-    ChannelsConfig,
-    OctoAgentConfig,
-    TelegramChannelConfig,
-)
-from octoagent.gateway.services.config.config_wizard import save_config
-from octoagent.provider.dx.project_migration import ProjectWorkspaceMigrationService
 from octoagent.gateway.services.telegram_client import (
     InlineKeyboardMarkup,
     TelegramChat,
@@ -41,7 +40,8 @@ from octoagent.gateway.services.telegram_client import (
     TelegramUpdate,
     TelegramUser,
 )
-from octoagent.provider.dx.telegram_pairing import TelegramStateStore
+from octoagent.policy.approval_manager import ApprovalManager
+from octoagent.policy.models import ApprovalRequest
 from octoagent.tooling.models import SideEffectLevel
 from ulid import ULID
 
@@ -56,9 +56,7 @@ def _write_config(project_root: Path, **telegram_overrides: object) -> None:
     save_config(
         OctoAgentConfig(
             updated_at="2026-03-07",
-            channels=ChannelsConfig(
-                telegram=TelegramChannelConfig(**telegram_config)
-            ),
+            channels=ChannelsConfig(telegram=TelegramChannelConfig(**telegram_config)),
         ),
         project_root,
     )
@@ -703,7 +701,7 @@ async def test_group_followup_reply_to_bot_message_keeps_same_thread_id(
             },
         }
     )
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     await task_service._write_state_transition(
         task_id=first.task_id or "",
         from_status=TaskStatus.CREATED,
@@ -774,7 +772,7 @@ async def test_notify_task_result_and_approval_event_reply_to_original_thread(
             telegram_state_store=state_store,
         ),
     )
-    task_service = TaskService(store_group, SSEHub())
+    task_service = TaskService(store_group, SSEHub(), storage_only=True)
     task_id, created = await task_service.create_task(
         NormalizedMessage(
             channel="telegram",
@@ -837,6 +835,7 @@ async def test_notify_task_result_and_approval_event_reply_to_original_thread(
 
 
 # ── D17a 测试（与 test_slack_service.py 对称） ──────────────────────────────
+
 
 def _make_dm_update(
     update_id: int = 202, message_id: int = 11, text: str = "run task"

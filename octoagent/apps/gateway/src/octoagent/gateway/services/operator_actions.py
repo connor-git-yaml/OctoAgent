@@ -146,7 +146,7 @@ class OperatorActionService:
         self._telegram_state_store = telegram_state_store
         self._watchdog_config = watchdog_config or WatchdogConfig.from_env()
         self._task_journal_service = task_journal_service or TaskJournalService(store_group)
-        self._task_service = TaskService(store_group, sse_hub)
+        self._task_service = TaskService(store_group, sse_hub, storage_only=True)
 
     async def execute(self, request: OperatorActionRequest) -> OperatorActionResult:
         normalized = self._normalize_request(request)
@@ -195,9 +195,7 @@ class OperatorActionService:
     ) -> OperatorActionResult:
         approval_id = request.item_id.split(":", 1)[1]
         record = (
-            self._approval_manager.get_approval(approval_id)
-            if self._approval_manager
-            else None
+            self._approval_manager.get_approval(approval_id) if self._approval_manager else None
         )
         now = datetime.now(tz=UTC)
         if record is None:
@@ -273,9 +271,11 @@ class OperatorActionService:
         # approval_manager.resolve() 负责持久化；approval_gate.resolve_approval() 负责唤醒。
         if self._approval_gate is not None:
             try:
-                _gate_decision = "approved" if decision in (
-                    ApprovalDecision.ALLOW_ONCE, ApprovalDecision.ALLOW_ALWAYS
-                ) else "rejected"
+                _gate_decision = (
+                    "approved"
+                    if decision in (ApprovalDecision.ALLOW_ONCE, ApprovalDecision.ALLOW_ALWAYS)
+                    else "rejected"
+                )
                 # F101 Phase B N-M-01 v3：从 record 读取 tool_name 作为 operation_type，
                 # 确保 ApprovalGate.allowlist 在 "approved" + operation_type 条件下真正更新。
                 # session_id 对 Telegram/operator 路径暂时为空（无会话上下文），allowlist 降级可接受。
@@ -290,6 +290,7 @@ class OperatorActionService:
                 )
             except Exception as _gate_exc:
                 import structlog as _sl
+
                 _sl.get_logger(__name__).warning(
                     "operator_action_approval_gate_resolve_failed",
                     approval_id=approval_id,
@@ -519,11 +520,7 @@ class OperatorActionService:
 
         events = await self._stores.event_store.get_events_for_task(task_id)
         latest_worker_return = next(
-            (
-                event
-                for event in reversed(events)
-                if event.type == EventType.WORKER_RETURNED
-            ),
+            (event for event in reversed(events) if event.type == EventType.WORKER_RETURNED),
             None,
         )
         if latest_worker_return is None or not bool(latest_worker_return.payload.get("retryable")):

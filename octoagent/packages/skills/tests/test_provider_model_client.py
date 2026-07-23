@@ -10,16 +10,15 @@
 from __future__ import annotations
 
 import textwrap
-from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
-from pydantic import BaseModel, SecretStr
-
-from octoagent.provider.auth.credentials import OAuthCredential
-from octoagent.provider.auth.profile import ProviderProfile
+from octoagent.gateway.services.config.config_wizard import load_config
+from octoagent.gateway.services.config.provider_route_resolver import (
+    resolve_provider_route,
+)
 from octoagent.provider.auth.store import CredentialStore
 from octoagent.provider.provider_router import ProviderRouter
 from octoagent.skills.manifest import SkillManifest
@@ -27,6 +26,7 @@ from octoagent.skills.models import (
     SkillExecutionContext,
 )
 from octoagent.skills.provider_model_client import ProviderModelClient
+from pydantic import BaseModel
 
 
 class _EchoInput(BaseModel):
@@ -39,6 +39,15 @@ class _EchoOutput(BaseModel):
 
 def _write_config(project_root: Path, content: str) -> None:
     (project_root / "octoagent.yaml").write_text(textwrap.dedent(content), encoding="utf-8")
+
+
+def _route_resolver(project_root: Path):
+    def resolve(alias: str):
+        config = load_config(project_root)
+        assert config is not None
+        return resolve_provider_route(config, alias)
+
+    return resolve
 
 
 def _make_manifest(model_alias: str = "main") -> SkillManifest:
@@ -82,13 +91,17 @@ async def test_generate_initial_creates_history_and_calls_provider(tmp_path: Pat
         """,
     )
     router = ProviderRouter(
-        project_root=tmp_path,
+        route_resolver=_route_resolver(tmp_path),
         credential_store=CredentialStore(store_path=tmp_path / "auth-profiles.json"),
     )
     try:
         # mock ProviderClient.call 不真发 HTTP
         async def _fake_call(**kwargs: Any) -> tuple[str, list[dict[str, Any]], dict[str, Any]]:
-            return ("Echoed: hi", [], {"token_usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}})
+            return (
+                "Echoed: hi",
+                [],
+                {"token_usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7}},
+            )
 
         client = ProviderModelClient(provider_router=router, tool_broker=None)
         manifest = _make_manifest()
@@ -139,7 +152,7 @@ async def test_generate_task_scope_locks_alias_within_same_task(tmp_path: Path) 
         """,
     )
     router = ProviderRouter(
-        project_root=tmp_path,
+        route_resolver=_route_resolver(tmp_path),
         credential_store=CredentialStore(store_path=tmp_path / "auth-profiles.json"),
     )
     try:
@@ -225,7 +238,7 @@ async def test_generate_clear_history_invalidates_router_cache(tmp_path: Path) -
         """,
     )
     router = ProviderRouter(
-        project_root=tmp_path,
+        route_resolver=_route_resolver(tmp_path),
         credential_store=CredentialStore(store_path=tmp_path / "auth-profiles.json"),
     )
     try:
@@ -245,8 +258,12 @@ async def test_generate_clear_history_invalidates_router_cache(tmp_path: Path) -
 
             ctx = _make_ctx(task_id="t-clear", trace_id="tr-clear")
             await client.generate(
-                manifest=manifest, execution_context=ctx, prompt="hi",
-                feedback=[], attempt=1, step=1,
+                manifest=manifest,
+                execution_context=ctx,
+                prompt="hi",
+                feedback=[],
+                attempt=1,
+                step=1,
             )
             assert called_models[-1] == "Qwen/Qwen3.5-14B"
 
@@ -273,8 +290,12 @@ async def test_generate_clear_history_invalidates_router_cache(tmp_path: Path) -
             # task 重新开始，期待 model = 72B
             new_ctx = _make_ctx(task_id="t-clear", trace_id="tr-clear")
             await client.generate(
-                manifest=manifest, execution_context=new_ctx, prompt="restart",
-                feedback=[], attempt=1, step=1,
+                manifest=manifest,
+                execution_context=new_ctx,
+                prompt="restart",
+                feedback=[],
+                attempt=1,
+                step=1,
             )
             assert called_models[-1] == "Qwen/Qwen3.5-72B"
     finally:
@@ -307,7 +328,7 @@ async def test_generate_passes_force_tool_choice_dict_from_metadata(tmp_path: Pa
         """,
     )
     router = ProviderRouter(
-        project_root=tmp_path,
+        route_resolver=_route_resolver(tmp_path),
         credential_store=CredentialStore(store_path=tmp_path / "auth-profiles.json"),
     )
     try:
@@ -336,13 +357,17 @@ async def test_generate_passes_force_tool_choice_dict_from_metadata(tmp_path: Pa
         with pytest.MonkeyPatch().context() as mp:
             mp.setattr(ProviderClient, "call", AsyncMock(side_effect=_capture_call))
             await client.generate(
-                manifest=manifest, execution_context=ctx, prompt="hi",
-                feedback=[], attempt=1, step=1,
+                manifest=manifest,
+                execution_context=ctx,
+                prompt="hi",
+                feedback=[],
+                attempt=1,
+                step=1,
             )
 
-        assert captured == [
-            {"type": "function", "function": {"name": "graph_pipeline"}}
-        ], f"force_tool_choice dict 应原样透传给 ProviderClient.call，实际: {captured}"
+        assert captured == [{"type": "function", "function": {"name": "graph_pipeline"}}], (
+            f"force_tool_choice dict 应原样透传给 ProviderClient.call，实际: {captured}"
+        )
     finally:
         await router.aclose()
 
@@ -376,7 +401,7 @@ async def test_generate_decodes_force_tool_choice_json_string_from_metadata(
         """,
     )
     router = ProviderRouter(
-        project_root=tmp_path,
+        route_resolver=_route_resolver(tmp_path),
         credential_store=CredentialStore(store_path=tmp_path / "auth-profiles.json"),
     )
     try:
@@ -404,13 +429,17 @@ async def test_generate_decodes_force_tool_choice_json_string_from_metadata(
         with pytest.MonkeyPatch().context() as mp:
             mp.setattr(ProviderClient, "call", AsyncMock(side_effect=_capture_call))
             await client.generate(
-                manifest=manifest, execution_context=ctx, prompt="hi",
-                feedback=[], attempt=1, step=1,
+                manifest=manifest,
+                execution_context=ctx,
+                prompt="hi",
+                feedback=[],
+                attempt=1,
+                step=1,
             )
 
-        assert captured == [
-            {"type": "function", "function": {"name": "delegate_task"}}
-        ], f"JSON 字符串应被 decode 为 dict 后透传，实际: {captured}"
+        assert captured == [{"type": "function", "function": {"name": "delegate_task"}}], (
+            f"JSON 字符串应被 decode 为 dict 后透传，实际: {captured}"
+        )
     finally:
         await router.aclose()
 
@@ -436,7 +465,7 @@ async def test_generate_force_tool_choice_default_is_none(tmp_path: Path) -> Non
         """,
     )
     router = ProviderRouter(
-        project_root=tmp_path,
+        route_resolver=_route_resolver(tmp_path),
         credential_store=CredentialStore(store_path=tmp_path / "auth-profiles.json"),
     )
     try:
@@ -455,8 +484,12 @@ async def test_generate_force_tool_choice_default_is_none(tmp_path: Path) -> Non
         with pytest.MonkeyPatch().context() as mp:
             mp.setattr(ProviderClient, "call", AsyncMock(side_effect=_capture_call))
             await client.generate(
-                manifest=manifest, execution_context=ctx, prompt="hi",
-                feedback=[], attempt=1, step=1,
+                manifest=manifest,
+                execution_context=ctx,
+                prompt="hi",
+                feedback=[],
+                attempt=1,
+                step=1,
             )
 
         assert captured == [None], (

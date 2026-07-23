@@ -22,7 +22,6 @@ data/
 .env
 .env.*
 !.env.example
-!.env.litellm.example
 
 # IDE
 .idea/

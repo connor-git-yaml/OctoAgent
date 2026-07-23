@@ -5,8 +5,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from octoagent.core.models import (
     AgentProfile,
     AgentProfileScope,
@@ -25,6 +23,8 @@ from octoagent.gateway.services.sse_hub import SSEHub
 from octoagent.gateway.services.task_service import TaskService
 from octoagent.memory import MemoryLayer, MemoryPartition, MemorySearchHit, MemoryService
 from octoagent.provider.models import ModelCallResult, TokenUsage
+
+from apps.gateway.tests.runtime_service_fixtures import runtime_service_fixture
 
 
 class RecordingLLMService:
@@ -64,7 +64,6 @@ async def _seed_project(
     session_id: str | None = None,
     session_thread_id: str | None = None,
 ) -> None:
-    workspace_id = f"workspace-{slug}"
     agent_profile_id = f"agent-profile-{slug}"
     owner_overlay_id = f"owner-overlay-{slug}"
     project = Project(
@@ -137,15 +136,6 @@ async def _seed_project(
     )
 
 
-@pytest.mark.skip(
-    reason=(
-        "agent context prompt 渲染结构已改（agent_context.py:3544）：Core block 现在只输出 "
-        "`AgentProfile: {name}\\ninstruction_overlays: ...`，不再把 persona_summary / "
-        "rolling_summary 直接拼进去。本测试断言 prompt 里包含 persona_summary 原文和"
-        "rolling_summary 原文，已经脱钩当前 renderer。需要根据新的 prompt 结构重写断言，"
-        "或者直接验证 agent_profile / session_state 的持久化字段而不是 prompt 文本。"
-    )
-)
 async def test_f033_context_survives_restart(
     tmp_path: Path,
     monkeypatch,
@@ -183,8 +173,10 @@ async def test_f033_context_survives_restart(
     )
     await store_group_1.conn.commit()
 
-    service_1 = TaskService(store_group_1, SSEHub())
     llm_1 = RecordingLLMService()
+    service_1 = TaskService(
+        store_group_1, SSEHub(), runtime_services=runtime_service_fixture(llm_1).bundle
+    )
     message = NormalizedMessage(
         channel="web",
         thread_id="thread-alpha",
@@ -197,32 +189,24 @@ async def test_f033_context_survives_restart(
     await service_1.process_task_with_llm(
         task_id=task_id,
         user_text=message.text,
-        llm_service=llm_1,
     )
     await service_1.append_user_message(task_id, "第二轮：继续沿用上一轮约束")
     await service_1.process_task_with_llm(
         task_id=task_id,
         user_text="第二轮：继续沿用上一轮约束",
-        llm_service=llm_1,
     )
     await store_group_1.close()
 
     store_group_2 = await create_store_group(str(db_path), str(artifacts_dir))
-    service_2 = TaskService(store_group_2, SSEHub())
     llm_2 = RecordingLLMService()
+    service_2 = TaskService(
+        store_group_2, SSEHub(), runtime_services=runtime_service_fixture(llm_2).bundle
+    )
     await service_2.append_user_message(task_id, "第三轮：重启后继续，不要丢上下文")
     await service_2.process_task_with_llm(
         task_id=task_id,
         user_text="第三轮：重启后继续，不要丢上下文",
-        llm_service=llm_2,
     )
-
-    joined = "\n".join(item.get("content", "") for item in llm_2.calls[0])
-    assert "你负责 Alpha 项目的连续上下文与交付推进" in joined
-    assert "之前已经确认 Alpha 的关键约束" in joined
-    assert "第一轮：记录 Alpha 的约束" in joined
-    assert "第二轮：继续沿用上一轮约束" in joined
-    assert "长期记忆：Alpha 的历史约束不能丢" in joined
 
     task = await store_group_2.task_store.get_task(task_id)
     assert task is not None
@@ -233,19 +217,20 @@ async def test_f033_context_survives_restart(
         )
     )
     assert session_state is not None
+    assert session_state.project_id == "project-alpha"
+    assert task_id in session_state.task_ids
     assert session_state.rolling_summary
     assert session_state.last_context_frame_id
+    events = await store_group_2.event_store.get_events_for_task(task_id)
+    persisted_payloads = "\n".join(str(event.payload) for event in events)
+    assert "第一轮：记录 Alpha 的约束" in persisted_payloads
+    assert "第二轮：继续沿用上一轮约束" in persisted_payloads
+    assert "第三轮：重启后继续，不要丢上下文" in persisted_payloads
+    assert llm_2.calls
 
     await store_group_2.close()
 
 
-@pytest.mark.skip(
-    reason=(
-        "同上：agent context prompt renderer 重构后 Alpha/Beta summary / 长期记忆提示"
-        "已不再直接出现在 prompt 文本里。跨 project 隔离验证应改用 SessionContextState / "
-        "memory_scope_ids 这类 store 字段而非 prompt 断言。"
-    )
-)
 async def test_f033_project_context_does_not_leak_across_projects(
     tmp_path: Path,
     monkeypatch,
@@ -258,14 +243,14 @@ async def test_f033_project_context_does_not_leak_across_projects(
         store_group,
         project_id="project-alpha",
         slug="alpha",
-        scope_id="chat:web:thread-alpha",
+        scope_id="project:project-alpha:chat:web:thread-alpha",
         memory_scope_id="memory/project-alpha",
         persona_summary="你负责 Alpha 项目的需求连续性。",
         rolling_summary="Alpha summary",
         assistant_name="Alpha Agent",
         is_default=True,
         session_id=(
-            "surface:web|scope:chat:web:thread-alpha|project:project-alpha|workspace:workspace-alpha|thread:shared-thread"
+            "surface:web|scope:project:project-alpha:chat:web:thread-alpha|project:project-alpha|workspace:workspace-alpha|thread:shared-thread"
         ),
         session_thread_id="shared-thread",
     )
@@ -273,13 +258,13 @@ async def test_f033_project_context_does_not_leak_across_projects(
         store_group,
         project_id="project-beta",
         slug="beta",
-        scope_id="chat:web:thread-beta",
+        scope_id="project:project-beta:chat:web:thread-beta",
         memory_scope_id="memory/project-beta",
         persona_summary="你负责 Beta 项目的实验推进。",
         rolling_summary="Beta summary",
         assistant_name="Beta Agent",
         session_id=(
-            "surface:web|scope:chat:web:thread-beta|project:project-beta|workspace:workspace-beta|thread:shared-thread"
+            "surface:web|scope:project:project-beta:chat:web:thread-beta|project:project-beta|workspace:workspace-beta|thread:shared-thread"
         ),
         session_thread_id="shared-thread",
     )
@@ -302,47 +287,34 @@ async def test_f033_project_context_does_not_leak_across_projects(
 
     monkeypatch.setattr(MemoryService, "search_memory", fake_search_memory)
 
-    service = TaskService(store_group, SSEHub())
     llm = RecordingLLMService()
+    service = TaskService(
+        store_group, SSEHub(), runtime_services=runtime_service_fixture(llm).bundle
+    )
 
     task_alpha, created_alpha = await service.create_task(
         NormalizedMessage(
             channel="web",
             thread_id="shared-thread",
-            scope_id="chat:web:thread-alpha",
+            scope_id="project:project-alpha:chat:web:thread-alpha",
             text="推进 Alpha",
             idempotency_key="f033-isolation-alpha",
         )
     )
     assert created_alpha is True
-    await service.process_task_with_llm(task_id=task_alpha, user_text="推进 Alpha", llm_service=llm)
+    await service.process_task_with_llm(task_id=task_alpha, user_text="推进 Alpha")
 
     task_beta, created_beta = await service.create_task(
         NormalizedMessage(
             channel="web",
             thread_id="shared-thread",
-            scope_id="chat:web:thread-beta",
+            scope_id="project:project-beta:chat:web:thread-beta",
             text="推进 Beta",
             idempotency_key="f033-isolation-beta",
         )
     )
     assert created_beta is True
-    await service.process_task_with_llm(task_id=task_beta, user_text="推进 Beta", llm_service=llm)
-
-    alpha_prompt = "\n".join(item.get("content", "") for item in llm.calls[0])
-    beta_prompt = "\n".join(item.get("content", "") for item in llm.calls[1])
-
-    assert "Alpha Agent" in alpha_prompt
-    assert "Alpha summary" in alpha_prompt
-    assert "Alpha memory only" in alpha_prompt
-    assert "Beta Agent" not in alpha_prompt
-    assert "Beta memory only" not in alpha_prompt
-
-    assert "Beta Agent" in beta_prompt
-    assert "Beta summary" in beta_prompt
-    assert "Beta memory only" in beta_prompt
-    assert "Alpha Agent" not in beta_prompt
-    assert "Alpha memory only" not in beta_prompt
+    await service.process_task_with_llm(task_id=task_beta, user_text="推进 Beta")
 
     task_alpha_model = await store_group.task_store.get_task(task_alpha)
     task_beta_model = await store_group.task_store.get_task(task_beta)
@@ -362,6 +334,21 @@ async def test_f033_project_context_does_not_leak_across_projects(
     )
     assert alpha_state is not None
     assert beta_state is not None
+    assert alpha_state.project_id == "project-alpha"
+    assert beta_state.project_id == "project-beta"
     assert alpha_state.session_id != beta_state.session_id
+    assert task_alpha in alpha_state.task_ids
+    assert task_beta not in alpha_state.task_ids
+    assert task_beta in beta_state.task_ids
+    assert task_alpha not in beta_state.task_ids
+
+    alpha_events = await store_group.event_store.get_events_for_task(task_alpha)
+    beta_events = await store_group.event_store.get_events_for_task(task_beta)
+    alpha_payloads = "\n".join(str(event.payload) for event in alpha_events)
+    beta_payloads = "\n".join(str(event.payload) for event in beta_events)
+    assert "推进 Alpha" in alpha_payloads
+    assert "推进 Beta" not in alpha_payloads
+    assert "推进 Beta" in beta_payloads
+    assert "推进 Alpha" not in beta_payloads
 
     await store_group.close()

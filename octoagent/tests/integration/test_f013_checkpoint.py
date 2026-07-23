@@ -53,7 +53,7 @@ class TestF013ScenarioB:
 
         # --- 阶段 1: 预置 checkpoint，模拟进程中断 ---
         sg1 = await create_store_group(db_path, artifacts_dir)
-        service = TaskService(sg1, SSEHub())
+        service = TaskService(sg1, SSEHub(), storage_only=True)
         msg = NormalizedMessage(
             text="f013 resume after restart",
             idempotency_key="f013-sc-b-001",
@@ -118,7 +118,7 @@ class TestF013ScenarioB:
 
         # 建立可恢复的 checkpoint（同场景 1 的阶段 1）
         sg1 = await create_store_group(db_path, artifacts_dir)
-        service = TaskService(sg1, SSEHub())
+        service = TaskService(sg1, SSEHub(), storage_only=True)
         msg = NormalizedMessage(
             text="f013 resume idempotency",
             idempotency_key="f013-sc-b-002",
@@ -168,13 +168,9 @@ class TestF013ScenarioB:
         # ResumeEngine 每次成功恢复均写入 RESUME_SUCCEEDED，两次调用产生两条（设计如此）
         # 关键验证：checkpoint 读取是幂等的，不出现多条 artifact 或 side effect
         all_events = await sg2.event_store.get_events_for_task(task_id)
-        resume_succeeded_events = [
-            e for e in all_events if e.type == EventType.RESUME_SUCCEEDED
-        ]
+        resume_succeeded_events = [e for e in all_events if e.type == EventType.RESUME_SUCCEEDED]
         # 两次恢复调用均成功，分别写入各自的 RESUME_SUCCEEDED 事件
-        assert len(resume_succeeded_events) >= 1, (
-            "RESUME_SUCCEEDED 事件应至少存在 1 条"
-        )
+        assert len(resume_succeeded_events) >= 1, "RESUME_SUCCEEDED 事件应至少存在 1 条"
 
         await sg2.close()
 
@@ -197,7 +193,7 @@ class TestF013ScenarioB:
 
         # 建立任务，写入版本不兼容的 checkpoint
         sg = await create_store_group(db_path, artifacts_dir)
-        service = TaskService(sg, SSEHub())
+        service = TaskService(sg, SSEHub(), storage_only=True)
         msg = NormalizedMessage(
             text="f013 corrupted checkpoint",
             idempotency_key="f013-sc-b-003",
@@ -229,15 +225,11 @@ class TestF013ScenarioB:
         result = await re.try_resume(task_id)
 
         # (a) 系统安全降级
-        assert result.ok is False, (
-            f"损坏的 checkpoint 应导致恢复失败，实际 ok={result.ok}"
-        )
+        assert result.ok is False, f"损坏的 checkpoint 应导致恢复失败，实际 ok={result.ok}"
 
         # (b) 失败原因已持久化记录（RESUME_FAILED 事件存在于 EventStore）
         all_events = await sg.event_store.get_events_for_task(task_id)
-        resume_failed_events = [
-            e for e in all_events if e.type == EventType.RESUME_FAILED
-        ]
+        resume_failed_events = [e for e in all_events if e.type == EventType.RESUME_FAILED]
         assert len(resume_failed_events) >= 1, (
             "失败原因应已写入 EventStore（RESUME_FAILED 事件），"
             f"实际事件类型: {[e.type.value for e in all_events]}"

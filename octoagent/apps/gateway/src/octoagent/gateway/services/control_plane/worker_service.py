@@ -46,6 +46,7 @@ from octoagent.core.models import (
     ControlPlaneDegradedState,
     ControlPlaneSupportStatus,
     ControlPlaneTargetRef,
+    DelegationTargetKind,
     NormalizedMessage,
     TurnExecutorKind,
     Work,
@@ -54,7 +55,7 @@ from octoagent.core.models import (
 from ulid import ULID
 
 from ..agent_decision import build_behavior_system_summary, is_worker_behavior_profile
-from ..task_service import TaskService
+from ..worker_runtime import WorkerBackendUnavailableError, preflight_graph_runtime
 from ._base import (
     ControlPlaneActionError,
     ControlPlaneContext,
@@ -71,6 +72,28 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
 
     def __init__(self, ctx: ControlPlaneContext) -> None:
         super().__init__(ctx)
+
+    @staticmethod
+    def _delegation_target(
+        params: Mapping[str, Any],
+        *,
+        default: DelegationTargetKind,
+    ) -> str:
+        if "target_kind" not in params:
+            return default.value
+        value = params["target_kind"]
+        if type(value) is not str:
+            raise ControlPlaneActionError(
+                "WORKER_RUNTIME_SELECTOR_UNSUPPORTED",
+                "target_kind 必须是受支持的精确字符串值",
+            )
+        try:
+            return DelegationTargetKind(value).value
+        except ValueError as exc:
+            raise ControlPlaneActionError(
+                "WORKER_RUNTIME_SELECTOR_UNSUPPORTED",
+                f"不支持的 target_kind: {value!r}",
+            ) from exc
 
     # ══════════════════════════════════════════════════════════════
     #  Action / Document Routes
@@ -112,9 +135,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         # （agent_profiles 含 status=ARCHIVED 行）。W4-3：直接用 AgentProfile（不再反构 DTO）。
         all_agent_profiles = await self._stores.agent_context_store.list_agent_profiles()
         stored_profiles = [
-            mirror
-            for mirror in all_agent_profiles
-            if is_worker_behavior_profile(mirror)
+            mirror for mirror in all_agent_profiles if is_worker_behavior_profile(mirror)
         ]
         project_works: list[Work] = []
         if self._ctx.delegation_plane_service is not None:
@@ -123,9 +144,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             # 都不代表用户委派，不应污染 Worker profile 的 dynamic_context / active_project
             # 解析）。finding-3：仅过滤 root 会让 child Work 泄漏，须连后代一并排除。
             excluded_work_ids = expand_internal_work_ids(project_works)
-            project_works = [
-                w for w in project_works if w.work_id not in excluded_work_ids
-            ]
+            project_works = [w for w in project_works if w.work_id not in excluded_work_ids]
         worker_profile_ids = {profile.profile_id for profile in stored_profiles}
         works_by_profile_id: dict[str, list[Work]] = defaultdict(list)
         legacy_works_by_type: dict[str, list[Work]] = defaultdict(list)
@@ -161,7 +180,8 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 warnings.append("当前 profile 还是草稿，还没有已发布 revision。")
             elif profile.draft_revision > profile.active_revision:
                 warnings.append(
-                    f"存在未发布草稿 revision {profile.draft_revision}，当前线上版本是 {profile.active_revision}。"
+                    f"存在未发布草稿 revision {profile.draft_revision}，"
+                    f"当前线上版本是 {profile.active_revision}。"
                 )
             if latest is None:
                 warnings.append("当前还没有绑定到这个 profile 的运行中 work。")
@@ -245,7 +265,9 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 key=lambda item: item.updated_at or datetime.min.replace(tzinfo=UTC),
                 reverse=True,
             )
-            summary = self._worker_profile_summary(profile.capabilities, profile.default_tool_groups)
+            summary = self._worker_profile_summary(
+                profile.capabilities, profile.default_tool_groups
+            )
             builtin_latest = matched_works[0] if matched_works else None
 
             # 为 builtin profile 构建 behavior_system（合成临时 AgentProfile）
@@ -327,9 +349,8 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             if item.profile_id in default_profile_id_set:
                 item.is_default_for_project = True
         # summary 中的 default_profile_id 优先用默认项目的，退化到 selected_project
-        default_profile_id = (
-            primary_default_profile_id
-            or (selected_project.default_agent_profile_id if selected_project is not None else "")
+        default_profile_id = primary_default_profile_id or (
+            selected_project.default_agent_profile_id if selected_project is not None else ""
         )
         default_profile = next(
             (item for item in items if item.profile_id == default_profile_id),
@@ -345,7 +366,9 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             )
             if agent_profile_fallback is not None:
                 default_profile_name = agent_profile_fallback.name or ""
-                default_profile_scope = str(agent_profile_fallback.scope) if agent_profile_fallback.scope else ""
+                default_profile_scope = (
+                    str(agent_profile_fallback.scope) if agent_profile_fallback.scope else ""
+                )
 
         return WorkerProfilesDocument(
             active_project_id=selected_project.project_id if selected_project is not None else "",
@@ -354,18 +377,10 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             summary={
                 "profile_count": len(items),
                 "singleton_count": len(
-                    [
-                        item
-                        for item in items
-                        if item.origin_kind == AgentProfileOriginKind.BUILTIN
-                    ]
+                    [item for item in items if item.origin_kind == AgentProfileOriginKind.BUILTIN]
                 ),
                 "custom_count": len(
-                    [
-                        item
-                        for item in items
-                        if item.origin_kind != AgentProfileOriginKind.BUILTIN
-                    ]
+                    [item for item in items if item.origin_kind != AgentProfileOriginKind.BUILTIN]
                 ),
                 "published_count": len(
                     [item for item in items if item.status == AgentProfileStatus.ACTIVE]
@@ -393,9 +408,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                     action_id="worker_profile.create",
                 )
             ],
-            refs={
-                "revisions_base": "/api/control/resources/worker-profile-revisions/{profile_id}"
-            },
+            refs={"revisions_base": "/api/control/resources/worker-profile-revisions/{profile_id}"},
             warnings=[] if items else ["当前没有可见的 Root Agent profiles。"],
             degraded=ControlPlaneDegradedState(
                 is_degraded=not bool(items),
@@ -534,7 +547,8 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             # 文件不存在时 fallback 到默认模板
             try:
                 content, _exists, budget_chars = read_behavior_file_content(
-                    self._ctx.project_root, file_path,
+                    self._ctx.project_root,
+                    file_path,
                 )
             except Exception:
                 content, _exists, budget_chars = "", False, 0
@@ -542,16 +556,18 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 request=request,
                 code="BEHAVIOR_FILE_READ",
                 message="文件尚未创建，返回默认模板",
-                data={"file_path": file_path, "content": content, "exists": False,
-                      "budget_chars": budget_chars},
+                data={
+                    "file_path": file_path,
+                    "content": content,
+                    "exists": False,
+                    "budget_chars": budget_chars,
+                },
             )
 
         try:
             content = resolved.read_text(encoding="utf-8")
         except Exception as exc:
-            raise ControlPlaneActionError(
-                "FILE_READ_ERROR", f"读取文件失败: {exc}"
-            ) from exc
+            raise ControlPlaneActionError("FILE_READ_ERROR", f"读取文件失败: {exc}") from exc
 
         return self._completed_result(
             request=request,
@@ -587,7 +603,9 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
     ) -> ActionResultEnvelope:
         """写入行为文件内容（到磁盘）。"""
         # 优先使用 file_id，兼容旧的 file_path
-        file_id = str(request.params.get("file_id", "") or request.params.get("file_path", "")).strip()
+        file_id = str(
+            request.params.get("file_id", "") or request.params.get("file_path", "")
+        ).strip()
         content = str(request.params.get("content", ""))
         if not file_id:
             raise ControlPlaneActionError("MISSING_PARAM", "file_id 不能为空")
@@ -628,9 +646,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         try:
             commit_behavior_file_write(pending, content)
         except Exception as exc:
-            raise ControlPlaneActionError(
-                "FILE_WRITE_ERROR", f"写入文件失败: {exc}"
-            ) from exc
+            raise ControlPlaneActionError("FILE_WRITE_ERROR", f"写入文件失败: {exc}") from exc
 
         # 记录事件（FR-018）
         _log = structlog.get_logger("control_plane.behavior")
@@ -703,9 +719,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         except ValueError as exc:
             raise ControlPlaneActionError("INVALID_FILE_ID", str(exc)) from exc
 
-        version = await self._stores.behavior_version_store.get_version_content(
-            key, target_version
-        )
+        version = await self._stores.behavior_version_store.get_version_content(key, target_version)
         if version is None or version.content is None:
             raise ControlPlaneActionError(
                 "VERSION_NOT_FOUND", f"版本 {target_version} 不存在或内容不可用"
@@ -717,10 +731,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             return self._completed_result(
                 request=request,
                 code="BEHAVIOR_RESTORE_PROPOSAL",
-                message=(
-                    f"将把 {file_id} 恢复到版本 {target_version}，"
-                    f"确认后写入并记为新版本"
-                ),
+                message=(f"将把 {file_id} 恢复到版本 {target_version}，确认后写入并记为新版本"),
                 data={
                     "file_id": file_id,
                     "target_version": target_version,
@@ -749,9 +760,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         try:
             commit_behavior_file_write(pending, target_content)
         except Exception as exc:
-            raise ControlPlaneActionError(
-                "FILE_WRITE_ERROR", f"恢复写入失败: {exc}"
-            ) from exc
+            raise ControlPlaneActionError("FILE_WRITE_ERROR", f"恢复写入失败: {exc}") from exc
 
         await record_behavior_version(
             stores=self._stores,
@@ -807,9 +816,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             existing=existing,
             source_profile=source_profile,
             selected_project=selected_project,
-            origin_kind=(
-                AgentProfileOriginKind.CLONED if mode == "clone" else None
-            ),
+            origin_kind=(AgentProfileOriginKind.CLONED if mode == "clone" else None),
         )
         target_profile_id = str(review["profile"].get("profile_id", "")).strip()
         return self._completed_result(
@@ -984,7 +991,9 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             origin_kind=AgentProfileOriginKind.CLONED,
         )
         if not bool(review.get("can_save")):
-            message = "；".join(review.get("save_errors", [])) or "克隆后的 Root Agent 草稿不能保存。"
+            message = (
+                "；".join(review.get("save_errors", [])) or "克隆后的 Root Agent 草稿不能保存。"
+            )
             raise ControlPlaneActionError("WORKER_PROFILE_CLONE_INVALID", message)
         saved = await self._save_worker_profile_draft(
             normalized_profile=review["profile"],
@@ -1030,7 +1039,8 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 "WORKER_PROFILE_BUILTIN_READONLY",
                 "内建 archetype 不能归档。",
             )
-        # F117 Wave 2c-2c-W：停写 worker_profiles——in-memory model_copy；镜像 status 由下方 archive-sync 写。
+        # F117 Wave 2c-2c-W：停写 worker_profiles——in-memory model_copy；
+        # 镜像 status 由下方 archive-sync 写。
         archived = existing.model_copy(
             update={
                 "status": AgentProfileStatus.ARCHIVED,
@@ -1181,7 +1191,12 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         draft = request.params.get("draft")
         if isinstance(draft, Mapping):
             return await self._handle_worker_profile_apply(
-                request.model_copy(update={"action_id": "worker_profile.apply", "params": {**request.params, "publish": True}})
+                request.model_copy(
+                    update={
+                        "action_id": "worker_profile.apply",
+                        "params": {**request.params, "publish": True},
+                    }
+                )
             )
 
         profile_id = self._param_str(request.params, "profile_id")
@@ -1206,8 +1221,7 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         published, revision, changed = await self._publish_worker_profile_revision(
             profile=existing,
             change_summary=(
-                self._param_str(request.params, "change_summary")
-                or "通过 Profile Studio 发布"
+                self._param_str(request.params, "change_summary") or "通过 Profile Studio 发布"
             ),
             actor=request.actor.actor_id,
         )
@@ -1317,12 +1331,28 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
         if not objective:
             raise ControlPlaneActionError("OBJECTIVE_REQUIRED", "objective 不能为空。")
         _, selected_project, _, _ = await self._resolve_selection()
-        project_id = (
-            profile.project_id
-            or (selected_project.project_id if selected_project is not None else "")
+        project_id = profile.project_id or (
+            selected_project.project_id if selected_project is not None else ""
         )
         workspace_id = ""
         requested_revision = profile.active_revision or profile.draft_revision or 1
+        target_kind = self._delegation_target(
+            request.params,
+            default=DelegationTargetKind.WORKER,
+        )
+        if self._ctx.task_runner is None:
+            raise ControlPlaneActionError(
+                "WORKER_RUNTIME_UNAVAILABLE",
+                "当前 runtime 未启用 TaskRunner",
+            )
+        if target_kind == DelegationTargetKind.GRAPH_AGENT.value:
+            try:
+                preflight_graph_runtime()
+            except WorkerBackendUnavailableError as exc:
+                raise ControlPlaneActionError(
+                    "WORKER_RUNTIME_UNAVAILABLE",
+                    "当前 runtime 无法提供 Graph backend",
+                ) from exc
         message = NormalizedMessage(
             channel="web",
             thread_id=f"worker-profile:{profile.profile_id}",
@@ -1340,19 +1370,15 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 ),
                 "requested_worker_type": "general",
                 "tool_profile": profile.tool_profile,
-                "target_kind": self._param_str(request.params, "target_kind", default="worker")
-                or "worker",
+                "target_kind": target_kind,
                 "project_id": project_id,
                 "workspace_id": workspace_id,
             },
         )
-        if self._ctx.task_runner is not None:
-            task_id, created = await self._ctx.task_runner.launch_child_task(
-                message,
-                model_alias=profile.model_alias,
-            )
-        else:
-            task_id, created = await TaskService(self._stores, self._ctx.sse_hub).create_task(message)
+        task_id, created = await self._ctx.task_runner.launch_child_task(
+            message,
+            model_alias=profile.model_alias,
+        )
         return self._completed_result(
             request=request,
             code="WORKER_PROFILE_SPAWNED",
@@ -1404,7 +1430,8 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
                 "source_snapshot_id": work.effective_profile_snapshot_id,
             },
             "profile_id": "",
-            "project_id": work.project_id or (selected_project.project_id if selected_project is not None else ""),
+            "project_id": work.project_id
+            or (selected_project.project_id if selected_project is not None else ""),
         }
         review = await self._review_worker_profile_draft(
             raw=raw,
@@ -1413,7 +1440,9 @@ class WorkerProfileDomainService(WorkerProfileOpsMixin, DomainServiceBase):
             origin_kind=AgentProfileOriginKind.EXTRACTED,
         )
         if not bool(review.get("can_save")):
-            message = "；".join(review.get("save_errors", [])) or "提炼后的 Root Agent 草稿不能保存。"
+            message = (
+                "；".join(review.get("save_errors", [])) or "提炼后的 Root Agent 草稿不能保存。"
+            )
             raise ControlPlaneActionError("WORKER_PROFILE_EXTRACT_INVALID", message)
         saved = await self._save_worker_profile_draft(
             normalized_profile=review["profile"],

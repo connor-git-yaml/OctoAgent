@@ -6,7 +6,6 @@
 """
 
 import asyncio
-import re
 import warnings
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -33,13 +32,12 @@ from octoagent.skills import (
     extract_mounted_tool_names,
 )
 from octoagent.skills.limits import get_global_defaults, merge_usage_limits
-from octoagent.skills.models import UsageLimits, _MAX_STEPS_HARD_CEILING
+from octoagent.skills.models import _MAX_STEPS_HARD_CEILING
 from octoagent.tooling.models import ToolSearchResult
+from pydantic import BaseModel, Field
 
 from .runtime_control import is_single_loop_main_active, runtime_context_from_metadata
-
 from .tool_promotion import ToolPromotionService
-from pydantic import BaseModel, Field
 
 # Skill 注入格式常量（agent_context.py 依赖此格式解析和截断）
 SKILL_SECTION_PREFIX = "--- Loaded Skill: "
@@ -55,10 +53,10 @@ SKILL_SECTION_SEPARATOR = "\n\n" + SKILL_SECTION_PREFIX
 # "先查 registry → 直接答可用"，消除 LLM 自己编造 connectivity test 的动机。
 _TOOL_USAGE_GUIDANCE = (
     " 工具可用性验证规则："
-    "（0）用户问\"X 能不能用 / 是否可用 / 通不通 / 可用了吗\"这类元问题时，"
+    '（0）用户问"X 能不能用 / 是否可用 / 通不通 / 可用了吗"这类元问题时，'
     "先调用 `mcp.servers.list` / `mcp.tools.list` 等 registry 查询确认工具是否已注册；"
-    "已注册就直接告诉用户\"可用\"并列出注册信息，不再做真实 MCP 调用做连通性测试；"
-    "只有用户明确要求\"跑一下试试 / 帮我测一次\"时才发起一次真实业务 query；"
+    '已注册就直接告诉用户"可用"并列出注册信息，不再做真实 MCP 调用做连通性测试；'
+    '只有用户明确要求"跑一下试试 / 帮我测一次"时才发起一次真实业务 query；'
     "严禁构造 `Reply OK` / `Reply with exactly OK` / `请用一句话回答 <随机 trivia>` "
     "这类与用户原问题无关的 connectivity test 探测调用。"
     "（1）对只读工具/MCP，用户给出真实业务意图时，用一次真实业务 query 调用即可，"
@@ -272,6 +270,11 @@ class LLMService:
         # Feature 065: Pipeline 注册表
         self._pipeline_registry = pipeline_registry
 
+    async def aclose(self) -> None:
+        """释放本地Skill执行链；共享ProviderRouter由RuntimeServiceBundle关闭。"""
+        if self._skill_runner is not None:
+            await self._skill_runner.aclose()
+
     def register(self, alias: str, provider: LLMProvider) -> None:
         """注册 LLM provider -- M0 兼容"""
         self._providers[alias] = provider
@@ -395,9 +398,9 @@ class LLMService:
         deferred_entries_raw = tool_selection_data.get("deferred_tool_entries", [])
         if deferred_entries_raw:
             from octoagent.tooling.models import DeferredToolEntry, format_deferred_tools_list
+
             deferred_entries = [
-                DeferredToolEntry(**e) if isinstance(e, dict) else e
-                for e in deferred_entries_raw
+                DeferredToolEntry(**e) if isinstance(e, dict) else e for e in deferred_entries_raw
             ]
             deferred_text = format_deferred_tools_list(deferred_entries)
             if deferred_text:
@@ -430,14 +433,15 @@ class LLMService:
         execution_context = SkillExecutionContext(
             task_id=task_id,
             trace_id=trace_id,
-            caller=(
-                f"main:{worker_type}" if single_loop_executor else f"worker:{worker_type}"
-            ),
+            caller=(f"main:{worker_type}" if single_loop_executor else f"worker:{worker_type}"),
             agent_runtime_id=str(metadata.get("agent_runtime_id", "")).strip(),
             agent_session_id=str(metadata.get("agent_session_id", "")).strip(),
             work_id=str(metadata.get("work_id", "")).strip(),
             # Feature 061: 从 metadata 获取 Agent 权限 Preset
-            permission_preset=str(metadata.get("permission_preset", DEFAULT_PERMISSION_PRESET)).strip() or DEFAULT_PERMISSION_PRESET,
+            permission_preset=str(
+                metadata.get("permission_preset", DEFAULT_PERMISSION_PRESET)
+            ).strip()
+            or DEFAULT_PERMISSION_PRESET,
             conversation_messages=conversation_messages,
             metadata=metadata,
             usage_limits=usage_limits,
@@ -493,17 +497,14 @@ class LLMService:
                 # _handle_llm_failure 写 MODEL_CALL_FAILED 事件并把 task 推进
                 # FAILED。
                 if result.error_category == ErrorCategory.AUTH_ERROR:
-                    raise SkillAuthError(
-                        result.error_message or "provider 凭证已失效，请重新授权"
-                    )
+                    raise SkillAuthError(result.error_message or "provider 凭证已失效，请重新授权")
                 error_msg = result.error_message or "执行过程中遇到问题"
                 category = result.error_category.value if result.error_category else "unknown"
                 usage = result.usage or {}
 
                 if category == "step_limit_exceeded":
                     content = (
-                        f"处理步骤较多（{result.steps} 步），已达上限。"
-                        "请尝试拆分为更小的问题。"
+                        f"处理步骤较多（{result.steps} 步），已达上限。请尝试拆分为更小的问题。"
                     )
                 elif category == "token_limit_exceeded":
                     tokens = usage.get("request_tokens", 0) + usage.get("response_tokens", 0)
@@ -513,10 +514,7 @@ class LLMService:
                     )
                 elif category == "tool_call_limit_exceeded":
                     calls = usage.get("tool_calls", 0)
-                    content = (
-                        f"工具调用次数较多（{calls} 次），已达上限。"
-                        "请尝试更具体的指令。"
-                    )
+                    content = f"工具调用次数较多（{calls} 次），已达上限。请尝试更具体的指令。"
                 elif category == "budget_exceeded":
                     budget = usage.get("cost_usd", 0.0)
                     content = (
@@ -525,10 +523,7 @@ class LLMService:
                     )
                 elif category == "timeout_exceeded":
                     seconds = usage.get("duration_seconds", 0)
-                    content = (
-                        f"请求处理时间过长（{seconds}s），已超时。"
-                        "请稍后重试或简化请求。"
-                    )
+                    content = f"请求处理时间过长（{seconds}s），已超时。请稍后重试或简化请求。"
                 else:
                     content = f"抱歉，处理请求时遇到了问题：{error_msg}。请稍后重试。"
 
@@ -537,7 +532,8 @@ class LLMService:
                 if (
                     not is_degraded_retry
                     and manifest.retry_policy.fallback_model_alias
-                    and category in (
+                    and category
+                    in (
                         "step_limit_exceeded",
                         "timeout_exceeded",
                         "token_limit_exceeded",
@@ -550,9 +546,7 @@ class LLMService:
                         else None
                     )
                     # 仅覆盖 max_steps，其余字段（含 max_budget_usd）保持不变
-                    degraded_limits = usage_limits.model_copy(
-                        update={"max_steps": degraded_steps}
-                    )
+                    degraded_limits = usage_limits.model_copy(update={"max_steps": degraded_steps})
                     degraded_ctx = SkillExecutionContext(
                         task_id=task_id,
                         trace_id=trace_id,
@@ -586,15 +580,12 @@ class LLMService:
                         # AUTH_ERROR 注释），不能落进"返回原始错误"分支。
                         if retry_result.error_category == ErrorCategory.AUTH_ERROR:
                             raise SkillAuthError(
-                                retry_result.error_message
-                                or "provider 凭证已失效，请重新授权"
+                                retry_result.error_message or "provider 凭证已失效，请重新授权"
                             )
                         if retry_result.status == SkillRunStatus.SUCCEEDED and retry_result.output:
                             r_meta = retry_result.output.metadata
                             r_usage = (
-                                r_meta.get("token_usage", {})
-                                if isinstance(r_meta, dict)
-                                else {}
+                                r_meta.get("token_usage", {}) if isinstance(r_meta, dict) else {}
                             )
                             return ModelCallResult(
                                 content=retry_result.output.content,
@@ -608,15 +599,11 @@ class LLMService:
                                 duration_ms=retry_result.duration_ms,
                                 token_usage=TokenUsage(
                                     prompt_tokens=int(r_usage.get("prompt_tokens", 0) or 0),
-                                    completion_tokens=int(
-                                        r_usage.get("completion_tokens", 0) or 0
-                                    ),
+                                    completion_tokens=int(r_usage.get("completion_tokens", 0) or 0),
                                     total_tokens=int(r_usage.get("total_tokens", 0) or 0),
                                 ),
                                 cost_usd=retry_result.total_cost_usd,
-                                cost_unavailable=bool(
-                                    r_meta.get("cost_unavailable", True)
-                                )
+                                cost_unavailable=bool(r_meta.get("cost_unavailable", True))
                                 if isinstance(r_meta, dict)
                                 else True,
                                 is_fallback=True,
@@ -695,6 +682,7 @@ class LLMService:
 
         try:
             import json
+
             data = json.loads(search_result_json)
             result = ToolSearchResult.model_validate(data)
         except Exception:
@@ -782,7 +770,8 @@ class LLMService:
             if entry is None:
                 # Skill 定义不存在，通过遍历 promotion state 找到关联工具
                 tools_with_source = [
-                    tn for tn, srcs in list(self._tool_promotion.state.promoted_tools.items())
+                    tn
+                    for tn, srcs in list(self._tool_promotion.state.promoted_tools.items())
                     if source in srcs
                 ]
             else:

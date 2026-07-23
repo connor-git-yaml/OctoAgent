@@ -24,7 +24,6 @@ import structlog
 from octoagent.core.models import (
     DelegationTargetKind,
     DispatchEnvelope,
-    ExecutionBackend,
     ExecutionSessionState,
     HumanInputPolicy,
     TaskStatus,
@@ -36,6 +35,7 @@ from octoagent.core.store import StoreGroup
 from ulid import ULID
 
 from .execution_context import ExecutionRuntimeContext
+from .runtime_service_bundle import RuntimeServiceBundle
 from .task_service import TaskService
 from .worker_audit_logger import audit_worker_log, derive_agent_runtime_id
 
@@ -213,7 +213,6 @@ class InlineRuntimeBackend:
         await task_service.process_task_with_llm(
             task_id=envelope.task_id,
             user_text=envelope.user_text,
-            llm_service=llm_service,
             model_alias=envelope.model_alias,
             resume_from_node=envelope.resume_from_node,
             resume_state_snapshot=envelope.resume_state_snapshot,
@@ -313,7 +312,6 @@ class GraphRuntimeBackend:
                 await ctx.deps.task_service.process_task_with_llm(
                     task_id=ctx.deps.envelope.task_id,
                     user_text=ctx.deps.envelope.user_text,
-                    llm_service=ctx.deps.llm_service,
                     model_alias=ctx.deps.envelope.model_alias,
                     resume_from_node=ctx.deps.envelope.resume_from_node,
                     resume_state_snapshot=ctx.deps.envelope.resume_state_snapshot,
@@ -370,6 +368,15 @@ class GraphRuntimeBackend:
             deps=deps,
         )
 
+    def preflight(self) -> None:
+        """在创建业务 Task 前证明 Graph backend 能完整构造。"""
+        self._graph_instance()
+
+
+def preflight_graph_runtime() -> None:
+    """使用真实 Graph backend 构造路径执行无副作用可用性预检。"""
+    GraphRuntimeBackend().preflight()
+
 
 def default_docker_available_checker() -> bool:
     """检测 Docker daemon 可用性。"""
@@ -418,7 +425,6 @@ async def _emit_is_caller_worker_signal(
 
         from octoagent.core.models import ActorType, Event, EventCausality, EventType
         from octoagent.core.models.payloads import ControlMetadataUpdatedPayload
-
         from ulid import ULID as _ULID
 
         event = Event(
@@ -433,9 +439,7 @@ async def _emit_is_caller_worker_signal(
                 source="worker_runtime_dispatch",
             ).model_dump(),
             trace_id=trace_id,
-            causality=EventCausality(
-                idempotency_key=f"is_caller_worker_signal:{dispatch_id}"
-            ),
+            causality=EventCausality(idempotency_key=f"is_caller_worker_signal:{dispatch_id}"),
         )
         await task_service._stores.event_store.append_event_committed(
             event, update_task_pointer=False
@@ -461,7 +465,7 @@ class WorkerRuntime:
         self,
         store_group: StoreGroup,
         sse_hub,
-        llm_service,
+        runtime_services: RuntimeServiceBundle,
         *,
         config: WorkerRuntimeConfig | None = None,
         docker_available_checker: Callable[[], bool] | None = None,
@@ -471,7 +475,8 @@ class WorkerRuntime:
     ) -> None:
         self._stores = store_group
         self._sse_hub = sse_hub
-        self._llm_service = llm_service
+        self._runtime_services = runtime_services
+        self._llm_service = runtime_services.llm_service
         self._config = config or WorkerRuntimeConfig.from_env()
         self._docker_available_checker = (
             docker_available_checker or default_docker_available_checker
@@ -509,7 +514,11 @@ class WorkerRuntime:
             tool_profile=profile,
         )
 
-        task_service = TaskService(self._stores, self._sse_hub)
+        task_service = TaskService(
+            self._stores,
+            self._sse_hub,
+            runtime_services=self._runtime_services,
+        )
         cancel_signal = (
             self._cancellation_registry.ensure(envelope.task_id)
             if self._cancellation_registry is not None
@@ -527,7 +536,6 @@ class WorkerRuntime:
                     task_id=envelope.task_id,
                     session_id=session.session_id,
                     backend_job_id=session.dispatch_id,
-                    backend=ExecutionBackend.INLINE,
                     interactive=True,
                     input_policy=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
                     worker_id=worker_id,
@@ -735,13 +743,9 @@ class WorkerRuntime:
                     # worker_runtime_exception。
                     is_auth_failure = False
                     try:
-                        failure_probe = getattr(
-                            task_service, "get_latest_model_call_failure", None
-                        )
+                        failure_probe = getattr(task_service, "get_latest_model_call_failure", None)
                         failure_payload = (
-                            await failure_probe(envelope.task_id)
-                            if failure_probe
-                            else None
+                            await failure_probe(envelope.task_id) if failure_probe else None
                         )
                         is_auth_failure = (
                             isinstance(failure_payload, dict)
@@ -761,8 +765,7 @@ class WorkerRuntime:
                         summary="worker_execution_terminal:FAILED",
                         error_type="WorkerExecutionFailed",
                         error_message=(
-                            "task status=FAILED（provider 凭证已失效，"
-                            "重新授权前重试无效）"
+                            "task status=FAILED（provider 凭证已失效，重新授权前重试无效）"
                             if is_auth_failure
                             else "task status=FAILED"
                         ),
@@ -946,15 +949,14 @@ class WorkerRuntime:
                     if task is not None and task.status == TaskStatus.WAITING_INPUT:
                         if waiting_input_deadline is None:
                             waiting_input_deadline = (
-                                time.monotonic()
-                                + self._config.waiting_input_timeout_seconds
+                                time.monotonic() + self._config.waiting_input_timeout_seconds
                             )
                         deadline = time.monotonic() + self._config.max_execution_timeout_seconds
                         if time.monotonic() > waiting_input_deadline:
                             backend_task.cancel()
                             with contextlib.suppress(asyncio.CancelledError):
                                 await backend_task
-                            raise WorkerRuntimeTimeoutError("waiting_input_timeout")
+                            raise WorkerRuntimeTimeoutError("waiting_input_timeout") from None
                         continue
                     else:
                         waiting_input_deadline = None

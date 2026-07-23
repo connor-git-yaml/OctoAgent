@@ -20,7 +20,6 @@ import {
   buildFieldState,
   buildProviderPreset,
   envPresence,
-  generateSecretValue,
   groupLabel,
   normalizeAliasDrafts,
   parseAliasDrafts,
@@ -34,9 +33,6 @@ import {
   type ModelAliasDraftItem,
   type ProviderDraftItem,
 } from "./shared";
-
-const DEFAULT_GATEWAY_PROXY_URL = "http://localhost:4000";
-const DEFAULT_GATEWAY_MASTER_KEY_ENV = "LITELLM_MASTER_KEY";
 
 const EMPTY_REVIEW: SetupReviewSummary = {
   ready: false,
@@ -198,28 +194,6 @@ export default function SettingsPage() {
       categories.push("model_aliases");
     }
 
-    const savedRuntimeRaw = getValueAtPath(config.current_value, "runtime") ?? {};
-    const savedRuntime =
-      savedRuntimeRaw && typeof savedRuntimeRaw === "object"
-        ? (savedRuntimeRaw as Record<string, unknown>)
-        : {};
-    // fieldState 里未设的 runtime 项回落到 snapshot 值，避免出现 undefined !== saved 的伪差异
-    const draftRuntime = {
-      llm_mode: fieldState["runtime.llm_mode"] ?? savedRuntime.llm_mode ?? "",
-      litellm_proxy_url:
-        fieldState["runtime.litellm_proxy_url"] ?? savedRuntime.litellm_proxy_url ?? "",
-      master_key_env:
-        fieldState["runtime.master_key_env"] ?? savedRuntime.master_key_env ?? "",
-    };
-    const canonicalSavedRuntime = {
-      llm_mode: savedRuntime.llm_mode ?? "",
-      litellm_proxy_url: savedRuntime.litellm_proxy_url ?? "",
-      master_key_env: savedRuntime.master_key_env ?? "",
-    };
-    if (JSON.stringify(canonicalSavedRuntime) !== JSON.stringify(draftRuntime)) {
-      categories.push("runtime");
-    }
-
     const unsavedSecrets = Object.entries(secretValues).filter(
       ([, value]) => String(value ?? "").trim(),
     );
@@ -244,58 +218,24 @@ export default function SettingsPage() {
     ...envPresence(providerRuntimeDetails),
     ...savedSecretEnvNames,
   ]);
-  const gatewayProxyUrl =
-    String(
-      fieldState["runtime.litellm_proxy_url"] ??
-        getValueAtPath(config.current_value, "runtime.litellm_proxy_url") ??
-        DEFAULT_GATEWAY_PROXY_URL
-    );
-  const normalizedGatewayProxyUrl = gatewayProxyUrl.trim() || DEFAULT_GATEWAY_PROXY_URL;
-  const gatewayMasterKeyEnvInput =
-    String(
-      fieldState["runtime.master_key_env"] ??
-        getValueAtPath(config.current_value, "runtime.master_key_env") ??
-        DEFAULT_GATEWAY_MASTER_KEY_ENV
-    );
-  const gatewayMasterKeyEnv =
-    gatewayMasterKeyEnvInput.trim() || DEFAULT_GATEWAY_MASTER_KEY_ENV;
-
   useEffect(() => {
     if (activeProviders.length === 0) {
       setPendingRuntimeRefresh(false);
     }
   }, [activeProviders.length]);
 
-  function buildManagedProviderDraft(secretStateOverride?: Record<string, string>) {
+  function buildSetupDraft(secretStateOverride?: Record<string, string>) {
     const nextSecretValues = {
       ...secretValues,
       ...(secretStateOverride ?? {}),
     };
-    if (
-      activeProviders.length > 0 &&
-      !savedEnvNames.has(gatewayMasterKeyEnv) &&
-      !nextSecretValues[gatewayMasterKeyEnv]?.trim()
-    ) {
-      nextSecretValues[gatewayMasterKeyEnv] = generateSecretValue();
-    }
-    return {
-      fieldState: {
-        ...fieldState,
-        "runtime.llm_mode": activeProviders.length > 0 ? "litellm" : "echo",
-        "runtime.litellm_proxy_url": normalizedGatewayProxyUrl,
-        "runtime.master_key_env": gatewayMasterKeyEnv,
-        model_aliases: stringifyAliasDrafts(aliasDrafts),
-      },
-      secretValues: nextSecretValues,
-    };
-  }
-
-  function buildSetupDraft(secretStateOverride?: Record<string, string>) {
-    const managedDraft = buildManagedProviderDraft(secretStateOverride);
     const result = buildConfigPayload(
       config.current_value,
       config.ui_hints,
-      managedDraft.fieldState
+      {
+        ...fieldState,
+        model_aliases: stringifyAliasDrafts(aliasDrafts),
+      }
     );
     setFieldErrors(result.errors);
     if (Object.keys(result.errors).length > 0) {
@@ -312,19 +252,12 @@ export default function SettingsPage() {
       });
       return null;
     }
-    if (
-      managedDraft.secretValues[gatewayMasterKeyEnv]?.trim() &&
-      secretValues[gatewayMasterKeyEnv] !== managedDraft.secretValues[gatewayMasterKeyEnv]
-    ) {
-      setSecretValues((state) => ({
-        ...state,
-        [gatewayMasterKeyEnv]: managedDraft.secretValues[gatewayMasterKeyEnv]!,
-      }));
-    }
+    const canonicalConfig = { ...result.config };
+    delete canonicalConfig.runtime;
     return {
-      config: result.config,
+      config: canonicalConfig,
       secret_values: Object.fromEntries(
-        Object.entries(managedDraft.secretValues).filter(([, value]) => value.trim())
+        Object.entries(nextSecretValues).filter(([, value]) => value.trim())
       ),
     };
   }
@@ -334,20 +267,10 @@ export default function SettingsPage() {
     secret_values: Record<string, string>;
   }) {
     const currentManagedState = {
-      runtime: {
-        llm_mode: getValueAtPath(config.current_value, "runtime.llm_mode") ?? "",
-        litellm_proxy_url: getValueAtPath(config.current_value, "runtime.litellm_proxy_url") ?? "",
-        master_key_env: getValueAtPath(config.current_value, "runtime.master_key_env") ?? "",
-      },
       providers: getValueAtPath(config.current_value, "providers") ?? [],
       model_aliases: getValueAtPath(config.current_value, "model_aliases") ?? {},
     };
     const nextManagedState = {
-      runtime: {
-        llm_mode: getValueAtPath(draft.config, "runtime.llm_mode") ?? "",
-        litellm_proxy_url: getValueAtPath(draft.config, "runtime.litellm_proxy_url") ?? "",
-        master_key_env: getValueAtPath(draft.config, "runtime.master_key_env") ?? "",
-      },
       providers: getValueAtPath(draft.config, "providers") ?? [],
       model_aliases: getValueAtPath(draft.config, "model_aliases") ?? {},
     };
@@ -446,9 +369,6 @@ export default function SettingsPage() {
       ...fieldState,
       providers: stringifyProviderDrafts(nextProviders),
       model_aliases: stringifyAliasDrafts(nextAliases),
-      "runtime.llm_mode": "litellm",
-      "runtime.litellm_proxy_url": normalizedGatewayProxyUrl,
-      "runtime.master_key_env": gatewayMasterKeyEnv,
     };
     const payload = buildConfigPayload(
       config.current_value,
@@ -468,8 +388,10 @@ export default function SettingsPage() {
       });
       return false;
     }
+    const canonicalConfig = { ...payload.config };
+    delete canonicalConfig.runtime;
     const draft = {
-      config: payload.config,
+      config: canonicalConfig,
       secret_values: Object.fromEntries(
         Object.entries(secretValues).filter(([, value]) => String(value ?? "").trim())
       ),

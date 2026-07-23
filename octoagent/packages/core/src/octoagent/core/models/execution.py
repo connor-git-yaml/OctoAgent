@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 
 
 class ExecutionBackend(StrEnum):
@@ -46,48 +46,6 @@ class HumanInputPolicy(StrEnum):
     APPROVAL_REQUIRED = "approval-required"
 
 
-class JobSpec(BaseModel):
-    """Declarative execution request."""
-
-    task_id: str = Field(description="关联 task ID")
-    image: str = Field(description="docker image")
-    command: list[str] = Field(description="container command")
-    env: dict[str, str] = Field(default_factory=dict)
-    working_dir: str = Field(default="/workspace", description="container working directory")
-    interactive: bool = Field(default=False, description="是否允许 attach input")
-    allow_network: bool = Field(default=False, description="是否允许容器联网")
-    input_policy: HumanInputPolicy = Field(
-        default=HumanInputPolicy.EXPLICIT_REQUEST_ONLY,
-        description="人工输入 gate 策略",
-    )
-    artifact_globs: list[str] = Field(
-        default_factory=lambda: ["**/*"],
-        description="output dir 中要回收的 artifact glob",
-    )
-    metadata: dict[str, str] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _validate_job(self) -> JobSpec:
-        if not self.command:
-            raise ValueError("command must not be empty")
-        if self.input_policy == HumanInputPolicy.APPROVAL_REQUIRED and not self.interactive:
-            raise ValueError("approval-required input policy requires interactive=true")
-        return self
-
-
-class ExecutionRuntimeRecord(BaseModel):
-    """Persistable runtime metadata used for session recovery."""
-
-    session_id: str = Field(description="execution session ID")
-    task_id: str = Field(description="task ID")
-    backend_job_id: str = Field(description="backend job ID")
-    runtime_dir: str = Field(description="host runtime directory")
-    container_name: str = Field(description="docker container name")
-    events_file: str = Field(description="backend events file path")
-    input_queue_file: str = Field(description="input queue path")
-    output_dir: str = Field(description="output directory path")
-
-
 class ExecutionConsoleSession(BaseModel):
     """Current projection of an execution console session."""
 
@@ -97,9 +55,7 @@ class ExecutionConsoleSession(BaseModel):
     backend_job_id: str = Field(description="backend-specific job ID")
     state: ExecutionSessionState = Field(default=ExecutionSessionState.PENDING)
     interactive: bool = Field(default=False)
-    input_policy: HumanInputPolicy = Field(
-        default=HumanInputPolicy.EXPLICIT_REQUEST_ONLY
-    )
+    input_policy: HumanInputPolicy = Field(default=HumanInputPolicy.EXPLICIT_REQUEST_ONLY)
     current_step: str = Field(default="", description="latest step summary")
     requested_input: str | None = Field(default=None, description="latest input request")
     pending_approval_id: str | None = Field(default=None, description="pending approval ID")

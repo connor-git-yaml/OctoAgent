@@ -18,7 +18,6 @@ from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
-
 from octoagent.core.behavior_workspace import BehaviorLoadProfile
 from octoagent.core.models import (
     ContextRequestKind,
@@ -27,7 +26,6 @@ from octoagent.core.models import (
 )
 from octoagent.core.models.agent_context import AgentProfile, AgentProfileScope
 from octoagent.gateway.services.agent_context import AgentContextService
-
 
 # ---------------------------------------------------------------------------
 # 辅助工具
@@ -165,7 +163,7 @@ async def test_resolve_context_bundle_subagent_short_circuits_resolve_agent_prof
         db_path=str(tmp_path / "phase-c-resolve-bundle.db"),
         artifacts_dir=str(tmp_path / "artifacts"),
     )
-    service = AgentContextService(store_group, project_root=tmp_path)
+    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     # patch _resolve_agent_profile，subagent 短路应使其未被调用
     mock_resolve_profile = AsyncMock(
@@ -188,10 +186,13 @@ async def test_resolve_context_bundle_subagent_short_circuits_resolve_agent_prof
         helper_calls.append(project)
         return real_helper(project)
 
-    with patch.object(service, "_resolve_agent_profile", mock_resolve_profile), patch.object(
-        AgentContextService,
-        "_build_ephemeral_subagent_profile",
-        staticmethod(_spy_helper),
+    with (
+        patch.object(service, "_resolve_agent_profile", mock_resolve_profile),
+        patch.object(
+            AgentContextService,
+            "_build_ephemeral_subagent_profile",
+            staticmethod(_spy_helper),
+        ),
     ):
         # 直接调用核心短路判断逻辑（_resolve_context_bundle 完整路径需大量 mock，
         # 此处验证短路决策的输入到分支选择正确性）
@@ -202,9 +203,7 @@ async def test_resolve_context_bundle_subagent_short_circuits_resolve_agent_prof
             # production code 调 helper（line 1311 of agent_context.py）
             profile = AgentContextService._build_ephemeral_subagent_profile(None)
         else:
-            profile, _ = await service._resolve_agent_profile(
-                project=None, requested_profile_id=""
-            )
+            profile, _ = await service._resolve_agent_profile(project=None, requested_profile_id="")
 
         # 验证：subagent 路径调用 helper 而不是 _resolve_agent_profile
         assert len(helper_calls) == 1, "subagent 路径应调用 _build_ephemeral_subagent_profile 一次"
@@ -223,7 +222,7 @@ async def test_resolve_context_bundle_worker_does_not_short_circuit(tmp_path: Pa
         db_path=str(tmp_path / "phase-c-worker.db"),
         artifacts_dir=str(tmp_path / "artifacts"),
     )
-    service = AgentContextService(store_group, project_root=tmp_path)
+    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     helper_calls = []
     real_helper = AgentContextService._build_ephemeral_subagent_profile
@@ -268,7 +267,7 @@ async def test_resolve_agent_profile_trusts_existing_worker_mirror(tmp_path: Pat
         db_path=str(tmp_path / "phase-2c2b.db"),
         artifacts_dir=str(tmp_path / "artifacts"),
     )
-    service = AgentContextService(store_group, project_root=tmp_path)
+    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     profile_id = "worker-profile-2c2b-drift"
     # 同 id **完整** canonical 镜像（instruction_overlays 非空）：运行时权威源即镜像。
@@ -311,7 +310,7 @@ async def test_resolve_agent_profile_trusts_stored_mirror_without_rebuild(tmp_pa
         db_path=str(tmp_path / "phase-w4-trust.db"),
         artifacts_dir=str(tmp_path / "artifacts"),
     )
-    service = AgentContextService(store_group, project_root=tmp_path)
+    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     profile_id = "worker-profile-w4-trust"
     # 残缺镜像：kind=worker 但 instruction_overlays 空 + selected_tools 陈旧（W4-3：
@@ -375,11 +374,7 @@ def test_subagent_kind_maps_to_minimal_profile():
     load_profile_for_emit = (
         BehaviorLoadProfile.MINIMAL
         if profile.kind == "subagent"
-        else (
-            BehaviorLoadProfile.WORKER
-            if worker_capability
-            else BehaviorLoadProfile.FULL
-        )
+        else (BehaviorLoadProfile.WORKER if worker_capability else BehaviorLoadProfile.FULL)
     )
     assert load_profile_for_emit == BehaviorLoadProfile.MINIMAL
 
@@ -388,11 +383,7 @@ def test_subagent_kind_maps_to_minimal_profile():
     effective_load_profile = (
         BehaviorLoadProfile.MINIMAL
         if profile.kind == "subagent"
-        else (
-            BehaviorLoadProfile.WORKER
-            if is_worker_profile
-            else BehaviorLoadProfile.FULL
-        )
+        else (BehaviorLoadProfile.WORKER if is_worker_profile else BehaviorLoadProfile.FULL)
     )
     assert effective_load_profile == BehaviorLoadProfile.MINIMAL
 
@@ -410,11 +401,7 @@ def test_worker_kind_does_not_map_to_minimal():
     load_profile = (
         BehaviorLoadProfile.MINIMAL
         if profile.kind == "subagent"
-        else (
-            BehaviorLoadProfile.WORKER
-            if worker_capability
-            else BehaviorLoadProfile.FULL
-        )
+        else (BehaviorLoadProfile.WORKER if worker_capability else BehaviorLoadProfile.FULL)
     )
     assert load_profile == BehaviorLoadProfile.WORKER, "worker kind 不应该映射到 MINIMAL"
 
@@ -432,11 +419,7 @@ def test_main_kind_falls_through_to_full():
     load_profile = (
         BehaviorLoadProfile.MINIMAL
         if profile.kind == "subagent"
-        else (
-            BehaviorLoadProfile.WORKER
-            if worker_capability
-            else BehaviorLoadProfile.FULL
-        )
+        else (BehaviorLoadProfile.WORKER if worker_capability else BehaviorLoadProfile.FULL)
     )
     assert load_profile == BehaviorLoadProfile.FULL, "main kind 应走 FULL"
 
@@ -481,7 +464,7 @@ async def test_build_context_request_worker_uses_delegation_target_over_session_
         db_path=str(tmp_path / "w3-build-context-request.db"),
         artifacts_dir=str(tmp_path / "artifacts"),
     )
-    service = AgentContextService(store_group, project_root=tmp_path)
+    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     task = _make_w3_task("task-w3-override-001")
     runtime_context = RuntimeControlContext(
@@ -515,7 +498,7 @@ async def test_build_context_request_chat_uses_session_owner(tmp_path: Path):
         db_path=str(tmp_path / "w3-build-context-request-chat.db"),
         artifacts_dir=str(tmp_path / "artifacts"),
     )
-    service = AgentContextService(store_group, project_root=tmp_path)
+    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     task = _make_w3_task("task-w3-chat-001")
     runtime_context = RuntimeControlContext(
