@@ -1,0 +1,35 @@
+{
+  "fixture": {
+    "fixture_id": "f149-current-v1",
+    "data_source": "deterministic-fixture",
+    "not_real_backend": true,
+    "fixture_server": "reference-capture-vite.config.mjs",
+    "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc",
+    "captured_at": "2026-07-20T11:02:00Z",
+    "note": "Current production frontend rendered with empty/minimal deterministic API fixtures; no live backend or real user data."
+  },
+  "captures": [
+    { "file": "approvals-desktop.png", "route": "/approvals", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "approvals-390.png", "route": "/approvals", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "tasks-desktop.png", "route": "/work", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "tasks-390.png", "route": "/work", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "task-detail-desktop.png", "route": "/tasks/f149-reference-task", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "task-detail-390.png", "route": "/tasks/f149-reference-task", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "automation-desktop.png", "route": "/automation", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "automation-390.png", "route": "/automation", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "settings-desktop.png", "route": "/settings", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "settings-390.png", "route": "/settings", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "agents-desktop.png", "route": "/agents", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "agents-390.png", "route": "/agents", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "memory-desktop.png", "route": "/memory", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "memory-390.png", "route": "/memory", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "files-desktop.png", "route": "/files", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "files-390.png", "route": "/files", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "skills-desktop.png", "route": "/skills", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "skills-390.png", "route": "/skills", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "mcp-desktop.png", "route": "/mcp", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "mcp-390.png", "route": "/mcp", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "f148-shell-desktop.png", "route": "/", "viewport": { "width": 1440, "height": 1024 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true },
+    { "file": "f148-shell-390.png", "route": "/", "viewport": { "width": 390, "height": 844 }, "captured_at": "2026-07-20T11:02:00Z", "commit": "9d5e1e48691c5ae5a12b33f224d64ac03d5442fc", "data_source": "deterministic-fixture", "fixture_id": "f149-current-v1", "not_real_backend": true }
+  ]
+}
