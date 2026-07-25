@@ -788,6 +788,7 @@ def check_changed_scope(repo: Path, *, scope_mode: str = "feature") -> None:
     changes = changed_paths(repo)
     owned = scope_owned_paths(repo)
     owned_globs = scope_owned_globs(repo)
+    f149_t011_active = F149_T011_AUTHORITY_PATHS <= changes
     for path in changes:
         if path.startswith(".specify/features/") and not path.startswith(
             FEATURE_REL.as_posix()
@@ -809,6 +810,8 @@ def check_changed_scope(repo: Path, *, scope_mode: str = "feature") -> None:
         if (
             path.startswith("octoagent/") or path.startswith("unowned/")
         ) and not path_owned_by_scope(path, owned, owned_globs):
+            if f149_t011_active and path in F149_T011_AUTHORITY_PATHS:
+                continue
             code = (
                 "DECLARED_NEW_WITHOUT_OWNER"
                 if path.endswith("declared.py")
@@ -1417,6 +1420,81 @@ F149_T010_ROUTE_AUTHORITY = MappingProxyType(
 F149_T010_AUTHORITY_PATHS = frozenset(
     {F149_T010_WEB_CONTRACT_PATH, *F149_T010_ROUTE_AUTHORITY}
 )
+F149_T011_ACTION_REGISTRY_PATH = (
+    "octoagent/apps/gateway/src/octoagent/gateway/services/"
+    "control_plane/action_registry.py"
+)
+F149_T011_COORDINATOR_PATH = (
+    "octoagent/apps/gateway/src/octoagent/gateway/services/"
+    "control_plane/_coordinator.py"
+)
+F149_T011_TEST_PATH = "octoagent/apps/gateway/tests/test_f149_web_contract.py"
+F149_T011_AUTHORITY_PATHS = frozenset(
+    {
+        F149_T011_ACTION_REGISTRY_PATH,
+        F149_T011_COORDINATOR_PATH,
+        F149_T011_TEST_PATH,
+    }
+)
+F149_T011_ACTION_IDS = (
+    "agent_profile.update_resource_limits",
+    "behavior.read_file",
+    "behavior.write_file",
+    "behavior.restore_version",
+    "memory.consolidate",
+    "mcp_provider.install",
+    "mcp_provider.install_status",
+)
+F149_T011_REGISTRY_ADDITIONS = frozenset(
+    {
+        "ActionHandler",
+        "F149_ACTION_IDS",
+        "F149ResourceLimitsValues",
+        "F149ResourceLimitsParams",
+        "F149ResourceLimitsResult",
+        "F149BehaviorReadParams",
+        "F149BehaviorReadResult",
+        "F149BehaviorWriteParams",
+        "F149BehaviorWriteResult",
+        "F149BehaviorRestoreParams",
+        "F149BehaviorRestoreResult",
+        "F149MemoryConsolidateParams",
+        "F149MemoryConsolidateResult",
+        "F149McpInstallParams",
+        "F149McpInstallResult",
+        "F149McpInstallStatusParams",
+        "F149McpInstallStatusResult",
+        "ActionContractDefinition",
+        "_f149_models",
+        "_missing_handler_definition",
+        "build_action_contracts",
+        "build_action_registry_from_contracts",
+        "export_f149_action_contract",
+    }
+)
+F149_T011_COORDINATOR_MEMBERS = frozenset(
+    {
+        "__init__",
+        "get_action_contracts",
+        "export_f149_action_contract",
+        "_dispatch_action",
+    }
+)
+F149_T011_TEST_PUBLIC_SYMBOLS = frozenset(
+    {
+        "ORACLE",
+        "ACTION_ORACLE",
+        "EXPECTED_RESOURCES",
+        "EXPECTED_ENDPOINTS",
+        "EXPECTED_F149_ACTION_IDS",
+        "F149_ACTION_SAMPLES",
+        "test_snapshot_contract_closes_envelope_and_resource_names",
+        "test_resource_endpoint_manifest_exports_finite_response_schemas",
+        "test_task_detail_response_keeps_only_named_raw_event_payload",
+        "test_action_registry_contracts_share_handler_validation_and_artifact",
+        "test_action_contract_rejects_invalid_params_before_owner",
+    }
+)
 F150_FORBIDDEN_PATTERNS = (
     r"\bBypass\b",
     r"service[_ -]?token",
@@ -1838,6 +1916,189 @@ def validate_f149_t010_scope(repo: Path, base_ref: str) -> None:
         _validate_f149_t010_authority_path(repo, base_ref, relative)
 
 
+def _f149_t011_literal(tree: ast.Module, name: str) -> Any:
+    names = _f150_named_statements(tree.body)
+    node = names.get(name)
+    require(
+        isinstance(node, (ast.Assign, ast.AnnAssign)),
+        "F149_T011_PROTECTED_SEMANTIC_DRIFT",
+        name,
+    )
+    value = node.value
+    try:
+        return ast.literal_eval(value)
+    except (TypeError, ValueError) as exc:
+        fail("F149_T011_PROTECTED_SEMANTIC_DRIFT", f"{name}: {exc}")
+
+
+def _f149_t011_call_names(node: ast.AST) -> list[str]:
+    names: list[str] = []
+    for candidate in ast.walk(node):
+        if not isinstance(candidate, ast.Call):
+            continue
+        function = candidate.func
+        if isinstance(function, ast.Name):
+            names.append(function.id)
+        elif isinstance(function, ast.Attribute):
+            names.append(function.attr)
+    return names
+
+
+def _validate_f149_t011_registry(baseline: str, current: str) -> None:
+    try:
+        baseline_tree, current_tree = ast.parse(baseline), ast.parse(current)
+    except SyntaxError as exc:
+        fail("F149_T011_PROTECTED_SEMANTIC_DRIFT", str(exc))
+    baseline_names = _f150_named_statements(baseline_tree.body)
+    current_names = _f150_named_statements(current_tree.body)
+    additions = set(current_names) - set(baseline_names)
+    require(
+        additions == set(F149_T011_REGISTRY_ADDITIONS)
+        and not (set(baseline_names) - set(current_names))
+        and _f150_protected_dump(
+            baseline_tree.body,
+            F149_T011_REGISTRY_ADDITIONS,
+        )
+        == _f150_protected_dump(
+            current_tree.body,
+            F149_T011_REGISTRY_ADDITIONS,
+        )
+        and all(
+            _f150_new_module_statement_allowed(
+                current_names[name],
+                F149_T011_REGISTRY_ADDITIONS,
+            )
+            for name in additions
+        ),
+        "F149_T011_PROTECTED_SEMANTIC_DRIFT",
+        "action registry sibling",
+    )
+    require(
+        tuple(_f149_t011_literal(current_tree, "F149_ACTION_IDS"))
+        == F149_T011_ACTION_IDS,
+        "F149_T011_PROTECTED_SEMANTIC_DRIFT",
+        "F149 action ids",
+    )
+    contract = current_names["ActionContractDefinition"]
+    require(
+        isinstance(contract, ast.ClassDef)
+        and {"definition", "handler", "params_model", "result_model"}
+        <= set(_f150_named_statements(contract.body))
+        and {
+            "validate_params",
+            "validate_result",
+            "params_error_code",
+        }
+        <= set(_f150_named_statements(contract.body)),
+        "F149_T011_PROTECTED_SEMANTIC_DRIFT",
+        "ActionContractDefinition",
+    )
+    build_calls = _f149_t011_call_names(current_names["build_action_contracts"])
+    require(
+        build_calls.count("build_action_registry") == 1
+        and build_calls.count("model_json_schema") == 2,
+        "F149_T011_PROTECTED_SEMANTIC_DRIFT",
+        "contract builder source",
+    )
+
+
+def _validate_f149_t011_coordinator(baseline: str, current: str) -> None:
+    _validate_f150_class(
+        baseline,
+        current,
+        "ControlPlaneService",
+        F149_T011_COORDINATOR_MEMBERS,
+    )
+    _, current_class = _f150_class_node(current, "ControlPlaneService")
+    members = _f150_named_statements(current_class.body)
+    init_calls = _f149_t011_call_names(members["__init__"])
+    dispatch_calls = _f149_t011_call_names(members["_dispatch_action"])
+    require(
+        init_calls.count("build_action_contracts") == 1
+        and init_calls.count("build_action_registry_from_contracts") == 1
+        and "build_action_registry" not in init_calls
+        and dispatch_calls.count("validate_params") == 1
+        and dispatch_calls.count("validate_result") == 1
+        and dispatch_calls.count("handler") == 1
+        and _f149_t011_call_names(members["export_f149_action_contract"]).count(
+            "export_f149_action_contract"
+        )
+        == 1,
+        "F149_T011_PROTECTED_SEMANTIC_DRIFT",
+        "coordinator contract seam",
+    )
+
+
+def _validate_f149_t011_test(current: str) -> None:
+    try:
+        current_tree = ast.parse(current)
+    except SyntaxError as exc:
+        fail("F149_T011_PROTECTED_SEMANTIC_DRIFT", str(exc))
+    names = _f150_named_statements(current_tree.body)
+    public_names = {name for name in names if not name.startswith("_")}
+    test_names = {
+        name
+        for name, node in names.items()
+        if name.startswith("test_")
+        and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    require(
+        public_names == set(F149_T011_TEST_PUBLIC_SYMBOLS)
+        and len(test_names) == 5
+        and _f149_t011_literal(current_tree, "ACTION_ORACLE")
+        == "F149_ACTION_CONTRACT_MISSING"
+        and tuple(_f149_t011_literal(current_tree, "EXPECTED_F149_ACTION_IDS"))
+        == F149_T011_ACTION_IDS
+        and not any(
+            name in {"run", "Popen", "system"}
+            for name in _f149_t011_call_names(current_tree)
+        ),
+        "F149_T011_PROTECTED_SEMANTIC_DRIFT",
+        "F149 contract tests",
+    )
+
+
+def _validate_f149_t011_authority_path(
+    repo: Path,
+    base_ref: str,
+    relative: str,
+) -> None:
+    target = repo / relative
+    require(
+        target.is_file(),
+        "F149_T011_PROTECTED_SEMANTIC_DRIFT",
+        relative,
+    )
+    baseline = _f150_source_at_ref(repo, base_ref, relative)
+    current = target.read_text(encoding="utf-8")
+    validate_f150_security_surface(relative, current, baseline)
+    if relative == F149_T011_ACTION_REGISTRY_PATH:
+        _validate_f149_t011_registry(baseline, current)
+    elif relative == F149_T011_COORDINATOR_PATH:
+        _validate_f149_t011_coordinator(baseline, current)
+    else:
+        require(
+            not baseline,
+            "F149_T011_PROTECTED_SEMANTIC_DRIFT",
+            "test baseline",
+        )
+        _validate_f149_t011_test(current)
+
+
+def validate_f149_t011_scope(repo: Path, base_ref: str) -> None:
+    """只允许T011收敛F149实际action的单一合同record。"""
+
+    resolve_base(repo, base_ref)
+    scoped = changed_paths(repo) & F149_T011_AUTHORITY_PATHS
+    require(
+        scoped == F149_T011_AUTHORITY_PATHS,
+        "F149_T011_PROTECTED_SEMANTIC_DRIFT",
+        "reviewed path set",
+    )
+    for relative in sorted(scoped):
+        _validate_f149_t011_authority_path(repo, base_ref, relative)
+
+
 def _validate_f150_module(
     baseline: str, current: str, allowed: frozenset[str], *, exact_new: bool
 ) -> None:
@@ -1921,6 +2182,7 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
     resolve_base(repo, base_ref)
     changed = changed_paths(repo)
     f149_t010_active = F149_T010_WEB_CONTRACT_PATH in changed
+    f149_t011_active = F149_T011_AUTHORITY_PATHS <= changed
     for relative in sorted(changed):
         if relative.startswith("octoagent/frontend/src/") and relative.endswith(
             (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
@@ -1933,6 +2195,9 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
             continue
         if f149_t010_active and relative in F149_T010_AUTHORITY_PATHS:
             _validate_f149_t010_authority_path(repo, base_ref, relative)
+            continue
+        if f149_t011_active and relative in F149_T011_AUTHORITY_PATHS:
+            _validate_f149_t011_authority_path(repo, base_ref, relative)
             continue
         contract = F150_AUTHORITY_PATHS.get(relative)
         path = repo / relative

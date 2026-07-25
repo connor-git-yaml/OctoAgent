@@ -51,6 +51,7 @@ REPOSITORY_COMPLEXITY_ORACLE = "F151_REPOSITORY_COMPLEXITY_SNAPSHOT_NOT_INSTALLE
 ATOMIC_SNAPSHOT_LIFECYCLE_ORACLE = "F151_ATOMIC_SNAPSHOT_LIFECYCLE_MISSING"
 F150_AUTHORITY_ORACLE = "F150_AUTHORITY_SCOPE_MISSING"
 F149_T010_AUTHORITY_ORACLE = "F149_T010_AUTHORITY_SCOPE_MISSING"
+F149_T011_AUTHORITY_ORACLE = "F149_T011_AUTHORITY_SCOPE_MISSING"
 REPOSITORY_COMPLEXITY_SNAPSHOT = REPO_ROOT / "repo-scripts/runtime-architecture-ceiling.v1.json"
 FORMAL_OFFLINE_ENV_KEY = "LITELLM_LOCAL_MODEL_COST_MAP"
 FORMAL_ENV_ORDER = ("PYTHONNOUSERSITE", "PYTHONPATH", FORMAL_OFFLINE_ENV_KEY)
@@ -688,6 +689,245 @@ def _assert_f149_t010_authority_contract(tmp_path: Path, checker: Any) -> None:
         with pytest.raises(checker.GateFailure):
             validator(repo, "HEAD")
         assert _f149_t010_scope_bytes(repo) == rejected, f"{label}: validator wrote files"
+
+
+F149_T011_ACTION_IDS = (
+    "agent_profile.update_resource_limits",
+    "behavior.read_file",
+    "behavior.write_file",
+    "behavior.restore_version",
+    "memory.consolidate",
+    "mcp_provider.install",
+    "mcp_provider.install_status",
+)
+
+F149_T011_REGISTRY_NAMES = (
+    "ActionHandler",
+    "F149_ACTION_IDS",
+    "F149ResourceLimitsValues",
+    "F149ResourceLimitsParams",
+    "F149ResourceLimitsResult",
+    "F149BehaviorReadParams",
+    "F149BehaviorReadResult",
+    "F149BehaviorWriteParams",
+    "F149BehaviorWriteResult",
+    "F149BehaviorRestoreParams",
+    "F149BehaviorRestoreResult",
+    "F149MemoryConsolidateParams",
+    "F149MemoryConsolidateResult",
+    "F149McpInstallParams",
+    "F149McpInstallResult",
+    "F149McpInstallStatusParams",
+    "F149McpInstallStatusResult",
+    "ActionContractDefinition",
+    "_f149_models",
+    "_missing_handler_definition",
+    "build_action_contracts",
+    "build_action_registry_from_contracts",
+    "export_f149_action_contract",
+)
+
+
+def _f149_t011_registry_source() -> str:
+    lines = [
+        "ActionHandler = object",
+        f"F149_ACTION_IDS = {F149_T011_ACTION_IDS!r}",
+    ]
+    for name in F149_T011_REGISTRY_NAMES:
+        if name in {"ActionHandler", "F149_ACTION_IDS", "ActionContractDefinition"}:
+            continue
+        if name.startswith("F149"):
+            lines.extend((f"class {name}:", "    pass", ""))
+    lines.extend(
+        (
+            "class ActionContractDefinition:",
+            "    definition: object",
+            "    handler: object",
+            "    params_model: object",
+            "    result_model: object",
+            "    def validate_params(self, params):",
+            "        return params",
+            "    def validate_result(self, result):",
+            "        return result",
+            "    def params_error_code(self, error):",
+            "        return 'ACTION_PARAMS_INVALID'",
+            "",
+            "def build_action_registry():",
+            "    return 'baseline'",
+            "",
+            "def _f149_models(action_id):",
+            "    return action_id",
+            "",
+            "def _missing_handler_definition(action_id):",
+            "    return action_id",
+            "",
+            "def build_action_contracts(handlers):",
+            "    registry = build_action_registry()",
+            "    first = handlers.model_json_schema()",
+            "    second = handlers.model_json_schema()",
+            "    return registry, first, second",
+            "",
+            "def build_action_registry_from_contracts(contracts):",
+            "    return contracts",
+            "",
+            "def export_f149_action_contract(contracts):",
+            "    return contracts",
+            "",
+        )
+    )
+    return "\n".join(lines)
+
+
+def _f149_t011_coordinator_source() -> str:
+    return (
+        "class ControlPlaneService:\n"
+        "    def __init__(self, handlers):\n"
+        "        self._action_contracts = build_action_contracts(handlers)\n"
+        "        self._registry = build_action_registry_from_contracts(\n"
+        "            self._action_contracts\n"
+        "        )\n"
+        "    def existing(self):\n"
+        "        return True\n"
+        "    def get_action_contracts(self):\n"
+        "        return self._action_contracts\n"
+        "    def export_f149_action_contract(self):\n"
+        "        return export_f149_action_contract(self._action_contracts)\n"
+        "    async def _dispatch_action(self, request):\n"
+        "        contract = self._action_contracts[0]\n"
+        "        params = contract.validate_params(request.params)\n"
+        "        result = await contract.handler(params)\n"
+        "        contract.validate_result(result)\n"
+        "        return result\n"
+    )
+
+
+def _f149_t011_test_source() -> str:
+    return (
+        "ORACLE = 'F149_REST_CONTRACT_MISSING'\n"
+        "ACTION_ORACLE = 'F149_ACTION_CONTRACT_MISSING'\n"
+        "EXPECTED_RESOURCES = ()\n"
+        "EXPECTED_ENDPOINTS = ()\n"
+        f"EXPECTED_F149_ACTION_IDS = {F149_T011_ACTION_IDS!r}\n"
+        "F149_ACTION_SAMPLES = {}\n\n"
+        "def test_snapshot_contract_closes_envelope_and_resource_names():\n"
+        "    pass\n\n"
+        "def test_resource_endpoint_manifest_exports_finite_response_schemas():\n"
+        "    pass\n\n"
+        "def test_task_detail_response_keeps_only_named_raw_event_payload():\n"
+        "    pass\n\n"
+        "async def test_action_registry_contracts_share_handler_validation_and_artifact():\n"
+        "    pass\n\n"
+        "async def test_action_contract_rejects_invalid_params_before_owner():\n"
+        "    pass\n"
+    )
+
+
+def _f149_t011_contract_repo(tmp_path: Path) -> Path:
+    repo = _seed_repo(tmp_path)
+    registry = repo / (
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/action_registry.py"
+    )
+    coordinator = registry.with_name("_coordinator.py")
+    _write(registry, "def build_action_registry():\n    return 'baseline'\n")
+    _write(
+        coordinator,
+        "class ControlPlaneService:\n"
+        "    def __init__(self, handlers):\n"
+        "        self._registry = build_action_registry()\n"
+        "    def existing(self):\n"
+        "        return True\n"
+        "    async def _dispatch_action(self, request):\n"
+        "        return await self._registry[request.action_id](request)\n",
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "pre-F149 T011 baseline")
+    _write(registry, _f149_t011_registry_source())
+    _write(coordinator, _f149_t011_coordinator_source())
+    _write(
+        repo / "octoagent/apps/gateway/tests/test_f149_web_contract.py",
+        _f149_t011_test_source(),
+    )
+    return repo
+
+
+def _f149_t011_scope_bytes(repo: Path) -> dict[str, str]:
+    paths = (
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/action_registry.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/control_plane/_coordinator.py",
+        "octoagent/apps/gateway/tests/test_f149_web_contract.py",
+    )
+    return {path: _sha(repo / path) for path in paths}
+
+
+def _assert_f149_t011_authority_contract(tmp_path: Path, checker: Any) -> None:
+    validator = getattr(checker, "validate_f149_t011_scope", None)
+    if not callable(validator):
+        pytest.fail(F149_T011_AUTHORITY_ORACLE, pytrace=False)
+    accepted = _f149_t011_contract_repo(tmp_path / "accepted")
+    accepted_bytes = _f149_t011_scope_bytes(accepted)
+    checker.check_changed_scope(accepted)
+    validator(accepted, "HEAD")
+    assert _f149_t011_scope_bytes(accepted) == accepted_bytes
+    cases = (
+        ("registry sibling", "return 'baseline'", "return 'drift'"),
+        (
+            "extra public registry",
+            "def export_f149_action_contract(contracts):",
+            "def UnreviewedContract():\n    pass\n\ndef export_f149_action_contract(contracts):",
+        ),
+        (
+            "coordinator sibling",
+            "    def existing(self):\n        return True",
+            "    def existing(self):\n        return False",
+        ),
+        (
+            "second dispatcher",
+            "        self._action_contracts = build_action_contracts(handlers)",
+            "        self._action_contracts = build_action_contracts(handlers)\n"
+            "        build_action_contracts(handlers)",
+        ),
+        (
+            "wrong action ids",
+            "'mcp_provider.install_status')",
+            "'mcp_provider.uninstall')",
+        ),
+        (
+            "extra public test",
+            "def test_snapshot_contract_closes_envelope_and_resource_names():",
+            "def UnreviewedTestHelper():\n    pass\n\n"
+            "def test_snapshot_contract_closes_envelope_and_resource_names():",
+        ),
+    )
+    for index, (label, old, new) in enumerate(cases):
+        repo = _f149_t011_contract_repo(tmp_path / f"reject-{index:02d}")
+        validator(repo, "HEAD")
+        before = _f149_t011_scope_bytes(repo)
+        if index < 2:
+            target = repo / (
+                "octoagent/apps/gateway/src/octoagent/gateway/services/"
+                "control_plane/action_registry.py"
+            )
+        elif index < 4:
+            target = repo / (
+                "octoagent/apps/gateway/src/octoagent/gateway/services/"
+                "control_plane/_coordinator.py"
+            )
+        else:
+            target = repo / "octoagent/apps/gateway/tests/test_f149_web_contract.py"
+        _write(
+            target,
+            _replace_exact(
+                target.read_text(encoding="utf-8"),
+                old,
+                new,
+                expected_count=1,
+            ),
+        )
+        rejected = _f149_t011_scope_bytes(repo)
+        assert rejected != before, f"{label}: no observable input delta"
+        with pytest.raises(checker.GateFailure):
+            validator(repo, "HEAD")
+        assert _f149_t011_scope_bytes(repo) == rejected, f"{label}: validator wrote files"
 
 
 def _seed_authority_documents(repo: Path) -> None:
@@ -4678,6 +4918,15 @@ class TestManifestIntegrity:
             _assert_f149_t010_authority_contract(tmp_path, checker)
         except AssertionError as exc:
             pytest.fail(f"{F149_T010_AUTHORITY_ORACLE}: {exc}", pytrace=False)
+
+    def test_f149_t011_scope_allows_one_action_contract_seam_and_rejects_sibling_drift(
+        self, tmp_path: Path
+    ) -> None:
+        checker = _load_frontier_checker()
+        try:
+            _assert_f149_t011_authority_contract(tmp_path, checker)
+        except AssertionError as exc:
+            pytest.fail(f"{F149_T011_AUTHORITY_ORACLE}: {exc}", pytrace=False)
 
     def test_rgr_scope_manifest_ids_refs_paths_and_declared_states_are_machine_complete(
         self, tmp_path: Path
