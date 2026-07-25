@@ -1,0 +1,15 @@
+task_id: T001-corrective
+phase: REFACTOR
+behavior: F149边界checker不能被property fetch、header mutation、token helper或query token绕过
+command: cd octoagent/frontend && npx vitest run scripts/check-f149-boundaries.test.ts scripts/check-f149-style-ratchet.test.ts scripts/check-openapi-generated.test.ts scripts/check-frontend-changed-lines-coverage.test.ts scripts/package-scripts.test.ts
+executed_at_utc: 2026-07-25T09:34:45Z
+head_sha: 57350c002c91f3d3003f80252af674674db35587
+exit_code: 0
+oracle_expected: T001-T005 targeted gates全部通过，仓库实扫只报告由后续owner修复的真实违规
+oracle_observed: 5 files和12 tests通过；实扫仅报告4个已登记owner文件，F150 FrontDoorGate无误报
+output_file: refactor.log
+quality_review:
+  - property与element access fetch共用唯一检测函数
+  - header mutation与query parameter mutation复用literal call识别
+  - F150 FrontDoorGate是唯一token helper额外allowlist
+secret_scan: 合成fixture不包含真实凭证，证据不记录运行环境或用户数据

@@ -64,6 +64,11 @@
   合法路径通过；REFACTOR收紧三类误报后同selector继续2/2通过。当前仓库实扫只剩
   `approval-center.ts`、`memory-candidates-types.ts`、`AgentCenter.tsx`、
   `SkillCenter.tsx`四个由后续任务拥有的真实direct fetch。
+- main独立复审T001时发现原AST规则仍可被`window.fetch`、`Headers.set`、
+  `getFrontDoorToken`直读和手写`access_token` query四种写法绕过；corrective RED
+  以`F149_BOUNDARY_RULES_MISSING`同时证明四项漏报，修复后同selector 2/2通过。
+  全部T001–T005 targeted tests为12/12；仓库实扫现在也报告上述四个owner文件内的
+  header/token违规，同时明确允许F150全局`FrontDoorGate`读取token，未引入第二认证入口。
 - T002以同一Vitest selector完成真实RED→GREEN→REFACTOR：五类seeded
   index/style/theme/token regression从全漏报变为精确拒绝，合法`--cp-*`控制通过；
   当前仓库CLI以`index.css=4476`、palette=336、Spotify=6、non-cp token=59、

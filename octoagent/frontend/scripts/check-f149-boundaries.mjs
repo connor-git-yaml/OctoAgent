@@ -13,6 +13,8 @@ import ts from "typescript";
 const SOURCE_EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".ts", ".tsx"]);
 const TRANSPORT_ALLOWLIST = new Set(["api/client.ts"]);
 const NON_F149_FETCH_ALLOWLIST = new Set(["components/shell/BuildVersionWatcher.tsx"]);
+const TOKEN_HELPER_ALLOWLIST = new Set(["components/FrontDoorGate.tsx"]);
+const HEADER_MUTATION_METHODS = new Set(["append", "set"]);
 
 function normalizePath(value) {
   return value.split(path.sep).join("/");
@@ -147,27 +149,82 @@ function containsLegacyIdentifier(node) {
   return found;
 }
 
+function propertyName(node) {
+  if (ts.isIdentifier(node) || ts.isStringLiteralLike(node)) {
+    return node.text;
+  }
+  return "";
+}
+
+function calledPropertyName(expression) {
+  if (ts.isPropertyAccessExpression(expression)) {
+    return expression.name.text;
+  }
+  if (
+    ts.isElementAccessExpression(expression) &&
+    expression.argumentExpression &&
+    ts.isStringLiteralLike(expression.argumentExpression)
+  ) {
+    return expression.argumentExpression.text;
+  }
+  return "";
+}
+
+function isDirectFetchCall(node) {
+  return (
+    ts.isCallExpression(node) &&
+    ((ts.isIdentifier(node.expression) && node.expression.text === "fetch") ||
+      calledPropertyName(node.expression) === "fetch")
+  );
+}
+
+function calledWithLiteral(node, methods, value) {
+  return (
+    ts.isCallExpression(node) &&
+    methods.has(calledPropertyName(node.expression)) &&
+    node.arguments.length > 0 &&
+    ts.isStringLiteralLike(node.arguments[0]) &&
+    node.arguments[0].text.toLowerCase() === value
+  );
+}
+
 function nodeViolations(relativePath, sourceFile) {
   const violations = [];
   const currentLayer = layer(relativePath);
   const allowTransport = TRANSPORT_ALLOWLIST.has(relativePath);
   const allowFetch = allowTransport || NON_F149_FETCH_ALLOWLIST.has(relativePath);
+  const allowTokenHelper = allowTransport || TOKEN_HELPER_ALLOWLIST.has(relativePath);
   function visit(node) {
-    if (
-      !allowFetch &&
-      ts.isCallExpression(node) &&
-      ts.isIdentifier(node.expression) &&
-      node.expression.text === "fetch"
-    ) {
+    if (!allowFetch && isDirectFetchCall(node)) {
       violations.push(["F149_DIRECT_FETCH", "网络调用必须经api/client"]);
     }
     if (
       !allowTransport &&
       ts.isPropertyAssignment(node) &&
-      ((ts.isIdentifier(node.name) && node.name.text === "Authorization") ||
-        (ts.isStringLiteral(node.name) && node.name.text === "Authorization"))
+      propertyName(node.name).toLowerCase() === "authorization"
     ) {
       violations.push(["F149_AUTH_HEADER_BYPASS", "认证header只能由api/client构造"]);
+    }
+    if (
+      !allowTransport &&
+      calledWithLiteral(node, HEADER_MUTATION_METHODS, "authorization")
+    ) {
+      violations.push(["F149_AUTH_HEADER_BYPASS", "认证header只能由api/client构造"]);
+    }
+    if (
+      !allowTokenHelper &&
+      ts.isIdentifier(node) &&
+      node.text === "getFrontDoorToken"
+    ) {
+      violations.push(["F149_TOKEN_HELPER_BYPASS", "token只能由api/client读取"]);
+    }
+    if (
+      !allowTransport &&
+      (calledWithLiteral(node, HEADER_MUTATION_METHODS, "access_token") ||
+        ((ts.isStringLiteralLike(node) || ts.isTemplateExpression(node)) &&
+          /[?&]access_token=/.test(node.getText(sourceFile))))
+    ) {
+      violations.push(["F149_QUERY_TOKEN_BYPASS", "query token只能由F150 SSE builder构造"]);
     }
     if (
       currentLayer === "ui" &&

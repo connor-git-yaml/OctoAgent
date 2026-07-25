@@ -31,9 +31,38 @@ const violations: Fixture[] = [
     files: { "pages/Tasks.tsx": "export const load = () => fetch('/api/tasks');" },
   },
   {
+    code: "F149_DIRECT_FETCH",
+    files: { "pages/Tasks.tsx": "export const load = () => window.fetch('/api/tasks');" },
+  },
+  {
     code: "F149_AUTH_HEADER_BYPASS",
     files: {
       "api/tasks.ts": "export const headers = { Authorization: 'Bearer local-token' };",
+    },
+  },
+  {
+    code: "F149_AUTH_HEADER_BYPASS",
+    files: {
+      "api/tasks.ts":
+        "export const headers = new Headers(); " +
+        "headers.set('Authorization', 'Bearer local-token');",
+    },
+  },
+  {
+    code: "F149_TOKEN_HELPER_BYPASS",
+    files: {
+      "api/tasks.ts":
+        "import { getFrontDoorToken } from './client'; " +
+        "export const token = getFrontDoorToken();",
+      "api/client.ts": "export const getFrontDoorToken = () => 'token';",
+    },
+  },
+  {
+    code: "F149_QUERY_TOKEN_BYPASS",
+    files: {
+      "api/tasks.ts":
+        "export const build = (path: string, token: string) => " +
+        "`${path}?access_token=${encodeURIComponent(token)}`;",
     },
   },
   {
@@ -96,7 +125,12 @@ describe("F149 boundary checker", () => {
 
   it("accepts the single transport and downward dependency path", async () => {
     const root = await createFixture({
-      "api/client.ts": "export const request = async () => ({ ok: true });",
+      "api/client.ts":
+        "export const request = async () => ({ ok: true }); " +
+        "export const getFrontDoorToken = () => 'token';",
+      "components/FrontDoorGate.tsx":
+        "import { getFrontDoorToken } from '../api/client'; " +
+        "export const FrontDoorGate = () => getFrontDoorToken();",
       "platform/contracts.ts": "export type RequestOptions = { signal?: AbortSignal };",
       "api/f149/tasks.ts":
         "import { request } from '../client'; " +

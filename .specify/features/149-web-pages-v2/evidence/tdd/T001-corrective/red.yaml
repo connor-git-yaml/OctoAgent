@@ -1,0 +1,11 @@
+task_id: T001-corrective
+phase: RED
+behavior: F149边界checker不能被property fetch、header mutation、token helper或query token绕过
+command: cd octoagent/frontend && npx vitest run scripts/check-f149-boundaries.test.ts
+executed_at_utc: 2026-07-25T09:34:45Z
+head_sha: 57350c002c91f3d3003f80252af674674db35587
+exit_code: 1
+oracle_expected: 测试正常收集，现有checker因漏报四类语法变体命中F149_BOUNDARY_RULES_MISSING
+oracle_observed: 2 tests正常执行；合法控制通过；四类绕过均被错误接受且由唯一目标oracle报告
+output_file: red.log
+secret_scan: 合成fixture不包含真实凭证，证据不记录运行环境或用户数据
