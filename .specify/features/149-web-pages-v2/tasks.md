@@ -55,6 +55,8 @@
 
 ### T002 — style/token/index.css ratchet checker
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T002/`。当前全局遗留值只作为不恶化ratchet，不宣称已清零。
 - **层/FR**：L4 checker；FR-009/019/029。
 - **文件**：`octoagent/frontend/scripts/check-f149-style-ratchet.mjs`、test、fixtures。
 - **依赖**：T000。

@@ -1,0 +1,14 @@
+RUN  v2.1.9
+
+scripts/check-f149-style-ratchet.test.ts (2 tests | 1 failed)
+× F149 style ratchet > rejects every seeded style and theme regression
+  F149_STYLE_RATCHET_RULES_MISSING:
+  F149_INDEX_CSS_GROWTH,
+  F149_HARDCODED_PALETTE_GROWTH,
+  F149_SPOTIFY_THEME_GROWTH,
+  F149_SECOND_THEME_GROWTH,
+  F149_NON_CP_TOKEN_GROWTH
+
+Test Files  1 failed (1)
+Tests       1 failed | 1 passed (2)
+process exit=1

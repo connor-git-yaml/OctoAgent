@@ -64,3 +64,7 @@
   合法路径通过；REFACTOR收紧三类误报后同selector继续2/2通过。当前仓库实扫只剩
   `approval-center.ts`、`memory-candidates-types.ts`、`AgentCenter.tsx`、
   `SkillCenter.tsx`四个由后续任务拥有的真实direct fetch。
+- T002以同一Vitest selector完成真实RED→GREEN→REFACTOR：五类seeded
+  index/style/theme/token regression从全漏报变为精确拒绝，合法`--cp-*`控制通过；
+  当前仓库CLI以`index.css=4476`、palette=336、Spotify=6、non-cp token=59、
+  second-theme=37作为诚实不恶化基线，未把遗留值伪报为已清零。

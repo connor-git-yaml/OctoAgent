@@ -1,0 +1,11 @@
+RUN  v2.1.9
+
+scripts/check-f149-style-ratchet.test.ts (2 tests)
+✓ F149 style ratchet > rejects every seeded style and theme regression
+✓ F149 style ratchet > accepts co-located styles that only consume cp tokens
+
+Test Files  1 passed (1)
+Tests       2 passed (2)
+process exit=0
+
+F149 style ratchet PASS {"indexLines":4476,"palette":336,"spotify":6,"nonCpToken":59,"secondTheme":37}

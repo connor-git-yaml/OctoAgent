@@ -1,0 +1,15 @@
+task_id: T002
+phase: RED
+behavior: style ratchet拒绝index.css增长、新palette、Spotify/第二主题及非cp token，同时接受cp token
+command: cd octoagent/frontend && npx vitest run scripts/check-f149-style-ratchet.test.ts
+executed_at_utc: 2026-07-25T09:02:42Z
+head_sha: 4c2d3f68591d3f94b9d6b5764a21f4f0d90a393d
+worktree_status_before: |-
+  ?? octoagent/frontend/scripts/check-f149-style-ratchet.mjs
+  ?? octoagent/frontend/scripts/check-f149-style-ratchet.test.ts
+exit_code: 1
+oracle_expected: inert checker漏报五类seeded regression并命中F149_STYLE_RATCHET_RULES_MISSING
+oracle_observed: 2 tests正常执行；合法cp-token控制通过；五类regression全部漏报，唯一失败为目标oracle
+output_file: red.log
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T002 evidence，命中即exit1
+secret_scan_exit_code: 0

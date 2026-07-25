@@ -1,0 +1,19 @@
+task_id: T002
+phase: REFACTOR
+behavior: style ratchet拒绝index.css增长、新palette、Spotify/第二主题及非cp token，同时接受cp token
+command: cd octoagent/frontend && npx vitest run scripts/check-f149-style-ratchet.test.ts
+executed_at_utc: 2026-07-25T09:03:15Z
+head_sha: 4c2d3f68591d3f94b9d6b5764a21f4f0d90a393d
+worktree_status_before: |-
+  ?? octoagent/frontend/scripts/check-f149-style-ratchet.mjs
+  ?? octoagent/frontend/scripts/check-f149-style-ratchet.test.ts
+exit_code: 0
+oracle_expected: 同一五类拒绝/合法控制及仓库ratchet继续通过
+oracle_observed: 2 tests通过，CLI对当前source输出冻结metrics并exit0
+output_file: refactor.log
+quality_review:
+  - 只冻结全局不恶化基线，不把当前遗留palette/Spotify误称为已清零
+  - 新增或净增加任一禁止项都会超过baseline并失败
+  - index.css以wc兼容换行计数固定4476且不得增长
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T002 evidence，命中即exit1
+secret_scan_exit_code: 0
