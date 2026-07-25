@@ -86,9 +86,10 @@ ARCH_PYTHONPATH="${ARCH_REPO_ROOT}/octoagent/packages/core/src:${ARCH_REPO_ROOT}
 if ! env PYTHONNOUSERSITE=1 PYTHONPATH="${ARCH_PYTHONPATH}" \
   uv run --project "${ARCH_REPO_ROOT}/octoagent" --no-sync python \
   "${ARCH_REPO_ROOT}/repo-scripts/check-runtime-architecture.py" all \
-  --base-ref "${ARCH_BASE_REF}"; then
+  --base-ref "${ARCH_BASE_REF}" \
+  --scope-mode repository; then
   echo "[ARCHITECTURE FAIL] F151 architecture gate 未通过"
-  echo "  详情: repo-scripts/check-runtime-architecture.py all --base-ref ${ARCH_BASE_REF}"
+  echo "  详情: repo-scripts/check-runtime-architecture.py all --base-ref ${ARCH_BASE_REF} --scope-mode repository"
   exit 1
 fi
 

@@ -100,6 +100,7 @@ jobs:
             uv run --project octoagent --no-sync python \
             repo-scripts/check-runtime-architecture.py all \
             --base-ref "${{ steps.architecture-base.outputs.base }}" \
+            --scope-mode repository \
             2>&1 | tee test-results/architecture/architecture.txt
 
       - name: Upload architecture report

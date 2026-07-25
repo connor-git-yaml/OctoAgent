@@ -96,6 +96,14 @@ def test_architecture_gate_runs_before_docs_fastpath_and_covers_docs_constitutio
         issues.append("real pre-commit architecture gate must precede docs-only exit")
     elif "--base-ref" not in hook[architecture:docs_fastpath]:
         issues.append("pre-commit architecture gate must consume an explicit base ref")
+    elif "--scope-mode repository" not in hook[architecture:docs_fastpath]:
+        issues.append("pre-commit architecture gate must use repository scope mode")
+
+    architecture_entry = _jobs().get("architecture")
+    if architecture_entry is None:
+        issues.append("architecture job missing")
+    elif "--scope-mode repository" not in _run_text(architecture_entry[1]):
+        issues.append("CI architecture gate must use repository scope mode")
 
     required = {
         "octoagent/**",

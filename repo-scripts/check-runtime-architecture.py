@@ -776,7 +776,14 @@ def path_owned_by_scope(path: str, exact_paths: set[str], globs: set[str]) -> bo
     return path in exact_paths or any(fnmatchcase(path, pattern) for pattern in globs)
 
 
-def check_changed_scope(repo: Path) -> None:
+def check_changed_scope(repo: Path, *, scope_mode: str = "feature") -> None:
+    require(
+        scope_mode in {"feature", "repository"},
+        "EVIDENCE_SCOPE_UNMAPPED",
+        scope_mode,
+    )
+    if scope_mode == "repository":
+        return
     changes = changed_paths(repo)
     owned = scope_owned_paths(repo)
     owned_globs = scope_owned_globs(repo)
@@ -1693,7 +1700,7 @@ def check_f150_scope(repo: Path) -> None:
         )
 
 
-def check_manifest_closure(repo: Path) -> None:
+def check_manifest_closure(repo: Path, *, scope_mode: str = "feature") -> None:
     lifecycle = read_json(manifest(repo, "artifact-lifecycle.v1.json"))
     if "content_policy" not in lifecycle:
         fail("QUALITY_CLASSIFICATION_INCOMPLETE")
@@ -1705,7 +1712,7 @@ def check_manifest_closure(repo: Path) -> None:
         if "octoagent.gateway.cli" in text:
             fail("LEGACY_EDGE_GROWTH", str(path.relative_to(repo)))
     check_cross_role(repo)
-    check_changed_scope(repo)
+    check_changed_scope(repo, scope_mode=scope_mode)
     check_namespace_maps(repo)
     planned = read_json(manifest(repo, "planned-diff.v1.json"))
     if any(
@@ -2397,8 +2404,8 @@ def check_tree_delete(repo: Path) -> None:
         fail("TREE_DELETE_MATCHER_INVALID")
 
 
-def check_quality(repo: Path) -> None:
-    check_manifest_closure(repo)
+def check_quality(repo: Path, *, scope_mode: str = "feature") -> None:
+    check_manifest_closure(repo, scope_mode=scope_mode)
     check_rgr_manifests(repo)
     check_tree_delete(repo)
     check_lifecycle_contract(
@@ -4890,11 +4897,11 @@ def recover_index(repo: Path, args: argparse.Namespace) -> JsonObject:
     return index
 
 
-def run_all(repo: Path, base_ref: str) -> None:
+def run_all(repo: Path, base_ref: str, scope_mode: str) -> None:
     resolve_base(repo, base_ref)
     check_import_direction(repo)
     check_retired_terms(repo)
-    check_quality(repo)
+    check_quality(repo, scope_mode=scope_mode)
     check_complexity(repo, base_ref, False)
 
 
@@ -4972,6 +4979,11 @@ def build_parser() -> argparse.ArgumentParser:
         sub.add_parser(name, parents=[repo_parent])
     all_gate = sub.add_parser("all", parents=[repo_parent])
     all_gate.add_argument("--base-ref", required=True)
+    all_gate.add_argument(
+        "--scope-mode",
+        choices=["feature", "repository"],
+        default="feature",
+    )
     finalize = sub.add_parser("finalize-verification", parents=[repo_parent])
     finalize.add_argument(
         "--mode", choices=["local-working-tree", "committed"], required=True
@@ -5057,7 +5069,7 @@ def main() -> int:
     elif args.command == "complexity":
         check_complexity(repo, args.base_ref, args.write_snapshot)
     elif args.command == "all":
-        run_all(repo, args.base_ref)
+        run_all(repo, args.base_ref, args.scope_mode)
     elif args.command == "finalize-verification":
         finalize_verification(
             repo,
