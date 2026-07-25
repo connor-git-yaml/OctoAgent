@@ -3,7 +3,7 @@
 ## 2026-07-23 Resume / Design
 
 - F151 stable precondition：`687f20fc6246e7157957ab51ac474d46e91578b6`，F150 worktree 已 fast-forward 到同一 commit。
-- F149 状态：Design/Tasks Gate 已完成，但 T000 正确等待 F150 stable；未执行 F149 production。
+- F149 当时状态：Design/Tasks Gate 已完成，T000 正确等待 F150 stable；未执行 F149 production。
 - 复核当前 front-door：现有 modes 为 `loopback|bearer|trusted_proxy`，F151 authority 保护 `FrontDoorConfig`、Guard、exposure 与 request dependencies，并明确要求 F150 更新 scope/hash/正负 tests。
 - 复核 Cloudflare 官方 contract：origin header、derived JWKS、Access session 与 named tunnel 生命周期已进入 Research/Spec。
 - Design 收敛：新增 manifest schema、origin contract、data model、clarifications 与 requirements checklist；未修改 production/tests。
@@ -204,5 +204,13 @@
   deps=`80d763e436542db820d7c468a8ef922fcc2cabff229ac3dab186917ed6ed2068`、
   route=`e540447c86cdb39edf118341c54950f13c6f78e31b1148c1b8a3a63782f59180`、
   test=`70d234f77b575f05e8aa870d77433af316a04b5a1340da74716b39bdda85848f`。
-- 本地实现、live与提交前验证已经完成，must-fix=0。由于尚未stage/commit，F149
-  T000所需的stable commit仍不存在；T017保持未勾选，不把工作树状态误报为稳定版。
+- 本地实现、live与提交前验证已经完成，must-fix=0。
+
+## 2026-07-25 T017 Stable
+
+- 产品实现提交：`bf29d6be7d7a86c298cd45699488a8640065a566`。
+- 仓库级门禁配套提交及当前稳定点：
+  `5e6f4846703b7126cd104c8b9678e0c2f5300cc8`。
+- T000～T017全部完成；F150 exact authority继续生效，F149 T000已获得可消费基线。
+- 两个提交已按普通、非force方式推送Feature分支；稳定真值同步完成后由main更新
+  `origin/master`。

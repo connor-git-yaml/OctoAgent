@@ -2,7 +2,8 @@
 
 > 当前事实：F150 已实现电脑 Web Access 的配置、manifest、Access JWT、request
 > classifier、mutation 与只读部署诊断合同；production live 与提交前验证均已通过，
-> 尚待stable commit。
+> 产品实现提交为 `bf29d6be7d7a86c298cd45699488a8640065a566`，仓库级门禁配套提交及
+> 当前稳定点为 `5e6f4846703b7126cd104c8b9678e0c2f5300cc8`。
 > Cloudflare named tunnel 是唯一远程网络基础设施：F150 交付电脑 Web Access
 > 入口，F153+ 交付原生 iOS 设备入口。
 

@@ -1,6 +1,6 @@
 # F150 Cloudflare Tunnel 远程访问 — Tasks
 
-> 状态：`GATE_DESIGN=true`，`GATE_TASKS=true`。T000～T016已完成；T003真实 named tunnel SSE live gate 与T015 production live gate均已通过。T017本地验证与主审项目已全部通过，尚待形成可供F149消费的stable commit，因此保持未勾选；F150 exact authority继续生效。
+> 状态：`GATE_DESIGN=true`，`GATE_TASKS=true`。T000～T017已完成；T003真实 named tunnel SSE live gate 与T015 production live gate均已通过。产品实现提交为`bf29d6be7d7a86c298cd45699488a8640065a566`，仓库级门禁配套提交及当前稳定点为`5e6f4846703b7126cd104c8b9678e0c2f5300cc8`；F149 T000已获得可消费基线，F150 exact authority继续生效。
 >
 > 产品边界：电脑保留 Web；手机产品只走原生 iOS App。F150 只交付桌面 Web 的 Cloudflare Access contract，不创建手机浏览器、WebView、mobile route、Access Bypass、iOS service token 或设备身份。Web/iOS 均以 Claude Design 最初方案为视觉语言基线；现有 Web UI 不是基线。
 >
@@ -223,7 +223,7 @@ cd octoagent/frontend && env PYTHONNOUSERSITE=1 LITELLM_LOCAL_MODEL_COST_MAP=Tru
     轮换、单设备撤销、App内service token禁令、mobile route/Access Bypass禁令、SwiftUI与
     Claude Design双端基线全部存在；把当前Web UI当设计基线的active statement=0。
 
-- [ ] **T017 [VERIFY] 全量验证、事实同步与提交前主审**
+- [x] **T017 [VERIFY] 全量验证、事实同步与提交前主审**
   - **动作**：
     1. 运行所有 F150 L4/L3/L1 selectors、现有 Gateway/front-door 回归、runtime architecture gate、frontend unit/lint/build。
     2. 复算 manifest schema、authority scope、secret-negative、数据库 migration absence、run/evidence hash 与 T015 attestation。
@@ -240,8 +240,9 @@ cd octoagent/frontend && env PYTHONNOUSERSITE=1 LITELLM_LOCAL_MODEL_COST_MAP=Tru
     已通过。主审后新增一条`F150_REMOTE_ACCESS_STATUS_MISSING`纠正RED，证明Guard、
     dependency与status projection仍会在请求期重复解析启动配置；GREEN只把
     Cloudflare生产路径接到同一启动期`FrontDoorConfig`对象，REFACTOR复验完整聚焦
-    回归与静态门，非Cloudflare旧模式保持原语义。当前唯一未满足项是stable commit
-    尚未创建，因此本任务不提前勾选。
+    回归与静态门，非Cloudflare旧模式保持原语义。产品实现已形成提交
+    `bf29d6be7d7a86c298cd45699488a8640065a566`；仓库级门禁配套提交及当前稳定点为
+    `5e6f4846703b7126cd104c8b9678e0c2f5300cc8`，F149 T000已获得可消费基线。
 
 ## 依赖图
 
@@ -263,4 +264,4 @@ T000
                                           └─ T017 final verify
 ```
 
-T003 已经用户单次授权并以真实 named tunnel、Access application 与受管 service 完成 5/5 SSE spike；T015最终production live与T016原生iOS handoff均已通过。T017提交前验证与主审项目已通过，但stable commit尚不存在；提交前不得宣称F150 stable，禁止force push。
+T003 已经用户单次授权并以真实 named tunnel、Access application 与受管 service 完成 5/5 SSE spike；T015最终production live、T016原生iOS handoff与T017最终验证均已通过。产品实现提交为`bf29d6be7d7a86c298cd45699488a8640065a566`，仓库级门禁配套提交及当前稳定点为`5e6f4846703b7126cd104c8b9678e0c2f5300cc8`；F150已稳定并解除F149 T000前置阻断，仍禁止force push。

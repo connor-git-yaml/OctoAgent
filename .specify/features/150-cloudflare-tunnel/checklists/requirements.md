@@ -40,6 +40,6 @@
 - [x] T016机械确认F150无iOS production path、F153唯一owner及Claude Design/SwiftUI handoff完整。
 - [x] T017本地验证项目通过：Python 363/363有效执行项通过（另1项条件跳过）、F150精确安全门22/22、frontend unit 17/17、Playwright 2/2、complexity/build/静态门均通过。
 - [x] manifest exact 7字段、changed migration=0、T003/T015 SHA/size与secret-negative均复算一致；must-fix=0。
-- [ ] 形成可供F149 T000消费的F150 stable commit；在此之前不得把本地验证通过写成已提交稳定版。
+- [x] 已形成可供F149 T000消费的F150 stable commit：产品实现`bf29d6be7d7a86c298cd45699488a8640065a566`，仓库级门禁配套提交及当前稳定点`5e6f4846703b7126cd104c8b9678e0c2f5300cc8`。
 
-当前：`GATE_DESIGN=true`、`GATE_TASKS=true`。T000～T016已完成，T017本地验证与主审项目已通过，唯一剩余是stable commit；提交前不得宣称F150 stable，禁止force push。
+当前：`GATE_DESIGN=true`、`GATE_TASKS=true`。T000～T017全部完成，F150 stable；F149 T000已解锁，禁止force push。
