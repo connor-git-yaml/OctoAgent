@@ -115,5 +115,12 @@
   snapshot/SSE/error/audit/log测试均未发现sentinel。REFACTOR精确回归23/23，
   完整control-plane与MCP registry回归96 passed/1 skipped；没有global secret
   值扫描器、第二scrub算法、第二transport或明文兼容路径。
+- T014以一个deterministic L3节点完成真实RED→GREEN→REFACTOR：同一最终test在
+  T013前旧生产基线上经真实FastAPI lifespan、SQLite与ASGITransport走到snapshot，
+  以`F149_DETERMINISTIC_L3_CONTRACT_MISSING: snapshot leaked secret`单缺陷见红；
+  当前实现串联OpenAPI、snapshot、`project.select`、非法secret mutation固定错误、
+  control events与终态SSE历史回放，HTTP/SSE/log均无sentinel。GREEN为1/1，
+  REFACTOR连同T010–T013 L4合同14/14；没有新增production composition seam、
+  第二transport、固定sleep、网络或真LLM。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

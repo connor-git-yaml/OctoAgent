@@ -1,0 +1,22 @@
+task_id: T014
+phase: REFACTOR
+behavior: deterministic OpenAPI→snapshot/action→SSE/secret egress 拼接
+command: cd octoagent && env PYTHONNOUSERSITE=1 LITELLM_LOCAL_MODEL_COST_MAP=True PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q tests/integration/test_f149_web_contract.py apps/gateway/tests/test_f149_web_contract.py apps/gateway/tests/test_f149_task_sse_contract.py apps/gateway/tests/test_f149_secret_egress.py
+executed_at_utc: 2026-07-25T12:15:32Z
+head_sha: 8644954325b58fb7c426c5e86dfc35f821abb327
+test_sha256: e645189ee3ab77048d7dd65fd765c0d8f40fa701f63bb12288029d17d809a8c4
+exit_code: 0
+oracle_expected: T014 L3与T010–T013 L4 owner合同同时通过
+oracle_observed: 14 passed；sentinel未出现在RED/GREEN/REFACTOR输出
+raw_output_file: /tmp/f149-t014-refactor.log
+raw_output_sha256: 34b30b0001ee86698151dbb58555607a812afe08743c890efcd8a5de3eb3a96a
+quality_review:
+  - 单一L3节点使用真实FastAPI lifespan、SQLite及ASGITransport，不复制下层parser/validator
+  - 终态SSE仅回放已提交历史，无固定sleep、后台轮询或共享队列竞态
+  - HTTP response、structured error、SSE bytes、control events及captured log均无sentinel
+  - 无production改动、第二transport、真LLM、网络、宿主HOME或凭证依赖
+file_sha256:
+  test_f149_web_contract.py: e645189ee3ab77048d7dd65fd765c0d8f40fa701f63bb12288029d17d809a8c4
+layer: L3
+network: false
+rerun: false

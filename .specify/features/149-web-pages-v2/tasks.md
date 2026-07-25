@@ -193,6 +193,10 @@
 
 ### T014 — deterministic L3 contract/egress 拼接
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T014/`。真实 FastAPI lifespan、SQLite 与 ASGITransport 串联
+  OpenAPI、snapshot、action dispatch/structured error、终态 SSE 历史回放和
+  secret 零出站；只组合 T010–T013 已有 owner，没有新增 production seam。
 - **层/FR**：L3；FR-010/022/027/028。
 - **文件**：`octoagent/tests/integration/test_f149_web_contract.py`。
 - **依赖**：T010–T013。
@@ -628,6 +632,6 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T013 中已执行的任务均有真实证据；下一项是 T014 deterministic
-  L3 contract/egress。F149 仍须逐 task 通过 RED→GREEN→REFACTOR，Tasks Gate 与
+- 当前风险：T000–T014 中已执行的任务均有真实证据；下一项是 T015 schema
+  artifacts/types-only generation。F149 仍须逐 task 通过 RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

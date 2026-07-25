@@ -1,0 +1,16 @@
+task_id: T014
+phase: GREEN
+behavior: deterministic OpenAPI→snapshot/action→SSE/secret egress 拼接
+command: cd octoagent && env PYTHONNOUSERSITE=1 LITELLM_LOCAL_MODEL_COST_MAP=True PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q tests/integration/test_f149_web_contract.py
+executed_at_utc: 2026-07-25T12:15:28Z
+head_sha: 8644954325b58fb7c426c5e86dfc35f821abb327
+test_sha256: e645189ee3ab77048d7dd65fd765c0d8f40fa701f63bb12288029d17d809a8c4
+exit_code: 0
+oracle_expected: deterministic全链通过且sentinel零出站
+oracle_observed: 1 passed；OpenAPI、snapshot、action、structured error、control events及终态SSE闭合
+raw_output_file: /tmp/f149-t014-green.log
+raw_output_sha256: b6017ccfecf7b5636b385cea0a9a352ff58ce6b3d81ec961c7932fc4c57e8a9e
+sentinel_occurrences_in_output: 0
+layer: L3
+network: false
+rerun: false
