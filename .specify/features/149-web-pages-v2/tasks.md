@@ -321,6 +321,13 @@
 
 ### T024 — shared resource page-state、permission 与 sensitivity
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T024/`。八类surface状态由单一pure helper互斥决策，401继续交回
+  F150 global auth，403/404/409与recoverable复用既有F149 error owner。Advanced
+  path/command只有已净化、非secret、workspace-relative且获权时才可截断/复制；
+  不可达结果不保留输入字节。可访问primitive复用既有`InlineCallout`，没有新CSS、
+  视觉class、全局业务store或Claude Design排版改动。精确18/18、全前端508/508、
+  build、OpenAPI、boundary/style/complexity与repository runtime architecture均通过。
 - **层/FR**：frontend L4 pure/component；FR-006/007/012/021/022/024。
 - **文件**：`src/domains/shared/resourcePageState.test.ts`、pure state/error/sensitivity helpers；`src/ui/primitives/resourceState.test.tsx` 与窄 UI primitives。
 - **依赖**：T020/T021。
@@ -675,7 +682,7 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T023 中已执行的任务均有真实证据；下一项是 T024
-  shared resource page-state、permission与sensitivity。F149 仍须逐 task 通过
+- 当前风险：T000–T015、T020–T024 中已执行的任务均有真实证据；下一项是 T025
+  F149 typed action commands/results。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

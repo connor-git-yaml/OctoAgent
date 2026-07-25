@@ -1,0 +1,14 @@
+task_id: T024
+phase: RED
+behavior: shared resource page-state, permission and sensitivity
+command: cd octoagent/frontend && npx vitest run src/domains/shared/resourcePageState.test.ts src/ui/primitives/resourceState.test.tsx
+executed_at_utc: 2026-07-25T13:24:16Z
+head_sha: c8edd26cc7847fd07625c80acd1f3f3803295c15
+exit_code: 1
+oracle_expected: F149_SHARED_RESOURCE_STATE_MISSING
+oracle_observed: inert pure helper固定返回recoverable-error且primitive仅渲染无语义占位；16项状态矩阵、401归属、截断复制与a11y断言稳定失败，2项负向不可达控制通过
+raw_output_file: /tmp/f149-t024-red-final.log
+raw_output_sha256: 0c7f9e8e32cc983d33181908ff4af3e7440e29c0bedf1c7b623be054d8d9eead
+secret_scan: pass
+network: false
+rerun: false

@@ -1,0 +1,39 @@
+task_id: T024
+phase: REFACTOR
+behavior: shared resource page-state, permission and sensitivity
+command: cd octoagent/frontend && npx vitest run src/domains/shared/resourcePageState.test.ts src/ui/primitives/resourceState.test.tsx
+executed_at_utc: 2026-07-25T13:25:34Z
+head_sha: c8edd26cc7847fd07625c80acd1f3f3803295c15
+exit_code: 0
+oracle_expected: exact 18项保持通过且无第二error owner、全局business store或视觉样式漂移
+oracle_observed: exact 18/18、全前端508/508、生产build、OpenAPI、F149 boundary/style/complexity与repository runtime architecture全部通过
+raw_output_file: /tmp/f149-t024-refactor.log
+raw_output_sha256: fad597c08fea8a03168357797b28b8513a8dda88b5c5cb503934e1a0e91416ae
+frontend_full_output_file: /tmp/f149-t024-frontend-full.log
+frontend_full_output_sha256: 14967ccba8bf974d85d0c43e34c4b0bfe39691d2dd633ac990c1b3b260d88ef6
+openapi_output_file: /tmp/f149-t024-openapi.log
+openapi_output_sha256: 08f1693acf42a717638bddfce398552b3936ecf0fac4704193b8ae521fcfa334
+boundary_output_file: /tmp/f149-t024-boundary.log
+boundary_output_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_output_file: /tmp/f149-t024-style.log
+style_output_sha256: 44594ef0a04a85351e98c9633928f770cd431a678e23d9c1d9fd6e25cbe9b652
+complexity_output_file: /tmp/f149-t024-complexity.log
+complexity_output_sha256: be5bd74bc68e0966716736d29b9bd404d51bfcaa96a8cfb7628a7991c2072569
+build_output_file: /tmp/f149-t024-build.log
+build_output_sha256: 71aa11dba195b32d9808107f03420767177b14f3d2e52cfd696c19a123130fff
+runtime_architecture_output_file: /tmp/f149-t024-runtime-architecture.log
+runtime_architecture_output_sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+quality_review:
+  - 复用唯一mapF149ErrorOwnership，401不产生surface状态，403/404/409与recoverable保持单一owner
+  - loading、ready、empty、recoverable、permission、not-found、disconnected、conflict为互斥判定，不建立全局业务store
+  - operator-sensitive path/command只有服务端已净化、非secret、workspace-relative且获权时可复制；否则结果不保留输入字节
+  - ResourceState复用既有InlineCallout视觉primitive，ready/global-auth不渲染，loading/empty与错误态使用恰当status/alert语义
+  - 未修改任何现有页面、CSS、视觉class或Claude Design排版
+file_sha256:
+  state: cda669b440b33dcad085948ed7bb20dfc2fd63ed90561e7c9ed0d2747a758a40
+  state-test: d30f2776e46b9be50a49cf90590d1a78817f4442bac34a2177396610dafd2bcf
+  primitive: ac3f32fe6aac9bc95b86ac76f1f744424babb058c42badbe158a335d4f14136d
+  primitive-test: fa75d6bf4c85a90bce4b035de24b7c4674cba5919970585ad093b44ea8c1849c
+secret_scan: pass
+network: false
+rerun: false

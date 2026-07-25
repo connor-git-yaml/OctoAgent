@@ -1,0 +1,14 @@
+task_id: T024
+phase: GREEN
+behavior: shared resource page-state, permission and sensitivity
+command: cd octoagent/frontend && npx vitest run src/domains/shared/resourcePageState.test.ts src/ui/primitives/resourceState.test.tsx
+executed_at_utc: 2026-07-25T13:24:55Z
+head_sha: c8edd26cc7847fd07625c80acd1f3f3803295c15
+exit_code: 0
+oracle_expected: 八类surface状态互斥、401交还global auth、Advanced内容按净化/权限截断复制且primitive可访问
+oracle_observed: 2 files、18 tests全部通过
+raw_output_file: /tmp/f149-t024-green.log
+raw_output_sha256: 1d45c17ce6f241f3a40e9274bea1bc08c618efe65da4e36060ad5bf531054116
+secret_scan: pass
+network: false
+rerun: false

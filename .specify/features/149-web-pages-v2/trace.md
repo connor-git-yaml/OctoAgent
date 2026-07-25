@@ -169,5 +169,12 @@
   re-export与新视觉class三类对抗样本均被拒绝。`TaskDetail.tsx`未改CSS或既有
   视觉class；本task没有Gateway协议改动、第二EventSource/transport、raw DOM泄漏
   或Claude Design视觉回退。
+- T024以固定recoverable helper与无语义primitive形成16条稳定RED，另有2条
+  secret/未净化不可达控制通过。GREEN后loading/ready/empty/recoverable/403/404/
+  disconnected/409由单一pure helper互斥决策，401继续交回F150 global auth；
+  operator-sensitive path/command只有已净化、非secret、workspace-relative且获权时
+  才可复制。REFACTOR复用既有`InlineCallout`提供status/alert语义，没有新CSS、
+  视觉class或全局业务store。最终精确18/18、全前端508/508、生产build、OpenAPI、
+  F149 boundary/style/complexity与repository runtime architecture均通过。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。
