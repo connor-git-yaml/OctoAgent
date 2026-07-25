@@ -1,0 +1,15 @@
+task_id: T004
+phase: RED
+behavior: frontend changed-lines gate只计算authored executable行，精确执行90%边界并把无LCOV新文件计0
+command: cd octoagent/frontend && npx vitest run scripts/check-frontend-changed-lines-coverage.test.ts
+executed_at_utc: 2026-07-25T09:06:59Z
+head_sha: 400f17e1de2a0d5a447d04e08ce1388ebfa9e371
+worktree_status_before: |-
+  ?? octoagent/frontend/scripts/check-frontend-changed-lines-coverage.test.ts
+  ?? repo-scripts/check-frontend-changed-lines-coverage.mjs
+exit_code: 1
+oracle_expected: inert evaluator使分类、89.99/90及新文件三组合同全部失败
+oracle_observed: 3 tests正常执行并全部因目标coverage结果不符而失败，无import/collection错误
+output_file: red.log
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T004 evidence，命中即exit1
+secret_scan_exit_code: 0

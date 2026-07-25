@@ -1,0 +1,19 @@
+task_id: T004
+phase: REFACTOR
+behavior: frontend changed-lines gate只计算authored executable行，精确执行90%边界并把无LCOV新文件计0
+command: cd octoagent/frontend && npx vitest run scripts/check-frontend-changed-lines-coverage.test.ts
+executed_at_utc: 2026-07-25T09:08:13Z
+head_sha: 400f17e1de2a0d5a447d04e08ce1388ebfa9e371
+worktree_status_before: |-
+  ?? octoagent/frontend/scripts/check-frontend-changed-lines-coverage.test.ts
+  ?? repo-scripts/check-frontend-changed-lines-coverage.mjs
+exit_code: 0
+oracle_expected: 同一分类与阈值合同继续通过，CLI同时纳入未跟踪新source
+oracle_observed: 3 tests通过；新增gitignored之外的untracked source收集后保持同一新文件0%语义
+output_file: refactor.log
+quality_review:
+  - TypeScript AST提供authored executable行集合，不用纯文本猜测type-only
+  - LCOV缺失行默认0，不允许新文件绕过
+  - committed/staged/unstaged diff与untracked source均进入候选集
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T004 evidence，命中即exit1
+secret_scan_exit_code: 0

@@ -72,3 +72,7 @@
   clean-diff、`any`与未命名`unknown/JsonValue`均由TypeScript AST稳定拒绝，
   命名raw/metadata/schema-as-data开放边界通过；真实generator alias/artifact仍由
   T005与后续Gateway contract任务创建，未伪造现有OpenAPI产物。
+- T004以同一Vitest selector完成真实RED→GREEN→REFACTOR：TypeScript AST只计
+  authored executable changed lines，tests/generated/`.d.ts`/type-only排除；
+  89.99%拒绝、90%接受，新source无LCOV按0%，且CLI同时纳入
+  committed/staged/unstaged diff与untracked source。真实coverage provider/alias仍由T005拥有。

@@ -1,0 +1,10 @@
+RUN  v2.1.9
+
+scripts/check-frontend-changed-lines-coverage.test.ts (3 tests)
+✓ F149 frontend changed-lines coverage > counts only changed authored executable lines
+✓ F149 frontend changed-lines coverage > rejects 89.99 percent and accepts exactly 90 percent
+✓ F149 frontend changed-lines coverage > counts a new executable file without LCOV as zero coverage
+
+Test Files  1 passed (1)
+Tests       3 passed (3)
+process exit=0

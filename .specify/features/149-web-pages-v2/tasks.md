@@ -87,6 +87,8 @@
 
 ### T004 — frontend changed-lines coverage checker
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T004/`；真实LCOV provider/npm alias仍由T005创建。
 - **层/FR**：L4 checker；FR-018。
 - **文件**：`repo-scripts/check-frontend-changed-lines-coverage.mjs`、`octoagent/frontend/scripts/check-frontend-changed-lines-coverage.test.ts`、fixtures。
 - **依赖**：T000。
