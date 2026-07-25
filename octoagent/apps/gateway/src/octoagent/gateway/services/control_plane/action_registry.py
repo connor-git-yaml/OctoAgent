@@ -6,15 +6,204 @@
 
 from __future__ import annotations
 
-from typing import Any
+from collections.abc import Awaitable, Callable, Iterable, Mapping
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from octoagent.core.models import (
     ActionDefinition,
     ActionRegistryDocument,
+    ActionRequestEnvelope,
+    ActionResultEnvelope,
     ControlPlaneCapability,
     ControlPlaneSupportStatus,
     ControlPlaneSurface,
 )
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, JsonValue, ValidationError
+
+ActionHandler = Callable[[ActionRequestEnvelope], Awaitable[ActionResultEnvelope]]
+
+F149_ACTION_IDS = (
+    "agent_profile.update_resource_limits",
+    "behavior.read_file",
+    "behavior.write_file",
+    "behavior.restore_version",
+    "memory.consolidate",
+    "mcp_provider.install",
+    "mcp_provider.install_status",
+)
+
+
+class F149ResourceLimitsValues(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_steps: int | None = Field(default=None, ge=1)
+    max_request_tokens: int | None = Field(default=None, ge=1)
+    max_response_tokens: int | None = Field(default=None, ge=1)
+    max_tool_calls: int | None = Field(default=None, ge=1)
+    max_budget_usd: float | None = Field(default=None, ge=0)
+    max_duration_seconds: int | None = Field(default=None, ge=1)
+    repeat_signature_threshold: int | None = Field(default=None, ge=1)
+
+
+class F149ResourceLimitsParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    target_type: Literal["agent_profile", "worker_profile"] = "agent_profile"
+    profile_id: str = Field(min_length=1)
+    resource_limits: F149ResourceLimitsValues
+
+
+class F149ResourceLimitsResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    profile_id: str = Field(min_length=1)
+    target_type: Literal["agent_profile", "worker_profile"]
+    resource_limits: F149ResourceLimitsValues
+
+
+class F149BehaviorReadParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_path: str = Field(min_length=1)
+
+
+class F149BehaviorReadResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_path: str = Field(min_length=1)
+    content: str
+    exists: bool
+    budget_chars: int | None = Field(default=None, ge=0)
+
+
+class F149BehaviorWriteParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("file_id", "file_path"),
+    )
+    content: str
+    agent_slug: str = "main"
+    project_slug: str = "default"
+
+
+class F149BehaviorWriteResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: str = Field(min_length=1)
+    resolved_path: str = Field(min_length=1)
+
+
+class F149BehaviorRestoreParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: str = Field(min_length=1)
+    target_version: int = Field(ge=1)
+    confirmed: bool = False
+    agent_slug: str = "main"
+    project_slug: str = "default"
+
+
+class F149BehaviorRestoreResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    file_id: str = Field(min_length=1)
+    target_version: int | None = Field(default=None, ge=1)
+    restored_from_version: int | None = Field(default=None, ge=1)
+    proposal: bool | None = None
+    preview: str | None = None
+
+
+class F149MemoryConsolidateParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    project_id: str = Field(min_length=1)
+
+
+class F149MemoryConsolidateResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    consolidated_count: int = Field(ge=0)
+    skipped_count: int = Field(ge=0)
+    errors: list[str]
+    model_alias: str | None = None
+    message: str = Field(min_length=1)
+
+
+class F149McpInstallParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    install_source: Literal["npm", "pip"]
+    package_name: str = Field(min_length=1)
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+class F149McpInstallResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str = Field(min_length=1)
+    server_id: str = Field(min_length=1)
+
+
+class F149McpInstallStatusParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str = Field(min_length=1)
+
+
+class F149McpInstallStatusResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    task_id: str = Field(min_length=1)
+    status: str = Field(min_length=1)
+    progress_message: str
+    error: str | None
+    result: dict[str, JsonValue] | None
+
+
+@dataclass(frozen=True, slots=True)
+class ActionContractDefinition:
+    """Action handler、runtime schema、registry 与导出 artifact 的唯一 record。"""
+
+    definition: ActionDefinition
+    handler: ActionHandler | None
+    params_model: type[BaseModel] | None
+    result_model: type[BaseModel] | None
+
+    @property
+    def action_id(self) -> str:
+        return self.definition.action_id
+
+    def validate_params(self, params: Mapping[str, object]) -> BaseModel | None:
+        if self.params_model is None:
+            return None
+        return self.params_model.model_validate(dict(params))
+
+    def validate_result(self, result: Mapping[str, object]) -> BaseModel | None:
+        if self.result_model is None:
+            return None
+        return self.result_model.model_validate(dict(result))
+
+    def params_error_code(self, error: ValidationError) -> str:
+        """把 schema 拒绝映射到既有 owner 的稳定错误码。"""
+
+        first_error = error.errors(include_url=False)[0]
+        location = str(first_error["loc"][0]) if first_error["loc"] else ""
+        return {
+            ("agent_profile.update_resource_limits", "profile_id"): ("PROFILE_ID_REQUIRED"),
+            ("agent_profile.update_resource_limits", "resource_limits"): (
+                "RESOURCE_LIMITS_INVALID"
+            ),
+            ("behavior.read_file", "file_path"): "MISSING_PARAM",
+            ("behavior.write_file", "file_id"): "MISSING_PARAM",
+            ("behavior.restore_version", "file_id"): "MISSING_PARAM",
+            ("behavior.restore_version", "target_version"): "INVALID_PARAM",
+            ("mcp_provider.install", "install_source"): "MCP_INSTALL_SOURCE_INVALID",
+            ("mcp_provider.install", "package_name"): "MCP_PACKAGE_NAME_REQUIRED",
+            ("mcp_provider.install_status", "task_id"): ("MCP_INSTALL_TASK_NOT_FOUND"),
+        }.get((self.action_id, location), "ACTION_PARAMS_INVALID")
 
 
 def build_action_registry() -> ActionRegistryDocument:
@@ -61,9 +250,7 @@ def build_action_registry() -> ActionRegistryDocument:
     return ActionRegistryDocument(
         actions=[
             definition("wizard.refresh", "刷新 Wizard", category="wizard"),
-            definition(
-                "wizard.restart", "重新开始 Wizard", category="wizard", risk_hint="medium"
-            ),
+            definition("wizard.restart", "重新开始 Wizard", category="wizard", risk_hint="medium"),
             definition(
                 "project.select",
                 "切换项目",
@@ -104,8 +291,7 @@ def build_action_registry() -> ActionRegistryDocument:
                 "连接并启用真实模型",
                 category="setup",
                 description=(
-                    "保存 Provider 配置、启动 LiteLLM Proxy，"
-                    "并在托管实例上自动切到真实模型。"
+                    "保存 Provider 配置、启动 LiteLLM Proxy，并在托管实例上自动切到真实模型。"
                 ),
                 params_schema={"type": "object"},
                 risk_hint="medium",
@@ -138,10 +324,7 @@ def build_action_registry() -> ActionRegistryDocument:
                 "provider.oauth.openai_codex",
                 "连接 OpenAI Auth",
                 category="setup",
-                description=(
-                    "通过浏览器 OAuth 连接 ChatGPT Pro / OpenAI Codex，"
-                    "并写入本地凭证。"
-                ),
+                description=("通过浏览器 OAuth 连接 ChatGPT Pro / OpenAI Codex，并写入本地凭证。"),
                 params_schema={"type": "object"},
                 risk_hint="medium",
             ),
@@ -273,13 +456,23 @@ def build_action_registry() -> ActionRegistryDocument:
             definition("session.focus", "聚焦会话", category="sessions"),
             definition("session.unfocus", "取消聚焦会话", category="sessions"),
             definition("session.new", "开始新对话", category="sessions"),
-            definition("session.create_with_project", "创建对话（含 Project）", category="sessions"),
+            definition(
+                "session.create_with_project", "创建对话（含 Project）", category="sessions"
+            ),
             definition("session.reset", "重置会话 continuity", category="sessions"),
             definition("session.set_alias", "修改会话名称", category="sessions"),
-            definition("agent.list_available_models", "查询可用模型别名", category="agent_management"),
-            definition("agent.list_worker_archetypes", "查询 Worker archetype", category="agent_management"),
+            definition(
+                "agent.list_available_models", "查询可用模型别名", category="agent_management"
+            ),
+            definition(
+                "agent.list_worker_archetypes", "查询 Worker archetype", category="agent_management"
+            ),
             definition("agent.list_tool_profiles", "查询工具权限等级", category="agent_management"),
-            definition("agent.create_worker_with_project", "创建 Worker + Project", category="agent_management"),
+            definition(
+                "agent.create_worker_with_project",
+                "创建 Worker + Project",
+                category="agent_management",
+            ),
             definition("session.export", "导出会话", category="sessions"),
             definition(
                 "session.interrupt",
@@ -579,3 +772,156 @@ def build_action_registry() -> ActionRegistryDocument:
             )
         ],
     )
+
+
+def _f149_models(
+    action_id: str,
+) -> tuple[type[BaseModel], type[BaseModel]] | None:
+    return {
+        "agent_profile.update_resource_limits": (
+            F149ResourceLimitsParams,
+            F149ResourceLimitsResult,
+        ),
+        "behavior.read_file": (F149BehaviorReadParams, F149BehaviorReadResult),
+        "behavior.write_file": (F149BehaviorWriteParams, F149BehaviorWriteResult),
+        "behavior.restore_version": (
+            F149BehaviorRestoreParams,
+            F149BehaviorRestoreResult,
+        ),
+        "memory.consolidate": (
+            F149MemoryConsolidateParams,
+            F149MemoryConsolidateResult,
+        ),
+        "mcp_provider.install": (F149McpInstallParams, F149McpInstallResult),
+        "mcp_provider.install_status": (
+            F149McpInstallStatusParams,
+            F149McpInstallStatusResult,
+        ),
+    }.get(action_id)
+
+
+def _missing_handler_definition(action_id: str) -> ActionDefinition:
+    label, category, risk_hint, approval_hint = {
+        "agent_profile.update_resource_limits": (
+            "更新资源限制",
+            "agent_management",
+            "medium",
+            "none",
+        ),
+        "behavior.read_file": ("读取行为文件", "behavior", "low", "none"),
+        "behavior.write_file": ("保存行为文件", "behavior", "medium", "none"),
+        "behavior.restore_version": (
+            "恢复行为文件版本",
+            "behavior",
+            "medium",
+            "none",
+        ),
+        "memory.consolidate": ("整理记忆事实", "memory", "medium", "none"),
+        "mcp_provider.install": ("安装 MCP Provider", "capability", "high", "operator"),
+        "mcp_provider.install_status": (
+            "查看 MCP 安装状态",
+            "capability",
+            "low",
+            "none",
+        ),
+        "mcp_provider.uninstall": (
+            "卸载 MCP Provider",
+            "capability",
+            "high",
+            "operator",
+        ),
+        "memory.profile_generate": ("生成用户画像", "memory", "medium", "none"),
+        "session.delete": ("删除会话", "sessions", "medium", "none"),
+    }.get(
+        action_id,
+        (action_id, action_id.partition(".")[0], "low", "none"),
+    )
+
+    return ActionDefinition(
+        action_id=action_id,
+        label=label,
+        category=category,
+        supported_surfaces=[ControlPlaneSurface.WEB, ControlPlaneSurface.SYSTEM],
+        surface_aliases={"web": [action_id]},
+        support_status_by_surface={
+            "web": ControlPlaneSupportStatus.SUPPORTED,
+            "telegram": ControlPlaneSupportStatus.DEGRADED,
+        },
+        params_schema={"type": "object"},
+        result_schema={"type": "object"},
+        risk_hint=risk_hint,
+        approval_hint=approval_hint,
+        idempotency_hint="request_id",
+        resource_targets=[],
+    )
+
+
+def build_action_contracts(
+    handlers: Mapping[str, ActionHandler],
+) -> tuple[ActionContractDefinition, ...]:
+    """把现有 registry metadata 与真实 handler 合并为唯一 contract records。"""
+
+    registry = build_action_registry()
+    declared = {item.action_id: item for item in registry.actions}
+    ordered_action_ids = [item.action_id for item in registry.actions]
+    ordered_action_ids.extend(sorted(set(handlers) - set(declared)))
+
+    contracts: list[ActionContractDefinition] = []
+    for action_id in ordered_action_ids:
+        definition = declared.get(action_id) or _missing_handler_definition(action_id)
+        models = _f149_models(action_id)
+        params_model = models[0] if models is not None else None
+        result_model = models[1] if models is not None else None
+        if params_model is not None and result_model is not None:
+            definition = definition.model_copy(
+                update={
+                    "params_schema": params_model.model_json_schema(),
+                    "result_schema": result_model.model_json_schema(),
+                }
+            )
+        contracts.append(
+            ActionContractDefinition(
+                definition=definition,
+                handler=handlers.get(action_id),
+                params_model=params_model,
+                result_model=result_model,
+            )
+        )
+
+    contracts_by_id = {item.action_id: item for item in contracts}
+    missing_handlers = [
+        action_id for action_id in F149_ACTION_IDS if contracts_by_id[action_id].handler is None
+    ]
+    if missing_handlers:
+        raise ValueError(f"F149 action缺少handler: {','.join(missing_handlers)}")
+    return tuple(contracts)
+
+
+def build_action_registry_from_contracts(
+    contracts: Iterable[ActionContractDefinition],
+) -> ActionRegistryDocument:
+    """从同一 contract records 派生公开 registry。"""
+
+    baseline = build_action_registry()
+    return baseline.model_copy(
+        update={"actions": [item.definition for item in contracts]},
+    )
+
+
+def export_f149_action_contract(
+    contracts: Iterable[ActionContractDefinition],
+) -> dict[str, JsonValue]:
+    """从同一 contract records 导出 F149 types-only action artifact。"""
+
+    contracts_by_id = {item.action_id: item for item in contracts}
+    return {
+        "contract_version": "1.0.0",
+        "actions": [
+            {
+                "action_id": action_id,
+                "params_schema": contracts_by_id[action_id].definition.params_schema,
+                "result_schema": contracts_by_id[action_id].definition.result_schema,
+            }
+            for action_id in F149_ACTION_IDS
+        ],
+    }

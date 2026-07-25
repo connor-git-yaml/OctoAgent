@@ -139,6 +139,10 @@
 
 ### T011 — action dispatch/validation/registry/artifact 同源
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T011/`。七个F149实际action由同一`ActionContractDefinition`
+  派生dispatch、runtime validation、registry与types artifact；非法参数在owner前
+  fail closed并保留既有稳定错误码，其他action继续显式open schema-as-data。
 - **层/FR**：Gateway L4；FR-026/027。
 - **文件**：同一 `test_f149_web_contract.py`；control-plane base/coordinator/registry 与实际 owner services。
 - **依赖**：T010。

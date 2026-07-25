@@ -90,5 +90,12 @@
   fields三项缺口；GREEN后67个实际REST operation均有有限2xx JSON schema，
   snapshot/TaskDetail开放JSON只停留在命名raw boundary。REFACTOR合并既有
   control-plane API回归后11/11通过，Ruff与diff-check通过；未新增第二schema源。
+- T011以两个可收集Gateway L4节点完成真实RED→GREEN→REFACTOR：RED只因
+  `F149_ACTION_CONTRACT_MISSING`命中缺失的同源action record；GREEN后七个F149
+  实际action由同一`ActionContractDefinition`派生handler、runtime validation、
+  registry与types artifact，其他action继续显式open schema-as-data。REFACTOR
+  保留既有owner错误码与`behavior.write_file(file_path=...)`调用兼容，精确回归
+  12/12、更宽control-plane回归115 passed/1 skipped；F151最窄T011 authority与
+  runtime architecture总门通过，未新增第二dispatcher/registry。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

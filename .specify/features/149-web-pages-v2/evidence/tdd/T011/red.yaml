@@ -1,0 +1,14 @@
+task_id: T011
+phase: RED
+behavior: action dispatch、runtime validation、registry与types artifact同源
+command: cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_web_contract.py -k "action_registry or action_contract"
+executed_at_utc: 2026-07-25T10:25:00Z
+timestamp_note: terminal未持久化命令起始秒，时间由本轮连续执行记录界定到该分钟
+head_sha: acf3b0f2ada3ce57603eac4b6ff7b646b24163e1
+exit_code: 1
+oracle_expected: F149_ACTION_CONTRACT_MISSING
+oracle_observed: 两个可收集node均只因action contract getter缺失而失败；无import、collection或usage错误
+output_file: red.log
+layer: L4
+network: false
+rerun: false

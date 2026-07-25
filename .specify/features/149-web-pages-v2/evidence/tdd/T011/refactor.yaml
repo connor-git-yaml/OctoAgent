@@ -1,0 +1,21 @@
+task_id: T011
+phase: REFACTOR
+behavior: action dispatch、runtime validation、registry与types artifact同源
+command: cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_web_contract.py apps/gateway/tests/services/test_control_plane_registry.py apps/gateway/tests/services/test_behavior_restore.py -k "action or registry or restore"
+executed_at_utc: 2026-07-25T10:52:00Z
+timestamp_note: terminal未持久化命令起始秒，时间由本轮连续执行记录界定到该分钟
+head_sha: acf3b0f2ada3ce57603eac4b6ff7b646b24163e1
+exit_code: 0
+oracle_expected: T011合同与既有registry/restore行为同时通过
+oracle_observed: 12 passed、3 deselected；更宽control-plane回归115 passed/1 skipped；F151架构总门通过
+output_file: refactor.log
+quality_review:
+  - ActionContractDefinition是唯一record，coordinator只派生现有单dispatch路径
+  - F149 authority只允许registry、coordinator与单一合同测试文件，兄弟漂移和第二dispatcher均拒绝
+  - 新增/触达函数McCabe不超过10，未新增第二parser、runner、registry或兼容层
+file_sha256:
+  action_registry.py: 40363d6550c80e077e463bc32181a626902d1ddd4430b6d79dc06e0f08b7cc70
+  _coordinator.py: 013143ecbda4872b46e0e3ba14af75017c98d6aefd87cef8a1fbb9919220b18d
+  test_f149_web_contract.py: 3571e402c07ab069ae54f9020d809994ecd161d8f502357c30b064acfb6f6c1f
+  check-runtime-architecture.py: 4668afcd65d64dee03b0968ec2bff226993b83dc56adf1c771b283666e9c98cf
+  test_runtime_architecture.py: ce198a276e5b04a8c59ec22128264743595c0bdd51bbd679041c5e877133e469

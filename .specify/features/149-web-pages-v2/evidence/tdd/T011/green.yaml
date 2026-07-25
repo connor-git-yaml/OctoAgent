@@ -1,0 +1,15 @@
+task_id: T011
+phase: GREEN
+behavior: action dispatch、runtime validation、registry与types artifact同源
+command: cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_web_contract.py -k "action_registry or action_contract"
+executed_at_utc: 2026-07-25T10:49:00Z
+timestamp_note: terminal未持久化命令起始秒，时间由本轮连续执行记录界定到该分钟
+head_sha: acf3b0f2ada3ce57603eac4b6ff7b646b24163e1
+exit_code: 0
+oracle_expected: F149七个真实action由同一ActionContractDefinition派生handler、validation、registry与artifact
+oracle_observed: 2 passed、3 deselected；非法MCP参数在owner前拒绝且保留既有MCP_INSTALL_SOURCE_INVALID
+output_file: green.log
+quality_review:
+  - 其他action继续显式open schema-as-data，不进行全registry强类型big-bang
+  - behavior.write_file接受现有file_path调用并归一为owner既有file_id语义
+  - 非法参数保留各owner稳定错误码，未引入兼容dispatcher

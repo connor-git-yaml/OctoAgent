@@ -61,10 +61,16 @@ from octoagent.gateway.services.memory.retrieval_platform_service import (
     RetrievalPlatformService,
 )
 from octoagent.gateway.services.operations.import_workbench_service import ImportWorkbenchService
+from pydantic import ValidationError
 from ulid import ULID
 
 from ._base import ControlPlaneActionError, ControlPlaneContext, ControlPlaneServiceRegistry
-from .action_registry import build_action_registry
+from .action_registry import (
+    ActionContractDefinition,
+    build_action_contracts,
+    build_action_registry_from_contracts,
+    export_f149_action_contract,
+)
 from .agent_service import AgentProfileDomainService
 from .automation_service import AutomationDomainService
 from .import_service import ImportDomainService
@@ -191,17 +197,24 @@ class ControlPlaneService(TelegramCommandMixin):
             self._setup_service,
             self._worker_service,
         ]
-        self._action_dispatch: dict[str, Any] = {}
+        action_handlers: dict[str, Any] = {}
         for svc in all_services:
-            self._action_dispatch.update(svc.action_routes())
+            action_handlers.update(svc.action_routes())
 
         # 汇总 document 路由
         self._document_dispatch: dict[str, Any] = {}
         for svc in all_services:
             self._document_dispatch.update(svc.document_routes())
 
-        # 构建 action 注册表
-        self._registry = build_action_registry()
+        # 从同一 records 派生 dispatch、runtime validation、registry 与 artifact。
+        self._action_contracts = build_action_contracts(action_handlers)
+        self._action_contract_by_id = {item.action_id: item for item in self._action_contracts}
+        self._action_dispatch = {
+            item.action_id: item.handler
+            for item in self._action_contracts
+            if item.handler is not None
+        }
+        self._registry = build_action_registry_from_contracts(self._action_contracts)
 
     # ------------------------------------------------------------------
     # 属性和延迟绑定
@@ -236,6 +249,12 @@ class ControlPlaneService(TelegramCommandMixin):
             (item for item in self._registry.actions if item.action_id == action_id),
             None,
         )
+
+    def get_action_contracts(self) -> tuple[ActionContractDefinition, ...]:
+        return self._action_contracts
+
+    def export_f149_action_contract(self) -> dict[str, Any]:
+        return export_f149_action_contract(self._action_contracts)
 
     # ------------------------------------------------------------------
     # 启动初始化
@@ -309,10 +328,39 @@ class ControlPlaneService(TelegramCommandMixin):
         inline_result = await self._dispatch_inline_action(request)
         if inline_result is not None:
             return inline_result
-        # 再委托到 domain services
-        handler = self._action_dispatch.get(request.action_id)
-        if handler is not None:
-            return await handler(request)
+        # 再委托到同一 contract record 持有的 domain handler。
+        contract = self._action_contract_by_id.get(request.action_id)
+        if contract is not None and contract.handler is not None:
+            try:
+                normalized_params = contract.validate_params(request.params)
+            except ValidationError as exc:
+                raise ControlPlaneActionError(
+                    contract.params_error_code(exc),
+                    f"{request.action_id} 参数不符合合同: {exc.errors(include_url=False)}",
+                ) from exc
+            normalized_request = (
+                request
+                if normalized_params is None
+                else request.model_copy(
+                    update={
+                        "params": normalized_params.model_dump(
+                            mode="json",
+                            exclude_none=True,
+                            exclude_unset=True,
+                        )
+                    }
+                )
+            )
+            result = await contract.handler(normalized_request)
+            if result.status != ControlPlaneActionStatus.REJECTED:
+                try:
+                    contract.validate_result(result.data)
+                except ValidationError as exc:
+                    raise ControlPlaneActionError(
+                        "ACTION_RESULT_INVALID",
+                        f"{request.action_id} 结果不符合合同: {exc.errors(include_url=False)}",
+                    ) from exc
+            return result
         raise ControlPlaneActionError("ACTION_NOT_FOUND", f"未知动作: {request.action_id}")
 
     async def _dispatch_inline_action(

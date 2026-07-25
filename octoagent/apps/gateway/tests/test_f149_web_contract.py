@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import replace
 from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
 
 import pytest
+from octoagent.core.models import (
+    ActionRequestEnvelope,
+    ControlPlaneActor,
+    ControlPlaneSurface,
+)
+from octoagent.core.store import create_store_group
 from octoagent.gateway.main import create_app
 from octoagent.gateway.routes.f149_web_contract import (
     F149_REST_ENDPOINTS,
@@ -14,9 +23,18 @@ from octoagent.gateway.routes.f149_web_contract import (
     decode_f149_snapshot,
     export_f149_rest_openapi,
 )
+from octoagent.gateway.services.control_plane import ControlPlaneService
+from octoagent.gateway.services.control_plane import action_registry as action_registry_module
+from octoagent.gateway.services.operations.project_migration import (
+    ProjectWorkspaceMigrationService,
+)
+from octoagent.gateway.services.operations.telegram_pairing import TelegramStateStore
+from octoagent.gateway.services.sse_hub import SSEHub
 from pydantic import ValidationError
+from ulid import ULID
 
 ORACLE = "F149_REST_CONTRACT_MISSING"
+ACTION_ORACLE = "F149_ACTION_CONTRACT_MISSING"
 
 EXPECTED_RESOURCES = (
     "config",
@@ -111,9 +129,104 @@ EXPECTED_ENDPOINTS = {
     ("POST", "/api/ops/export/chats"),
 }
 
+EXPECTED_F149_ACTION_IDS = (
+    "agent_profile.update_resource_limits",
+    "behavior.read_file",
+    "behavior.write_file",
+    "behavior.restore_version",
+    "memory.consolidate",
+    "mcp_provider.install",
+    "mcp_provider.install_status",
+)
+
+F149_ACTION_SAMPLES: dict[str, tuple[dict[str, object], dict[str, object]]] = {
+    "agent_profile.update_resource_limits": (
+        {
+            "target_type": "agent_profile",
+            "profile_id": "profile-main",
+            "resource_limits": {"max_steps": 20},
+        },
+        {
+            "profile_id": "profile-main",
+            "target_type": "agent_profile",
+            "resource_limits": {"max_steps": 20},
+        },
+    ),
+    "behavior.read_file": (
+        {"file_path": "USER.md"},
+        {"file_path": "USER.md", "content": "hello", "exists": True},
+    ),
+    "behavior.write_file": (
+        {"file_id": "USER.md", "content": "hello"},
+        {"file_id": "USER.md", "resolved_path": "/tmp/USER.md"},
+    ),
+    "behavior.restore_version": (
+        {"file_id": "USER.md", "target_version": 1, "confirmed": True},
+        {"file_id": "USER.md", "restored_from_version": 1},
+    ),
+    "memory.consolidate": (
+        {"project_id": "project-main"},
+        {
+            "consolidated_count": 1,
+            "skipped_count": 0,
+            "errors": [],
+            "model_alias": "main",
+            "message": "已整理 1 条事实",
+        },
+    ),
+    "mcp_provider.install": (
+        {"install_source": "npm", "package_name": "@example/mcp"},
+        {"task_id": "install-1", "server_id": "npm-example-mcp"},
+    ),
+    "mcp_provider.install_status": (
+        {"task_id": "install-1"},
+        {
+            "task_id": "install-1",
+            "status": "running",
+            "progress_message": "installing",
+            "error": None,
+            "result": None,
+        },
+    ),
+}
+
 
 def _assert_contract(condition: bool, detail: str) -> None:
     assert condition, f"{ORACLE}: {detail}"
+
+
+def _assert_action_contract(condition: bool, detail: str) -> None:
+    assert condition, f"{ACTION_ORACLE}: {detail}"
+
+
+async def _control_plane(tmp_path: Path) -> tuple[ControlPlaneService, Any]:
+    store_group = await create_store_group(
+        str(tmp_path / "gateway.db"),
+        str(tmp_path / "artifacts"),
+    )
+    await ProjectWorkspaceMigrationService(
+        project_root=tmp_path,
+        store_group=store_group,
+    ).ensure_default_project()
+    return (
+        ControlPlaneService(
+            project_root=tmp_path,
+            store_group=store_group,
+            sse_hub=SSEHub(),
+            telegram_state_store=TelegramStateStore(tmp_path),
+        ),
+        store_group,
+    )
+
+
+def _action_contract_api(control_plane: ControlPlaneService) -> tuple[Any, Any]:
+    contract_getter = getattr(control_plane, "get_action_contracts", None)
+    artifact_exporter = getattr(control_plane, "export_f149_action_contract", None)
+    contract_type = getattr(action_registry_module, "ActionContractDefinition", None)
+    _assert_action_contract(callable(contract_getter), "action contract getter missing")
+    _assert_action_contract(callable(artifact_exporter), "action artifact exporter missing")
+    _assert_action_contract(contract_type is not None, "ActionContractDefinition missing")
+    return contract_getter, artifact_exporter
 
 
 def _raw_resource(resource_type: str) -> dict[str, object]:
@@ -218,3 +331,83 @@ def test_task_detail_response_keeps_only_named_raw_event_payload() -> None:
     rendered = str(schema)
     _assert_contract("F149RawEventPayload" in rendered, "event payload raw boundary unnamed")
     _assert_contract("Any" not in rendered, "task detail leaked Any")
+
+
+@pytest.mark.asyncio
+async def test_action_registry_contracts_share_handler_validation_and_artifact(
+    tmp_path: Path,
+) -> None:
+    control_plane, store_group = await _control_plane(tmp_path)
+    try:
+        contract_getter, artifact_exporter = _action_contract_api(control_plane)
+        contracts = {item.action_id: item for item in contract_getter()}
+        registry = {item.action_id: item for item in control_plane.get_action_registry().actions}
+        artifact = artifact_exporter()
+        artifact_actions = {item["action_id"]: item for item in artifact.get("actions", [])}
+        _assert_action_contract(
+            tuple(sorted(artifact_actions)) == tuple(sorted(EXPECTED_F149_ACTION_IDS)),
+            "F149 action artifact set drift",
+        )
+        for action_id in EXPECTED_F149_ACTION_IDS:
+            contract = contracts[action_id]
+            params, result = F149_ACTION_SAMPLES[action_id]
+            _assert_action_contract(
+                contract.handler is control_plane._action_dispatch[action_id],
+                f"{action_id} handler not sourced from contract",
+            )
+            _assert_action_contract(
+                contract.definition == registry[action_id],
+                f"{action_id} registry not sourced from contract",
+            )
+            _assert_action_contract(
+                artifact_actions[action_id]["params_schema"] == contract.definition.params_schema,
+                f"{action_id} params artifact drift",
+            )
+            _assert_action_contract(
+                artifact_actions[action_id]["result_schema"] == contract.definition.result_schema,
+                f"{action_id} result artifact drift",
+            )
+            contract.validate_params(params)
+            contract.validate_result(result)
+            with pytest.raises(ValidationError):
+                contract.validate_params({})
+    finally:
+        await store_group.close()
+
+
+@pytest.mark.asyncio
+async def test_action_contract_rejects_invalid_params_before_owner(tmp_path: Path) -> None:
+    control_plane, store_group = await _control_plane(tmp_path)
+    try:
+        _action_contract_api(control_plane)
+        owner_called = False
+
+        async def owner_must_not_run(
+            request: ActionRequestEnvelope,
+        ) -> object:
+            del request
+            nonlocal owner_called
+            owner_called = True
+            raise AssertionError("invalid params reached owner")
+
+        original = control_plane._action_contract_by_id["mcp_provider.install"]
+        control_plane._action_contract_by_id["mcp_provider.install"] = replace(
+            original,
+            handler=owner_must_not_run,
+        )
+        result = await control_plane.execute_action(
+            ActionRequestEnvelope(
+                request_id=str(ULID()),
+                action_id="mcp_provider.install",
+                params={},
+                surface=ControlPlaneSurface.WEB,
+                actor=ControlPlaneActor(actor_id="user:web", actor_label="Owner"),
+            )
+        )
+        _assert_action_contract(
+            result.code == "MCP_INSTALL_SOURCE_INVALID",
+            f"invalid params reached owner ({result.code})",
+        )
+        _assert_action_contract(not owner_called, "invalid params invoked owner")
+    finally:
+        await store_group.close()
