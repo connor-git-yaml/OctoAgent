@@ -1,0 +1,13 @@
+task_id: T023
+phase: RED
+behavior: Task SSE frontend decoder and TaskDetail state projection
+command: cd octoagent/frontend && npx vitest run src/api/f149/taskSseDecoder.test.ts src/pages/TaskDetail.test.tsx
+executed_at_utc: 2026-07-25T13:00:23Z
+head_sha: d8048f13178d625ae699942452d2cce67f91693d
+exit_code: 1
+oracle_expected: F149_TASK_SSE_FRONTEND_DECODER_MISSING / F149_TASK_DETAIL_STATE_CONTRACT_MISSING
+oracle_observed: decoder三类投影固定invalid；TaskDetail三项因raw history默认穿透、页面状态与断线合同缺失而失败；其余5项通过
+raw_output_file: /tmp/f149-t023-red-valid.log
+raw_output_sha256: d03ef503f1df59b59109c1d34a61879268483186eebbbd1f17b000158f9bf3cb
+network: false
+rerun: false

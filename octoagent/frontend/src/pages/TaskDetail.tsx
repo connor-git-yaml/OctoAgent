@@ -16,6 +16,12 @@ import {
   fetchTaskDetail,
   isFrontDoorApiError,
 } from "../api/client";
+import { mapF149ErrorOwnership } from "../api/f149/errorOwnership";
+import {
+  decodeTaskSseFrame,
+  type RawTaskSseFrame,
+  type TaskSseProjection,
+} from "../api/f149/taskSseDecoder";
 import FrontDoorGate from "../components/FrontDoorGate";
 import { useSSE } from "../hooks/useSSE";
 import {
@@ -34,13 +40,12 @@ import type {
   TaskDetailResponse,
   TaskEvent,
   Artifact,
-  SSEEventData,
-  TaskStatus,
 } from "../types";
 
 /** 状态 badge 的用户友好文案 */
 const STATUS_LABEL: Record<string, string> = {
   CREATED: "已创建",
+  QUEUED: "排队中",
   RUNNING: "运行中",
   WAITING_INPUT: "等待输入",
   WAITING_APPROVAL: "等待审批",
@@ -74,6 +79,35 @@ function getLatestStateTransitionSeq(events: TaskEvent[]): number {
   }, 0);
 }
 
+function projectTaskDetailEvents(events: TaskEvent[]): TaskEvent[] {
+  return events.flatMap<TaskEvent>((event) => {
+    const projection = {
+      event_id: event.event_id,
+      task_seq: event.task_seq,
+      ts: event.ts,
+      type: event.type,
+      actor: event.actor,
+    };
+    if (
+      event.type === "STATE_TRANSITION" &&
+      typeof event.payload.to_status === "string" &&
+      event.payload.to_status in STATUS_LABEL
+    ) {
+      return [{
+        ...projection,
+        payload: { to_status: event.payload.to_status },
+      }];
+    }
+    if (event.type === "ARTIFACT_CREATED") {
+      return [{
+        ...projection,
+        payload: { refresh_artifacts: true },
+      }];
+    }
+    return [];
+  });
+}
+
 function mergeTaskSnapshot(
   currentTask: TaskDetailType | null,
   nextTask: TaskDetailType,
@@ -92,13 +126,32 @@ function mergeTaskSnapshot(
   };
 }
 
+type TaskSseDiagnostic = Extract<TaskSseProjection, { kind: "diagnostic" }>;
+
+function taskEventFromProjection(
+  event: Exclude<TaskSseProjection, { kind: "diagnostic" }>,
+): TaskEvent {
+  return {
+    event_id: event.eventId,
+    task_seq: event.taskSeq,
+    ts: event.timestamp,
+    type: event.sourceType,
+    actor: event.actor,
+    payload:
+      event.kind === "state-transition"
+        ? { to_status: event.toStatus }
+        : { refresh_artifacts: true },
+  };
+}
+
 export default function TaskDetail() {
   const { taskId } = useParams<{ taskId: string }>();
   const [task, setTask] = useState<TaskDetailType | null>(null);
   const [events, setEvents] = useState<TaskEvent[]>([]);
+  const [diagnostics, setDiagnostics] = useState<TaskSseDiagnostic[]>([]);
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown | null>(null);
   const [authError, setAuthError] = useState<ApiError | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("visual");
   const [selectedNode, setSelectedNode] = useState<FlowNode | null>(null);
@@ -110,21 +163,23 @@ export default function TaskDetail() {
     latestStatusSeqRef.current = 0;
     artifactRefreshInFlightRef.current = false;
     artifactRefreshQueuedRef.current = false;
+    setDiagnostics([]);
   }, [taskId]);
 
   const applyTaskDetail = useCallback((
     data: TaskDetailResponse,
     options?: { replaceEvents?: boolean },
   ) => {
+    const projectedEvents = projectTaskDetailEvents(data.events);
     const currentStatusSeq = latestStatusSeqRef.current;
-    const nextStatusSeq = getLatestStateTransitionSeq(data.events);
+    const nextStatusSeq = getLatestStateTransitionSeq(projectedEvents);
     latestStatusSeqRef.current = Math.max(currentStatusSeq, nextStatusSeq);
 
     setTask((prev) =>
       mergeTaskSnapshot(prev, data.task, currentStatusSeq, nextStatusSeq)
     );
     if (options?.replaceEvents ?? true) {
-      setEvents(data.events);
+      setEvents(projectedEvents);
     }
     setArtifacts(data.artifacts);
     setAuthError(null);
@@ -140,7 +195,7 @@ export default function TaskDetail() {
       const data = await fetchTaskDetail(taskId);
       applyTaskDetail(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "加载任务失败");
+      setError(err);
       setAuthError(isFrontDoorApiError(err) ? err : null);
     } finally {
       setLoading(false);
@@ -178,46 +233,54 @@ export default function TaskDetail() {
   }, [loadTask]);
 
   // SSE 事件回调
-  const handleSSEEvent = useCallback((eventData: SSEEventData) => {
-    // 追加新事件到列表（去重）
-    setEvents((prev) => {
-      const exists = prev.some((e) => e.event_id === eventData.event_id);
-      if (exists) return prev;
-      return [...prev, {
-        event_id: eventData.event_id,
-        task_seq: eventData.task_seq,
-        ts: eventData.ts,
-        type: eventData.type,
-        actor: eventData.actor,
-        payload: eventData.payload,
-      }];
-    });
+  const handleSSEEvent = useCallback((rawEvent: RawTaskSseFrame): boolean => {
+    const decoded = decodeTaskSseFrame(rawEvent);
+    if (!decoded.ok) {
+      return false;
+    }
+    const eventData = decoded.event;
+    if (eventData.taskId !== taskId) {
+      return false;
+    }
+    if (eventData.kind === "diagnostic") {
+      setDiagnostics((prev) => {
+        if (prev.some((event) => event.eventId === eventData.eventId)) {
+          return prev;
+        }
+        return [...prev, eventData];
+      });
+      return eventData.final;
+    }
 
-    const isCurrentTaskEvent = eventData.task_id === taskId;
+    const taskEvent = taskEventFromProjection(eventData);
+    setEvents((prev) => {
+      const exists = prev.some((event) => event.event_id === eventData.eventId);
+      if (exists) return prev;
+      return [...prev, taskEvent];
+    });
 
     // 只用当前任务自己的、且 task_seq 单调递增的 transition 更新头部状态，
     // 避免子任务冒泡事件或历史重放把 badge 回刷到旧状态。
     if (
-      isCurrentTaskEvent &&
-      eventData.type === "STATE_TRANSITION" &&
-      eventData.payload.to_status &&
-      eventData.task_seq > latestStatusSeqRef.current
+      eventData.kind === "state-transition" &&
+      eventData.taskSeq > latestStatusSeqRef.current
     ) {
-      latestStatusSeqRef.current = eventData.task_seq;
+      latestStatusSeqRef.current = eventData.taskSeq;
       setTask((prev) =>
         prev
           ? {
             ...prev,
-            status: eventData.payload.to_status as TaskStatus,
-            updated_at: eventData.ts,
+            status: eventData.toStatus,
+            updated_at: eventData.timestamp,
           }
           : prev
       );
     }
 
-    if (isCurrentTaskEvent && eventData.type === "ARTIFACT_CREATED") {
+    if (eventData.kind === "artifact-refresh") {
       void refreshArtifacts();
     }
+    return eventData.final;
   }, [taskId, refreshArtifacts]);
 
   // SSE 连接（仅非终态任务）
@@ -247,10 +310,34 @@ export default function TaskDetail() {
   }
 
   if (error || !task) {
+    const state = mapF149ErrorOwnership(
+      error instanceof Error ? error : new Error("任务详情加载失败"),
+    );
+    const copy =
+      state.state === "forbidden"
+        ? {
+            title: "无权查看这个任务",
+            detail: "你没有查看此任务来源的权限，请联系管理员。",
+          }
+        : state.state === "not-found"
+          ? {
+              title: "找不到这个任务",
+              detail: "这个任务可能已被移除，或链接已经失效。",
+            }
+          : {
+              title: "暂时无法加载任务详情",
+              detail: "请稍后重试；你当前的页面内容不会受到影响。",
+            };
     return (
       <div className="tv-page">
         <Link to="/" className="tv-detail-back">&larr;</Link>
-        <div className="error">错误: {error || "未找到任务"}</div>
+        <h1>{copy.title}</h1>
+        <p>{copy.detail}</p>
+        {state.state !== "not-found" && (
+          <button type="button" onClick={() => void loadTask()}>
+            重试
+          </button>
+        )}
       </div>
     );
   }
@@ -301,7 +388,21 @@ export default function TaskDetail() {
             {!isTerminal && (
               <span
                 className={`sse-indicator ${sseStatus === "connected" ? "connected" : "disconnected"}`}
-                title={`SSE: ${sseStatus}`}
+                role="status"
+                aria-label={
+                  sseStatus === "disconnected"
+                    ? "连接已断开，正在重试"
+                    : sseStatus === "connecting"
+                      ? "正在连接"
+                      : sseStatus === "connected"
+                        ? "已连接"
+                        : "连接已关闭"
+                }
+                title={
+                  sseStatus === "disconnected"
+                    ? "连接已断开，正在重试"
+                    : `SSE: ${sseStatus}`
+                }
               />
             )}
             <SegmentedToggle value={viewMode} onChange={setViewMode} />
@@ -342,6 +443,23 @@ export default function TaskDetail() {
               </div>
             ))}
           </div>
+
+          {diagnostics.length > 0 && (
+            <details>
+              <summary>高级诊断</summary>
+              {diagnostics.map((diagnostic) => (
+                <div key={diagnostic.eventId} className="timeline-item">
+                  <span className="event-type">{diagnostic.sourceType}</span>
+                  <span className="event-time">
+                    {formatTime(diagnostic.timestamp)}
+                  </span>
+                  <div className="event-payload">
+                    {JSON.stringify(diagnostic.diagnostic)}
+                  </div>
+                </div>
+              ))}
+            </details>
+          )}
 
           {/* Artifacts */}
           {artifacts.length > 0 && (

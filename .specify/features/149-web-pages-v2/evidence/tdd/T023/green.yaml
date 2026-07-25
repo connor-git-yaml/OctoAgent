@@ -1,0 +1,13 @@
+task_id: T023
+phase: GREEN
+behavior: Task SSE frontend decoder and TaskDetail state projection
+command: cd octoagent/frontend && npx vitest run src/api/f149/taskSseDecoder.test.ts src/pages/TaskDetail.test.tsx
+executed_at_utc: 2026-07-25T13:03:46Z
+head_sha: d8048f13178d625ae699942452d2cce67f91693d
+exit_code: 0
+oracle_expected: state/artifact/diagnostic三路互斥且TaskDetail状态合同通过
+oracle_observed: 2 files、11 tests全部通过；tsc --noEmit与相邻37项回归通过
+raw_output_file: /tmp/f149-t023-green-final.log
+raw_output_sha256: bd480067c6b2ae80b3723e8f903f5fd56bffa1caf15add02aa87a40ad67ba054
+network: false
+rerun: false

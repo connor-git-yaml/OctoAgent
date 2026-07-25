@@ -4,6 +4,7 @@
 
 export type TaskStatus =
   | "CREATED"
+  | "QUEUED"
   | "RUNNING"
   | "WAITING_INPUT"
   | "WAITING_APPROVAL"
@@ -141,11 +142,6 @@ export interface AttachExecutionInputResult {
 export interface AttachExecutionInputResponse {
   result: AttachExecutionInputResult;
   session: ExecutionSessionDocument | null;
-}
-
-export interface SSEEventData extends TaskEvent {
-  task_id: string;
-  final?: boolean;
 }
 
 export type SensitivityLevel =

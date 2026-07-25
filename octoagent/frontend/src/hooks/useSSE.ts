@@ -10,7 +10,7 @@
 
 import { useEffect, useRef, useState, useCallback } from "react";
 import { buildFrontDoorSseUrl } from "../api/client";
-import type { SSEEventData } from "../types";
+import type { RawTaskSseFrame } from "../api/f149/taskSseDecoder";
 
 export type SSEStatus = "connecting" | "connected" | "disconnected" | "closed";
 
@@ -20,7 +20,7 @@ interface UseSSEOptions {
   /** 是否启用（任务非终态时启用） */
   enabled: boolean;
   /** 收到新事件的回调 */
-  onEvent: (event: SSEEventData) => void;
+  onEvent: (event: RawTaskSseFrame) => boolean | void;
 }
 
 interface UseSSEReturn {
@@ -90,12 +90,9 @@ export function useSSE({ taskId, enabled, onEvent }: UseSSEOptions): UseSSERetur
 
     const handler = (e: MessageEvent) => {
       try {
-        const data: SSEEventData = JSON.parse(e.data);
-
-        onEventRef.current(data);
-
-        // 终态检测：final: true 时关闭连接
-        if (data.final) {
+        const data: RawTaskSseFrame = JSON.parse(e.data);
+        const shouldClose = onEventRef.current(data);
+        if (shouldClose === true) {
           es.close();
           setStatus("closed");
         }

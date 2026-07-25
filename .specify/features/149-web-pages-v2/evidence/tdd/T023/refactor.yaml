@@ -1,0 +1,47 @@
+task_id: T023
+phase: REFACTOR
+behavior: Task SSE frontend decoder and TaskDetail state projection
+command: cd octoagent/frontend && npx vitest run src/api/f149/taskSseDecoder.test.ts src/pages/TaskDetail.test.tsx
+executed_at_utc: 2026-07-25T13:17:52Z
+head_sha: d8048f13178d625ae699942452d2cce67f91693d
+exit_code: 0
+oracle_expected: exact 11项保持通过且raw/当前任务/单调/页面状态边界闭合
+oracle_observed: exact 11/11、全前端490/490、生产build、OpenAPI、complexity与F149 boundary全部通过
+raw_output_file: /tmp/f149-t023-refactor-final.log
+raw_output_sha256: 1c8cf739c5ce34ff50bf4bce3e22724036565839e5a12af9b68657d9716d810f
+frontend_full_output_file: /tmp/f149-t023-frontend-full.log
+frontend_full_output_sha256: dd99d0e679616c9f31693a551c07dfcd7e44f1201aee6854e591f7494ae0086e
+build_output_file: /tmp/f149-t023-build.log
+build_output_sha256: 529a85bd3649fb78ebb797d86cb9eb12bdd9d288c01e91ba803aa7cbf301e871
+openapi_output_file: /tmp/f149-t023-openapi.log
+openapi_output_sha256: ca51125fac08c2276977b9254e4c8e94b41bd34322a906fccf9f597db313320e
+complexity_output_file: /tmp/f149-t023-complexity.log
+complexity_output_sha256: 07f356d01209c0cf1a07e7fc2e67c3cd23a01fdce506d4d7c9d4bbc202680b92
+boundary_output_file: /tmp/f149-t023-boundary.log
+boundary_output_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+runtime_architecture_output_file: /tmp/f149-t023-runtime-architecture.log
+runtime_architecture_output_sha256: b976386929c5e9fa50d3588c0bff6cd7174151b6d664dac584c0dbbc5db374fc
+authority_adversarial_output_file: /tmp/f149-t023-authority-adversarial.log
+authority_adversarial_output_sha256: 91323f820564ba7681cf299893cf41cb3737bf6877d9e9fa94fc548a5e71ce31
+quality_review:
+  - generated wire只在命名raw adapter内出现，页面只消费typed projection
+  - current-task与task_seq单调边界阻止子任务终态关闭当前流或旧状态覆盖badge
+  - REST历史与SSE均丢弃raw payload及额外顶层字段，secret sentinel未进入DOM
+  - diagnostic有深度、项数、字符串与总bytes边界，只在默认收起Advanced显示
+  - loading、403、404、recoverable与disconnected页面状态互斥，403不提供重新登录动作
+  - 未修改CSS、既有视觉class或页面布局，Claude Design视觉基线未回退
+  - repository-scope runtime architecture通过，额外runtime export、第二re-export与视觉class漂移三类对抗样本均被拒绝
+file_sha256:
+  raw-decoder: 9a9d9f478b02a598f56161755edf360a4ea2a482b9a32eece19e7b1bebce0813
+  decoder-export: 70b94764e6d0bbfa1021744c7ffcd0f7982538030622417ef4337e009ff11b62
+  decoder-test: a1acd65c2b105c387f91d19a4317dafbf7c5b775bed24d527e9727c90b713362
+  task-detail: f81ed8a89ac3e8cdd217eb1c1804ed6789df262fdd97b7da7351616e55ad73fd
+  task-detail-test: 6fbdc219299c9696a96a755b220eae19d9c5c2e7eb27a48c662455f3859050d5
+  use-sse: 94468e687f6aa2722e5262c2543bd4da9aa0bfe7ca96bada9ad30deb98fa2007
+  chat-stream-helpers: ace481f65f096305278f668edcd07ac81f296fec8aafcc7b97824e4177fa9c56
+  types: 777337861c2d914bbb898d72f77cd1cb9a8104732ca5c9d3a990a8cbb6a8bfe2
+  error-ownership: 19d0318d81dfdefcb0842d1d1527c1179aaae04c32da8c63d813aeb7586022fe
+  adapters-test: a736972c52c96d4ef5022fa5fa4530db12b9e930248cbb9ed73d9c916246e90b
+  runtime-architecture-checker: fe71b8d7f14ea9c3b90fa76bf938adedf3fbf59a1c906170954249990b8d2edc
+network: false
+rerun: false

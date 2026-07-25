@@ -1,5 +1,5 @@
 import { fetchTaskDetail } from "../api/client";
-import type { Artifact, SSEEventData, TaskDetailResponse, TaskEvent } from "../types";
+import type { Artifact, TaskDetailResponse, TaskEvent } from "../types";
 import type {
   ChatMessage,
   ChatRestoreTarget,
@@ -11,6 +11,10 @@ export const ACTIVE_CHAT_TASK_STORAGE_KEY = "octoagent.chat.activeTaskId";
 export const AGENT_STREAM_PLACEHOLDER = "主助手已接手，正在处理这条消息…";
 
 const RESTORE_TASK_DETAIL_TIMEOUT_MS = 3_000;
+type SSEPayloadEvent = {
+  type: string;
+  payload: Record<string, unknown>;
+};
 
 /** 流式占位消息 id 生成（非纯，归 helpers 侧；reducer 只收注入值） */
 export function makePlaceholderId(): string {
@@ -140,7 +144,7 @@ export function buildRestoreCandidateTaskIds(
 }
 
 function extractEventPayload(
-  eventData: Pick<SSEEventData, "payload"> & { type: string }
+  eventData: SSEPayloadEvent
 ): Record<string, unknown> | null {
   const payload = eventData.payload;
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
@@ -150,7 +154,7 @@ function extractEventPayload(
 }
 
 export function extractAgentMessage(
-  eventData: Pick<SSEEventData, "payload"> & { type: string }
+  eventData: SSEPayloadEvent
 ): string {
   const payload = extractEventPayload(eventData);
   if (!payload) {
@@ -169,7 +173,7 @@ export function extractAgentMessage(
 }
 
 function extractArtifactRef(
-  eventData: Pick<SSEEventData, "payload"> & { type: string }
+  eventData: SSEPayloadEvent
 ): string {
   const payload = extractEventPayload(eventData);
   if (!payload) {
@@ -180,7 +184,7 @@ function extractArtifactRef(
 }
 
 export function isUserVisibleModelEvent(
-  eventData: Pick<SSEEventData, "payload"> & { type: string }
+  eventData: SSEPayloadEvent
 ): boolean {
   const payload = extractEventPayload(eventData);
   if (!payload) {
@@ -361,7 +365,7 @@ function normalizeFailureMessage(raw: string): string {
 }
 
 export function extractFailureMessage(
-  eventData: Pick<SSEEventData, "payload"> & { type: string }
+  eventData: SSEPayloadEvent
 ): string {
   const payload = extractEventPayload(eventData);
   if (!payload) {

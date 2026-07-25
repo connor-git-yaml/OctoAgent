@@ -161,11 +161,11 @@ describe("F149 Agent/Skills adapters", () => {
       }),
     );
 
-    let caught: unknown;
+    let caught: ApiError | undefined;
     try {
       await fetchF149Skills();
     } catch (error) {
-      caught = error;
+      caught = error as ApiError;
     }
     expect(caught, "F149_AGENT_SKILL_ADAPTER_MISSING").toMatchObject({
       name: "ApiError",

@@ -157,5 +157,17 @@
   保留9增/18删与7增/42删的transport迁移；DOM、inline style与`wb-*` class multiset
   不变。runtime architecture真实工作树通过，并分别拒绝adapter额外export、页面
   direct fetch与视觉class漂移；无第二transport、UI/CSS或宿主状态改动。
+- T023以inert Task SSE decoder与旧TaskDetail形成6条稳定RED：state、artifact、
+  diagnostic三类投影缺失，unknown/history仍进入默认时间线，页面状态合同不完整。
+  GREEN后generated wire只在`api/f149/raw/`命名边界验证，TaskDetail只消费
+  typed state/artifact与有界净化diagnostic；current-task与task_seq单调合同阻止
+  子任务终态关闭当前流或旧回放覆盖badge，artifact只触发详情刷新。REFACTOR把
+  REST历史也显式重建为最小投影，丢弃raw payload和额外顶层字段；Advanced默认
+  收起，403/404/recoverable/disconnected互斥。最终精确selector 11/11、全前端
+  490/490、生产build、OpenAPI字节比对、F149 boundary与complexity均通过。
+  repository-scope runtime architecture也通过，额外runtime export、第二
+  re-export与新视觉class三类对抗样本均被拒绝。`TaskDetail.tsx`未改CSS或既有
+  视觉class；本task没有Gateway协议改动、第二EventSource/transport、raw DOM泄漏
+  或Claude Design视觉回退。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

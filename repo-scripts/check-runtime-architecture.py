@@ -1328,6 +1328,18 @@ F149_T022_FRONTEND_AUTHORITY_PATHS = MappingProxyType(
         "octoagent/frontend/src/pages/SkillCenter.tsx": frozenset(),
     }
 )
+F149_T023_FRONTEND_AUTHORITY_PATHS = MappingProxyType(
+    {
+        "octoagent/frontend/src/api/f149/raw/taskSseDecoder.ts": frozenset(
+            {"decodeTaskSseFrame"}
+        ),
+        "octoagent/frontend/src/api/f149/taskSseDecoder.ts": frozenset(),
+        "octoagent/frontend/src/hooks/chatStreamHelpers.ts": frozenset(),
+        "octoagent/frontend/src/hooks/useSSE.ts": frozenset(),
+        "octoagent/frontend/src/pages/TaskDetail.tsx": frozenset(),
+        "octoagent/frontend/src/types/index.ts": frozenset(),
+    }
+)
 F149_T010_PUBLIC_SYMBOLS = frozenset(
     {
         "F149_SNAPSHOT_RESOURCE_NAMES",
@@ -2234,6 +2246,56 @@ def _validate_f149_t022_frontend_path(
     _validate_f150_typescript(baseline, current, allowed)
 
 
+def _f149_runtime_reexports(text: str) -> set[str]:
+    exports: set[str] = set()
+    for body in re.findall(r"\bexport\s*\{([^}]*)\}\s*from\b", text, flags=re.DOTALL):
+        for item in body.split(","):
+            name = item.strip().split()
+            if name:
+                exports.add(name[-1])
+    return exports
+
+
+def _f149_visual_class_names(text: str) -> set[str]:
+    return set(
+        re.findall(
+            r"\b(?:card|error|loading)\b|"
+            r"\b(?:control|event|sse|timeline|tv)-[\w-]+",
+            text,
+        )
+    )
+
+
+def _validate_f149_t023_frontend_path(
+    relative: str,
+    baseline: str,
+    current: str,
+    allowed: frozenset[str],
+) -> None:
+    """只允许T023收窄Task SSE投影，不以实现便利改变既有视觉语言。"""
+
+    validate_f150_security_surface(relative, current, baseline)
+    _validate_f150_typescript(baseline, current, allowed)
+    if relative.endswith("/api/f149/taskSseDecoder.ts"):
+        require(
+            _f149_runtime_reexports(current) == {"decodeTaskSseFrame"},
+            "F150_PROTECTED_SEMANTIC_DRIFT",
+            "T023 decoder public runtime surface",
+        )
+    else:
+        require(
+            not _f149_runtime_reexports(current),
+            "F150_PROTECTED_SEMANTIC_DRIFT",
+            f"{relative} runtime re-export",
+        )
+    if relative.endswith("/pages/TaskDetail.tsx"):
+        require(
+            _f149_visual_class_names(current) <= _f149_visual_class_names(baseline),
+            "F150_PROTECTED_SEMANTIC_DRIFT",
+            "T023 Claude Design visual class growth",
+        )
+
+
 def _f150_related_unapproved(relative: str, text: str) -> bool:
     candidate = (relative + "\n" + text).lower()
     markers = (
@@ -2342,6 +2404,21 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
                 _f150_source_at_ref(repo, base_ref, relative),
                 path.read_text(encoding="utf-8"),
                 f149_t022_allowed,
+            )
+            continue
+        f149_t023_allowed = F149_T023_FRONTEND_AUTHORITY_PATHS.get(relative)
+        if f149_t023_allowed is not None:
+            path = repo / relative
+            require(
+                path.is_file(),
+                "F150_PROTECTED_SEMANTIC_DRIFT",
+                relative,
+            )
+            _validate_f149_t023_frontend_path(
+                relative,
+                _f150_source_at_ref(repo, base_ref, relative),
+                path.read_text(encoding="utf-8"),
+                f149_t023_allowed,
             )
             continue
         contract = F150_AUTHORITY_PATHS.get(relative)

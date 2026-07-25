@@ -298,6 +298,16 @@
 
 ### T023 — Task SSE frontend decoder 与 TaskDetail state
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T023/`。SSE wire 只在命名 `raw/` adapter 由 generated
+  `TaskStatus` 与 runtime decoder 收窄；TaskDetail 只接收 state、artifact
+  refresh、scrubbed diagnostic 三类互斥投影。非当前任务与非单调状态不会改写
+  badge，子任务 final 不关闭当前流；REST 历史只重建最小 state/artifact 投影，
+  原始 payload 与额外顶层字段均不进入 DOM。Advanced 默认收起，403/404/
+  recoverable/disconnected 状态互斥。全前端 490/490 与生产 build 通过，
+  `openapi:check`、F149 boundary、complexity 均通过；未修改 CSS、视觉 class
+  或 Claude Design 页面排版。repository-scope runtime architecture 同时通过，
+  并实际拒绝额外 runtime export、第二 re-export 与新视觉 class 三类对抗样本。
 - **层/FR**：frontend L4；FR-003/010/028。
 - **文件**：`src/api/f149/taskSseDecoder.test.ts`、decoder；`src/pages/TaskDetail.test.tsx`、TaskDetail pure state/projection。
 - **依赖**：T012/T015。
@@ -665,7 +675,7 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T022 中已执行的任务均有真实证据；下一项是 T023
-  Task SSE frontend decoder与TaskDetail state。F149 仍须逐 task 通过
+- 当前风险：T000–T015、T020–T023 中已执行的任务均有真实证据；下一项是 T024
+  shared resource page-state、permission与sensitivity。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

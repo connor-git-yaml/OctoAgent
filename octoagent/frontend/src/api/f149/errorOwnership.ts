@@ -12,7 +12,7 @@ export type F149ErrorOwnership =
       status: number;
     };
 
-export function mapF149ErrorOwnership(error: unknown): F149ErrorOwnership {
+export function mapF149ErrorOwnership(error: Error): F149ErrorOwnership {
   const status = error instanceof ApiError ? error.status : 0;
   if (status === 401) {
     return {
