@@ -156,6 +156,10 @@
 
 ### T012 — Task SSE Gateway/web adapter contract
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T012/`。现有 Task SSE 路由输出必填 `final`，仅闭合
+  `STATE_TRANSITION.to_status` 与 artifact refresh；其他事件只能经有界脱敏
+  diagnostic payload 进入 Advanced，core 未新增对应模型。
 - **层/FR**：Gateway L4；FR-028。
 - **文件**：`octoagent/apps/gateway/tests/test_f149_task_sse_contract.py`；Gateway route-adapter SSE schema/decoder。
 - **依赖**：T010。

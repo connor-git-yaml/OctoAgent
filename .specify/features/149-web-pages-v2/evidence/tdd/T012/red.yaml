@@ -1,0 +1,15 @@
+task_id: T012
+phase: RED
+behavior: Task SSE有限业务payload、final必填与安全诊断边界
+command: cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_task_sse_contract.py
+executed_at_utc: 2026-07-25T10:59:00Z
+timestamp_note: terminal未持久化命令起始秒，时间由本轮连续执行记录界定到该分钟
+head_sha: 0a4973d648183af9cb48e9bde31281958e301be1
+exit_code: 1
+oracle_expected: F149_TASK_SSE_CONTRACT_MISSING
+oracle_observed: 四个可收集node均只命中固定合同oracle；无import、collection、path或usage错误
+output_file: red.log
+discarded_attempt: 首次输出展开ModuleNotFoundError上下文，按Gate规则不计RED；改用find_spec能力断言后取得本记录
+layer: L4
+network: false
+rerun: false

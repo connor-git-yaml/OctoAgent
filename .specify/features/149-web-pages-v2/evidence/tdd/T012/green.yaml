@@ -1,0 +1,13 @@
+task_id: T012
+phase: GREEN
+behavior: Task SSE有限业务payload、final必填与安全诊断边界
+command: cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_task_sse_contract.py
+executed_at_utc: 2026-07-25T11:01:00Z
+timestamp_note: terminal未持久化命令起始秒，时间由本轮连续执行记录界定到该分钟
+head_sha: 0a4973d648183af9cb48e9bde31281958e301be1
+exit_code: 0
+oracle_expected: final必填、状态与刷新payload有限闭合、历史诊断有界脱敏、core无SSE模型
+oracle_observed: 4 passed；普通OpenAPI只声明text/event-stream且不内嵌frame schema
+output_file: green.log
+layer: L4
+network: false

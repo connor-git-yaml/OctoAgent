@@ -97,5 +97,12 @@
   保留既有owner错误码与`behavior.write_file(file_path=...)`调用兼容，精确回归
   12/12、更宽control-plane回归115 passed/1 skipped；F151最窄T011 authority与
   runtime architecture总门通过，未新增第二dispatcher/registry。
+- T012以四个可收集Gateway L4节点完成真实RED→GREEN→REFACTOR：首次输出因展开
+  `ModuleNotFoundError`上下文被主动判为无效，改成能力断言后四项只命中
+  `F149_TASK_SSE_CONTRACT_MISSING`。GREEN后`final`为必填，状态变更只输出
+  `to_status`，artifact只输出刷新信号，其他已知/历史事件经限深、限项、限字符串、
+  限总bytes及secret scrub后才进入diagnostic。REFACTOR连同既有SSE历史回放、
+  实时、终态、dedup与队列测试13/13通过，并把复杂event generator抽为单一内部
+  协程；Gateway仍只有原SSE路由，core无F149 frame模型。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

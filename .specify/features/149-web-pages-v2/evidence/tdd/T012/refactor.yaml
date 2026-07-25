@@ -1,0 +1,21 @@
+task_id: T012
+phase: REFACTOR
+behavior: Task SSE有限业务payload、final必填与安全诊断边界
+command: cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_task_sse_contract.py apps/gateway/tests/test_us3_sse.py
+executed_at_utc: 2026-07-25T11:03:00Z
+timestamp_note: terminal未持久化命令起始秒，时间由本轮连续执行记录界定到该分钟
+head_sha: 0a4973d648183af9cb48e9bde31281958e301be1
+exit_code: 0
+oracle_expected: T012合同与既有历史回放、实时流、终态、去重和队列行为同时通过
+oracle_observed: 13 passed；Ruff、C901不超过10、py_compile与diff-check通过
+output_file: refactor.log
+quality_review:
+  - Gateway route旁单一frame seam复用现有SSE路由，不新增第二transport或EventSource
+  - STATE_TRANSITION只输出to_status，ARTIFACT_CREATED只输出刷新信号
+  - 其他事件经命名diagnostic边界限深、限项、限字符串、限总bytes并脱敏
+  - event generator抽为单一内部协程，既有竞态与dedup语义保持且McCabe不超过10
+  - core package未新增F149 SSE模型
+file_sha256:
+  task_sse_contract.py: 18cdcf2a2cc3ff238b7bb3088c9073e5ce087c945ecc6a8671171a9933060e1f
+  stream.py: 99838417c4d701cf28918e410d43a8c4b9f0ac31869b765f9cdbd9e2df8f0faa
+  test_f149_task_sse_contract.py: 6f063f8e301f536952ca24f8248049ae982876cda193f6912d8f297a54728504
