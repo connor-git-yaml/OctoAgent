@@ -1,0 +1,13 @@
+RUN  v2.1.9
+
+scripts/check-f149-boundaries.test.ts (2 tests | 1 failed)
+× F149 boundary checker > rejects every seeded architecture violation
+  F149_BOUNDARY_RULES_MISSING:
+  F149_DIRECT_FETCH,
+  F149_AUTH_HEADER_BYPASS,
+  F149_TOKEN_HELPER_BYPASS,
+  F149_QUERY_TOKEN_BYPASS
+
+Test Files  1 failed (1)
+Tests       1 failed | 1 passed (2)
+process exit=1

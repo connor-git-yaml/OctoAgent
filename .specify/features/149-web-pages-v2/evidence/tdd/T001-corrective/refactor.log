@@ -1,0 +1,16 @@
+RUN  v2.1.9
+
+Targeted F149 gate regression:
+Test Files  5 passed (5)
+Tests       12 passed (12)
+
+Repository boundary scan:
+F149_TOKEN_HELPER_BYPASS: api/approval-center.ts
+F149_AUTH_HEADER_BYPASS: api/approval-center.ts
+F149_DIRECT_FETCH: api/approval-center.ts
+F149_TOKEN_HELPER_BYPASS: api/memory-candidates-types.ts
+F149_AUTH_HEADER_BYPASS: api/memory-candidates-types.ts
+F149_DIRECT_FETCH: api/memory-candidates-types.ts
+F149_DIRECT_FETCH: pages/AgentCenter.tsx
+F149_DIRECT_FETCH: pages/SkillCenter.tsx
+process exit=1
