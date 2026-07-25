@@ -24,6 +24,8 @@ from octoagent.provider.auth.profile import ProviderProfile
 from octoagent.provider.auth.store import CredentialStore
 from pydantic import SecretStr, ValidationError
 
+from .secret_contract import SecretMutation, apply_secret_mutations
+
 
 class SetupConfigIOMixin:
     """Config / secret IO 职责簇：见模块 docstring。
@@ -41,82 +43,146 @@ class SetupConfigIOMixin:
         config: OctoAgentConfig,
         secret_values: Mapping[str, Any],
     ) -> dict[str, Any]:
-        normalized = {
-            str(key).strip(): str(value).strip()
-            for key, value in secret_values.items()
-            if str(key).strip() and str(value).strip()
-        }
-        if not normalized:
-            return {"provider_env_names": [], "runtime_env_names": [], "profile_names": []}
+        provider_targets, runtime_targets = self._runtime_secret_targets(config)
+        target_names = provider_targets | runtime_targets
+        env_path = self._ctx.project_root / ".env"
+        existing = self._env_file_values(env_path)
+        try:
+            parsed = self._parse_secret_mutations(
+                secret_values,
+                target_names=target_names,
+                existing=existing,
+            )
+            resolved = apply_secret_mutations(existing, secret_values)
+        except ValueError as exc:
+            raise self._action_error(
+                "SECRET_MUTATION_INVALID",
+                "secret_values 不符合 keep/replace/remove 合同",
+            ) from exc
+        if not parsed:
+            return {
+                "provider_env_names": [],
+                "runtime_env_names": [],
+                "profile_names": [],
+                "removed_env_names": [],
+            }
 
-        # F081 cleanup：runtime.master_key_env 已删除；ProviderRouter 直连后无 master
-        # key 概念。所有 provider api_key 进 .env，runtime/channel 凭证也进 .env。
-        # 历史上 LiteLLM Master Key 写到 .env.litellm，本次 cleanup 后不再分文件。
-        provider_targets: set[str] = set()
-        runtime_targets: set[str] = set()
-        for provider in config.providers:
-            env_name = provider.effective_api_key_env
-            if env_name:
-                provider_targets.add(env_name)
-        if config.front_door.bearer_token_env:
-            runtime_targets.add(config.front_door.bearer_token_env)
-        if config.front_door.trusted_proxy_token_env:
-            runtime_targets.add(config.front_door.trusted_proxy_token_env)
-        telegram = config.channels.telegram
-        if telegram.bot_token_env:
-            runtime_targets.add(telegram.bot_token_env)
-        if telegram.webhook_secret_env:
-            runtime_targets.add(telegram.webhook_secret_env)
-
-        provider_updates = {
-            env_name: value
-            for env_name, value in normalized.items()
-            if env_name in provider_targets
+        updates = {
+            name: resolved[name] for name, mutation in parsed.items() if mutation.mode == "replace"
         }
-        runtime_updates = {
-            env_name: value for env_name, value in normalized.items() if env_name in runtime_targets
-        }
+        removals = {name for name, mutation in parsed.items() if mutation.mode == "remove"}
+        provider_updates = {name: updates[name] for name in updates if name in provider_targets}
+        runtime_updates = {name: updates[name] for name in updates if name in runtime_targets}
 
         # 所有 secret 统一写 .env（F081 P3b 退役 .env.litellm 后不再分文件）
         merged_env = {**provider_updates, **runtime_updates}
-        self._write_env_values(self._ctx.project_root / ".env", merged_env)
+        self._write_env_mutations(
+            env_path,
+            updates=merged_env,
+            removals=removals,
+        )
 
-        store = self._credential_store()
-        saved_profiles: list[str] = []
-        for provider in config.providers:
-            if provider.effective_auth_kind != "api_key":
-                continue
-            env_name = provider.effective_api_key_env
-            if not env_name:
-                continue
-            secret_value = provider_updates.get(env_name)
-            if not secret_value:
-                continue
-            existing = store.get_profile(f"{provider.id}-default")
-            profile = ProviderProfile(
-                name=f"{provider.id}-default",
-                provider=provider.id,
-                auth_mode="api_key",
-                credential=ApiKeyCredential(
-                    provider=provider.id,
-                    key=SecretStr(secret_value),
-                ),
-                is_default=(
-                    existing.is_default
-                    if existing is not None
-                    else store.get_default_profile() is None
-                ),
-                created_at=existing.created_at if existing is not None else datetime.now(tz=UTC),
-                updated_at=datetime.now(tz=UTC),
-            )
-            store.set_profile(profile)
-            saved_profiles.append(profile.name)
+        saved_profiles = self._save_provider_secret_profiles(
+            config=config,
+            provider_updates=provider_updates,
+            removals=removals,
+        )
 
         return {
             "provider_env_names": sorted(provider_updates.keys()),
             "runtime_env_names": sorted(runtime_updates.keys()),
             "profile_names": saved_profiles,
+            "removed_env_names": sorted(removals),
         }
+
+    @staticmethod
+    def _parse_secret_mutations(
+        secret_values: Mapping[str, Any],
+        *,
+        target_names: set[str],
+        existing: Mapping[str, str],
+    ) -> dict[str, SecretMutation]:
+        parsed: dict[str, SecretMutation] = {}
+        for raw_name, raw_mutation in secret_values.items():
+            name = str(raw_name).strip()
+            if not name or name not in target_names:
+                raise ValueError("secret name 未由当前配置声明")
+            mutation = SecretMutation.model_validate(raw_mutation)
+            if mutation.mode == "keep" and name not in existing:
+                raise ValueError("keep 只能用于已配置 secret")
+            parsed[name] = mutation
+        return parsed
+
+    @staticmethod
+    def _runtime_secret_targets(config: OctoAgentConfig) -> tuple[set[str], set[str]]:
+        """返回当前 config 实际声明的 provider/runtime secret env names。"""
+
+        provider_targets = {
+            env_name
+            for provider in config.providers
+            if (env_name := provider.effective_api_key_env)
+        }
+        runtime_targets = {
+            env_name
+            for env_name in (
+                config.front_door.bearer_token_env,
+                config.front_door.trusted_proxy_token_env,
+                config.channels.telegram.bot_token_env,
+                config.channels.telegram.webhook_secret_env,
+            )
+            if env_name
+        }
+        return provider_targets, runtime_targets
+
+    def _save_provider_secret_profiles(
+        self,
+        *,
+        config: OctoAgentConfig,
+        provider_updates: Mapping[str, str],
+        removals: set[str],
+    ) -> list[str]:
+        store = self._credential_store()
+        saved_profiles: list[str] = []
+        for provider in config.providers:
+            env_name = provider.effective_api_key_env
+            if provider.effective_auth_kind != "api_key" or not env_name:
+                continue
+            secret_value = provider_updates.get(env_name)
+            if secret_value:
+                profile = self._provider_secret_profile(
+                    store=store,
+                    provider_id=provider.id,
+                    secret_value=secret_value,
+                )
+                store.set_profile(profile)
+                saved_profiles.append(profile.name)
+            if env_name in removals:
+                store.remove_profile(f"{provider.id}-default")
+        return saved_profiles
+
+    @staticmethod
+    def _provider_secret_profile(
+        *,
+        store: CredentialStore,
+        provider_id: str,
+        secret_value: str,
+    ) -> ProviderProfile:
+        profile_name = f"{provider_id}-default"
+        existing = store.get_profile(profile_name)
+        return ProviderProfile(
+            name=profile_name,
+            provider=provider_id,
+            auth_mode="api_key",
+            credential=ApiKeyCredential(
+                provider=provider_id,
+                key=SecretStr(secret_value),
+            ),
+            is_default=(
+                existing.is_default if existing is not None else store.get_default_profile() is None
+            ),
+            created_at=existing.created_at if existing is not None else datetime.now(tz=UTC),
+            updated_at=datetime.now(tz=UTC),
+        )
 
     def _build_config_ui_hints(self) -> dict[str, ConfigFieldHint]:
         # Runtime 旧模型配置提示已经整体退役。
@@ -313,12 +379,22 @@ class SetupConfigIOMixin:
         return values
 
     def _write_env_values(self, path: Path, updates: Mapping[str, str]) -> None:
+        self._write_env_mutations(path, updates=updates, removals=set())
+
+    def _write_env_mutations(
+        self,
+        path: Path,
+        *,
+        updates: Mapping[str, str],
+        removals: set[str],
+    ) -> None:
         normalized = {
             str(key).strip(): str(value)
             for key, value in updates.items()
             if str(key).strip() and str(value).strip()
         }
-        if not normalized:
+        normalized_removals = {str(name).strip() for name in removals if str(name).strip()}
+        if not normalized and not normalized_removals:
             return
         existing_lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
         rendered: list[str] = []
@@ -330,6 +406,8 @@ class SetupConfigIOMixin:
                 continue
             key, _ = line.split("=", 1)
             env_name = key.strip()
+            if env_name in normalized_removals:
+                continue
             if env_name in normalized:
                 rendered.append(f"{env_name}={normalized[env_name]}")
                 seen_keys.add(env_name)

@@ -1,0 +1,15 @@
+task_id: T013
+phase: GREEN
+behavior: Settings/MCP write-only secret mutation 与出站去值
+command: cd octoagent && env PYTHONNOUSERSITE=1 LITELLM_LOCAL_MODEL_COST_MAP=True PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_secret_egress.py
+executed_at_utc: 2026-07-25T12:07:28Z
+head_sha: 68da366461a0cec765bfc7f62d69f03cfaf0a3db
+test_sha256: 429c63aecf70997ed217bd1381ca2625a0b14052035a2e29902d04b55c7f2c4d
+exit_code: 0
+oracle_expected: read只含name/configured/redacted_summary；三态精确；所有出站无secret value
+oracle_observed: 4 passed；MCP env字段已从读模型移除，首次新值与后续三态分流，placeholder及非法mutation fail closed
+output_file: green.log
+raw_output_file: /tmp/f149-t013-green-final.log
+raw_output_sha256: 428fd15400f5f8720ffdc6b707ac1e3dd943c558790630e1bdc75d6a73e0c396
+layer: L4
+network: false

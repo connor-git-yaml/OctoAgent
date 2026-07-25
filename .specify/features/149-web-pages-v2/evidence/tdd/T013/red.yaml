@@ -1,0 +1,19 @@
+task_id: T013
+phase: RED
+behavior: Settings/MCP write-only secret mutation 与出站去值
+command: cd octoagent && env PYTHONNOUSERSITE=1 LITELLM_LOCAL_MODEL_COST_MAP=True PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_secret_egress.py
+executed_at_utc: 2026-07-25T12:06:41Z
+head_sha: 68da366461a0cec765bfc7f62d69f03cfaf0a3db
+test_sha256: 429c63aecf70997ed217bd1381ca2625a0b14052035a2e29902d04b55c7f2c4d
+exit_code: 1
+oracle_expected: F149_SECRET_EGRESS_CONTRACT_MISSING
+oracle_observed: 4个节点均只命中固定合同oracle；无import、collection、path或usage错误
+output_file: red.log
+raw_output_file: /tmp/f149-t013-red-final.log
+raw_output_sha256: 771716377de0fa460687a24e39d38dc26e79f81a0da35276029a6d327fbf7d8d
+sentinel_occurrences_in_output: 0
+execution_note: 最终架构合同的测试字节复制到detached旧生产基线后执行；临时worktree已删除，主工作树未回退
+discarded_attempt: 首轮RED的PYTHONPATH多含已退休SDK，行为虽正确但不计规范证据
+layer: L4
+network: false
+rerun: false

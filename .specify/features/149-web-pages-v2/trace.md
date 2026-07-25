@@ -104,5 +104,16 @@
   限总bytes及secret scrub后才进入diagnostic。REFACTOR连同既有SSE历史回放、
   实时、终态、dedup与队列测试13/13通过，并把复杂event generator抽为单一内部
   协程；Gateway仍只有原SSE路由，core无F149 frame模型。
+- T013以四个可收集Gateway L4节点完成真实RED→GREEN→REFACTOR：首轮RED虽命中
+  正确oracle，但PYTHONPATH多含已退休SDK，主动判为不合格；随后把当前test相同
+  SHA复制到detached旧生产基线，以七包+Gateway规范环境取得4/4固定
+  `F149_SECRET_EGRESS_CONTRACT_MISSING`且输出sentinel为0。GREEN后MCP读模型彻底
+  移除`env`兼容字段，只公开`name/configured/redacted_summary`；首次MCP安装只
+  接受一次性新值，后续Settings/MCP持久化编辑共用严格`keep|replace|remove`，
+  placeholder、未声明字段与额外schema均fail closed。原始值从读模型与领域结果
+  边界排除，MCP持久化异常固定化，SSE复用既有diagnostic sanitizer；action/
+  snapshot/SSE/error/audit/log测试均未发现sentinel。REFACTOR精确回归23/23，
+  完整control-plane与MCP registry回归96 passed/1 skipped；没有global secret
+  值扫描器、第二scrub算法、第二transport或明文兼容路径。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

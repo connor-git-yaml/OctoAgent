@@ -29,6 +29,11 @@ from octoagent.provider.auth.store import CredentialStore
 
 from ..mcp_registry import McpServerConfig
 from ._base import ControlPlaneContext, DomainServiceBase
+from .secret_contract import (
+    apply_secret_mutations,
+    secret_field_summaries,
+    validate_initial_secret_values,
+)
 
 log = structlog.get_logger()
 
@@ -119,7 +124,7 @@ class McpDomainService(DomainServiceBase):
                     command=config.command,
                     args=list(config.args),
                     cwd=config.cwd,
-                    env=dict(config.env),
+                    secret_fields=secret_field_summaries(config.env),
                     mount_policy=str(config.mount_policy).strip().lower() or "auto_readonly",
                     tool_count=record.tool_count if record is not None else 0,
                     selection_item_id=f"mcp:{config.name}",
@@ -202,8 +207,15 @@ class McpDomainService(DomainServiceBase):
         if not package_name:
             raise self._action_error("MCP_PACKAGE_NAME_REQUIRED", "包名不能为空")
 
-        env = self._normalize_dict(request.params.get("env"))
-        env = {str(k): str(v) for k, v in env.items() if str(k).strip()}
+        try:
+            env = validate_initial_secret_values(
+                self._normalize_dict(request.params.get("env")),
+            )
+        except ValueError as exc:
+            raise self._action_error(
+                "SECRET_MUTATION_INVALID",
+                "MCP secret mutation 不符合合同",
+            ) from exc
 
         try:
             task_id = await self._mcp_installer.install(
@@ -322,22 +334,39 @@ class McpDomainService(DomainServiceBase):
                 "MCP_PROVIDER_MOUNT_POLICY_INVALID",
                 "mount_policy 不合法",
             )
+        registry = self._ctx.capability_pack_service.mcp_registry
+        existing = next(
+            (item for item in registry.list_configs() if item.name == provider_id),
+            None,
+        )
+        try:
+            env = apply_secret_mutations(
+                existing.env if existing is not None else {},
+                self._normalize_dict(raw.get("env")),
+            )
+        except ValueError as exc:
+            raise self._action_error(
+                "SECRET_MUTATION_INVALID",
+                "MCP secret mutation 不符合合同",
+            ) from exc
         config = McpServerConfig.model_validate(
             {
                 "name": provider_id,
                 "command": command,
                 "args": self._normalize_text_list(raw.get("args")),
-                "env": {
-                    key: str(value)
-                    for key, value in self._normalize_dict(raw.get("env")).items()
-                    if str(key).strip()
-                },
+                "env": env,
                 "cwd": self._param_str(raw, "cwd"),
                 "enabled": self._param_bool(raw, "enabled", default=True),
                 "mount_policy": mount_policy,
             }
         )
-        self._ctx.capability_pack_service.mcp_registry.save_config(config)
+        try:
+            registry.save_config(config)
+        except (OSError, RuntimeError) as exc:
+            raise self._action_error(
+                "MCP_PROVIDER_SAVE_FAILED",
+                "MCP provider 保存失败",
+            ) from exc
         await self._ctx.capability_pack_service.refresh()
         document = await self.get_mcp_provider_catalog_document()
         return self._completed_result(

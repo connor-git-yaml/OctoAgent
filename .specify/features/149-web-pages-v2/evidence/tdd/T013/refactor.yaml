@@ -1,0 +1,26 @@
+task_id: T013
+phase: REFACTOR
+behavior: Settings/MCP write-only secret mutation 与出站去值
+command: cd octoagent && env PYTHONNOUSERSITE=1 LITELLM_LOCAL_MODEL_COST_MAP=True PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_secret_egress.py apps/gateway/tests/test_control_plane_api.py -k "mcp or setup or secret or snapshot"
+executed_at_utc: 2026-07-25T12:07:34Z
+head_sha: 68da366461a0cec765bfc7f62d69f03cfaf0a3db
+test_sha256: 429c63aecf70997ed217bd1381ca2625a0b14052035a2e29902d04b55c7f2c4d
+exit_code: 0
+oracle_expected: T013合同与既有setup/MCP/snapshot/control-plane行为同时通过
+oracle_observed: 23 passed；完整control-plane与MCP registry回归另为96 passed、1 skipped
+output_file: refactor.log
+raw_output_file: /tmp/f149-t013-refactor-final.log
+raw_output_sha256: b16efd179a60cccb50350a291569a783884bbe3b7532f0cf418cb672b61ce456
+quality_review:
+  - MCP读模型彻底移除env兼容字段，只公开name/configured/redacted_summary
+  - 首次MCP安装只接受一次性新值；Settings与后续MCP编辑共用严格keep/replace/remove模型
+  - 原始值从读模型与领域结果边界排除；持久化异常固定化，SSE复用既有diagnostic sanitizer
+  - action response、snapshot、SSE、structured error、audit event与captured log均无sentinel
+  - 未新增global secret值扫描器、第二scrub算法、第二transport或明文兼容路径
+file_sha256:
+  mcp_service.py: 0036ac2a8ef54b170374ce6e34816e85bc7fc2b98880b7afc3d7a0ea4200e4af
+  secret_contract.py: 1ab351975a802ba8da48165babb28b58f63fd9a29fb738e86c3af14239769082
+  setup_config_io.py: 5bcc50f7a38591fb1c49431e36a37dc661d3999e127da12f7cf7705fa395f294
+  test_control_plane_api.py: f7786d9f90b6649ab1e56076c3fb2b44e25cf97b15d74d054940b88cbae7d95a
+  test_f149_secret_egress.py: 429c63aecf70997ed217bd1381ca2625a0b14052035a2e29902d04b55c7f2c4d
+  control_plane_setup.py: 80fd8ed5351030525fbe80aca75edaf84a89f0656d74d81f2fdc8b3eb2e8e171

@@ -173,6 +173,12 @@ class SetupGovernanceDocument(ControlPlaneDocument):
     review: SetupReviewSummary = Field(default_factory=SetupReviewSummary)
 
 
+class SecretFieldSummary(BaseModel):
+    name: str = Field(min_length=1)
+    configured: bool
+    redacted_summary: str = Field(min_length=1)
+
+
 class McpProviderItem(BaseModel):
     provider_id: str = Field(min_length=1)
     label: str = Field(min_length=1)
@@ -184,7 +190,7 @@ class McpProviderItem(BaseModel):
     command: str = Field(default="")
     args: list[str] = Field(default_factory=list)
     cwd: str = Field(default="")
-    env: dict[str, str] = Field(default_factory=dict)
+    secret_fields: list[SecretFieldSummary] = Field(default_factory=list)
     mount_policy: str = Field(default="auto_readonly")
     tool_count: int = Field(default=0, ge=0)
     selection_item_id: str = Field(default="")

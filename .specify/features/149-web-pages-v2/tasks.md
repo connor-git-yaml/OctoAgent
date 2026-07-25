@@ -173,13 +173,20 @@
 
 ### T013 — Settings/MCP write-only secret 与全出站 scrub
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T013/`。MCP 读取模型已移除 `env`，只公开
+  `name/configured/redacted_summary`；首次 MCP 安装只接受一次性新值，后续
+  Settings/MCP 持久化编辑使用严格 `keep|replace|remove` mutation，placeholder、
+  未声明字段与 schema 漂移 fail closed。原始值从读模型和领域结果边界排除，
+  持久化异常映射为固定错误，SSE 复用既有 diagnostic sanitizer；未新增全局
+  secret 值扫描器、registry、第二套 scrub 算法或第二 transport。
 - **层/FR**：Gateway L4 security；FR-022。
 - **文件**：`octoagent/apps/gateway/tests/test_f149_secret_egress.py`；setup/MCP application contract。
 - **依赖**：T010/T011/T012。
 - **RED_SETUP**：用运行时拼接的合成 sentinel；测试 read summary、keep/replace/remove、placeholder 拒绝、list/get/snapshot/action/SSE/error/captured log。失败只输出固定 oracle，不打印 payload/value。
 - **RED_COMMAND**：`cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_secret_egress.py`
 - **RED_ORACLE**：MCP env/read response 泄漏、mutation 三态/placeholder 拒绝错误或出站任一路径含 sentinel。
-- **GREEN_CHANGE**：F149 窄 representation/validation/scrub，复用现有 config/secret store 与 application boundary。
+- **GREEN_CHANGE**：F149 窄 representation/validation/error mapping，复用现有 config/secret store 与 SSE sanitizer；不把请求值提升为全局净化状态。
 - **GREEN_COMMAND**：`cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_secret_egress.py`
 - **GREEN_ORACLE**：所有出站为 name/configured/redacted summary，mutation 三态精确。
 - **REFACTOR_COMMAND**：`cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_secret_egress.py apps/gateway/tests/test_control_plane_api.py -k "mcp or setup or secret or snapshot"`
@@ -621,5 +628,6 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000已关闭；下一项是T001 checker真实RED。F149仍须逐task通过
-  RED→GREEN→REFACTOR，Tasks Gate与T000完成均不豁免后续证据门。
+- 当前风险：T000–T013 中已执行的任务均有真实证据；下一项是 T014 deterministic
+  L3 contract/egress。F149 仍须逐 task 通过 RED→GREEN→REFACTOR，Tasks Gate 与
+  前序完成均不豁免后续证据门。

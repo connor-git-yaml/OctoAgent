@@ -1688,7 +1688,10 @@ class TestControlPlaneApi:
                             },
                         },
                         "secret_values": {
-                            "OPENROUTER_API_KEY": "sk-openrouter-value",
+                            "OPENROUTER_API_KEY": {
+                                "mode": "replace",
+                                "value": "sk-openrouter-value",
+                            },
                         },
                         "agent_profile": {
                             "scope": "project",
@@ -1776,7 +1779,10 @@ class TestControlPlaneApi:
                             },
                         },
                         "secret_values": {
-                            "OPENROUTER_API_KEY": "sk-v2-secret",
+                            "OPENROUTER_API_KEY": {
+                                "mode": "replace",
+                                "value": "sk-v2-secret",
+                            },
                         },
                         "agent_profile": {
                             "scope": "project",
@@ -1856,8 +1862,10 @@ class TestControlPlaneApi:
                             },
                         },
                         "secret_values": {
-                            "OPENROUTER_API_KEY": "sk-openrouter-value",
-                            "LITELLM_MASTER_KEY": "sk-master-value",
+                            "OPENROUTER_API_KEY": {
+                                "mode": "replace",
+                                "value": "sk-openrouter-value",
+                            },
                         },
                         "agent_profile": {
                             "scope": "project",
