@@ -46,9 +46,16 @@
 - 2026-07-21 main Plan/Tasks code review 指出 F149 不能把 pre-F151 SDK 路径冻结为未来 RED。窄返修后所有未来 Python/Playwright 环境改为 post-F151 canonical 七个保留 workspace packages + Gateway，retired SDK absent；T050 改用独立 seeded config-contract negatives，T000 增加 F151 stable commit 后 rebase/recon 与 canonical profile 不一致即回 Gate。任务/行为/command 数保持 40/32/96。
 - 2026-07-21 main 最终独立复核通过：`GATE_TASKS=true`。Implement 未放行；F150/F151 stable commit、rebase/recon 与 main 再次明确授权未齐前，T000 保持 CLOSED，禁止 production/tests、behavior RED、stage/commit/push。
 - 2026-07-24 用户冻结产品/设计边界：桌面端保留 Web；手机产品只走原生 iOS App，不把 390px Web/手机浏览器作为移动产品入口，F149 的 390px 仅为 Web 窄窗口响应式健壮性，不是手机产品、移动认证或 iOS 验收。Claude Design 最开始方案是 Web/iOS 共同视觉/交互基线；现有 Web 仅作 current-state evidence。只允许因明确功能合同、可用性、无障碍或 iOS 原生平台规范调整，必须记录原因和影响，禁止以实现方便为理由；iOS 保留视觉语言但使用 SwiftUI/Apple 原生导航、手势、控件与无障碍语义，不复制 Web 组件结构。F149 仍只实施 Web，该决定已同步至 Spec/Plan/Tasks/Checklist；未进入 Implement。
-- Design/Tasks Gate 已通过；生产实现仍需 F150/F151 稳定、rebase/recon 与 main 另行明确放行。
+- Design/Tasks Gate 已通过；该时点生产实现仍需 F150/F151 稳定、rebase/recon 与 main
+  另行明确放行。
 
-## Phase 3+ — 未开始
+## Phase 3 — Implement readiness
 
-- `plan.md`、`tasks.md` 已通过 Gate；生产实现与验证均未开始。
-- 未修改 F150/F151 或其他生产代码；未 commit、未 push。
+- 2026-07-25：F150产品实现提交`bf29d6be7d7a86c298cd45699488a8640065a566`、
+  stable tip`5e6f4846703b7126cd104c8b9678e0c2f5300cc8`与
+  `origin/master=112a54aed0aca2971d8dabb34b6390efe9d779aa`已就绪。
+- F149 snapshot接入正式分支并无冲突rebase；merge-base精确等于`origin/master`。
+- 重新完整读取tests契约、Playwright config与F151 stage profile；canonical post-SDK
+  profile仍为七包+Gateway、SDK absent。Playwright CI retry漂移留给T050按真实TDD修复。
+- Design export SHA仍为`a2db08ea0eb39278558e61e87a355b042c98ad24273b201940925f310271d98a`。
+- T000关闭；Implement放行。尚未执行T001行为RED，未修改F150/F151 production。

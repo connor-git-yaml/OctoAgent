@@ -19,7 +19,7 @@
 - [x] 每条 functional requirement 可测试且无歧义
 - [x] 10 个 Web surface 的唯一 Desktop/390 Web 窄窗口 frame、loading/empty/error/origin-403 与 accessibility 均有验收要求
 - [x] REST OpenAPI、raw snapshot decoder、Gateway SSE、有限 action contract、UI view model 与单一 transport 边界明确
-- [x] F150/F151/main 放行条件明确
+- [x] F150/F151/main 放行条件明确，且T000已在stable commits与rebase/recon证据齐全后关闭
 - [x] 未遗留 `[NEEDS CLARIFICATION]` 占位符
 
 ## Quality Hard Gates
@@ -36,10 +36,11 @@
 
 ## Scope Safety
 
-- [x] 当前仅新增 Spec Driver 制品，没有生产实现
+- [x] T000关闭前仅新增Spec Driver制品，没有生产实现；后续生产变更必须逐task TDD
 - [x] 不修改 F150/F151 生产代码
 - [x] 不 commit、不 push
-- [x] Design/Tasks Gate 均已通过；实现仍需 T000 的 F150/F151 stable commit、rebase/recon 与 main 再次明确放行
+- [x] Design/Tasks Gate均已通过；F150/F151 stable commit、rebase/recon与main Implement
+  放行已在T000闭合
 
 ## Known External Inputs
 
@@ -73,7 +74,8 @@
 
 ## Notes
 
-- 本 checklist 的 Design 输入、窄返修、真实云端导出与 Plan/Tasks 已通过。Implement 仍等待 F150/F151 stable commit、rebase/recon 与 main 再次明确放行。
+- 本 checklist 的 Design 输入、窄返修、真实云端导出与 Plan/Tasks 已通过；T000已完成，
+  Implement从T001开始逐task放行。
 - Tasks Gate 必须把测试矩阵拆成逐行为 RED/GREEN/REFACTOR，并用仓库最终文件名替换任何规划阶段落点。
 
 ## Plan/Tasks Gate 状态
@@ -87,3 +89,5 @@
 - [x] T000 要求 F151 stable commit 后 rebase/recon 并重读 tests/AGENTS、Playwright config 与 stage profile；canonical package set 不一致即回 Gate，禁止兼容 retired SDK
 - [x] T050 使用独立 seeded negative fixtures 验 retired SDK、漏 package、CI retry、ambient/host path；actual post-F151 config 只作 accept control，已满足时不伪造 production change
 - [x] main 明确 `GATE_TASKS=true`（2026-07-21 PASS；不得据此 Implement）
+- [x] T000已记录F151 stable、F150 stable、`origin/master`、无冲突rebase、Design export
+  SHA与post-SDK七包+Gateway profile；T001可以开始

@@ -1,8 +1,10 @@
 # F149 Web 其余页面 v2 — Tasks
 
-> 状态：`GATE_TASKS=true`（2026-07-21 main PASS）；Implement 仍由 T000 硬阻断。
+> 状态：`GATE_TASKS=true`（2026-07-21 main PASS）；T000 已在 F150 stable 后完成
+> rebase/recon，Implement 已放行，当前从 T001 checker RED 开始推进。
 >
-> 当前不执行任何任务。T000 未关闭且 main 未再次明确放行 Implement 前，T001 之后的 production/tests 变更均不得开始；不得 stage/commit/push。
+> F149 分支以 `112a54aed0aca2971d8dabb34b6390efe9d779aa` 为上游基线；
+> 不得修改 F150/F151 authority，不得 stage/commit/push 未通过当前 task review 的字节。
 
 ## 0. 执行纪律
 
@@ -19,10 +21,20 @@
 
 ### T000 — Implement readiness 硬阻断
 
+- [x] **状态：完成**
 - **类型**：process blocker；非行为 task，不产生伪 RED。
 - **FR/SC**：FR-020；SC-008。
 - **关闭条件**：记录 F150 global Access/SSE URL 契约稳定 commit、F151 runtime/config/secret-reference seam 稳定 commit、`origin/master` 新基线与 main 明确 Implement 放行；随后完成 rebase/recon，重新完整读取届时的 `octoagent/tests/AGENTS.md`、`octoagent/frontend/playwright.config.ts` 与 F151 stage profile。
 - **ORACLE**：任一证据缺失时 T001–T066 均保持 blocked；Python/Playwright 必须采用 post-F151 canonical `core/provider/protocol/tooling/skills/policy/memory` 七包 + Gateway profile 且 retired SDK absent。若届时 canonical package set 与本计划不一致，回 Tasks Gate；不得创建 fallback auth/DTO 或兼容旧 SDK。
+- **RESULT**：F151 stable=`687f20fc6246e7157957ab51ac474d46e91578b6`；
+  F150产品实现=`bf29d6be7d7a86c298cd45699488a8640065a566`，F150 stable
+  tip=`5e6f4846703b7126cd104c8b9678e0c2f5300cc8`，`origin/master`真值同步
+  commit=`112a54aed0aca2971d8dabb34b6390efe9d779aa`。F149已无冲突rebase，
+  merge-base精确等于该`origin/master`。重新完整读取tests契约、Playwright config与
+  F151 stage profile后，post-SDK profile仍为七包+Gateway且SDK计数为0；Design export
+  SHA仍为`a2db08ea0eb39278558e61e87a355b042c98ad24273b201940925f310271d98a`。
+  Playwright现存`CI retries=1`漂移已登记为T050的真实目标，不扩成兼容路径，也不阻断
+  T001–T049的确定性L4/L3任务。
 
 ### T001 — F149 boundary checker 行为
 
@@ -584,4 +596,5 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 剩余风险：F150/F151 stable commit、rebase/recon 与 main 再次明确 Implement 放行仍由 T000 硬阻断；Tasks Gate PASS 不授权实施。
+- 当前风险：T000已关闭；下一项是T001 checker真实RED。F149仍须逐task通过
+  RED→GREEN→REFACTOR，Tasks Gate与T000完成均不豁免后续证据门。

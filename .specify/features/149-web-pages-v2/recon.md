@@ -1,7 +1,8 @@
 # F149 Web 其余页面 v2：设计侦察
 
-> 状态：Design Gate 候选制品；仅做事实核验与设计约束，不授权生产实现。
-> 基线：`origin/master` 与当前 detached HEAD 均为 `9d5e1e48691c5ae5a12b33f224d64ac03d5442fc`（2026-07-20 核验）。
+> 状态：Design/Tasks Gate已通过；2026-07-25 T000 rebase/recon完成并放行Implement。
+> §1～§13保留2026-07-20的历史侦察；当前基线与漂移结论以§14为准。
+> 当前上游基线：`origin/master=112a54aed0aca2971d8dabb34b6390efe9d779aa`。
 
 ## 1. 上游约束与范围
 
@@ -238,3 +239,26 @@ Python 测试必须按 `octoagent/tests/AGENTS.md` 使用固定 `PYTHONPATH` 和
 3. **唯一 Design Gate 阻断**：Claude 尚未回存 20 个唯一页面 frame、Shared-States、Advanced-Pattern 与 References；在此之前 GATE_DESIGN 不通过。
 4. **生产契约前置**：实现等待 F150/F151 稳定，以及 raw snapshot decoder、Gateway SSE、action 同源 registry、F149-owned write-only secret slice 就绪。`any` 禁止，开放 JSON 只可留在命名 boundary。
 5. **main 已定范围**：审批维持 F145 三类候选；自动化维持 pause/resume；任务不新增 cancel/resume；Tasks“待处理事项”与 Settings Advanced“维护与恢复”落点均已冻结。
+
+## 14. 2026-07-25 T000 rebase/recon
+
+- F149本地snapshot已接入`codex/f149-web-pages-v2`并无冲突rebase到
+  `origin/master=112a54aed0aca2971d8dabb34b6390efe9d779aa`；当前分支提交为
+  `aa664c4162f88d13105bdadc57870770e169d832`，merge-base精确等于上游。
+- F151 stable commit为`687f20fc6246e7157957ab51ac474d46e91578b6`。F150产品实现提交为
+  `bf29d6be7d7a86c298cd45699488a8640065a566`，仓库级门禁配套及stable tip为
+  `5e6f4846703b7126cd104c8b9678e0c2f5300cc8`；F149不复制其Access、JWT、
+  request classifier、SSE或remote status状态机。
+- Claude Design导出仍为`280442` bytes，SHA-256仍为
+  `a2db08ea0eb39278558e61e87a355b042c98ad24273b201940925f310271d98a`；
+  它继续是视觉/交互基线，现有Web只作current-state evidence。
+- 已重新完整读取`octoagent/tests/AGENTS.md`、
+  `octoagent/frontend/playwright.config.ts`及F151 stage command/profile SoT。
+  post-SDK `PYTHONPATH`仍精确为core/provider/protocol/tooling/skills/policy/memory七包
+  加Gateway，retired SDK计数为0，与Tasks一致。
+- Playwright现状仍是`workers=1`、local retry=0、CI retry=1。后者违反T050冻结的
+  `retries=0`目标，作为T050 seeded-negative/actual-config合同的真实待修项保留；
+  不在T000提前修改，也不增加fallback或blanket rerun。
+- 结论：F150/F151前置、上游基线、Design SoT和canonical package profile均闭合；
+  T000完成，T001可开始。§3与§13中“Design尚未回存/仍阻断”只记录历史状态，不再代表
+  当前Gate。
