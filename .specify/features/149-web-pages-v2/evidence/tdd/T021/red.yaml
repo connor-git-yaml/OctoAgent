@@ -1,0 +1,15 @@
+task_id: T021
+phase: RED
+behavior: Approvals/Memory unified transport and error ownership
+command: cd octoagent/frontend && npx vitest run src/api/approval-center.test.ts src/api/memory-candidates.test.ts src/api/client.test.ts
+executed_at_utc: 2026-07-25T20:38:58Z
+head_sha: a38d3e4331a149c4ce7e19858d6098db9b0fda80
+exit_code: 1
+oracle_expected:
+  - F149_UNIFIED_TRANSPORT_MISSING
+  - F149_ERROR_OWNERSHIP_MISSING
+oracle_observed: 8项稳定失败；Approvals命中统一request、403与401三项，Memory命中统一request及401/403/404/409五项；其余19项通过
+raw_output_file: /tmp/f149-t021-red.log
+raw_output_sha256: fe656d7f63640683c42ab503606230b0481f05f46332dcc855136542b9be07d3
+network: false
+rerun: false

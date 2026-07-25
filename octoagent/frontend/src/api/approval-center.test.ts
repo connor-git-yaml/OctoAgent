@@ -9,6 +9,19 @@
  * 回放后端真实 body 形态，钉住 HTTP→resultStatus 这一跳。
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const clientMocks = vi.hoisted(() => ({
+  frontDoorRequest: vi.fn(),
+}));
+
+vi.mock("./client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./client")>();
+  return {
+    ...actual,
+    frontDoorRequest: clientMocks.frontDoorRequest,
+  };
+});
+
 import {
   ApprovalActionError,
   acceptCompactCandidate,
@@ -44,6 +57,10 @@ describe("postApproval：后端真实 body 形态 → resultStatus（MED-1）", 
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
+    clientMocks.frontDoorRequest.mockReset();
+    clientMocks.frontDoorRequest.mockImplementation((path, init) =>
+      fetchMock(path, init)
+    );
   });
 
   afterEach(() => {
@@ -56,6 +73,13 @@ describe("postApproval：后端真实 body 形态 → resultStatus（MED-1）", 
     );
     await expect(acceptConsolidationCandidate("c1")).resolves.toBeUndefined();
     expect(fetchMock).toHaveBeenCalledWith(
+      "/api/consolidation/candidates/c1/accept",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(
+      clientMocks.frontDoorRequest,
+      "F149_UNIFIED_TRANSPORT_MISSING"
+    ).toHaveBeenCalledWith(
       "/api/consolidation/candidates/c1/accept",
       expect.objectContaining({ method: "POST" })
     );
@@ -98,6 +122,35 @@ describe("postApproval：后端真实 body 形态 → resultStatus（MED-1）", 
     expect(err.resultStatus).toBe("not_found");
   });
 
+  it("403保留给surface permission state", async () => {
+    fetchMock.mockResolvedValue(jsonResponse(403, { detail: "无权修改该资源" }));
+    const err = await captureApprovalError(() =>
+      acceptConsolidationCandidate("protected")
+    );
+    expect(err).toMatchObject({
+      httpStatus: 403,
+      resultStatus: "forbidden",
+    });
+  });
+
+  it("401交回全局front-door owner而不是降级成approval unknown", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(401, {
+        detail: {
+          code: "FRONT_DOOR_TOKEN_REQUIRED",
+          message: "需要登录态",
+        },
+      })
+    );
+    await expect(
+      acceptConsolidationCandidate("protected")
+    ).rejects.toMatchObject({
+      name: "ApiError",
+      status: 401,
+      code: "FRONT_DOOR_TOKEN_REQUIRED",
+    });
+  });
+
   it("原生 500（root-task ensure 失败等 detail-only）→ unknown（保守保留卡片）", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse(500, { detail: "consolidation root task ensure 失败" })
@@ -129,6 +182,10 @@ describe("getJson / bulk 调用形态", () => {
   beforeEach(() => {
     vi.stubGlobal("fetch", fetchMock);
     fetchMock.mockReset();
+    clientMocks.frontDoorRequest.mockReset();
+    clientMocks.frontDoorRequest.mockImplementation((path, init) =>
+      fetchMock(path, init)
+    );
   });
 
   afterEach(() => {
@@ -155,9 +212,8 @@ describe("getJson / bulk 调用形态", () => {
     );
     const summary = await fetchApprovalSummary();
     expect(summary.total_pending).toBe(6);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/approval-center/summary",
-      expect.anything()
+    expect(clientMocks.frontDoorRequest).toHaveBeenCalledWith(
+      "/api/approval-center/summary"
     );
   });
 

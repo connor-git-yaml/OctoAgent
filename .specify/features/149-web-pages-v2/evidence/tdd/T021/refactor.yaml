@@ -1,0 +1,34 @@
+task_id: T021
+phase: REFACTOR
+behavior: Approvals/Memory unified transport and error ownership
+command: cd octoagent/frontend && npx vitest run src/api/approval-center.test.ts src/api/memory-candidates.test.ts src/api/client.test.ts
+executed_at_utc: 2026-07-25T20:45:19Z
+head_sha: a38d3e4331a149c4ce7e19858d6098db9b0fda80
+exit_code: 0
+oracle_expected: 同一27项合同继续通过，且跨Feature authority只允许唯一client export
+oracle_observed: 3 files、27 tests全部通过；相关回归68/68；openapi、tsc、complexity、F150 scope均通过
+raw_output_file: /tmp/f149-t021-refactor-final.log
+raw_output_sha256: 41f2613603e53bfef0639b76661d093c75cbe99a07c7f043946e5edd05f52ce5
+openapi_output_file: /tmp/f149-t021-openapi-final.log
+openapi_output_sha256: 28f09c1d100e86fa0560ca67dc0c90c87e7479a645ca2b08520360e7e7542b0f
+complexity_output_file: /tmp/f149-t021-complexity-final.log
+complexity_output_sha256: 8f1a968e483dfd54f21bd3a9ea53a82f93964d87caafb81fe3a13751a16776b1
+boundary_output_file: /tmp/f149-t021-boundary.log
+boundary_output_sha256: 17423d68ed605e5b6cf0e2a88c461c51ff34389e4465fa4a7bd2470c201d8334
+quality_review:
+  - Approvals与Memory不再直接读取token、组装header或调用fetch
+  - 401唯一归F150 global auth；403/404/409由F149 surface mapper处理
+  - client只新增apiErrorFromResponse公开能力，不创建第二transport或第二error parser
+  - runtime architecture真实工作树与正向control通过，额外export和DeviceSession敏感语义均fail closed
+  - boundary扫描中Approvals/Memory违规为零；剩余Agent/Skills旧直连由T022明确拥有
+  - 本task不修改UI/CSS，不影响Claude Design视觉基线
+file_sha256:
+  approval-api: 4ce61d3b60bdc282bf4aafb6d4e6c0e65e563b27857b47db97df9b949a91b757
+  approval-test: 854576135d4585537753df7225939dee8aac6c2ac3795ed2ef5508c7b21a4aaa
+  api-client: f559ae5b10036a62516223287066851cdb438282ac20a530eaf49570fab77bf1
+  memory-types: 8a814714c943ef819a03d1a37f858afabe431118cb34612441adc2bc8e490920
+  memory-test: b43f2d09e5cdcf80108897f996441a3e576fa4863fdce510d3f9b9d89d0c5dd5
+  error-ownership: 9fe8201d59681086890e682c16059d8a716164b510801162216a6eecded64432
+  runtime-architecture-checker: 3cb6726b3924e348aed80f13c16b582ec73fbc2f5020a72973d739a15557f8fd
+network: false
+rerun: false

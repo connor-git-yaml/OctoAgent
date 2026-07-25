@@ -1,0 +1,13 @@
+task_id: T021
+phase: GREEN
+behavior: Approvals/Memory unified transport and error ownership
+command: cd octoagent/frontend && npx vitest run src/api/approval-center.test.ts src/api/memory-candidates.test.ts src/api/client.test.ts
+executed_at_utc: 2026-07-25T20:40:01Z
+head_sha: a38d3e4331a149c4ce7e19858d6098db9b0fda80
+exit_code: 0
+oracle_expected: 两类helper统一经api/client，401交回global auth，403/404/409由surface精确处理
+oracle_observed: 3 files、27 tests全部通过；tsc -b通过
+raw_output_file: /tmp/f149-t021-green.log
+raw_output_sha256: b7a7401798c40930a9f0c6308154352b09aa0cc2d0b91d0e827fcd98963962c4
+network: false
+rerun: false

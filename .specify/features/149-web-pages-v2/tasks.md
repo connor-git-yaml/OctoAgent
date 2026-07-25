@@ -253,8 +253,17 @@
 
 ### T021 — Approvals/Memory helper 统一 transport 与 error ownership
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T021/`。Approvals/Memory 已删除各自的 token/header/direct fetch
+  helper，统一经 `api/client` 的 `frontDoorRequest`；401 保持 F150 global auth
+  owner，403/404/409 由 F149 surface mapper 精确归属。`apiErrorFromResponse` 是
+  `client.ts` 唯一新增公开能力，runtime architecture exact authority 的正向控制
+  通过，并拒绝额外 export 与新增敏感 session/device 语义。仓库边界扫描剩余的
+  Agent/Skills direct fetch 全部由 T022 拥有，不把全局未完成伪报为 T021 失败。
 - **层/FR**：frontend L4；FR-002/011/021。
-- **文件**：`src/api/approval-center.test.ts`、新 `src/api/memory-candidates.test.ts`、`src/api/memory-candidates*.ts`、F149 adapter/error mapper。
+- **文件**：`src/api/approval-center*.ts`、新 `src/api/memory-candidates.test.ts`、
+  `src/api/memory-candidates*.ts`、`src/api/f149/errorOwnership.ts`、
+  `src/api/client.ts`、`repo-scripts/check-runtime-architecture.py` exact authority。
 - **依赖**：T001/T015。
 - **RED_SETUP**：扩 test 断言统一 request 注入、404/409/403 mapper 与 401 交回 global owner；不只断言 mock called，还断言 mapper/可观察结果。
 - **RED_COMMAND**：`cd octoagent/frontend && npx vitest run src/api/approval-center.test.ts src/api/memory-candidates.test.ts src/api/client.test.ts`
@@ -647,7 +656,7 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020 中已执行的任务均有真实证据；下一项是 T021
-  Approvals/Memory统一transport与error ownership。F149 仍须逐 task 通过
+- 当前风险：T000–T015、T020–T021 中已执行的任务均有真实证据；下一项是 T022
+  Agent auxiliary/Skills REST统一transport。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

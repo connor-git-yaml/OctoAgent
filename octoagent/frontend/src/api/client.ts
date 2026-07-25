@@ -145,7 +145,16 @@ function parseErrorPayload(body: unknown): ApiErrorPayload {
           ? (payload.result as Record<string, unknown>)
           : null;
   if (!error) {
-    return {};
+    return {
+      code: typeof payload.code === "string" ? payload.code : undefined,
+      message:
+        typeof payload.message === "string"
+          ? payload.message
+          : typeof payload.detail === "string"
+            ? payload.detail
+            : undefined,
+      hint: typeof payload.hint === "string" ? payload.hint : undefined,
+    };
   }
   return {
     code: typeof error.code === "string" ? error.code : undefined,
@@ -154,7 +163,10 @@ function parseErrorPayload(body: unknown): ApiErrorPayload {
   };
 }
 
-async function buildApiError(resp: Response, body?: unknown): Promise<ApiError> {
+export async function apiErrorFromResponse(
+  resp: Response,
+  body?: unknown
+): Promise<ApiError> {
   const resolvedBody = body ?? (await resp.json().catch(() => null));
   const payload = parseErrorPayload(resolvedBody);
   return new ApiError(payload.message ?? `HTTP ${resp.status}`, {
@@ -278,7 +290,7 @@ export async function frontDoorRequest(
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await apiRequest(path, init);
   if (!resp.ok) {
-    throw await buildApiError(resp);
+    throw await apiErrorFromResponse(resp);
   }
   return resp.json() as Promise<T>;
 }
@@ -382,7 +394,7 @@ export async function executeControlAction(
     return payload.result;
   }
   if (!resp.ok) {
-    throw await buildApiError(resp, rawPayload);
+    throw await apiErrorFromResponse(resp, rawPayload);
   }
   throw new Error("control action 返回体缺少 result");
 }
@@ -611,7 +623,8 @@ export async function proposeWorkspaceRollback(body: {
     method: "POST",
     body: JSON.stringify(body),
   });
-  if (!resp.ok) throw await buildApiError(resp, await resp.json().catch(() => null));
+  if (!resp.ok)
+    throw await apiErrorFromResponse(resp, await resp.json().catch(() => null));
   return resp.json();
 }
 
@@ -623,7 +636,8 @@ export async function approveWorkspaceRollback(
     `/api/workspace-git/rollback/${encodeURIComponent(requestId)}/approve`,
     { method: "POST" }
   );
-  if (!resp.ok) throw await buildApiError(resp, await resp.json().catch(() => null));
+  if (!resp.ok)
+    throw await apiErrorFromResponse(resp, await resp.json().catch(() => null));
   return resp.json();
 }
 
@@ -635,7 +649,8 @@ export async function rejectWorkspaceRollback(
     `/api/workspace-git/rollback/${encodeURIComponent(requestId)}/reject`,
     { method: "POST" }
   );
-  if (!resp.ok) throw await buildApiError(resp, await resp.json().catch(() => null));
+  if (!resp.ok)
+    throw await apiErrorFromResponse(resp, await resp.json().catch(() => null));
   return resp.json();
 }
 

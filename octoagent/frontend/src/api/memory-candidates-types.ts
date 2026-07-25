@@ -1,8 +1,11 @@
 /**
- * Memory Candidates API 共享类型 + fetch 工具
+ * Memory Candidates API 共享类型 + 统一client transport
  * Feature 084 FR-8.1
  */
-import { ApiError, getFrontDoorToken } from "./client";
+import {
+  apiErrorFromResponse,
+  frontDoorRequest,
+} from "./client";
 
 export interface MemoryCandidate {
   id: string;
@@ -21,28 +24,11 @@ export interface MemoryCandidatesResponse {
   pending_count: number;
 }
 
-/** 轻量版 apiFetch，直接复用 client 的 token 逻辑，避免循环依赖 */
+/** Memory窄JSON wrapper；认证/header/error解析只归api/client。 */
 export async function apiFetchMemory<T>(path: string, init?: RequestInit): Promise<T> {
-  const token = getFrontDoorToken();
-  const headers = new Headers(init?.headers ?? undefined);
-  if (!headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
-  if (token && !headers.has("Authorization")) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-  const resp = await fetch(path, { ...init, headers });
+  const resp = await frontDoorRequest(path, init);
   if (!resp.ok) {
-    let message = `HTTP ${resp.status}`;
-    try {
-      const body = (await resp.json()) as Record<string, unknown>;
-      const err = (body?.error ?? body?.detail) as Record<string, unknown> | undefined;
-      if (typeof err?.message === "string") message = err.message;
-      else if (typeof body?.message === "string") message = body.message as string;
-    } catch {
-      // 解析失败时使用默认 HTTP 状态描述
-    }
-    throw new ApiError(message, { status: resp.status });
+    throw await apiErrorFromResponse(resp);
   }
   return resp.json() as Promise<T>;
 }

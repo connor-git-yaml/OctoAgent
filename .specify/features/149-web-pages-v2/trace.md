@@ -139,5 +139,14 @@
   与`tsc -b`通过。跨Feature Gate只为raw decoder exact path授权resource-name常量
   与decoder两个runtime exports，没有给其他frontend路径开放session语义；无网络、
   宿主状态或UI改动。
+- T021以三份既有/新增API L4测试形成8条稳定RED：Approvals与Memory仍各自直读
+  token、组装header并调用fetch，同时401/403/404/409归属未闭合；GREEN删除两套
+  鉴权helper，统一经`frontDoorRequest`，并由共享F149 error ownership mapper把
+  401交回F150 global auth、403/404/409留给surface。REFACTOR同一精确selector
+  27/27通过，连同相关query/projection回归68/68、`openapi:check`、`tsc -b`与
+  complexity均通过。runtime architecture只为`client.ts`新增的
+  `apiErrorFromResponse`开放exact export authority，正向工作树通过，额外export与
+  `DeviceSession`敏感语义均被拒绝。边界实扫只剩T022拥有的Agent/Skills旧直连点；
+  本task没有UI/CSS、第二transport、第二auth owner或宿主状态改动。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

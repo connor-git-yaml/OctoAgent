@@ -10,10 +10,14 @@
  * memory 候选沿用既有 api/memory-candidates.ts，不在本模块重复。
  *
  * 与 apiFetchMemory 的差异：accept/reject 失败响应的 body.status 字段是 UI 呈现
- * 决策依据（HTTP 409 两义：conflict 终态 vs pending 回滚可重试），通用 fetch 会把
- * body 压成 message 丢掉 status——本模块的 postApproval 保留它（ApprovalActionError）。
+ * 决策依据（HTTP 409 两义：conflict 终态 vs pending 回滚可重试），通用 client
+ * 负责transport/auth/通用错误；本模块的 postApproval 只保留领域 status
+ * （ApprovalActionError）。
  */
-import { ApiError, getFrontDoorToken } from "./client";
+import {
+  apiErrorFromResponse,
+  frontDoorRequest,
+} from "./client";
 
 // ---------------------------------------------------------------------------
 // 类型（与后端 response schema 对齐）
@@ -69,7 +73,12 @@ export interface ApprovalSummary {
 }
 
 /** accept/reject 失败结果状态（后端 body.status；unknown = 无法解析/网络层错误） */
-export type ApprovalFailureStatus = "conflict" | "pending" | "not_found" | "unknown";
+export type ApprovalFailureStatus =
+  | "conflict"
+  | "pending"
+  | "not_found"
+  | "forbidden"
+  | "unknown";
 
 /** accept/reject 非 2xx 时抛出：保留 body.status 供 UI 按终态/可重试分流呈现 */
 export class ApprovalActionError extends Error {
@@ -94,31 +103,14 @@ export class ApprovalActionError extends Error {
 }
 
 // ---------------------------------------------------------------------------
-// fetch 工具
+// 统一 transport 工具
 // ---------------------------------------------------------------------------
-
-function buildHeaders(): Headers {
-  const headers = new Headers();
-  headers.set("Content-Type", "application/json");
-  const token = getFrontDoorToken();
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
-  return headers;
-}
 
 /** GET 类调用：失败抛 ApiError（与 apiFetchMemory 同语义） */
 async function getJson<T>(path: string): Promise<T> {
-  const resp = await fetch(path, { headers: buildHeaders() });
+  const resp = await frontDoorRequest(path);
   if (!resp.ok) {
-    let message = `HTTP ${resp.status}`;
-    try {
-      const body = (await resp.json()) as Record<string, unknown>;
-      if (typeof body?.detail === "string") message = body.detail;
-    } catch {
-      // 保留默认 HTTP 状态描述
-    }
-    throw new ApiError(message, { status: resp.status });
+    throw await apiErrorFromResponse(resp);
   }
   return resp.json() as Promise<T>;
 }
@@ -133,7 +125,7 @@ const KNOWN_FAILURE_STATUSES: ReadonlySet<string> = new Set([
 async function postApproval(path: string): Promise<void> {
   let resp: Response;
   try {
-    resp = await fetch(path, { method: "POST", headers: buildHeaders() });
+    resp = await frontDoorRequest(path, { method: "POST" });
   } catch (err) {
     throw new ApprovalActionError({
       httpStatus: 0,
@@ -143,6 +135,9 @@ async function postApproval(path: string): Promise<void> {
   }
   if (resp.ok) {
     return;
+  }
+  if (resp.status === 401) {
+    throw await apiErrorFromResponse(resp);
   }
   let resultStatus: ApprovalFailureStatus = "unknown";
   let detail = `HTTP ${resp.status}`;
@@ -161,6 +156,9 @@ async function postApproval(path: string): Promise<void> {
   // FastAPI 原生 404（如 route 层 HTTPException）没有 status 字段，用 HTTP 码兜底
   if (resultStatus === "unknown" && resp.status === 404) {
     resultStatus = "not_found";
+  }
+  if (resultStatus === "unknown" && resp.status === 403) {
+    resultStatus = "forbidden";
   }
   throw new ApprovalActionError({ httpStatus: resp.status, resultStatus, detail });
 }
@@ -189,13 +187,12 @@ export async function rejectConsolidationCandidate(id: string): Promise<void> {
 export async function bulkRejectConsolidation(
   candidateIds: string[]
 ): Promise<{ rejected: string[]; skipped: string[] }> {
-  const resp = await fetch("/api/consolidation/candidates/bulk_reject", {
+  const resp = await frontDoorRequest("/api/consolidation/candidates/bulk_reject", {
     method: "PUT",
-    headers: buildHeaders(),
     body: JSON.stringify({ candidate_ids: candidateIds }),
   });
   if (!resp.ok) {
-    throw new ApiError(`HTTP ${resp.status}`, { status: resp.status });
+    throw await apiErrorFromResponse(resp);
   }
   return resp.json() as Promise<{ rejected: string[]; skipped: string[] }>;
 }
