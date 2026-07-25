@@ -85,5 +85,10 @@
   `openapi-typescript@7.13.0`与`@vitest/coverage-v8@2.1.9`，三条alias、
   post-SDK exporter命令与LCOV排除合同通过；targeted `test:coverage`真实加载v8并生成
   LCOV。OpenAPI exporter/artifact仍等待T010–T012，未把未来命令冒充现成产物。
+- T010以三个可收集Gateway L4节点完成真实RED→GREEN→REFACTOR：RED仅因
+  `F149_REST_CONTRACT_MISSING`命中snapshot names、endpoint manifest与TaskDetail
+  fields三项缺口；GREEN后67个实际REST operation均有有限2xx JSON schema，
+  snapshot/TaskDetail开放JSON只停留在命名raw boundary。REFACTOR合并既有
+  control-plane API回归后11/11通过，Ruff与diff-check通过；未新增第二schema源。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

@@ -72,6 +72,24 @@ class ConsolidationCandidatesListResponse(BaseModel):
     pending_count: int
 
 
+class ConsolidationCandidateDecisionResponse(BaseModel):
+    """单条巩固候选审批结果。"""
+
+    ok: bool
+    status: str
+    candidate_id: str
+    new_sor_id: str | None = None
+    superseded_count: int = 0
+    detail: str = ""
+
+
+class ConsolidationBulkRejectResponse(BaseModel):
+    """批量拒绝巩固候选结果。"""
+
+    rejected: list[str]
+    skipped: list[str]
+
+
 class BulkRejectRequest(BaseModel):
     """PUT bulk_reject 请求 body。"""
 
@@ -211,7 +229,10 @@ def _approval_result_to_http(result: Any) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/consolidation/candidates")
+@router.get(
+    "/api/consolidation/candidates",
+    response_model=ConsolidationCandidatesListResponse,
+)
 async def list_consolidation_candidates(
     request: Request,
     store_group=Depends(get_store_group),
@@ -242,12 +263,13 @@ async def list_consolidation_candidates(
         )
         for c in pending
     ]
-    return ConsolidationCandidatesListResponse(
-        candidates=items, pending_count=len(items)
-    )
+    return ConsolidationCandidatesListResponse(candidates=items, pending_count=len(items))
 
 
-@router.post("/api/consolidation/candidates/{candidate_id}/accept")
+@router.post(
+    "/api/consolidation/candidates/{candidate_id}/accept",
+    response_model=ConsolidationCandidateDecisionResponse,
+)
 async def accept_consolidation_candidate(
     candidate_id: str,
     request: Request,
@@ -260,7 +282,10 @@ async def accept_consolidation_candidate(
     return _approval_result_to_http(result)
 
 
-@router.post("/api/consolidation/candidates/{candidate_id}/reject")
+@router.post(
+    "/api/consolidation/candidates/{candidate_id}/reject",
+    response_model=ConsolidationCandidateDecisionResponse,
+)
 async def reject_consolidation_candidate(
     candidate_id: str,
     request: Request,
@@ -273,7 +298,10 @@ async def reject_consolidation_candidate(
     return _approval_result_to_http(result)
 
 
-@router.put("/api/consolidation/candidates/bulk_reject")
+@router.put(
+    "/api/consolidation/candidates/bulk_reject",
+    response_model=ConsolidationBulkRejectResponse,
+)
 async def bulk_reject_consolidation_candidates(
     body: BulkRejectRequest,
     request: Request,

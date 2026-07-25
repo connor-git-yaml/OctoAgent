@@ -1,0 +1,13 @@
+FFF                                                                      [100%]
+
+test_snapshot_contract_closes_envelope_and_resource_names
+F149_REST_CONTRACT_MISSING: snapshot resource names drift
+
+test_resource_endpoint_manifest_exports_finite_response_schemas
+F149_REST_CONTRACT_MISSING: endpoint manifest drift
+
+test_task_detail_response_keeps_only_named_raw_event_payload
+F149_REST_CONTRACT_MISSING: task detail fields drift
+
+3 failed
+process exit=1

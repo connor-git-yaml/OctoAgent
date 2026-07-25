@@ -123,6 +123,9 @@
 
 ### T010 — REST/snapshot/task-detail contract
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T010/`。67个实际REST operation均由FastAPI/Pydantic有限模型导出；
+  snapshot与TaskDetail的开放JSON分别只停留在命名raw boundary。
 - **层/FR**：Gateway L4；FR-010/025。
 - **文件**：`octoagent/apps/gateway/tests/test_f149_web_contract.py`；Gateway route-adapter Pydantic contract/exporter。
 - **依赖**：T000。

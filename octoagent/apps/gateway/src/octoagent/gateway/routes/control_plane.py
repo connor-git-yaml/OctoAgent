@@ -4,7 +4,29 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
-from octoagent.core.models import ActionRequestEnvelope, ControlPlaneActionStatus
+from octoagent.core.models import (
+    ActionRequestEnvelope,
+    AgentProfileRevisionsDocument,
+    AgentProfilesDocument,
+    AutomationJobDocument,
+    CapabilityPackDocument,
+    ConfigSchemaDocument,
+    ContextContinuityDocument,
+    ControlPlaneActionStatus,
+    ControlPlaneDocument,
+    DelegationPlaneDocument,
+    DiagnosticsSummaryDocument,
+    McpProviderCatalogDocument,
+    MemoryConsoleDocument,
+    OwnerProfileDocument,
+    ProjectSelectorDocument,
+    RecallFrameListDocument,
+    RetrievalPlatformDocument,
+    SessionProjectionDocument,
+    SetupGovernanceDocument,
+    SkillGovernanceDocument,
+    WorkerProfilesDocument,
+)
 
 from ..deps import get_control_plane_service
 from ..services.cloudflare_web_access import (
@@ -13,11 +35,15 @@ from ..services.cloudflare_web_access import (
 )
 from ..services.config.config_schema import FrontDoorConfig
 from ..services.config.config_wizard import load_config
+from .f149_web_contract import (
+    F149RemoteAccessStatusResponse,
+    F149SnapshotEnvelope,
+)
 
 router = APIRouter()
 
 
-@router.get("/api/control/snapshot")
+@router.get("/api/control/snapshot", response_model=F149SnapshotEnvelope)
 async def get_control_snapshot(
     mode: str | None = Query(default=None),
     control_plane=Depends(get_control_plane_service),
@@ -25,12 +51,15 @@ async def get_control_snapshot(
     return await control_plane.get_snapshot(mode=mode)
 
 
-@router.get("/api/control/resources/config")
+@router.get("/api/control/resources/config", response_model=ConfigSchemaDocument)
 async def get_control_config(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_config_schema()).model_dump(mode="json", by_alias=True)
 
 
-@router.get("/api/control/resources/remote-access")
+@router.get(
+    "/api/control/resources/remote-access",
+    response_model=F149RemoteAccessStatusResponse,
+)
 async def remote_access_status(request: Request) -> dict[str, object]:
     """返回电脑Web远程访问的只读瞬时投影。"""
 
@@ -77,31 +106,37 @@ async def remote_access_status(request: Request) -> dict[str, object]:
     }
 
 
-@router.get("/api/control/resources/project-selector")
+@router.get(
+    "/api/control/resources/project-selector",
+    response_model=ProjectSelectorDocument,
+)
 async def get_control_project_selector(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_project_selector()).model_dump(mode="json", by_alias=True)
 
 
-@router.get("/api/control/resources/sessions")
+@router.get("/api/control/resources/sessions", response_model=SessionProjectionDocument)
 async def get_control_sessions(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_session_projection()).model_dump(mode="json", by_alias=True)
 
 
-@router.get("/api/control/resources/agent-profiles")
+@router.get("/api/control/resources/agent-profiles", response_model=AgentProfilesDocument)
 async def get_control_agent_profiles(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_agent_profiles_document()).model_dump(
         mode="json", by_alias=True
     )
 
 
-@router.get("/api/control/resources/worker-profiles")
+@router.get("/api/control/resources/worker-profiles", response_model=WorkerProfilesDocument)
 async def get_control_worker_profiles(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_worker_profiles_document()).model_dump(
         mode="json", by_alias=True
     )
 
 
-@router.get("/api/control/resources/worker-profile-revisions/{profile_id}")
+@router.get(
+    "/api/control/resources/worker-profile-revisions/{profile_id}",
+    response_model=AgentProfileRevisionsDocument,
+)
 async def get_control_worker_profile_revisions(
     profile_id: str,
     control_plane=Depends(get_control_plane_service),
@@ -111,70 +146,88 @@ async def get_control_worker_profile_revisions(
     )
 
 
-@router.get("/api/control/resources/owner-profile")
+@router.get("/api/control/resources/owner-profile", response_model=OwnerProfileDocument)
 async def get_control_owner_profile(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_owner_profile_document()).model_dump(mode="json", by_alias=True)
 
 
-@router.get("/api/control/resources/bootstrap-session")
+@router.get("/api/control/resources/bootstrap-session", response_model=ControlPlaneDocument)
 async def get_control_bootstrap_session(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_bootstrap_session_document()).model_dump(
         mode="json", by_alias=True
     )
 
 
-@router.get("/api/control/resources/context-frames")
+@router.get(
+    "/api/control/resources/context-frames",
+    response_model=ContextContinuityDocument,
+)
 async def get_control_context_continuity(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_context_continuity_document()).model_dump(
         mode="json", by_alias=True
     )
 
 
-@router.get("/api/control/resources/capability-pack")
+@router.get("/api/control/resources/capability-pack", response_model=CapabilityPackDocument)
 async def get_control_capability_pack(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_capability_pack_document()).model_dump(
         mode="json", by_alias=True
     )
 
 
-@router.get("/api/control/resources/skill-governance")
+@router.get(
+    "/api/control/resources/skill-governance",
+    response_model=SkillGovernanceDocument,
+)
 async def get_control_skill_governance(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_skill_governance_document()).model_dump(
         mode="json", by_alias=True
     )
 
 
-@router.get("/api/control/resources/mcp-provider-catalog")
+@router.get(
+    "/api/control/resources/mcp-provider-catalog",
+    response_model=McpProviderCatalogDocument,
+)
 async def get_control_mcp_provider_catalog(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_mcp_provider_catalog_document()).model_dump(
         mode="json", by_alias=True
     )
 
 
-@router.get("/api/control/resources/setup-governance")
+@router.get(
+    "/api/control/resources/setup-governance",
+    response_model=SetupGovernanceDocument,
+)
 async def get_control_setup_governance(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_setup_governance_document()).model_dump(
         mode="json", by_alias=True
     )
 
 
-@router.get("/api/control/resources/delegation")
+@router.get("/api/control/resources/delegation", response_model=DelegationPlaneDocument)
 async def get_control_delegation(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_delegation_document()).model_dump(mode="json", by_alias=True)
 
 
-@router.get("/api/control/resources/automation")
+@router.get("/api/control/resources/automation", response_model=AutomationJobDocument)
 async def get_control_automation(control_plane=Depends(get_control_plane_service)):
     """F132: 定时任务列表（Web AutomationCenter 数据源）。"""
     return (await control_plane.get_automation_document()).model_dump(mode="json", by_alias=True)
 
 
-@router.get("/api/control/resources/diagnostics")
+@router.get(
+    "/api/control/resources/diagnostics",
+    response_model=DiagnosticsSummaryDocument,
+)
 async def get_control_diagnostics(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_diagnostics_summary()).model_dump(mode="json", by_alias=True)
 
 
-@router.get("/api/control/resources/retrieval-platform")
+@router.get(
+    "/api/control/resources/retrieval-platform",
+    response_model=RetrievalPlatformDocument,
+)
 async def get_control_retrieval_platform(
     project_id: str | None = Query(default=None),
     control_plane=Depends(get_control_plane_service),
@@ -186,7 +239,7 @@ async def get_control_retrieval_platform(
     ).model_dump(mode="json", by_alias=True)
 
 
-@router.get("/api/control/resources/memory")
+@router.get("/api/control/resources/memory", response_model=MemoryConsoleDocument)
 async def get_control_memory(
     project_id: str | None = Query(default=None),
     scope_id: str | None = Query(default=None),
@@ -220,7 +273,10 @@ async def get_control_memory(
     ).model_dump(mode="json", by_alias=True)
 
 
-@router.get("/api/control/resources/recall-frames")
+@router.get(
+    "/api/control/resources/recall-frames",
+    response_model=RecallFrameListDocument,
+)
 async def get_control_recall_frames(
     agent_runtime_id: str | None = Query(default=None),
     agent_session_id: str | None = Query(default=None),

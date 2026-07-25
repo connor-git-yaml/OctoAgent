@@ -15,6 +15,7 @@ from starlette.responses import JSONResponse
 from ..deps import get_store_group
 from ..services.resume_engine import ResumeEngine
 from ..services.task_service import TaskService
+from .f149_web_contract import F149TaskDetailResponse
 
 router = APIRouter()
 
@@ -143,7 +144,7 @@ async def list_tasks(
     )
 
 
-@router.get("/api/tasks/{task_id}")
+@router.get("/api/tasks/{task_id}", response_model=F149TaskDetailResponse)
 async def get_task_detail(
     task_id: str,
     store_group=Depends(get_store_group),

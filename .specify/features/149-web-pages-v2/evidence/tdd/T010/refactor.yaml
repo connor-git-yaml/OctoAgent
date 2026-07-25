@@ -1,0 +1,20 @@
+task_id: T010
+phase: REFACTOR
+behavior: Gateway有限REST、snapshot envelope与TaskDetail命名raw boundary合同
+command: cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_web_contract.py apps/gateway/tests/test_control_plane_api.py -k "snapshot or resource or task_detail"
+executed_at_utc: 2026-07-25T09:48:00Z
+timestamp_note: terminal未持久化命令起始秒，时间由本轮连续执行记录界定到该分钟
+head_sha: c616ba8401d82939e561e9677d96c3031c29d750
+exit_code: 0
+oracle_expected: T010合同与既有control-plane API回归同时通过
+oracle_observed: 11 passed、74 deselected；候选/ops路由额外回归47 passed；Ruff check/format与git diff --check通过
+output_file: refactor.log
+quality_review:
+  - FastAPI/Pydantic仍为唯一response schema来源，exporter只确定性截取真实OpenAPI
+  - snapshot内部开放字段只停留在F149RawSnapshotResource命名边界
+  - TaskDetail开放event payload只停留在F149RawEventPayload命名边界
+  - 未新增第二transport、fetch client、registry或兼容schema
+regression_command: cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="<post-F151七包+Gateway>" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/routes/test_consolidation_candidates_api.py apps/gateway/tests/test_f111_compact_routes.py apps/gateway/tests/integration/test_memory_candidates_routes_audit.py apps/gateway/tests/test_ops_api.py
+regression_exit_code: 0
+secret_scan_command: rg扫描T010 evidence中的常见credential赋值、私钥头与个人邮箱
+secret_scan_exit_code: 0

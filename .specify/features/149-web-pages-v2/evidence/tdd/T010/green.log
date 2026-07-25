@@ -1,0 +1,8 @@
+...                                                                      [100%]
+
+test_snapshot_contract_closes_envelope_and_resource_names PASSED
+test_resource_endpoint_manifest_exports_finite_response_schemas PASSED
+test_task_detail_response_keeps_only_named_raw_event_payload PASSED
+
+3 passed
+process exit=0

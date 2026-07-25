@@ -6,7 +6,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
-from octoagent.core.models import UpdateTriggerSource
+from octoagent.core.models import (
+    BackupBundle,
+    ExportManifest,
+    RecoverySummary,
+    UpdateAttemptSummary,
+    UpdateTriggerSource,
+)
 from octoagent.gateway.services.operations.backup_service import BackupService, resolve_project_root
 from octoagent.gateway.services.operations.update_service import UpdateActionError
 from pydantic import BaseModel
@@ -144,7 +150,7 @@ def _ops_summary_failure_response(
     )
 
 
-@router.get("/api/ops/recovery")
+@router.get("/api/ops/recovery", response_model=RecoverySummary)
 async def get_recovery_summary(store_group=Depends(get_store_group)):
     """读取最近一次 backup / recovery drill 摘要。"""
     service = BackupService(resolve_project_root(), store_group=store_group)
@@ -371,7 +377,7 @@ async def get_tool_registry_diagnostics(request: Request):
     return {"count": len(items), "items": items}
 
 
-@router.post("/api/ops/backup/create")
+@router.post("/api/ops/backup/create", response_model=BackupBundle)
 async def create_backup(
     body: BackupCreateRequest,
     store_group=Depends(get_store_group),
@@ -393,13 +399,13 @@ async def create_backup(
         )
 
 
-@router.get("/api/ops/update/status")
+@router.get("/api/ops/update/status", response_model=UpdateAttemptSummary)
 async def get_update_status(request: Request):
     """读取最近一次升级摘要。"""
     return _load_latest_update_summary(request)
 
 
-@router.post("/api/ops/update/dry-run")
+@router.post("/api/ops/update/dry-run", response_model=UpdateAttemptSummary)
 async def update_dry_run(request: Request):
     """执行 update dry-run。"""
     service = _get_update_service(request)
@@ -421,7 +427,7 @@ async def update_dry_run(request: Request):
         return _ops_error_response(default_code="UPDATE_DRY_RUN_FAILED", exc=exc)
 
 
-@router.post("/api/ops/update/apply")
+@router.post("/api/ops/update/apply", response_model=UpdateAttemptSummary)
 async def update_apply(
     body: UpdateApplyRequest,
     request: Request,
@@ -461,7 +467,7 @@ async def update_apply(
         return _ops_error_response(default_code="UPDATE_APPLY_FAILED", exc=exc)
 
 
-@router.post("/api/ops/restart")
+@router.post("/api/ops/restart", response_model=UpdateAttemptSummary)
 async def restart_runtime(request: Request):
     """触发独立 restart。"""
     service = _get_update_service(request)
@@ -491,7 +497,7 @@ async def restart_runtime(request: Request):
         return _ops_error_response(default_code="RESTART_UNAVAILABLE", exc=exc)
 
 
-@router.post("/api/ops/verify")
+@router.post("/api/ops/verify", response_model=UpdateAttemptSummary)
 async def verify_runtime(request: Request):
     """触发独立 verify。"""
     service = _get_update_service(request)
@@ -521,7 +527,7 @@ async def verify_runtime(request: Request):
         return _ops_error_response(default_code="VERIFY_FAILED", exc=exc)
 
 
-@router.post("/api/ops/export/chats")
+@router.post("/api/ops/export/chats", response_model=ExportManifest)
 async def export_chats(
     body: ExportChatsRequest,
     store_group=Depends(get_store_group),

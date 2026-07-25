@@ -73,6 +73,16 @@ class BehaviorCompactCandidatesListResponse(BaseModel):
     pending_count: int
 
 
+class BehaviorCompactDecisionResponse(BaseModel):
+    """单条行为精简候选审批结果。"""
+
+    ok: bool
+    status: str
+    candidate_id: str
+    file_id: str
+    detail: str = ""
+
+
 class BehaviorCompactTriggerRequest(BaseModel):
     """手动触发请求：file_id 为空 → 扫默认 SHARED eligible 集。
 
@@ -118,9 +128,7 @@ async def _ensure_root_task_or_500(store_group: Any) -> None:
     服务不同，降级期先创建会永久歪斜后续 spawn 的 parent lineage）。
     """
     try:
-        await _ensure_behavior_compact_root(
-            store_group.task_store, store_group.work_store
-        )
+        await _ensure_behavior_compact_root(store_group.task_store, store_group.work_store)
     except Exception:
         log.exception(
             "behavior_compact_root_task_ensure_failed",
@@ -214,7 +222,10 @@ def _approval_result_to_http(result: Any) -> JSONResponse:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/api/behavior/compact/candidates")
+@router.get(
+    "/api/behavior/compact/candidates",
+    response_model=BehaviorCompactCandidatesListResponse,
+)
 async def list_behavior_compact_candidates(
     request: Request,
     limit: int = 200,
@@ -248,18 +259,17 @@ async def list_behavior_compact_candidates(
             size_after=c.size_after,
             status=c.status.value,
             created_at=c.created_at.isoformat(),
-            diff=_unified_diff(
-                _current_disk_content(request, c), c.compacted_content, c.file_id
-            ),
+            diff=_unified_diff(_current_disk_content(request, c), c.compacted_content, c.file_id),
         )
         for c in pending
     ]
-    return BehaviorCompactCandidatesListResponse(
-        candidates=items, pending_count=total_pending
-    )
+    return BehaviorCompactCandidatesListResponse(candidates=items, pending_count=total_pending)
 
 
-@router.post("/api/behavior/compact/candidates/{candidate_id}/accept")
+@router.post(
+    "/api/behavior/compact/candidates/{candidate_id}/accept",
+    response_model=BehaviorCompactDecisionResponse,
+)
 async def accept_behavior_compact_candidate(
     candidate_id: str,
     request: Request,
@@ -272,7 +282,10 @@ async def accept_behavior_compact_candidate(
     return _approval_result_to_http(result)
 
 
-@router.post("/api/behavior/compact/candidates/{candidate_id}/reject")
+@router.post(
+    "/api/behavior/compact/candidates/{candidate_id}/reject",
+    response_model=BehaviorCompactDecisionResponse,
+)
 async def reject_behavior_compact_candidate(
     candidate_id: str,
     request: Request,
@@ -326,9 +339,7 @@ async def trigger_behavior_compact(
         file_ids=file_ids, project_slug=body.project_slug.strip() or "default"
     )
     if result.skipped_reason == "already_running":
-        raise HTTPException(
-            status_code=409, detail="compact 正在运行中（cron 或另一次手动触发）"
-        )
+        raise HTTPException(status_code=409, detail="compact 正在运行中（cron 或另一次手动触发）")
     if result.error:
         # Codex round3 P2：发现端异常显式 500——不与"真无提议"混淆成空 200
         raise HTTPException(status_code=500, detail=result.error)
@@ -337,9 +348,7 @@ async def trigger_behavior_compact(
     for o in result.outcomes:
         diff = ""
         if o.status == "proposed" and o.candidate_id:
-            candidate = await store_group.behavior_compact_store.get_candidate(
-                o.candidate_id
-            )
+            candidate = await store_group.behavior_compact_store.get_candidate(o.candidate_id)
             if candidate is not None:
                 diff = _unified_diff(
                     _current_disk_content(request, candidate),

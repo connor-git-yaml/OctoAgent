@@ -25,11 +25,10 @@ from typing import Any
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from ulid import ULID
-
 from octoagent.core.models.enums import ActorType, EventType
 from octoagent.core.models.event import Event
+from pydantic import BaseModel
+from ulid import ULID
 
 from ..deps import get_store_group
 
@@ -66,6 +65,29 @@ class CandidatesListResponse(BaseModel):
     candidates: list[CandidateItem]
     total: int
     pending_count: int
+
+
+class PromoteCandidateResponse(BaseModel):
+    """候选事实提升结果。"""
+
+    status: str
+    candidate_id: str
+    edited: bool
+
+
+class DiscardCandidateResponse(BaseModel):
+    """单条候选事实丢弃结果。"""
+
+    status: str
+    candidate_id: str
+
+
+class BulkDiscardResponse(BaseModel):
+    """批量丢弃候选事实结果。"""
+
+    status: str
+    discarded_count: int
+    skipped_ids: list[str] = []
 
 
 class PromoteRequest(BaseModel):
@@ -188,7 +210,7 @@ async def _emit_event(
             event_id=str(ULID()),
             task_id=_CANDIDATES_AUDIT_TASK_ID,
             task_seq=task_seq,
-            ts=datetime.now(timezone.utc),
+            ts=datetime.now(timezone.utc),  # noqa: UP017
             type=event_type,
             actor=ActorType.SYSTEM,
             payload=payload,
@@ -269,14 +291,17 @@ async def list_memory_candidates(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/api/memory/candidates/{candidate_id}/promote")
+@router.post(
+    "/api/memory/candidates/{candidate_id}/promote",
+    response_model=PromoteCandidateResponse,
+)
 async def promote_candidate(
     candidate_id: str,
     body: PromoteRequest,
     request: Request,
     store_group=Depends(get_store_group),
 ) -> JSONResponse:
-    """accept / edit+accept，经 ThreatScanner + PolicyGate + user_profile.update 写入 USER.md（T051 / FR-8.2）。"""
+    """accept / edit+accept，经 ThreatScanner + PolicyGate + user_profile.update 写入 USER.md（T051 / FR-8.2）。"""  # noqa: E501
     conn = store_group.conn
     event_store = getattr(store_group, "event_store", None)
     task_store = getattr(store_group, "task_store", None)
@@ -378,8 +403,10 @@ async def promote_candidate(
             project_root = getattr(_tool_deps, "project_root", None)
 
             if snapshot_store is not None and project_root is not None:
-                from octoagent.gateway.harness.snapshot_store import CharLimitExceeded
-                from pathlib import Path
+                from octoagent.gateway.harness.snapshot_store import (  # noqa: I001
+                    CharLimitExceeded,
+                )
+                from pathlib import Path  # noqa: F401
 
                 USER_MD_CHAR_LIMIT = 50_000
                 ENTRY_SEPARATOR = "\n\n§ "
@@ -429,7 +456,7 @@ async def promote_candidate(
     # 否则 USER.md 已写入但 candidate 仍 promoting，悬挂状态会让重试看到 promoting
     # 永远拒绝（409），用户视角是"已写入但永远显示未处理"
     try:
-        now_iso = datetime.now(timezone.utc).isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()  # noqa: UP017
         cursor = await conn.execute(
             "UPDATE observation_candidates SET status = 'promoted', promoted_at = ?, edited = ? "
             "WHERE id = ? AND status = 'promoting'",
@@ -440,7 +467,9 @@ async def promote_candidate(
             log.error(
                 "memory_candidates_promote_status_lost_promoting",
                 candidate_id=candidate_id,
-                hint="status 不再是 promoting（外部并发改了？）— USER.md 可能已写入但候选状态不一致",
+                hint=(
+                    "status 不再是 promoting（外部并发改了？）— USER.md 可能已写入但候选状态不一致"
+                ),
             )
             raise HTTPException(
                 status_code=500,
@@ -524,6 +553,7 @@ async def promote_candidate(
             apply_user_md_sync_to_owner_profile,
             sync_owner_profile_from_user_md,
         )
+
         cap = getattr(request.app.state, "capability_pack_service", None)
         _tool_deps = getattr(cap, "_tool_deps", None)
         _project_root = getattr(_tool_deps, "project_root", None) if _tool_deps else None
@@ -542,6 +572,7 @@ async def promote_candidate(
                     )
 
             import asyncio
+
             asyncio.create_task(_sync_after_promote())
     except Exception as _exc:  # noqa: BLE001
         # sync 触发失败不阻断 promote return（OBSERVATION_PROMOTED 已写入）
@@ -570,7 +601,10 @@ async def promote_candidate(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/api/memory/candidates/{candidate_id}/discard")
+@router.post(
+    "/api/memory/candidates/{candidate_id}/discard",
+    response_model=DiscardCandidateResponse,
+)
 async def discard_candidate(
     candidate_id: str,
     request: Request,
@@ -626,9 +660,7 @@ async def discard_candidate(
     )
 
     log.info("memory_candidate_discarded", candidate_id=candidate_id)
-    return JSONResponse(
-        content={"status": "discarded", "candidate_id": candidate_id}
-    )
+    return JSONResponse(content={"status": "discarded", "candidate_id": candidate_id})
 
 
 # ---------------------------------------------------------------------------
@@ -636,7 +668,10 @@ async def discard_candidate(
 # ---------------------------------------------------------------------------
 
 
-@router.put("/api/memory/candidates/bulk_discard")
+@router.put(
+    "/api/memory/candidates/bulk_discard",
+    response_model=BulkDiscardResponse,
+)
 async def bulk_discard_candidates(
     body: BulkDiscardRequest,
     request: Request,
@@ -671,9 +706,7 @@ async def bulk_discard_candidates(
         ) as cur:
             actual_pending_rows = await cur.fetchall()
         actual_pending_ids = [r["id"] for r in actual_pending_rows]
-        skipped_ids = [
-            cid for cid in body.candidate_ids if cid not in set(actual_pending_ids)
-        ]
+        skipped_ids = [cid for cid in body.candidate_ids if cid not in set(actual_pending_ids)]
 
         if actual_pending_ids:
             update_placeholders = ",".join("?" for _ in actual_pending_ids)

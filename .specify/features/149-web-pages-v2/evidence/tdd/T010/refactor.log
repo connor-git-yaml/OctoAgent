@@ -1,0 +1,8 @@
+...........                                                              [100%]
+
+11 passed, 74 deselected
+candidate/ops route regression: 47 passed
+Ruff check: PASS
+Ruff format --check: PASS
+git diff --check: PASS
+process exit=0

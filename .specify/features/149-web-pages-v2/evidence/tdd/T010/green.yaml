@@ -1,0 +1,13 @@
+task_id: T010
+phase: GREEN
+behavior: Gateway有限REST、snapshot envelope与TaskDetail命名raw boundary合同
+command: cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest -q apps/gateway/tests/test_f149_web_contract.py -k "snapshot or resource or task_detail"
+executed_at_utc: 2026-07-25T09:46:00Z
+timestamp_note: terminal未持久化命令起始秒，时间由本轮连续执行记录界定到该分钟
+head_sha: c616ba8401d82939e561e9677d96c3031c29d750
+exit_code: 0
+oracle_expected: envelope、67个实际REST operation与TaskDetail命名raw boundary全部通过
+oracle_observed: 3 tests passed；无collection/import/path错误
+output_file: green.log
+secret_scan_command: rg扫描T010 evidence中的常见credential赋值、私钥头与个人邮箱
+secret_scan_exit_code: 0
