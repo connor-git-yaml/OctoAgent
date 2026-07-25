@@ -1,0 +1,13 @@
+task_id: T022
+phase: RED
+behavior: Agent auxiliary and Skills REST unified adapters
+command: cd octoagent/frontend && npx vitest run src/api/f149/adapters.test.ts src/api/client.test.ts
+executed_at_utc: 2026-07-25T20:49:07Z
+head_sha: a0bd7c598677ddb4d1ff3912c46bcf37fb4ae1c6
+exit_code: 1
+oracle_expected: F149_AGENT_SKILL_ADAPTER_MISSING
+oracle_observed: inert adapter使审批覆盖、Skills四请求与ApiError归属3项稳定失败；既有client 8项通过
+raw_output_file: /tmp/f149-t022-red.log
+raw_output_sha256: d3f11db9b6d45b9a3a6f7f3325588580164ac61cabe0aa9c2e83b4f0f9030d39
+network: false
+rerun: false

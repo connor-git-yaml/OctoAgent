@@ -1,0 +1,34 @@
+task_id: T022
+phase: REFACTOR
+behavior: Agent auxiliary and Skills REST unified adapters
+command: cd octoagent/frontend && npx vitest run src/api/f149/adapters.test.ts src/api/client.test.ts
+executed_at_utc: 2026-07-25T20:52:53Z
+head_sha: a0bd7c598677ddb4d1ff3912c46bcf37fb4ae1c6
+exit_code: 0
+oracle_expected: 同一11项合同保持通过，页面回归与全仓boundary闭合
+oracle_observed: exact 11/11、Agent页面14/14、F149 boundary PASS、openapi/tsc/complexity与F150 scope通过
+raw_output_file: /tmp/f149-t022-refactor-final.log
+raw_output_sha256: b7690141d0bf8087d54539e7e13551f35afcc29f7da2a3c7161a95f9146a74cb
+agent_regression_output_file: /tmp/f149-t022-agent-regression.log
+agent_regression_output_sha256: fa097c876186657adb7ffe64f1eead681e92f77b33ce289f36861ad7c33d59e9
+boundary_output_file: /tmp/f149-t022-boundary-final.log
+boundary_output_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+openapi_output_file: /tmp/f149-t022-openapi-final.log
+openapi_output_sha256: a0b643c273ca73333dae3b5ad9359697eaefae64670c03cc6c072bca94f7c706
+complexity_output_file: /tmp/f149-t022-complexity-final.log
+complexity_output_sha256: 1e2f23ba677a0925dadda9538926a3cc3a95125de1cdc4961bafbe99f3453f51
+quality_review:
+  - Agent审批覆盖与Skills四类REST不再直接调用fetch或持有auth/header职责
+  - adapter直接消费generated REST wire type并输出既有safe frontend DTO
+  - ApiError status/code保留，401继续由F150 global owner识别
+  - F149全仓boundary完整PASS，不再存在计划内direct fetch遗留
+  - 主动撤销Prettier大范围纯排版噪声；页面DOM、inline style和wb class multiset保持
+  - runtime authority拒绝额外export、direct fetch及视觉class漂移
+file_sha256:
+  adapters: bfa3a401aa3b250b746518bf60fc7671192bfcd63ca47511e2093ecb7cc2c973
+  adapters-test: b9385eb49a0f825b510ed78f6ccbdf3e2718e13bba7461fb767f2793b3b79415
+  agent-page: f4358e6227b1aa0b94f3d8d9008b1d15ca48077962ada450742e4280dabb9b2e
+  skill-page: 88aa5773290dfcba32545a5888d974c88a8da630440bd0e6bad4ea809b5c81d2
+  runtime-architecture-checker: c68801b92759c892ee7d30bde92cc262c89f80d11a22d0f7ddd9962919642add
+network: false
+rerun: false

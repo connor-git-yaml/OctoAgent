@@ -1,0 +1,13 @@
+task_id: T022
+phase: GREEN
+behavior: Agent auxiliary and Skills REST unified adapters
+command: cd octoagent/frontend && npx vitest run src/api/f149/adapters.test.ts src/api/client.test.ts
+executed_at_utc: 2026-07-25T20:50:31Z
+head_sha: a0bd7c598677ddb4d1ff3912c46bcf37fb4ae1c6
+exit_code: 0
+oracle_expected: 六条请求统一经client且wire/error合同精确
+oracle_observed: 2 files、11 tests全部通过；tsc -b通过
+raw_output_file: /tmp/f149-t022-green.log
+raw_output_sha256: e06a7ac0d9a9d5d65b07962cdfd1f10439b72f5ff7468720b345e7e088238e28
+network: false
+rerun: false

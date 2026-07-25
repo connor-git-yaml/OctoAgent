@@ -275,8 +275,17 @@
 
 ### T022 — Agent auxiliary/Skills REST 统一 transport
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T022/`。Agent审批覆盖列表/撤销与Skills列表/详情/安装/删除六条
+  请求已迁入同一`api/f149/adapters.ts`，wire type直接消费T015 generated REST
+  declaration，transport/auth/error只经`api/client`。F149全仓boundary现已PASS；
+  页面DOM、`wb-*` class multiset与inline style均未改变。跨Feature exact authority
+  同时拒绝adapter额外export、页面direct fetch与新增视觉class，避免借transport迁移
+  偷改F150安全面或Claude Design后续视觉基线。
 - **层/FR**：frontend L4；FR-011/012。
-- **文件**：`src/api/f149/adapters.test.ts`、Agent/Skills adapter、`api/client.ts`（只暴露必要底层能力）。
+- **文件**：`src/api/f149/adapters.test.ts`、Agent/Skills adapter、
+  `pages/AgentCenter.tsx`、`pages/SkillCenter.tsx`、
+  `repo-scripts/check-runtime-architecture.py` exact transport-only authority。
 - **依赖**：T001/T015。
 - **RED_SETUP**：先创建可导入但返回固定 invalid result 的 inert adapter exports，再由 test 驱动 approval override/behavior auxiliary 与 skill list/detail/install/delete；断言统一 error/transport，不使用 global fetch stub 自证页面逻辑。
 - **RED_COMMAND**：`cd octoagent/frontend && npx vitest run src/api/f149/adapters.test.ts src/api/client.test.ts`
@@ -656,7 +665,7 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T021 中已执行的任务均有真实证据；下一项是 T022
-  Agent auxiliary/Skills REST统一transport。F149 仍须逐 task 通过
+- 当前风险：T000–T015、T020–T022 中已执行的任务均有真实证据；下一项是 T023
+  Task SSE frontend decoder与TaskDetail state。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

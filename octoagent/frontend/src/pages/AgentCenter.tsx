@@ -20,6 +20,10 @@ import {
   type ApprovalOverrideDisplay,
   type BehaviorFileInfo,
 } from "../domains/agents/agentManagementData";
+import {
+  fetchAgentApprovalOverrides,
+  revokeAgentApprovalOverride,
+} from "../api/f149/adapters";
 import type { AgentProfileItem } from "../types";
 import { formatDateTime } from "../workbench/utils";
 
@@ -270,19 +274,9 @@ export default function AgentCenter() {
   async function fetchApprovalOverrides() {
     setApprovalOverridesLoading(true);
     try {
-      const response = await fetch("/api/approval-overrides");
-      if (response.ok) {
-        const data = await response.json();
-        const items: ApprovalOverrideDisplay[] = (data.overrides ?? []).map(
-          (o: Record<string, string>) => ({
-            agentRuntimeId: o.agent_runtime_id ?? "",
-            toolName: o.tool_name ?? "",
-            decision: o.decision ?? "always",
-            createdAt: o.created_at ?? "",
-          })
-        );
-        setApprovalOverrides(items);
-      }
+      const items: ApprovalOverrideDisplay[] =
+        await fetchAgentApprovalOverrides();
+      setApprovalOverrides(items);
     } catch {
       // 静默失败，列表保持空
     } finally {
@@ -292,11 +286,8 @@ export default function AgentCenter() {
 
   async function handleRevokeOverride(agentRuntimeId: string, toolName: string) {
     try {
-      const response = await fetch(
-        `/api/approval-overrides/${encodeURIComponent(agentRuntimeId)}/${encodeURIComponent(toolName)}`,
-        { method: "DELETE" }
-      );
-      if (response.ok) {
+      const revoked = await revokeAgentApprovalOverride(agentRuntimeId, toolName);
+      if (revoked) {
         setApprovalOverrides((current) =>
           current.filter(
             (o) => !(o.agentRuntimeId === agentRuntimeId && o.toolName === toolName)

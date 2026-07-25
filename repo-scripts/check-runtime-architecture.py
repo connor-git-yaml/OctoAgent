@@ -1312,6 +1312,22 @@ F149_T021_FRONTEND_AUTHORITY_PATHS = MappingProxyType(
         ),
     }
 )
+F149_T022_FRONTEND_AUTHORITY_PATHS = MappingProxyType(
+    {
+        "octoagent/frontend/src/api/f149/adapters.ts": frozenset(
+            {
+                "fetchAgentApprovalOverrides",
+                "fetchF149SkillDetail",
+                "fetchF149Skills",
+                "installF149Skill",
+                "revokeAgentApprovalOverride",
+                "uninstallF149Skill",
+            }
+        ),
+        "octoagent/frontend/src/pages/AgentCenter.tsx": frozenset(),
+        "octoagent/frontend/src/pages/SkillCenter.tsx": frozenset(),
+    }
+)
 F149_T010_PUBLIC_SYMBOLS = frozenset(
     {
         "F149_SNAPSHOT_RESOURCE_NAMES",
@@ -2191,6 +2207,33 @@ def _validate_f149_t015_generated_contract(
     )
 
 
+def _validate_f149_t022_frontend_path(
+    relative: str,
+    baseline: str,
+    current: str,
+    allowed: frozenset[str],
+) -> None:
+    """只允许T022迁移请求边界，保持既有页面视觉class集合逐字不变。"""
+
+    if relative.endswith("/adapters.ts"):
+        validate_f150_security_surface(relative, current, baseline)
+        _validate_f150_typescript(baseline, current, allowed)
+        return
+    require(
+        all(
+            len(re.findall(pattern, current, flags=re.IGNORECASE))
+            <= len(re.findall(pattern, baseline, flags=re.IGNORECASE))
+            for pattern in F150_FORBIDDEN_PATTERNS
+        )
+        and sorted(re.findall(r"\bwb-[\w-]+", current))
+        == sorted(re.findall(r"\bwb-[\w-]+", baseline))
+        and re.search(r"\bfetch\s*\(", current) is None,
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        f"{relative} transport-only authority",
+    )
+    _validate_f150_typescript(baseline, current, allowed)
+
+
 def _f150_related_unapproved(relative: str, text: str) -> bool:
     candidate = (relative + "\n" + text).lower()
     markers = (
@@ -2285,6 +2328,21 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
             current = path.read_text(encoding="utf-8")
             validate_f150_security_surface(relative, current, baseline)
             _validate_f150_typescript(baseline, current, f149_t021_allowed)
+            continue
+        f149_t022_allowed = F149_T022_FRONTEND_AUTHORITY_PATHS.get(relative)
+        if f149_t022_allowed is not None:
+            path = repo / relative
+            require(
+                path.is_file(),
+                "F150_PROTECTED_SEMANTIC_DRIFT",
+                relative,
+            )
+            _validate_f149_t022_frontend_path(
+                relative,
+                _f150_source_at_ref(repo, base_ref, relative),
+                path.read_text(encoding="utf-8"),
+                f149_t022_allowed,
+            )
             continue
         contract = F150_AUTHORITY_PATHS.get(relative)
         path = repo / relative

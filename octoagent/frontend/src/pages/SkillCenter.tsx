@@ -7,48 +7,13 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { SkillDeleteResponse, SkillDetail, SkillInstallResponse, SkillItem, SkillListResponse } from "../types";
-
-// ============================================================
-// 数据获取
-// ============================================================
-
-async function fetchSkills(): Promise<SkillListResponse> {
-  const resp = await fetch("/api/skills");
-  if (!resp.ok) throw new Error(`获取 Skill 列表失败: ${resp.status}`);
-  return resp.json();
-}
-
-async function fetchSkillDetail(name: string): Promise<SkillDetail> {
-  const resp = await fetch(`/api/skills/${encodeURIComponent(name)}`);
-  if (!resp.ok) throw new Error(`获取 Skill 详情失败: ${resp.status}`);
-  return resp.json();
-}
-
-async function installSkill(
-  name: string,
-  content: string
-): Promise<SkillInstallResponse> {
-  const resp = await fetch("/api/skills", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, content }),
-  });
-  if (!resp.ok) {
-    const body = await resp.json().catch(() => ({}));
-    throw new Error(body.detail ?? `安装失败: ${resp.status}`);
-  }
-  return resp.json();
-}
-
-async function uninstallSkill(name: string): Promise<SkillDeleteResponse> {
-  const resp = await fetch(`/api/skills/${encodeURIComponent(name)}`, { method: "DELETE" });
-  if (!resp.ok) {
-    const body = await resp.json().catch(() => ({}));
-    throw new Error(body.detail ?? `卸载失败: ${resp.status}`);
-  }
-  return resp.json();
-}
+import type { SkillDetail, SkillItem } from "../types";
+import {
+  fetchF149SkillDetail as fetchSkillDetail,
+  fetchF149Skills as fetchSkills,
+  installF149Skill as installSkill,
+  uninstallF149Skill as uninstallSkill,
+} from "../api/f149/adapters";
 
 // ============================================================
 // 来源标记颜色

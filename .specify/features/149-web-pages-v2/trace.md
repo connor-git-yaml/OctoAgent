@@ -148,5 +148,14 @@
   `apiErrorFromResponse`开放exact export authority，正向工作树通过，额外export与
   `DeviceSession`敏感语义均被拒绝。边界实扫只剩T022拥有的Agent/Skills旧直连点；
   本task没有UI/CSS、第二transport、第二auth owner或宿主状态改动。
+- T022以inert Agent/Skills adapter形成3条稳定`F149_AGENT_SKILL_ADAPTER_MISSING`
+  RED；GREEN后审批覆盖列表/撤销与Skills列表/详情/安装/删除六条请求统一经过
+  `api/client`，wire type直接消费T015 generated REST declarations，并保留
+  `ApiError` status/code。REFACTOR精确selector 11/11、Agent页面回归14/14、
+  `openapi:check`、`tsc -b`与complexity通过，F149全仓boundary首次无遗留直接
+  fetch而完整PASS。审查主动撤销Prettier对两个旧页面产生的大范围纯排版噪声，只
+  保留9增/18删与7增/42删的transport迁移；DOM、inline style与`wb-*` class multiset
+  不变。runtime architecture真实工作树通过，并分别拒绝adapter额外export、页面
+  direct fetch与视觉class漂移；无第二transport、UI/CSS或宿主状态改动。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。
