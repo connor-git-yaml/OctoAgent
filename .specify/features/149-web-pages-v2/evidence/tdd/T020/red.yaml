@@ -1,0 +1,15 @@
+task_id: T020
+phase: RED
+behavior: raw F149 snapshot decode and consumed resource projection
+command: cd octoagent/frontend && npx vitest run src/api/f149/snapshotDecoder.test.ts src/platform/queries/controlPlaneResources.test.ts
+executed_at_utc: 2026-07-25T12:30:39Z
+head_sha: 93422a92c25bca9b29e87ee18f82bbbd32b9b406
+exit_code: 1
+oracle_expected:
+  - F149_SNAPSHOT_DECODER_MISSING
+  - F149_CONSUMED_PROJECTION_MISSING
+oracle_observed: inert decoder使3项raw envelope合同失败，inert projection使1项platform消费合同失败；其余既有3项通过
+raw_output_file: /tmp/f149-t020-red.log
+raw_output_sha256: d90c7f5c93a494863b9c365f9ee53fa6a1929c659a6b3f0e9677bfc37df1a81e
+network: false
+rerun: false

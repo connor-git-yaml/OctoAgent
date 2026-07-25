@@ -1293,6 +1293,16 @@ F149_T015_GENERATED_CONTRACT_PATHS = frozenset(
         "octoagent/frontend/src/generated/f149/task-sse.d.ts",
     }
 )
+F149_T020_FRONTEND_AUTHORITY_PATHS = MappingProxyType(
+    {
+        "octoagent/frontend/src/api/f149/raw/snapshotDecoder.ts": frozenset(
+            {
+                "F149_SNAPSHOT_RESOURCE_NAMES",
+                "decodeF149Snapshot",
+            }
+        ),
+    }
+)
 F149_T010_PUBLIC_SYMBOLS = frozenset(
     {
         "F149_SNAPSHOT_RESOURCE_NAMES",
@@ -2240,6 +2250,19 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
                 _f150_source_at_ref(repo, base_ref, relative),
                 path.read_text(encoding="utf-8"),
             )
+            continue
+        f149_t020_allowed = F149_T020_FRONTEND_AUTHORITY_PATHS.get(relative)
+        if f149_t020_allowed is not None:
+            path = repo / relative
+            require(
+                path.is_file(),
+                "F150_PROTECTED_SEMANTIC_DRIFT",
+                relative,
+            )
+            baseline = _f150_source_at_ref(repo, base_ref, relative)
+            current = path.read_text(encoding="utf-8")
+            validate_f150_security_surface(relative, current, baseline)
+            _validate_f150_typescript(baseline, current, f149_t020_allowed)
             continue
         contract = F150_AUTHORITY_PATHS.get(relative)
         path = repo / relative

@@ -1,0 +1,13 @@
+task_id: T020
+phase: GREEN
+behavior: raw F149 snapshot decode and consumed resource projection
+command: cd octoagent/frontend && npx vitest run src/api/f149/snapshotDecoder.test.ts src/platform/queries/controlPlaneResources.test.ts
+executed_at_utc: 2026-07-25T12:31:24Z
+head_sha: 93422a92c25bca9b29e87ee18f82bbbd32b9b406
+exit_code: 0
+oracle_expected: 完整/缺section/degraded envelope与platform consumed projection全部通过
+oracle_observed: 2 files、7 tests全部通过
+raw_output_file: /tmp/f149-t020-green.log
+raw_output_sha256: d9f64514f3529058e52e1f9c82ced817650cb7242a13719c76c0c7c4003f295b
+network: false
+rerun: false

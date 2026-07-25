@@ -1,0 +1,31 @@
+task_id: T020
+phase: REFACTOR
+behavior: raw F149 snapshot decode and consumed resource projection
+command: cd octoagent/frontend && npx vitest run src/api/f149/snapshotDecoder.test.ts src/platform/queries/controlPlaneResources.test.ts
+executed_at_utc: 2026-07-25T12:33:44Z
+head_sha: 93422a92c25bca9b29e87ee18f82bbbd32b9b406
+exit_code: 0
+oracle_expected: 拆分校验职责后同一7项合同保持通过
+oracle_observed: 2 files、7 tests全部通过；openapi:check与tsc -b先行通过
+raw_output_file: /tmp/f149-t020-refactor.log
+raw_output_sha256: f0707d00770c3ade1ca5878daa533dc916590a866fffa5a5db77db631047e01c
+final_regression_output_file: /tmp/f149-t020-refactor-final.log
+final_regression_output_sha256: 80461e7c27d40778b31fb588663f17640d964ad805947c53432e4e711e667fec
+complexity_output_file: /tmp/f149-t020-complexity.log
+complexity_output_sha256: 8f1a968e483dfd54f21bd3a9ea53a82f93964d87caafb81fe3a13751a16776b1
+quality_review:
+  - generated wire类型只进入api/f149/raw adapter，public index只导出safe decoded DTO
+  - platform pure projection不import generated、transport或React
+  - 16个冻结resource必须exact；缺失、重复degraded、非法error/action均fail closed
+  - raw resource与开放metadata不进入decoded DTO或platform projection
+  - decoder按resources、degraded、errors、actions拆成窄纯函数，没有页面业务规则
+  - runtime gate exact authority正向通过并拒绝额外runtime export与DeviceSession敏感模式
+file_sha256:
+  runtime-architecture-checker: 46cd74776d1d8443995de3f98f8e4de2d230195d88a59396f0248a42b4118b0c
+  api-index: f5d8046f6d7f906514e966b56dee915d159b3726014d84122e016c49b03ffa1e
+  snapshot-decoder: be7c90801dee7ffa104431a9affb2fad82ec55d66fd50ed74566feacee866d60
+  snapshot-decoder-test: 3c02c38acb559542949470ee99045cbc6e91f48eb3214c2a087e1fd144fdc2b4
+  snapshot-projection: 803a6b6cb037df5cedea176d7f8a187330008a47d0c5f3e949cf1a423cb76552
+  control-plane-test: ea0bea266df58da5532581f55641b42c6272a85fadd628d772b25b56bde7dc68
+network: false
+rerun: false

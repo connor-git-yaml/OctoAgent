@@ -131,5 +131,13 @@
   首次commit Gate又如实发现生成的REST类型复制了F150已批准的session/remote
   schema语义；最终只为三个exact `.d.ts` path增加types-only authority，仍拒绝
   可执行export与新增敏感模式，不删除真实F149页面合同，也不放宽其他frontend文件。
+- T020先以可导入但固定invalid的raw decoder和空projection形成4条稳定RED；
+  GREEN对16个冻结resource、缺section、degraded/resource_errors、action IDs做
+  runtime fail-closed，并只输出实际消费字段。REFACTOR把resource/degraded/error/
+  action校验拆为窄纯函数；platform projection不import generated、transport或React，
+  sentinel raw metadata在adapter与projection两层均不可见。最终7/7、`openapi:check`
+  与`tsc -b`通过。跨Feature Gate只为raw decoder exact path授权resource-name常量
+  与decoder两个runtime exports，没有给其他frontend路径开放session语义；无网络、
+  宿主状态或UI改动。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

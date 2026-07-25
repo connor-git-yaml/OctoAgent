@@ -233,8 +233,15 @@
 
 ### T020 — raw snapshot → consumed projection
 
+- **状态**：`[x]`；真实 inert RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T020/`。generated wire只进入命名raw adapter；16个resource
+  exact校验后仅输出稳定消费字段，开放metadata不进入platform；pure projection
+  不import generated、transport或React。runtime architecture gate只授权raw
+  decoder exact path的resource-name常量与decoder两个runtime exports。
 - **层/FR**：frontend L4；FR-010/025。
-- **文件**：`src/api/f149/snapshotDecoder.test.ts`、adapter；`src/platform/queries/controlPlaneResources.test.ts`。
+- **文件**：`src/api/f149/snapshotDecoder.test.ts`、adapter；
+  `src/platform/queries/controlPlaneResources.test.ts`；
+  `repo-scripts/check-runtime-architecture.py` 的exact raw-decoder authority。
 - **依赖**：T015。
 - **RED_SETUP**：先创建可导入但只返回 `invalid` 的 inert `snapshotDecoder` export，再用 test 输入完整 raw envelope、缺 section、degraded/resource_errors、开放 metadata；断言 raw 不进入 page/domain。
 - **RED_COMMAND**：`cd octoagent/frontend && npx vitest run src/api/f149/snapshotDecoder.test.ts src/platform/queries/controlPlaneResources.test.ts`
@@ -640,6 +647,7 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015 中已执行的任务均有真实证据；下一项是 T016 frontend
-  raw decoder/projection foundation。F149 仍须逐 task 通过 RED→GREEN→REFACTOR，Tasks Gate 与
+- 当前风险：T000–T015、T020 中已执行的任务均有真实证据；下一项是 T021
+  Approvals/Memory统一transport与error ownership。F149 仍须逐 task 通过
+  RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

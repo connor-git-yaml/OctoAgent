@@ -8,6 +8,7 @@ import {
   listWorkbenchResourceRoutes,
   mergeSnapshotResources,
 } from "./controlPlaneResources";
+import { projectControlPlaneSnapshot } from "./controlPlaneSnapshotProjection";
 
 function buildSnapshot(): ControlPlaneSnapshot {
   return {
@@ -314,5 +315,58 @@ describe("controlPlaneResources", () => {
       snapshot.resources.sessions.resource_id
     );
     expect(merged.generated_at).not.toBe(snapshot.generated_at);
+  });
+
+  it("只把消费字段投影到platform，不携带raw resource或metadata", () => {
+    const projection = projectControlPlaneSnapshot({
+      status: "degraded",
+      contractVersion: "1.0.0",
+      generatedAt: "2026-07-25T12:00:00Z",
+      resources: [
+        {
+          name: "config",
+          resourceType: "config_schema",
+          resourceId: "config:octoagent",
+          status: "ready",
+        },
+        {
+          name: "diagnostics",
+          resourceType: "diagnostics_summary",
+          resourceId: "diagnostics:summary",
+          status: "degraded",
+        },
+      ],
+      degradedSections: ["diagnostics"],
+      resourceErrors: [
+        {
+          name: "diagnostics",
+          code: "DIAGNOSTICS_UNAVAILABLE",
+          errorType: "dependency",
+          message: "暂时不可用",
+        },
+      ],
+      actionIds: ["project.select", "mcp.install"],
+    });
+
+    expect(projection, "F149_CONSUMED_PROJECTION_MISSING").toEqual({
+      status: "degraded",
+      contractVersion: "1.0.0",
+      generatedAt: "2026-07-25T12:00:00Z",
+      resourceStates: [
+        {
+          name: "config",
+          available: true,
+          errorCode: null,
+        },
+        {
+          name: "diagnostics",
+          available: false,
+          errorCode: "DIAGNOSTICS_UNAVAILABLE",
+        },
+      ],
+      availableActionIds: ["mcp.install", "project.select"],
+    });
+    expect(JSON.stringify(projection)).not.toContain("resourceType");
+    expect(JSON.stringify(projection)).not.toContain("resourceId");
   });
 });
