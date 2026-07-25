@@ -38,6 +38,9 @@
 
 ### T001 — F149 boundary checker 行为
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T001/`。仓库实扫仅保留4个由后续owner修复的真实direct fetch，
+  无合法分层/fallback/Restore命名误报。
 - **层/FR**：L4 checker；FR-011/012/013/024/029。
 - **文件**：`octoagent/frontend/scripts/check-f149-boundaries.mjs`、`check-f149-boundaries.test.ts`、fixtures。
 - **依赖**：T000。

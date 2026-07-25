@@ -1,0 +1,9 @@
+RUN  v2.1.9
+
+scripts/check-f149-boundaries.test.ts (2 tests)
+✓ F149 boundary checker > rejects every seeded architecture violation
+✓ F149 boundary checker > accepts the single transport and downward dependency path
+
+Test Files  1 passed (1)
+Tests       2 passed (2)
+process exit=0

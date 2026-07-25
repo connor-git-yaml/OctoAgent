@@ -1,0 +1,20 @@
+task_id: T001
+phase: REFACTOR
+behavior: F149边界checker拒绝九类单缺陷架构违规并接受唯一合法分层路径
+command: cd octoagent/frontend && npx vitest run scripts/check-f149-boundaries.test.ts
+executed_at_utc: 2026-07-25T08:58:26Z
+head_sha: 1f1d6baaa12cd7544511806e406eb23bfdbe21ba
+worktree_status_before: |-
+  M .specify/features/149-web-pages-v2/tdd-evidence-policy.md
+  ?? .specify/features/149-web-pages-v2/evidence/
+  ?? octoagent/frontend/scripts/
+exit_code: 0
+oracle_expected: 同一九类拒绝与合法控制继续通过，且不误报现有合法platform contract、UI fallback与Restore命名
+oracle_observed: 2 tests通过；仓库实扫只剩4个已登记direct fetch真实违规，无合法路径误报
+output_file: refactor.log
+quality_review:
+  - api/client读取canonical platform/contracts type不算反向依赖
+  - 普通UI fallback值与legacy兼容路径分离
+  - Store规则不再把Restore后缀误判为第二状态容器
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T001 evidence，命中即exit1
+secret_scan_exit_code: 0

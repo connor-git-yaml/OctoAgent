@@ -58,4 +58,9 @@
 - 重新完整读取tests契约、Playwright config与F151 stage profile；canonical post-SDK
   profile仍为七包+Gateway、SDK absent。Playwright CI retry漂移留给T050按真实TDD修复。
 - Design export SHA仍为`a2db08ea0eb39278558e61e87a355b042c98ad24273b201940925f310271d98a`。
-- T000关闭；Implement放行。尚未执行T001行为RED，未修改F150/F151 production。
+- T000关闭；Implement放行。
+- T001以同一Vitest selector完成真实RED→GREEN→REFACTOR：RED稳定命中
+  `F149_BOUNDARY_RULES_MISSING`并漏报九类seeded violation；GREEN后九类均拒绝、
+  合法路径通过；REFACTOR收紧三类误报后同selector继续2/2通过。当前仓库实扫只剩
+  `approval-center.ts`、`memory-candidates-types.ts`、`AgentCenter.tsx`、
+  `SkillCenter.tsx`四个由后续任务拥有的真实direct fetch。

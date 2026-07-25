@@ -1,0 +1,18 @@
+task_id: T001
+phase: GREEN
+behavior: F149边界checker拒绝九类单缺陷架构违规并接受唯一合法分层路径
+command: cd octoagent/frontend && npx vitest run scripts/check-f149-boundaries.test.ts
+executed_at_utc: 2026-07-25T08:54:59Z
+head_sha: 1f1d6baaa12cd7544511806e406eb23bfdbe21ba
+worktree_status_before: |-
+  M .specify/features/149-web-pages-v2/tdd-evidence-policy.md
+  ?? .specify/features/149-web-pages-v2/evidence/
+  ?? octoagent/frontend/scripts/
+exit_code: 0
+oracle_expected: 九类单缺陷fixture全部拒绝，合法单transport及向下依赖fixture通过
+oracle_observed: 2 tests通过，坏fixture与合法控制均达到预期
+output_file: green.log
+implementation_correction:
+  - 首次实现运行仅因Authorization属性的AST节点形态漏识别而失败；同一规则修正后取得本GREEN
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T001 evidence，命中即exit1
+secret_scan_exit_code: 0

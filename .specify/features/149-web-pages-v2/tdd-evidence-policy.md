@@ -1,6 +1,6 @@
 # F149 TDD 与 Command Policy
 
-> 本文件约束未来 Tasks/Implement/Review；当前 Design Gate 不生成 `tasks.md`，也不伪造 RED 证据。
+> 本文件约束 Tasks/Implement/Review；Design/Tasks Gate与T000已完成，但不得伪造RED证据。
 
 ## 1. Tasks Gate command 结构
 
@@ -17,12 +17,13 @@
 所有 Python pytest command 必须从 `octoagent` cwd 使用以下前缀；只允许替换末尾选择器：
 
 ```bash
-cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/packages/sdk/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest
+cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH="$(pwd)/packages/core/src:$(pwd)/packages/provider/src:$(pwd)/packages/protocol/src:$(pwd)/packages/tooling/src:$(pwd)/packages/skills/src:$(pwd)/packages/policy/src:$(pwd)/packages/memory/src:$(pwd)/apps/gateway/src" uv run --project . --no-sync python -m pytest
 ```
 
 Review 对每个实际 command 做结构化检查：
 
-- 必须同时包含 `PYTHONNOUSERSITE=1`、上述 8 个 package src 和 gateway src；
+- 必须同时包含 `PYTHONNOUSERSITE=1`、上述7个保留package src和gateway src；
+- `packages/sdk/src`必须absent；F151已退休该workspace，加入它会制造旧路径兼容假象；
 - 必须包含 `uv run --project . --no-sync python -m pytest`；
 - command 不得包含 `uv sync`、裸 `pytest`、shell/Python 固定 sleep、`--reruns` 或宿主 `~/.octoagent`；
 - 时序敏感测试必须在测试源码标 `xdist_group`，并用条件轮询/受控时钟提供 oracle。
