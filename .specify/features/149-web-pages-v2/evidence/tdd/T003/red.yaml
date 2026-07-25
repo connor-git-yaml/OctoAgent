@@ -1,0 +1,15 @@
+task_id: T003
+phase: RED
+behavior: generated checker拒绝字节漂移、any及未命名raw unknown/JsonValue，同时接受命名开放边界
+command: cd octoagent/frontend && npx vitest run scripts/check-openapi-generated.test.ts
+executed_at_utc: 2026-07-25T09:05:07Z
+head_sha: 8cd4c166d6a492a8d7f3dc4e65d29fe4fbb4dd91
+worktree_status_before: |-
+  ?? octoagent/frontend/scripts/check-openapi-generated.mjs
+  ?? octoagent/frontend/scripts/check-openapi-generated.test.ts
+exit_code: 1
+oracle_expected: inert checker漏报四个单缺陷fixture并命中F149_OPENAPI_GENERATED_RULES_MISSING
+oracle_observed: 2 tests正常执行；合法开放边界控制通过；四个单缺陷均漏报并命中唯一目标oracle
+output_file: red.log
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T003 evidence，命中即exit1
+secret_scan_exit_code: 0

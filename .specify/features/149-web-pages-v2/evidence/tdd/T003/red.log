@@ -1,0 +1,13 @@
+RUN  v2.1.9
+
+scripts/check-openapi-generated.test.ts (2 tests | 1 failed)
+× F149 OpenAPI generated contract checker > rejects deterministic drift, any, and unnamed raw type leakage
+  F149_OPENAPI_GENERATED_RULES_MISSING:
+  F149_GENERATED_DRIFT,
+  F149_GENERATED_ANY,
+  F149_RAW_TYPE_LEAK,
+  F149_RAW_TYPE_LEAK
+
+Test Files  1 failed (1)
+Tests       1 failed | 1 passed (2)
+process exit=1

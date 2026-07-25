@@ -68,3 +68,7 @@
   index/style/theme/token regression从全漏报变为精确拒绝，合法`--cp-*`控制通过；
   当前仓库CLI以`index.css=4476`、palette=336、Spotify=6、non-cp token=59、
   second-theme=37作为诚实不恶化基线，未把遗留值伪报为已清零。
+- T003以同一Vitest selector完成真实RED→GREEN→REFACTOR：完整相对路径/bytes
+  clean-diff、`any`与未命名`unknown/JsonValue`均由TypeScript AST稳定拒绝，
+  命名raw/metadata/schema-as-data开放边界通过；真实generator alias/artifact仍由
+  T005与后续Gateway contract任务创建，未伪造现有OpenAPI产物。

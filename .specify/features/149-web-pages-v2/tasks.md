@@ -71,6 +71,8 @@
 
 ### T003 — OpenAPI/generated clean-diff checker
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T003/`；npm alias与真实generated artifact仍由T005及后续contract任务拥有。
 - **层/FR**：L4 checker；FR-010/018。
 - **文件**：`octoagent/frontend/scripts/check-openapi-generated.mjs`、test、fixtures。
 - **依赖**：T000。

@@ -1,0 +1,19 @@
+task_id: T003
+phase: REFACTOR
+behavior: generated checker拒绝字节漂移、any及未命名raw unknown/JsonValue，同时接受命名开放边界
+command: cd octoagent/frontend && npx vitest run scripts/check-openapi-generated.test.ts
+executed_at_utc: 2026-07-25T09:05:41Z
+head_sha: 8cd4c166d6a492a8d7f3dc4e65d29fe4fbb4dd91
+worktree_status_before: |-
+  ?? octoagent/frontend/scripts/check-openapi-generated.mjs
+  ?? octoagent/frontend/scripts/check-openapi-generated.test.ts
+exit_code: 0
+oracle_expected: 同一byte-diff/type-policy合同保持通过
+oracle_observed: 2 tests通过；no-op职责复核未发现需要制造churn的重构项
+output_file: refactor.log
+quality_review:
+  - deterministic diff比较完整相对路径集合与逐文件bytes
+  - TypeScript AST区分any、unknown和JsonValue声明/引用
+  - 只扫描F149 generated与slice输入，不扩成历史类型big-bang
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T003 evidence，命中即exit1
+secret_scan_exit_code: 0

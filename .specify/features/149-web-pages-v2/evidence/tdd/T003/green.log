@@ -1,0 +1,9 @@
+RUN  v2.1.9
+
+scripts/check-openapi-generated.test.ts (2 tests)
+✓ F149 OpenAPI generated contract checker > rejects deterministic drift, any, and unnamed raw type leakage
+✓ F149 OpenAPI generated contract checker > accepts byte-identical generated types and named open boundaries
+
+Test Files  1 passed (1)
+Tests       2 passed (2)
+process exit=0
