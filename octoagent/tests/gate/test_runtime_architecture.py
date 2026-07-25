@@ -50,6 +50,7 @@ DEPENDENCY_SELECTOR_ORACLE = "F151_DEPENDENCY_SELECTOR_SEMANTIC_RESOLVER_MISSING
 REPOSITORY_COMPLEXITY_ORACLE = "F151_REPOSITORY_COMPLEXITY_SNAPSHOT_NOT_INSTALLED"
 ATOMIC_SNAPSHOT_LIFECYCLE_ORACLE = "F151_ATOMIC_SNAPSHOT_LIFECYCLE_MISSING"
 F150_AUTHORITY_ORACLE = "F150_AUTHORITY_SCOPE_MISSING"
+F149_T010_AUTHORITY_ORACLE = "F149_T010_AUTHORITY_SCOPE_MISSING"
 REPOSITORY_COMPLEXITY_SNAPSHOT = REPO_ROOT / "repo-scripts/runtime-architecture-ceiling.v1.json"
 FORMAL_OFFLINE_ENV_KEY = "LITELLM_LOCAL_MODEL_COST_MAP"
 FORMAL_ENV_ORDER = ("PYTHONNOUSERSITE", "PYTHONPATH", FORMAL_OFFLINE_ENV_KEY)
@@ -565,6 +566,128 @@ def _assert_f150_authority_contract(tmp_path: Path, checker: Any) -> None:
         with pytest.raises(checker.GateFailure):
             validator(repo, "HEAD")
         assert _f150_authority_bytes(repo) == reject_bytes, f"{label}: reject wrote files"
+
+
+F149_T010_PUBLIC_SYMBOLS = (
+    "F149_SNAPSHOT_RESOURCE_NAMES",
+    "F149_REST_ENDPOINTS",
+    "F149RawSnapshotResource",
+    "F149SnapshotResourceError",
+    "F149SnapshotEnvelope",
+    "F149RemoteAccessStatusResponse",
+    "F149RequesterInfo",
+    "F149TaskDetail",
+    "F149RawEventPayload",
+    "F149TaskEvent",
+    "F149ArtifactPart",
+    "F149TaskArtifact",
+    "F149TaskDetailResponse",
+    "decode_f149_snapshot",
+    "export_f149_rest_openapi",
+)
+
+
+def _f149_t010_contract_repo(tmp_path: Path) -> Path:
+    repo = _seed_repo(tmp_path)
+    control = repo / "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py"
+    _write(
+        control,
+        "router = object()\n\n"
+        '@router.get("/api/control/snapshot")\n'
+        "async def get_control_snapshot():\n"
+        '    return {"status": "ready"}\n\n'
+        '@router.get("/api/control/resources/remote-access")\n'
+        "async def remote_access_status():\n"
+        '    return {"state": "ready"}\n',
+    )
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "pre-F149 T010 baseline")
+    _write(
+        control,
+        "router = object()\n\n"
+        '@router.get("/api/control/snapshot", response_model=F149SnapshotEnvelope)\n'
+        "async def get_control_snapshot():\n"
+        '    return {"status": "ready"}\n\n'
+        "@router.get(\n"
+        '    "/api/control/resources/remote-access",\n'
+        "    response_model=F149RemoteAccessStatusResponse,\n"
+        ")\n"
+        "async def remote_access_status():\n"
+        '    return {"state": "ready"}\n',
+    )
+    contract = repo / ("octoagent/apps/gateway/src/octoagent/gateway/routes/f149_web_contract.py")
+    lines: list[str] = []
+    for name in F149_T010_PUBLIC_SYMBOLS:
+        if name in {"F149_SNAPSHOT_RESOURCE_NAMES", "F149_REST_ENDPOINTS"}:
+            lines.append(f"{name} = ()")
+        elif name.startswith("F149"):
+            lines.extend((f"class {name}:", "    pass"))
+        else:
+            lines.extend((f"def {name}():", "    return None"))
+        lines.append("")
+    _write(contract, "\n".join(lines))
+    return repo
+
+
+def _f149_t010_scope_bytes(repo: Path) -> dict[str, str]:
+    root = repo / "octoagent/apps/gateway/src/octoagent/gateway/routes"
+    return {path.relative_to(repo).as_posix(): _sha(path) for path in sorted(root.glob("*.py"))}
+
+
+def _assert_f149_t010_authority_contract(tmp_path: Path, checker: Any) -> None:
+    validator = getattr(checker, "validate_f149_t010_scope", None)
+    if not callable(validator):
+        pytest.fail(F149_T010_AUTHORITY_ORACLE, pytrace=False)
+    accepted = _f149_t010_contract_repo(tmp_path / "accepted")
+    accepted_bytes = _f149_t010_scope_bytes(accepted)
+    validator(accepted, "HEAD")
+    assert _f149_t010_scope_bytes(accepted) == accepted_bytes
+
+    cases = (
+        (
+            "route body sibling",
+            '    return {"status": "ready"}',
+            '    return {"status": "degraded"}',
+        ),
+        (
+            "wrong response model",
+            "response_model=F149SnapshotEnvelope",
+            "response_model=F149TaskDetailResponse",
+        ),
+        (
+            "extra public contract symbol",
+            "def export_f149_rest_openapi():\n    return None\n",
+            (
+                "def export_f149_rest_openapi():\n"
+                "    return None\n\n"
+                "class UnreviewedContract:\n"
+                "    pass\n"
+            ),
+        ),
+    )
+    for index, (label, old, new) in enumerate(cases):
+        repo = _f149_t010_contract_repo(tmp_path / f"reject-{index:02d}")
+        validator(repo, "HEAD")
+        before = _f149_t010_scope_bytes(repo)
+        target = (
+            repo / "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py"
+            if index < 2
+            else repo / "octoagent/apps/gateway/src/octoagent/gateway/routes/f149_web_contract.py"
+        )
+        _write(
+            target,
+            _replace_exact(
+                target.read_text(encoding="utf-8"),
+                old,
+                new,
+                expected_count=1,
+            ),
+        )
+        rejected = _f149_t010_scope_bytes(repo)
+        assert rejected != before, f"{label}: no observable input delta"
+        with pytest.raises(checker.GateFailure):
+            validator(repo, "HEAD")
+        assert _f149_t010_scope_bytes(repo) == rejected, f"{label}: validator wrote files"
 
 
 def _seed_authority_documents(repo: Path) -> None:
@@ -4546,6 +4669,15 @@ class TestManifestIntegrity:
             _assert_f150_authority_contract(tmp_path, checker)
         except AssertionError as exc:
             pytest.fail(f"{F150_AUTHORITY_ORACLE}: {exc}", pytrace=False)
+
+    def test_f149_t010_scope_allows_exact_response_models_and_rejects_route_sibling_drift(
+        self, tmp_path: Path
+    ) -> None:
+        checker = _load_frontier_checker()
+        try:
+            _assert_f149_t010_authority_contract(tmp_path, checker)
+        except AssertionError as exc:
+            pytest.fail(f"{F149_T010_AUTHORITY_ORACLE}: {exc}", pytrace=False)
 
     def test_rgr_scope_manifest_ids_refs_paths_and_declared_states_are_machine_complete(
         self, tmp_path: Path

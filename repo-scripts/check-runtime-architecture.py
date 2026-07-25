@@ -15,6 +15,7 @@ import sys
 import tarfile
 import tempfile
 import tomllib
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from fnmatch import fnmatchcase
@@ -1279,6 +1280,143 @@ F150_AUTHORITY_PATHS = MappingProxyType(
         ),
     }
 )
+F149_T010_WEB_CONTRACT_PATH = (
+    "octoagent/apps/gateway/src/octoagent/gateway/routes/f149_web_contract.py"
+)
+F149_T010_PUBLIC_SYMBOLS = frozenset(
+    {
+        "F149_SNAPSHOT_RESOURCE_NAMES",
+        "F149_REST_ENDPOINTS",
+        "F149RawSnapshotResource",
+        "F149SnapshotResourceError",
+        "F149SnapshotEnvelope",
+        "F149RemoteAccessStatusResponse",
+        "F149RequesterInfo",
+        "F149TaskDetail",
+        "F149RawEventPayload",
+        "F149TaskEvent",
+        "F149ArtifactPart",
+        "F149TaskArtifact",
+        "F149TaskDetailResponse",
+        "decode_f149_snapshot",
+        "export_f149_rest_openapi",
+    }
+)
+F149_T010_ROUTE_AUTHORITY = MappingProxyType(
+    {
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py": (
+            MappingProxyType(
+                {
+                    "get_control_snapshot": "F149SnapshotEnvelope",
+                    "remote_access_status": "F149RemoteAccessStatusResponse",
+                    "get_control_config": "ConfigSchemaDocument",
+                    "get_control_project_selector": "ProjectSelectorDocument",
+                    "get_control_sessions": "SessionProjectionDocument",
+                    "get_control_agent_profiles": "AgentProfilesDocument",
+                    "get_control_worker_profiles": "WorkerProfilesDocument",
+                    "get_control_worker_profile_revisions": (
+                        "AgentProfileRevisionsDocument"
+                    ),
+                    "get_control_owner_profile": "OwnerProfileDocument",
+                    "get_control_bootstrap_session": "ControlPlaneDocument",
+                    "get_control_context_continuity": "ContextContinuityDocument",
+                    "get_control_capability_pack": "CapabilityPackDocument",
+                    "get_control_skill_governance": "SkillGovernanceDocument",
+                    "get_control_mcp_provider_catalog": "McpProviderCatalogDocument",
+                    "get_control_setup_governance": "SetupGovernanceDocument",
+                    "get_control_delegation": "DelegationPlaneDocument",
+                    "get_control_automation": "AutomationJobDocument",
+                    "get_control_diagnostics": "DiagnosticsSummaryDocument",
+                    "get_control_retrieval_platform": "RetrievalPlatformDocument",
+                    "get_control_memory": "MemoryConsoleDocument",
+                    "get_control_recall_frames": "RecallFrameListDocument",
+                }
+            ),
+            frozenset(),
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/tasks.py": (
+            MappingProxyType({"get_task_detail": "F149TaskDetailResponse"}),
+            frozenset(),
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/ops.py": (
+            MappingProxyType(
+                {
+                    "get_recovery_summary": "RecoverySummary",
+                    "create_backup": "BackupBundle",
+                    "get_update_status": "UpdateAttemptSummary",
+                    "update_dry_run": "UpdateAttemptSummary",
+                    "update_apply": "UpdateAttemptSummary",
+                    "restart_runtime": "UpdateAttemptSummary",
+                    "verify_runtime": "UpdateAttemptSummary",
+                    "export_chats": "ExportManifest",
+                }
+            ),
+            frozenset(),
+        ),
+        (
+            "octoagent/apps/gateway/src/octoagent/gateway/routes/"
+            "consolidation_candidates.py"
+        ): (
+            MappingProxyType(
+                {
+                    "list_consolidation_candidates": (
+                        "ConsolidationCandidatesListResponse"
+                    ),
+                    "accept_consolidation_candidate": (
+                        "ConsolidationCandidateDecisionResponse"
+                    ),
+                    "reject_consolidation_candidate": (
+                        "ConsolidationCandidateDecisionResponse"
+                    ),
+                    "bulk_reject_consolidation_candidates": (
+                        "ConsolidationBulkRejectResponse"
+                    ),
+                }
+            ),
+            frozenset(
+                {
+                    "ConsolidationCandidateDecisionResponse",
+                    "ConsolidationBulkRejectResponse",
+                }
+            ),
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/behavior_compact.py": (
+            MappingProxyType(
+                {
+                    "list_behavior_compact_candidates": (
+                        "BehaviorCompactCandidatesListResponse"
+                    ),
+                    "accept_behavior_compact_candidate": (
+                        "BehaviorCompactDecisionResponse"
+                    ),
+                    "reject_behavior_compact_candidate": (
+                        "BehaviorCompactDecisionResponse"
+                    ),
+                }
+            ),
+            frozenset({"BehaviorCompactDecisionResponse"}),
+        ),
+        ("octoagent/apps/gateway/src/octoagent/gateway/routes/memory_candidates.py"): (
+            MappingProxyType(
+                {
+                    "promote_candidate": "PromoteCandidateResponse",
+                    "discard_candidate": "DiscardCandidateResponse",
+                    "bulk_discard_candidates": "BulkDiscardResponse",
+                }
+            ),
+            frozenset(
+                {
+                    "PromoteCandidateResponse",
+                    "DiscardCandidateResponse",
+                    "BulkDiscardResponse",
+                }
+            ),
+        ),
+    }
+)
+F149_T010_AUTHORITY_PATHS = frozenset(
+    {F149_T010_WEB_CONTRACT_PATH, *F149_T010_ROUTE_AUTHORITY}
+)
 F150_FORBIDDEN_PATTERNS = (
     r"\bBypass\b",
     r"service[_ -]?token",
@@ -1547,6 +1685,159 @@ def _validate_f150_new_module(
     )
 
 
+def _f149_t010_function_without_decorators(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> str:
+    candidate = deepcopy(node)
+    candidate.decorator_list = []
+    return ast.dump(candidate, include_attributes=False)
+
+
+def _f149_t010_route_decorator_dump(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    response_model: str,
+) -> list[str]:
+    decorators = deepcopy(node.decorator_list)
+    routes = [
+        decorator
+        for decorator in decorators
+        if isinstance(decorator, ast.Call)
+        and isinstance(decorator.func, ast.Attribute)
+        and isinstance(decorator.func.value, ast.Name)
+        and decorator.func.value.id == "router"
+    ]
+    require(
+        len(routes) == 1
+        and not any(keyword.arg == "response_model" for keyword in routes[0].keywords),
+        "F149_T010_PROTECTED_SEMANTIC_DRIFT",
+        f"{node.name} route decorator",
+    )
+    routes[0].keywords.append(
+        ast.keyword(
+            arg="response_model",
+            value=ast.Name(id=response_model, ctx=ast.Load()),
+        )
+    )
+    return [ast.dump(decorator, include_attributes=False) for decorator in decorators]
+
+
+def _validate_f149_t010_route_function(
+    baseline: ast.FunctionDef | ast.AsyncFunctionDef,
+    current: ast.FunctionDef | ast.AsyncFunctionDef,
+    response_model: str,
+) -> None:
+    require(
+        _f149_t010_function_without_decorators(baseline)
+        == _f149_t010_function_without_decorators(current)
+        and [
+            ast.dump(decorator, include_attributes=False)
+            for decorator in current.decorator_list
+        ]
+        == _f149_t010_route_decorator_dump(baseline, response_model),
+        "F149_T010_PROTECTED_SEMANTIC_DRIFT",
+        baseline.name,
+    )
+
+
+def _validate_f149_t010_route_module(
+    baseline: str,
+    current: str,
+    response_models: MappingProxyType,
+    allowed_new: frozenset[str],
+) -> None:
+    try:
+        baseline_tree, current_tree = ast.parse(baseline), ast.parse(current)
+    except SyntaxError as exc:
+        fail("F149_T010_PROTECTED_SEMANTIC_DRIFT", str(exc))
+    baseline_names = _f150_named_statements(baseline_tree.body)
+    current_names = _f150_named_statements(current_tree.body)
+    target_names = frozenset(response_models) & frozenset(baseline_names)
+    require(
+        bool(target_names)
+        and set(current_names) - set(baseline_names) == set(allowed_new)
+        and _f150_protected_dump(
+            baseline_tree.body,
+            target_names,
+        )
+        == _f150_protected_dump(
+            current_tree.body,
+            target_names | allowed_new,
+        )
+        and all(isinstance(current_names[name], ast.ClassDef) for name in allowed_new),
+        "F149_T010_PROTECTED_SEMANTIC_DRIFT",
+        "route module sibling",
+    )
+    for name in target_names:
+        baseline_node, current_node = baseline_names[name], current_names.get(name)
+        require(
+            isinstance(baseline_node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and isinstance(current_node, (ast.FunctionDef, ast.AsyncFunctionDef)),
+            "F149_T010_PROTECTED_SEMANTIC_DRIFT",
+            name,
+        )
+        _validate_f149_t010_route_function(
+            baseline_node,
+            current_node,
+            str(response_models[name]),
+        )
+
+
+def _validate_f149_t010_authority_path(
+    repo: Path, base_ref: str, relative: str
+) -> None:
+    baseline = _f150_source_at_ref(repo, base_ref, relative)
+    target = repo / relative
+    require(
+        target.is_file(),
+        "F149_T010_PROTECTED_SEMANTIC_DRIFT",
+        relative,
+    )
+    current = target.read_text(encoding="utf-8")
+    validate_f150_security_surface(relative, current, baseline)
+    if relative == F149_T010_WEB_CONTRACT_PATH:
+        try:
+            current_tree = ast.parse(current)
+        except SyntaxError as exc:
+            fail("F149_T010_PROTECTED_SEMANTIC_DRIFT", str(exc))
+        current_names = set(_f150_named_statements(current_tree.body))
+        public_names = {name for name in current_names if not name.startswith("_")}
+        require(
+            not baseline
+            and public_names == set(F149_T010_PUBLIC_SYMBOLS)
+            and all(
+                _f150_new_module_statement_allowed(
+                    node,
+                    F149_T010_PUBLIC_SYMBOLS,
+                )
+                for node in current_tree.body
+            ),
+            "F149_T010_PROTECTED_SEMANTIC_DRIFT",
+            "F149 Web contract public surface",
+        )
+        return
+    response_models, allowed_new = F149_T010_ROUTE_AUTHORITY[relative]
+    _validate_f149_t010_route_module(
+        baseline,
+        current,
+        response_models,
+        allowed_new,
+    )
+
+
+def validate_f149_t010_scope(repo: Path, base_ref: str) -> None:
+    """只允许F149 T010冻结真实OpenAPI schema，不改变既有路由行为。"""
+
+    resolve_base(repo, base_ref)
+    scoped = sorted(changed_paths(repo) & F149_T010_AUTHORITY_PATHS)
+    require(
+        bool(scoped),
+        "F149_T010_PROTECTED_SEMANTIC_DRIFT",
+        "no reviewed path",
+    )
+    for relative in scoped:
+        _validate_f149_t010_authority_path(repo, base_ref, relative)
+
+
 def _validate_f150_module(
     baseline: str, current: str, allowed: frozenset[str], *, exact_new: bool
 ) -> None:
@@ -1628,7 +1919,9 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
     """验证F150只改变获批Web Access符号，且不创建iOS/第二身份路径。"""
 
     resolve_base(repo, base_ref)
-    for relative in sorted(changed_paths(repo)):
+    changed = changed_paths(repo)
+    f149_t010_active = F149_T010_WEB_CONTRACT_PATH in changed
+    for relative in sorted(changed):
         if relative.startswith("octoagent/frontend/src/") and relative.endswith(
             (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
         ):
@@ -1637,6 +1930,9 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
             "octoagent/apps/gateway/src/octoagent/gateway/"
         ) or relative.startswith("octoagent/frontend/src/")
         if not production:
+            continue
+        if f149_t010_active and relative in F149_T010_AUTHORITY_PATHS:
+            _validate_f149_t010_authority_path(repo, base_ref, relative)
             continue
         contract = F150_AUTHORITY_PATHS.get(relative)
         path = repo / relative
