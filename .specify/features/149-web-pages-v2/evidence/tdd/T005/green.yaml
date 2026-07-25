@@ -1,0 +1,18 @@
+task_id: T005
+phase: GREEN
+behavior: frontend锁定types-only generator/coverage provider及post-SDK aliases与LCOV配置
+command: cd octoagent/frontend && npx vitest run scripts/package-scripts.test.ts
+executed_at_utc: 2026-07-25T09:10:25Z
+head_sha: 1b12123397a420e27a35cddf43e131c66bc3e968
+worktree_status_before: |-
+  M octoagent/frontend/package-lock.json
+  M octoagent/frontend/package.json
+  M octoagent/frontend/vite.config.ts
+  ?? octoagent/frontend/scripts/package-scripts.test.ts
+exit_code: 0
+oracle_expected: exact devDependency/lock、post-SDK aliases及v8 LCOV排除合同全部通过
+oracle_observed: 3 tests通过；npm ls确认openapi-typescript=7.13.0、coverage-v8=2.1.9
+output_file: green.log
+dependency_install: npm install --save-dev --save-exact openapi-typescript@7.13.0 @vitest/coverage-v8@2.1.9
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T005 evidence，命中即exit1
+secret_scan_exit_code: 0

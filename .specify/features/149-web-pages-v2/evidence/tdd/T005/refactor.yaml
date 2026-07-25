@@ -1,0 +1,23 @@
+task_id: T005
+phase: REFACTOR
+behavior: frontend锁定types-only generator/coverage provider及post-SDK aliases与LCOV配置
+command: cd octoagent/frontend && npx vitest run scripts/package-scripts.test.ts
+executed_at_utc: 2026-07-25T09:10:59Z
+head_sha: 1b12123397a420e27a35cddf43e131c66bc3e968
+worktree_status_before: |-
+  M octoagent/frontend/package-lock.json
+  M octoagent/frontend/package.json
+  M octoagent/frontend/vite.config.ts
+  ?? octoagent/frontend/coverage/
+  ?? octoagent/frontend/scripts/package-scripts.test.ts
+exit_code: 0
+oracle_expected: 同一package/config合同通过，真实test:coverage能加载v8并生成LCOV
+oracle_observed: 3 tests通过；targeted test:coverage另行exit0并生成lcov.info，生成目录随后可恢复移至/tmp
+output_file: refactor.log
+quality_review:
+  - OpenAPI alias只生成types，未安装generated client runtime
+  - Python exporter命令固定七个保留packages加Gateway且SDK absent
+  - coverage排除generated、test/tests、spec与d.ts
+security_audit_note: npm audit --omit=dev仍报告既有dompurify与react-router生产依赖风险；未用越界自动升级掩盖
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T005 evidence，命中即exit1
+secret_scan_exit_code: 0

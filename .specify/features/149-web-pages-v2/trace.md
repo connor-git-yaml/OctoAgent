@@ -76,3 +76,9 @@
   authored executable changed lines，tests/generated/`.d.ts`/type-only排除；
   89.99%拒绝、90%接受，新source无LCOV按0%，且CLI同时纳入
   committed/staged/unstaged diff与untracked source。真实coverage provider/alias仍由T005拥有。
+- T005以同一Vitest selector完成真实RED→GREEN→REFACTOR：锁定
+  `openapi-typescript@7.13.0`与`@vitest/coverage-v8@2.1.9`，三条alias、
+  post-SDK exporter命令与LCOV排除合同通过；targeted `test:coverage`真实加载v8并生成
+  LCOV。OpenAPI exporter/artifact仍等待T010–T012，未把未来命令冒充现成产物。
+- 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
+  本task未越界自动升级，留待最终安全审查显式处置。

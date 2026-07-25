@@ -68,6 +68,19 @@ export default defineConfig(({ mode }) => {
       // F140：e2e/ 是 Playwright 地盘（@playwright/test 的 *.spec.ts），
       // vitest 默认 include 会误收——显式排除，两套 runner 互不越界。
       exclude: ["**/node_modules/**", "**/dist/**", "e2e/**"],
+      coverage: {
+        provider: "v8",
+        reporter: ["text", "lcov"],
+        include: ["src/**/*.{ts,tsx}"],
+        exclude: [
+          "src/generated/**",
+          "src/test/**",
+          "src/tests/**",
+          "**/*.test.*",
+          "**/*.spec.*",
+          "**/*.d.ts",
+        ],
+      },
     },
   };
 });

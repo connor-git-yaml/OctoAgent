@@ -103,6 +103,9 @@
 
 ### T005 — package scripts 与 dev-only generator/coverage provider
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T005/`。aliases与provider已可用；真实OpenAPI exporter/artifact仍由
+  T010–T012交付后执行。
 - **层/FR**：L4 config contract；FR-010/018。
 - **文件**：`octoagent/frontend/scripts/package-scripts.test.ts`、`package.json`、`package-lock.json`、`vite.config.ts`。
 - **依赖**：T003/T004。

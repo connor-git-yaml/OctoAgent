@@ -8,6 +8,9 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "openapi:generate": "cd .. && env PYTHONNOUSERSITE=1 PYTHONPATH=\"$PWD/packages/core/src:$PWD/packages/provider/src:$PWD/packages/protocol/src:$PWD/packages/tooling/src:$PWD/packages/skills/src:$PWD/packages/policy/src:$PWD/packages/memory/src:$PWD/apps/gateway/src\" uv run --project . --no-sync python ../repo-scripts/export-f149-contracts.py --output-dir frontend/.openapi/f149 && cd frontend && openapi-typescript .openapi/f149/rest.openapi.json -o src/generated/f149/rest.d.ts && openapi-typescript .openapi/f149/actions.openapi.json -o src/generated/f149/actions.d.ts && openapi-typescript .openapi/f149/task-sse.openapi.json -o src/generated/f149/task-sse.d.ts",
+    "openapi:check": "cd .. && env PYTHONNOUSERSITE=1 PYTHONPATH=\"$PWD/packages/core/src:$PWD/packages/provider/src:$PWD/packages/protocol/src:$PWD/packages/tooling/src:$PWD/packages/skills/src:$PWD/packages/policy/src:$PWD/packages/memory/src:$PWD/apps/gateway/src\" uv run --project . --no-sync python ../repo-scripts/export-f149-contracts.py --output-dir frontend/.openapi-check/contracts && cd frontend && mkdir -p .openapi-generated/f149 && openapi-typescript .openapi-check/contracts/rest.openapi.json -o .openapi-generated/f149/rest.d.ts && openapi-typescript .openapi-check/contracts/actions.openapi.json -o .openapi-generated/f149/actions.d.ts && openapi-typescript .openapi-check/contracts/task-sse.openapi.json -o .openapi-generated/f149/task-sse.d.ts && node scripts/check-openapi-generated.mjs src/generated/f149 .openapi-generated/f149 src/api/f149",
     "test:e2e": "playwright test",
     "check:complexity": "node ../../repo-scripts/check-frontend-complexity.mjs"
   },
@@ -30,7 +33,9 @@
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@vitejs/plugin-react": "^4.6.0",
+    "@vitest/coverage-v8": "2.1.9",
     "jsdom": "^25.0.1",
+    "openapi-typescript": "7.13.0",
     "typescript": "~5.8.3",
     "vite": "^6.3.5",
     "vitest": "^2.1.9"

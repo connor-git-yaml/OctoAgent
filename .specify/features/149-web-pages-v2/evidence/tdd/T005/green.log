@@ -1,0 +1,10 @@
+RUN  v2.1.9
+
+scripts/package-scripts.test.ts (3 tests)
+✓ F149 frontend package Gate > locks the types-only generator and matching coverage provider
+✓ F149 frontend package Gate > defines complete post-SDK OpenAPI and coverage aliases
+✓ F149 frontend package Gate > configures v8 LCOV coverage without tests or generated DTOs
+
+Test Files  1 passed (1)
+Tests       3 passed (3)
+process exit=0

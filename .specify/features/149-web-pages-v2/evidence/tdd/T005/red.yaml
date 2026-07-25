@@ -1,0 +1,14 @@
+task_id: T005
+phase: RED
+behavior: frontend锁定types-only generator/coverage provider及post-SDK aliases与LCOV配置
+command: cd octoagent/frontend && npx vitest run scripts/package-scripts.test.ts
+executed_at_utc: 2026-07-25T09:09:38Z
+head_sha: 1b12123397a420e27a35cddf43e131c66bc3e968
+worktree_status_before: |-
+  ?? octoagent/frontend/scripts/package-scripts.test.ts
+exit_code: 1
+oracle_expected: 缺两个devDependency、三个alias与coverage config使三个合同均失败
+oracle_observed: 3 tests正常执行并分别因dependency、alias、coverage config缺失失败
+output_file: red.log
+secret_scan_command: node以分段字符串构造合成sentinel并扫描T005 evidence，命中即exit1
+secret_scan_exit_code: 0
