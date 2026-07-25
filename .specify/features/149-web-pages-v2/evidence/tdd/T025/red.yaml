@@ -1,0 +1,14 @@
+task_id: T025
+phase: RED
+behavior: F149 typed action commands and results
+command: cd octoagent/frontend && npx vitest run src/platform/actions/f149Actions.test.ts
+executed_at_utc: 2026-07-25T13:35:57Z
+head_sha: af223d896fc84e4576979e75887337bcc6459c95
+exit_code: 1
+oracle_expected: inert typed wrapper拒绝合法command，无法产生typed result/error或复用既有refresh语义
+oracle_observed: 11项中9项稳定失败、2项negative control通过；七条合法action均被decoder拒绝，typed error与refresh断言未满足
+raw_output_file: /tmp/f149-t025-red.log
+raw_output_sha256: 908fd02b16379d16b535dc45595bc1f26adf89913afdce9661b2d9ac38458e08
+secret_scan: pass
+network: false
+rerun: false

@@ -176,5 +176,14 @@
   才可复制。REFACTOR复用既有`InlineCallout`提供status/alert语义，没有新CSS、
   视觉class或全局业务store。最终精确18/18、全前端508/508、生产build、OpenAPI、
   F149 boundary/style/complexity与repository runtime architecture均通过。
+- T025以可导入但拒绝全部command的inert typed wrapper形成9条稳定RED，2条
+  negative control通过。GREEN后七条F149 action由generated schema约束，并在
+  application boundary做runtime fail-closed；`behavior.restore_version`保留，
+  dead Memory与Automation action不进入本task。REFACTOR直接复用既有Workbench
+  executor与`executeWorkbenchActionWithRefresh`，非法command、envelope/action/
+  result漂移和executor exception均返回稳定typed error，异常不回显params/secret。
+  最终精确15/15、全前端520/520、生产build、OpenAPI、F149 boundary/style/
+  complexity与repository runtime architecture均通过。没有第二action pipeline、
+  service、页面、CSS、视觉class或Claude Design排版改动。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

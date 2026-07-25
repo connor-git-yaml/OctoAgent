@@ -1,0 +1,38 @@
+task_id: T025
+phase: REFACTOR
+behavior: F149 typed action commands and results
+command: cd octoagent/frontend && npx vitest run src/platform/actions/f149Actions.test.ts src/platform/actions/controlPlaneActions.test.ts
+executed_at_utc: 2026-07-25T13:41:58Z
+head_sha: af223d896fc84e4576979e75887337bcc6459c95
+exit_code: 0
+oracle_expected: exact action union与既有executor/refresh语义保持，异常不回显params/secret且无第二action pipeline
+oracle_observed: exact 15/15、全前端520/520、生产build、OpenAPI、F149 boundary/style/complexity与repository runtime architecture全部通过
+raw_output_file: /tmp/f149-t025-refactor.log
+raw_output_sha256: 160871cc837674c39edb28384c18a2856284de9c58a0da4ced4dd0f78a290dcc
+frontend_full_output_file: /tmp/f149-t025-frontend-full.log
+frontend_full_output_sha256: 58278b0b3a88a6fd09fca6682e67bf10ae6266f5e40759e717fc1a78a494438f
+openapi_output_file: /tmp/f149-t025-openapi.log
+openapi_output_sha256: 8930c6e2e2baa610a7d07b4790fbd17d9816ceff372a35cd805919f85cdce431
+boundary_output_file: /tmp/f149-t025-boundary.log
+boundary_output_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_output_file: /tmp/f149-t025-style.log
+style_output_sha256: 44594ef0a04a85351e98c9633928f770cd431a678e23d9c1d9fd6e25cbe9b652
+complexity_output_file: /tmp/f149-t025-complexity.log
+complexity_output_sha256: 974073e015a5d5d824f5d5ef5c7c494cd82e0e93f1cd30797d5e18c820f408a9
+build_output_file: /tmp/f149-t025-build.log
+build_output_sha256: a25bd5fa3dbd3af6d6497ea8862ba8f00a850089f3c0d818f241954c0ad15752
+runtime_architecture_output_file: /tmp/f149-t025-runtime-architecture-rerun.log
+runtime_architecture_output_sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+quality_review:
+  - exact七条action由generated schema约束，保留behavior.restore_version并排除dead Memory与Automation action
+  - decoder对command、envelope、action与result schema逐层fail closed，不接受额外字段或错误action
+  - wrapper直接复用既有Workbench executor与executeWorkbenchActionWithRefresh，不建立第二pipeline或service
+  - executor异常返回稳定execution-failed，错误消息不回显params或synthetic secret
+  - 未修改任何页面、CSS、视觉class或Claude Design排版
+file_sha256:
+  action: 42e015043c4b8b074664b8b375a9edb01824d5e15186a3585f60e86c414f33ef
+  action-test: d635be3c79752c39bd0c73a2de1df9eed32705a7bd63a2a36a39f4c9a226cffc
+  index: 076f4a273783bf477ebf5a50db16a74d7f58c974d41b161d802131d71740ad3c
+secret_scan: pass
+network: false
+rerun: false

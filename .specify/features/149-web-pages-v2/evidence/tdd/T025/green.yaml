@@ -1,0 +1,14 @@
+task_id: T025
+phase: GREEN
+behavior: F149 typed action commands and results
+command: cd octoagent/frontend && npx vitest run src/platform/actions/f149Actions.test.ts
+executed_at_utc: 2026-07-25T13:38:07Z
+head_sha: af223d896fc84e4576979e75887337bcc6459c95
+exit_code: 0
+oracle_expected: 七条F149 action产生typed result/error，非法command/result fail closed并复用既有refresh executor
+oracle_observed: 1 file、11 tests全部通过
+raw_output_file: /tmp/f149-t025-green.log
+raw_output_sha256: ed1230b440c1290ea3a526019f47b15292f9f84ea5e7f62eee32d695054034f7
+secret_scan: pass
+network: false
+rerun: false

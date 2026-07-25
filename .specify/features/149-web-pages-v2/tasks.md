@@ -341,6 +341,15 @@
 
 ### T025 — F149 typed action commands/results
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T025/`。七条 F149 action 由 generated schema 约束并在
+  application boundary 做 runtime fail-closed；`behavior.restore_version`
+  保留，dead Memory 与 Automation action 不进入本任务。typed wrapper 直接复用
+  既有 Workbench executor 与 `executeWorkbenchActionWithRefresh`，非法 command、
+  envelope/action/result 漂移和 executor exception 均收敛为稳定 typed error，
+  异常信息不回显 params/secret。最终精确15/15、全前端520/520、生产build、
+  OpenAPI、F149 boundary/style/complexity与repository runtime architecture均通过；
+  未修改页面、CSS、视觉class或Claude Design排版。
 - **层/FR**：frontend L4 application；FR-010/012/027。
 - **文件**：`src/platform/actions/f149Actions.test.ts`、`f149Actions.ts`。
 - **依赖**：T011/T015/T020。
@@ -682,7 +691,8 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T024 中已执行的任务均有真实证据；下一项是 T025
-  F149 typed action commands/results。F149 仍须逐 task 通过
+- 当前风险：T000–T015、T020–T025 中已执行的任务均有真实证据；下一项是 T030
+  Approvals v2。它是首个页面视觉实现，必须先逐页对照 Claude Design 最初版；
+  现有 Web 只能作为实现现状，不得成为视觉基线。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。
