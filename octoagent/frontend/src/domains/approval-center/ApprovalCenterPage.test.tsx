@@ -9,6 +9,7 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import ApprovalCenterPage from "./ApprovalCenterPage";
 import { ApprovalActionError } from "../../api/approval-center";
+import { ApiError } from "../../api/client";
 import type {
   CompactCandidatesResponse,
   ConsolidationCandidatesResponse,
@@ -24,7 +25,8 @@ vi.mock("../../api/memory-candidates", () => ({
 
 vi.mock("../../api/approval-center", async (importOriginal) => {
   // ApprovalActionError 保留真实实现（mapApprovalFailure instanceof 判定需要）
-  const actual = await importOriginal<typeof import("../../api/approval-center")>();
+  const actual =
+    await importOriginal<typeof import("../../api/approval-center")>();
   return {
     ...actual,
     fetchConsolidationCandidates: vi.fn(),
@@ -53,7 +55,7 @@ import {
 } from "../../api/approval-center";
 
 function memoryResponse(
-  overrides?: Partial<MemoryCandidatesResponse>
+  overrides?: Partial<MemoryCandidatesResponse>,
 ): MemoryCandidatesResponse {
   return {
     candidates: [
@@ -83,7 +85,7 @@ function memoryResponse(
 }
 
 function consolidationResponse(
-  overrides?: Partial<ConsolidationCandidatesResponse>
+  overrides?: Partial<ConsolidationCandidatesResponse>,
 ): ConsolidationCandidatesResponse {
   return {
     candidates: [
@@ -108,7 +110,7 @@ function consolidationResponse(
 }
 
 function compactResponse(
-  overrides?: Partial<CompactCandidatesResponse>
+  overrides?: Partial<CompactCandidatesResponse>,
 ): CompactCandidatesResponse {
   return {
     candidates: [
@@ -133,20 +135,20 @@ function compactResponse(
 
 function emptyAll() {
   vi.mocked(fetchMemoryCandidates).mockResolvedValue(
-    memoryResponse({ candidates: [], total: 0, pending_count: 0 })
+    memoryResponse({ candidates: [], total: 0, pending_count: 0 }),
   );
   vi.mocked(fetchConsolidationCandidates).mockResolvedValue(
-    consolidationResponse({ candidates: [], pending_count: 0 })
+    consolidationResponse({ candidates: [], pending_count: 0 }),
   );
   vi.mocked(fetchCompactCandidates).mockResolvedValue(
-    compactResponse({ candidates: [], pending_count: 0 })
+    compactResponse({ candidates: [], pending_count: 0 }),
   );
 }
 
 function fullAll() {
   vi.mocked(fetchMemoryCandidates).mockResolvedValue(memoryResponse());
   vi.mocked(fetchConsolidationCandidates).mockResolvedValue(
-    consolidationResponse()
+    consolidationResponse(),
   );
   vi.mocked(fetchCompactCandidates).mockResolvedValue(compactResponse());
 }
@@ -155,7 +157,7 @@ function renderPage() {
   return render(
     <MemoryRouter>
       <ApprovalCenterPage />
-    </MemoryRouter>
+    </MemoryRouter>,
   );
 }
 
@@ -166,6 +168,79 @@ describe("ApprovalCenterPage", () => {
 
   // ---- AC-1：三源分组渲染 ----
 
+  it("沿用 Claude Design 的 hero、三类数量胶囊与卡片信息层级", async () => {
+    fullAll();
+    renderPage();
+
+    const page = await screen.findByRole("main", { name: "审批中心" });
+    expect(page).toHaveClass("f149-approval-page");
+    expect(
+      screen.getByRole("heading", { level: 1, name: "审批中心" }),
+    ).toBeInTheDocument();
+    const overview = screen.getByRole("list", { name: "候选概览" });
+    expect(overview).toHaveTextContent("新记忆2");
+    expect(overview).toHaveTextContent("记忆整合1");
+    expect(overview).toHaveTextContent("行为精简1");
+    expect(page.querySelectorAll(".f149-approval-source")).toHaveLength(3);
+  });
+
+  it("分来源 403/404/409 使用普通语言且 403 不提供重新登录动作", async () => {
+    vi.mocked(fetchMemoryCandidates).mockRejectedValue(
+      new ApiError("forbidden", { status: 403 }),
+    );
+    vi.mocked(fetchConsolidationCandidates).mockRejectedValue(
+      new ApiError("missing", { status: 404 }),
+    );
+    vi.mocked(fetchCompactCandidates).mockRejectedValue(
+      new ApiError("conflict", { status: 409 }),
+    );
+    renderPage();
+
+    expect(
+      await screen.findByRole("alert", { name: "新记忆暂不可用" }),
+    ).toHaveTextContent("资源权限不足，请联系管理员");
+    expect(
+      screen.getByRole("alert", { name: "记忆整合暂不可用" }),
+    ).toHaveTextContent("这部分内容暂时不存在");
+    expect(
+      screen.getByRole("alert", { name: "行为精简暂不可用" }),
+    ).toHaveTextContent("内容刚刚发生变化");
+    expect(
+      screen.queryByRole("button", { name: /登录/ }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/forbidden|missing|conflict/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("loading 与统一 empty state 都留在审批页视觉系统内", async () => {
+    vi.mocked(fetchMemoryCandidates).mockImplementation(
+      () => new Promise(() => {}),
+    );
+    vi.mocked(fetchConsolidationCandidates).mockImplementation(
+      () => new Promise(() => {}),
+    );
+    vi.mocked(fetchCompactCandidates).mockImplementation(
+      () => new Promise(() => {}),
+    );
+    const pending = renderPage();
+
+    expect(
+      screen
+        .getByRole("status", { name: "正在加载审批提议" })
+        .closest(".f149-approval-state"),
+    ).not.toBeNull();
+    pending.unmount();
+
+    emptyAll();
+    renderPage();
+    expect(
+      (await screen.findByRole("status", { name: "暂无待处理提议" })).closest(
+        ".f149-approval-state",
+      ),
+    ).not.toBeNull();
+  });
+
   it("三源都有数据时渲染三个分组与人话摘要", async () => {
     fullAll();
     renderPage();
@@ -174,9 +249,11 @@ describe("ApprovalCenterPage", () => {
     expect(screen.getByText("记忆合并建议（1）")).toBeInTheDocument();
     expect(screen.getByText("规则精简建议（1）")).toBeInTheDocument();
     // 人话摘要
-    expect(screen.getByText("建议把 2 条相似记忆合并为一条")).toBeInTheDocument();
     expect(
-      screen.getByText("建议精简「AGENTS.md」：约 342 字 → 约 242 字")
+      screen.getByText("建议把 2 条相似记忆合并为一条"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("建议精简「AGENTS.md」：约 342 字 → 约 242 字"),
     ).toBeInTheDocument();
     // 技术字段不上卡面（AC-1）
     expect(screen.queryByText(/consol-1/)).not.toBeInTheDocument();
@@ -187,22 +264,24 @@ describe("ApprovalCenterPage", () => {
     emptyAll();
     renderPage();
 
-    expect(await screen.findByText("暂无待处理的提议")).toBeInTheDocument();
+    expect(await screen.findByText("暂无待处理提议")).toBeInTheDocument();
     expect(screen.queryByText(/新记忆（/)).not.toBeInTheDocument();
   });
 
   it("一源加载失败只影响该分组，其余源可操作（按源降级）", async () => {
     vi.mocked(fetchMemoryCandidates).mockRejectedValue(new Error("网络不可用"));
     vi.mocked(fetchConsolidationCandidates).mockResolvedValue(
-      consolidationResponse()
+      consolidationResponse(),
     );
     vi.mocked(fetchCompactCandidates).mockResolvedValue(
-      compactResponse({ candidates: [], pending_count: 0 })
+      compactResponse({ candidates: [], pending_count: 0 }),
     );
     renderPage();
 
-    expect(await screen.findByText("这部分暂时加载失败")).toBeInTheDocument();
-    expect(screen.getByText("网络不可用")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("alert", { name: "新记忆暂不可用" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("加载没有成功，请稍后重试。")).toBeInTheDocument();
     // 其余源正常渲染
     expect(screen.getByText("记忆合并建议（1）")).toBeInTheDocument();
   });
@@ -242,10 +321,10 @@ describe("ApprovalCenterPage", () => {
   it("memory 批量忽略后该分组清空", async () => {
     vi.mocked(fetchMemoryCandidates).mockResolvedValue(memoryResponse());
     vi.mocked(fetchConsolidationCandidates).mockResolvedValue(
-      consolidationResponse({ candidates: [], pending_count: 0 })
+      consolidationResponse({ candidates: [], pending_count: 0 }),
     );
     vi.mocked(fetchCompactCandidates).mockResolvedValue(
-      compactResponse({ candidates: [], pending_count: 0 })
+      compactResponse({ candidates: [], pending_count: 0 }),
     );
     vi.mocked(bulkDiscardCandidates).mockResolvedValue({
       discarded_count: 2,
@@ -259,7 +338,7 @@ describe("ApprovalCenterPage", () => {
     await waitFor(() => {
       expect(screen.queryByText("用户喜欢异步沟通")).not.toBeInTheDocument();
       expect(screen.queryByText("用户是全栈工程师")).not.toBeInTheDocument();
-      expect(screen.getByText("暂无待处理的提议")).toBeInTheDocument();
+      expect(screen.getByText("暂无待处理提议")).toBeInTheDocument();
     });
   });
 
@@ -278,7 +357,7 @@ describe("ApprovalCenterPage", () => {
     await waitFor(() => {
       expect(acceptConsolidationCandidate).toHaveBeenCalledWith("consol-1");
       expect(
-        screen.queryByText("建议把 2 条相似记忆合并为一条")
+        screen.queryByText("建议把 2 条相似记忆合并为一条"),
       ).not.toBeInTheDocument();
       expect(screen.getByText("已合并为一条记忆。")).toBeInTheDocument();
     });
@@ -286,20 +365,20 @@ describe("ApprovalCenterPage", () => {
 
   it("conflict 终态：卡片移除 + 已失效 toast（不诱导重试）", async () => {
     vi.mocked(fetchMemoryCandidates).mockResolvedValue(
-      memoryResponse({ candidates: [], total: 0, pending_count: 0 })
+      memoryResponse({ candidates: [], total: 0, pending_count: 0 }),
     );
     vi.mocked(fetchConsolidationCandidates).mockResolvedValue(
-      consolidationResponse()
+      consolidationResponse(),
     );
     vi.mocked(fetchCompactCandidates).mockResolvedValue(
-      compactResponse({ candidates: [], pending_count: 0 })
+      compactResponse({ candidates: [], pending_count: 0 }),
     );
     vi.mocked(acceptConsolidationCandidate).mockRejectedValue(
       new ApprovalActionError({
         httpStatus: 409,
         resultStatus: "conflict",
         detail: "源已变更",
-      })
+      }),
     );
     renderPage();
 
@@ -308,30 +387,30 @@ describe("ApprovalCenterPage", () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByText("建议把 2 条相似记忆合并为一条")
+        screen.queryByText("建议把 2 条相似记忆合并为一条"),
       ).not.toBeInTheDocument();
       expect(
-        screen.getByText("这条提议在等待期间已失效，已自动关闭。")
+        screen.getByText("这条提议在等待期间已失效，已自动关闭。"),
       ).toBeInTheDocument();
     });
   });
 
   it("pending 回滚：卡片保留 + 可重试 toast", async () => {
     vi.mocked(fetchMemoryCandidates).mockResolvedValue(
-      memoryResponse({ candidates: [], total: 0, pending_count: 0 })
+      memoryResponse({ candidates: [], total: 0, pending_count: 0 }),
     );
     vi.mocked(fetchConsolidationCandidates).mockResolvedValue(
-      consolidationResponse()
+      consolidationResponse(),
     );
     vi.mocked(fetchCompactCandidates).mockResolvedValue(
-      compactResponse({ candidates: [], pending_count: 0 })
+      compactResponse({ candidates: [], pending_count: 0 }),
     );
     vi.mocked(acceptConsolidationCandidate).mockRejectedValue(
       new ApprovalActionError({
         httpStatus: 409,
         resultStatus: "pending",
         detail: "内部回滚",
-      })
+      }),
     );
     renderPage();
 
@@ -340,21 +419,23 @@ describe("ApprovalCenterPage", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("建议把 2 条相似记忆合并为一条")
+        screen.getByText("建议把 2 条相似记忆合并为一条"),
       ).toBeInTheDocument();
-      expect(screen.getByText("处理没有成功，请稍后重试。")).toBeInTheDocument();
+      expect(
+        screen.getByText("处理没有成功，请稍后重试。"),
+      ).toBeInTheDocument();
     });
   });
 
   it("consolidation 全部拒绝按 rejected 结果移除", async () => {
     vi.mocked(fetchMemoryCandidates).mockResolvedValue(
-      memoryResponse({ candidates: [], total: 0, pending_count: 0 })
+      memoryResponse({ candidates: [], total: 0, pending_count: 0 }),
     );
     vi.mocked(fetchConsolidationCandidates).mockResolvedValue(
-      consolidationResponse()
+      consolidationResponse(),
     );
     vi.mocked(fetchCompactCandidates).mockResolvedValue(
-      compactResponse({ candidates: [], pending_count: 0 })
+      compactResponse({ candidates: [], pending_count: 0 }),
     );
     vi.mocked(bulkRejectConsolidation).mockResolvedValue({
       rejected: ["consol-1"],
@@ -367,9 +448,9 @@ describe("ApprovalCenterPage", () => {
 
     await waitFor(() => {
       expect(
-        screen.queryByText("建议把 2 条相似记忆合并为一条")
+        screen.queryByText("建议把 2 条相似记忆合并为一条"),
       ).not.toBeInTheDocument();
-      expect(screen.getByText("暂无待处理的提议")).toBeInTheDocument();
+      expect(screen.getByText("暂无待处理提议")).toBeInTheDocument();
     });
   });
 
@@ -377,10 +458,10 @@ describe("ApprovalCenterPage", () => {
 
   it("compact accept 调对应 API 并移除卡片", async () => {
     vi.mocked(fetchMemoryCandidates).mockResolvedValue(
-      memoryResponse({ candidates: [], total: 0, pending_count: 0 })
+      memoryResponse({ candidates: [], total: 0, pending_count: 0 }),
     );
     vi.mocked(fetchConsolidationCandidates).mockResolvedValue(
-      consolidationResponse({ candidates: [], pending_count: 0 })
+      consolidationResponse({ candidates: [], pending_count: 0 }),
     );
     vi.mocked(fetchCompactCandidates).mockResolvedValue(compactResponse());
     vi.mocked(acceptCompactCandidate).mockResolvedValue(undefined);
@@ -392,7 +473,7 @@ describe("ApprovalCenterPage", () => {
     await waitFor(() => {
       expect(acceptCompactCandidate).toHaveBeenCalledWith("bcpt-1");
       expect(
-        screen.queryByText("建议精简「AGENTS.md」：约 342 字 → 约 242 字")
+        screen.queryByText("建议精简「AGENTS.md」：约 342 字 → 约 242 字"),
       ).not.toBeInTheDocument();
       expect(screen.getByText("已接受，规则文件已更新。")).toBeInTheDocument();
     });
@@ -400,18 +481,20 @@ describe("ApprovalCenterPage", () => {
 
   it("compact 折叠区渲染 diff 行（增删着色模型）与理由", async () => {
     vi.mocked(fetchMemoryCandidates).mockResolvedValue(
-      memoryResponse({ candidates: [], total: 0, pending_count: 0 })
+      memoryResponse({ candidates: [], total: 0, pending_count: 0 }),
     );
     vi.mocked(fetchConsolidationCandidates).mockResolvedValue(
-      consolidationResponse({ candidates: [], pending_count: 0 })
+      consolidationResponse({ candidates: [], pending_count: 0 }),
     );
     vi.mocked(fetchCompactCandidates).mockResolvedValue(compactResponse());
     renderPage();
 
     await screen.findByText("建议精简「AGENTS.md」：约 342 字 → 约 242 字");
-    await userEvent.click(screen.getByText("查看详情"));
+    await userEvent.click(screen.getByText("高级 · 原因与变更"));
 
-    expect(screen.getByText("理由：合并了三条重复的简洁性规则")).toBeInTheDocument();
+    expect(
+      screen.getByText("理由：合并了三条重复的简洁性规则"),
+    ).toBeInTheDocument();
     const removed = screen.getByText("旧规则甲");
     expect(removed.closest('[data-diff-kind="removed"]')).not.toBeNull();
     const added = screen.getByText("精简后的规则");
@@ -420,18 +503,18 @@ describe("ApprovalCenterPage", () => {
 
   it("consolidation 折叠区展示来源记忆预览", async () => {
     vi.mocked(fetchMemoryCandidates).mockResolvedValue(
-      memoryResponse({ candidates: [], total: 0, pending_count: 0 })
+      memoryResponse({ candidates: [], total: 0, pending_count: 0 }),
     );
     vi.mocked(fetchConsolidationCandidates).mockResolvedValue(
-      consolidationResponse()
+      consolidationResponse(),
     );
     vi.mocked(fetchCompactCandidates).mockResolvedValue(
-      compactResponse({ candidates: [], pending_count: 0 })
+      compactResponse({ candidates: [], pending_count: 0 }),
     );
     renderPage();
 
     await screen.findByText("建议把 2 条相似记忆合并为一条");
-    await userEvent.click(screen.getByText("查看详情"));
+    await userEvent.click(screen.getByText("高级 · 原因与来源"));
 
     expect(screen.getByText("将被合并的记忆：")).toBeInTheDocument();
     expect(screen.getByText("时区 上海")).toBeInTheDocument();

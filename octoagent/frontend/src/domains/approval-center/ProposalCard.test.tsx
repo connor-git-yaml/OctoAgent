@@ -17,7 +17,7 @@ function renderCard(overrides?: Partial<Parameters<typeof ProposalCard>[0]>) {
       onAccept={onAccept}
       onReject={onReject}
       {...overrides}
-    />
+    />,
   );
   return { onAccept, onReject };
 }
@@ -26,7 +26,9 @@ describe("ProposalCard", () => {
   it("渲染类型标签、摘要与操作按钮", () => {
     renderCard();
     expect(screen.getByText("记忆合并")).toBeInTheDocument();
-    expect(screen.getByText("建议把 2 条相似记忆合并为一条")).toBeInTheDocument();
+    expect(
+      screen.getByText("建议把 2 条相似记忆合并为一条"),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "接受" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "拒绝" })).toBeInTheDocument();
   });
@@ -64,9 +66,10 @@ describe("ProposalCard", () => {
     renderCard({
       sensitive: true,
       details: <p>理由：来源相同</p>,
+      detailsLabel: "高级 · 原因与来源",
     });
     expect(screen.getByText("敏感内容")).toBeInTheDocument();
-    await userEvent.click(screen.getByText("查看详情"));
+    await userEvent.click(screen.getByText("高级 · 原因与来源"));
     expect(screen.getByText("理由：来源相同")).toBeInTheDocument();
   });
 

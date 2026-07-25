@@ -1,0 +1,14 @@
+task_id: T030
+phase: GREEN
+behavior: Approvals v2 Claude Design hierarchy, state and accessibility
+command: cd octoagent/frontend && npx vitest run src/domains/approval-center/ApprovalCenterPage.test.tsx src/domains/approval-center/ProposalCard.test.tsx src/domains/approval-center/approvalModels.test.ts
+executed_at_utc: 2026-07-25T13:53:30Z
+head_sha: 8f942200d01e74e7e2938da85b658f4b0256a97d
+exit_code: 0
+oracle_expected: 三类候选、Claude Design层级、普通语言状态、origin403与accessible高级披露全部通过
+oracle_observed: 3 files、35 tests全部通过
+raw_output_file: /tmp/f149-t030-green.log
+raw_output_sha256: 8c1a3c314d44bba0ebaf0cf5c7de2f7b26e43f4af73674129f562c27adc707be
+secret_scan: pass
+network: false
+rerun: false

@@ -365,6 +365,16 @@
 
 ### T030 — Approvals v2
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T030/`。实现前逐页复核 Claude Design
+  `F149/Approvals/Desktop` 与 `F149/Approvals/390`，以原稿 hero、三类数量胶囊、
+  从容留白、卡片节奏和单列操作层级为视觉基线；没有按旧 Web 回退成平均分栏或
+  管理后台表格。三类候选与既有动作未扩域，loading/empty及分来源403/404/409
+  复用共享state/error owner，401不下沉，技术错误不进普通界面。旧`wb-*`视觉类
+  从本页新增/触达文件清零，新增样式只消费`--cp-*`；真实Chromium桌面与390 Web
+  窄窗口均无横向溢出、主操作≥44px。最终精确35/35、全前端523/523、生产build、
+  OpenAPI、F149 boundary/style/complexity与repository runtime architecture均通过。
+  390只作Web响应式检查，不代表手机产品；手机仍只走原生iOS。
 - **层/FR**：frontend L4 component/projection；FR-002/007/009。
 - **文件**：`domains/approval-center/{ApprovalCenterPage,ProposalCard,approvalModels}*` 与 co-located CSS。
 - **依赖**：T021/T024。
@@ -691,8 +701,8 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T025 中已执行的任务均有真实证据；下一项是 T030
-  Approvals v2。它是首个页面视觉实现，必须先逐页对照 Claude Design 最初版；
-  现有 Web 只能作为实现现状，不得成为视觉基线。F149 仍须逐 task 通过
+- 当前风险：T000–T015、T020–T025、T030 中已执行的任务均有真实证据；下一项是
+  T031 Tasks list 与“待处理事项”归位。每个后续页面仍必须先逐页对照 Claude
+  Design 最初版；现有 Web 只能作为实现现状，不得成为视觉基线。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

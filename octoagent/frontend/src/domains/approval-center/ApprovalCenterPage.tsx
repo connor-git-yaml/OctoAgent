@@ -10,6 +10,7 @@
  * 三源并行加载、按源降级（Constitution #6）：一源失败只影响该分组，其余可操作。
  */
 import { useCallback, useEffect, useRef, useState } from "react";
+import "./ApprovalCenterPage.css";
 import CandidateCard from "../../components/memory/CandidateCard";
 import BatchRejectButton, {
   type BulkDiscardOutcome,
@@ -38,6 +39,11 @@ import {
 } from "./approvalModels";
 import ProposalCard from "./ProposalCard";
 import { APPROVAL_CENTER_CHANGED_EVENT } from "../../hooks/useApprovalCenterCount";
+import {
+  resolveResourcePageState,
+  type ResourcePageResolution,
+} from "../shared/resourcePageState";
+import ResourceState from "../../ui/primitives/ResourceState";
 
 interface ToastState {
   message: string;
@@ -48,7 +54,7 @@ interface ToastState {
 interface SourceState<T> {
   items: T[];
   loading: boolean;
-  error: string | null;
+  error: Error | null;
 }
 
 function useApprovalSource<T>(load: () => Promise<T[]>) {
@@ -64,8 +70,8 @@ function useApprovalSource<T>(load: () => Promise<T[]>) {
       const items = await load();
       setState({ items, loading: false, error: null });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "加载失败，请重试";
-      setState({ items: [], loading: false, error: msg });
+      const error = err instanceof Error ? err : new Error("加载失败");
+      setState({ items: [], loading: false, error });
     }
   }, [load]);
 
@@ -90,40 +96,55 @@ function notifyApprovalChanged() {
 /** 分组骨架：标题 + 说明 + 头部动作位 */
 function SourceSection(props: {
   title: string;
+  stateTitle: string;
   subtitle: string;
   count: number;
-  error: string | null;
+  error: Error | null;
   onRetry: () => void;
   headerAction?: React.ReactNode;
   children?: React.ReactNode;
 }) {
-  const { title, subtitle, count, error, onRetry, headerAction, children } = props;
+  const {
+    title,
+    stateTitle,
+    subtitle,
+    count,
+    error,
+    onRetry,
+    headerAction,
+    children,
+  } = props;
+  const headingId = `approval-source-${stateTitle}`;
+  const resolution =
+    error === null
+      ? null
+      : resolveResourcePageState({
+          loading: false,
+          hasContent: false,
+          connected: true,
+          error,
+        });
   return (
-    <section className="wb-panel">
-      <div className="wb-panel-header">
+    <section className="f149-approval-source" aria-labelledby={headingId}>
+      <div className="f149-approval-source-header">
         <div>
-          <h2>
+          <h2 id={headingId}>
             {title}
             {count > 0 ? `（${count}）` : ""}
           </h2>
-          <p className="wb-panel-subtitle">{subtitle}</p>
+          <p>{subtitle}</p>
         </div>
         {headerAction && (
-          <div className="wb-panel-header-actions">{headerAction}</div>
+          <div className="f149-approval-source-action">{headerAction}</div>
         )}
       </div>
-      {error !== null ? (
-        <div className="wb-empty-state">
-          <strong>这部分暂时加载失败</strong>
-          <span>{error}</span>
-          <button
-            type="button"
-            className="wb-button wb-button-primary"
-            onClick={onRetry}
-          >
-            重新加载
-          </button>
-        </div>
+      {resolution !== null ? (
+        <ApprovalState
+          resolution={resolution}
+          title={`${stateTitle}暂不可用`}
+          detail={sourceErrorDetail(resolution)}
+          onRetry={onRetry}
+        />
       ) : (
         children
       )}
@@ -131,15 +152,53 @@ function SourceSection(props: {
   );
 }
 
+function sourceErrorDetail(resolution: ResourcePageResolution): string {
+  if (resolution.owner === "global-auth" || resolution.state === null) {
+    return "";
+  }
+  switch (resolution.state.kind) {
+    case "permission-denied":
+      return "资源权限不足，请联系管理员确认访问范围。";
+    case "not-found":
+      return "这部分内容暂时不存在，可能已经被处理。";
+    case "conflict":
+      return "内容刚刚发生变化，请刷新后再试。";
+    default:
+      return "加载没有成功，请稍后重试。";
+  }
+}
+
+function ApprovalState(props: {
+  resolution: ResourcePageResolution;
+  title: string;
+  detail: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <div className="f149-approval-state">
+      <ResourceState
+        resolution={props.resolution}
+        title={props.title}
+        detail={props.detail}
+        retryLabel="重新加载"
+        onRetry={props.onRetry}
+      />
+    </div>
+  );
+}
+
 export default function ApprovalCenterPage() {
   const memory = useApprovalSource<MemoryCandidate>(
-    useCallback(async () => (await fetchMemoryCandidates()).candidates, [])
+    useCallback(async () => (await fetchMemoryCandidates()).candidates, []),
   );
   const consolidation = useApprovalSource<ConsolidationCandidate>(
-    useCallback(async () => (await fetchConsolidationCandidates()).candidates, [])
+    useCallback(
+      async () => (await fetchConsolidationCandidates()).candidates,
+      [],
+    ),
   );
   const compact = useApprovalSource<CompactCandidate>(
-    useCallback(async () => (await fetchCompactCandidates()).candidates, [])
+    useCallback(async () => (await fetchCompactCandidates()).candidates, []),
   );
 
   const [toast, setToast] = useState<ToastState | null>(null);
@@ -171,7 +230,7 @@ export default function ApprovalCenterPage() {
       memory.removeItem((c) => c.id === id);
       notifyApprovalChanged();
     },
-    [memory.removeItem] // eslint-disable-line react-hooks/exhaustive-deps
+    [memory.removeItem], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   const handleMemoryBulk = useCallback(
@@ -180,7 +239,7 @@ export default function ApprovalCenterPage() {
       memory.removeItem((c) => discardedSet.has(c.id));
       notifyApprovalChanged();
     },
-    [memory.removeItem] // eslint-disable-line react-hooks/exhaustive-deps
+    [memory.removeItem], // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   // ---- F127 / F111 源（页面层统一处理成功/失败呈现，D4 分流） ----
@@ -218,7 +277,7 @@ export default function ApprovalCenterPage() {
       if (result.skipped.length > 0) {
         showToast(
           `已拒绝 ${result.rejected.length} 条，${result.skipped.length} 条跳过`,
-          false
+          false,
         );
       } else {
         showToast(`已拒绝全部 ${result.rejected.length} 条合并建议`, false);
@@ -239,22 +298,57 @@ export default function ApprovalCenterPage() {
     memory.items.length === 0 &&
     consolidation.items.length === 0 &&
     compact.items.length === 0;
+  const totalPending =
+    memory.items.length + consolidation.items.length + compact.items.length;
+  const loadingResolution = resolveResourcePageState({
+    loading: true,
+    hasContent: false,
+    connected: true,
+    error: null,
+  });
+  const emptyResolution = resolveResourcePageState({
+    loading: false,
+    hasContent: false,
+    connected: true,
+    error: null,
+  });
 
   return (
-    <div className="wb-page">
-      <section className="wb-panel">
-        <div className="wb-panel-header">
+    <main
+      className="f149-approval-page"
+      aria-labelledby="approval-center-title"
+    >
+      <section className="f149-approval-hero">
+        <div className="f149-approval-hero-copy">
+          <span className="f149-approval-eyebrow">
+            {totalPending > 0 ? `${totalPending} 条待处理提议` : "你的知识整理"}
+          </span>
           <div>
-            <h2>审批中心</h2>
-            <p className="wb-panel-subtitle">
-              Agent 后台整理出的提议都在这里：确认新记忆、审阅记忆合并与规则精简。
+            <h1 id="approval-center-title">审批中心</h1>
+            <p>
+              确认新记忆，审阅记忆整合与规则精简。每项操作都会先保留清晰的上下文。
             </p>
           </div>
         </div>
 
+        <ul className="f149-approval-overview" aria-label="候选概览">
+          <li className="is-primary">
+            <span>新记忆</span>
+            <strong>{memory.items.length}</strong>
+          </li>
+          <li>
+            <span>记忆整合</span>
+            <strong>{consolidation.items.length}</strong>
+          </li>
+          <li>
+            <span>行为精简</span>
+            <strong>{compact.items.length}</strong>
+          </li>
+        </ul>
+
         {toast !== null && (
           <div
-            className={`wb-inline-banner ${toast.isError ? "is-error" : "is-muted"}`}
+            className={`f149-approval-toast ${toast.isError ? "is-error" : "is-muted"}`}
             role="status"
             aria-live="polite"
           >
@@ -263,18 +357,19 @@ export default function ApprovalCenterPage() {
         )}
 
         {!allLoaded && (
-          <div className="wb-empty-state" aria-label="加载中">
-            <span>正在加载待处理提议…</span>
-          </div>
+          <ApprovalState
+            resolution={loadingResolution}
+            title="正在加载审批提议"
+            detail="正在整理三类候选，请稍候。"
+          />
         )}
 
         {allLoaded && !anyError && allEmpty && (
-          <div className="wb-empty-state">
-            <strong>暂无待处理的提议</strong>
-            <span>
-              Agent 会在后台持续整理记忆与规则，有新提议时这里会出现内容。
-            </span>
-          </div>
+          <ApprovalState
+            resolution={emptyResolution}
+            title="暂无待处理提议"
+            detail="Agent 会持续整理记忆与规则，有新提议时会出现在这里。"
+          />
         )}
       </section>
 
@@ -282,6 +377,7 @@ export default function ApprovalCenterPage() {
       {(memory.items.length > 0 || memory.error !== null) && (
         <SourceSection
           title="新记忆"
+          stateTitle="新记忆"
           subtitle="Agent 在对话中发现的信息片段，确认后将存入你的长期记忆。"
           count={memory.items.length}
           error={memory.error}
@@ -296,7 +392,7 @@ export default function ApprovalCenterPage() {
             )
           }
         >
-          <div className="wb-candidate-list">
+          <div className="f149-approval-list">
             {memory.items.map((candidate) => (
               <CandidateCard
                 key={candidate.id}
@@ -313,6 +409,7 @@ export default function ApprovalCenterPage() {
       {(consolidation.items.length > 0 || consolidation.error !== null) && (
         <SourceSection
           title="记忆合并建议"
+          stateTitle="记忆整合"
           subtitle="后台整理发现的相似记忆，接受后合并为一条更准确的记忆。"
           count={consolidation.items.length}
           error={consolidation.error}
@@ -321,7 +418,6 @@ export default function ApprovalCenterPage() {
             consolidation.items.length > 0 && (
               <button
                 type="button"
-                className="wb-button wb-button-secondary"
                 onClick={() => void handleConsolidationBulkReject()}
               >
                 全部拒绝（{consolidation.items.length} 条）
@@ -329,7 +425,7 @@ export default function ApprovalCenterPage() {
             )
           }
         >
-          <div className="wb-candidate-list">
+          <div className="f149-approval-list">
             {consolidation.items.map((candidate) => (
               <ProposalCard
                 key={candidate.candidate_id}
@@ -337,11 +433,7 @@ export default function ApprovalCenterPage() {
                 summary={consolidationSummary(candidate)}
                 createdAt={candidate.created_at}
                 sensitive={candidate.is_sensitive}
-                body={
-                  <p className="wb-candidate-card-content">
-                    {candidate.merged_content}
-                  </p>
-                }
+                body={<p>{candidate.merged_content}</p>}
                 details={
                   <div>
                     {candidate.rationale && <p>理由：{candidate.rationale}</p>}
@@ -357,13 +449,14 @@ export default function ApprovalCenterPage() {
                     )}
                   </div>
                 }
+                detailsLabel="高级 · 原因与来源"
                 onAccept={() =>
                   runProposalAction({
                     action: () =>
                       acceptConsolidationCandidate(candidate.candidate_id),
                     remove: () =>
                       consolidation.removeItem(
-                        (c) => c.candidate_id === candidate.candidate_id
+                        (c) => c.candidate_id === candidate.candidate_id,
                       ),
                     successMessage: "已合并为一条记忆。",
                   })
@@ -374,7 +467,7 @@ export default function ApprovalCenterPage() {
                       rejectConsolidationCandidate(candidate.candidate_id),
                     remove: () =>
                       consolidation.removeItem(
-                        (c) => c.candidate_id === candidate.candidate_id
+                        (c) => c.candidate_id === candidate.candidate_id,
                       ),
                     successMessage: "已拒绝这条合并建议。",
                   })
@@ -389,12 +482,13 @@ export default function ApprovalCenterPage() {
       {(compact.items.length > 0 || compact.error !== null) && (
         <SourceSection
           title="规则精简建议"
+          stateTitle="行为精简"
           subtitle="后台发现行为规则里有重复表述，接受后文件会更新为精简版。"
           count={compact.items.length}
           error={compact.error}
           onRetry={() => void compact.reload()}
         >
-          <div className="wb-candidate-list">
+          <div className="f149-approval-list">
             {compact.items.map((candidate) => {
               const diffRows = parseUnifiedDiff(candidate.diff);
               return (
@@ -407,7 +501,9 @@ export default function ApprovalCenterPage() {
                   acceptTestId="approval-compact-accept"
                   details={
                     <div>
-                      {candidate.rationale && <p>理由：{candidate.rationale}</p>}
+                      {candidate.rationale && (
+                        <p>理由：{candidate.rationale}</p>
+                      )}
                       {diffRows.length > 0 ? (
                         <DiffLineList rows={diffRows} />
                       ) : (
@@ -415,13 +511,14 @@ export default function ApprovalCenterPage() {
                       )}
                     </div>
                   }
+                  detailsLabel="高级 · 原因与变更"
                   onAccept={() =>
                     runProposalAction({
                       action: () =>
                         acceptCompactCandidate(candidate.candidate_id),
                       remove: () =>
                         compact.removeItem(
-                          (c) => c.candidate_id === candidate.candidate_id
+                          (c) => c.candidate_id === candidate.candidate_id,
                         ),
                       successMessage: "已接受，规则文件已更新。",
                     })
@@ -432,7 +529,7 @@ export default function ApprovalCenterPage() {
                         rejectCompactCandidate(candidate.candidate_id),
                       remove: () =>
                         compact.removeItem(
-                          (c) => c.candidate_id === candidate.candidate_id
+                          (c) => c.candidate_id === candidate.candidate_id,
                         ),
                       successMessage: "已拒绝这条精简建议。",
                     })
@@ -443,6 +540,6 @@ export default function ApprovalCenterPage() {
           </div>
         </SourceSection>
       )}
-    </div>
+    </main>
   );
 }

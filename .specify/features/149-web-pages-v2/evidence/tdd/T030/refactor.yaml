@@ -1,0 +1,42 @@
+task_id: T030
+phase: REFACTOR
+behavior: Approvals v2 Claude Design hierarchy, state and accessibility
+command: cd octoagent/frontend && npx vitest run src/domains/approval-center/ApprovalCenterPage.test.tsx src/domains/approval-center/ProposalCard.test.tsx src/domains/approval-center/approvalModels.test.ts
+executed_at_utc: 2026-07-25T14:00:57Z
+head_sha: 8f942200d01e74e7e2938da85b658f4b0256a97d
+exit_code: 0
+oracle_expected: exact35项保持、旧Web视觉类不回流、桌面/390层级稳定且不引入第二主题或功能
+oracle_observed: exact35/35、全前端523/523、生产build、OpenAPI、F149 boundary/style/complexity与repository runtime architecture全部通过
+raw_output_file: /tmp/f149-t030-refactor.log
+raw_output_sha256: 899d92ca44be266fcaa34fa4993b00b99b86c2095c35210a77f6442ec767a8dc
+frontend_full_output_file: /tmp/f149-t030-frontend-full.log
+frontend_full_output_sha256: 41ce94411153f7bf50dc531bb285c78ab65e301ef7de70d90819d3d469d23cbb
+openapi_output_file: /tmp/f149-t030-openapi.log
+openapi_output_sha256: 62d3d20d0aa8797ace8a5195294e34ce8935d4cb84e0670cd8ed41153ccf8f6e
+boundary_output_file: /tmp/f149-t030-boundary.log
+boundary_output_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_output_file: /tmp/f149-t030-style.log
+style_output_sha256: 1a196041013b79dae1ccafea9785183427a6a2ef8c677b98cf1fdd624fe58c4a
+complexity_output_file: /tmp/f149-t030-complexity.log
+complexity_output_sha256: 23f33c6c10cec6c0495348ca48ac349d8cfed4079a6469956b1993c83f3e46f9
+build_output_file: /tmp/f149-t030-build.log
+build_output_sha256: 7e32de60bb8783b70c7e8500c5b5007b7c0c2ca05138672f957a6b3b062ca4d0
+runtime_architecture_output_file: /tmp/f149-t030-runtime-architecture.log
+runtime_architecture_output_sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+quality_review:
+  - 实现前逐页复核Claude Design Approvals Desktop/390，保留hero、数量胶囊、留白、卡片节奏与单列操作层级
+  - 真实Chromium桌面与390 Web窄窗口验收无横向溢出，主操作至少44px；390不作为手机产品入口
+  - 三类候选与既有动作未扩域，不并入通用tool approval；loading/empty与403/404/409复用共享state/error owner
+  - 401不下沉，origin403只提示资源权限与联系管理员，不提供重新登录
+  - 新增样式只消费--cp-*，本页新增/触达文件的旧wb视觉类为0，无第二主题或为旧Web回退
+file_sha256:
+  page: a44db1b356f2b52d5ca2d2fd8e2ad9ae86ec996a218f172e4dfbd41757736979
+  page-test: 611d6f8be3298516e711d0e7b2994ad82495ce72c077bb726a907d016d7bf2ca
+  card: 61d097c89ab7d8e2460cb81fe550234ec9c5fa888097fb07341ca27012bee81f
+  card-test: 2ff6e0ecaf68d646b82ccf9c668d368559071e5288538656c0090f0fa75a6487
+  model: 7bea1dcf69c709bc9850dc964fcddc3dcd182966bd92888a7d01d27d3f27515d
+  model-test: 18181f3d001dc0bc76cf0fa5c1e0d7e51bd7f8b17eb115f7e489e78ecfe0f99c
+  css: ab7a44bb258b2ceb83523f55294e2bc27100d471a8c94f80ca2ed9a2371107ae
+secret_scan: pass
+network: false
+rerun: false

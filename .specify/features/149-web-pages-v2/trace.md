@@ -185,5 +185,14 @@
   最终精确15/15、全前端520/520、生产build、OpenAPI、F149 boundary/style/
   complexity与repository runtime architecture均通过。没有第二action pipeline、
   service、页面、CSS、视觉class或Claude Design排版改动。
+- T030先逐页复核Claude Design的Approvals Desktop/390原稿，再以hero、三类数量
+  胶囊、从容留白、卡片节奏与单列主次操作形成6条稳定RED，既有29条行为控制保持。
+  GREEN后loading/empty及分来源403/404/409复用共享state/error owner，401不下沉，
+  技术错误不进普通界面；三类候选与既有动作未扩域。REFACTOR响应跨Feature Gate，
+  从本页新增/触达文件清零旧`wb-*`视觉类，样式只消费`--cp-*`，不是给旧Web套皮。
+  真实Chromium桌面与390 Web窄窗口视觉验收通过：无横向溢出、主操作≥44px；
+  390仅为Web响应式健壮性，不代表手机产品，手机仍只走原生iOS。最终精确35/35、
+  全前端523/523、生产build、OpenAPI、F149 boundary/style/complexity与repository
+  runtime architecture均通过。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

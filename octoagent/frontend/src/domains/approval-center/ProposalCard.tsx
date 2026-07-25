@@ -6,19 +6,8 @@
  * accept/reject 的失败呈现（conflict 终态/可重试分流）由页面层处理——本卡只管
  * busy 态与触发回调。
  */
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { formatRelativeTime } from "./approvalModels";
-
-/** 折叠详情区（tokens inline，不进 index.css——余量仅 3 行，DiffBody 先例） */
-const DETAILS_STYLE: CSSProperties = {
-  margin: "var(--space-sm) 0",
-};
-
-const DETAILS_SUMMARY_STYLE: CSSProperties = {
-  cursor: "pointer",
-  color: "var(--cp-muted)",
-  userSelect: "none",
-};
 
 export interface ProposalCardProps {
   /** 类型标签（人话）：如「记忆合并」「规则精简」 */
@@ -31,6 +20,8 @@ export interface ProposalCardProps {
   body?: ReactNode;
   /** 折叠区决策材料（理由 / diff / 来源预览） */
   details?: ReactNode;
+  /** 折叠区的人话 accessible label */
+  detailsLabel?: string;
   /** 敏感提议标记（F127 is_sensitive） */
   sensitive?: boolean;
   /** 接受（页面层负责 API + toast + 移除） */
@@ -48,6 +39,7 @@ export default function ProposalCard({
   createdAt,
   body,
   details,
+  detailsLabel = "高级 · 原因与详情",
   sensitive,
   onAccept,
   onReject,
@@ -69,31 +61,31 @@ export default function ProposalCard({
   }
 
   return (
-    <article className="wb-candidate-card" data-testid={rootTestId}>
-      <div className="wb-candidate-card-meta">
-        <span className="wb-candidate-card-category">{typeLabel}</span>
+    <article className="f149-approval-card" data-testid={rootTestId}>
+      <div className="f149-approval-card-meta">
+        <span className="f149-approval-card-category">{typeLabel}</span>
         {sensitive && (
-          <span className="wb-candidate-card-category">敏感内容</span>
+          <span className="f149-approval-card-category">敏感内容</span>
         )}
-        <span className="wb-candidate-card-time">
+        <span className="f149-approval-card-time">
           {formatRelativeTime(createdAt)}
         </span>
       </div>
 
-      <p className="wb-candidate-card-content">{summary}</p>
+      <p className="f149-approval-card-content">{summary}</p>
       {body}
 
       {details && (
-        <details style={DETAILS_STYLE}>
-          <summary style={DETAILS_SUMMARY_STYLE}>查看详情</summary>
-          {details}
+        <details className="f149-approval-details">
+          <summary>{detailsLabel}</summary>
+          <div className="f149-approval-details-body">{details}</div>
         </details>
       )}
 
-      <div className="wb-candidate-card-actions">
+      <div className="f149-approval-card-actions">
         <button
           type="button"
-          className="wb-button wb-button-primary"
+          className="f149-approval-button is-primary"
           onClick={() => void run(onAccept)}
           disabled={busy}
           data-testid={acceptTestId}
@@ -102,7 +94,7 @@ export default function ProposalCard({
         </button>
         <button
           type="button"
-          className="wb-button wb-button-tertiary"
+          className="f149-approval-button is-tertiary"
           onClick={() => void run(onReject)}
           disabled={busy}
         >
