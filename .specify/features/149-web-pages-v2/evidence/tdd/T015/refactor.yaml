@@ -1,0 +1,37 @@
+task_id: T015
+phase: REFACTOR
+behavior: F149 REST/action/SSE types-only generated artifact drift
+command: cd octoagent/frontend && npm run openapi:check && npx tsc -b
+executed_at_utc: 2026-07-25T12:20:47Z
+head_sha: 038671a78ee2d229e92c0d259b4bc01a989767b0
+exit_code: 0
+oracle_expected: 重导出无drift且全量TypeScript编译通过
+oracle_observed: generated contract check PASS；tsc -b exit0；checker/package回归5 passed
+raw_output_file: /tmp/f149-t015-refactor.log
+raw_output_sha256: bfc46fc4730ffed01b02731673cc01ae9ec0b645771ca384bb1bbce23d8b98be
+regression_output_file: /tmp/f149-t015-regression.log
+regression_output_sha256: f26a21d1aa05fb5796ce990869aa3bae87ed33a215a931fa3bbbbc1c597d9aea
+final_gate_outputs:
+  openapi_check:
+    path: /tmp/f149-t015-final-openapi.log
+    sha256: efa90f922312f2fab2ae8b4cc6a97f1de2b94401f633ff872ce9cbfe652fae43
+  typescript:
+    path: /tmp/f149-t015-final-tsc.log
+    sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+  checker_regression:
+    path: /tmp/f149-t015-final-regression.log
+    sha256: 7643a088a45c899a58a6937baf1556f00d156b4535a9b0007f4cc6b0c7d01a48
+quality_review:
+  - exporter只读取worktree内Gateway REST/action/SSE authority，路径越界fail closed
+  - REST components按实际引用做transitive closure；action与SSE复用Pydantic schema
+  - 两次独立/tmp导出逐字节一致；checked-in声明无any或generated fetch client
+  - 可重建OpenAPI JSON及check树已gitignore，不建立第二schema source
+  - runtime architecture gate仅授权三个exact generated路径，仍拒绝可执行export与新增F150敏感模式
+file_sha256:
+  check-runtime-architecture.py: 3c69695c5531c0074ce34e65d4862864b97a11ab41266cd8d1ca890fe5b17bb3
+  export-f149-contracts.py: 33cd0d6dcdfa59f6d95592d6b36b07be3375bf463a898b26237ecdc5e9c5dae3
+  actions.d.ts: 3daa017bec27c76414f7d3d689eae7eda8f82604cdf73d3dcdc82577c012f82f
+  rest.d.ts: 2f758ddd9414eeae8beb8907b354eac7e9a0f4cbb60b7917b7a0a9b8e4bb1f1d
+  task-sse.d.ts: b4f5a69d7a477a5aa281551606ad28ef250fff460e4ec9b8376e61e33497574c
+network: false
+rerun: false

@@ -1,0 +1,18 @@
+task_id: T015
+phase: GREEN
+behavior: F149 REST/action/SSE types-only generated artifact drift
+command: cd octoagent/frontend && npm run openapi:generate && npm run openapi:check
+executed_at_utc: 2026-07-25T12:19:38Z
+head_sha: 038671a78ee2d229e92c0d259b4bc01a989767b0
+exit_code: 0
+oracle_expected: 三份types-only artifact生成且deterministic checker PASS
+oracle_observed: openapi-typescript三份生成成功；F149 generated contract check PASS
+raw_output_files:
+  generate:
+    path: /tmp/f149-t015-generate.log
+    sha256: c1f230a88017102b73afcea31af3baf935b810bc62f371329ef929c7fa5787fb
+  check:
+    path: /tmp/f149-t015-green.log
+    sha256: 1ba00372a7e842fac80eed9768b4384232c06434e7be163211555612362009a3
+network: false
+rerun: false

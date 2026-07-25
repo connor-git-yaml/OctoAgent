@@ -210,8 +210,16 @@
 
 ### T015 — schema artifacts 与 types-only generation
 
+- **状态**：`[x]`；真实 generated-drift RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T015/`。唯一 exporter 从 Gateway REST/action/SSE 三个现有
+  authority 导出最小依赖闭包，`openapi-typescript` 只生成 `.d.ts`，两次独立
+  导出字节一致；runtime architecture gate 仅授权三个 exact generated path，
+  并继续拒绝可执行 export 与新增 F150 敏感模式；没有 fetch client、第二
+  schema source 或宿主安装 fallback。
 - **层/FR**：contract/codegen；FR-010。
-- **文件**：`repo-scripts/export-f149-contracts.py`；`frontend/src/generated/f149/*`；package aliases。
+- **文件**：`repo-scripts/export-f149-contracts.py`；
+  `repo-scripts/check-runtime-architecture.py` 的 exact types-only path authority；
+  `frontend/src/generated/f149/*`；package aliases。
 - **依赖**：T003/T005/T010–T014。
 - **RED_SETUP**：后端 schema 已真实改变、alias/dependency 已由 T005 建立，但 checked-in generated artifact 尚未刷新。
 - **RED_COMMAND**：`cd octoagent/frontend && npm run openapi:check`
@@ -632,6 +640,6 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T014 中已执行的任务均有真实证据；下一项是 T015 schema
-  artifacts/types-only generation。F149 仍须逐 task 通过 RED→GREEN→REFACTOR，Tasks Gate 与
+- 当前风险：T000–T015 中已执行的任务均有真实证据；下一项是 T016 frontend
+  raw decoder/projection foundation。F149 仍须逐 task 通过 RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

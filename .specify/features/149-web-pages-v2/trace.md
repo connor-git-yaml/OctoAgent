@@ -122,5 +122,14 @@
   control events与终态SSE历史回放，HTTP/SSE/log均无sentinel。GREEN为1/1，
   REFACTOR连同T010–T013 L4合同14/14；没有新增production composition seam、
   第二transport、固定sleep、网络或真LLM。
+- T015先发现planned exporter缺失导致exit 2，明确判为无效预检；补齐只读三权威
+  source的deterministic exporter后，`openapi:check`完成三次types-only生成并只以
+  三个`F149_GENERATED_DRIFT`报告checked-in `.d.ts`缺失，形成有效RED。GREEN生成
+  REST/action/Task SSE三份声明并通过字节比对；REFACTOR再次`openapi:check`后
+  `tsc -b`通过，checker/package回归5/5。两次独立/tmp导出逐字节一致，生成物无
+  `any`或fetch client；可重建JSON/比对树已gitignore，只提交唯一exporter与`.d.ts`。
+  首次commit Gate又如实发现生成的REST类型复制了F150已批准的session/remote
+  schema语义；最终只为三个exact `.d.ts` path增加types-only authority，仍拒绝
+  可执行export与新增敏感模式，不删除真实F149页面合同，也不放宽其他frontend文件。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

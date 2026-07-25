@@ -1,0 +1,15 @@
+task_id: T015
+phase: RED
+behavior: F149 REST/action/SSE types-only generated artifact drift
+command: cd octoagent/frontend && npm run openapi:check
+executed_at_utc: 2026-07-25T12:19:14Z
+head_sha: 038671a78ee2d229e92c0d259b4bc01a989767b0
+exporter_sha256: 33cd0d6dcdfa59f6d95592d6b36b07be3375bf463a898b26237ecdc5e9c5dae3
+exit_code: 1
+oracle_expected: F149_GENERATED_DRIFT
+oracle_observed: actions.d.ts、rest.d.ts、task-sse.d.ts三个checked-in文件集合缺失；三次generator均成功
+raw_output_file: /tmp/f149-t015-red-valid.log
+raw_output_sha256: 6a354efc1b4507b2450e42d0fb4fcdfcd356c3a07d683b6b0b4e05b0db144d61
+discarded_attempt: 首次命令因planned exporter缺失exit 2，未到generated checker，不计RED证据
+network: false
+rerun: false

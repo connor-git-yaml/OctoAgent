@@ -78,6 +78,10 @@ docker-compose.override.yml
 # ===== Node（如有前端）=====
 node_modules/
 .next/
+# F149 contract exporter 的可重建中间文档/比对树；只提交 src/generated/f149。
+octoagent/frontend/.openapi/
+octoagent/frontend/.openapi-check/
+octoagent/frontend/.openapi-generated/
 
 # ScheduleWakeup runtime artifact（不应进版本控制）
 .claude/scheduled_tasks.lock
