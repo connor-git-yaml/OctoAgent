@@ -39,13 +39,14 @@ def _write_uvicorn_probe(root: Path) -> tuple[Path, Path]:
 import json
 import os
 
-def run(app, *, host, port):
+def run(app, *, host, port, proxy_headers):
     with open(os.environ["F151_UVICORN_FACTS"], "w", encoding="utf-8") as handle:
         json.dump({
             "app_module": type(app).__module__,
             "app_title": app.title,
             "host": host,
             "port": port,
+            "proxy_headers": proxy_headers,
         }, handle, sort_keys=True)
 """,
         encoding="utf-8",
@@ -93,8 +94,10 @@ def _workload_counts():
             connection.close()
     return counts
 
-def run(app, *, host, port):
+def run(app, *, host, port, proxy_headers):
     del host, port
+    if proxy_headers is not False:
+        raise RuntimeError("F151_PROXY_HEADERS_MUST_BE_DISABLED")
     facts = {
         "task_runner_attempts": 0,
         "lifespan_entered": False,
@@ -305,6 +308,7 @@ def test_module_entry_imports_main_app_once_create_app_preflights_once_and_uvico
         "app_title": "OctoAgent Gateway",
         "host": "127.0.0.1",
         "port": 8123,
+        "proxy_headers": False,
     }
     if outcome.facts != expected:
         issues.append(f"uvicorn facts={outcome.facts!r}, expected {expected!r}")

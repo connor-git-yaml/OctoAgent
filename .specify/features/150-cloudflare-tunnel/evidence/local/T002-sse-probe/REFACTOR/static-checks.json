@@ -1,0 +1,65 @@
+[
+  {
+    "argv": [
+      "uv",
+      "run",
+      "--project",
+      "octoagent",
+      "--no-sync",
+      "ruff",
+      "check",
+      "repo-scripts/probe-cloudflare-web-sse.py",
+      "octoagent/tests/gate/test_cloudflare_web_sse_probe.py"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "All checks passed!\n"
+  },
+  {
+    "argv": [
+      "uv",
+      "run",
+      "--project",
+      "octoagent",
+      "--no-sync",
+      "ruff",
+      "format",
+      "--check",
+      "repo-scripts/probe-cloudflare-web-sse.py",
+      "octoagent/tests/gate/test_cloudflare_web_sse_probe.py"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "2 files already formatted\n"
+  },
+  {
+    "argv": [
+      "uv",
+      "run",
+      "--project",
+      "octoagent",
+      "--no-sync",
+      "ruff",
+      "check",
+      "--select",
+      "C901",
+      "--config",
+      "lint.mccabe.max-complexity=10",
+      "repo-scripts/probe-cloudflare-web-sse.py",
+      "octoagent/tests/gate/test_cloudflare_web_sse_probe.py"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "All checks passed!\n"
+  },
+  {
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": ""
+  }
+]

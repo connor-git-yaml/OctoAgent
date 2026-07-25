@@ -1,0 +1,124 @@
+{
+  "base_ref": "origin/master",
+  "captured_utc": "2026-07-24T11:58:35Z",
+  "feature_id": "F150",
+  "head_sha": "687f20fc6246e7157957ab51ac474d46e91578b6",
+  "head_tree_sha": "a46eec8157eb7507dc19d9cfffacd107546ac02b",
+  "merge_base_sha": "687f20fc6246e7157957ab51ac474d46e91578b6",
+  "phase": "RED",
+  "status": [
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/design-forks.md",
+      "sha256": "e9056ae8534d147611fa84b5579594651317b839cc797a4b5e256229f3c7bb61",
+      "status": " M"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/plan.md",
+      "sha256": "46706faaa052eed43baae6f2452b33aa86d73f73bde4e132ca7b08a6c651343a",
+      "status": " M"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/research.md",
+      "sha256": "d680e383407667651d17e16c717ca8ea3cebc0fcabf8a1f5b73cced1f79c2320",
+      "status": " M"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/spec.md",
+      "sha256": "30e6582162c4a5306a556301ab9f10530b17ef68670847c7b2f0de83a4aa5f62",
+      "status": " M"
+    },
+    {
+      "path": ".specify/features/151-runtime-boundary-architecture-truth/inventories/architecture-quality.md",
+      "sha256": "19b064d74cb872433afd78725f4e16cd024a6353a30243b4d23c5dc1900a7a4d",
+      "status": " M"
+    },
+    {
+      "path": ".specify/features/151-runtime-boundary-architecture-truth/inventories/f150-scope.md",
+      "sha256": "c418d1d92e92f128ae9b1b860fd1316258f7d12de55a06d9fb570927bc0a5da9",
+      "status": " M"
+    },
+    {
+      "path": "docs/blueprint.md",
+      "sha256": "6c655ec7524f72feedc715aee8c349a82fdd0d578077531798e6b6b8ccb2ed0b",
+      "status": " M"
+    },
+    {
+      "path": "docs/blueprint/deployment-and-ops.md",
+      "sha256": "d5fa9059f741ae4c1424051dd9c30a7b5d9352983e4170df86773e3b43ca30ba",
+      "status": " M"
+    },
+    {
+      "path": "docs/blueprint/milestones.md",
+      "sha256": "608173c5855581fe36b8e7304b41e60f810d2b0e19b87b3ad7e929045de39372",
+      "status": " M"
+    },
+    {
+      "path": "docs/codebase-architecture/remote-access.md",
+      "sha256": "efbe33186a8b9e60800efb363df20e8af0879baded0044dbd007f7c0d88dcae6",
+      "status": " M"
+    },
+    {
+      "path": "octoagent/tests/gate/test_runtime_architecture.py",
+      "sha256": "e2401ba4d3414fdc3e38503864ad95f8611074863a3d0523c199fb9c455807e9",
+      "status": " M"
+    },
+    {
+      "path": "repo-scripts/check-runtime-architecture.py",
+      "sha256": "88b1d02d2210bd9f6fb90095a0d09dcfcb4210057330f9d91ac8d131a1812b34",
+      "status": " M"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/checklists/",
+      "sha256": null,
+      "status": "??"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/clarifications.md",
+      "sha256": "cd760da68cfaf7b2c5e846dcfb522c151093eadb21b1c601f16abc197f648e31",
+      "status": "??"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/contracts/",
+      "sha256": null,
+      "status": "??"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/data-model.md",
+      "sha256": "f24e6cbac5aa1233cc4085e68046505f43e891fb4e25a428119795d7598f509d",
+      "status": "??"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/design-gate-review.md",
+      "sha256": "a819507a6adfd987dff58aff684fdfc2e13d1b287327f096bc59c81154c75410",
+      "status": "??"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/evidence/",
+      "sha256": null,
+      "status": "??"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/plan-tasks-gate-review.md",
+      "sha256": "164936f9921df207c084fa81ac5cfee7614e6c0d7fc838d54f4236d273e9cac5",
+      "status": "??"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/tasks.md",
+      "sha256": "0f8cc695e8e55aae722016962b02c58ccd501ab9cab993c93b576671563ace5d",
+      "status": "??"
+    },
+    {
+      "path": ".specify/features/150-cloudflare-tunnel/trace.md",
+      "sha256": "4898dbc047105866ccaef48e263ee93fadfb3edc2a38316ba9267323b41dc0d4",
+      "status": "??"
+    },
+    {
+      "path": "octoagent/tests/gate/test_cloudflare_web_sse_probe.py",
+      "sha256": "cd8d22922d516f3be9d1649829efea2723965deb416a725048a31ba6565feb42",
+      "status": "??"
+    }
+  ],
+  "task_id": "T002",
+  "version": 1,
+  "worktree_fingerprint": "8cf9592a2f1285aeb61690fb533887253ebe5da4a171ef0dbb001cd650e5186d"
+}

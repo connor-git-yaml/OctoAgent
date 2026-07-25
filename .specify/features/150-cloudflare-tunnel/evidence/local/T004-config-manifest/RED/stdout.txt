@@ -1,0 +1,108 @@
+.....FFF.....................FFFFFFFFFFFFF                               [100%]
+=================================== FAILURES ===================================
+______ test_front_door_cloudflared_requires_manifest_and_normalizes_owner ______
+1 validation error for FrontDoorConfig
+mode
+  Input should be 'loopback', 'bearer' or 'trusted_proxy' [type=literal_error, input_value='cloudflared', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
+
+During handling of the above exception, another exception occurred:
+F150_WEB_MANIFEST_CONTRACT_MISSING: valid cloudflared config rejected: 1 validation error for FrontDoorConfig
+mode
+  Input should be 'loopback', 'bearer' or 'trusted_proxy' [type=literal_error, input_value='cloudflared', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
+___________ test_front_door_cloudflared_rejects_invalid_owner_email ____________
+1 validation error for FrontDoorConfig
+mode
+  Input should be 'loopback', 'bearer' or 'trusted_proxy' [type=literal_error, input_value='cloudflared', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
+
+During handling of the above exception, another exception occurred:
+F150_WEB_MANIFEST_CONTRACT_MISSING: valid cloudflared config rejected: 1 validation error for FrontDoorConfig
+mode
+  Input should be 'loopback', 'bearer' or 'trusted_proxy' [type=literal_error, input_value='cloudflared', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
+__ test_front_door_schema_exposes_cloudflared_without_changing_local_defaults __
+1 validation error for FrontDoorConfig
+mode
+  Input should be 'loopback', 'bearer' or 'trusted_proxy' [type=literal_error, input_value='cloudflared', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
+
+During handling of the above exception, another exception occurred:
+F150_WEB_MANIFEST_CONTRACT_MISSING: valid cloudflared config rejected: 1 validation error for FrontDoorConfig
+mode
+  Input should be 'loopback', 'bearer' or 'trusted_proxy' [type=literal_error, input_value='cloudflared', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
+_ TestManifestContract.test_accepts_exact_schema_as_one_immutable_typed_object _
+No module named 'octoagent.gateway.services.cloudflare_web_access'
+
+During handling of the above exception, another exception occurred:
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+_ TestManifestContract.test_rejects_unknown_missing_type_and_format[unknown-<lambda>] _
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+_ TestManifestContract.test_rejects_unknown_missing_type_and_format[missing-<lambda>] _
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+_ TestManifestContract.test_rejects_unknown_missing_type_and_format[type-<lambda>] _
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+_ TestManifestContract.test_rejects_unknown_missing_type_and_format[hostname-<lambda>] _
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+_ TestManifestContract.test_rejects_unknown_missing_type_and_format[team-domain-<lambda>] _
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+_ TestManifestContract.test_rejects_unknown_missing_type_and_format[audience-<lambda>] _
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+_ TestManifestContract.test_rejects_unknown_missing_type_and_format[tunnel-id-<lambda>] _
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+_ TestManifestContract.test_rejects_unknown_missing_type_and_format[origin-<lambda>] _
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+_____ TestManifestContract.test_rejects_escape_absolute_and_symlink_paths ______
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+________ TestManifestContract.test_rejects_secret_key_and_secret_value _________
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+________ TestManifestContract.test_has_no_home_or_environment_fallback _________
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+_______ TestManifestContract.test_rejects_non_object_and_malformed_json ________
+F150_WEB_MANIFEST_CONTRACT_MISSING: typed manifest loader is absent
+=========================== short test summary info ============================
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_parse_full_config
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_model_alias_normalizes_routed_provider_model_string
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_default_values
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_front_door_config_accepts_comma_separated_cidrs
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_front_door_config_rejects_invalid_cidr
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_alias_references_nonexistent_provider
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_duplicate_provider_ids
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_memory_alias_references_nonexistent_model_alias
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_memory_alias_references_existing_model_alias
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_api_key_env_with_equals_sign_rejected
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_api_key_env_lowercase_rejected
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_api_key_env_valid_format
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_to_yaml_roundtrip
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_build_config_schema_document_uses_canonical_provider_target_key
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_build_config_schema_document_exposes_provider_base_url_and_memory_step
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_from_yaml_invalid_syntax
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_from_yaml_schema_validation_error
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_from_yaml_empty_raises
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_from_yaml_rejects_exact_retired_runtime_keys_before_model_validation
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_from_yaml_removes_empty_runtime_and_preserves_v1_v2_provider_inputs
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_validate_alias_disabled_provider
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_telegram_webhook_requires_url_when_enabled
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_telegram_numeric_ids_are_normalized_to_strings
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_get_provider_found
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_get_provider_not_found
+PASSED apps/gateway/tests/services/config/test_config_schema.py::test_multiple_providers_valid
+FAILED apps/gateway/tests/services/config/test_config_schema.py::test_front_door_cloudflared_requires_manifest_and_normalizes_owner
+FAILED apps/gateway/tests/services/config/test_config_schema.py::test_front_door_cloudflared_rejects_invalid_owner_email
+FAILED apps/gateway/tests/services/config/test_config_schema.py::test_front_door_schema_exposes_cloudflared_without_changing_local_defaults
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_accepts_exact_schema_as_one_immutable_typed_object
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_unknown_missing_type_and_format[unknown-<lambda>]
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_unknown_missing_type_and_format[missing-<lambda>]
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_unknown_missing_type_and_format[type-<lambda>]
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_unknown_missing_type_and_format[hostname-<lambda>]
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_unknown_missing_type_and_format[team-domain-<lambda>]
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_unknown_missing_type_and_format[audience-<lambda>]
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_unknown_missing_type_and_format[tunnel-id-<lambda>]
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_unknown_missing_type_and_format[origin-<lambda>]
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_escape_absolute_and_symlink_paths
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_secret_key_and_secret_value
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_has_no_home_or_environment_fallback
+FAILED apps/gateway/tests/test_cloudflare_web_access.py::TestManifestContract::test_rejects_non_object_and_malformed_json
+16 failed, 26 passed, 90 warnings in 0.09s

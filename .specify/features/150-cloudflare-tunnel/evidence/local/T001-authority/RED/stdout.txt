@@ -1,0 +1,7 @@
+F                                                                        [100%]
+=================================== FAILURES ===================================
+_ TestManifestIntegrity.test_f150_scope_allows_exact_web_access_contract_and_rejects_sibling_or_ios_drift _
+F150_AUTHORITY_SCOPE_MISSING
+=========================== short test summary info ============================
+FAILED tests/gate/test_runtime_architecture.py::TestManifestIntegrity::test_f150_scope_allows_exact_web_access_contract_and_rejects_sibling_or_ios_drift
+1 failed in 0.06s

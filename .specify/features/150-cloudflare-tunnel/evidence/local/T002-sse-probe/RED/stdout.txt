@@ -1,0 +1,19 @@
+FFFFF                                                                    [100%]
+=================================== FAILURES ===================================
+______ test_collects_first_three_events_and_reconnects_with_last_event_id ______
+F150_SSE_LIVE_PROBE_MISSING
+___________ test_five_runs_write_redacted_deterministic_attestation ____________
+F150_SSE_LIVE_PROBE_MISSING
+__________ test_rejects_timeout_without_retry_or_partial_attestation ___________
+F150_SSE_LIVE_PROBE_MISSING
+___________ test_rejects_non_sse_content_type_before_consuming_body ____________
+F150_SSE_LIVE_PROBE_MISSING
+________ test_rejects_slow_first_event_and_cli_requires_explicit_inputs ________
+F150_SSE_LIVE_PROBE_MISSING
+=========================== short test summary info ============================
+FAILED tests/gate/test_cloudflare_web_sse_probe.py::test_collects_first_three_events_and_reconnects_with_last_event_id
+FAILED tests/gate/test_cloudflare_web_sse_probe.py::test_five_runs_write_redacted_deterministic_attestation
+FAILED tests/gate/test_cloudflare_web_sse_probe.py::test_rejects_timeout_without_retry_or_partial_attestation
+FAILED tests/gate/test_cloudflare_web_sse_probe.py::test_rejects_non_sse_content_type_before_consuming_body
+FAILED tests/gate/test_cloudflare_web_sse_probe.py::test_rejects_slow_first_event_and_cli_requires_explicit_inputs
+5 failed in 0.04s

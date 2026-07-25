@@ -14,6 +14,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
+from octoagent.gateway.services.cloudflare_web_access import (
+    CloudflareWebAccessManifest,
+    _CloudflaredDeploymentFacts,
+    _derive_remote_access_status,
+    _FrontDoorStatusConfig,
+    _RemoteAccessProbeFacts,
+)
 from octoagent.gateway.services.config.config_schema import TelegramChannelConfig
 from octoagent.gateway.services.operations.models import (
     CheckLevel,
@@ -680,6 +687,67 @@ class DoctorRunner:
             status=CheckStatus.PASS,
             level=CheckLevel.RECOMMENDED,
             message=message,
+        )
+
+    async def check_cloudflare_web_access(
+        self,
+        *,
+        front_door: _FrontDoorStatusConfig,
+        manifest: CloudflareWebAccessManifest | None,
+        probe: _RemoteAccessProbeFacts,
+        deployment: _CloudflaredDeploymentFacts | None = None,
+    ) -> CheckResult:
+        """把同一typed manifest与瞬时facts映射为只读doctor结果。"""
+
+        if manifest is not None and deployment is not None:
+            from octoagent.gateway.services.cloudflare_web_access import (
+                _validate_cloudflared_service_contract,
+            )
+
+            deployment_failure = _validate_cloudflared_service_contract(
+                manifest=manifest,
+                facts=deployment,
+            )
+            if deployment_failure is not None:
+                return CheckResult(
+                    name="cloudflare_web_access",
+                    status=CheckStatus.FAIL,
+                    level=CheckLevel.RECOMMENDED,
+                    message=f"fault: {deployment_failure}",
+                    fix_hint="检查 named tunnel、loopback ingress、Access 与托管 service 配置",
+                )
+        status = _derive_remote_access_status(
+            front_door=front_door,
+            manifest=manifest,
+            probe=probe,
+        )
+        if status.state == "ready":
+            return CheckResult(
+                name="cloudflare_web_access",
+                status=CheckStatus.PASS,
+                level=CheckLevel.RECOMMENDED,
+                message="Cloudflare Web Access ready",
+            )
+        if status.state == "unconfigured":
+            check_status = CheckStatus.SKIP
+            fix_hint = "在设置中配置电脑 Web 远程访问"
+        elif status.state == "pending_verification":
+            check_status = CheckStatus.WARN
+            fix_hint = "完成服务、回源与 Access 验证"
+        else:
+            check_status = CheckStatus.FAIL
+            fix_hint = {
+                "review_remote_access_config": "检查 canonical config 与 manifest",
+                "restart_remote_access_service": "重启 cloudflared 托管服务后复查",
+                "restart_gateway": "修复 loopback Gateway 后重启并复查",
+                "reauthenticate_access": "重新通过 Cloudflare Access 验证",
+            }.get(status.recovery_action or "", "")
+        return CheckResult(
+            name="cloudflare_web_access",
+            status=check_status,
+            level=CheckLevel.RECOMMENDED,
+            message=f"{status.state}: {status.reason_code}",
+            fix_hint=fix_hint,
         )
 
     async def check_front_door_exposure(self) -> CheckResult:

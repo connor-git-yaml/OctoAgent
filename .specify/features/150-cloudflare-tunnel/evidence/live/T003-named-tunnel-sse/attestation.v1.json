@@ -1,0 +1,64 @@
+{
+  "captured_utc": "2026-07-24T18:16:52Z",
+  "cloudflared_version": "2026.7.3",
+  "config_sha256": "cbfbbf8e3a68372eef1459083d91522a03926e5aa747e32ac2f6e5d661f6d026",
+  "feature_id": "F150",
+  "passed_runs": 5,
+  "run_count": 5,
+  "runs": [
+    {
+      "event_count": 3,
+      "event_intervals_ms": [
+        544,
+        1221
+      ],
+      "first_event_ms": 639,
+      "reconnect_ms": 1221,
+      "status": "PASS"
+    },
+    {
+      "event_count": 3,
+      "event_intervals_ms": [
+        504,
+        1310
+      ],
+      "first_event_ms": 652,
+      "reconnect_ms": 1310,
+      "status": "PASS"
+    },
+    {
+      "event_count": 3,
+      "event_intervals_ms": [
+        500,
+        1241
+      ],
+      "first_event_ms": 681,
+      "reconnect_ms": 1241,
+      "status": "PASS"
+    },
+    {
+      "event_count": 3,
+      "event_intervals_ms": [
+        501,
+        1166
+      ],
+      "first_event_ms": 654,
+      "reconnect_ms": 1166,
+      "status": "PASS"
+    },
+    {
+      "event_count": 3,
+      "event_intervals_ms": [
+        500,
+        1194
+      ],
+      "first_event_ms": 702,
+      "reconnect_ms": 1194,
+      "status": "PASS"
+    }
+  ],
+  "schema_version": 1,
+  "status": "PASS",
+  "target_host_sha256": "fb3981f77562e76fef1b23ab0527c4528e31c33cc735ae466e6c1cd35a249897",
+  "task_id": "T003"
+}

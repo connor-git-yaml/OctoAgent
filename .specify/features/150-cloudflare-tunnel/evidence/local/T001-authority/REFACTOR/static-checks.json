@@ -1,0 +1,64 @@
+[
+  {
+    "argv": [
+      "uv",
+      "run",
+      "--project",
+      "octoagent",
+      "--no-sync",
+      "ruff",
+      "check",
+      "repo-scripts/check-runtime-architecture.py",
+      "octoagent/tests/gate/test_runtime_architecture.py"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "All checks passed!\n"
+  },
+  {
+    "argv": [
+      "uv",
+      "run",
+      "--project",
+      "octoagent",
+      "--no-sync",
+      "ruff",
+      "format",
+      "--check",
+      "repo-scripts/check-runtime-architecture.py",
+      "octoagent/tests/gate/test_runtime_architecture.py"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "2 files already formatted\n"
+  },
+  {
+    "argv": [
+      "uv",
+      "run",
+      "--project",
+      "octoagent",
+      "--no-sync",
+      "ruff",
+      "check",
+      "--select",
+      "C901",
+      "--config",
+      "lint.mccabe.max-complexity=10",
+      "repo-scripts/check-runtime-architecture.py"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": "All checks passed!\n"
+  },
+  {
+    "argv": [
+      "git",
+      "diff",
+      "--check"
+    ],
+    "exit_code": 0,
+    "stderr": "",
+    "stdout": ""
+  }
+]

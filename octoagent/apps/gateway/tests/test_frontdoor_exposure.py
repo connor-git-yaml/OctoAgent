@@ -13,6 +13,8 @@ from octoagent.gateway.services.frontdoor_exposure import (
     validate_front_door_exposure,
 )
 
+REQUEST_CLASSIFIER_ORACLE = "F150_REQUEST_CLASSIFIER_MISSING"
+
 
 class TestExposureMatrix:
     """host↔mode 判定矩阵全组合。"""
@@ -71,6 +73,53 @@ class TestExposureMatrix:
         assert verdict.verdict == "reject"
 
 
+class TestCloudflaredExposure:
+    @pytest.mark.parametrize(
+        "host",
+        ["127.0.0.1", "127.0.0.8", "::1", "localhost"],
+    )
+    def test_cloudflared_requires_loopback_bind(self, host: str) -> None:
+        verdict = validate_front_door_exposure(host, "cloudflared")
+        if verdict.verdict != "safe":
+            pytest.fail(
+                f"{REQUEST_CLASSIFIER_ORACLE}: loopback cloudflared rejected",
+                pytrace=False,
+            )
+
+    @pytest.mark.parametrize("host", ["192.168.1.50", "203.0.113.10", "0.0.0.0"])
+    def test_cloudflared_rejects_every_non_loopback_bind(self, host: str) -> None:
+        verdict = validate_front_door_exposure(host, "cloudflared")
+        if verdict.verdict != "reject":
+            pytest.fail(
+                f"{REQUEST_CLASSIFIER_ORACLE}: exposed cloudflared bind accepted",
+                pytrace=False,
+            )
+
+    @pytest.mark.parametrize(
+        ("host", "mode", "expected"),
+        [
+            ("127.0.0.1", "loopback", "safe"),
+            ("127.0.0.1", "bearer", "safe"),
+            ("127.0.0.1", "trusted_proxy", "safe"),
+            ("192.168.1.50", "loopback", "reject"),
+            ("192.168.1.50", "bearer", "warn"),
+            ("192.168.1.50", "trusted_proxy", "warn"),
+        ],
+    )
+    def test_legacy_mode_matrix_does_not_drift(
+        self,
+        host: str,
+        mode: str,
+        expected: str,
+    ) -> None:
+        verdict = validate_front_door_exposure(host, mode)
+        if verdict.verdict != expected:
+            pytest.fail(
+                f"{REQUEST_CLASSIFIER_ORACLE}: legacy exposure matrix drift",
+                pytrace=False,
+            )
+
+
 class TestResolveBindHost:
     def test_default_is_loopback(self) -> None:
         assert resolve_bind_host(env={}) == "127.0.0.1"
@@ -83,9 +132,7 @@ class TestResolveBindHost:
 
 
 class TestValidationIsReadOnly:
-    def test_validate_does_not_mutate_env(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_validate_does_not_mutate_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """FR-C4：校验只读，不改 env/系统。"""
         import os
 
@@ -98,9 +145,7 @@ class TestValidationIsReadOnly:
 class TestReadInstanceEffectiveEnv:
     """Codex 第四/五轮 P2：托管服务诊断——权威键只来自实例 .env（不继承 shell）。"""
 
-    def test_non_authoritative_key_falls_back_to_shell(
-        self, tmp_path, monkeypatch
-    ) -> None:
+    def test_non_authoritative_key_falls_back_to_shell(self, tmp_path, monkeypatch) -> None:
         """非权威键（如 PATH）.env 未设时回退进程 env。"""
         from octoagent.gateway.services.frontdoor_exposure import (
             read_instance_effective_env,
@@ -111,9 +156,7 @@ class TestReadInstanceEffectiveEnv:
         env = read_instance_effective_env(tmp_path)
         assert env["SOME_NON_OCTO_KEY"] == "shellval"  # 非权威键回退 shell
 
-    def test_authoritative_key_shell_only_is_dropped(
-        self, tmp_path, monkeypatch
-    ) -> None:
+    def test_authoritative_key_shell_only_is_dropped(self, tmp_path, monkeypatch) -> None:
         """★ Codex 第五轮 P2：权威键（host/port/mode/token）shell-only 不生效
         （托管服务不继承 CLI export）——.env 无此键则视为未设，不回退 shell。"""
         from octoagent.gateway.services.frontdoor_exposure import (
@@ -124,9 +167,7 @@ class TestReadInstanceEffectiveEnv:
         env = read_instance_effective_env(tmp_path)  # 无 .env 文件
         assert "OCTOAGENT_PORT" not in env  # shell-only 权威键被丢弃
 
-    def test_authoritative_key_from_instance_env_wins(
-        self, tmp_path, monkeypatch
-    ) -> None:
+    def test_authoritative_key_from_instance_env_wins(self, tmp_path, monkeypatch) -> None:
         """权威键：shell=9001 + 实例 .env=8000 → 取 .env 的 8000。"""
         from octoagent.gateway.services.frontdoor_exposure import (
             read_instance_effective_env,

@@ -73,6 +73,18 @@ def _clean_env() -> None:
 
 def _redirect_paths(root: Path) -> None:
     """OCTOAGENT_* 路径 env 全指进实例 root（同 conftest ``_OCTOAGENT_PATH_ENVS``）。"""
+    home = root / ".home"
+    for path in (
+        home,
+        home / ".config",
+        home / ".cache",
+        home / ".local" / "share",
+    ):
+        path.mkdir(parents=True, exist_ok=True)
+    os.environ["HOME"] = str(home)
+    os.environ["XDG_CONFIG_HOME"] = str(home / ".config")
+    os.environ["XDG_CACHE_HOME"] = str(home / ".cache")
+    os.environ["XDG_DATA_HOME"] = str(home / ".local" / "share")
     os.environ["OCTOAGENT_PROJECT_ROOT"] = str(root)
     os.environ["OCTOAGENT_DATA_DIR"] = str(root / "data")
     os.environ["OCTOAGENT_DB_PATH"] = str(root / "data" / "octoagent.db")
@@ -147,9 +159,9 @@ def main() -> None:
     os.environ["OCTOAGENT_LLM_MODE"] = "echo"
 
     _clean_env()
+    _build_instance(root)
     _redirect_paths(root)
     _apply_mode(mode)
-    _build_instance(root)
 
     # env 全就位后再 import（config/路径解析发生在 import 后的 create_app 内）
     import octoagent.gateway.main as gateway_main  # noqa: PLC0415

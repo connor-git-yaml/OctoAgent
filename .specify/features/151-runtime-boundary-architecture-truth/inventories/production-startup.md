@@ -15,6 +15,7 @@ install-octo-home.sh
   -> import octoagent.gateway.main.app exactly once
   -> main.app=create_app() performs canonical static config/security exposure preflight exactly once
   -> Uvicorn serves that app instance with the same resolved host/port values
+     and proxy_headers=False so ASGI client remains the raw TCP peer
 ```
 
 | id | 当前 path / symbol | 当前 argv /事实 | 完成态 action |
@@ -25,7 +26,7 @@ install-octo-home.sh
 | `PSTART-04` | `provider/dx/service_manager.py::build_spec/render`（迁移后operations） | 把descriptor argv原样写入launchd/systemd | 普通build/start只接受canonical entry/wrapper；legacy direct argv typed reject并给显式迁移指引，不在read/start路径顺手写回 |
 | `PSTART-05` | `provider/dx/update_service.py::_run_restart_phase`（迁移后operations） | COMMAND可Popen persisted descriptor | 显式update可先validated atomic migration；执行时只允许canonical argv。普通restart/start遇legacy argv typed reject，绝不隐藏写回或绕过preflight |
 | `PSTART-06` | `octoagent.gateway.main:app` | module import时创建ASGI app | 保留ASGI/import/test用途；不计为第二生产入口 |
-| `PSTART-07` | `octoagent/apps/gateway/src/octoagent/gateway/__main__.py` | baseline不存在 | 新增唯一module entry；先解析exact argv，再在typed exception boundary内只import一次`main.app`；import触发唯一`create_app()`及一次preflight，随后把app instance和同一resolved host/port值交Uvicorn，不构造第二FastAPI/OctoHarness/runtime |
+| `PSTART-07` | `octoagent/apps/gateway/src/octoagent/gateway/__main__.py` | baseline不存在 | 新增唯一module entry；先解析exact argv，再在typed exception boundary内只import一次`main.app`；import触发唯一`create_app()`及一次preflight，随后把app instance和同一resolved host/port值交Uvicorn，并固定`proxy_headers=False`保留真实TCP peer；不构造第二FastAPI/OctoHarness/runtime |
 
 ## 2. 旧 application-host 字符串 inventory
 
@@ -60,7 +61,7 @@ module entry必须保持下列单值precedence。这里冻结的是值相等与�
 | front-door mode | 完整`load_config(project_root)`在任何env mode early-return前恰一次；结果仍为既有 `OCTOAGENT_FRONTDOOR_MODE` > YAML > `loopback`，F151不得改变三种mode或判定。env mode存在也不能绕过malformed/retired/unknown runtime YAML |
 | cwd | managed service为instance root；source/dev descriptor为project root；module entry不得自行切换到第二project/runtime |
 
-没有`--config` argv：config root只按上表project/instance/cwd和canonical `.env`解析。entry不能转发unknown option给第二个Uvicorn parser；L4/L3必须分别断言exact supported集合、重复/unknown exit64、`create_app()`恰一次、config resolution恰一次、exposure validation恰一次、resolved host/port exact equality与Uvicorn app-instance调用参数。
+没有`--config` argv：config root只按上表project/instance/cwd和canonical `.env`解析。entry不能转发unknown option给第二个Uvicorn parser；L4/L3必须分别断言exact supported集合、重复/unknown exit64、`create_app()`恰一次、config resolution恰一次、exposure validation恰一次、resolved host/port exact equality、Uvicorn app-instance调用参数与`proxy_headers=False`。不得让Uvicorn按`X-Forwarded-For`重写ASGI `client`，因为front-door安全判定只信真实TCP peer。
 
 ## 4. Fail-closed 与迁移支持矩阵
 
@@ -82,7 +83,7 @@ module entry必须保持下列单值precedence。这里冻结的是值相等与�
 ## 5. Gate 与测试 owner
 
 - L4：`TestProductionStartupInventory`解析shell、Python常量、descriptor、service render；拒绝第二host字符串、legacy argv继续执行、read-time write、host/port值分叉。`test_update_status_store.py`对canonical/legacy/invalid schema/invalid JSON逐格拍摄目录字节快照，普通load后必须完全相同。
-- L3：`test_f151_gateway_startup_fail_closed.py`真实subprocess：`S064-runtime-exit`证明env-present malformed runtime YAML仍为typed code/78且Uvicorn0；`S085-lifespan-startup`独立证明真实composition failure只经lifespan fail closed、readiness/request/workload=0、process nonzero。`test_f151_runtime_boundary_flow.py`验证descriptor→entry；clean-wheel在repo外cwd验证canonical entry、单次`create_app` static preflight、exit78、SIGTERM与结构readiness。
+- L3：`test_f151_gateway_startup_fail_closed.py`真实subprocess：`S064-runtime-exit`证明env-present malformed runtime YAML仍为typed code/78且Uvicorn0；成功与lifespan probe同时要求`proxy_headers=False`；`S085-lifespan-startup`独立证明真实composition failure只经lifespan fail closed、readiness/request/workload=0、process nonzero。`test_f151_runtime_boundary_flow.py`验证descriptor→entry；clean-wheel在repo外cwd验证canonical entry、单次`create_app` static preflight、exit78、SIGTERM与结构readiness。
 - exact negative fixtures：无关ASGI import允许；active生产旧argv拒绝；persisted legacy descriptor普通读取只能typed reject且0写；module entry若构造第二app/host、传Uvicorn import string、重复preflight或绕过`main.app=create_app()`则拒绝；`_resolve_front_door_mode`若env early-return、完整load次数≠1、吞static runtime异常或改变env>YAML precedence则拒绝。
 
 ## 6. Lifespan composition failure（非static exit78）

@@ -93,7 +93,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         raise
 
     uvicorn = importlib.import_module("uvicorn")
-    uvicorn.run(gateway_main.app, host=options.host, port=options.port)
+    uvicorn.run(
+        gateway_main.app,
+        host=options.host,
+        port=options.port,
+        proxy_headers=False,
+    )
     return 0
 
 

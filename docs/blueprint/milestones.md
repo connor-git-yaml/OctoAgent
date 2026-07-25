@@ -677,32 +677,32 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 
 ### M11（运行边界收口 + Cloudflare 远程访问 + Web 工作台 v2）⏳ 进行中（2026-07-20 二次重评）
 
-> **来源**：用户在 Claude Design 产出 Web + Mobile 两份 v2 设计稿（Spotify 深色风 · project 851e3fb2），F148 已完成主工作台。2026-07-20 又对 Octo、OpenClaw、Hermes Agent、Agent Zero 做固定版本源码审计，结论见 [architecture-audit.md](architecture-audit.md) §14.14：三个项目都值得借局部运行机制，但它们的兼容层、全局状态、Plugin/Memory 膨胀和 host-first 安全模型不应成为 Octo 的目标架构。
+> **来源**：用户在 Claude Design 产出 Web v2 与移动视觉探索（project 851e3fb2），F148 已完成主工作台。Claude Design 初稿是 Web 与未来 iOS 的视觉/交互基线；实现必须适配设计，非功能合同、可用性或无障碍所必需，不得让设计迁就当前 Web 外观。2026-07-20 又对 Octo、OpenClaw、Hermes Agent、Agent Zero 做固定版本源码审计，结论见 [architecture-audit.md](architecture-audit.md) §14.14：三个项目都值得借局部运行机制，但它们的兼容层、全局状态、Plugin/Memory 膨胀和 host-first 安全模型不应成为 Octo 的目标架构。
 > **架构定位**：Octo 保持单用户、单 Gateway application host 的模块化单体；`apps/kernel`、`workers/*` 是历史物理拆分设想，不新建这些目录、`packages/management` 或第二套 runtime。先修真实依赖环、打包与失真配置，再开放公网；God service 只按后续触达的垂直切片收敛，不做 big-bang 重写。
-> **远程产品定位（2026-07-20 二次重评）**：Cloudflare named tunnel + Access 是唯一远程访问路径。手机使用标准浏览器，不安装网络客户端，不改变已有网络连接；Gateway 保持 loopback 回源，Access 边缘认证后由 origin 验证 JWT 与 owner identity。浏览器直接复用 Access application session，不再增加配对码、Octo Cookie、remote session/browser device 表；真正设备身份统一归 F153。
-> **设计与文案硬约束**：① Butler→主 Agent，LiteLLM→ProviderRouter，普通页面禁暴露 JWT/AUD/JWKS 等内部词；②继续消费 F148 `--cp-*` 深色 token，不造第二套主题、不向 `index.css` 堆叠；③ Cloudflare 在边缘终止 TLS，禁写“端到端加密”；④ F150 删除二次配对 UI，只补“未配置 / Access 登录 / 可用 / 会话过期或登出 / 故障恢复”的手机与桌面状态；⑤ `#1ed760` 个人自用可，未来公开分发前换成自有品牌色。
+> **远程产品定位（2026-07-24 用户纠正）**：Cloudflare named tunnel 是唯一远程网络基础设施，不是唯一客户端或认证模型。电脑保留 Web，由 F150 通过 Access browser session + origin JWT/owner identity 交付；手机产品只走 F153+ 原生 iOS App，Safari/WebView 不计产品入口。F150 的“无第二 session/device”仅适用于 Web；iOS 必须有设备密钥、短期凭证与单设备撤销，且禁止内置 Cloudflare service token。
+> **设计与文案硬约束**：① Butler→主 Agent，LiteLLM→ProviderRouter，普通页面禁暴露 JWT/AUD/JWKS 等内部词；②Claude Design 初稿的层级、留白、卡片节奏、视觉张力与排版是基线，现有 Web UI 不是基线；实现应适配设计，只有功能合同、可用性或无障碍确有需要才调整；③继续消费 F148 `--cp-*` token，不造第二套主题、不向 `index.css` 堆叠；④ Cloudflare 在边缘终止 TLS，禁写“端到端加密”；⑤ F150 删除 Web 二次配对 UI，只补电脑 Web 的“未配置 / Access 登录 / 可用 / 会话过期或登出 / 故障恢复”；⑥ iOS 延续同一视觉语言，但按 SwiftUI/Apple 原生交互语义实现，不照搬 Web 组件结构；⑦ `#1ed760` 个人自用可，未来公开分发前换成自有品牌色。
 
 | Feature | 规模 | 一句话 | 波次 |
 |---------|------|--------|------|
 | **F148 设计系统 + Web 主工作台 v2** ✅ 完成（2026-07-20，9 commits ff push master；Codex spec+final 2 finding 全闭环 + Opus 自审 0 HIGH；438 vitest + L1 4/4 + tsc 0 + complexity 过）| L | 已交付：**Phase 0** `tokens.css` `--cp-*` 原地翻转 Spotify 深色（committed dark 删冗余 dark-media 块，不并造第二套）+ Figtree/remixicon 自托管 + `theme-v2.css` 三动画（octoPulse/octoBar/octoJelly）+ 旧 accent 覆盖；**Phase 1** 三栏——左栏会话按 `project_id` 分组+折叠+octoBar 运行指示+就绪卡 / 中栏对话加壳（内核 JSX 保留）+octoJelly 空舞台 / 右栏新 `SessionRunPanel`（本会话运行状态只读镜像：状态/进度/事件流/工件/打开任务）；**Phase 2** `GlobalTaskOverlay`（读 `delegation.works` 同源同状态词表）；**Phase 3** 加载页 octoPulse。**纯前端零后端**（勘察先验：跨项目会话+当前运行任务现成；多并发任务列表 defer）。**复用数据逻辑只换视觉/结构**（零新 hook/fetch/协议）。文案映射 Butler→主 Agent、无 LiteLLM 泄漏。`index.css` 4477 零增长。**限制**：原稿逐像素未自证（DesignSync 不可达，按 §M11 书面规格+Spotify 语言实现）/ 右栏停止控制+多任务列表 defer / octo-mark 已换设计稿绿泡泡（主 session 从原稿 assets 取，subagent DesignSync 不可达） / F149 页 accent 残留渐进边界。详见 `.specify/features/148-web-workbench-v2/completion-report.md` | ① |
-| **F151 Runtime Boundary & Architecture Truth** 📋 编号预留、待立项 | XL | M11 生产改动前的硬门：把 `provider/dx` 迁入既有 `apps/gateway/cli`，禁止 Provider 反向 import Gateway；删除 LiteLLM Proxy、`.env.litellm`、SDK 平行调用与 no-op compatibility；删除/诚实重命名“required 但仍 inline”的 Docker 配置；补 Gateway 直接依赖、clean-wheel 安装/启动、security/backend fail-closed 契约；用显式 runtime service bundle 收敛 class-level 注入，并给 `task_service`/`orchestrator` 等热点设“不再恶化”ratchet。同步 constitution/Blueprint/实现级文档。禁为此新增 management/kernel/worker 包或大爆炸重写 | ① 硬前置 |
-| **F150 Cloudflare 零信任远程** ⏳ 二次重评 spec 待评审（2026-07-20）| M | 唯一远程入口：named tunnel + 官方 service、Gateway loopback 回源、Access 全站保护、origin JWT + owner allowlist、Host/Origin/CSRF、真实 SSE gate。复用 Access application session，F150 零新增配对/session/device 表；禁 quick tunnel、浏览器 bearer/service token 与 provider/profile 抽象。Phase 0 live spike 可先于 F151，生产实现不可越过 F151 gate。制品 `.specify/features/150-cloudflare-tunnel/` | ② |
-| **F149 Web 其余页面 v2** 📋 待立项 | M-L | 两波完成全站：A 波=审批/任务/自动化/设置高频页；B 波=智能体/记忆/文件/技能/MCP 高信息密度页。网络 DTO 从 OpenAPI 生成，手写类型只保留 UI view model；所有页面消费 F148 token，普通界面不暴露内部字段，并补手机宽度、空态、失败态、权限态 L1。设计 recon 可并行，生产实现等 F150 契约稳定 | ③ |
+| **F151 Runtime Boundary & Architecture Truth** ✅ 稳定（2026-07-22） | XL | 已完成Gateway唯一module entry、运行/打包边界、retired Proxy/SDK路径清理与F150 exact authority；stable commit `687f20fc6246e7157957ab51ac474d46e91578b6`。后续仍按其复杂度与ownership ratchet演进，不恢复management/kernel/worker平行体系 | ① 硬前置 |
+| **F150 Cloudflare 零信任远程** ⏳ 本地实现/live/验证完成，待stable commit（2026-07-25）| M | 唯一 named-tunnel 网络地基 + 电脑 Web 入口已通过：官方 service、Gateway loopback 回源、Web Access 全站保护、origin JWT + owner allowlist、Host/Origin/CSRF、真实 SSE与production浏览器旅程。Web复用Access application session且不新增browser session/device；iOS route/device trust归F153，禁App内service token。当前must-fix=0，提交前验证通过，stable commit形成后解锁F149 T000。制品 `.specify/features/150-cloudflare-tunnel/` | ② |
+| **F149 Web 其余页面 v2** 📋 Design/Tasks Gate 已通过，Implement 等 F150 stable | M-L | 两波完成全站：A 波=审批/任务/自动化/设置高频页；B 波=智能体/记忆/文件/技能/MCP 高信息密度页。网络 DTO 从 OpenAPI 生成，手写类型只保留 UI view model；所有页面消费 F148 token，普通界面不暴露内部字段。Claude Design 初稿是视觉基线，实现适配设计；390px 只作 Web 窄窗口回归，不代表手机产品。 | ③ |
 
-**新波次**：0️⃣ 关闭当前旧 VPN 方案删除工作并建立全绿 baseline；并行只做 F150 真实链路 spike → ① F151 完整 Spec Driver 闭环 → ② F150 实施与 live 验收（F149 同期只做设计 recon）→ ③ F149 两波全站 v2。
+**新波次**：0️⃣ 旧 VPN 删除与全绿baseline ✅ → ① F151完整Spec Driver闭环 ✅ → ② F150实施、live与提交前验证 ✅（待stable commit）→ ③ F149解除T000后两波全站v2。
 
 **推进协议**：Spec Driver 是外层唯一研发流程（constitution → spec/research → plan → tasks → implement → verify）；每次只有一个生产 Feature 处于 implement。Superpowers 的小任务、先写失败测试、频繁 review 用作 Feature 内执行纪律，不另建第二套制品或状态机。每个 task 应是可独立验证的垂直切片，竞品代码只作为 evidence，不作为兼容目标。
 
-**M11 完成定义**：F148/F149/F150/F151 全部 ✅；Cloudflare owner/JWKS/Host/Origin/CSRF fail-closed、Access 登出/过期与真实 SSE 延迟通过；手机无需额外网络客户端或二次配对；Web v2 全站切换；干净环境安装 Gateway wheel 可启动；Provider 无 Gateway 反向 import；Blueprint、constitution 与实现级文档不再描述已退役的 Proxy/Docker backend。
+**M11 完成定义**：F148/F149/F150/F151 全部 ✅；电脑 Web 的 Cloudflare owner/JWKS/Host/Origin/CSRF fail-closed、Access 登出/过期与真实 SSE 延迟通过；Web v2 全站切换且保持 Claude Design 初稿视觉基线；手机浏览器不列为产品入口；干净环境安装 Gateway wheel 可启动；Provider 无 Gateway 反向 import；Blueprint、constitution 与实现级文档不再描述已退役的 Proxy/Docker backend。
 
 ### M12（原生 iOS + 健康/日程感知）📋 设计门禁先行（2026-07-20 重排）
 
 > **为何独立**：HealthKit/EventKit 是新的高敏感数据入口与 Agent 能力域，不是 Web UI 的原生外壳。M12 必须先回答“设备如何可信连接、数据如何最小化、什么能进 LLM、如何撤销/删除/审计”，再做 SwiftUI 页面。
 > **安全翻转**：旧 F150 handoff 提议在 iOS App 使用 `CF-Access-Client-Id/Secret`，现已否决。静态 service secret 一旦进入 App 包就不是可信 secret。F152/F153 必须从交互式 Access 或设备注册换短期凭证中完成设计，并支持撤销、轮换和单设备审计。
-> **浏览器与原生分界**：F150 的 Access browser session 不能直接给 `URLSession` 当原生设备凭证。F153 必须先用真实 iPhone spike 在“交互式 Access user session / 独立 mobile API + Octo device proof / 可用套餐下的 mTLS”中选出无需内置 service secret 的可行路径；未通过前不得读取 HealthKit。
+> **浏览器与原生分界**：手机产品只走原生 iOS App，不提供 Safari/WebView 产品入口。F150 的 Access browser session 不能直接给 `URLSession` 当原生设备凭证。F153 必须先用真实 iPhone spike 在“交互式 Access user session / 独立 mobile API + Octo device proof / 可用套餐下的 mTLS”中选出无需内置 service secret 的可行路径；未通过前不得读取 HealthKit。
 > **数据安全不变量**：Memory/召回内容是不可信证据，不是指令；raw sample、normalized fact、retrieval snapshot、transcript/LLM context 四层分开。每次进入 LLM 或 Memory 的事实都需 provenance、consent、delete/revoke audit；高敏感写入不能采用 shutdown 时允许丢写的 best-effort 语义。
 > **Apple 权限事实**：[HealthKit 读权限按数据类型授权](https://developer.apple.com/documentation/HealthKit/authorizing-access-to-health-data)，App 不能把“用户拒绝读取”与“没有数据”简单区分；[EventKit 读取日历在当前 iOS API 下需要 full access](https://developer.apple.com/documentation/eventkit/accessing-the-event-store)，没有 OS 级 read-only 权限。F155 的“只读”只能是 Octo 代码与产品承诺，不能误写为系统最小权限。
-> **启动依赖**：M11 的 F150 浏览器远程和 F151 架构/打包边界均完成；M12 privacy threat model 通过 review。设计 token 可复用视觉语言，但移动端信息架构由 Claude Design 重新校正，不照搬 Web 三栏。
+> **启动依赖**：M11 的 F150 电脑 Web 远程/named-tunnel 地基和 F151 架构/打包边界均完成；M12 privacy threat model 通过 review。iOS 继续以 Claude Design 最初移动方案为视觉与交互基线，功能实现适配设计；同时遵守原生 SwiftUI/Apple 平台语义，不照搬 Web 三栏或让现有 Web 外观反向改造设计。
 
 | Feature | 规模 | 目标 | 顺序 |
 |---------|------|------|------|
@@ -710,7 +710,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | **F153 iOS Device Trust & Secure Transport** 📋 编号预留、待立项 | L-XL | 先做真机 transport spike，再冻结方案；设备生成密钥，browser/owner 辅助 challenge 注册，短期 capability-scoped token，Keychain 保存、proof-of-possession、单设备撤销/轮换。复用同一 tunnel 但不内置 Cloudflare service secret；只打通 `/ready` + 最小 API，不接 HealthKit | ② |
 | **F154 HealthKit Read-Only Vertical Slice** 📋 编号预留、待立项 | L-XL | 按最小数据类型授权 → 只读样本 → 本地归一化 → 用户预览/批准 → 单次 Agent 分析 → 审计。UI 必须把“无可读数据/权限受限”作为诚实状态；v0.1 不后台全量同步、不自动写 Memory | ③ |
 | **F155 EventKit App-Read-Only Vertical Slice（OS Full-Access Gate）** 📋 编号预留、待立项 | L | 启动前由用户明确接受“系统要求 full access、Octo 实现层不写日历”。写路径在代码和 capability 中物理缺席；只读限定时间范围、预览批准和单次分析，正文默认不进长期记忆。若不能接受该权限，F152 review 时将本 Feature 移出 M12，而不是伪装成系统 read-only | ④ 决策门 |
-| **F156 Native Companion Experience** 📋 编号预留、待立项 | XL | SwiftUI 对话、任务、审批、记忆候选、连接状态与通知；只消费 F152-F155 已证明的认证/数据能力，不复制 Web 三栏或另造状态词表。APNs、后台刷新和上架准备在能力链通过后进入 | ⑤ |
+| **F156 Native Companion Experience** 📋 编号预留、待立项 | XL | SwiftUI 对话、任务、审批、记忆候选、连接状态与通知；只消费 F152-F155 已证明的认证/数据能力，不复制 Web 三栏或另造状态词表。以 Claude Design 最初移动方案为视觉/交互基线，非功能、可用性或无障碍所必需不得重排；APNs、后台刷新和上架准备在能力链通过后进入 | ⑤ |
 
 **M12 波次**：F152 → F153 → F154 → F155 → F156，默认严格串行。只有视觉探索可与 F152/F153 并行，生产代码不得绕过隐私/身份 gate。
 

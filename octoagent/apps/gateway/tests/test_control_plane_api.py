@@ -50,7 +50,13 @@ from octoagent.gateway.services.agent_context import (
     build_projected_session_id,
     build_scope_aware_session_id,
 )
+from octoagent.gateway.services.cloudflare_web_access import (
+    CloudflareWebAccessManifest,
+    _derive_remote_access_status,
+    _RemoteAccessProbeFacts,
+)
 from octoagent.gateway.services.config.config_schema import (
+    FrontDoorConfig,
     MemoryConfig,
     ModelAlias,
     OctoAgentConfig,
@@ -5621,3 +5627,247 @@ async def _save_worker_with_mirror(store, wp: AgentProfile):
         )
     )
     return wp
+
+
+REMOTE_ACCESS_API_ORACLE = "F150_REMOTE_ACCESS_API_MISSING"
+REMOTE_ACCESS_API_FIELDS = {
+    "state",
+    "hostname",
+    "owner_email",
+    "last_verified_at",
+    "reason_code",
+    "recovery_action",
+    "desktop_web_url",
+    "access_logout_url",
+}
+
+
+def _remote_access_inputs() -> tuple[FrontDoorConfig, CloudflareWebAccessManifest]:
+    return (
+        FrontDoorConfig(
+            mode="cloudflared",
+            cloudflare_manifest_path=".octoagent/cloudflare-web-access.json",
+            cloudflare_owner_email="owner@example.com",
+        ),
+        CloudflareWebAccessManifest.model_validate(
+            {
+                "version": 1,
+                "hostname": "octo.example.com",
+                "access_team_domain": "https://octo.cloudflareaccess.com",
+                "access_audience": "audience_ABC-123",
+                "tunnel_id": "79441b64-7342-4cb4-a651-9a56d278875b",
+                "origin_url": "http://127.0.0.1:8000",
+                "cloudflared_config_path": ".cloudflared/config.yml",
+            }
+        ),
+    )
+
+
+def _configure_remote_access(
+    app,
+    *,
+    service_ready: bool | None = None,
+    origin_ready: bool | None = None,
+    access_ready: bool | None = None,
+    last_verified_at: datetime | None = None,
+) -> tuple[FrontDoorConfig, CloudflareWebAccessManifest]:
+    front_door, manifest = _remote_access_inputs()
+    save_config(
+        OctoAgentConfig(
+            updated_at="2026-07-24T10:00:00Z",
+            front_door=front_door,
+        ),
+        app.state.project_root,
+    )
+    app.state.cloudflare_access_manifest = manifest
+    app.state.cloudflare_access_service_ready = service_ready
+    app.state.cloudflare_access_origin_ready = origin_ready
+    app.state.cloudflare_access_access_ready = access_ready
+    app.state.cloudflare_access_last_verified_at = last_verified_at
+    return front_door, manifest
+
+
+async def _read_remote_access(client: AsyncClient) -> dict[str, object]:
+    response = await client.get("/api/control/resources/remote-access")
+    if response.status_code != 200:
+        pytest.fail(
+            f"{REMOTE_ACCESS_API_ORACLE}: status={response.status_code}",
+            pytrace=False,
+        )
+    payload = response.json()
+    if set(payload) != REMOTE_ACCESS_API_FIELDS:
+        pytest.fail(
+            f"{REMOTE_ACCESS_API_ORACLE}: schema drift",
+            pytrace=False,
+        )
+    return payload
+
+
+def _expected_remote_status(
+    *,
+    front_door: FrontDoorConfig,
+    manifest: CloudflareWebAccessManifest | None,
+    service_ready: bool | None = None,
+    origin_ready: bool | None = None,
+    access_ready: bool | None = None,
+    last_verified_at: datetime | None = None,
+) -> dict[str, object]:
+    return _derive_remote_access_status(
+        front_door=front_door,
+        manifest=manifest,
+        probe=_RemoteAccessProbeFacts(
+            service_ready=service_ready,
+            origin_ready=origin_ready,
+            access_ready=access_ready,
+            last_verified_at=last_verified_at,
+        ),
+    ).model_dump(mode="json")
+
+
+def _assert_status_projection(
+    payload: dict[str, object],
+    expected: dict[str, object],
+) -> None:
+    assert {key: payload[key] for key in expected} == expected
+
+
+class TestRemoteAccessProjection:
+    async def test_unconfigured_is_exact_read_only_projection(
+        self,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        payload = await _read_remote_access(control_plane_client)
+        expected = _expected_remote_status(
+            front_door=FrontDoorConfig(),
+            manifest=None,
+        )
+        _assert_status_projection(payload, expected)
+        assert payload["desktop_web_url"] is None
+        assert payload["access_logout_url"] is None
+
+    async def test_pending_and_ready_add_only_desktop_web_actions(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        front_door, manifest = _configure_remote_access(control_plane_app)
+        pending = await _read_remote_access(control_plane_client)
+        _assert_status_projection(
+            pending,
+            _expected_remote_status(front_door=front_door, manifest=manifest),
+        )
+        assert pending["desktop_web_url"] == "https://octo.example.com"
+        assert pending["access_logout_url"] == ("https://octo.example.com/cdn-cgi/access/logout")
+
+        verified_at = datetime(2026, 7, 24, 10, 30, tzinfo=UTC)
+        control_plane_app.state.cloudflare_access_service_ready = True
+        control_plane_app.state.cloudflare_access_origin_ready = True
+        control_plane_app.state.cloudflare_access_access_ready = True
+        control_plane_app.state.cloudflare_access_last_verified_at = verified_at
+        ready = await _read_remote_access(control_plane_client)
+        _assert_status_projection(
+            ready,
+            _expected_remote_status(
+                front_door=front_door,
+                manifest=manifest,
+                service_ready=True,
+                origin_ready=True,
+                access_ready=True,
+                last_verified_at=verified_at,
+            ),
+        )
+        assert ready["state"] == "ready"
+
+    @pytest.mark.parametrize(
+        ("facts", "reason_code", "recovery_action"),
+        [
+            (
+                {"manifest_present": False},
+                "REMOTE_ACCESS_MANIFEST_INVALID",
+                "review_remote_access_config",
+            ),
+            (
+                {"service_ready": False},
+                "REMOTE_ACCESS_SERVICE_UNAVAILABLE",
+                "restart_remote_access_service",
+            ),
+            (
+                {"origin_ready": False},
+                "REMOTE_ACCESS_ORIGIN_UNAVAILABLE",
+                "restart_gateway",
+            ),
+            (
+                {"access_ready": False},
+                "REMOTE_ACCESS_ACCESS_UNAVAILABLE",
+                "reauthenticate_access",
+            ),
+        ],
+    )
+    async def test_fault_projection_keeps_typed_recovery(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+        facts: dict[str, bool],
+        reason_code: str,
+        recovery_action: str,
+    ) -> None:
+        front_door, manifest = _configure_remote_access(
+            control_plane_app,
+            service_ready=facts.get("service_ready"),
+            origin_ready=facts.get("origin_ready"),
+            access_ready=facts.get("access_ready"),
+        )
+        if facts.get("manifest_present") is False:
+            control_plane_app.state.cloudflare_access_manifest = None
+            manifest = None
+        payload = await _read_remote_access(control_plane_client)
+        assert payload["state"] == "fault"
+        assert payload["reason_code"] == reason_code
+        assert payload["recovery_action"] == recovery_action
+        _assert_status_projection(
+            payload,
+            _expected_remote_status(
+                front_door=front_door,
+                manifest=manifest,
+                service_ready=facts.get("service_ready"),
+                origin_ready=facts.get("origin_ready"),
+                access_ready=facts.get("access_ready"),
+            ),
+        )
+
+    async def test_projection_is_guarded_and_secret_negative(
+        self,
+        control_plane_app,
+        control_plane_client: AsyncClient,
+    ) -> None:
+        _configure_remote_access(control_plane_app)
+        guarded = await control_plane_client.get(
+            "/api/control/resources/remote-access",
+            headers={"cf-ray": "marker"},
+        )
+        if guarded.status_code == 404:
+            pytest.fail(
+                f"{REMOTE_ACCESS_API_ORACLE}: route absent",
+                pytrace=False,
+            )
+        assert guarded.status_code == 503
+        assert guarded.json()["detail"]["code"] == "FRONT_DOOR_CLOUDFLARE_NOT_READY"
+
+        payload = await _read_remote_access(control_plane_client)
+        rendered = json.dumps(payload, sort_keys=True)
+        for forbidden in (
+            "owner@example.com",
+            "octo.cloudflareaccess.com",
+            "audience_ABC-123",
+            "79441b64-7342-4cb4-a651-9a56d278875b",
+            "http://127.0.0.1:8000",
+            ".cloudflared/config.yml",
+            "jwt",
+            "cookie",
+            "service_token",
+            "device",
+            "pairing",
+            "ios",
+            "mobile",
+        ):
+            assert forbidden not in rendered.casefold()

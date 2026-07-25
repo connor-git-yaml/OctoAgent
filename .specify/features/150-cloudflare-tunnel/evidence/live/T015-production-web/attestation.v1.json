@@ -1,0 +1,57 @@
+{
+  "access_audience_sha256": "a0c342c46b1012002cdb3d7e1b51f86f9c1d8363abf108dffe68ad4ac04f5904",
+  "access_policy": {
+    "bypass_absent": true,
+    "owner_only": true,
+    "status": "PASS"
+  },
+  "access_team_domain_sha256": "c234e415ffa5dd87098c81b8f0c1c46e2004022b0b9bf0a83f0971b23e306221",
+  "browser_checks": {
+    "desktop_spa": "PASS",
+    "error_recovery": "PASS",
+    "logout": "PASS",
+    "octo_browser_device_absent": true,
+    "octo_browser_pairing_absent": true,
+    "octo_browser_session_absent": true,
+    "one_time_pin_reauthentication": "PASS",
+    "protected_rest": "PASS",
+    "protected_sse": "PASS",
+    "refresh_after_reauthentication": "PASS"
+  },
+  "captured_utc": "2026-07-25T05:17:36Z",
+  "cloudflared_version": "2026.7.3",
+  "config_sha256": "cbfbbf8e3a68372eef1459083d91522a03926e5aa747e32ac2f6e5d661f6d026",
+  "feature_id": "F150",
+  "origin_checks": {
+    "bind_host": "127.0.0.1",
+    "forwarded_peer_trust_disabled": true,
+    "mobile_route_absent": true,
+    "non_loopback_listener_count": 0,
+    "origin_peer_loopback": true,
+    "quick_tunnel_absent": true,
+    "status": "PASS"
+  },
+  "schema_version": 1,
+  "secret_scan": {
+    "access_identity_matches": 0,
+    "cookie_matches": 0,
+    "credential_matches": 0,
+    "jwt_matches": 0,
+    "otp_matches": 0,
+    "service_token_matches": 0,
+    "status": "PASS"
+  },
+  "session_expiry_contract": {
+    "live_logout_invalidated_session": true,
+    "t013_deterministic_expiry_reauthentication": "PASS"
+  },
+  "sse_timing_reference": {
+    "attestation_sha256": "5685d1d976bf522b54f78c25548355ce0b9dbbb4225920feccb868e9319893a9",
+    "passed_runs": 5,
+    "run_count": 5,
+    "status": "PASS"
+  },
+  "status": "PASS",
+  "target_host_sha256": "fb3981f77562e76fef1b23ab0527c4528e31c33cc735ae466e6c1cd35a249897",
+  "task_id": "T015"
+}

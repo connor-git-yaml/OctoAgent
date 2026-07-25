@@ -1,0 +1,29 @@
+{
+  "argv": [
+    "uv",
+    "run",
+    "--project",
+    ".",
+    "--no-sync",
+    "python",
+    "-m",
+    "pytest",
+    "-q",
+    "-rA",
+    "tests/gate/test_runtime_architecture.py::TestManifestIntegrity::test_f150_scope_allows_exact_web_access_contract_and_rejects_sibling_or_ios_drift"
+  ],
+  "cwd": "/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent",
+  "env": {
+    "LITELLM_LOCAL_MODEL_COST_MAP": "True",
+    "PYTHONNOUSERSITE": "1",
+    "PYTHONPATH": "/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/core/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/provider/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/protocol/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/tooling/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/skills/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/policy/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/memory/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/apps/gateway/src"
+  },
+  "exact_command": "cd octoagent && env PYTHONNOUSERSITE=1 PYTHONPATH=/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/core/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/provider/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/protocol/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/tooling/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/skills/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/policy/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/packages/memory/src:/Users/connorlu/Desktop/.workspace2.nosync/OctoAgent/.claude/worktrees/F150-cloudflare/octoagent/apps/gateway/src LITELLM_LOCAL_MODEL_COST_MAP=True uv run --project . --no-sync python -m pytest -q -rA tests/gate/test_runtime_architecture.py::TestManifestIntegrity::test_f150_scope_allows_exact_web_access_contract_and_rejects_sibling_or_ios_drift",
+  "exit_code": 1,
+  "feature_id": "F150",
+  "finished_utc": "2026-07-24T11:50:27Z",
+  "phase": "RED",
+  "started_utc": "2026-07-24T11:50:25Z",
+  "task_id": "T001",
+  "version": 1
+}

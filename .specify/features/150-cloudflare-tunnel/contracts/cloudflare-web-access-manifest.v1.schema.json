@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://octoagent.local/contracts/cloudflare-web-access-manifest.v1.schema.json",
+  "title": "OctoAgent Cloudflare Web Access Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "hostname",
+    "access_team_domain",
+    "access_audience",
+    "tunnel_id",
+    "origin_url",
+    "cloudflared_config_path"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "hostname": {
+      "type": "string",
+      "pattern": "^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$"
+    },
+    "access_team_domain": {
+      "type": "string",
+      "pattern": "^https://[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.cloudflareaccess\\.com$"
+    },
+    "access_audience": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256,
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "tunnel_id": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "origin_url": {
+      "type": "string",
+      "pattern": "^http://127\\.0\\.0\\.1:[1-9][0-9]{0,4}$"
+    },
+    "cloudflared_config_path": {
+      "type": "string",
+      "minLength": 1
+    }
+  }
+}

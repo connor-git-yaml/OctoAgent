@@ -484,24 +484,53 @@ Watchdog 作为 kernel 内部组件，监控 Task 执行健康度：
   `octo service install --keep-awake`（用户级 caffeinate 伴随，零 sudo，
   合盖睡眠软件挡不住——诚实边界）。
 
-#### 12.5.7 手机安全远程触达（F150 Cloudflare Tunnel，M11）
+#### 12.5.7 电脑 Web 安全远程触达与 iOS 传输地基（F150 Cloudflare Tunnel，M11）
 
-> F150 规划以 Cloudflare named tunnel + Access 提供唯一远程 Web 入口。当前代码尚未交付该能力；现阶段只支持主机本地 loopback 使用。详见 `docs/codebase-architecture/remote-access.md`。
+> Cloudflare named tunnel 是唯一远程网络基础设施。F150 以 Access 提供电脑 Web
+> 入口；手机产品只走 F153+ 原生 iOS App。当前代码已具备本机 loopback、Web
+> Access 安全合同与只读部署诊断；production live 与提交前验证均已通过，尚待
+> stable commit。详见
+> `docs/codebase-architecture/remote-access.md`。
 
-**目标部署形态**：
+**F150 电脑 Web 目标部署形态**：
 
 1. **常驻服务在线**：`octo service install` 托管 Gateway，确认 `octo service status` 健康。
 2. **正式 tunnel**：使用官方 `cloudflared` service + named tunnel，ingress 只回源 `127.0.0.1:<port>`。
 3. **Access 全站保护**：Access application 覆盖 SPA、API 与 SSE；Gateway 在 origin 再验证 Access JWT。
-4. **浏览器会话**：用户在普通浏览器完成 Access 登录；Gateway 验证 JWT 与 owner identity，直接复用 Access application session，不签发第二套 Octo Cookie。
+4. **电脑浏览器会话**：用户在电脑标准浏览器完成 Access 登录；Gateway 验证 JWT 与 owner identity，直接复用 Access application session，不签发第二套 Octo Cookie。
 5. **验证**：真实 named tunnel 下完成 SPA、REST、SSE 流式、Access 登出/过期与重新认证测试，证据中不得出现 secret。
+
+**最小 cloudflared 配置形状**（占位符必须替换成部署者自己的事实，不是项目默认值）：
+
+```yaml
+tunnel: <TUNNEL_UUID>
+credentials-file: <ABSOLUTE_PATH_TO_CLOUDFLARED_CREDENTIAL_JSON>
+ingress:
+  - hostname: <PERSONAL_DEPLOYMENT_HOSTNAME>
+    service: http://127.0.0.1:<GATEWAY_PORT>
+  - service: http_status:404
+```
+
+- `credentials-file` 只引用官方本机凭证文件；Octo 不读取或保存其内容。
+- 禁止 inline `token` / `credentials` / `service-token`，也禁止 `url` quick tunnel。
+- Access hostname/audience 由 F150 manifest 声明，不与 tunnel YAML 混成第二事实源。
+- doctor 只消费显式配置、Access 与 service facts：要求 named tunnel、loopback
+  origin、catch-all 404、hostname/audience 一致，以及系统 service
+  `{installed=true,running=true}`；检查本身零外部写入。
+- 每位用户的真实域名不同。`maojiwang.work` 仅可用于用户个人部署，不得硬编码为
+  OctoAgent 的产品域名、默认 hostname 或测试 oracle。
 
 **关键约束 / 红线**：
 
 - Gateway 始终绑定 `127.0.0.1`，不得为远程访问改绑 `0.0.0.0`。
+- Gateway 生产入口必须以 `proxy_headers=False` 启动 Uvicorn，安全判定只信真实
+  TCP loopback peer；不得让 `X-Forwarded-For` 重写 ASGI `client`，代理头只是不可信 marker。
 - 禁止 quick tunnel、临时前台进程和匿名公开链接。
-- 手机不保存 bearer token 或 Cloudflare service token，也不要求安装额外网络客户端。
-- F150 不新增配对码、remote session 或 browser device 数据表；原生设备注册统一归 F153。
+- 电脑 Web 不保存 bearer token 或 Cloudflare service token。
+- F150 不新增 Web 配对码、remote session 或 browser device 数据表；该约束不适用于原生 iOS device identity。
+- 手机 Safari/WebView 不作为产品入口。原生 iOS 必须复用同一 named tunnel 基础设施，但其 edge route 与设备身份由 F153 真机 spike 决定。
+- iOS App 禁止内置 Cloudflare service token；F153 必须支持设备密钥、短期凭证、轮换和单设备撤销。
+- F153 方案通过前不得启用 mobile route 或 Access Bypass，也不得把 Web Cookie 解释成设备 proof。
 - Cloudflare 在边缘终止 TLS，产品文案不得宣称设备间端到端加密。
 - 配置失败保持本地 loopback 可恢复，不降低认证强度。
 
@@ -689,7 +718,7 @@ Gateway 的生产与受管服务入口统一为 `python -m octoagent.gateway`。
   配置稳定映射为 `GATEWAY_RUNTIME_CONFIG_INVALID` / exit 78；
 - 已有安全暴露拒绝保持 `GATEWAY_SECURITY_CONFIG_INVALID` / exit 78；
 - 两类失败均发生在 Uvicorn 启动前；成功时 Uvicorn 接收同一 app instance 与解析后的
-  exact host/port；
+  exact host/port，并以 `proxy_headers=False` 保留真实 TCP peer；
 - 真正的运行期 composition failure 继续由 lifespan fail closed，不与静态预检混合。
 
 受管 descriptor 的普通 load/start/restart 是只读操作：canonical、legacy、invalid schema

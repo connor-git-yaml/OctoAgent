@@ -49,6 +49,7 @@ DOCUMENTATION_AUTHORITY_ORACLE = "F151_DOCUMENTATION_AUTHORITY_DRIFT"
 DEPENDENCY_SELECTOR_ORACLE = "F151_DEPENDENCY_SELECTOR_SEMANTIC_RESOLVER_MISSING"
 REPOSITORY_COMPLEXITY_ORACLE = "F151_REPOSITORY_COMPLEXITY_SNAPSHOT_NOT_INSTALLED"
 ATOMIC_SNAPSHOT_LIFECYCLE_ORACLE = "F151_ATOMIC_SNAPSHOT_LIFECYCLE_MISSING"
+F150_AUTHORITY_ORACLE = "F150_AUTHORITY_SCOPE_MISSING"
 REPOSITORY_COMPLEXITY_SNAPSHOT = REPO_ROOT / "repo-scripts/runtime-architecture-ceiling.v1.json"
 FORMAL_OFFLINE_ENV_KEY = "LITELLM_LOCAL_MODEL_COST_MAP"
 FORMAL_ENV_ORDER = ("PYTHONNOUSERSITE", "PYTHONPATH", FORMAL_OFFLINE_ENV_KEY)
@@ -267,6 +268,303 @@ def _seed_repo(tmp_path: Path) -> Path:
     _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "fixture baseline")
     return repo
+
+
+def _f150_authority_sources() -> dict[str, tuple[str, str]]:
+    """返回F150权威范围的基线与唯一允许实现形状。"""
+
+    return {
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py": (
+            "class FrontDoorConfig:\n"
+            '    mode = ("loopback", "bearer", "trusted_proxy")\n'
+            '    bearer_token_env = "OCTOAGENT_BEARER_TOKEN"\n'
+            "    trusted_proxy_cidrs = ()\n",
+            "class FrontDoorConfig:\n"
+            '    mode = ("loopback", "bearer", "trusted_proxy", "cloudflared")\n'
+            "    cloudflare_manifest_path = None\n"
+            "    cloudflare_owner_email = None\n"
+            '    bearer_token_env = "OCTOAGENT_BEARER_TOKEN"\n'
+            "    trusted_proxy_cidrs = ()\n\n"
+            "    def normalize_cloudflare_manifest_path(self):\n"
+            "        return self.cloudflare_manifest_path\n\n"
+            "    def normalize_cloudflare_owner_email(self):\n"
+            "        return self.cloudflare_owner_email\n\n"
+            "    def validate_mode_requirements(self):\n"
+            "        return self\n",
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/services/frontdoor_auth.py": (
+            "class FrontDoorGuard:\n"
+            "    def __init__(self, project_root):\n"
+            "        self.project_root = project_root\n\n"
+            "    def authenticate(self, request):\n"
+            '        return "legacy"\n\n'
+            "    def unrelated_policy(self):\n"
+            "        return 1\n",
+            "class FrontDoorGuard:\n"
+            "    def __init__(self, project_root, cloudflare_manifest=None):\n"
+            "        self.project_root = project_root\n"
+            "        self.cloudflare_manifest = cloudflare_manifest\n\n"
+            "    def authenticate(self, request):\n"
+            "        if self.cloudflare_manifest is not None:\n"
+            "            return self.authenticate_cloudflare_access(request)\n"
+            '        return "legacy"\n\n'
+            "    def authenticate_cloudflare_access(self, request):\n"
+            "        return request\n\n"
+            "    def unrelated_policy(self):\n"
+            "        return 1\n",
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/services/frontdoor_exposure.py": (
+            'def validate_front_door_exposure(config):\n    return config.mode == "loopback"\n',
+            "def validate_front_door_exposure(config):\n"
+            '    if config.mode == "cloudflared":\n'
+            "        return config.cloudflare_manifest_path is not None\n"
+            '    return config.mode == "loopback"\n',
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/deps.py": (
+            "def get_front_door_guard(config):\n"
+            "    return config\n\n"
+            "def require_front_door_access(request):\n"
+            "    return request\n",
+            "def get_front_door_guard(config):\n"
+            "    return config.front_door_guard()\n\n"
+            "def require_front_door_access(request):\n"
+            "    return request.state.front_door_guard.authenticate(request)\n",
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py": (
+            "class DoctorRunner:\n    def check_runtime(self):\n        return True\n",
+            "class DoctorRunner:\n"
+            "    def check_runtime(self):\n"
+            "        return True\n\n"
+            "    def check_cloudflare_web_access(self):\n"
+            "        return True\n",
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py": (
+            "def status():\n    return {}\n",
+            "def status():\n"
+            "    return {}\n\n"
+            "def remote_access_status():\n"
+            '    return {"web": "cloudflare-access"}\n',
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/services/cloudflare_web_access.py": (
+            "",
+            "class CloudflareWebAccessManifest:\n"
+            "    pass\n\n"
+            "class CloudflarePrincipal:\n"
+            "    pass\n\n"
+            "def load_cloudflare_web_access_manifest(path):\n"
+            "    return path\n\n"
+            "def classify_cloudflare_request(request):\n"
+            "    return request\n\n"
+            "def verify_cloudflare_access_jwt(token, manifest):\n"
+            "    return token, manifest\n\n"
+            "def validate_cloudflare_mutation(request, identity):\n"
+            "    return request, identity\n",
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py": (
+            "class OctoHarness:\n"
+            "    async def _bootstrap_paths(self, app):\n"
+            "        app.state.project_root = self.project_root\n"
+            "        app.state.front_door_guard = FrontDoorGuard(self.project_root)\n\n"
+            "    async def unrelated_bootstrap(self, app):\n"
+            "        app.state.unrelated = True\n",
+            "class OctoHarness:\n"
+            "    async def _bootstrap_paths(self, app):\n"
+            "        manifest = load_cloudflare_web_access_manifest(self.project_root)\n"
+            "        verifier = verify_cloudflare_access_jwt(manifest)\n"
+            "        app.state.project_root = self.project_root\n"
+            "        app.state.cloudflare_access_manifest = manifest\n"
+            "        app.state.cloudflare_access_verifier = verifier\n"
+            "        app.state.front_door_guard = FrontDoorGuard(\n"
+            "            self.project_root,\n"
+            "            cloudflare_manifest=manifest,\n"
+            "            cloudflare_verifier=verifier,\n"
+            "        )\n\n"
+            "    async def unrelated_bootstrap(self, app):\n"
+            "        app.state.unrelated = True\n",
+        ),
+        "octoagent/frontend/src/api/remote-access.ts": (
+            "",
+            "export function readRemoteAccessStatus(): string {\n"
+            '  return "cloudflare-access";\n'
+            "}\n",
+        ),
+        "octoagent/frontend/src/domains/settings/RemoteAccessSettings.tsx": (
+            "",
+            "export function RemoteAccessSettings(): string {\n"
+            '  return "Desktop Web remote access";\n'
+            "}\n",
+        ),
+    }
+
+
+def _f150_authority_repo(tmp_path: Path, *, implemented: bool) -> Path:
+    repo = _seed_repo(tmp_path)
+    for relative, sources in _f150_authority_sources().items():
+        _write(repo / relative, sources[0])
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-q", "-m", "F150 pre-implementation baseline")
+    if implemented:
+        for relative, sources in _f150_authority_sources().items():
+            _write(repo / relative, sources[1])
+    return repo
+
+
+def _f150_authority_bytes(repo: Path) -> dict[str, str]:
+    roots = (
+        repo / "octoagent/apps/gateway/src/octoagent/gateway",
+        repo / "octoagent/frontend/src",
+    )
+    paths = sorted(path for root in roots for path in root.rglob("*") if path.is_file())
+    return {
+        path.relative_to(repo).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in paths
+    }
+
+
+def _f150_mutate_config_sibling(repo: Path) -> None:
+    path = repo / "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py"
+    _write(
+        path,
+        _replace_exact(
+            path.read_text(encoding="utf-8"),
+            'bearer_token_env = "OCTOAGENT_BEARER_TOKEN"',
+            'bearer_token_env = "F150_CHANGED_LEGACY_TOKEN"',
+            expected_count=1,
+        ),
+    )
+
+
+def _f150_mutate_guard_sibling(repo: Path) -> None:
+    path = repo / "octoagent/apps/gateway/src/octoagent/gateway/services/frontdoor_auth.py"
+    _write(
+        path,
+        _replace_exact(
+            path.read_text(encoding="utf-8"),
+            "    def unrelated_policy(self):\n        return 1\n",
+            "    def unrelated_policy(self):\n        return 2\n",
+            expected_count=1,
+        ),
+    )
+
+
+def _f150_add_second_manifest_parser(repo: Path) -> None:
+    path = repo / "octoagent/apps/gateway/src/octoagent/gateway/services/cloudflare_web_access.py"
+    _write(
+        path,
+        path.read_text(encoding="utf-8") + "\ndef parse_manifest_again(raw):\n    return raw\n",
+    )
+
+
+def _f150_add_second_guard(repo: Path) -> None:
+    _write(
+        repo / "octoagent/apps/gateway/src/octoagent/gateway/services/cloudflare_mobile_guard.py",
+        "class CloudflareMobileGuard:\n    pass\n",
+    )
+
+
+def _f150_add_second_state_registry(repo: Path) -> None:
+    _write(
+        repo / "octoagent/frontend/src/domains/settings/remoteAccessState.ts",
+        'export const remoteAccessState = "duplicated";\n',
+    )
+
+
+def _f150_add_ios_route(repo: Path) -> None:
+    path = repo / "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py"
+    _write(path, path.read_text(encoding="utf-8") + "\ndef ios_mobile_route():\n    return {}\n")
+
+
+def _f150_add_access_bypass(repo: Path) -> None:
+    path = repo / "octoagent/apps/gateway/src/octoagent/gateway/services/cloudflare_web_access.py"
+    _write(path, path.read_text(encoding="utf-8") + '\nACCESS_POLICY = "Bypass"\n')
+
+
+def _f150_add_service_token(repo: Path) -> None:
+    path = repo / "octoagent/apps/gateway/src/octoagent/gateway/services/cloudflare_web_access.py"
+    _write(path, path.read_text(encoding="utf-8") + '\nSERVICE_TOKEN = "embedded"\n')
+
+
+def _f150_add_device_registry(repo: Path) -> None:
+    _write(
+        repo / "octoagent/apps/gateway/src/octoagent/gateway/services/device_registry.py",
+        "class DeviceSession:\n    pass\n",
+    )
+
+
+def _f150_add_public_bind(repo: Path) -> None:
+    path = repo / "octoagent/apps/gateway/src/octoagent/gateway/services/frontdoor_exposure.py"
+    _write(path, path.read_text(encoding="utf-8") + '\nPUBLIC_BIND = "0.0.0.0"\n')
+
+
+def _f150_add_page_state_machine(repo: Path) -> None:
+    path = repo / "octoagent/frontend/src/domains/settings/RemoteAccessSettings.tsx"
+    _write(
+        path,
+        path.read_text(encoding="utf-8")
+        + '\nexport const pageStateMachine = ["loading", "ready", "error"];\n',
+    )
+
+
+def _f150_mutate_harness_sibling(repo: Path) -> None:
+    path = repo / "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py"
+    _write(
+        path,
+        _replace_exact(
+            path.read_text(encoding="utf-8"),
+            "    async def unrelated_bootstrap(self, app):\n        app.state.unrelated = True\n",
+            "    async def unrelated_bootstrap(self, app):\n        app.state.unrelated = False\n",
+            expected_count=1,
+        ),
+    )
+
+
+def _f150_authority_reject_cases() -> tuple[tuple[str, Any], ...]:
+    return (
+        ("config sibling drift", _f150_mutate_config_sibling),
+        ("guard sibling drift", _f150_mutate_guard_sibling),
+        ("harness sibling drift", _f150_mutate_harness_sibling),
+        ("second manifest parser", _f150_add_second_manifest_parser),
+        ("second guard", _f150_add_second_guard),
+        ("second state registry", _f150_add_second_state_registry),
+        ("iOS route", _f150_add_ios_route),
+        ("Access Bypass", _f150_add_access_bypass),
+        ("embedded service token", _f150_add_service_token),
+        ("second device/session registry", _f150_add_device_registry),
+        ("unapproved public bind", _f150_add_public_bind),
+        ("F149 page state machine", _f150_add_page_state_machine),
+    )
+
+
+def _assert_f150_authority_contract(tmp_path: Path, checker: Any) -> None:
+    validator = getattr(checker, "validate_f150_implementation_scope", None)
+    if not callable(validator):
+        pytest.fail(F150_AUTHORITY_ORACLE, pytrace=False)
+    accepted = _f150_authority_repo(tmp_path / "accepted", implemented=True)
+    accepted_before = _f150_authority_bytes(accepted)
+    validator(accepted, "HEAD")
+    assert _f150_authority_bytes(accepted) == accepted_before
+    frontend_test = accepted / "octoagent/frontend/src/api/remote-access.test.ts"
+    _write(
+        frontend_test,
+        'test("remote access contract", () => expect("mobile browser").toBeTruthy());\n',
+    )
+    frontend_test_sha = _sha(frontend_test)
+    try:
+        validator(accepted, "HEAD")
+    except checker.GateFailure as exc:
+        raise AssertionError(f"frontend test module rejected: {exc}") from exc
+    assert _sha(frontend_test) == frontend_test_sha
+    for index, (label, mutate) in enumerate(_f150_authority_reject_cases()):
+        repo = _f150_authority_repo(tmp_path / f"reject-{index:02d}", implemented=True)
+        accept_bytes = _f150_authority_bytes(repo)
+        validator(repo, "HEAD")
+        assert _f150_authority_bytes(repo) == accept_bytes, f"{label}: validator wrote files"
+        mutate(repo)
+        reject_bytes = _f150_authority_bytes(repo)
+        assert reject_bytes != accept_bytes, f"{label}: no observable input delta"
+        with pytest.raises(checker.GateFailure):
+            validator(repo, "HEAD")
+        assert _f150_authority_bytes(repo) == reject_bytes, f"{label}: reject wrote files"
 
 
 def _seed_authority_documents(repo: Path) -> None:
@@ -4239,6 +4537,15 @@ class TestManifestIntegrity:
             )
         except AssertionError as exc:
             pytest.fail(f"{MANIFEST_ORACLE}: {exc}", pytrace=False)
+
+    def test_f150_scope_allows_exact_web_access_contract_and_rejects_sibling_or_ios_drift(
+        self, tmp_path: Path
+    ) -> None:
+        checker = _load_frontier_checker()
+        try:
+            _assert_f150_authority_contract(tmp_path, checker)
+        except AssertionError as exc:
+            pytest.fail(f"{F150_AUTHORITY_ORACLE}: {exc}", pytrace=False)
 
     def test_rgr_scope_manifest_ids_refs_paths_and_declared_states_are_machine_complete(
         self, tmp_path: Path

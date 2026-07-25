@@ -24,6 +24,7 @@ from octoagent.gateway.services.config.config_schema import (
 
 RAW_RUNTIME_TOMBSTONE_ORACLE = "F151_RAW_RUNTIME_TOMBSTONE_MISSING"
 RUNTIME_SCHEMA_NORMALIZATION_ORACLE = "F151_RUNTIME_SCHEMA_NORMALIZATION_MISSING"
+WEB_MANIFEST_CONTRACT_ORACLE = "F150_WEB_MANIFEST_CONTRACT_MISSING"
 
 # ---------------------------------------------------------------------------
 # 测试夹具
@@ -121,6 +122,94 @@ def test_front_door_config_rejects_invalid_cidr() -> None:
         FrontDoorConfig(
             mode="trusted_proxy",
             trusted_proxy_cidrs=["not-a-cidr"],
+        )
+
+
+def _cloudflared_front_door(**overrides: object) -> FrontDoorConfig:
+    values: dict[str, object] = {
+        "mode": "cloudflared",
+        "cloudflare_manifest_path": ".octoagent/cloudflare-web-access.json",
+        "cloudflare_owner_email": " Owner@Example.COM ",
+    }
+    values.update(overrides)
+    try:
+        return FrontDoorConfig(**values)  # type: ignore[arg-type]
+    except Exception as exc:
+        pytest.fail(
+            f"{WEB_MANIFEST_CONTRACT_ORACLE}: valid cloudflared config rejected: {exc}",
+            pytrace=False,
+        )
+
+
+def test_front_door_cloudflared_requires_manifest_and_normalizes_owner() -> None:
+    config = _cloudflared_front_door()
+
+    if (
+        config.mode != "cloudflared"
+        or config.cloudflare_manifest_path != ".octoagent/cloudflare-web-access.json"
+        or config.cloudflare_owner_email != "owner@example.com"
+    ):
+        pytest.fail(
+            f"{WEB_MANIFEST_CONTRACT_ORACLE}: cloudflared fields are not canonical",
+            pytrace=False,
+        )
+
+    for field_name in ("cloudflare_manifest_path", "cloudflare_owner_email"):
+        try:
+            FrontDoorConfig(
+                mode="cloudflared",
+                cloudflare_manifest_path=(
+                    "   "
+                    if field_name == "cloudflare_manifest_path"
+                    else ".octoagent/cloudflare-web-access.json"
+                ),
+                cloudflare_owner_email=(
+                    "   " if field_name == "cloudflare_owner_email" else "owner@example.com"
+                ),
+            )
+        except Exception:
+            continue
+        pytest.fail(
+            f"{WEB_MANIFEST_CONTRACT_ORACLE}: missing {field_name} accepted",
+            pytrace=False,
+        )
+
+
+def test_front_door_cloudflared_rejects_invalid_owner_email() -> None:
+    _cloudflared_front_door()
+
+    for invalid in ("owner", "owner@", "@example.com", "owner @example.com"):
+        try:
+            FrontDoorConfig(
+                mode="cloudflared",
+                cloudflare_manifest_path=".octoagent/cloudflare-web-access.json",
+                cloudflare_owner_email=invalid,
+            )
+        except Exception:
+            continue
+        pytest.fail(
+            f"{WEB_MANIFEST_CONTRACT_ORACLE}: invalid owner email accepted",
+            pytrace=False,
+        )
+
+
+def test_front_door_schema_exposes_cloudflared_without_changing_local_defaults() -> None:
+    cloudflared = _cloudflared_front_door()
+    local = FrontDoorConfig()
+    schema = FrontDoorConfig.model_json_schema()
+    mode_schema = schema["properties"]["mode"]
+
+    if (
+        local.mode != "loopback"
+        or local.cloudflare_manifest_path != ""
+        or local.cloudflare_owner_email != ""
+        or "cloudflared" not in mode_schema["enum"]
+        or cloudflared.cloudflare_manifest_path != ".octoagent/cloudflare-web-access.json"
+        or cloudflared.cloudflare_owner_email != "owner@example.com"
+    ):
+        pytest.fail(
+            f"{WEB_MANIFEST_CONTRACT_ORACLE}: schema/default compatibility drift",
+            pytrace=False,
         )
 
 

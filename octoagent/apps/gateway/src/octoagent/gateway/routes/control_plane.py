@@ -2,11 +2,17 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from octoagent.core.models import ActionRequestEnvelope, ControlPlaneActionStatus
 
 from ..deps import get_control_plane_service
+from ..services.cloudflare_web_access import (
+    _derive_remote_access_status,
+    _RemoteAccessProbeFacts,
+)
+from ..services.config.config_schema import FrontDoorConfig
+from ..services.config.config_wizard import load_config
 
 router = APIRouter()
 
@@ -22,6 +28,53 @@ async def get_control_snapshot(
 @router.get("/api/control/resources/config")
 async def get_control_config(control_plane=Depends(get_control_plane_service)):
     return (await control_plane.get_config_schema()).model_dump(mode="json", by_alias=True)
+
+
+@router.get("/api/control/resources/remote-access")
+async def remote_access_status(request: Request) -> dict[str, object]:
+    """返回电脑Web远程访问的只读瞬时投影。"""
+
+    front_door = getattr(request.app.state, "cloudflare_access_front_door", None)
+    if front_door is None:
+        config = load_config(request.app.state.project_root)
+        front_door = config.front_door if config is not None else FrontDoorConfig()
+    manifest = getattr(request.app.state, "cloudflare_access_manifest", None)
+    status = _derive_remote_access_status(
+        front_door=front_door,
+        manifest=manifest,
+        probe=_RemoteAccessProbeFacts(
+            service_ready=getattr(
+                request.app.state,
+                "cloudflare_access_service_ready",
+                None,
+            ),
+            origin_ready=getattr(
+                request.app.state,
+                "cloudflare_access_origin_ready",
+                None,
+            ),
+            access_ready=getattr(
+                request.app.state,
+                "cloudflare_access_access_ready",
+                None,
+            ),
+            last_verified_at=getattr(
+                request.app.state,
+                "cloudflare_access_last_verified_at",
+                None,
+            ),
+        ),
+    ).model_dump(mode="json")
+    desktop_web_url = None
+    access_logout_url = None
+    if front_door.mode == "cloudflared" and manifest is not None:
+        desktop_web_url = f"https://{manifest.hostname}"
+        access_logout_url = f"{desktop_web_url}/cdn-cgi/access/logout"
+    return {
+        **status,
+        "desktop_web_url": desktop_web_url,
+        "access_logout_url": access_logout_url,
+    }
 
 
 @router.get("/api/control/resources/project-selector")

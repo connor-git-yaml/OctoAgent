@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import importlib
 import json
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 import pytest
 import pytest_asyncio
+from fastapi import Request
 from httpx import ASGITransport, AsyncClient
 from octoagent.gateway.services.frontdoor_auth import _PROXY_HINT_HEADERS
 
@@ -191,6 +196,308 @@ _PROXY_HEADER_SAMPLES = {
     "x-real-ip": "203.0.113.10",
 }
 
+REQUEST_CLASSIFIER_ORACLE = "F150_REQUEST_CLASSIFIER_MISSING"
+WEB_GUARD_ORACLE = "F150_WEB_ORIGIN_GUARD_MISSING"
+
+
+def _cloudflare_classifier():
+    try:
+        module = importlib.import_module("octoagent.gateway.services.cloudflare_web_access")
+        classifier = module.classify_cloudflare_request
+    except (AttributeError, ImportError, ModuleNotFoundError):
+        pytest.fail(
+            f"{REQUEST_CLASSIFIER_ORACLE}: classifier public seam is absent",
+            pytrace=False,
+        )
+    if not callable(classifier):
+        pytest.fail(
+            f"{REQUEST_CLASSIFIER_ORACLE}: classifier public seam is invalid",
+            pytrace=False,
+        )
+    return classifier
+
+
+def _assert_classification(
+    client_host: str,
+    headers: list[tuple[str, str]],
+    expected: str,
+) -> None:
+    classifier = _cloudflare_classifier()
+    try:
+        actual = classifier(client_host, headers)
+    except Exception as exc:
+        pytest.fail(
+            f"{REQUEST_CLASSIFIER_ORACLE}: valid request rejected: {type(exc).__name__}",
+            pytrace=False,
+        )
+    if actual != expected:
+        pytest.fail(
+            f"{REQUEST_CLASSIFIER_ORACLE}: expected {expected}, observed {actual}",
+            pytrace=False,
+        )
+
+
+class TestCloudflareRequestClassifier:
+    @pytest.mark.parametrize(
+        "client_host",
+        ["127.0.0.1", "127.0.0.8", "::1", "localhost", "testclient"],
+    )
+    def test_loopback_without_marker_is_direct_local(self, client_host: str) -> None:
+        _assert_classification(client_host, [], "direct_local")
+
+    @pytest.mark.parametrize(
+        "header_name",
+        [
+            "Cf-Access-Jwt-Assertion",
+            "cf-access-authenticated-user-email",
+            "CF-Ray",
+            "Forwarded",
+            "X-Forwarded-For",
+            "x-forwarded-proto",
+        ],
+    )
+    def test_any_case_insensitive_marker_forces_cloudflare_access(
+        self,
+        header_name: str,
+    ) -> None:
+        _assert_classification(
+            "127.0.0.1",
+            [(header_name, "")],
+            "cloudflare_access",
+        )
+
+    def test_duplicate_marker_names_still_force_cloudflare_access(self) -> None:
+        _assert_classification(
+            "127.0.0.1",
+            [
+                ("Cf-Access-Jwt-Assertion", "first"),
+                ("cf-access-jwt-assertion", "second"),
+            ],
+            "cloudflare_access",
+        )
+
+    @pytest.mark.parametrize("with_marker", [False, True])
+    def test_non_loopback_peer_is_rejected(self, with_marker: bool) -> None:
+        _assert_classification("127.0.0.1", [], "direct_local")
+        classifier = _cloudflare_classifier()
+        headers = [("CF-Ray", "ray-id")] if with_marker else []
+        try:
+            classifier("203.0.113.10", headers)
+        except Exception:
+            return
+        pytest.fail(
+            f"{REQUEST_CLASSIFIER_ORACLE}: non-loopback peer accepted",
+            pytrace=False,
+        )
+
+
+def _fail_web_guard(reason: str) -> None:
+    pytest.fail(f"{WEB_GUARD_ORACLE}: {reason}", pytrace=False)
+
+
+class _StubAccessVerifier:
+    def __init__(self, principal: Any) -> None:
+        self.principal = principal
+        self.calls: list[tuple[tuple[str, str], ...]] = []
+        self.reject = False
+
+    async def __call__(self, headers: Sequence[tuple[str, str]]) -> Any:
+        captured = tuple(headers)
+        self.calls.append(captured)
+        tokens = [value for name, value in captured if name.casefold() == "cf-access-jwt-assertion"]
+        if self.reject or tokens != ["valid-jwt"]:
+            raise ValueError("Cloudflare Access identity rejected")
+        return self.principal
+
+
+def _cloudflare_guard_app(
+    tmp_path: Path,
+) -> tuple[Any, _StubAccessVerifier]:
+    try:
+        from fastapi import Depends, FastAPI
+        from octoagent.gateway.services.cloudflare_web_access import (
+            CloudflarePrincipal,
+            CloudflareWebAccessManifest,
+        )
+        from octoagent.gateway.services.config.config_schema import FrontDoorConfig
+        from octoagent.gateway.services.frontdoor_auth import FrontDoorGuard
+
+        authenticate = FrontDoorGuard.authenticate
+        authenticate_cloudflare = FrontDoorGuard.authenticate_cloudflare_access
+    except (AttributeError, ImportError, ModuleNotFoundError):
+        _fail_web_guard("single FrontDoorGuard cloudflared seam is absent")
+    if not callable(authenticate) or not callable(authenticate_cloudflare):
+        _fail_web_guard("FrontDoorGuard cloudflared seam has the wrong shape")
+
+    manifest = CloudflareWebAccessManifest.model_validate(
+        {
+            "version": 1,
+            "hostname": "octo.example.com",
+            "access_team_domain": "https://octo.cloudflareaccess.com",
+            "access_audience": "audience_ABC-123",
+            "tunnel_id": "79441b64-7342-4cb4-a651-9a56d278875b",
+            "origin_url": "http://127.0.0.1:8000",
+            "cloudflared_config_path": ".cloudflared/config.yml",
+        }
+    )
+    now = datetime(2026, 7, 24, 8, 0, tzinfo=UTC)
+    principal = CloudflarePrincipal(
+        subject="access-user-123",
+        email="owner@example.com",
+        issued_at=now,
+        expires_at=now + timedelta(minutes=5),
+        key_id="key-1",
+    )
+    verifier = _StubAccessVerifier(principal)
+    try:
+        guard = FrontDoorGuard(
+            tmp_path,
+            cloudflare_manifest=manifest,
+            cloudflare_verifier=verifier,
+        )
+    except TypeError:
+        _fail_web_guard("FrontDoorGuard cannot receive the one verifier instance")
+    config = FrontDoorConfig(
+        mode="cloudflared",
+        cloudflare_manifest_path=".octoagent/cloudflare-web-access.json",
+        cloudflare_owner_email="owner@example.com",
+    )
+    guard._load_front_door_config = lambda: config
+    app = FastAPI(dependencies=[Depends(guard.authenticate)])
+
+    @app.api_route("/api/probe", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
+    async def probe(request: Request) -> dict[str, object]:
+        return {
+            "ok": True,
+            "state_keys": sorted(request.scope.get("state", {})),
+        }
+
+    @app.get("/api/stream/probe")
+    async def stream_probe() -> dict[str, bool]:
+        return {"ok": True}
+
+    return app, verifier
+
+
+def _access_headers(**extra: str) -> dict[str, str]:
+    return {
+        "Cf-Access-Jwt-Assertion": "valid-jwt",
+        "CF-Ray": "ray-id",
+        **extra,
+    }
+
+
+class TestCloudflareWebGuard:
+    async def test_direct_local_without_markers_keeps_existing_local_access(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        app, verifier = _cloudflare_guard_app(tmp_path)
+        async with _client(app) as client:
+            get_response = await client.get("/api/probe")
+            post_response = await client.post("/api/probe", json={"local": True})
+        assert get_response.status_code == 200
+        assert post_response.status_code == 200
+        assert verifier.calls == []
+
+    async def test_http_sse_and_reconnect_use_the_same_verifier(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        app, verifier = _cloudflare_guard_app(tmp_path)
+        async with _client(app) as client:
+            assert (await client.get("/api/probe", headers=_access_headers())).status_code == 200
+            assert (
+                await client.get("/api/stream/probe", headers=_access_headers())
+            ).status_code == 200
+            assert (
+                await client.get("/api/stream/probe", headers=_access_headers())
+            ).status_code == 200
+        assert len(verifier.calls) == 3
+
+    async def test_marker_without_valid_jwt_is_never_trusted(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        app, verifier = _cloudflare_guard_app(tmp_path)
+        async with _client(app) as client:
+            response = await client.get(
+                "/api/probe",
+                headers={
+                    "CF-Ray": "ray-id",
+                    "Cf-Access-Authenticated-User-Email": "owner@example.com",
+                },
+            )
+        assert response.status_code == 401
+        assert response.json()["detail"]["code"] == "FRONT_DOOR_ACCESS_INVALID"
+        assert len(verifier.calls) == 1
+
+    async def test_non_loopback_peer_is_rejected_before_verification(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        app, verifier = _cloudflare_guard_app(tmp_path)
+        async with _client(app, client_ip="203.0.113.10") as client:
+            response = await client.get("/api/probe", headers=_access_headers())
+        assert response.status_code == 403
+        assert response.json()["detail"]["code"] == "FRONT_DOOR_ORIGIN_NOT_LOOPBACK"
+        assert verifier.calls == []
+
+    async def test_expired_or_revoked_access_fails_closed_without_claim_leak(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        app, verifier = _cloudflare_guard_app(tmp_path)
+        verifier.reject = True
+        async with _client(app) as client:
+            response = await client.get("/api/probe", headers=_access_headers())
+        assert response.status_code == 401
+        payload = response.json()
+        assert payload["detail"]["code"] == "FRONT_DOOR_ACCESS_INVALID"
+        assert "owner@example.com" not in response.text
+        assert "valid-jwt" not in response.text
+
+    async def test_remote_mutation_requires_exact_host_origin_and_json(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        app, verifier = _cloudflare_guard_app(tmp_path)
+        valid_headers = _access_headers(
+            Host="octo.example.com:443",
+            Origin="https://octo.example.com",
+            **{"Content-Type": "application/json; charset=utf-8"},
+        )
+        async with _client(app) as client:
+            accepted = await client.post("/api/probe", headers=valid_headers, json={"ok": True})
+            wrong_origin = await client.post(
+                "/api/probe",
+                headers={**valid_headers, "Origin": "https://evil.example.com"},
+                json={"ok": True},
+            )
+            form = await client.post(
+                "/api/probe",
+                headers={**valid_headers, "Content-Type": "application/x-www-form-urlencoded"},
+                content="ok=true",
+            )
+        assert accepted.status_code == 200
+        assert wrong_origin.status_code == 403
+        assert wrong_origin.json()["detail"]["code"] == "FRONT_DOOR_MUTATION_REJECTED"
+        assert form.status_code == 415
+        assert form.json()["detail"]["code"] == "FRONT_DOOR_MUTATION_MEDIA_TYPE_INVALID"
+        assert len(verifier.calls) == 3
+
+    async def test_principal_is_request_scoped_and_not_returned_as_session_state(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        app, _ = _cloudflare_guard_app(tmp_path)
+        async with _client(app) as client:
+            response = await client.get("/api/probe", headers=_access_headers())
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["state_keys"] == ["cloudflare_principal"]
+        assert not {"session", "device", "csrf_token"} & set(payload)
+
 
 def _sample_header(name: str) -> dict[str, str]:
     return {name: _PROXY_HEADER_SAMPLES.get(name, "attest-matrix-sample")}
@@ -290,9 +597,7 @@ class TestFrontDoorModeHeaderMatrix:
 
     # ---- A4：trusted_proxy 源 IP 不在 CIDR ----
 
-    async def test_trusted_proxy_rejects_client_outside_cidr(
-        self, guard_app, monkeypatch
-    ) -> None:
+    async def test_trusted_proxy_rejects_client_outside_cidr(self, guard_app, monkeypatch) -> None:
         monkeypatch.setenv("OCTOAGENT_FRONTDOOR_MODE", "trusted_proxy")
         monkeypatch.setenv("OCTOAGENT_TRUSTED_PROXY_TOKEN", "proxy-secret")
         monkeypatch.setenv("OCTOAGENT_TRUSTED_PROXY_CIDRS", "10.0.0.0/24")
@@ -490,9 +795,7 @@ class TestFrontDoorRateLimitMatrix:
 
     # ---- AC-R4：lockout 到期恢复（注入 clock 无 sleep）----
 
-    async def test_lockout_expires_with_clock(
-        self, rate_limit_guard_app, monkeypatch
-    ) -> None:
+    async def test_lockout_expires_with_clock(self, rate_limit_guard_app, monkeypatch) -> None:
         from octoagent.gateway.services.frontdoor_auth import _FailureRateLimiter
 
         app, guard = rate_limit_guard_app
@@ -560,17 +863,13 @@ class TestFrontDoorRateLimitMatrix:
             # 归 trusted_proxy 指引而非 bearer token 输入框）
             assert resp.json()["detail"]["code"] == "FRONT_DOOR_PROXY_RATE_LIMITED"
 
-            ok = await client.get(
-                "/api/probe", headers={"X-OctoAgent-Proxy-Auth": "proxy-secret"}
-            )
+            ok = await client.get("/api/probe", headers={"X-OctoAgent-Proxy-Auth": "proxy-secret"})
 
         assert ok.status_code == 200
 
     # ---- AC-R7：loopback 模式不接限流（无凭证可爆破）----
 
-    async def test_loopback_mode_never_upgrades_to_429(
-        self, rate_limit_guard_app
-    ) -> None:
+    async def test_loopback_mode_never_upgrades_to_429(self, rate_limit_guard_app) -> None:
         app, _guard = rate_limit_guard_app
 
         async with _client(app, client_ip="203.0.113.10") as client:
@@ -581,9 +880,7 @@ class TestFrontDoorRateLimitMatrix:
 
     # ---- AC-R8：双源桶隔离 ----
 
-    async def test_sources_are_isolated(
-        self, rate_limit_guard_app, monkeypatch
-    ) -> None:
+    async def test_sources_are_isolated(self, rate_limit_guard_app, monkeypatch) -> None:
         app, _guard = rate_limit_guard_app
         _set_bearer_env(monkeypatch)
 

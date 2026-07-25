@@ -402,12 +402,40 @@ class OctoHarness:
             _build_update_status_store,
             _persist_runtime_state,
             _warn_duplicate_instance_roots,
+            load_config,
+        )
+        from ..services.cloudflare_web_access import (
+            _fetch_cloudflare_jwks,
+            load_cloudflare_web_access_manifest,
+            verify_cloudflare_access_jwt,
         )
 
         project_root = self._project_root
         _warn_duplicate_instance_roots(project_root)  # Feature 082 P4
         app.state.project_root = project_root
-        app.state.front_door_guard = FrontDoorGuard(project_root)
+        config = load_config(project_root)
+        if config is not None and config.front_door.mode == "cloudflared":
+            manifest = load_cloudflare_web_access_manifest(
+                project_root,
+                Path(config.front_door.cloudflare_manifest_path),
+            )
+            verifier = verify_cloudflare_access_jwt(
+                manifest=manifest,
+                owner_email=config.front_door.cloudflare_owner_email,
+                fetch_jwks=_fetch_cloudflare_jwks,
+                clock=_utc_now,
+            )
+            app.state.cloudflare_access_front_door = config.front_door
+            app.state.cloudflare_access_manifest = manifest
+            app.state.cloudflare_access_verifier = verifier
+            app.state.front_door_guard = FrontDoorGuard(
+                project_root,
+                cloudflare_front_door=config.front_door,
+                cloudflare_manifest=manifest,
+                cloudflare_verifier=verifier,
+            )
+        else:
+            app.state.front_door_guard = FrontDoorGuard(project_root)
         app.state.update_status_store = _build_update_status_store(project_root)
         app.state.update_service = _build_update_service(
             project_root,

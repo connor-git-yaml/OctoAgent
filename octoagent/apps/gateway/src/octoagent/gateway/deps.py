@@ -81,13 +81,24 @@ def get_front_door_guard(request: Request):
     """从 app.state 获取 FrontDoorGuard。"""
     guard = getattr(request.app.state, "front_door_guard", None)
     if guard is None:
-        guard = FrontDoorGuard(_get_project_root(request))
+        guard = FrontDoorGuard(
+            _get_project_root(request),
+            cloudflare_front_door=getattr(
+                request.app.state,
+                "cloudflare_access_front_door",
+                None,
+            ),
+            cloudflare_manifest=getattr(request.app.state, "cloudflare_access_manifest", None),
+            cloudflare_verifier=getattr(request.app.state, "cloudflare_access_verifier", None),
+        )
         request.app.state.front_door_guard = guard
     return guard
 
 
 def _validate_request_front_door_config(request: Request) -> None:
     """在进入 owner-facing workload 前拒绝运行期已损坏的配置源。"""
+    if getattr(request.app.state, "cloudflare_access_front_door", None) is not None:
+        return
     try:
         load_config(_get_project_root(request))
     except ValueError as exc:
@@ -107,7 +118,7 @@ async def require_front_door_access(
 ) -> None:
     """统一校验 owner-facing API 的 front-door 访问边界。"""
     _validate_request_front_door_config(request)
-    await guard.authorize(request)
+    await guard.authenticate(request)
 
 
 def get_skill_discovery(request: Request):

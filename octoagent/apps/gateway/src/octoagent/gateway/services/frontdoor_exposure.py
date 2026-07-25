@@ -166,6 +166,15 @@ def validate_front_door_exposure(host: str, mode: str) -> FrontDoorExposureVerdi
             ),
         )
 
+    if mode == "cloudflared":
+        return FrontDoorExposureVerdict(
+            verdict="reject",
+            host=host,
+            mode=mode,
+            reason=(f"cloudflared回源要求Gateway只绑定loopback，当前绑定为{host}"),
+            fix_hint=("改回 OCTOAGENT_HOST=127.0.0.1；Cloudflare Tunnel只应连接本机回源端口"),
+        )
+
     # 非 loopback + bearer/trusted_proxy：暴露面大但有认证 → 强警告放行
     return FrontDoorExposureVerdict(
         verdict="warn",

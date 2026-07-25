@@ -317,9 +317,17 @@ class MemoryConfig(BaseModel):
 class FrontDoorConfig(BaseModel):
     """Gateway front-door 边界配置。"""
 
-    mode: Literal["loopback", "bearer", "trusted_proxy"] = Field(
+    mode: Literal["loopback", "bearer", "trusted_proxy", "cloudflared"] = Field(
         default="loopback",
         description="owner-facing API 的 front-door 模式",
+    )
+    cloudflare_manifest_path: str = Field(
+        default="",
+        description="cloudflared 模式下相对项目根目录的Web Access manifest路径",
+    )
+    cloudflare_owner_email: str = Field(
+        default="",
+        description="cloudflared 模式下唯一owner邮箱（只存规范化身份，不存凭证）",
     )
     bearer_token_env: str = Field(
         default="OCTOAGENT_FRONTDOOR_TOKEN",
@@ -347,6 +355,26 @@ class FrontDoorConfig(BaseModel):
         normalized = value.strip()
         if not normalized:
             raise ValueError("trusted_proxy_header 不能为空")
+        return normalized
+
+    @field_validator("cloudflare_manifest_path")
+    @classmethod
+    def normalize_cloudflare_manifest_path(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("cloudflare_owner_email")
+    @classmethod
+    def normalize_cloudflare_owner_email(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        local, separator, domain = normalized.partition("@")
+        if normalized and (
+            separator != "@"
+            or not local
+            or not domain
+            or "." not in domain
+            or any(character.isspace() for character in normalized)
+        ):
+            raise ValueError("cloudflare_owner_email 必须是有效邮箱")
         return normalized
 
     @field_validator("trusted_proxy_cidrs", mode="before")
@@ -378,6 +406,11 @@ class FrontDoorConfig(BaseModel):
     def validate_mode_requirements(self) -> FrontDoorConfig:
         if self.mode == "trusted_proxy" and not self.trusted_proxy_cidrs:
             raise ValueError("front_door.mode=trusted_proxy 时必须提供 trusted_proxy_cidrs")
+        if self.mode == "cloudflared":
+            if not self.cloudflare_manifest_path:
+                raise ValueError("front_door.mode=cloudflared 时必须提供 cloudflare_manifest_path")
+            if not self.cloudflare_owner_email:
+                raise ValueError("front_door.mode=cloudflared 时必须提供 cloudflare_owner_email")
         return self
 
 

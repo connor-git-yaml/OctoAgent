@@ -8,7 +8,7 @@ import os
 import secrets
 import time
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import structlog
@@ -180,11 +180,97 @@ def _http_error(
 class FrontDoorGuard:
     """统一保护 owner-facing API。"""
 
-    def __init__(self, project_root: Path) -> None:
+    def __init__(
+        self,
+        project_root: Path,
+        *,
+        cloudflare_front_door: FrontDoorConfig | None = None,
+        cloudflare_manifest: object | None = None,
+        cloudflare_verifier: Callable[..., Awaitable[object]] | None = None,
+    ) -> None:
         self._project_root = project_root
+        self._cloudflare_front_door = cloudflare_front_door
+        self._cloudflare_manifest = cloudflare_manifest
+        self._cloudflare_verifier = cloudflare_verifier
         # F134：guard 经 deps.get_front_door_guard 缓存到 app.state（单例），
         # 内存态限流状态随 app 生命周期存活。
         self._rate_limiter = _FailureRateLimiter()
+
+    async def authenticate(self, request: Request) -> None:
+        """在唯一Guard内分流既有三mode与Cloudflare Web Access。"""
+
+        config = self._cloudflare_front_door or self._load_front_door_config()
+        if config.mode == "cloudflared":
+            await self.authenticate_cloudflare_access(request, config)
+            return
+        await self.authorize(request)
+
+    async def authenticate_cloudflare_access(
+        self,
+        request: Request,
+        config: FrontDoorConfig,
+    ) -> None:
+        """验证loopback回源、Access JWT及远程browser mutation。"""
+
+        from octoagent.gateway.services.cloudflare_web_access import (
+            classify_cloudflare_request,
+            validate_cloudflare_mutation,
+        )
+
+        client_host = self._resolve_client_host(request)
+        headers = [
+            (name.decode("latin-1"), value.decode("latin-1")) for name, value in request.headers.raw
+        ]
+        try:
+            classification = classify_cloudflare_request(client_host, headers)
+        except ValueError as exc:
+            raise _http_error(
+                403,
+                "FRONT_DOOR_ORIGIN_NOT_LOOPBACK",
+                "Cloudflare Tunnel回源请求必须来自本机loopback。",
+            ) from exc
+        if classification == "direct_local":
+            return
+        if self._cloudflare_manifest is None or self._cloudflare_verifier is None:
+            raise _http_error(
+                503,
+                "FRONT_DOOR_CLOUDFLARE_NOT_READY",
+                "Cloudflare Web Access尚未完成进程内组装。",
+            )
+        try:
+            principal = await self._cloudflare_verifier(headers)
+        except ValueError as exc:
+            raise self._reject_invalid_credential(
+                client_host,
+                status_code=401,
+                code="FRONT_DOOR_ACCESS_INVALID",
+                message="Cloudflare Access身份无效。",
+                hint="请重新通过Cloudflare Access登录后重试。",
+                rate_limited_code="FRONT_DOOR_ACCESS_RATE_LIMITED",
+            ) from exc
+        try:
+            validate_cloudflare_mutation(
+                method=request.method,
+                host=request.headers.get("host"),
+                origin=request.headers.get("origin"),
+                content_type=request.headers.get("content-type"),
+                hostname=self._cloudflare_manifest.hostname,
+            )
+        except ValueError as exc:
+            reason_code = getattr(exc, "reason_code", "")
+            status_code = 415 if reason_code == "MUTATION_MEDIA_TYPE_INVALID" else 403
+            code = (
+                "FRONT_DOOR_MUTATION_MEDIA_TYPE_INVALID"
+                if status_code == 415
+                else "FRONT_DOOR_MUTATION_REJECTED"
+            )
+            raise _http_error(
+                status_code,
+                code,
+                "远程浏览器写操作未满足同源JSON合同。",
+            ) from exc
+        request.state.cloudflare_principal = principal
+        self._rate_limiter.reset(client_host)
 
     def _reject_invalid_credential(
         self,

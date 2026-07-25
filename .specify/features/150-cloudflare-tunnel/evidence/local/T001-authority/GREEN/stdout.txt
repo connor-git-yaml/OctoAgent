@@ -1,0 +1,5 @@
+.                                                                        [100%]
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED tests/gate/test_runtime_architecture.py::TestManifestIntegrity::test_f150_scope_allows_exact_web_access_contract_and_rejects_sibling_or_ios_drift
+1 passed in 4.19s

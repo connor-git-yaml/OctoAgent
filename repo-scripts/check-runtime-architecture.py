@@ -1188,7 +1188,469 @@ def _canonical_f150_tree(
     return ast.dump(tree, include_attributes=False)
 
 
+F150_AUTHORITY_PATHS = MappingProxyType(
+    {
+        "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py": (
+            "class",
+            "FrontDoorConfig",
+            frozenset(
+                {
+                    "mode",
+                    "cloudflare_manifest_path",
+                    "cloudflare_owner_email",
+                    "normalize_cloudflare_manifest_path",
+                    "normalize_cloudflare_owner_email",
+                    "validate_mode_requirements",
+                }
+            ),
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/services/frontdoor_auth.py": (
+            "class",
+            "FrontDoorGuard",
+            frozenset(
+                {
+                    "__init__",
+                    "authenticate",
+                    "authenticate_cloudflare_access",
+                }
+            ),
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/services/frontdoor_exposure.py": (
+            "module",
+            "",
+            frozenset({"validate_front_door_exposure"}),
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/deps.py": (
+            "module",
+            "",
+            frozenset(
+                {
+                    "get_front_door_guard",
+                    "_validate_request_front_door_config",
+                    "require_front_door_access",
+                }
+            ),
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py": (
+            "class",
+            "DoctorRunner",
+            frozenset({"check_cloudflare_web_access"}),
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py": (
+            "module",
+            "",
+            frozenset({"remote_access_status"}),
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/services/cloudflare_web_access.py": (
+            "new-module",
+            "",
+            frozenset(
+                {
+                    "CloudflareWebAccessManifest",
+                    "CloudflarePrincipal",
+                    "load_cloudflare_web_access_manifest",
+                    "classify_cloudflare_request",
+                    "verify_cloudflare_access_jwt",
+                    "validate_cloudflare_mutation",
+                }
+            ),
+        ),
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py": (
+            "class",
+            "OctoHarness",
+            frozenset({"_bootstrap_paths"}),
+        ),
+        "octoagent/frontend/src/api/remote-access.ts": (
+            "typescript",
+            "",
+            frozenset({"readRemoteAccessStatus"}),
+        ),
+        "octoagent/frontend/src/domains/settings/RemoteAccessSettings.tsx": (
+            "typescript",
+            "",
+            frozenset({"RemoteAccessSettings"}),
+        ),
+    }
+)
+F150_FORBIDDEN_PATTERNS = (
+    r"\bBypass\b",
+    r"service[_ -]?token",
+    r"\bios(?:[_ -]?mobile)?[_ -]?(?:route|browser|webview)\b",
+    r"\bmobile[_ -]?(?:route|browser|webview)\b",
+    r"\bDeviceSession\b",
+    r"\bPairingRegistry\b",
+    r"(?:device|session)[_-]registry",
+    r"0\.0\.0\.0",
+    r"TrustedHost|CORSMiddleware|Access-Control",
+)
+_F150_ALLOWED_SECURITY_SYMBOLS = frozenset(
+    {
+        "FrontDoorGuard",
+        "_CloudflareAccessVerifier",
+        "load_cloudflare_web_access_manifest",
+        "verify_cloudflare_access_jwt",
+    }
+)
+_F150_LOG_METHODS = frozenset(
+    {"debug", "info", "warning", "error", "exception", "critical"}
+)
+_F150_SENSITIVE_LOG_NAMES = frozenset(
+    {
+        "claim",
+        "claims",
+        "cookie",
+        "header",
+        "headers",
+        "jwks",
+        "principal",
+        "token",
+    }
+)
+
+
+def _f150_sensitive_log_reference(node: ast.AST) -> bool:
+    return any(
+        (
+            isinstance(candidate, ast.Name)
+            and candidate.id.casefold() in _F150_SENSITIVE_LOG_NAMES
+        )
+        or (
+            isinstance(candidate, ast.Attribute)
+            and candidate.attr.casefold() in _F150_SENSITIVE_LOG_NAMES
+        )
+        for candidate in ast.walk(node)
+    )
+
+
+def _f150_logging_leaks_security_values(tree: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr.casefold() in _F150_LOG_METHODS
+        ):
+            continue
+        values = [*node.args, *(keyword.value for keyword in node.keywords)]
+        if any(_f150_sensitive_log_reference(value) for value in values):
+            return True
+    return False
+
+
+def _f150_duplicate_security_symbol(name: str) -> bool:
+    if name in _F150_ALLOWED_SECURITY_SYMBOLS:
+        return False
+    normalized = name.casefold()
+    return (
+        ("manifest" in normalized and ("parse" in normalized or "parser" in normalized))
+        or ("jwt" in normalized and "verifier" in normalized)
+        or ("cloudflare" in normalized and "guard" in normalized)
+        or (
+            "registry" in normalized
+            and any(
+                marker in normalized
+                for marker in ("device", "pair", "remote", "session", "state")
+            )
+        )
+    )
+
+
+def validate_f150_security_surface(
+    relative: str,
+    text: str,
+    baseline: str | None = None,
+) -> None:
+    """拒绝F150敏感值日志、重复authority与旧Web视觉反向约束。"""
+
+    reference = baseline or ""
+    require(
+        all(
+            len(re.findall(pattern, text, flags=re.IGNORECASE))
+            <= len(re.findall(pattern, reference, flags=re.IGNORECASE))
+            for pattern in F150_FORBIDDEN_PATTERNS
+        ),
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        f"{relative} forbidden semantic",
+    )
+    require(
+        re.search(r"current[-_ ]web|\bwb-", text, flags=re.IGNORECASE) is None,
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        f"{relative} old Web visual baseline",
+    )
+    if not relative.endswith(".py"):
+        return
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        fail("F150_PROTECTED_SEMANTIC_DRIFT", str(exc))
+    require(
+        not _f150_logging_leaks_security_values(tree),
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        f"{relative} sensitive logging",
+    )
+    names = _f150_named_statements(tree.body)
+    require(
+        not any(_f150_duplicate_security_symbol(name) for name in names),
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        f"{relative} duplicate security authority",
+    )
+
+
+def _f150_source_at_ref(repo: Path, base_ref: str, relative: str) -> str:
+    try:
+        return str(git(repo, "show", f"{base_ref}:{relative}"))
+    except GateFailure:
+        return ""
+
+
+def _f150_statement_name(node: ast.stmt) -> str | None:
+    if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+        return node.name
+    if isinstance(node, ast.Assign) and len(node.targets) == 1:
+        target = node.targets[0]
+        return target.id if isinstance(target, ast.Name) else None
+    if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+        return node.target.id
+    return None
+
+
+def _f150_named_statements(nodes: list[ast.stmt]) -> dict[str, ast.stmt]:
+    pairs = [
+        (name, node)
+        for node in nodes
+        if (name := _f150_statement_name(node)) is not None
+    ]
+    require(
+        len(pairs) == len({name for name, _ in pairs}),
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        "duplicate symbol",
+    )
+    return dict(pairs)
+
+
+def _f150_ignored_statement(node: ast.stmt) -> bool:
+    return isinstance(node, (ast.Import, ast.ImportFrom)) or (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    )
+
+
+def _f150_protected_dump(nodes: list[ast.stmt], allowed: frozenset[str]) -> str:
+    protected = [
+        node
+        for node in nodes
+        if not _f150_ignored_statement(node)
+        and _f150_statement_name(node) not in allowed
+    ]
+    return _statement_dump(protected)
+
+
+def _f150_class_node(text: str, name: str) -> tuple[ast.Module, ast.ClassDef]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as exc:
+        fail("F150_PROTECTED_SEMANTIC_DRIFT", str(exc))
+    matches = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == name
+    ]
+    require(len(matches) == 1, "F150_PROTECTED_SEMANTIC_DRIFT", name)
+    return tree, matches[0]
+
+
+def _validate_f150_class(
+    baseline: str,
+    current: str,
+    class_name: str,
+    allowed: frozenset[str],
+) -> None:
+    baseline_tree, baseline_class = _f150_class_node(baseline, class_name)
+    current_tree, current_class = _f150_class_node(current, class_name)
+    require(
+        _f150_protected_dump(baseline_tree.body, frozenset({class_name}))
+        == _f150_protected_dump(current_tree.body, frozenset({class_name})),
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        f"{class_name} module sibling",
+    )
+    baseline_members = _f150_named_statements(baseline_class.body)
+    current_members = _f150_named_statements(current_class.body)
+    require(
+        set(current_members) <= set(baseline_members) | set(allowed)
+        and allowed <= set(current_members)
+        and all(
+            ast.dump(current_members[name], include_attributes=False)
+            == ast.dump(node, include_attributes=False)
+            for name, node in baseline_members.items()
+            if name not in allowed
+        ),
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        class_name,
+    )
+
+
+def _f150_new_module_statement_allowed(
+    node: ast.stmt,
+    allowed: frozenset[str],
+) -> bool:
+    if (
+        isinstance(node, ast.Expr)
+        and isinstance(node.value, ast.Constant)
+        and isinstance(node.value.value, str)
+    ):
+        return True
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return True
+    if not isinstance(
+        node,
+        (
+            ast.Assign,
+            ast.AnnAssign,
+            ast.FunctionDef,
+            ast.AsyncFunctionDef,
+            ast.ClassDef,
+        ),
+    ):
+        return False
+    names = _f150_named_statements([node])
+    return bool(names) and all(
+        name.startswith("_") or name in allowed for name in names
+    )
+
+
+def _validate_f150_new_module(
+    current_tree: ast.Module,
+    allowed: frozenset[str],
+) -> None:
+    current_names = set(_f150_named_statements(current_tree.body))
+    public_names = {name for name in current_names if not name.startswith("_")}
+    require(
+        bool(public_names) and public_names <= set(allowed),
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        "new module public symbol",
+    )
+    require(
+        all(
+            _f150_new_module_statement_allowed(node, allowed)
+            for node in current_tree.body
+        ),
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        "new module statement",
+    )
+
+
+def _validate_f150_module(
+    baseline: str, current: str, allowed: frozenset[str], *, exact_new: bool
+) -> None:
+    try:
+        baseline_tree, current_tree = ast.parse(baseline), ast.parse(current)
+    except SyntaxError as exc:
+        fail("F150_PROTECTED_SEMANTIC_DRIFT", str(exc))
+    current_names = set(_f150_named_statements(current_tree.body))
+    baseline_names = set(_f150_named_statements(baseline_tree.body))
+    if exact_new:
+        _validate_f150_new_module(current_tree, allowed)
+        return
+    require(
+        allowed <= current_names
+        and current_names <= baseline_names | set(allowed)
+        and _f150_protected_dump(baseline_tree.body, allowed)
+        == _f150_protected_dump(current_tree.body, allowed),
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        "module sibling",
+    )
+
+
+def _f150_typescript_exports(text: str) -> set[str]:
+    return set(
+        re.findall(
+            r"\bexport\s+(?:async\s+)?(?:function|class|const|let)\s+([A-Za-z_$][\w$]*)",
+            text,
+        )
+    )
+
+
+def _validate_f150_typescript(
+    baseline: str, current: str, allowed: frozenset[str]
+) -> None:
+    baseline_exports = _f150_typescript_exports(baseline)
+    current_exports = _f150_typescript_exports(current)
+    require(
+        allowed <= current_exports
+        and current_exports <= baseline_exports | set(allowed),
+        "F150_PROTECTED_SEMANTIC_DRIFT",
+        "frontend export",
+    )
+
+
+def _f150_related_unapproved(relative: str, text: str) -> bool:
+    candidate = (relative + "\n" + text).lower()
+    markers = (
+        "cloudflare",
+        "remoteaccess",
+        "remote_access",
+        "ios",
+        "mobile",
+        "device",
+        "session",
+    )
+    return any(marker in candidate for marker in markers)
+
+
+def _validate_f150_authority_path(
+    repo: Path, base_ref: str, relative: str, contract: tuple[Any, ...]
+) -> None:
+    kind, name, allowed = contract
+    baseline = _f150_source_at_ref(repo, base_ref, relative)
+    path = repo / relative
+    require(path.is_file(), "F150_PROTECTED_SEMANTIC_DRIFT", relative)
+    current = path.read_text(encoding="utf-8")
+    validate_f150_security_surface(relative, current, baseline)
+    if kind == "class":
+        _validate_f150_class(baseline, current, str(name), allowed)
+    elif kind in {"module", "new-module"}:
+        _validate_f150_module(
+            baseline, current, allowed, exact_new=kind == "new-module"
+        )
+    else:
+        _validate_f150_typescript(baseline, current, allowed)
+
+
+def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
+    """验证F150只改变获批Web Access符号，且不创建iOS/第二身份路径。"""
+
+    resolve_base(repo, base_ref)
+    for relative in sorted(changed_paths(repo)):
+        if relative.startswith("octoagent/frontend/src/") and relative.endswith(
+            (".test.ts", ".test.tsx", ".spec.ts", ".spec.tsx")
+        ):
+            continue
+        production = relative.startswith(
+            "octoagent/apps/gateway/src/octoagent/gateway/"
+        ) or relative.startswith("octoagent/frontend/src/")
+        if not production:
+            continue
+        contract = F150_AUTHORITY_PATHS.get(relative)
+        path = repo / relative
+        text = path.read_text(encoding="utf-8") if path.is_file() else ""
+        if contract is None:
+            validate_f150_security_surface(
+                relative,
+                text,
+                _f150_source_at_ref(repo, base_ref, relative),
+            )
+            require(
+                not _f150_related_unapproved(relative, text),
+                "F150_PROTECTED_SEMANTIC_DRIFT",
+                relative,
+            )
+            continue
+        _validate_f150_authority_path(repo, base_ref, relative, contract)
+
+
 def check_f150_scope(repo: Path) -> None:
+    validate_f150_implementation_scope(repo, "HEAD")
     relative = Path("octoagent/apps/gateway/src/octoagent/gateway/main.py")
     current_path = repo / relative
     try:

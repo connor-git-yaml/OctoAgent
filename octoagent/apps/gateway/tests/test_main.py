@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
@@ -59,6 +60,42 @@ def test_module_entry_accepts_exact_help_host_port_and_rejects_duplicate_or_unkn
         issues.append("invalid/help argv imported app")
     if issues:
         pytest.fail(f"{oracle}: {'; '.join(issues)}", pytrace=False)
+
+
+def test_module_entry_preserves_raw_tcp_peer_by_disabling_proxy_headers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    oracle = "F150_UVICORN_PEER_INTEGRITY_MISSING"
+    entry = importlib.import_module("octoagent.gateway.__main__")
+    app = object()
+    calls: list[tuple[object, dict[str, object]]] = []
+    original_import = entry.importlib.import_module
+
+    def import_module(name: str):
+        if name == "octoagent.gateway.main":
+            return SimpleNamespace(app=app)
+        if name == "uvicorn":
+            return SimpleNamespace(run=lambda target, **kwargs: calls.append((target, kwargs)))
+        return original_import(name)
+
+    monkeypatch.setattr(entry.importlib, "import_module", import_module)
+    exit_code = entry.main(["--host", "127.0.0.1", "--port", "8123"])
+
+    expected = [
+        (
+            app,
+            {
+                "host": "127.0.0.1",
+                "port": 8123,
+                "proxy_headers": False,
+            },
+        )
+    ]
+    if exit_code != 0 or calls != expected:
+        pytest.fail(
+            f"{oracle}: exit={exit_code}, uvicorn_calls={calls!r}",
+            pytrace=False,
+        )
 
 
 def _write_litellm_config(tmp_path: Path, content: str) -> None:
