@@ -1,12 +1,10 @@
 import type {
   IndexBuildJob,
   IndexGeneration,
-  MemoryConsoleDocument,
   RetrievalCorpusState,
 } from "../../types";
 
 interface MemoryRetrievalLifecycleSectionProps {
-  memory: MemoryConsoleDocument;
   memoryCorpus: RetrievalCorpusState | null;
   activeGeneration: IndexGeneration | null;
   pendingGeneration: IndexGeneration | null;
@@ -28,7 +26,7 @@ function resolveIndexStageLabel(stage: string): string {
     case "embedding":
       return "生成向量中";
     case "writing_projection":
-      return "写入 projection";
+      return "写入索引";
     case "catching_up":
       return "追平增量";
     case "validating":
@@ -47,7 +45,6 @@ function resolveIndexStageLabel(stage: string): string {
 }
 
 export default function MemoryRetrievalLifecycleSection({
-  memory,
   memoryCorpus,
   activeGeneration,
   pendingGeneration,
@@ -71,14 +68,6 @@ export default function MemoryRetrievalLifecycleSection({
     return null;
   }
 
-  const activeEmbeddingLabel =
-    activeGeneration?.label ||
-    memory.retrieval_profile?.bindings?.find((item) => item.binding_key === "embedding")
-      ?.effective_label ||
-    memoryCorpus.active_profile_target ||
-    "当前索引";
-  const desiredEmbeddingLabel =
-    pendingGeneration?.label || memoryCorpus.desired_profile_target || activeEmbeddingLabel;
   const pendingStageLabel = pendingBuildJob
     ? resolveIndexStageLabel(pendingBuildJob.stage)
     : "等待重新发起";
@@ -88,35 +77,34 @@ export default function MemoryRetrievalLifecycleSection({
   );
 
   return (
-    <section className="wb-card wb-retrieval-progress-card">
+    <section className="wb-card wb-retrieval-progress-card f149-memory-lifecycle">
       <div className="wb-panel-head">
         <div>
-          <p className="wb-card-label">Embedding 迁移</p>
-          <h3>当前查询继续使用旧索引，直到新索引切换完成</h3>
+          <p className="wb-card-label">索引生命周期</p>
+          <h3>旧索引会继续服务，准备完成后再切换。</h3>
         </div>
         <div className="wb-chip-row">
-          <span className="wb-chip">{memoryCorpus.state}</span>
           {pendingBuildJob ? <span className="wb-chip">{pendingStageLabel}</span> : null}
         </div>
       </div>
 
       <p className="wb-panel-copy">
-        Memory 和未来知识库会共用这条 embedding 轨道。迁移期间，当前对话和检索不会中断。
+        更新期间，已经保存的记忆仍然可以正常查询。
       </p>
 
       <div className="wb-card-grid wb-card-grid-3">
         <article className="wb-card">
-          <p className="wb-card-label">当前在线索引</p>
-          <strong>{activeEmbeddingLabel}</strong>
-          <span>现在所有 recall 仍继续使用这一层。</span>
+          <p className="wb-card-label">当前索引</p>
+          <strong>{activeGeneration ? "稳定服务中" : "继续服务中"}</strong>
+          <span>在新索引切换前，查询会继续使用这一版。</span>
         </article>
         <article className="wb-card">
-          <p className="wb-card-label">目标 embedding</p>
-          <strong>{desiredEmbeddingLabel}</strong>
+          <p className="wb-card-label">新索引</p>
+          <strong>{pendingGeneration ? "准备中" : "等待开始"}</strong>
           <span>
             {pendingGeneration
               ? "新索引准备好后再切换。"
-              : "你已经改了目标 embedding，但当前仍保留旧索引。"}
+              : "当前仍保留旧索引，不会影响已有查询。"}
           </span>
         </article>
         <article className="wb-card">
@@ -129,9 +117,13 @@ export default function MemoryRetrievalLifecycleSection({
                 : "等待重新发起"}
           </strong>
           <span>
-            {pendingBuildJob?.summary ||
-              memoryCorpus.summary ||
-              "当前没有进行中的迁移。"}
+            {pendingBuildJob
+              ? pendingBuildJob.stage === "ready_to_cutover"
+                ? "新的索引已经准备好，等待你确认切换。"
+                : "新的索引正在后台准备，不会中断现有查询。"
+              : rollbackCandidate
+                ? "上一版仍在可恢复期限内。"
+                : "当前没有进行中的更新。"}
           </span>
         </article>
       </div>
@@ -152,8 +144,8 @@ export default function MemoryRetrievalLifecycleSection({
 
       {memoryCorpus.warnings.length > 0 ? (
         <div className="wb-note">
-          <strong>迁移提醒</strong>
-          <span>{memoryCorpus.warnings.join("；")}</span>
+          <strong>更新提醒</strong>
+          <span>旧索引会继续服务，直到新的索引完成切换。</span>
         </div>
       ) : null}
 

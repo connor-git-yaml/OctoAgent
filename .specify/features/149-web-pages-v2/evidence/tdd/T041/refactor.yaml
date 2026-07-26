@@ -1,0 +1,50 @@
+task_id: T041
+phase: REFACTOR
+behavior: Memory v2 Claude Design 视觉迁移、死动作文件删除、职责收敛与 Desktop/390 Web 窄窗口验收
+command: cd octoagent/frontend && npx vitest run src/domains/memory/MemoryPage.test.tsx
+executed_at_utc: 2026-07-26T06:52:55Z
+head_sha: b7e96d5fdc49e8d06a46dbeea401d277920af95d
+exit_code: 0
+oracle_expected: exact 合同不漂移，dead MemoryActionsSection 在机械 import graph 归零后删除，页面职责保持分区，Desktop/390 保持 Claude Design 层级、留白与卡片节奏且无横向溢出
+oracle_observed: exact 15/15、全前端 556/556、生产 build、OpenAPI、F149 boundary/style/complexity 与 changed-lines coverage 90.32%通过；repository runtime architecture 因 F151 永久冻结旧 MemoryDetailModal 视觉 class 快照而阻断
+raw_output_file: /tmp/f149-t041-refactor.log
+raw_output_sha256: 3af8fc04e48593de47a6f8ace6619e78787470d24d9a5f99dbb448dab5ef0aec
+raw_output_size: 330
+full_frontend_log_sha256: 45438cff66e5c2544cf9df8efaa7094ca097981ccf204215b821c88b1d729bce
+build_log_sha256: 44559a064bae22f03aa3933dae2fb0e19e9034634412cfec722825ea236e61bf
+openapi_log_sha256: 0412b4c686fc223576b96159b7f722c6a3faa930699d4d9944cbb2d939c4ba8b
+boundary_log_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_log_sha256: f7e48d70fc3e91d47a271aa6709c959ca1ef1cda177da0d2d90cfe52b8d57ba1
+complexity_log_sha256: 67d4c4ec3f321a36484ecdd0617871a32dd0407798df6601097db0888669c6e1
+coverage_log_sha256: 45438cff66e5c2544cf9df8efaa7094ca097981ccf204215b821c88b1d729bce
+changed_lines_coverage_log_sha256: df93b5727a8cdbc7148f319c91f072f0a56c936553eea1fa5e7d768be0ddc9ef
+runtime_architecture_log_sha256: fb926563ee898623528e743778d9957a63c7879417cbef380121c959ee84fb7b
+runtime_architecture_gate: blocked
+runtime_architecture_observed: F150_PROTECTED_SEMANTIC_DRIFT 拒绝 MemoryDetailModal 的视觉 class 变化；F151 authority 仍把旧 Web 视觉基线固定为永久合同。本任务未修改、放宽或绕过 F151 checker，也未把旧 wb class 塞回新页面。
+visual_review:
+  - 真实浏览器 Desktop 为宽松 hero、索引生命周期三栏与记录卡片布局；层级、留白、卡片节奏和视觉张力以 Claude Design 初版为准，未回退旧 Web 密集布局
+  - 390px Web 窄窗口为单列，scrollWidth 精确等于 clientWidth；取消迁移、搜索与筛选、立即整理、开始对话、清除筛选和 Advanced 触发器均不小于 44px。该检查不是手机产品或 iOS 验收
+  - 搜索与筛选在窄窗口以可见按钮打开；Escape 关闭后焦点回原触发器
+  - 原始记录ID、检索后端与Embedding目标只在Advanced bottom sheet；Escape关闭后焦点回原触发器
+  - 普通区的真实后端 warning 已转换为用户语言，不泄漏 Memory Engine、LanceDB、Qwen3、embedding、cutover 或 engine-default
+  - 本次新增样式只消费 --cp-*；没有引入 Spotify、第二主题或以旧 Web 外观覆盖 Claude Design
+quality_review:
+  - dead MemoryActionsSection 在全仓 import graph 确认为零后删除，没有保留死文件或兼容入口
+  - 查询、合并、SoR 编辑/恢复与索引动作复用现有页面/application seam；没有第二 transport、action pipeline、store、service 或 registry
+  - loading、empty、recoverable 与 403 继续复用共享 resourcePageState；401 仍归 F150 global auth
+  - 详情、编辑、筛选与Advanced对话职责保持在窄组件；MemoryPage不吸收内部算法
+  - changed-lines authored executable coverage 为 1820/2015=90.32%；阈值未降低
+file_sha256:
+  memory-page: 9990a291b5627899a93943ca16890f542178bc97b51c04ff3a0de3573158350c
+  memory-page-test: 9b443c6eabd802b622f7ea448ffd7503121e46495f0cb0f022666bde38387d6a
+  memory-css: aa70ebe5d14e7c924e0b3605b45ef979e2743cb0412ad94b45b9bee5e1427fb2
+  memory-advanced: 0773a1db1ebf83e022ee56ccfad155f75de631eeae786015885a25fa32b861d0
+  memory-detail: 02008a85f9e0cc3c4eb7092d3dfdc9b1a846a8c6ecb4c3d8494cc21dd96f4b87
+  memory-edit: 1471b87c0e34f5b5b6f115efd4b294f06831c9c6b30128843f60407c641bb29f
+  memory-filters: 1eae4f059af249fce23bf71c52bf0e101d678948e8ec1efe916dc28876ed74c3
+  memory-results: e066fa01a5c0724ee6363017baeb6b8a754f66bf9b6def8e7c3a2cfcd4182653
+  memory-lifecycle: b0ad697770287cc01c2746acfdcb1778b2f7232924193ed80d2829230b13010d
+  memory-shared: cef7d75d4a065378d3811375cfb9644bb44dd0fdf35c30c95a5d1be7c271f46f
+secret_scan: pass
+network: false
+rerun: false

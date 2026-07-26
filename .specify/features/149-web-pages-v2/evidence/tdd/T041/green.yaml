@@ -1,0 +1,14 @@
+task_id: T041
+phase: GREEN
+behavior: Memory v2 页面状态、真实动作、索引生命周期、Advanced 技术字段与死入口清理
+command: cd octoagent/frontend && npx vitest run src/domains/memory/MemoryPage.test.tsx
+executed_at_utc: 2026-07-26T06:45:30Z
+head_sha: b7e96d5fdc49e8d06a46dbeea401d277920af95d
+exit_code: 0
+oracle_expected: loading、empty、recoverable error 与 origin-403 互斥；查询、合并、SoR 编辑/恢复与索引互斥状态准确；原始记录ID、检索后端和Embedding目标只在Advanced；无死链或扩域动作
+oracle_observed: exact 15/15 通过；页面状态、查询与筛选、合并、SoR 编辑/恢复、索引生命周期、Advanced 可见性与焦点返回全部通过
+raw_output_retained: false
+raw_output_note: 首次GREEN在终端真实显示15/15通过，但本次输出未落盘；后续REFACTOR以同一最终selector保存完整原始输出，未把它伪装成首次GREEN日志
+secret_scan: pass
+network: false
+rerun: false

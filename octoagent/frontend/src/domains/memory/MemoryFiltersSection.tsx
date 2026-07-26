@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+
 const SCOPE_LABELS: Record<string, string> = {
   project_shared: "项目共享",
   agent_private: "Agent 私有",
@@ -84,9 +86,46 @@ export default function MemoryFiltersSection({
   formatPartitionLabel,
   formatDateTime,
 }: MemoryFiltersSectionProps) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  const closeMobileFilters = useCallback(() => {
+    setMobileOpen(false);
+    window.requestAnimationFrame(() => triggerRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeMobileFilters();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [closeMobileFilters, mobileOpen]);
+
+  async function applyFilters() {
+    await onRefreshMemory();
+    closeMobileFilters();
+  }
+
   return (
-    <section className="wb-panel">
-      <div className="wb-panel-head">
+    <section className="wb-panel f149-memory-filters">
+      <button
+        ref={triggerRef}
+        type="button"
+        className="f149-memory-filter-trigger"
+        aria-expanded={mobileOpen}
+        aria-controls="memory-filter-content"
+        onClick={() => setMobileOpen((value) => !value)}
+      >
+        搜索与筛选
+      </button>
+
+      <div
+        id="memory-filter-content"
+        className={`f149-memory-filter-content${mobileOpen ? " is-open" : ""}`}
+      >
+        <div className="wb-panel-head">
         <div>
           <p className="wb-card-label">筛选与刷新</p>
           <h3>调整这次想看的记忆范围</h3>
@@ -103,15 +142,15 @@ export default function MemoryFiltersSection({
           <button
             type="button"
             className="wb-button wb-button-primary"
-            onClick={() => void onRefreshMemory()}
+            onClick={() => void applyFilters()}
             disabled={busyActionId === "memory.query"}
           >
             重新查看
           </button>
         </div>
-      </div>
+        </div>
 
-      <div className="wb-toolbar-grid">
+        <div className="wb-toolbar-grid">
         {scopeOptions.length > 1 ? (
           <label className="wb-field">
             <span>作用域</span>
@@ -181,9 +220,9 @@ export default function MemoryFiltersSection({
             ))}
           </select>
         </label>
-      </div>
+        </div>
 
-      <div className="wb-toggle-row">
+        <div className="wb-toggle-row">
         <label className="wb-toggle">
           <input
             type="checkbox"
@@ -203,6 +242,7 @@ export default function MemoryFiltersSection({
         <span className="wb-panel-copy">
           当前检索方式：{retrievalLabel}，更新时间 {formatDateTime(updatedAt)}
         </span>
+        </div>
       </div>
     </section>
   );

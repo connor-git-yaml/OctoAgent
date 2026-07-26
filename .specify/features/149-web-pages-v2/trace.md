@@ -257,5 +257,19 @@
   transport-only阶段的AgentCenter旧视觉class multiset而如实阻断；本task未修改、
   放宽或绕过F151 authority，也未为过门恢复旧`wb-*`样式。390仍只作Web响应式检查，
   手机产品只走原生iOS。
+- T041以旧Memory页面形成5条稳定RED，既有10条query/filter、consolidate、
+  SoR与索引控制继续通过。GREEN复用共享resource state与既有Memory actions，
+  闭合loading/empty/recoverable/origin-403、SoR编辑/恢复、索引迁移互斥状态及
+  Advanced原始字段边界；普通区只显示用户语言，真实后端warning也不再泄漏
+  Memory Engine、LanceDB、Qwen3、embedding、cutover或engine-default。
+  `MemoryActionsSection`在全仓import graph为零后删除，没有保留死入口或兼容路径。
+  REFACTOR逐页对照Claude Design Memory Desktop/390，保留宽松hero、桌面索引
+  三栏、记录卡片留白与视觉张力；真实Chromium 1440/390 Web窄窗口无横向溢出，
+  操作≥44px，筛选与Advanced关闭后焦点回原触发器。最终精确15/15、全前端
+  556/556、生产build、OpenAPI、F149 boundary/style/complexity及changed-lines
+  coverage 90.32%通过。repository runtime architecture因F151仍永久冻结旧
+  MemoryDetailModal视觉class快照而如实阻断；本task未修改、放宽或绕过F151
+  authority，也未为过门恢复旧`wb-*`样式。390仍只作Web响应式检查，手机产品
+  只走原生iOS。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

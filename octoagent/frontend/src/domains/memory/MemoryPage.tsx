@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
 import { formatDateTime } from "../../workbench/utils";
@@ -7,6 +7,12 @@ import MemoryFiltersSection from "./MemoryFiltersSection";
 import MemoryHeroSection from "./MemoryHeroSection";
 import MemoryRetrievalLifecycleSection from "./MemoryRetrievalLifecycleSection";
 import MemoryResultsSection from "./MemoryResultsSection";
+import MemoryAdvancedInfo from "./MemoryAdvancedInfo";
+import { resolveResourcePageState } from "../shared/resourcePageState";
+import type {
+  MemoryConsoleDocument,
+  RetrievalPlatformDocument,
+} from "../../types";
 import {
   buildMemoryDisplayRecords,
   buildMemoryNarrative,
@@ -16,42 +22,93 @@ import {
   type MemoryNarrative,
   uniqueOptions,
 } from "./shared";
+import "./MemoryPage.css";
 
 export default function MemoryPage() {
-  const { snapshot, submitAction, busyActionId, refreshSnapshot } = useWorkbench();
+  const {
+    snapshot,
+    loading,
+    error,
+    authError,
+    refreshSnapshot,
+  } = useWorkbench();
   const memory = snapshot?.resources?.memory ?? null;
   const config = snapshot?.resources?.config ?? null;
   const retrievalPlatform = snapshot?.resources?.retrieval_platform ?? null;
-  if (!snapshot || !memory || !config) {
+
+  const resolution = resolveResourcePageState({
+    loading,
+    hasContent: Boolean(snapshot && memory && config),
+    connected: Boolean(snapshot),
+    error:
+      authError ??
+      (error
+        ? new Error(error)
+        : !memory || !config
+          ? new Error("memory-resource-missing")
+          : null),
+  });
+
+  if (resolution.owner === "global-auth") {
+    return null;
+  }
+  if (resolution.state.kind !== "ready" || !memory) {
+    const isPermissionDenied = resolution.state.kind === "permission-denied";
+    const isLoading = resolution.state.kind === "loading";
     return (
-      <div className="wb-page">
-        <section className="wb-panel">
-          <div className="wb-empty-state">
-            <strong>Memory 数据暂时不可用</strong>
-            <span>
-              可能是后端服务尚未启动或快照加载失败。请检查后端是否正常运行，然后重新加载。
-              如果问题持续，可到 Advanced 页面查看诊断信息。
-            </span>
-            <div className="wb-inline-actions wb-inline-actions-wrap">
-              <button
-                type="button"
-                className="wb-button wb-button-primary"
-                onClick={() => void refreshSnapshot()}
-              >
-                重新加载
-              </button>
-              <Link className="wb-button wb-button-secondary" to="/">
-                回到 Chat
-              </Link>
-              <Link className="wb-button wb-button-tertiary" to="/advanced">
-                去 Advanced 诊断
-              </Link>
+      <main className="f149-memory-page">
+        <section
+          className={`f149-memory-state${isPermissionDenied ? " is-permission" : ""}`}
+          aria-live="polite"
+        >
+          {isLoading ? <span className="f149-memory-state-mark" aria-hidden="true" /> : null}
+          <strong>
+            {isLoading
+              ? "正在整理记忆"
+              : isPermissionDenied
+                ? "当前账号没有权限查看记忆"
+                : "记忆加载失败"}
+          </strong>
+          <p>
+            {isLoading
+              ? "正在读取已经保存的背景，请稍候。"
+              : isPermissionDenied
+                ? "这部分内容需要管理员授权。你仍可以继续使用对话。"
+                : "暂时没能读取已经保存的背景，请稍后重试。"}
+          </p>
+          {!isLoading ? (
+            <div className="f149-memory-state-actions">
+              {!isPermissionDenied ? (
+                <button type="button" onClick={() => void refreshSnapshot()}>
+                  重试
+                </button>
+              ) : null}
+              <Link to="/">回到对话</Link>
             </div>
-          </div>
+          ) : null}
         </section>
-      </div>
+      </main>
     );
   }
+
+  return (
+    <MemoryReadyPage
+      memory={memory}
+      retrievalPlatform={retrievalPlatform}
+    />
+  );
+}
+
+interface MemoryReadyPageProps {
+  memory: MemoryConsoleDocument;
+  retrievalPlatform: RetrievalPlatformDocument | null;
+}
+
+function MemoryReadyPage({
+  memory,
+  retrievalPlatform,
+}: MemoryReadyPageProps) {
+  const { submitAction, busyActionId } = useWorkbench();
   const defaultSummary = {
     sor_current_count: 0,
     sor_readable_count: 0,
@@ -95,6 +152,7 @@ export default function MemoryPage() {
   const [limitDraft, setLimitDraft] = useState(String(filters.limit || 50));
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedRecordId, setSelectedRecordId] = useState("");
+  const detailTriggerRef = useRef<HTMLElement | null>(null);
   const displayRecords = buildMemoryDisplayRecords(records);
 
   useEffect(() => {
@@ -239,17 +297,22 @@ export default function MemoryPage() {
     setConsolidateIsError(hasErrors);
   }
 
-  function handleSelectRecord(record: (typeof displayRecords)[number]) {
+  function handleSelectRecord(
+    record: (typeof displayRecords)[number],
+    trigger: HTMLElement
+  ) {
+    detailTriggerRef.current = trigger;
     setSelectedRecordId(record.record.record_id);
     setShowDetailModal(true);
   }
 
   const handleCloseModal = useCallback(() => {
     setShowDetailModal(false);
+    window.requestAnimationFrame(() => detailTriggerRef.current?.focus());
   }, []);
 
   return (
-    <div className="wb-page">
+    <main className="f149-memory-page">
       <MemoryHeroSection
         memory={memoryResource}
         heroTone={narrative.heroTone}
@@ -267,7 +330,6 @@ export default function MemoryPage() {
       ) : null}
 
       <MemoryRetrievalLifecycleSection
-        memory={memoryResource}
         memoryCorpus={memoryCorpus}
         activeGeneration={activeGeneration}
         pendingGeneration={pendingGeneration}
@@ -324,7 +386,19 @@ export default function MemoryPage() {
         selectedRecord={selectedRecord}
         open={showDetailModal}
         onClose={handleCloseModal}
+        onSubmitAction={submitAction}
+        busyActionId={busyActionId ?? undefined}
       />
-    </div>
+
+      <MemoryAdvancedInfo
+        records={records}
+        retrievalBackend={memoryResource.retrieval_backend}
+        embeddingTarget={
+          memoryResource.retrieval_profile?.bindings?.find(
+            (item) => item.binding_key === "embedding"
+          )?.effective_target ?? ""
+        }
+      />
+    </main>
   );
 }

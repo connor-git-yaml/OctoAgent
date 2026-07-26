@@ -2,12 +2,16 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../../api/client";
 import MemoryPage from "./MemoryPage";
 
 let mockWorkbench: {
   snapshot: unknown;
   submitAction: ReturnType<typeof vi.fn>;
   busyActionId: string | null;
+  loading?: boolean;
+  error?: string | null;
+  authError?: ApiError | null;
   refreshSnapshot?: ReturnType<typeof vi.fn>;
 };
 
@@ -356,7 +360,7 @@ describe("MemoryPage", () => {
     );
   });
 
-  it("资源缺失时给出可恢复降级态，而不是直接崩溃", async () => {
+  it("资源缺失时给出普通语言可恢复态，且不再链接死去的 Advanced 页面", async () => {
     const refreshSnapshot = vi.fn().mockResolvedValue(undefined);
     mockWorkbench = {
       snapshot: {
@@ -376,10 +380,11 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    expect(screen.getByText("Memory 数据暂时不可用")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "回到 Chat" })).toHaveAttribute("href", "/");
+    expect(screen.getByText("记忆加载失败")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "回到对话" })).toHaveAttribute("href", "/");
+    expect(screen.queryByRole("link", { name: /Advanced|诊断/ })).not.toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole("button", { name: "重新加载" }));
+    await userEvent.click(screen.getByRole("button", { name: "重试" }));
 
     expect(refreshSnapshot).toHaveBeenCalledTimes(1);
   });
@@ -608,13 +613,14 @@ describe("MemoryPage", () => {
       </MemoryRouter>
     );
 
-    expect(await screen.findByText("Embedding 迁移")).toBeInTheDocument();
-    expect(screen.getByText("当前查询继续使用旧索引，直到新索引切换完成")).toBeInTheDocument();
+    expect(await screen.findByText("索引生命周期")).toBeInTheDocument();
+    expect(screen.getByText("旧索引会继续服务，准备完成后再切换。")).toBeInTheDocument();
     expect(
-      screen.getByText(/Memory 和未来知识库会共用这条 embedding 轨道/)
+      screen.getByText(/新的索引已经准备好/)
     ).toBeInTheDocument();
     expect(screen.getAllByText("待切换")).toHaveLength(2);
     expect(screen.getByText("100%")).toBeInTheDocument();
+    expect(screen.queryByText(/Embedding|embedding|cutover|projection/)).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByRole("button", { name: "切换到新索引" }));
 
@@ -662,5 +668,204 @@ describe("MemoryPage", () => {
 
     expect(await screen.findByRole("heading", { name: "3 条记忆" })).toBeInTheDocument();
     expect(screen.queryByText("待确认事项")).not.toBeInTheDocument();
+  });
+
+  it("loading、双空态、可恢复错误与 origin 403 使用互斥的普通语言页面状态", async () => {
+    mockWorkbench = {
+      snapshot: buildMemorySnapshot(),
+      loading: true,
+      error: null,
+      authError: null,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+    const loadingView = render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+    expect(screen.getByText("正在整理记忆")).toBeInTheDocument();
+    expect(screen.queryByText("Alice 偏好异步沟通")).not.toBeInTheDocument();
+    loadingView.unmount();
+
+    const emptySnapshot = buildMemorySnapshot();
+    emptySnapshot.resources.memory.records = [];
+    emptySnapshot.resources.memory.summary.sor_current_count = 0;
+    emptySnapshot.resources.memory.summary.sor_readable_count = 0;
+    emptySnapshot.resources.memory.summary.fragment_count = 0;
+    mockWorkbench = {
+      snapshot: emptySnapshot,
+      loading: false,
+      error: null,
+      authError: null,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+    const emptyView = render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+    expect(screen.getByText("还没有记忆")).toBeInTheDocument();
+    expect(screen.getByText("先和助手聊聊，值得记住的背景会出现在这里。")).toBeInTheDocument();
+    emptyView.unmount();
+
+    const noMatchSnapshot = buildMemorySnapshot();
+    noMatchSnapshot.resources.memory.records = [];
+    mockWorkbench = {
+      snapshot: noMatchSnapshot,
+      loading: false,
+      error: null,
+      authError: null,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+    const noMatchView = render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+    expect(screen.getByText("没有匹配的记忆")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "清除筛选" })).toBeInTheDocument();
+    noMatchView.unmount();
+
+    const refreshSnapshot = vi.fn();
+    mockWorkbench = {
+      snapshot: buildMemorySnapshot(),
+      loading: false,
+      error: "temporary failure",
+      authError: null,
+      refreshSnapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+    const errorView = render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+    expect(screen.getByText("记忆加载失败")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(refreshSnapshot).toHaveBeenCalledTimes(1);
+    errorView.unmount();
+
+    mockWorkbench = {
+      snapshot: buildMemorySnapshot(),
+      loading: false,
+      error: "forbidden",
+      authError: new ApiError("forbidden", { status: 403 }),
+      refreshSnapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+    expect(screen.getByText("当前账号没有权限查看记忆")).toBeInTheDocument();
+    expect(screen.queryByText("重新登录")).not.toBeInTheDocument();
+  });
+
+  it("SoR 编辑、归档与恢复动作真实可达，且 dead 管理入口保持缺席", async () => {
+    const snapshot = buildMemorySnapshot();
+    snapshot.resources.memory.records.push({
+      ...snapshot.resources.memory.records[0],
+      record_id: "record-archived",
+      subject_key: "已归档出发机场",
+      summary: "常用出发机场为浦东 T2",
+      status: "archived",
+      version: 4,
+    });
+    const submitAction = vi.fn().mockResolvedValue(null);
+    mockWorkbench = {
+      snapshot,
+      submitAction,
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByText("待确认事项")).not.toBeInTheDocument();
+    expect(screen.queryByText("备份与恢复")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Advanced/ })).not.toBeInTheDocument();
+
+    const aliceCard = screen.getByText("Alice").closest("article") as HTMLElement;
+    await userEvent.click(aliceCard);
+    await userEvent.click(screen.getByRole("button", { name: "编辑" }));
+    await userEvent.clear(screen.getByRole("textbox", { name: "内容" }));
+    await userEvent.type(screen.getByRole("textbox", { name: "内容" }), "Alice 喜欢书面同步");
+    await userEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() =>
+      expect(submitAction).toHaveBeenCalledWith("memory.sor.edit", {
+        scope_id: "scope-contact",
+        subject_key: "Alice",
+        content: "Alice 喜欢书面同步",
+        new_subject_key: "",
+        expected_version: 3,
+        edit_summary: "",
+      })
+    );
+
+    const archivedCard = screen.getByText("已归档出发机场").closest("article") as HTMLElement;
+    await userEvent.click(archivedCard);
+    await userEvent.click(screen.getByRole("button", { name: "恢复" }));
+    await waitFor(() =>
+      expect(submitAction).toHaveBeenCalledWith("memory.sor.restore", {
+        scope_id: "scope-contact",
+        memory_id: "record-archived",
+      })
+    );
+    expect(screen.queryByRole("heading", { name: "已归档出发机场" })).not.toBeInTheDocument();
+  });
+
+  it("检索实现、模型 alias 与记录 ID 只在可聚焦 Advanced 中出现并归还焦点", async () => {
+    const snapshot = buildMemorySnapshot();
+    snapshot.resources.memory.records[0].record_id = "rec_77aa-c3f2";
+    snapshot.resources.memory.records[0].retrieval_backend = "sqlite-metadata";
+    snapshot.resources.memory.warnings = [
+      "当前使用内建 Memory Engine（LanceDB + Qwen3）。",
+      "embedding 迁移尚未 cutover；当前仍使用 engine-default。",
+    ];
+    mockWorkbench = {
+      snapshot,
+      loading: false,
+      error: null,
+      authError: null,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <MemoryPage />
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByText("rec_77aa-c3f2")).not.toBeInTheDocument();
+    expect(screen.queryByText("sqlite-metadata")).not.toBeInTheDocument();
+    expect(screen.queryByText("engine-default")).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/记忆服务已准备好，现有内容可以正常查询/)
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/索引正在更新，现有查询会继续使用稳定版本/)
+    ).toBeInTheDocument();
+
+    const trigger = screen.getByRole("button", {
+      name: "高级 · 检索与记录信息",
+    });
+    trigger.focus();
+    await userEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "检索与记录信息" });
+    expect(within(dialog).getByText("rec_77aa-c3f2")).toBeInTheDocument();
+    expect(within(dialog).getByText("sqlite-metadata")).toBeInTheDocument();
+    expect(within(dialog).getByText("engine-default")).toBeInTheDocument();
+    await userEvent.keyboard("{Escape}");
+    expect(trigger).toHaveFocus();
   });
 });

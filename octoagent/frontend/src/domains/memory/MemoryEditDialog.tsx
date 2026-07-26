@@ -55,11 +55,17 @@ export default function MemoryEditDialog({
         if (e.target === e.currentTarget && e.detail > 0) onClose();
       }}
     >
-      <div className="wb-modal-body" style={{ maxWidth: "600px" }}>
+      <section
+        className="wb-modal-body f149-memory-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="memory-edit-title"
+        style={{ maxWidth: "600px" }}
+      >
         <div className="wb-panel-head">
           <div>
             <p className="wb-card-label">编辑记忆</p>
-            <h3>{record.subject_key || "未命名"}</h3>
+            <h3 id="memory-edit-title">{record.subject_key || "未命名"}</h3>
           </div>
           <button
             type="button"
@@ -71,18 +77,18 @@ export default function MemoryEditDialog({
         </div>
 
         <div className="wb-note-stack">
-          <div className="wb-note">
-            <strong>主题标识</strong>
+          <label className="wb-note">
+            <strong>主题</strong>
             <input
               type="text"
               className="wb-input"
               value={subjectKey}
               onChange={(e) => setSubjectKey(e.target.value)}
-              placeholder="subject_key"
+              placeholder="例如：Alice"
               style={{ width: "100%", marginTop: "0.25rem" }}
             />
-          </div>
-          <div className="wb-note">
+          </label>
+          <label className="wb-note">
             <strong>内容</strong>
             <textarea
               className="wb-input"
@@ -90,9 +96,9 @@ export default function MemoryEditDialog({
               onChange={(e) => setContent(e.target.value)}
               rows={8}
               style={{ width: "100%", marginTop: "0.25rem", resize: "vertical" }}
-              placeholder="记忆内容..."
+              placeholder="更新这条记忆的内容"
             />
-          </div>
+          </label>
           {error && (
             <div className="wb-note" style={{ color: "var(--color-danger)" }}>
               {error}
@@ -117,7 +123,7 @@ export default function MemoryEditDialog({
             {saving ? "保存中..." : "保存"}
           </button>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

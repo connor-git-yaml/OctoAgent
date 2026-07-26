@@ -80,16 +80,21 @@ export default function MemoryDetailModal({
   return document.body
     ? createPortal(
         <div
-          className="wb-modal-overlay"
+          className="wb-modal-overlay f149-memory-dialog-backdrop"
           onClick={(e) => {
             if (e.target === e.currentTarget && e.detail > 0) onClose();
           }}
         >
-          <div className="wb-modal-body">
+          <section
+            className="wb-modal-body f149-memory-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="memory-detail-title"
+          >
             <div className="wb-panel-head">
               <div>
                 <p className="wb-card-label">记忆详情</p>
-                <h3>{selectedRecord.title}</h3>
+                <h3 id="memory-detail-title">{selectedRecord.title}</h3>
               </div>
               <button
                 type="button"
@@ -212,7 +217,7 @@ export default function MemoryDetailModal({
                 )}
               </div>
             )}
-          </div>
+          </section>
 
           {/* T028-T030: 编辑对话框 */}
           {editOpen && onSubmitAction && (

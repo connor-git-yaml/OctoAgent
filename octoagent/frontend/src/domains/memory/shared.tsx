@@ -2,8 +2,6 @@ import type {
   ConfigFieldHint,
   MemoryConsoleDocument,
   MemoryRecordProjection,
-  OperatorActionKind,
-  OperatorInboxItem,
 } from "../../types";
 
 const WARNING_LABELS: Record<string, string> = {
@@ -14,7 +12,27 @@ const WARNING_LABELS: Record<string, string> = {
 
 /** 将后端原始 warning 翻译为用户友好文案 */
 export function translateWarning(raw: string): string {
-  return WARNING_LABELS[raw] ?? raw;
+  const exact = WARNING_LABELS[raw];
+  if (exact) return exact;
+  const normalized = raw.toLowerCase();
+  if (
+    normalized.includes("memory engine") ||
+    normalized.includes("lancedb") ||
+    normalized.includes("qwen3")
+  ) {
+    return "记忆服务已准备好，现有内容可以正常查询。";
+  }
+  if (normalized.includes("没有记忆数据")) {
+    return "还没有记忆内容。和助手聊聊后，值得记住的背景会出现在这里。";
+  }
+  if (
+    normalized.includes("embedding") ||
+    normalized.includes("cutover") ||
+    normalized.includes("engine-default")
+  ) {
+    return "索引正在更新，现有查询会继续使用稳定版本。";
+  }
+  return raw;
 }
 
 const LAYER_LABELS: Record<string, string> = {
@@ -47,13 +65,6 @@ const METADATA_LABELS: Record<string, string> = {
   topic: "主题",
   derived_type: "派生类型",
   confidence: "置信度",
-};
-
-const OPERATOR_KIND_LABELS: Record<string, string> = {
-  approval: "审批",
-  pairing_request: "配对请求",
-  retryable_failure: "可重试失败",
-  alert: "提醒",
 };
 
 export interface MemoryDisplayRecord {
@@ -362,33 +373,10 @@ export function uniqueOptions(values: Array<string | undefined>): string[] {
     .filter((value, index, all) => all.indexOf(value) === index);
 }
 
-export function metadataPreviewEntries(
-  record: MemoryRecordProjection
-): Array<[string, string]> {
-  return buildMetadataEntries(record, 4);
-}
-
 export function metadataDetailEntries(
   record: MemoryRecordProjection
 ): Array<[string, string]> {
   return buildMetadataEntries(record);
-}
-
-export function formatRecoveryTime(value: string | null | undefined): string {
-  if (!value) {
-    return "未记录";
-  }
-  return new Date(value).toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
-export function formatOperatorKind(kind: string): string {
-  return OPERATOR_KIND_LABELS[kind] ?? kind;
 }
 
 export function normalizeMemoryWarning(message: string): string {
@@ -413,68 +401,6 @@ export function fieldLabel(
   fallback: string
 ): string {
   return hints[fieldPath]?.label || fallback;
-}
-
-export function renderOperatorMeta(item: OperatorInboxItem): string {
-  if (item.kind === "approval") {
-    return item.metadata.tool_name || item.source_ref;
-  }
-  if (item.kind === "pairing_request") {
-    return item.metadata.username || item.metadata.user_id || item.source_ref;
-  }
-  if (item.kind === "retryable_failure") {
-    return item.metadata.error_type || item.source_ref;
-  }
-  return item.metadata.journal_state || item.source_ref;
-}
-
-export function mapQuickAction(
-  item: OperatorInboxItem,
-  kind: OperatorActionKind
-): { actionId: string; params: Record<string, unknown> } | null {
-  if (kind === "approve_once") {
-    return {
-      actionId: "operator.approval.resolve",
-      params: {
-        approval_id: item.item_id.split(":")[1] ?? "",
-        mode: "once",
-      },
-    };
-  }
-  if (kind === "approve_always") {
-    return {
-      actionId: "operator.approval.resolve",
-      params: {
-        approval_id: item.item_id.split(":")[1] ?? "",
-        mode: "always",
-      },
-    };
-  }
-  if (kind === "deny") {
-    return {
-      actionId: "operator.approval.resolve",
-      params: {
-        approval_id: item.item_id.split(":")[1] ?? "",
-        mode: "deny",
-      },
-    };
-  }
-  if (kind === "cancel_task") {
-    return { actionId: "operator.task.cancel", params: { item_id: item.item_id } };
-  }
-  if (kind === "retry_task") {
-    return { actionId: "operator.task.retry", params: { item_id: item.item_id } };
-  }
-  if (kind === "ack_alert") {
-    return { actionId: "operator.alert.ack", params: { item_id: item.item_id } };
-  }
-  if (kind === "approve_pairing") {
-    return { actionId: "channel.pairing.approve", params: { item_id: item.item_id } };
-  }
-  if (kind === "reject_pairing") {
-    return { actionId: "channel.pairing.reject", params: { item_id: item.item_id } };
-  }
-  return null;
 }
 
 export function buildMemoryNarrative(

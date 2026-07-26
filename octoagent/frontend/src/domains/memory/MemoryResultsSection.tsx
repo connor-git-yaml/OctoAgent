@@ -15,7 +15,7 @@ interface MemoryResultsSectionProps {
   consolidateMessage: string;
   consolidateIsError: boolean;
   onResetFilters: () => Promise<void>;
-  onSelectRecord: (record: MemoryDisplayRecord) => void;
+  onSelectRecord: (record: MemoryDisplayRecord, trigger: HTMLElement) => void;
   onConsolidate: () => Promise<void>;
 }
 
@@ -33,7 +33,7 @@ export default function MemoryResultsSection({
   const isConsolidating = busyActionId === "memory.consolidate";
 
   return (
-    <section className="wb-panel">
+    <section className="wb-panel f149-memory-results">
       <div className="wb-panel-head">
         <div>
           <p className="wb-card-label">记忆列表</p>
@@ -63,15 +63,15 @@ export default function MemoryResultsSection({
 
       {records.length === 0 ? (
         <div className="wb-empty-state">
-          <strong>{hasStoredRecords ? "当前筛选没有命中记忆" : "还没有记忆"}</strong>
+          <strong>{hasStoredRecords ? "没有匹配的记忆" : "还没有记忆"}</strong>
           <span>
             {hasStoredRecords
-              ? "试试清空筛选条件。"
-              : "去 Chat 对话或导入历史内容后，这里会出现记忆。"}
+              ? "换个关键词，或者清除筛选后再看看。"
+              : "先和助手聊聊，值得记住的背景会出现在这里。"}
           </span>
           <div className="wb-inline-actions">
             <Link className="wb-button wb-button-primary" to="/">
-              去 Chat
+              开始对话
             </Link>
             <button
               type="button"
@@ -79,7 +79,7 @@ export default function MemoryResultsSection({
               onClick={() => void onResetFilters()}
               disabled={busyActionId === "memory.query"}
             >
-              清空筛选
+              清除筛选
             </button>
           </div>
         </div>
@@ -91,12 +91,21 @@ export default function MemoryResultsSection({
             return (
               <article
                 key={record.record_id}
-                className="wb-memory-card"
-                onClick={() => onSelectRecord(displayRecord)}
-                style={{
-                  cursor: "pointer",
-                  ...(record.status === "archived" ? { opacity: 0.65 } : {}),
+                className={`wb-memory-card f149-memory-record${
+                  record.status === "archived" ? " is-archived" : ""
+                }`}
+                onClick={(event) =>
+                  onSelectRecord(displayRecord, event.currentTarget)
+                }
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onSelectRecord(displayRecord, event.currentTarget);
+                  }
                 }}
+                role="button"
+                tabIndex={0}
+                aria-label={`查看 ${displayRecord.title}`}
               >
                 <div className="wb-memory-head">
                   <div>
@@ -124,26 +133,9 @@ export default function MemoryResultsSection({
                   </div>
                 </div>
 
-                <div className="wb-chip-row">
-                  <span className="wb-chip">证据 {record.evidence_refs.length}</span>
-                  {record.version !== null ? (
-                    <span className="wb-chip">版本 {record.version}</span>
-                  ) : null}
-                  {displayRecord.confidenceLabel ? (
-                    <span className="wb-chip">置信度 {displayRecord.confidenceLabel}</span>
-                  ) : null}
-                </div>
-
-                {displayRecord.metadataPreview.length > 0 ? (
-                  <div className="wb-key-value-list">
-                    {displayRecord.metadataPreview.map(([key, value]) => (
-                      <div key={`${record.record_id}-${key}`} className="wb-key-value-item">
-                        <span>{key}</span>
-                        <strong>{value}</strong>
-                      </div>
-                    ))}
-                  </div>
-                ) : null}
+                <span className="f149-memory-record-action">
+                  {record.status === "archived" ? "查看并恢复" : "查看与编辑"}
+                </span>
               </article>
             );
           })}

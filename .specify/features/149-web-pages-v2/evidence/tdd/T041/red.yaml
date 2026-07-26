@@ -1,0 +1,15 @@
+task_id: T041
+phase: RED
+behavior: Memory v2 页面状态、真实动作、索引生命周期、Advanced 技术字段与死入口清理
+command: cd octoagent/frontend && npx vitest run src/domains/memory/MemoryPage.test.tsx
+executed_at_utc: 2026-07-26T06:40:47Z
+head_sha: b7e96d5fdc49e8d06a46dbeea401d277920af95d
+exit_code: 1
+oracle_expected: 旧 Memory 页面无法同时满足缺失资源普通恢复态、索引生命周期人话表达、loading/empty/error/origin-403、SoR 编辑与恢复可达、原始检索信息只在 Advanced；既有查询与管理动作控制继续通过
+oracle_observed: exact 15 项中 5 项稳定失败、10 项通过；失败均为目标页面状态、术语、SoR 可达性或 Advanced 边界断言，不是 import、collection、路径或基础设施错误
+raw_output_file: /tmp/f149-t041-red.log
+raw_output_sha256: c7e37ddb1ba468fb6c655bb19d2200041c3ff53b992478c20ec6c3d8d620acad
+raw_output_size: 254087
+secret_scan: pass
+network: false
+rerun: false
