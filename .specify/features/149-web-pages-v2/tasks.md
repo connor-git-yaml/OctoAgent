@@ -438,6 +438,16 @@
 
 ### T033 — Settings write-only secret 与普通用户语言
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T033/`。前端只发送 backend 既有的
+  `keep/replace/remove` typed mutation；密钥值仅停留在 ephemeral draft，
+  保存成功、失败或关闭后清空，且不进入 DOM、clipboard、错误信息或证据。
+  普通区采用 Claude Design 的“访问密钥 / 检查改动 / 保存并生效”语言，
+  Provider ID、鉴权方式、环境变量名与 API Base URL 只在默认收起的 Advanced。
+  本次触及的 Settings 视觉类已从旧 `wb-*` 基线迁到 co-located
+  `f149-settings-*`，只消费 `--cp-*`；桌面 Provider 卡片保持三列节奏，
+  390px Web 窄窗口改为单列且无横向挤压。该 390 检查仅代表 Web
+  响应式健壮性，手机产品仍只走原生 iOS。
 - **层/FR**：frontend L4 pure/component/security；FR-005/006/022。
 - **文件**：`domains/settings/secretMutation.test.ts`、pure command/state；Settings tests/components。
 - **依赖**：T013/T024/T025/T032。
@@ -725,8 +735,8 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T025、T030–T032 中已执行的任务均有真实证据；下一项是
-  T033 Settings write-only secret 与普通用户语言。每个后续页面仍必须先逐页对照 Claude
+- 当前风险：T000–T015、T020–T025、T030–T033 中已执行的任务均有真实证据；下一项是
+  T034 Automation v2。每个后续页面仍必须先逐页对照 Claude
   Design 最初版；现有 Web 只能作为实现现状，不得成为视觉基线。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

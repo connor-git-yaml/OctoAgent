@@ -1,0 +1,45 @@
+task_id: T033
+phase: REFACTOR
+behavior: Settings write-only secret 三态、清空、安全 absence 与普通用户语言合同
+command: cd octoagent/frontend && npx vitest run src/domains/settings/secretMutation.test.ts src/domains/settings/SettingsPage.test.tsx
+executed_at_utc: 2026-07-26T05:52:52Z
+head_sha: b4e19cea4f3354026452ae26dfb46b5fbbbe9414
+exit_code: 0
+oracle_expected: exact19项保持，ephemeral secret VM与Settings组合职责清晰，Claude Design普通语言与Advanced边界不漂移
+oracle_observed: exact19/19、全前端543/543、生产build、OpenAPI、F149 boundary/style/complexity、changed-lines coverage 92.24%及repository runtime architecture通过
+raw_output_file: /tmp/f149-t033-refactor.log
+raw_output_sha256: 3023cd1dba51f4667d49b1d37c26eb7d94f45931678fd3ab08cef6b6092ee088
+raw_output_size: 397
+full_frontend_log_sha256: 57cc22bdec170d338e50c093289a4f084a8f7e825f339f1a1f88351ef83f80a6
+build_log_sha256: 22b749a43504aa20eed24e0604582dda5a60352bfb8562b3825bc104a2802704
+openapi_log_sha256: 9638cc491425d7792ce6e2b62a5382a55f68afb73ad374d3ae4c802c5af10c10
+boundary_log_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_log_sha256: 4ed23a9b3faaae305c3dcbdc9619d857c74160a17c03dd8fb5ecda00f1f96ad2
+complexity_log_sha256: 8bd3aae19b517ad6cc754c86b6d83db9e52a37156832f46ef1c3caf90be8812d
+coverage_log_sha256: 6b1e225956916cbb899bea6085a3c776823a0dfce322aac25aa3d8438fe49e28
+changed_lines_coverage_log_sha256: 5a14ab47459588b9e7a108f1467e5d1f83ed469e66b5a22982d9cd37472b9ac8
+runtime_architecture_log_sha256: b26c73c48865449bc56e3d70778af1f143b433b80ab939b2d5a55c59e516e887
+runtime_architecture_gate: pass
+runtime_architecture_observed: repository runtime architecture PASS
+quality_review:
+  - 实际浏览器逐页核对Claude Design Settings原稿；保留现有层级、留白、卡片节奏和视觉张力，没有把页面退回当前旧Web审美
+  - 本次触及的旧wb视觉类迁到co-located f149-settings CSS且只消费--cp-*；桌面维持三列卡片节奏，390px Web窄窗口单列无横向挤压
+  - 普通区只显示访问密钥、已保存的值不会显示、检查改动、保存并生效与本地安全存储；实现术语只在默认收起的Advanced
+  - secret value只存在于ephemeral draft与typed replace command；placeholder拒绝，keep/remove不携带value
+  - 保存成功、失败、取消修改、Provider删除及OAuth/quick-connect结束后清空对应草稿；值不进入DOM、clipboard、错误文案或证据
+  - Settings继续复用既有Workbench action executor与Gateway setup合同；没有第二transport、store、service、registry或兼容payload
+  - 未放宽runtime architecture checker、未修改index.css；旧视觉依赖真实移除后repository gate通过
+file_sha256:
+  secret-mutation: eab9c1376e9f5b884deb5b9c2fb96ce9f680917a011ce1565c2ba9fd0df11368
+  secret-mutation-test: cd45dafa49df38662e420b6b46078e101f9effc13bd74848a4bff27fa5fea11e
+  settings-page: c47206e759c70f745e51e357ae0b1c7a5b71f21464cab7a50bb2a3b1d66b65a3
+  settings-page-test: e17717729c8daeaf43751ae7f90acbee0c52fd7030d455996a48ca47ba0442dc
+  provider-section: 7e521682b60ec7cafadb7365111b370ecc9eaff2192df71a9c3bb954ee2133ae
+  settings-overview: 4dcd19d8e15b548aa7b9a5499eda91a829fe7271c6dc1fb4ce91a271e5f047ec
+  settings-overview-css: f3232d680be5dffdf020ddff72f2206262c60e3fae2c01c70bf034d545272563
+  pending-changes: 408836545660f088efcf72eec9ec3bddfd68ca3b9459091d55d86cfaf0de0f7c
+  settings-phase079-test: 11e0b01ac7a4dfbf536c9991314f41bbb87cf9233c9a0be36a5374fe3102df7d
+  app-test: f17e2eb6add288aef7bfd89ed4051b45179da1d0963401e2b73d68bf2da53a45
+secret_scan: pass
+network: false
+rerun: false

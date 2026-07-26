@@ -14,6 +14,16 @@ import SettingsProviderSection from "./SettingsProviderSection";
 import { translateWarning } from "../memory/shared";
 import SettingsResourceLimitsSection from "./SettingsResourceLimitsSection";
 import {
+  SecretMutationError,
+  buildSecretMutations,
+  clearSecretDrafts,
+  hasPendingSecretChanges,
+  updateSecretDrafts,
+  type SecretDraftCommand,
+  type SecretDrafts,
+  type SecretMutation,
+} from "./secretMutation";
+import {
   CUSTOM_PROVIDER_FIELD_PATHS,
   buildConfigPayload,
   buildDefaultAliasDrafts,
@@ -62,7 +72,7 @@ export default function SettingsPage() {
   );
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [review, setReview] = useState<SetupReviewSummary>(setup?.review ?? EMPTY_REVIEW);
-  const [secretValues, setSecretValues] = useState<Record<string, string>>({});
+  const [secretDrafts, setSecretDrafts] = useState<SecretDrafts>({});
   const [savedSecretEnvNames, setSavedSecretEnvNames] = useState<string[]>([]);
   const [pendingRuntimeRefresh, setPendingRuntimeRefresh] = useState(false);
 
@@ -87,7 +97,7 @@ export default function SettingsPage() {
   }, [setup?.generated_at]);
 
   useEffect(() => {
-    setSecretValues({});
+    setSecretDrafts({});
   }, [setup.generated_at, config.generated_at]);
 
   // Feature 079 Phase 1：保存类 action 失败时自动弹错误 modal。
@@ -194,10 +204,7 @@ export default function SettingsPage() {
       categories.push("model_aliases");
     }
 
-    const unsavedSecrets = Object.entries(secretValues).filter(
-      ([, value]) => String(value ?? "").trim(),
-    );
-    if (unsavedSecrets.length > 0) {
+    if (hasPendingSecretChanges(secretDrafts)) {
       categories.push("secrets");
     }
     return categories;
@@ -218,17 +225,17 @@ export default function SettingsPage() {
     ...envPresence(providerRuntimeDetails),
     ...savedSecretEnvNames,
   ]);
+  const secretEnvNames = providerDrafts
+    .filter((provider) => provider.auth_type !== "oauth")
+    .map((provider) => provider.api_key_env)
+    .filter((envName) => envName.trim());
   useEffect(() => {
     if (activeProviders.length === 0) {
       setPendingRuntimeRefresh(false);
     }
   }, [activeProviders.length]);
 
-  function buildSetupDraft(secretStateOverride?: Record<string, string>) {
-    const nextSecretValues = {
-      ...secretValues,
-      ...(secretStateOverride ?? {}),
-    };
+  function buildSetupDraft() {
     const result = buildConfigPayload(
       config.current_value,
       config.ui_hints,
@@ -254,17 +261,40 @@ export default function SettingsPage() {
     }
     const canonicalConfig = { ...result.config };
     delete canonicalConfig.runtime;
-    return {
-      config: canonicalConfig,
-      secret_values: Object.fromEntries(
-        Object.entries(nextSecretValues).filter(([, value]) => value.trim())
-      ),
-    };
+    try {
+      return {
+        config: canonicalConfig,
+        secret_values: buildSecretMutations(
+          secretEnvNames,
+          savedEnvNames,
+          secretDrafts,
+        ),
+      };
+    } catch (error) {
+      const item =
+        error instanceof SecretMutationError
+          ? {
+              id: error.envName,
+              title: "访问密钥需要重新输入",
+              detail: error.message,
+            }
+          : {
+              id: "secret_mutation",
+              title: "访问密钥无法保存",
+              detail: "请重新输入后再试。",
+            };
+      setErrorModal({
+        open: true,
+        kind: "field",
+        items: [item],
+      });
+      return null;
+    }
   }
 
   function draftRequiresRuntimeRefresh(draft: {
     config: Record<string, unknown>;
-    secret_values: Record<string, string>;
+    secret_values: Record<string, SecretMutation>;
   }) {
     const currentManagedState = {
       providers: getValueAtPath(config.current_value, "providers") ?? [],
@@ -283,6 +313,7 @@ export default function SettingsPage() {
   async function handleReview() {
     const draft = buildSetupDraft();
     if (!draft) {
+      setSecretDrafts((current) => clearSecretDrafts(current, "failure"));
       return;
     }
     const result = await submitAction("setup.review", { draft });
@@ -305,6 +336,12 @@ export default function SettingsPage() {
     // 让 useEffect 知道要把 error 映射到错误 modal。
     pendingSaveActionRef.current = "setup.apply";
     const result = await submitAction("setup.apply", { draft });
+    setSecretDrafts((current) =>
+      clearSecretDrafts(current, result ? "success" : "failure"),
+    );
+    if (!result) {
+      return;
+    }
     const appliedReview = result?.data.review;
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
       setReview(appliedReview as SetupReviewSummary);
@@ -390,11 +427,34 @@ export default function SettingsPage() {
     }
     const canonicalConfig = { ...payload.config };
     delete canonicalConfig.runtime;
+    let secretMutations: Record<string, SecretMutation>;
+    try {
+      secretMutations = buildSecretMutations(
+        secretEnvNames,
+        savedEnvNames,
+        secretDrafts,
+      );
+    } catch (error) {
+      setSecretDrafts((current) => clearSecretDrafts(current, "failure"));
+      setErrorModal({
+        open: true,
+        kind: "field",
+        items: [
+          {
+            id: error instanceof SecretMutationError ? error.envName : "secret_mutation",
+            title: "访问密钥需要重新输入",
+            detail:
+              error instanceof SecretMutationError
+                ? error.message
+                : "请重新输入后再试。",
+          },
+        ],
+      });
+      return false;
+    }
     const draft = {
       config: canonicalConfig,
-      secret_values: Object.fromEntries(
-        Object.entries(secretValues).filter(([, value]) => String(value ?? "").trim())
-      ),
+      secret_values: secretMutations,
     };
 
     pendingSaveActionRef.current = "setup.oauth_and_apply";
@@ -404,13 +464,11 @@ export default function SettingsPage() {
       profile_name: "openai-codex-default",
       draft,
     });
+    setSecretDrafts((current) =>
+      clearSecretDrafts(current, result ? "success" : "failure"),
+    );
     if (result) {
       setPendingRuntimeRefresh(false);
-      setSecretValues((state) => {
-        const next = { ...state };
-        delete next[envName];
-        return next;
-      });
       // 如果后端返回 SETUP_OAUTH_OK_APPLY_BLOCKED，把 blocking message 弹到 modal
       // 让用户知道"授权已完成，但配置还需修复 blocking 后再保存"
       const code = result.code ?? "";
@@ -448,6 +506,7 @@ export default function SettingsPage() {
   async function handleQuickConnect() {
     const draft = buildSetupDraft();
     if (!draft) {
+      setSecretDrafts((current) => clearSecretDrafts(current, "failure"));
       return;
     }
     const needsOpenAIOAuth =
@@ -457,6 +516,7 @@ export default function SettingsPage() {
     if (needsOpenAIOAuth) {
       const connected = await handleOpenAIOAuthConnect();
       if (!connected) {
+        setSecretDrafts((current) => clearSecretDrafts(current, "failure"));
         return;
       }
     }
@@ -466,13 +526,18 @@ export default function SettingsPage() {
       const parsedReview = nextReview as SetupReviewSummary;
       setReview(parsedReview);
       if (!parsedReview.ready) {
+        setSecretDrafts((current) => clearSecretDrafts(current, "failure"));
         return;
       }
     } else if (!review.ready) {
+      setSecretDrafts((current) => clearSecretDrafts(current, "failure"));
       return;
     }
     pendingSaveActionRef.current = "setup.quick_connect";
     const result = await submitAction("setup.quick_connect", { draft });
+    setSecretDrafts((current) =>
+      clearSecretDrafts(current, result ? "success" : "failure"),
+    );
     const appliedReview = result?.data.review;
     if (appliedReview && typeof appliedReview === "object" && !Array.isArray(appliedReview)) {
       setReview(appliedReview as SetupReviewSummary);
@@ -514,11 +579,14 @@ export default function SettingsPage() {
     }));
   }
 
-  function updateSecretValue(envName: string, value: string) {
-    setSecretValues((state) => ({
-      ...state,
-      [envName]: value,
-    }));
+  function updateSecretDraft(
+    envName: string,
+    configured: boolean,
+    command: SecretDraftCommand,
+  ) {
+    setSecretDrafts((state) =>
+      updateSecretDrafts(state, envName, configured, command),
+    );
   }
 
   function updateProviders(nextProviders: ProviderDraftItem[]) {
@@ -607,6 +675,11 @@ export default function SettingsPage() {
     if (!target) {
       return;
     }
+    setSecretDrafts((state) => {
+      const next = { ...state };
+      delete next[target.api_key_env];
+      return next;
+    });
     const nextProviders = providerDrafts.filter((_, providerIndex) => providerIndex !== index);
     const fallbackProviderId =
       nextProviders.find((item) => item.enabled)?.id ?? nextProviders[0]?.id ?? "";
@@ -656,7 +729,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="wb-page wb-settings-page">
+    <div className="f149-settings-page f149-settings-page-layout">
       {/* Feature 079 Phase 1：错误 modal 用 portal 渲染到 body，不受本子树异常影响 */}
       <SettingsErrorModal
         open={errorModal.open}
@@ -688,10 +761,10 @@ export default function SettingsPage() {
         defaultProvider={defaultProvider}
         providerRuntimeDetails={providerRuntimeDetails}
         providerSelectOptions={providerSelectOptions}
-        secretValues={secretValues}
+        secretDrafts={secretDrafts}
         savedEnvNames={savedEnvNames}
         connectBusy={connectBusy}
-        onSecretValueChange={updateSecretValue}
+        onSecretDraftChange={updateSecretDraft}
         onAddProviderDraft={addProviderDraft}
         onUpdateProviderAt={updateProviderAt}
         onMoveProviderToFront={moveProviderToFront}
@@ -705,26 +778,26 @@ export default function SettingsPage() {
         }}
       />
 
-      <section id="settings-group-memory" className="wb-panel">
-        <div className="wb-panel-head">
+      <section id="settings-group-memory" className="f149-settings-panel">
+        <div className="f149-settings-panel-head">
           <div>
             <h3 style={{ fontSize: "1.1rem", margin: 0 }}>记忆</h3>
           </div>
         </div>
 
-        <div className="wb-card-grid wb-card-grid-4">
-          <article className="wb-card">
-            <p className="wb-card-label">引擎模式</p>
+        <div className="f149-settings-card-grid f149-settings-card-grid-4">
+          <article className="f149-settings-card">
+            <p className="f149-settings-card-label">引擎模式</p>
             <strong>内建记忆引擎</strong>
-            <span>SQLite / Vault</span>
+            <span>本地安全存储</span>
           </article>
-          <article className="wb-card">
-            <p className="wb-card-label">当前状态</p>
+          <article className="f149-settings-card">
+            <p className="f149-settings-card-label">当前状态</p>
             <strong>{memory.backend_state || memory.status}</strong>
             <span>{memory.backend_id || "未标记"}</span>
           </article>
-          <article className="wb-card">
-            <p className="wb-card-label">语义检索</p>
+          <article className="f149-settings-card">
+            <p className="f149-settings-card-label">语义检索</p>
             <strong>
               {
                 String(
@@ -736,15 +809,15 @@ export default function SettingsPage() {
             </strong>
             <span>换模型时会后台重建索引</span>
           </article>
-          <article className="wb-card">
-            <p className="wb-card-label">当前结论</p>
+          <article className="f149-settings-card">
+            <p className="f149-settings-card-label">当前结论</p>
             <strong>{memory.summary?.sor_current_count ?? "—"}</strong>
             <span>片段 {memory.summary?.fragment_count ?? "—"}</span>
           </article>
         </div>
 
         <h4 style={{ fontSize: "0.85rem", fontWeight: 600, margin: "1rem 0 0.5rem", color: "var(--cp-muted)" }}>记忆模型配置</h4>
-        <div className="wb-toolbar-grid">
+        <div className="f149-settings-toolbar-grid">
           {(
             [
               { key: "memory.reasoning_model_alias", label: "记忆加工", fallback: "main（默认）" },
@@ -764,7 +837,7 @@ export default function SettingsPage() {
               .map((item) => item.alias.trim())
               .filter((a) => a && a !== fallbackBase);
             return (
-              <label key={slot.key} className="wb-field">
+              <label key={slot.key} className="f149-settings-field">
                 <span>{slot.label}</span>
                 <select
                   value={currentValue}
@@ -783,7 +856,7 @@ export default function SettingsPage() {
         </div>
 
         {(memory.warnings ?? []).length > 0 ? (
-          <div className="wb-inline-banner is-error" role="alert">
+          <div className="f149-settings-inline-banner is-error" role="alert">
             <strong>记忆服务提醒</strong>
             <span>{(memory.warnings ?? []).map(translateWarning).join("；")}</span>
           </div>
@@ -799,8 +872,8 @@ export default function SettingsPage() {
         }
         const group = groupLabel(groupId);
         return (
-          <section key={groupId} id={`settings-group-${groupId}`} className="wb-panel">
-            <div className="wb-panel-head">
+          <section key={groupId} id={`settings-group-${groupId}`} className="f149-settings-panel">
+            <div className="f149-settings-panel-head">
               <div>
                 <h3 style={{ fontSize: "1.1rem", margin: 0 }}>{group.title}</h3>
               </div>
@@ -830,18 +903,18 @@ export default function SettingsPage() {
         busy={busyActionId === "agent_profile.update_resource_limits"}
       />
 
-      <section id="settings-group-review" className="wb-panel">
-        <div className="wb-panel-head">
+      <section id="settings-group-review" className="f149-settings-panel">
+        <div className="f149-settings-panel-head">
           <div>
             <h3 style={{ fontSize: "1.1rem", margin: 0 }}>保存检查</h3>
           </div>
         </div>
 
-        <div className="wb-settings-review-grid">
-          <div className="wb-note-stack">
-            <div className="wb-note">
+        <div className="f149-settings-review-grid">
+          <div className="f149-settings-note-stack">
+            <div className="f149-settings-note">
               <strong>下一步</strong>
-              <div className="wb-note-stack">
+              <div className="f149-settings-note-stack">
                 {reviewNextActions.length > 0 ? (
                   reviewNextActions.map((item) => <span key={item}>{item}</span>)
                 ) : (
@@ -850,7 +923,7 @@ export default function SettingsPage() {
               </div>
             </div>
             {review.agent_autonomy_risks.length > 0 ? (
-              <div className="wb-note">
+              <div className="f149-settings-note">
                 <strong>其他模块仍有阻塞项</strong>
                 <span>{review.agent_autonomy_risks.map((risk) => risk.title).join("；")}</span>
               </div>
@@ -861,24 +934,24 @@ export default function SettingsPage() {
             {renderRiskList("密钥绑定", review.secret_binding_risks)}
           </div>
 
-          <div className="wb-provider-card">
-            <div className="wb-provider-card-head">
+          <div className="f149-settings-provider-card">
+            <div className="f149-settings-provider-card-head">
               <div>
-                <p className="wb-card-label">本页动作</p>
+                <p className="f149-settings-card-label">本页动作</p>
                 <strong>检查、保存或一键接入</strong>
               </div>
-              <span className={`wb-status-pill ${review.ready ? "is-ready" : "is-warning"}`}>
+              <span className={`f149-settings-status-pill ${review.ready ? "is-ready" : "is-warning"}`}>
                 {review.ready ? "就绪" : "需要检查"}
               </span>
             </div>
-            <div className="wb-inline-actions wb-inline-actions-wrap">
+            <div className="f149-settings-inline-actions f149-settings-inline-actions-wrap">
               {pendingRuntimeRefresh ? (
-                <div className="wb-inline-banner is-warning" role="alert">
+                <div className="f149-settings-inline-banner is-warning" role="alert">
                   <strong>配置已保存，但当前连接尚未刷新</strong>
                   <span>要让刚保存的 Provider、模型别名和密钥立即生效，请再执行一次连接刷新。</span>
                   <button
                     type="button"
-                    className="wb-button wb-button-secondary"
+                    className="f149-settings-button f149-settings-button-secondary"
                     onClick={() => void handleQuickConnect()}
                     disabled={connectBusy}
                   >
@@ -888,7 +961,7 @@ export default function SettingsPage() {
               ) : null}
               <button
                 type="button"
-                className="wb-button wb-button-primary"
+                className="f149-settings-button f149-settings-button-primary"
                 onClick={() => void handleQuickConnect()}
                 disabled={connectBusy}
               >
@@ -896,19 +969,19 @@ export default function SettingsPage() {
               </button>
               <button
                 type="button"
-                className="wb-button wb-button-secondary"
+                className="f149-settings-button f149-settings-button-secondary"
                 onClick={() => void handleReview()}
                 disabled={connectBusy}
               >
-                检查配置
+                检查改动
               </button>
               <button
                 type="button"
-                className="wb-button wb-button-secondary"
+                className="f149-settings-button f149-settings-button-secondary"
                 onClick={() => void handleApply()}
                 disabled={connectBusy}
               >
-                保存配置
+                保存并生效
               </button>
             </div>
           </div>

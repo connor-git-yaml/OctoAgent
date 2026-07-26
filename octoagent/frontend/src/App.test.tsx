@@ -1054,7 +1054,7 @@ describe("App workbench routing", () => {
     await screen.findByText("先连上至少一个模型 Provider");
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
     expect(await screen.findByDisplayValue("OpenAI")).toBeInTheDocument();
-    await userEvent.click(screen.getAllByRole("button", { name: "保存配置" })[0]!);
+    await userEvent.click(screen.getAllByRole("button", { name: "保存并生效" })[0]!);
 
     await waitFor(() =>
       expect(
@@ -1587,7 +1587,7 @@ describe("App workbench routing", () => {
 
     await screen.findByText("先连上至少一个模型 Provider");
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI Auth" }));
-    await userEvent.click(screen.getByRole("button", { name: "连接 OpenAI Auth" }));
+    await userEvent.click(screen.getByRole("button", { name: "连接账户" }));
 
     await waitFor(() =>
       expect(

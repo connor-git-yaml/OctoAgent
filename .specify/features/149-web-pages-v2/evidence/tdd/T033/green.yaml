@@ -1,0 +1,15 @@
+task_id: T033
+phase: GREEN
+behavior: Settings write-only secret 三态、清空、安全 absence 与普通用户语言合同
+command: cd octoagent/frontend && npx vitest run src/domains/settings/secretMutation.test.ts src/domains/settings/SettingsPage.test.tsx
+executed_at_utc: 2026-07-26T05:36:23Z
+head_sha: b4e19cea4f3354026452ae26dfb46b5fbbbe9414
+exit_code: 0
+oracle_expected: keep/replace/remove与backend一致，placeholder拒绝，success/failure/close清空，值不进入DOM/clipboard/error，技术事实只在Advanced
+oracle_observed: exact 19/19通过；3项pure mutation与16项Settings component/control全部通过
+raw_output_file: /tmp/f149-t033-green.log
+raw_output_sha256: cb09230c425ea32cb9e5045e953c3194c341acd1203f50ccbdabec5092df41c0
+raw_output_size: 397
+secret_scan: pass
+network: false
+rerun: false

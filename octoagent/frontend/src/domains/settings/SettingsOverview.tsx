@@ -49,7 +49,7 @@ export default function SettingsOverview({
             onClick={usingEchoMode ? onQuickConnect : onApply}
             disabled={connectBusy}
           >
-            {usingEchoMode ? "连接真实模型" : "保存配置"}
+            {usingEchoMode ? "连接真实模型" : "保存并生效"}
           </button>
           <button
             type="button"
@@ -57,7 +57,7 @@ export default function SettingsOverview({
             onClick={onReview}
             disabled={connectBusy}
           >
-            检查配置
+            检查改动
           </button>
         </div>
       </section>

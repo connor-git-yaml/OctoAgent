@@ -1,0 +1,15 @@
+task_id: T033
+phase: RED
+behavior: Settings write-only secret 三态、清空、安全 absence 与普通用户语言合同
+command: cd octoagent/frontend && npx vitest run src/domains/settings/secretMutation.test.ts src/domains/settings/SettingsPage.test.tsx
+executed_at_utc: 2026-07-26T05:33:57Z
+head_sha: b4e19cea4f3354026452ae26dfb46b5fbbbe9414
+exit_code: 1
+oracle_expected: inert mutation 与旧Settings无法满足keep/replace/remove、placeholder拒绝、清空、安全absence及Claude Design普通语言合同
+oracle_observed: 19项中4项稳定失败、15项既有控制通过；失败精确落在typed mutation缺失、pending与clear缺失、旧密钥输入和普通区技术词泄漏
+raw_output_file: /tmp/f149-t033-red.log
+raw_output_sha256: 7bd351bcfda49a982db295fd34884ab8ffaf3bbc2f848c84096ddff2b76c242e
+raw_output_size: 33509
+secret_scan: pass
+network: false
+rerun: false

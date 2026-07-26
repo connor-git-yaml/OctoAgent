@@ -19,7 +19,7 @@ interface PendingChangesBarProps {
   categories: string[];
   /** 是否正在保存 */
   busy: boolean;
-  /** 点"立即保存"触发 */
+  /** 点“保存并生效”触发 */
   onSave: () => void;
 }
 
@@ -53,25 +53,25 @@ export default function PendingChangesBar({
   }
   return (
     <div
-      className="wb-pending-changes-bar"
+      className="f149-settings-pending-changes-bar"
       role="status"
       aria-live="polite"
       data-testid="settings-pending-changes-bar"
     >
-      <div className="wb-pending-changes-bar-main">
+      <div className="f149-settings-pending-changes-bar-main">
         <strong>你有未保存的变更</strong>
-        <span className="wb-muted">
+        <span className="f149-settings-muted">
           刚改动的 {renderCategories(categories)} 还没落盘。完成保存后主 Agent 才会用上新配置。
         </span>
       </div>
-      <div className="wb-pending-changes-bar-actions">
+      <div className="f149-settings-pending-changes-bar-actions">
         <button
           type="button"
-          className="wb-button wb-button-primary"
+          className="f149-settings-button f149-settings-button-primary"
           onClick={onSave}
           disabled={busy}
         >
-          {busy ? "正在保存…" : "立即保存"}
+          {busy ? "正在保存…" : "保存并生效"}
         </button>
       </div>
     </div>

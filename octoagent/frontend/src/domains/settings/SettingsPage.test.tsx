@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -498,12 +498,134 @@ describe("SettingsPage", () => {
 
     await userEvent.clear(baseUrlInput);
     await userEvent.type(baseUrlInput, "https://siliconflow.example.com/v1");
-    await userEvent.click(screen.getAllByRole("button", { name: "检查配置" })[0]);
+    await userEvent.click(screen.getAllByRole("button", { name: "检查改动" })[0]);
 
     await waitFor(() => expect(submitAction).toHaveBeenCalledWith("setup.review", expect.anything()));
 
     const draft = submitAction.mock.calls[0][1].draft;
     expect(draft.config.providers[0].base_url).toBe("https://siliconflow.example.com/v1");
+  });
+
+  it("访问密钥只以 replace mutation 出站，保存成功后立即清空输入", async () => {
+    const snapshot = buildSettingsSnapshot();
+    snapshot.resources.config.current_value.providers = [
+      {
+        id: "openai",
+        name: "OpenAI",
+        auth_type: "api_key",
+        api_key_env: "OPENAI_API_KEY",
+        base_url: "",
+        enabled: true,
+      },
+    ] as unknown as never[];
+    snapshot.resources.config.current_value.model_aliases = {
+      main: {
+        provider: "openai",
+        model: "gpt-5.4",
+        description: "主模型",
+      },
+    } as never;
+    snapshot.resources.setup_governance.provider_runtime.details.runtime_env_names = [
+      "OPENAI_API_KEY",
+    ];
+    const submitAction = vi.fn().mockResolvedValue({
+      data: {
+        review: snapshot.resources.setup_governance.review,
+        saved_secrets: {
+          runtime_env_names: ["OPENAI_API_KEY"],
+          litellm_env_names: [],
+        },
+      },
+    });
+    mockWorkbench = {
+      snapshot,
+      submitAction,
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("已保存的值不会显示")).toBeInTheDocument();
+    await userEvent.click(
+      screen.getByRole("button", { name: "重新输入 OpenAI 访问密钥" }),
+    );
+    const secretInput = screen.getByLabelText("OpenAI 新的访问密钥");
+    await userEvent.type(secretInput, "sk-f149-write-only-secret");
+    await userEvent.click(
+      screen.getAllByRole("button", { name: "保存并生效" })[0]!,
+    );
+
+    await waitFor(() =>
+      expect(submitAction).toHaveBeenCalledWith(
+        "setup.apply",
+        expect.objectContaining({
+          draft: expect.objectContaining({
+            secret_values: {
+              OPENAI_API_KEY: {
+                mode: "replace",
+                value: "sk-f149-write-only-secret",
+              },
+            },
+          }),
+        }),
+      ),
+    );
+    expect(screen.queryByDisplayValue("sk-f149-write-only-secret")).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain("sk-f149-write-only-secret");
+    expect(screen.queryByRole("button", { name: /复制.*访问密钥/u })).not.toBeInTheDocument();
+  });
+
+  it("普通区使用 Claude Design 用户语言，技术字段只放在高级", () => {
+    const snapshot = buildSettingsSnapshot();
+    snapshot.resources.config.current_value.providers = [
+      {
+        id: "openai",
+        name: "OpenAI",
+        auth_type: "api_key",
+        api_key_env: "OPENAI_API_KEY",
+        base_url: "https://api.openai.com/v1",
+        enabled: true,
+      },
+    ] as unknown as never[];
+    mockWorkbench = {
+      snapshot,
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsPage />
+      </MemoryRouter>,
+    );
+
+    const ordinary = screen.getByTestId("settings-provider-ordinary-openai");
+    for (const term of [
+      "LiteLLM",
+      "JWT",
+      "AUD",
+      "JWKS",
+      "API Key",
+      "write-only",
+      "review",
+      "apply",
+      "dry-run",
+      "vault",
+    ]) {
+      expect(ordinary.textContent?.toLowerCase()).not.toContain(term.toLowerCase());
+    }
+    expect(within(ordinary).getByText("访问密钥")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "检查改动" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "保存并生效" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("本地安全存储")).toBeInTheDocument();
+
+    const advanced = screen.getByRole("group", { name: "OpenAI 高级设置" });
+    expect(within(advanced).getByText("Provider ID")).toBeInTheDocument();
+    expect(within(advanced).getByText("API Base URL")).toBeInTheDocument();
   });
 
   it("omits retired runtime fields from canonical save payload", async () => {
@@ -527,7 +649,7 @@ describe("SettingsPage", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI" }));
 
-    await userEvent.click(screen.getAllByRole("button", { name: "检查配置" })[0]);
+    await userEvent.click(screen.getAllByRole("button", { name: "检查改动" })[0]);
 
     await waitFor(() => expect(submitAction).toHaveBeenCalledWith("setup.review", expect.anything()));
 
@@ -582,7 +704,7 @@ describe("SettingsPage", () => {
     );
 
     await userEvent.click(screen.getByRole("button", { name: "添加 OpenAI Auth" }));
-    await userEvent.click(screen.getByRole("button", { name: "连接 OpenAI Auth" }));
+    await userEvent.click(screen.getByRole("button", { name: "连接账户" }));
 
     // Feature 079 Phase 2：授权动作改走原子的 setup.oauth_and_apply
     // 保证 OAuth 成功后 providers[] 和 model_aliases 也一起写到 octoagent.yaml。
@@ -632,7 +754,7 @@ describe("SettingsPage", () => {
     );
 
     expect(screen.getByRole("heading", { name: "设置" })).toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "保存配置" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "保存并生效" }).length).toBeGreaterThan(0);
   });
 
   it("未连接真实模型时仍把连接真实模型作为首屏主动作", () => {
@@ -657,7 +779,7 @@ describe("SettingsPage", () => {
 
     expect(screen.getByText("先连上至少一个模型 Provider")).toBeInTheDocument();
     expect(screen.getAllByRole("button", { name: "连接真实模型" }).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("button", { name: "检查配置" }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: "检查改动" }).length).toBeGreaterThan(0);
   });
 
   it("保存包含 Provider 的配置后提示用户刷新连接", async () => {
@@ -727,7 +849,7 @@ describe("SettingsPage", () => {
     await user.clear(providerNameInput);
     await user.type(providerNameInput, "OpenRouter Updated");
 
-    await user.click(screen.getAllByRole("button", { name: "保存配置" })[0]!);
+    await user.click(screen.getAllByRole("button", { name: "保存并生效" })[0]!);
 
     expect(
       await screen.findByText("配置已保存，但当前连接尚未刷新")
@@ -763,7 +885,7 @@ describe("SettingsPage", () => {
     // Feature 063 重构后 Memory 区块展示内建引擎卡片
     expect(screen.getByRole("heading", { name: "记忆" })).toBeInTheDocument();
     expect(screen.getByText("内建记忆引擎")).toBeInTheDocument();
-    expect(screen.getByText("SQLite / Vault")).toBeInTheDocument();
+    expect(screen.getByText("本地安全存储")).toBeInTheDocument();
     // 兼容接入表单字段不应在 Memory 区块中渲染
     expect(screen.queryByDisplayValue("uv run python scripts/memu_bridge.py")).not.toBeInTheDocument();
     expect(screen.queryByDisplayValue("/tmp/memu")).not.toBeInTheDocument();
@@ -896,7 +1018,7 @@ describe("SettingsPage", () => {
     const reasoningSelect = screen.getByRole("combobox", { name: /推理强度/ });
     expect(reasoningSelect).toBeDisabled();
 
-    await userEvent.click(screen.getAllByRole("button", { name: "检查配置" })[0]);
+    await userEvent.click(screen.getAllByRole("button", { name: "检查改动" })[0]);
 
     await waitFor(() => expect(submitAction).toHaveBeenCalledWith("setup.review", expect.anything()));
 

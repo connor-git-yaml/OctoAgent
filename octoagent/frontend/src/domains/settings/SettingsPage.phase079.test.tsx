@@ -243,7 +243,7 @@ describe("SettingsPage · Feature 079 Phase 1", () => {
     );
     const removeButton = screen.getAllByRole("button", { name: /移除|删除/ })[0]!;
     await userEvent.click(removeButton);
-    await userEvent.click(await screen.findByRole("button", { name: "立即保存" }));
+    await userEvent.click(screen.getAllByRole("button", { name: "保存并生效" })[0]!);
     await waitFor(() => expect(submitAction).toHaveBeenCalledWith("setup.apply", expect.anything()));
     const draft = submitAction.mock.calls[0]![1].draft;
     expect(draft.config, "PendingChangesBar仍发旧activation").not.toHaveProperty("runtime");
@@ -263,8 +263,8 @@ describe("SettingsPage · Feature 079 Phase 1", () => {
       </MemoryRouter>
     );
 
-    // 触发一次 handleApply（通过顶部"保存配置"按钮，name 可能不同；按 text 找）
-    const saveButton = screen.queryAllByRole("button", { name: /保存配置|保存/ })[0];
+    // 触发一次 handleApply（通过顶部“保存并生效”按钮，name 可能不同；按 text 找）
+    const saveButton = screen.queryAllByRole("button", { name: /保存并生效|保存/ })[0];
     expect(saveButton).toBeTruthy();
     if (saveButton) {
       fireEvent.click(saveButton);

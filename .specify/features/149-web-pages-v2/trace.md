@@ -218,5 +218,18 @@
   尚无TaskList新路径证据slice而如实阻断，未伪造跨Feature证据；没有第二store、
   transport、action pipeline或维护入口。390仍只作Web响应式检查，手机产品只走
   原生iOS。
+- T033以可导入inert secret mutation形成4条稳定RED，既有Settings十五项控制
+  继续通过。GREEN把前端密钥草稿收敛为`keep/replace/remove`三态typed command，
+  与Gateway既有合同精确一致；遮罩占位与空替换fail closed，保存成功、失败或关闭
+  都清空ephemeral value。普通Provider卡片沿用Claude Design原稿的“访问密钥”、
+  “已保存的值不会显示”、“检查改动”和“保存并生效”，Provider ID、鉴权方式、
+  环境变量名和API Base URL只在默认收起的Advanced；值不进入DOM、clipboard、
+  error或证据。REFACTOR精确19/19、全前端543/543、生产build、OpenAPI、F149
+  boundary/style/complexity及changed-lines coverage 92.24%通过。对实际页面完成
+  桌面与390px Web窄窗口视觉抽查后，将本次触及的Settings旧`wb-*`视觉类迁到
+  co-located `f149-settings-*`和`--cp-*`，保留Claude Design原稿层级、留白、
+  卡片节奏与视觉张力；同时移除锁死三列的内联布局，使窄窗口单列且无横向挤压。
+  未放宽checker、未改`index.css`，repository runtime architecture最终通过。
+  390仍只作Web响应式检查，手机产品只走原生iOS。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。
