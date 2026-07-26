@@ -1,0 +1,14 @@
+task_id: T032
+phase: GREEN
+behavior: Settings Advanced 维护与恢复归位、状态与危险操作合同
+command: cd octoagent/frontend && npx vitest run src/domains/settings/MaintenanceRecoverySection.test.tsx src/domains/settings/SettingsPage.test.tsx
+executed_at_utc: 2026-07-25T22:19:31Z
+head_sha: ed9a78e1a5f8c398a408171a33fbcf070663f798
+exit_code: 0
+oracle_expected: loading/empty/recoverable-error/origin-403与ready互斥，七项能力可达，backup/apply/restart强确认且apply必须依赖有效dry-run
+oracle_observed: exact22/22通过；Maintenance八项与既有Settings十四项控制全部通过
+raw_output_file: /tmp/f149-t032-green.log
+raw_output_sha256: bc17cc3166df680308e7347879160f8e14a6bd8de1d5a36bbfb80a5467ca1930
+secret_scan: pass
+network: false
+rerun: false

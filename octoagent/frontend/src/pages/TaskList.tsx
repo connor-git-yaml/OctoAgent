@@ -12,7 +12,6 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { fetchTasks } from "../api/client";
 import OperatorInboxPanel from "../components/OperatorInboxPanel";
-import RecoveryPanel from "../components/RecoveryPanel";
 import type { TaskSummary } from "../types";
 import { formatDateTime } from "../utils/formatTime";
 
@@ -56,7 +55,6 @@ export default function TaskList() {
       <div>
         <h1>当前工作</h1>
         <OperatorInboxPanel />
-        <RecoveryPanel />
         <div className="loading">正在加载任务列表…</div>
       </div>
     );
@@ -67,7 +65,6 @@ export default function TaskList() {
       <div>
         <h1>当前工作</h1>
         <OperatorInboxPanel />
-        <RecoveryPanel />
         <div className="error">加载失败：{error}</div>
       </div>
     );
@@ -78,7 +75,6 @@ export default function TaskList() {
       <div>
         <h1>当前工作</h1>
         <OperatorInboxPanel />
-        <RecoveryPanel />
         <div className="card" style={{ textAlign: "center", color: "var(--color-text-secondary)" }}>
           暂无进行中的工作
         </div>
@@ -90,7 +86,6 @@ export default function TaskList() {
     <div>
       <h1>当前工作</h1>
       <OperatorInboxPanel />
-      <RecoveryPanel />
       <div className="card" style={{ padding: 0, overflow: "hidden" }}>
         {tasks.map((task) => (
           <div

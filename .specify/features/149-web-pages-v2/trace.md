@@ -194,5 +194,17 @@
   390仅为Web响应式健壮性，不代表手机产品，手机仍只走原生iOS。最终精确35/35、
   全前端523/523、生产build、OpenAPI、F149 boundary/style/complexity与repository
   runtime architecture均通过。
+- T032以可导入inert维护区形成8条稳定RED，既有Settings十四项控制保持；首次
+  正式RED未持久化，随后只以同字节同命令做一次透明捕获复跑并在证据中标记。
+  GREEN把summary、backup、export、dry-run、apply、restart、verify七项能力归入
+  Settings唯一Advanced路径，移除Tasks旧Recovery入口；状态由单一reducer/hook
+  拥有，origin403只提示资源权限，401继续交回global auth。backup/apply/restart
+  强词确认、有效dry-run-before-apply、导出不含密钥与运行日志、restart不虚构
+  固定时长均闭合。REFACTOR逐页对照Claude Design Settings Desktop/390，保留
+  宽松hero、窄卡片、留白与视觉张力；真实Chromium 1440/390 Web窄窗口无横向
+  溢出、操作控件≥44px。最终精确22/22、全前端532/532、生产build、OpenAPI、
+  F149 boundary/style/complexity及changed-lines coverage 95.03%通过。
+  repository runtime architecture因F151缺本次新路径证据slice而如实阻断，
+  未伪造跨Feature证据或放宽checker。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

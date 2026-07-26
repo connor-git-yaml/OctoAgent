@@ -1,0 +1,112 @@
+.f149-settings-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--cp-space-5);
+  padding: 30px;
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-xl);
+  background:
+    radial-gradient(
+      circle at 92% 8%,
+      color-mix(in srgb, var(--cp-primary) 10%, transparent),
+      transparent 34%
+    ),
+    linear-gradient(145deg, var(--cp-card-strong), var(--cp-card));
+  box-shadow: 0 20px 48px color-mix(in srgb, var(--cp-bg) 62%, transparent);
+}
+
+.f149-settings-hero-copy {
+  display: grid;
+  gap: var(--cp-space-2);
+}
+
+.f149-settings-hero h1 {
+  margin: 0;
+  font-size: clamp(1.75rem, 4vw, 2.35rem);
+  letter-spacing: -0.035em;
+}
+
+.f149-settings-hero-copy p {
+  margin: 0;
+  color: var(--cp-muted);
+  line-height: 1.6;
+}
+
+.f149-settings-hero-actions {
+  display: flex;
+  gap: var(--cp-space-2);
+}
+
+.f149-settings-button,
+.f149-settings-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  border: 1px solid var(--cp-border);
+  border-radius: 999px;
+  color: var(--cp-ink);
+  font: inherit;
+  font-size: 0.88rem;
+  font-weight: 650;
+}
+
+.f149-settings-button {
+  padding: 0 var(--cp-space-4);
+  background: var(--cp-card-strong);
+}
+
+.f149-settings-button.is-primary {
+  border-color: transparent;
+  background: var(--cp-primary);
+  color: var(--cp-bg);
+}
+
+.f149-settings-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.f149-settings-nav {
+  display: flex;
+  gap: var(--cp-space-2);
+  padding: var(--cp-space-3) 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.f149-settings-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.f149-settings-chip {
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 0 var(--cp-space-3);
+  background: color-mix(in srgb, var(--cp-ink) 5.5%, transparent);
+}
+
+.f149-settings-chip.is-advanced {
+  border-color: color-mix(in srgb, var(--cp-secondary) 28%, transparent);
+  color: var(--cp-secondary-ink);
+}
+
+@media (max-width: 720px) {
+  .f149-settings-hero {
+    align-items: stretch;
+    flex-direction: column;
+    padding: var(--cp-space-4);
+    border-radius: var(--cp-radius-lg);
+  }
+
+  .f149-settings-hero-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .f149-settings-nav {
+    margin-inline: calc(var(--cp-space-4) * -1);
+    padding-inline: var(--cp-space-4);
+  }
+}

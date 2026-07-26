@@ -2,6 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import SettingsCenter from ".";
 import SettingsPage from "./SettingsPage";
 
 let mockWorkbench: {
@@ -12,6 +13,14 @@ let mockWorkbench: {
 
 vi.mock("../../components/shell/WorkbenchLayout", () => ({
   useWorkbench: () => mockWorkbench,
+}));
+
+vi.mock("./MaintenanceRecoverySection", () => ({
+  default: () => (
+    <section id="settings-group-maintenance">
+      <h2>高级 · 维护与恢复</h2>
+    </section>
+  ),
 }));
 
 function buildSettingsSnapshot(): any {
@@ -893,5 +902,24 @@ describe("SettingsPage", () => {
 
     const setupReviewPayload = submitAction.mock.calls[0][1];
     expect(setupReviewPayload.draft.config.model_aliases.cheap.thinking_level).toBeUndefined();
+  });
+
+  it("Settings 组合层把维护能力放在 Advanced，而不扩张原页面职责", () => {
+    mockWorkbench = {
+      snapshot: buildSettingsSnapshot(),
+      submitAction: vi.fn(),
+      busyActionId: null,
+    };
+
+    render(
+      <MemoryRouter>
+        <SettingsCenter />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("button", { name: "高级" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "高级 · 维护与恢复" }),
+    ).toBeInTheDocument();
   });
 });

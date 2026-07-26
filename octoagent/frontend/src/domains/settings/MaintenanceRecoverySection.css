@@ -1,0 +1,294 @@
+.f149-maintenance {
+  display: grid;
+  gap: var(--cp-space-4);
+  width: min(100%, 1040px);
+  padding: var(--cp-space-5);
+  margin: var(--cp-space-5) auto 0;
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-xl);
+  background:
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--cp-secondary) 5%, transparent),
+      transparent 48%
+    ),
+    var(--cp-surface);
+  box-shadow: 0 20px 48px color-mix(in srgb, var(--cp-bg) 62%, transparent);
+}
+
+.f149-maintenance-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--cp-space-4);
+}
+
+.f149-maintenance-header > div {
+  display: grid;
+  gap: var(--cp-space-1);
+}
+
+.f149-maintenance-eyebrow {
+  color: var(--cp-secondary-ink);
+  font-size: 0.74rem;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.f149-maintenance-header h2,
+.f149-maintenance-actions h3,
+.f149-maintenance-drawer h3 {
+  margin: 0;
+}
+
+.f149-maintenance-header h2 {
+  font-size: 1.22rem;
+  letter-spacing: -0.015em;
+}
+
+.f149-maintenance-header p,
+.f149-maintenance-actions p,
+.f149-maintenance-summary p,
+.f149-maintenance-drawer p {
+  margin: 0;
+  color: var(--cp-muted);
+  line-height: 1.6;
+}
+
+.f149-maintenance-readiness {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 var(--cp-space-3);
+  border: 1px solid var(--cp-border);
+  border-radius: 999px;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.f149-maintenance-readiness.is-ready {
+  border-color: color-mix(in srgb, var(--cp-primary) 24%, transparent);
+  background: var(--cp-success-soft);
+  color: var(--cp-secondary-ink);
+}
+
+.f149-maintenance-readiness.is-warning {
+  background: var(--cp-warning-soft);
+  color: var(--cp-warning-ink);
+}
+
+.f149-maintenance-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--cp-space-3);
+}
+
+.f149-maintenance-summary article {
+  display: grid;
+  gap: var(--cp-space-2);
+  padding: var(--cp-space-4);
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-lg);
+  background: color-mix(in srgb, var(--cp-ink) 3.5%, transparent);
+}
+
+.f149-maintenance-summary article > span,
+.f149-maintenance-actions small {
+  color: var(--cp-muted);
+  font-size: 0.78rem;
+}
+
+.f149-maintenance-state,
+.f149-maintenance-notice {
+  display: grid;
+  gap: var(--cp-space-2);
+  padding: var(--cp-space-4);
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-lg);
+  background: color-mix(in srgb, var(--cp-ink) 3.5%, transparent);
+}
+
+.f149-maintenance-state.is-error {
+  border-color: var(--cp-danger-border);
+  background: var(--cp-danger-bg);
+}
+
+.f149-maintenance-state > span {
+  color: var(--cp-muted);
+}
+
+.f149-maintenance-state button,
+.f149-maintenance-button,
+.f149-maintenance-drawer-head button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 var(--cp-space-4);
+  border: 1px solid var(--cp-border);
+  border-radius: 999px;
+  background: var(--cp-card-strong);
+  color: var(--cp-ink);
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 650;
+}
+
+.f149-maintenance-state button {
+  width: fit-content;
+}
+
+.f149-maintenance-button.is-primary {
+  border-color: transparent;
+  background: var(--cp-primary);
+  color: var(--cp-bg);
+}
+
+.f149-maintenance-button.is-danger {
+  border-color: var(--cp-danger-border);
+  background: var(--cp-danger-bg);
+  color: var(--cp-danger-ink);
+}
+
+.f149-maintenance-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.f149-maintenance-actions {
+  display: grid;
+  gap: var(--cp-space-2);
+}
+
+.f149-maintenance-actions article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--cp-space-4);
+  min-height: 78px;
+  padding: var(--cp-space-3) var(--cp-space-4);
+  border: 1px solid color-mix(in srgb, var(--cp-ink) 7.5%, transparent);
+  border-radius: var(--cp-radius-lg);
+  background: var(--cp-card);
+}
+
+.f149-maintenance-actions article > div:first-child {
+  display: grid;
+  gap: var(--cp-space-1);
+}
+
+.f149-maintenance-row-actions {
+  display: flex;
+  gap: var(--cp-space-2);
+}
+
+.f149-maintenance-drawer-backdrop {
+  position: fixed;
+  z-index: 40;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: var(--cp-space-4);
+  background: color-mix(in srgb, var(--cp-bg) 70%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.f149-maintenance-drawer {
+  display: grid;
+  gap: var(--cp-space-4);
+  width: min(100%, 480px);
+  padding: var(--cp-space-5);
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-xl);
+  background: var(--cp-card-strong);
+  box-shadow: 0 28px 72px color-mix(in srgb, var(--cp-bg) 80%, transparent);
+}
+
+.f149-maintenance-drawer-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--cp-space-3);
+}
+
+.f149-maintenance-drawer-head > div {
+  display: grid;
+  gap: var(--cp-space-1);
+}
+
+.f149-maintenance-drawer-head span {
+  color: var(--cp-warning-ink);
+  font-size: 0.76rem;
+  font-weight: 700;
+}
+
+.f149-maintenance-drawer-head button {
+  width: 44px;
+  padding: 0;
+  background: transparent;
+  font-size: 1.2rem;
+}
+
+.f149-maintenance-drawer label {
+  display: grid;
+  gap: var(--cp-space-2);
+  color: var(--cp-muted);
+  font-size: 0.82rem;
+}
+
+.f149-maintenance-drawer input {
+  min-height: 44px;
+  padding: 0 var(--cp-space-3);
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-md);
+  background: var(--cp-bg);
+  color: var(--cp-ink);
+  font: inherit;
+}
+
+@media (max-width: 720px) {
+  .f149-maintenance {
+    gap: var(--cp-space-3);
+    padding: var(--cp-space-4);
+    border-radius: var(--cp-radius-lg);
+  }
+
+  .f149-maintenance-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .f149-maintenance-readiness {
+    width: fit-content;
+  }
+
+  .f149-maintenance-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .f149-maintenance-actions article {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .f149-maintenance-row-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .f149-maintenance-actions article > button {
+    width: 100%;
+  }
+
+  .f149-maintenance-drawer-backdrop {
+    align-items: end;
+    padding: 0;
+  }
+
+  .f149-maintenance-drawer {
+    width: 100%;
+    border-radius: var(--cp-radius-xl) var(--cp-radius-xl) 0 0;
+  }
+}

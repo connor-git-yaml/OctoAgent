@@ -1,0 +1,36 @@
+task_id: T032
+phase: REFACTOR
+behavior: Settings Advanced 维护与恢复归位、状态与危险操作合同
+command: cd octoagent/frontend && npx vitest run src/domains/settings/MaintenanceRecoverySection.test.tsx src/domains/settings/SettingsPage.test.tsx
+executed_at_utc: 2026-07-25T22:21:19Z
+head_sha: ed9a78e1a5f8c398a408171a33fbcf070663f798
+exit_code: 0
+oracle_expected: exact22项保持，维护能力只有Settings单一路径、单一application state，Claude Design层级与桌面/390 Web窄窗口可用性不漂移
+oracle_observed: exact22/22、全前端532/532、生产build、OpenAPI、F149 boundary/style/complexity与changed-lines coverage 95.03%通过
+raw_output_file: /tmp/f149-t032-refactor.log
+raw_output_sha256: 75e2ebf41062895d2c297971cba63c27afcaa2544e697ed5821a32effd6cb84e
+runtime_architecture_gate: blocked_cross_feature_evidence
+runtime_architecture_observed: "EVIDENCE_REQUIRED_SLICE_MISSING: octoagent/frontend/src/domains/settings/SettingsOverview.tsx"
+quality_review:
+  - 实现前逐页复核Claude Design Settings Desktop/390原稿，保留宽松hero、窄Advanced卡片、从容留白、卡片节奏与视觉张力
+  - 真实Chromium桌面1440与390 Web窄窗口均无横向溢出，操作控件至少44px；桌面使用modal，390使用底部drawer
+  - 390只作Web响应式健壮性，不代表手机产品；手机产品仍只走原生iOS
+  - loading/ready/empty/recoverable-error/origin-403/global-auth由单一reducer与application hook拥有，未新增store/service/registry
+  - backup/apply/restart使用强词确认；apply只有dry-run成功且attempt id有效后可用，restart不虚构固定时长
+  - 导出范围精确为全部会话与消息且不含密钥与运行日志；普通区不暴露raw path、内部状态或密钥值
+  - 旧Task Recovery入口删除，维护能力只在Settings可达；触达Settings文件旧wb视觉类为0，新增样式只消费--cp-*
+  - repository runtime architecture因F151尚无对应新路径证据slice而阻断；本task未伪造或越界修改F151证据
+file_sha256:
+  section: 200a4c6aa7c60e0fcf1db9f10d8cc1e83e9eeeb4d3d0b3e1f2f30bf12a3a21b9
+  section-css: cbdefca437a6b4c35148be5141bc994c3748de6c61c74fbcfb8b3084f1fa8945
+  section-test: 0243a03f6ec35091cd125e9b7e8c6f93fba3b4ce44f605d869b6560dd462f448
+  state: 12174bd438e1318a574aef41b53cdc0784a8c5098e8187eadbe199b8e59052ae
+  settings-center: 5217a72299575ddbaecf4c0dc003455661fb622fa8e22d68189c9d425d149756
+  settings-overview: ed06fc3c3148af16bc2577f4e9440ceb607738f40c0f939f2233ddac2bd2cb36
+  settings-overview-css: df415a8d0f58dbee021831f51758d1c67c5fc4084bd130ecc10d6f838cbd2da7
+  settings-index: 0c27c622e456688c14f110380caa0816d71ccc1be41b51f8cbc01cce5cd04b35
+  settings-test: ac3124b09f815b06f333ed9d486257340dd764b2907e17e0555f02a13405447c
+  task-list: 9e5e9d9ed21a7e063b0c1b3e37c32bea8086c7cdc3b01ae3b5f3a958a3aa97c7
+secret_scan: pass
+network: false
+rerun: false

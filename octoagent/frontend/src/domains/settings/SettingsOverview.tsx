@@ -2,6 +2,7 @@ import type {
   ProjectSelectorDocument,
   SetupReviewSummary,
 } from "../../types";
+import "./SettingsOverview.css";
 
 interface SettingsOverviewProps {
   usingEchoMode: boolean;
@@ -35,16 +36,16 @@ export default function SettingsOverview({
     <>
       <section
         id="settings-group-overview"
-        className="wb-hero wb-settings-hero wb-settings-hero-refined"
+        className="f149-settings-hero"
       >
-        <div className="wb-hero-copy">
-          <h1 style={{ fontSize: "1.75rem" }}>设置</h1>
-          {subtitle ? <p style={{ margin: 0, color: "var(--cp-muted)" }}>{subtitle}</p> : null}
+        <div className="f149-settings-hero-copy">
+          <h1>设置</h1>
+          {subtitle ? <p>{subtitle}</p> : null}
         </div>
-        <div className="wb-settings-hero-actions" style={{ display: "flex", gap: 10, width: "auto" }}>
+        <div className="f149-settings-hero-actions">
           <button
             type="button"
-            className="wb-button wb-button-primary"
+            className="f149-settings-button is-primary"
             onClick={usingEchoMode ? onQuickConnect : onApply}
             disabled={connectBusy}
           >
@@ -52,7 +53,7 @@ export default function SettingsOverview({
           </button>
           <button
             type="button"
-            className="wb-button wb-button-secondary"
+            className="f149-settings-button"
             onClick={onReview}
             disabled={connectBusy}
           >
@@ -61,27 +62,34 @@ export default function SettingsOverview({
         </div>
       </section>
 
-      <nav className="wb-settings-section-nav" aria-label="设置导航">
-        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("overview")}>
+      <nav className="f149-settings-nav" aria-label="设置导航">
+        <button type="button" className="f149-settings-chip" onClick={() => onScrollToSection("overview")}>
           概览
         </button>
-        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("models")}>
+        <button type="button" className="f149-settings-chip" onClick={() => onScrollToSection("models")}>
           供应商
         </button>
-        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("aliases")}>
+        <button type="button" className="f149-settings-chip" onClick={() => onScrollToSection("aliases")}>
           模型别名
         </button>
-        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("memory")}>
+        <button type="button" className="f149-settings-chip" onClick={() => onScrollToSection("memory")}>
           记忆
         </button>
-        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("channels")}>
+        <button type="button" className="f149-settings-chip" onClick={() => onScrollToSection("channels")}>
           渠道
         </button>
-        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("resource-limits")}>
+        <button type="button" className="f149-settings-chip" onClick={() => onScrollToSection("resource-limits")}>
           资源限制
         </button>
-        <button type="button" className="wb-section-chip" onClick={() => onScrollToSection("review")}>
+        <button type="button" className="f149-settings-chip" onClick={() => onScrollToSection("review")}>
           保存检查
+        </button>
+        <button
+          type="button"
+          className="f149-settings-chip is-advanced"
+          onClick={() => onScrollToSection("maintenance")}
+        >
+          高级
         </button>
       </nav>
     </>

@@ -1,0 +1,15 @@
+task_id: T032
+phase: RED
+behavior: Settings Advanced 维护与恢复归位、状态与危险操作合同
+command: cd octoagent/frontend && npx vitest run src/domains/settings/MaintenanceRecoverySection.test.tsx src/domains/settings/SettingsPage.test.tsx
+executed_at_utc: 2026-07-25T22:15:42Z
+head_sha: ed9a78e1a5f8c398a408171a33fbcf070663f798
+exit_code: 1
+oracle_expected: inert维护区无法满足loading/empty/recoverable-error/origin-403、Advanced落点、七项能力、强确认、导出范围与dry-run-before-apply合同
+oracle_observed: 22项中Maintenance八项稳定失败、既有Settings十四项控制通过；失败精确落在inert状态、accessible state、维护标题、危险确认、导出范围与单一状态源
+raw_output_file: /tmp/f149-t032-red.log
+raw_output_sha256: 53e3f6d0f4f4a547d73e76b687664c1e327efbb02723bfeeebeb49413ba98d58
+capture_note: 首次正式RED未持久化；在test与inert实现字节不变时，以同一命令执行一次透明捕获复跑，仅用于保存原始输出
+secret_scan: pass
+network: false
+rerun: capture-repeat

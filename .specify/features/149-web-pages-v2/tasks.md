@@ -401,6 +401,18 @@
 
 ### T032 — Settings Advanced“维护与恢复”
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T032/`。维护能力从 Tasks 移入 Settings 唯一 Advanced 路径，
+  由新 `SettingsCenter` 组合窄 `MaintenanceRecoverySection`，没有继续扩大
+  既有 Settings God component，也没有新增 store/service/registry。loading、
+  empty、recoverable-error、origin-403 与 ready 由单一 reducer/hook 互斥拥有；
+  backup/apply/restart 强确认、有效 dry-run-before-apply、导出范围与 restart
+  短暂不可用合同全部闭合。逐页对照 Claude Design Settings Desktop/390 后保留
+  宽松 hero、窄 Advanced 卡片、留白与卡片节奏；真实 Chromium 1440/390 Web
+  窄窗口无横向溢出，操作控件≥44px。最终精确22/22、全前端532/532、生产build、
+  OpenAPI、F149 boundary/style/complexity及changed-lines coverage 95.03%通过。
+  repository runtime architecture因F151尚无本次新路径证据slice而如实阻断，本
+  task未伪造或越界修改F151证据。390只作Web响应式检查，手机产品仍只走原生iOS。
 - **层/FR**：frontend L4 component/application；FR-005/007/013/030。
 - **文件**：新 `domains/settings/MaintenanceRecoverySection.test.tsx`/component/state/CSS；Settings composition；旧 Recovery panel 移除。
 - **依赖**：T024/T025。
@@ -701,7 +713,7 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T025、T030 中已执行的任务均有真实证据；下一项是
+- 当前风险：T000–T015、T020–T025、T030、T032 中已执行的任务均有真实证据；下一项是
   T031 Tasks list 与“待处理事项”归位。每个后续页面仍必须先逐页对照 Claude
   Design 最初版；现有 Web 只能作为实现现状，不得成为视觉基线。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
