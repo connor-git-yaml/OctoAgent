@@ -346,5 +346,15 @@
   字节。旧dist与错误API正文预期的中间尝试均明确拒绝。最终GREEN/REFACTOR均
   exact 1/1，全前端594/594、build、OpenAPI、boundary/style/complexity与
   changed-lines coverage 90.08%全部通过。
+- T054新增F150 global 401与F149 origin-403交界的单一L1旅程。origin-403正向
+  控制先证明资源权限提示留在Skills页面、Workbench shell保持且没有重新登录动作；
+  页面API切换401后，既有snapshot仍让shell留在屏幕，F150 Access未接管，形成
+  稳定late RED。GREEN让既有API client统一发布认证错误，由`useWorkbenchData`
+  接回唯一global owner并清除失效snapshot，由未改动的`WorkbenchLayout`自然渲染
+  原有`FrontDoorGate`。REFACTOR撤销通用Prettier造成的无语义排版噪音，并按
+  F150架构门撤掉新增公开subscriber与壳层条件改动，只保留内部浏览器事件和数据层
+  owner切换。最终GREEN/REFACTOR均exact 1/1，定向单测16/16、全前端596/596、
+  TypeScript、build、pre-commit架构门与changed-lines coverage 90.12%通过；
+  没有第二认证状态机、公开API、CSS、布局或Claude Design视觉改动。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

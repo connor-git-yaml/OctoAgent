@@ -14,6 +14,8 @@ import {
   refreshWorkbenchSnapshotResources,
 } from "./controlPlaneResources";
 
+const FRONT_DOOR_AUTH_ERROR_EVENT = "octoagent:front-door-auth-error";
+
 export interface WorkbenchDataState {
   snapshot: ControlPlaneSnapshot | null;
   loading: boolean;
@@ -211,6 +213,21 @@ export function useWorkbenchData(
     },
     [refreshSnapshot, refreshResources]
   );
+
+  useEffect(() => {
+    const handleAuthError = (event: Event): void => {
+      const nextAuthError = (event as CustomEvent<unknown>).detail;
+      if (!isFrontDoorApiError(nextAuthError)) {
+        return;
+      }
+      setSnapshot(null);
+      setError(nextAuthError.message);
+      setAuthError(nextAuthError);
+    };
+    window.addEventListener(FRONT_DOOR_AUTH_ERROR_EVENT, handleAuthError);
+    return () =>
+      window.removeEventListener(FRONT_DOOR_AUTH_ERROR_EVENT, handleAuthError);
+  }, []);
 
   useEffect(() => {
     if (options.autoRefresh === false) {

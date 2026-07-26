@@ -17,9 +17,11 @@ const {
   refreshWorkbenchSnapshotResourcesMock: vi.fn(),
 }));
 
+const FRONT_DOOR_AUTH_ERROR_EVENT = "octoagent:front-door-auth-error";
+
 vi.mock("../../api/client", () => ({
   ApiError: class ApiError extends Error {},
-  isFrontDoorApiError: () => false,
+  isFrontDoorApiError: (error: unknown) => error instanceof Error,
 }));
 
 vi.mock("../actions", () => ({
@@ -87,6 +89,28 @@ describe("useWorkbenchData", () => {
     executeWorkbenchActionWithRefreshMock.mockReset();
     fetchWorkbenchSnapshotMock.mockReset();
     refreshWorkbenchSnapshotResourcesMock.mockReset();
+  });
+
+  it("页面请求上交的认证错误会清除旧快照并切换到全局 Access 状态", () => {
+    const initialSnapshot = buildSnapshot();
+    const authError = new Error("需要重新验证访问权限");
+    const { result, unmount } = renderHook(() =>
+      useWorkbenchData({
+        initialSnapshot,
+        autoRefresh: false,
+      })
+    );
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(FRONT_DOOR_AUTH_ERROR_EVENT, { detail: authError })
+      );
+    });
+
+    expect(result.current.snapshot).toBeNull();
+    expect(result.current.authError).toBe(authError);
+    expect(result.current.error).toBe("需要重新验证访问权限");
+    unmount();
   });
 
   it("memory.query 局部刷新使用本次提交的筛选参数", async () => {

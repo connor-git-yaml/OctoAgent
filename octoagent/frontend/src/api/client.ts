@@ -39,6 +39,7 @@ import {
 const BASE_URL = "";
 const FRONT_DOOR_TOKEN_STORAGE_KEY = "octoagent.frontdoorToken";
 const FRONT_DOOR_TOKEN_SESSION_STORAGE_KEY = "octoagent.frontdoorToken.session";
+const FRONT_DOOR_AUTH_ERROR_EVENT = "octoagent:front-door-auth-error";
 const FRONT_DOOR_ERROR_CODES = new Set([
   "FRONT_DOOR_LOOPBACK_ONLY",
   "FRONT_DOOR_LOOPBACK_PROXY_REJECTED",
@@ -169,11 +170,13 @@ export async function apiErrorFromResponse(
 ): Promise<ApiError> {
   const resolvedBody = body ?? (await resp.json().catch(() => null));
   const payload = parseErrorPayload(resolvedBody);
-  return new ApiError(payload.message ?? `HTTP ${resp.status}`, {
+  const error = new ApiError(payload.message ?? `HTTP ${resp.status}`, {
     status: resp.status,
     code: payload.code,
     hint: payload.hint,
   });
+  notifyFrontDoorAuthError(error);
+  return error;
 }
 
 export function getFrontDoorToken(): string {
@@ -248,7 +251,19 @@ export function isApiError(error: unknown): error is ApiError {
 }
 
 export function isFrontDoorApiError(error: unknown): error is ApiError {
-  return isApiError(error) && Boolean(error.code && FRONT_DOOR_ERROR_CODES.has(error.code));
+  return (
+    isApiError(error) &&
+    (error.status === 401 || Boolean(error.code && FRONT_DOOR_ERROR_CODES.has(error.code)))
+  );
+}
+
+function notifyFrontDoorAuthError(error: ApiError): void {
+  if (typeof window === "undefined" || !isFrontDoorApiError(error)) {
+    return;
+  }
+  window.dispatchEvent(
+    new CustomEvent<ApiError>(FRONT_DOOR_AUTH_ERROR_EVENT, { detail: error })
+  );
 }
 
 export function buildFrontDoorSseUrl(path: string): string {

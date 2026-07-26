@@ -1,0 +1,19 @@
+task_id: T054
+phase: GREEN
+behavior: F150全局401与F149资源级origin-403唯一归属边界
+command: cd octoagent/frontend && npx playwright test e2e/f149-auth-boundary.spec.ts
+executed_at_utc: 2026-07-26T08:52:41Z
+head_sha: afbf73395bc0d453451f6e3fdc48158759423c56
+exit_code: 0
+oracle_expected: origin-403保留Workbench shell与资源权限说明；页面API的401交回唯一F150全局Access且隐藏shell
+oracle_observed: exact 1/1通过；同一真实浏览器旅程先到达403页面正向控制，再切换401；403无重新登录动作，401显示既有FrontDoorGate并隐藏Workbench Navigation
+selected: 1
+passed: 1
+failed: 0
+raw_output_file: /tmp/f149-t054-green-final.log
+raw_output_sha256: 652c4e73967afb88224c075b3a23e2954770b4b13981a44f86a881a0a26aafee
+raw_output_size: 66760
+runner_wrapper_note: Playwright本身1/1通过；外层zsh在命令完成后因误用只读变量status退出1，未触发重跑，原始Playwright日志完整保留
+external_network_warning: absent
+secret_scan: pass
+rerun: false

@@ -1,0 +1,57 @@
+task_id: T054
+phase: REFACTOR
+behavior: F150全局401与F149资源级origin-403唯一归属边界
+command: cd octoagent/frontend && npx playwright test e2e/f149-auth-boundary.spec.ts
+executed_at_utc: 2026-07-26T09:02:13Z
+head_sha: afbf73395bc0d453451f6e3fdc48158759423c56
+exit_code: 0
+oracle_expected: 同一交界旅程保持唯一全局Access owner、资源级403与无视觉漂移
+oracle_observed: exact 1/1；定向单测16/16与TypeScript检查通过；复审撤销通用Prettier产生的大范围无语义排版，并按架构门撤掉新增公开subscriber及WorkbenchLayout改动，只保留内部浏览器事件、失效snapshot清理与窄测试合同
+selected: 1
+passed: 1
+failed: 0
+raw_output_file: /tmp/f149-t054-refactor-final-v2.log
+raw_output_sha256: c9b239089180a2a21d901a46bff45861c30c38443f1f015d0c24862ff823a279
+raw_output_size: 66762
+file_sha256:
+  api-client: 2940eaaff7f4f09a29195043033a13a33968458ed599c0a4270ffe9893ba799d
+  workbench-query: d943916b087fd76c36baffad0b6df11f9042f169165eedf1794ed854ba4c1c0d
+  auth-boundary-spec: d47785f3b8fe86c9ba9f34d0fe88aec5fbe1d2bd3b1e12d7cfb54540a68aa6f0
+frontend_gates:
+  raw_output_file: /tmp/f149-t054-frontend-gates-final-v2.log
+  raw_output_sha256: a1aa6b7bd0d67e9a688eaf93224c2bb70866fc43fb92dadffe7578a33faa20f2
+  raw_output_size: 24077
+  vitest: 596/596
+  openapi: pass
+  boundary: pass
+  style: pass
+  complexity: pass
+  build: pass
+coverage:
+  raw_test_output_file: /tmp/f149-t054-coverage-tests-final-v2.log
+  raw_test_output_sha256: cab46a13159e923064adb320669b0781e5c9f30afdd945cb7efaac2cb2a51861
+  raw_test_output_size: 26030
+  raw_check_output_file: /tmp/f149-t054-coverage-check-final-v2.log
+  raw_check_output_sha256: 8f9aad4568ca93248450d9aa508d09daa1cb38a938d48679d8b85734928e6c14
+  raw_check_output_size: 13077
+  changed_lines_covered: 2973
+  changed_lines_total: 3299
+  changed_lines_percent: 90.12
+  rejected_invocation: 首次coverage checker从frontend子目录执行导致source root重复；只从仓库根重跑只读checker，未重跑596项测试
+architecture_gate:
+  raw_output_file: /tmp/f149-t054-precommit-commit.log
+  raw_output_sha256: 12d04b2e785b215b986bbc6a5dc7a0c33070972aa0754e50a7a6416cbc1a284c
+  raw_output_size: 236
+  result: pass
+  e2e: 26 passed, 1 skipped, 5679 deselected
+  rejected_iterations:
+    - 新增api-client subscriber导出扩张了F150保护的公共surface，已撤销且未放宽checker
+    - 直接修改WorkbenchLayout会触碰既有视觉壳层，已改为数据层清除失效snapshot并恢复layout原字节
+quality_review:
+  - 没有修改CSS、布局、普通文案、卡片结构或Claude Design视觉节奏
+  - 所有401由现有F150 FrontDoorGate统一接管；403继续由F149资源页面拥有
+  - 页面没有第二Access组件、第二认证store、公开subscriber或重新登录动作
+  - RED发生在页面GREEN之后，证据明确标记late_red，不倒签、不冒充pre-page TDD
+external_network_warning: absent
+secret_scan: pass
+rerun: true

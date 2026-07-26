@@ -1,0 +1,20 @@
+task_id: T054
+phase: RED
+behavior: F150全局401与F149资源级origin-403唯一归属边界
+chronology: late_red_after_page_green
+chronology_note: T024及Skills页面已经完成后才补建本L1交界合同；这是迟到但真实的RED，不宣称满足原计划的pre-page test-first顺序
+command: cd octoagent/frontend && npx playwright test e2e/f149-auth-boundary.spec.ts
+executed_at_utc: 2026-07-26T08:50:32Z
+head_sha: afbf73395bc0d453451f6e3fdc48158759423c56
+exit_code: 1
+oracle_expected: F149_AUTH_OWNERSHIP_BOUNDARY_MISSING
+oracle_observed: 单一旅程先证明origin-403留在Skills页面且Workbench shell仍可见；切换页面API为401并reload后，既有snapshot仍让shell继续显示，F150全局Access输入不存在
+selected: 1
+passed: 0
+failed: 1
+raw_output_file: /tmp/f149-t054-red.log
+raw_output_sha256: f2810428b78b8f1499458395354c1bb4e5fc85dbd8789c3041ce240874c1a6ca
+raw_output_size: 70313
+external_network_warning: absent
+secret_scan: pass
+rerun: false

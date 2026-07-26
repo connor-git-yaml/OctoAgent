@@ -10,6 +10,8 @@ import {
   saveFrontDoorToken,
 } from "./client";
 
+const FRONT_DOOR_AUTH_ERROR_EVENT = "octoagent:front-door-auth-error";
+
 describe("api client front-door auth", () => {
   afterEach(() => {
     clearFrontDoorToken();
@@ -87,6 +89,8 @@ describe("api client front-door auth", () => {
   });
 
   it("非 2xx 时抛出带 code 的 ApiError", async () => {
+    const listener = vi.fn();
+    window.addEventListener(FRONT_DOOR_AUTH_ERROR_EVENT, listener);
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -110,6 +114,42 @@ describe("api client front-door auth", () => {
       message: "当前实例要求 Bearer Token。",
       hint: "请输入 token 后重试。",
     } satisfies Partial<ApiError>);
+    expect(listener).toHaveBeenCalledOnce();
+    expect(
+      (listener.mock.calls[0][0] as CustomEvent<ApiError>).detail
+    ).toEqual(
+      expect.objectContaining({
+        status: 401,
+        code: "FRONT_DOOR_TOKEN_REQUIRED",
+      })
+    );
+    window.removeEventListener(FRONT_DOOR_AUTH_ERROR_EVENT, listener);
+  });
+
+  it("资源级 403 不会上交全局 FrontDoor owner", async () => {
+    const listener = vi.fn();
+    window.addEventListener(FRONT_DOOR_AUTH_ERROR_EVENT, listener);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          detail: {
+            code: "FORBIDDEN",
+            message: "当前账号没有权限管理技能。",
+          },
+        }),
+        {
+          status: 403,
+          headers: { "Content-Type": "application/json" },
+        }
+      )
+    );
+
+    await expect(fetchTaskDetail("task-1")).rejects.toMatchObject({
+      status: 403,
+      code: "FORBIDDEN",
+    } satisfies Partial<ApiError>);
+    expect(listener).not.toHaveBeenCalled();
+    window.removeEventListener(FRONT_DOOR_AUTH_ERROR_EVENT, listener);
   });
 
   it("F134：限流 429 FRONT_DOOR_RATE_LIMITED 被识别为 front-door 错误（走 gate 而非通用错误态）", async () => {

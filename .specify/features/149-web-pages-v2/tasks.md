@@ -705,6 +705,15 @@
 
 ### T054 — F150 global 401 / F149 origin-403 交界
 
+- **状态**：`[x]`；真实但迟到的RED→GREEN→REFACTOR已完成，证据见
+  `evidence/tdd/T054/`。由于T024及Skills页面先于本task完成，RED不满足原计划的
+  pre-page chronology：origin-403正向控制先通过，页面API切换401后仍保留已有
+  Workbench shell，F150全局Access没有接管。GREEN在既有API client发出唯一中央
+  认证通知，由`useWorkbenchData`接回既有global owner并清除失效snapshot，使原有
+  `WorkbenchLayout`条件自然渲染`FrontDoorGate`。403仍留在资源页，不出现owner或
+  重新登录动作。最终GREEN/REFACTOR均exact 1/1，定向单测16/16、全前端596/596、
+  TypeScript、build、pre-commit架构门与changed-lines coverage 90.12%通过；没有
+  新增公开API、Access组件、认证store、CSS、布局或Claude Design视觉改动。
 - **层/FR**：L1；FR-007/008/021。
 - **文件**：新 `frontend/e2e/f149-auth-boundary.spec.ts`、F150 deterministic fixture extension。
 - **RED_DEPENDS**：T000/T050；RED 必须在 T024/page permission GREEN 前执行。
