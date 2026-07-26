@@ -1,0 +1,16 @@
+task_id: T034
+phase: GREEN
+behavior: Automation v2 页面状态、动作范围、卡片内冲突与 Advanced 技术字段边界
+command: cd octoagent/frontend && npx vitest run src/pages/AutomationCenter.test.tsx
+executed_at_utc: 2026-07-26T06:00:58Z
+head_sha: 3ec5771315137bbb4ba41fed596076aa7fe89c2c
+exit_code: 0
+oracle_expected: loading/empty/recoverable/403/409互斥，普通区只含pause/resume与人读计划，技术字段只在按卡片打开的可访问sheet
+oracle_observed: exact 12/12通过；pause/resume既有控制、403资源权限、卡片内刷新、启用优先、Advanced sheet与Esc焦点返回全部通过
+raw_output_file: /tmp/f149-t034-green.log
+raw_output_sha256: 0aadda977632a568c099ca38159f27c1c590cb3ec6ccce40e5437ff0d17be3d4
+raw_output_size: 415
+capture_note: 首次GREEN实现运行11/12，唯一失败为旧测试把视觉分层后的“提醒内容”和值要求成同一文本节点；修正测试matcher后通过，首次失败日志被后续tee覆盖未保留
+secret_scan: pass
+network: false
+rerun: true

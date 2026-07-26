@@ -461,6 +461,13 @@
 
 ### T034 — Automation v2
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T034/`。页面只保留暂停/恢复，loading/empty/recoverable/
+  origin-403/卡片内409冲突边界闭合；任务编号、action 与 cron 原式只在按卡片
+  打开的可访问 Advanced sheet。触及页面已从旧 `wb-*` 视觉类迁到 co-located
+  `f149-automation-*`，只消费 `--cp-*`；真实 Desktop 双列与 390px Web 窄窗口
+  单列均无横向溢出，Esc 关闭 sheet 后焦点回原触发器。390 仍仅代表 Web
+  响应式健壮性，手机产品只走原生 iOS。
 - **层/FR**：frontend L4 component/projection；FR-004/007/009。
 - **文件**：`pages/AutomationCenter.test.tsx`、automation pure projection/page/CSS。
 - **依赖**：T024/T025。
@@ -735,8 +742,8 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T025、T030–T033 中已执行的任务均有真实证据；下一项是
-  T034 Automation v2。每个后续页面仍必须先逐页对照 Claude
+- 当前风险：T000–T015、T020–T025、T030–T034 中已执行的任务均有真实证据；下一项是
+  T040 Agents v2。每个后续页面仍必须先逐页对照 Claude
   Design 最初版；现有 Web 只能作为实现现状，不得成为视觉基线。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

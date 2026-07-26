@@ -231,5 +231,18 @@
   卡片节奏与视觉张力；同时移除锁死三列的内联布局，使窄窗口单列且无横向挤压。
   未放宽checker、未改`index.css`，repository runtime architecture最终通过。
   390仍只作Web响应式检查，手机产品只走原生iOS。
+- T034以旧Automation页面形成5条稳定RED，既有pause/resume、人读schedule与
+  empty控制继续通过。GREEN复用共享resource page state与唯一Workbench action
+  executor，闭合loading/empty/recoverable/origin-403及卡片内rejected冲突刷新；
+  普通界面只保留pause/resume，job/action/cron原式只在按卡片打开的可访问
+  Advanced sheet。REFACTOR逐页对照Claude Design Automation Desktop/390原稿，
+  把触及页面的旧`wb-*`视觉类迁到co-located `f149-automation-*`与`--cp-*`，
+  真实Chromium Desktop双列、390px Web窄窗口单列均无横向溢出，操作≥44px，
+  Esc关闭sheet后焦点回原触发器。视觉审查额外发现真实`0 */4 * * *`泄漏普通区，
+  随即转为“每4小时”，未知cron只显示“按自定义计划”；内置系统任务也用普通中文
+  展示。最终精确13/13、全前端546/546、生产build、OpenAPI、F149 boundary/
+  style/complexity、changed-lines coverage 92.46%与repository runtime
+  architecture全部通过。未新增第二transport/store/service/registry或未授权动作；
+  390仍只作Web响应式检查，手机产品只走原生iOS。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

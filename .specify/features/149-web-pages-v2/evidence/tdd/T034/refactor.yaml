@@ -1,0 +1,43 @@
+task_id: T034
+phase: REFACTOR
+behavior: Automation v2 Claude Design视觉迁移、普通语言计划投影与Desktop/390 Web窄窗口验收
+command: cd octoagent/frontend && npx vitest run src/pages/AutomationCenter.test.tsx
+executed_at_utc: 2026-07-26T06:06:15Z
+head_sha: 3ec5771315137bbb4ba41fed596076aa7fe89c2c
+exit_code: 0
+oracle_expected: exact合同不漂移，旧wb视觉依赖清零，raw cron只在Advanced，Desktop/390保留Claude Design层级与卡片节奏且无横向溢出
+oracle_observed: exact13/13、全前端546/546、生产build、OpenAPI、F149 boundary/style/complexity、changed-lines coverage 92.46%与repository runtime architecture全部通过
+raw_output_file: /tmp/f149-t034-refactor.log
+raw_output_sha256: a62eb699d8b4a9de28846482bbd91e361ed9cecff3ac1cc079b42cc62767329f
+raw_output_size: 415
+full_frontend_log_sha256: a4b138e87a4474601b095dd236f8f8b83a2e55e45bd7ca8b783c318eae104404
+build_log_sha256: 9b98d75228e5d1dd2be3033664b258be5167c1f667d39812f90b0cb19b6fcbd8
+openapi_log_sha256: c0469e8bc779fbea8b4115715cc1bd4dce7e4b0ab26ec4df951e2dac1edc971e
+boundary_log_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_log_sha256: e78842fb9d758c0c04d4f1d2612d9a0f372cd5a862b360329f6836d85644b105
+complexity_log_sha256: 564210dd78bfbe4e2d4d13b4f82b8ceda73e9d1de60cb2cd7e8922283accbbd2
+coverage_log_sha256: 5457076031a7cab43fb8a3d04254858c2b2fa6f09c50a14cf017527039281c61
+changed_lines_coverage_log_sha256: 2fce5d814bcdde5378a57ef4eaa2c5fe3c2b635d8b0ab0f097000891991c3922
+runtime_architecture_log_sha256: b26c73c48865449bc56e3d70778af1f143b433b80ab939b2d5a55c59e516e887
+runtime_architecture_gate: pass
+runtime_architecture_observed: repository runtime architecture PASS
+visual_review:
+  - 真实浏览器Desktop双列卡片等高，宽松hero、数字节奏与卡片留白保持Claude Design原稿方向；现有Web旧样式未作为基线
+  - 390px Web窄窗口为单列，页面scrollWidth精确等于clientWidth，主动作与Advanced触发器均不小于44px；该检查不是手机产品或iOS验收
+  - Advanced在Desktop居中、390底部sheet展开，Esc关闭后焦点回原触发器；任务编号、action与cron原式不进入普通卡片
+  - 真实系统任务名转为“定期整理记忆/生成用户画像”，0 */4计划转为“每4小时”；无法识别的cron只显示“按自定义计划”
+  - 本次页面旧wb视觉类全部迁为co-located f149-automation CSS，只消费--cp-*；style ratchet曾拒绝一处硬编码遮罩色，改为cp token后PASS，未放宽基线
+quality_review:
+  - 页面继续复用唯一fetchAutomationDocument与executeWorkbenchAction，没有第二transport、service、store、registry或action pipeline
+  - 普通区只提供pause/resume；create/delete/run/cancel均未新增，删除与改计划继续由对话承接
+  - 401仍归F150 global auth，403由surface提示资源权限；rejected action不回显后端原始错误，而在对应卡片显示刷新
+  - loading/empty/recoverable/permission/ready由共享resourcePageState互斥决策；启用任务稳定排在暂停任务前
+  - AutomationCenter为472/1200行，frontend complexity PASS；没有God component增长、nested helper或复制schedule parser
+file_sha256:
+  automation-page: 2448fd4a8d0110b895c106361f37e1aea5e61aee2c1c8de946f34a7174e8137a
+  automation-test: a5e9daecb134cef4ecd206aad7a8f1e1fd509639244e72abc0ff864fd73658f7
+  automation-css: 56e1f31b87a97fbed2a21365bc80737ddaee9e48657576e86079b6dcd32c96b8
+capture_note: REFACTOR exact命令在视觉审查发现raw cron普通可见及style ratchet拒绝硬编码遮罩色后透明重跑；最终日志对应最终字节
+secret_scan: pass
+network: false
+rerun: true

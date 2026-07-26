@@ -1,0 +1,15 @@
+task_id: T034
+phase: RED
+behavior: Automation v2 页面状态、动作范围、卡片内冲突与 Advanced 技术字段边界
+command: cd octoagent/frontend && npx vitest run src/pages/AutomationCenter.test.tsx
+executed_at_utc: 2026-07-26T05:58:50Z
+head_sha: 3ec5771315137bbb4ba41fed596076aa7fe89c2c
+exit_code: 1
+oracle_expected: 旧Automation页无法满足按卡片Advanced sheet、403普通文案、409卡片内刷新、启用任务优先与raw字段默认隐藏；既有pause/resume与人读schedule控制继续通过
+oracle_observed: 12项中5项稳定失败、7项既有控制通过；失败精确落在Advanced触发器/焦点、卡片内冲突、recoverable error、origin-403与启用优先排序
+raw_output_file: /tmp/f149-t034-red.log
+raw_output_sha256: 157e5a9c8a2e8bc6e43cd1f61bb5c1e971e80f53233b2168569f7e8b74a1e08a
+raw_output_size: 43634
+secret_scan: pass
+network: false
+rerun: false

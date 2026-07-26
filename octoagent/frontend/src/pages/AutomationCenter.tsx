@@ -12,13 +12,21 @@
  * 所有请求经 src/api/client 的内部 apiFetch（front-door 鉴权）。
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { fetchAutomationDocument } from "../api/client";
+import { resolveResourcePageState } from "../domains/shared/resourcePageState";
 import { executeWorkbenchAction } from "../platform/actions/controlPlaneActions";
 import type {
   AutomationJobDocument,
   AutomationJobItem,
 } from "../types";
+import "./AutomationCenter.css";
 
 interface ToastState {
   message: string;
@@ -59,19 +67,39 @@ export function humanizeSchedule(
       if (secs % 60 === 0) return `每 ${secs / 60} 分钟`;
       return `每 ${secs} 秒`;
     }
-    return expr;
+    return "按固定间隔";
   }
   if (kind === "once") {
     const dt = new Date(expr);
     if (!Number.isNaN(dt.getTime())) {
       return `一次：${dt.toLocaleString("zh-CN")}${tzHint}`;
     }
-    return `一次：${expr}`;
+    return "单次计划";
   }
   if (kind === "cron") {
     const parts = expr.trim().split(/\s+/);
     if (parts.length === 5) {
       const [min, hour, dom, mon, dow] = parts;
+      const minuteStep = min.match(/^\*\/(\d+)$/);
+      if (
+        minuteStep &&
+        hour === "*" &&
+        dom === "*" &&
+        mon === "*" &&
+        dow === "*"
+      ) {
+        return `每 ${minuteStep[1]} 分钟${tzHint}`;
+      }
+      const hourStep = hour.match(/^\*\/(\d+)$/);
+      if (
+        hourStep &&
+        /^\d+$/.test(min) &&
+        dom === "*" &&
+        mon === "*" &&
+        dow === "*"
+      ) {
+        return `每 ${hourStep[1]} 小时${tzHint}`;
+      }
       const timeStr =
         /^\d+$/.test(min) && /^\d+$/.test(hour)
           ? `${hour.padStart(2, "0")}:${min.padStart(2, "0")}`
@@ -95,17 +123,17 @@ export function humanizeSchedule(
         }
       }
     }
-    return `${expr}${tzHint}`;
+    return `按自定义计划${tzHint}`;
   }
-  return expr;
+  return "自定义计划";
 }
 
 const STATUS_LABEL: Record<string, { label: string; cls: string }> = {
-  active: { label: "运行中", cls: "is-ok" },
-  paused: { label: "已暂停", cls: "" },
-  running: { label: "执行中", cls: "is-ok" },
-  failed: { label: "失败", cls: "is-warning" },
-  degraded: { label: "异常", cls: "is-warning" },
+  active: { label: "运行中", cls: "is-active" },
+  paused: { label: "已暂停", cls: "is-paused" },
+  running: { label: "执行中", cls: "is-active" },
+  failed: { label: "需要处理", cls: "is-warning" },
+  degraded: { label: "需要处理", cls: "is-warning" },
 };
 
 function readReminderText(item: AutomationJobItem): string {
@@ -114,14 +142,27 @@ function readReminderText(item: AutomationJobItem): string {
   return typeof msg === "string" ? msg : "";
 }
 
+function readJobDisplayName(item: AutomationJobItem): string {
+  if (item.job.job_id === "system:memory-consolidate") {
+    return "定期整理记忆";
+  }
+  if (item.job.job_id === "system:memory-profile-generate") {
+    return "生成用户画像";
+  }
+  return item.job.name;
+}
+
 export default function AutomationCenter() {
   const [doc, setDoc] = useState<AutomationJobDocument | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<Error | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [conflictJobId, setConflictJobId] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastState | null>(null);
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [advancedJobId, setAdvancedJobId] = useState<string | null>(null);
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const advancedTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const advancedCloseRef = useRef<HTMLButtonElement | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -129,8 +170,9 @@ export default function AutomationCenter() {
     try {
       const resp = await fetchAutomationDocument();
       setDoc(resp);
+      setConflictJobId(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "加载失败，请重试");
+      setError(err instanceof Error ? err : new Error("automation load failed"));
     } finally {
       setLoading(false);
     }
@@ -164,19 +206,14 @@ export default function AutomationCenter() {
           actionId,
           { job_id: item.job.job_id }
         );
-        // executeControlAction 在 4xx（404/409，如任务已被别处删除）时仍会解析 result，
-        // 故必须查 result.status——rejected 走错误提示而非假成功（Codex P2）。
         if (result.status === "rejected") {
-          flashToast(result.message || "操作未生效，请刷新重试", true);
-        } else {
-          flashToast(nextEnabled ? "已恢复" : "已暂停", false);
+          setConflictJobId(item.job.job_id);
+          return;
         }
+        flashToast(nextEnabled ? "已恢复" : "已暂停", false);
         await load();
-      } catch (err) {
-        flashToast(
-          err instanceof Error ? err.message : "操作失败，请重试",
-          true
-        );
+      } catch {
+        flashToast("操作未完成，请稍后重试", true);
       } finally {
         setBusyId(null);
       }
@@ -184,74 +221,137 @@ export default function AutomationCenter() {
     [doc?.contract_version, flashToast, load]
   );
 
-  const jobs = doc?.jobs ?? [];
+  const jobs = useMemo(
+    () =>
+      [...(doc?.jobs ?? [])].sort(
+        (left, right) => Number(right.job.enabled) - Number(left.job.enabled)
+      ),
+    [doc?.jobs]
+  );
+  const pageResolution = resolveResourcePageState({
+    loading,
+    hasContent: jobs.length > 0,
+    connected: true,
+    error,
+  });
+  const pageState =
+    pageResolution.owner === "surface"
+      ? pageResolution.state.kind
+      : "recoverable-error";
+  const advancedItem =
+    jobs.find((item) => item.job.job_id === advancedJobId) ?? null;
+
+  const openAdvanced = useCallback(
+    (item: AutomationJobItem, trigger: HTMLButtonElement) => {
+      advancedTriggerRef.current = trigger;
+      setAdvancedJobId(item.job.job_id);
+    },
+    []
+  );
+
+  const closeAdvanced = useCallback(() => {
+    setAdvancedJobId(null);
+    advancedTriggerRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!advancedJobId) {
+      return;
+    }
+    advancedCloseRef.current?.focus();
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeAdvanced();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [advancedJobId, closeAdvanced]);
 
   return (
-    <div className="wb-page">
-      <section className="wb-hero wb-hero-compact">
-        <div className="wb-hero-copy">
-          <p className="wb-kicker">定时任务</p>
+    <div className="f149-automation-page">
+      <section className="f149-automation-hero">
+        <div className="f149-automation-hero-copy">
+          <p className="f149-automation-kicker">AUTOMATION</p>
           <h1>定时任务</h1>
           <p>
-            这里是助手帮你安排的定时提醒和任务。想新建或删除，直接在对话里告诉助手
-            （例如「每周一早上9点提醒我交周报」）。
+            助手会按约定的时间完成提醒和任务。想新建或删除，直接在对话里告诉助手。
           </p>
+        </div>
+        <div className="f149-automation-hero-count" aria-label={`共 ${jobs.length} 项任务`}>
+          <strong>{jobs.length}</strong>
+          <span>项计划</span>
         </div>
       </section>
 
       {toast && (
         <div
-          className={`wb-inline-banner ${toast.isError ? "is-warning" : "is-ok"}`}
+          className={`f149-automation-banner ${
+            toast.isError ? "is-warning" : "is-success"
+          }`}
           role="status"
         >
           {toast.message}
         </div>
       )}
 
-      {loading && <div className="wb-empty-state">加载中…</div>}
+      {pageState === "loading" && (
+        <div className="f149-automation-state" aria-live="polite">
+          <span className="f149-automation-state-mark" aria-hidden="true" />
+          <strong>正在整理定时任务</strong>
+          <p>很快就好。</p>
+        </div>
+      )}
 
-      {!loading && error && (
-        <div className="wb-inline-banner is-warning" role="alert">
-          {error}
+      {pageState === "permission-denied" && (
+        <div className="f149-automation-state is-error" role="alert">
+          <strong>当前账号没有权限查看定时任务</strong>
+          <p>请联系管理员确认这项资源的访问权限。</p>
+        </div>
+      )}
+
+      {pageState === "recoverable-error" && (
+        <div className="f149-automation-state is-error" role="alert">
+          <strong>定时任务加载失败</strong>
+          <p>连接可能暂时不稳定，请稍后再试。</p>
           <button
             type="button"
-            className="wb-button wb-button-tertiary"
             onClick={() => void load()}
-            style={{ marginLeft: "var(--space-sm)" }}
           >
             重试
           </button>
         </div>
       )}
 
-      {!loading && !error && jobs.length === 0 && (
-        <div className="wb-empty-state">
-          还没有定时任务。在对话里让助手帮你建一个吧，比如「每天早上8点提醒我喝水」。
+      {pageState === "empty" && (
+        <div className="f149-automation-state">
+          <span className="f149-automation-state-mark is-empty" aria-hidden="true" />
+          <strong>还没有定时任务</strong>
+          <p>在对话里说一句即可创建，例如“每天早上 8 点提醒我喝水”。</p>
         </div>
       )}
 
-      {!loading && !error && jobs.length > 0 && (
-        <section className="wb-card-grid">
+      {pageState === "ready" && (
+        <section className="f149-automation-grid" aria-label="定时任务列表">
           {jobs.map((item) => {
             const statusMeta =
               STATUS_LABEL[item.status] ?? { label: item.status, cls: "" };
+            const displayName = readJobDisplayName(item);
             const reminder = readReminderText(item);
             const nextRun = item.next_run_at
               ? new Date(item.next_run_at).toLocaleString("zh-CN")
               : "—";
             return (
-              <article key={item.job.job_id} className="wb-card">
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "flex-start",
-                    gap: "var(--space-sm)",
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <strong style={{ display: "block" }}>{item.job.name}</strong>
-                    <span className="wb-chip" style={{ marginTop: "4px" }}>
+              <article key={item.job.job_id} className="f149-automation-card">
+                <div className="f149-automation-card-header">
+                  <span
+                    className={`f149-automation-indicator ${statusMeta.cls}`}
+                    aria-hidden="true"
+                  />
+                  <div className="f149-automation-card-title">
+                    <strong>{displayName}</strong>
+                    <span className="f149-automation-schedule">
                       {humanizeSchedule(
                         item.job.schedule_kind,
                         item.job.schedule_expr,
@@ -260,7 +360,7 @@ export default function AutomationCenter() {
                     </span>
                   </div>
                   <span
-                    className={`wb-status-pill ${statusMeta.cls}`}
+                    className={`f149-automation-status ${statusMeta.cls}`}
                     aria-label={`状态：${statusMeta.label}`}
                   >
                     {statusMeta.label}
@@ -268,67 +368,103 @@ export default function AutomationCenter() {
                 </div>
 
                 {reminder && (
-                  <p style={{ marginTop: "var(--space-sm)" }}>提醒内容：{reminder}</p>
+                  <p className="f149-automation-reminder">
+                    <span>提醒内容</span>
+                    {reminder}
+                  </p>
                 )}
 
-                <p className="wb-card-label" style={{ marginTop: "var(--space-sm)" }}>
-                  下次运行：{nextRun}
+                <p className="f149-automation-next-run">
+                  <span>下次运行</span>
+                  <strong>{nextRun}</strong>
                 </p>
                 {item.degraded_reason && (
-                  <p className="wb-inline-banner is-warning">
+                  <p className="f149-automation-card-warning">
                     {item.degraded_reason}
                   </p>
                 )}
 
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "var(--space-sm)",
-                    marginTop: "var(--space-md)",
-                    alignItems: "center",
-                  }}
-                >
+                {conflictJobId === item.job.job_id && (
+                  <div className="f149-automation-conflict" role="alert">
+                    <span>已在别处更改</span>
+                    <button type="button" onClick={() => void load()}>
+                      刷新
+                    </button>
+                  </div>
+                )}
+
+                <div className="f149-automation-card-actions">
                   <button
                     type="button"
-                    className="wb-button wb-button-secondary"
+                    className="f149-automation-advanced-trigger"
+                    onClick={(event) => openAdvanced(item, event.currentTarget)}
+                  >
+                    高级 · 任务编号与计划原式
+                  </button>
+                  <button
+                    type="button"
+                    className="f149-automation-primary-action"
                     disabled={busyId === item.job.job_id}
                     onClick={() => void handleToggle(item)}
                   >
-                    {item.job.enabled ? "暂停" : "恢复"}
+                    {busyId === item.job.job_id
+                      ? "处理中…"
+                      : item.job.enabled
+                        ? "暂停"
+                        : "恢复"}
                   </button>
-                  <span className="wb-card-label">
-                    如需删除，在对话中让助手删除。
-                  </span>
                 </div>
-
-                {showAdvanced && (
-                  <dl className="wb-advanced-block" style={{ marginTop: "var(--space-sm)" }}>
-                    <dt>任务 ID</dt>
-                    <dd>{item.job.job_id}</dd>
-                    <dt>动作</dt>
-                    <dd>{item.job.action_id}</dd>
-                    <dt>表达式</dt>
-                    <dd>
-                      {item.job.schedule_kind} · {item.job.schedule_expr} ·{" "}
-                      {item.job.timezone}
-                    </dd>
-                  </dl>
-                )}
               </article>
             );
           })}
         </section>
       )}
 
-      {!loading && jobs.length > 0 && (
-        <button
-          type="button"
-          className="wb-button wb-button-tertiary"
-          onClick={() => setShowAdvanced((v) => !v)}
-          style={{ marginTop: "var(--space-md)" }}
-        >
-          {showAdvanced ? "隐藏技术信息" : "显示技术信息"}
-        </button>
+      {advancedItem && (
+        <div className="f149-automation-sheet-backdrop">
+          <section
+            className="f149-automation-sheet"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${readJobDisplayName(advancedItem)}的高级信息`}
+          >
+            <header>
+              <div>
+                <p>高级信息</p>
+                <h2>{readJobDisplayName(advancedItem)}</h2>
+              </div>
+              <button
+                ref={advancedCloseRef}
+                type="button"
+                onClick={closeAdvanced}
+                aria-label="关闭高级信息"
+              >
+                关闭
+              </button>
+            </header>
+            <dl>
+              <div>
+                <dt>任务编号</dt>
+                <dd>{advancedItem.job.job_id}</dd>
+              </div>
+              <div>
+                <dt>动作</dt>
+                <dd>{advancedItem.job.action_id}</dd>
+              </div>
+              <div>
+                <dt>计划原式</dt>
+                <dd>
+                  {advancedItem.job.schedule_kind} ·{" "}
+                  {advancedItem.job.schedule_expr} ·{" "}
+                  {advancedItem.job.timezone}
+                </dd>
+              </div>
+            </dl>
+            <p className="f149-automation-sheet-note">
+              如需删除或更改计划，请直接在对话里告诉助手。
+            </p>
+          </section>
+        </div>
       )}
     </div>
   );
