@@ -1,0 +1,15 @@
+task_id: T031
+phase: RED
+behavior: Tasks list 与待处理事项归位、状态、人话与 Claude Design 层级合同
+command: cd octoagent/frontend && npx vitest run src/pages/TaskList.test.tsx
+executed_at_utc: 2026-07-26T13:16:38Z
+head_sha: 8b5b85084cdbd72796a1058f86405a8f8e169047
+exit_code: 1
+oracle_expected: 当前TaskList无法满足人话状态、Claude Design卡片与筛选、互斥页面状态、origin-403、可恢复重试及待处理事项归位合同
+oracle_observed: 6项中5项稳定失败、1项absence控制通过；失败精确落在原始状态/密集旧结构、loading与empty、重试、403 ownership及显著待处理入口
+raw_output_file: /tmp/f149-t031-red.log
+raw_output_sha256: 6f4153630cb99631c250c1944cd5d2543d4fdaee3fd1d7e35d80c3a0d27c7b00
+raw_output_size: 81606
+secret_scan: pass
+network: false
+rerun: false

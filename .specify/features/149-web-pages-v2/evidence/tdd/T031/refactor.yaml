@@ -1,0 +1,41 @@
+task_id: T031
+phase: REFACTOR
+behavior: Tasks list 与待处理事项归位、状态、人话与 Claude Design 层级合同
+command: cd octoagent/frontend && npx vitest run src/pages/TaskList.test.tsx
+executed_at_utc: 2026-07-26T13:19:29Z
+head_sha: 8b5b85084cdbd72796a1058f86405a8f8e169047
+exit_code: 0
+oracle_expected: exact 6项保持，任务投影与待处理入口职责清晰，Claude Design Desktop/390 Web窄窗口层级、留白、卡片节奏和可访问性不漂移
+oracle_observed: exact 6/6、全前端538/538、生产build、OpenAPI、F149 boundary/style/complexity及changed-lines coverage 94.90%通过
+raw_output_file: /tmp/f149-t031-refactor.log
+raw_output_sha256: d63f2b6bad1d5b0e748c716b43dcf553fd252417b9df53f8bf3a7974776d4826
+raw_output_size: 319
+full_frontend_log_sha256: 43d3eac8da140c555748b99d362c0ca5cdb85576e29b941bd0185961b3ead413
+build_log_sha256: 4ad8ee222a0b85b13e87343e06d6dc8b84c08489860a9d83615821f3b1344758
+openapi_log_sha256: d3818772aac0919710d2d6f2e16f5e7ecc9218bc1f8f0a03792a9fedf3742c5f
+boundary_log_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_log_sha256: 4ed23a9b3faaae305c3dcbdc9619d857c74160a17c03dd8fb5ecda00f1f96ad2
+complexity_log_sha256: b01362ef6a0b5b341ea113a527d715acbeaafaec607c23ea2487b9a7599bdfaa
+coverage_log_sha256: fcefd0126557e1d4cdf2d15519e5e1c7ce18ddb3f323065bcd5084ebdff99545
+changed_lines_coverage_log_sha256: 7891f2aafc303dbee4f6b66d3a493ceeeccd5e5497d98b28534e9fdf6d99f762
+runtime_architecture_log_sha256: ebd999750dcf98c132839cfde3c434ad8e9528e2a4515574fb2f72279b229beb
+runtime_architecture_gate: blocked_cross_feature_evidence
+runtime_architecture_observed: "EVIDENCE_REQUIRED_SLICE_MISSING: octoagent/frontend/src/pages/TaskList.tsx"
+quality_review:
+  - 实现前逐页复核Claude Design Tasks Desktop/390原稿；保留警示型待处理横幅、宽松hero、筛选胶囊、大卡片、留白和视觉张力，没有回退为旧Web管理表格
+  - 真实Chromium 1440桌面与390 Web窄窗口均无横向溢出；筛选、打开任务、进入处理与Advanced触发器均至少44px
+  - 390只作Web响应式健壮性，不代表手机产品；手机产品仍只走原生iOS
+  - raw task status与task id只在默认收起的Advanced中；普通界面只显示等待开始、进行中、等待你补充、等待你确认、已完成或未成功等人话
+  - Tasks只组合现有tasks与operator inbox端点；没有第二store、transport、action pipeline或维护/恢复入口
+  - 非零待处理事项保持显著入口；零项只保留安静的一行状态，不占首屏横幅；原OperatorInboxPanel技术面已删除
+  - 401继续交回F150 global auth；origin403只提示资源权限不足并联系管理员；recoverable error提供显式重试
+  - repository runtime architecture因F151尚无TaskList新路径证据slice而阻断；本task未伪造或越界修改F151证据
+file_sha256:
+  task-list: 539abebbe85dd0cefbccfe5a0374ec5c50661461d90f7cd340ac6d08be69b30f
+  task-list-css: cead254ab1787e0b07dc12c2b0dd4ed6c3bbe3c42450e1147e7121472b5e6a4b
+  task-list-test: 00ff57af286d192d320ed1d6cb9957124f530be4d4d9b319daee79e01f64066c
+  pending-section: 3783b177738425c7080f81b2372e097e9023331ae7e99da0e14deae8e8ad9555
+  task-list-model: 7ce340356900e528914bd2c6c089193f1c7e098fea10d9a9e819a52783b44c45
+secret_scan: pass
+network: false
+rerun: false

@@ -1,0 +1,15 @@
+task_id: T031
+phase: GREEN
+behavior: Tasks list 与待处理事项归位、状态、人话与 Claude Design 层级合同
+command: cd octoagent/frontend && npx vitest run src/pages/TaskList.test.tsx
+executed_at_utc: 2026-07-26T13:18:50Z
+head_sha: 8b5b85084cdbd72796a1058f86405a8f8e169047
+exit_code: 0
+oracle_expected: 人话状态、筛选、互斥页面状态、origin-403、可恢复重试与非零待处理入口全部成立，Recovery/cancel/resume/知识审批不混入
+oracle_observed: exact 6/6通过；Task列表与现有operator inbox端点组合，未新增store/transport/action
+raw_output_file: /tmp/f149-t031-green.log
+raw_output_sha256: 7a2f4a349882b170f14778eda17f5b72fc78fef3e97751fce570c7e92474e262
+raw_output_size: 317
+secret_scan: pass
+network: false
+rerun: false

@@ -206,5 +206,17 @@
   F149 boundary/style/complexity及changed-lines coverage 95.03%通过。
   repository runtime architecture因F151缺本次新路径证据slice而如实阻断，
   未伪造跨Feature证据或放宽checker。
+- T031以旧TaskList形成5条稳定行为RED，既有Recovery/cancel/resume/知识审批
+  absence控制通过。GREEN把raw status收敛为窄pure人话投影，loading/empty/
+  recoverable-error/origin-403与筛选互斥，401继续交回F150 global auth；非零
+  待处理事项复用既有operator inbox端点，零项只保留安静的一行状态，旧技术型
+  `OperatorInboxPanel`删除。REFACTOR逐页对照Claude Design Tasks Desktop/390，
+  保留警示横幅、宽松hero、筛选胶囊、大卡片、留白与视觉张力；真实Chromium
+  1440/390 Web窄窗口无横向溢出，全部操作与Advanced触发器≥44px。最终精确6/6、
+  全前端538/538、生产build、OpenAPI、F149 boundary/style/complexity及
+  changed-lines coverage 94.90%通过。repository runtime architecture因F151
+  尚无TaskList新路径证据slice而如实阻断，未伪造跨Feature证据；没有第二store、
+  transport、action pipeline或维护入口。390仍只作Web响应式检查，手机产品只走
+  原生iOS。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

@@ -1,109 +1,154 @@
-/**
- * TaskList 页面 -- 展示所有任务列表
- *
- * 功能：
- * 1. 调用 GET /api/tasks 获取任务列表
- * 2. 按创建时间倒序展示
- * 3. 每个任务显示标题、状态标记、创建时间
- * 4. 点击导航到详情页
- */
-
-import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { fetchTasks } from "../api/client";
-import OperatorInboxPanel from "../components/OperatorInboxPanel";
+import { mapF149ErrorOwnership } from "../api/f149/errorOwnership";
 import type { TaskSummary } from "../types";
 import { formatDateTime } from "../utils/formatTime";
+import "./TaskList.css";
+import {
+  filterTasks,
+  presentTaskStatus,
+  summarizeTasks,
+  type TaskListFilter,
+} from "./taskListModel";
+import TaskPendingSection from "./TaskPendingSection";
 
 export default function TaskList() {
   const [tasks, setTasks] = useState<TaskSummary[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const navigate = useNavigate();
+  const [error, setError] = useState<Error | null>(null);
+  const [filter, setFilter] = useState<TaskListFilter>("all");
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      try {
-        const data = await fetchTasks();
-        if (!cancelled) {
-          setTasks(data.tasks);
-          setLoading(false);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : "加载任务失败");
-          setLoading(false);
-        }
-      }
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await fetchTasks();
+      setTasks(data.tasks);
+      setError(null);
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught : new Error("任务列表暂时不可用"),
+      );
+    } finally {
+      setLoading(false);
     }
-
-    load();
-
-    // 每 5 秒刷新一次列表
-    const interval = setInterval(load, 5000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
   }, []);
 
-  if (loading) {
-    return (
-      <div>
-        <h1>当前工作</h1>
-        <OperatorInboxPanel />
-        <div className="loading">正在加载任务列表…</div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    void load();
+  }, [load]);
 
-  if (error) {
-    return (
-      <div>
-        <h1>当前工作</h1>
-        <OperatorInboxPanel />
-        <div className="error">加载失败：{error}</div>
-      </div>
-    );
-  }
-
-  if (tasks.length === 0) {
-    return (
-      <div>
-        <h1>当前工作</h1>
-        <OperatorInboxPanel />
-        <div className="card" style={{ textAlign: "center", color: "var(--color-text-secondary)" }}>
-          暂无进行中的工作
-        </div>
-      </div>
-    );
-  }
+  const visibleTasks = useMemo(
+    () => filterTasks(tasks, filter),
+    [filter, tasks],
+  );
+  const ownership = error ? mapF149ErrorOwnership(error) : null;
+  const isPermissionDenied =
+    ownership?.owner === "surface" && ownership.state === "forbidden";
+  const isGlobalAuth = ownership?.owner === "global-auth";
 
   return (
-    <div>
-      <h1>当前工作</h1>
-      <OperatorInboxPanel />
-      <div className="card" style={{ padding: 0, overflow: "hidden" }}>
-        {tasks.map((task) => (
+    <main className="f149-task-page">
+      <TaskPendingSection />
+
+      <header className="f149-task-hero">
+        <div>
+          <h1>任务</h1>
+          <p>{summarizeTasks(tasks)}</p>
+        </div>
+        <nav className="f149-task-filters" aria-label="筛选任务">
+          {(
+            [
+              ["all", "全部"],
+              ["active", "进行中"],
+              ["succeeded", "已完成"],
+              ["failed", "未成功"],
+            ] as const
+          ).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={filter === value}
+              onClick={() => setFilter(value)}
+            >
+              {label}
+            </button>
+          ))}
+        </nav>
+      </header>
+
+      <section className="f149-task-content" aria-label="任务列表">
+        {loading ? (
           <div
-            key={task.task_id}
-            className="task-item"
-            onClick={() => navigate(`/tasks/${task.task_id}`)}
-            style={{
-              borderBottom: "1px solid var(--color-border)",
-            }}
+            className="f149-task-state"
+            role="status"
+            aria-label="正在加载任务"
           >
-            <span className="task-title">{task.title}</span>
-            <span className={`status-badge ${task.status}`}>{task.status}</span>
-            <span className="task-time" style={{ marginLeft: "var(--space-md)" }}>
-              {formatDateTime(task.created_at)}
-            </span>
+            正在加载任务…
           </div>
-        ))}
-      </div>
-    </div>
+        ) : isGlobalAuth ? null : error ? (
+          <div
+            className="f149-task-state is-error"
+            role="alert"
+            aria-label={isPermissionDenied ? "无法查看任务" : "任务暂时不可用"}
+          >
+            <strong>
+              {isPermissionDenied ? "无法查看任务" : "任务暂时不可用"}
+            </strong>
+            <p>
+              {isPermissionDenied
+                ? "你没有查看这组任务的权限，请联系管理员。"
+                : "这次没有加载成功，可以重新试一次。"}
+            </p>
+            {!isPermissionDenied ? (
+              <button type="button" onClick={() => void load()}>
+                重新加载
+              </button>
+            ) : null}
+          </div>
+        ) : tasks.length === 0 ? (
+          <div
+            className="f149-task-state"
+            role="status"
+            aria-label="还没有任务"
+          >
+            <strong>还没有任务</strong>
+            <p>从聊天开始一项工作后，进度会出现在这里。</p>
+          </div>
+        ) : visibleTasks.length === 0 ? (
+          <div className="f149-task-state" role="status">
+            这个筛选下暂时没有任务。
+          </div>
+        ) : (
+          visibleTasks.map((task) => {
+            const status = presentTaskStatus(task.status);
+            return (
+              <article key={task.task_id} className="f149-task-card">
+                <span
+                  className={`f149-task-card-indicator is-${status.tone}`}
+                  aria-hidden="true"
+                />
+                <div className="f149-task-card-copy">
+                  <strong>{task.title}</strong>
+                  <span>更新于 {formatDateTime(task.updated_at)}</span>
+                </div>
+                <span className={`f149-task-status is-${status.tone}`}>
+                  {status.label}
+                </span>
+                <Link className="f149-task-open" to={`/tasks/${task.task_id}`}>
+                  打开
+                </Link>
+                <details className="f149-task-advanced">
+                  <summary>高级</summary>
+                  <p>
+                    status={task.status} · {task.task_id}
+                  </p>
+                </details>
+              </article>
+            );
+          })
+        )}
+      </section>
+    </main>
   );
 }
