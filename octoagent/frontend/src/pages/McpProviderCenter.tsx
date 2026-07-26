@@ -1,33 +1,76 @@
-import { useEffect, useState } from "react";
+import {
+  type ReactElement,
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import McpInstallWizard from "../components/McpInstallWizard";
 import type { McpProviderItem } from "../types";
+import "./McpProviderCenter.css";
 
-/* ── draft helpers ─────────────────────────────────────────── */
+type SecretMode = "keep" | "replace" | "remove";
+
+interface SecretDraft {
+  name: string;
+  mode: SecretMode;
+  value: string;
+}
 
 interface McpProviderDraft {
-  provider_id: string;
+  displayName: string;
+  providerId: string;
   command: string;
-  args_text: string;
+  argsText: string;
   cwd: string;
-  env_text: string;
   enabled: boolean;
+  secrets: SecretDraft[];
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  available: "运行正常",
+  error: "需要检查",
+  unconfigured: "等待配置",
+  discovering: "正在连接",
+  disabled: "已停用",
+};
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? "状态检查中";
 }
 
 function emptyDraft(): McpProviderDraft {
   return {
-    provider_id: "",
+    displayName: "",
+    providerId: "",
     command: "",
-    args_text: "",
+    argsText: "",
     cwd: "",
-    env_text: "",
     enabled: true,
+    secrets: [{ name: "", mode: "replace", value: "" }],
   };
 }
 
-function joinLines(values: string[]): string {
-  return values.join("\n");
+function draftFromItem(item: McpProviderItem): McpProviderDraft {
+  const secretNames = Object.keys(item.env).filter(Boolean);
+  return {
+    displayName: item.label,
+    providerId: item.provider_id,
+    command: item.command,
+    argsText: item.args.join("\n"),
+    cwd: item.cwd,
+    enabled: item.enabled,
+    secrets: (secretNames.length > 0 ? secretNames : ["API_KEY"]).map(
+      (name) => ({
+        name,
+        mode: "keep" as const,
+        value: "",
+      }),
+    ),
+  };
 }
 
 function parseLines(value: string): string[] {
@@ -37,56 +80,234 @@ function parseLines(value: string): string[] {
     .filter(Boolean);
 }
 
-function parseEnvText(value: string): Record<string, string> {
-  const entries = parseLines(value)
-    .map((line) => {
-      const [key, ...rest] = line.split("=");
-      return [key?.trim() ?? "", rest.join("=").trim()] as const;
+function secretMutations(
+  secrets: SecretDraft[],
+): Record<string, { mode: SecretMode; value?: string }> {
+  return Object.fromEntries(
+    secrets
+      .filter((secret) => secret.name.trim())
+      .map((secret) => [
+        secret.name.trim(),
+        secret.mode === "replace"
+          ? { mode: secret.mode, value: secret.value }
+          : { mode: secret.mode },
+      ]),
+  );
+}
+
+function toolsFrom(item: McpProviderItem): string[] {
+  const raw = item.details.tools;
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+  return raw
+    .map((tool) => {
+      if (typeof tool === "string") {
+        return tool;
+      }
+      if (tool && typeof tool === "object" && "name" in tool) {
+        return String(tool.name);
+      }
+      return "";
     })
-    .filter(([key]) => key);
-  return Object.fromEntries(entries);
+    .filter(Boolean)
+    .slice(0, 12);
 }
 
-function stringifyEnvText(source: Record<string, string>): string {
-  return Object.entries(source)
-    .map(([key, value]) => `${key}=${value}`)
-    .join("\n");
+function safeCommand(item: McpProviderItem): string {
+  const command = [item.command, ...item.args].join(" ").trim();
+  return /(?:token|secret|password|key)=/i.test(command)
+    ? "已隐藏敏感参数"
+    : command;
 }
 
-function draftFromItem(item: McpProviderItem): McpProviderDraft {
-  return {
-    provider_id: item.provider_id,
-    command: item.command,
-    args_text: joinLines(item.args),
-    cwd: item.cwd,
-    env_text: stringifyEnvText(item.env),
-    enabled: item.enabled,
-  };
+function providerDescription(item: McpProviderItem): string {
+  const description = item.description?.trim();
+  const technicalValues = new Set([
+    item.command.trim(),
+    [item.command, ...item.args].join(" ").trim(),
+    item.provider_id.trim(),
+  ]);
+  return description && !technicalValues.has(description)
+    ? description
+    : "已连接到 OctoAgent，可供 Agent 按权限使用。";
 }
 
-/* ── 状态文案 ────────────────────────────────────────────── */
-
-const STATUS_LABELS: Record<string, string> = {
-  available: "运行中",
-  error: "异常",
-  unconfigured: "未配置",
-  discovering: "发现中",
-  disabled: "已停用",
-};
-
-function statusLabel(status: string): string {
-  return STATUS_LABELS[status] ?? status;
+function restoreFocus(target: HTMLElement | null): void {
+  if (target) {
+    window.requestAnimationFrame(() => target.focus());
+  }
 }
 
-/* ── modal 编辑器 ────────────────────────────────────────── */
+function ProviderCard({
+  item,
+  onEdit,
+}: {
+  item: McpProviderItem;
+  onEdit: (item: McpProviderItem, trigger: HTMLButtonElement) => void;
+}): ReactElement {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const titleId = `mcp-provider-${item.provider_id.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const tools = toolsFrom(item);
+  return (
+    <article
+      className="f149-mcp-card"
+      aria-labelledby={titleId}
+      aria-label={item.label}
+    >
+      <div className="f149-mcp-card-head">
+        <div>
+          <span className={`f149-mcp-status is-${item.status}`}>
+            {statusLabel(item.status)}
+          </span>
+          <h2 id={titleId}>{item.label}</h2>
+        </div>
+        <button
+          type="button"
+          className="f149-mcp-button f149-mcp-button-quiet"
+          aria-label={`编辑${item.label}`}
+          onClick={(event) => onEdit(item, event.currentTarget)}
+        >
+          编辑
+        </button>
+      </div>
+      <p className="f149-mcp-description">
+        {providerDescription(item)}
+      </p>
+      <dl className="f149-mcp-card-meta">
+        <div>
+          <dt>可用工具</dt>
+          <dd>{item.tool_count}</dd>
+        </div>
+        <div>
+          <dt>连接方式</dt>
+          <dd>
+            {item.install_source && item.install_source !== "manual"
+              ? "自动安装"
+              : "手动添加"}
+          </dd>
+        </div>
+      </dl>
+      <section className="f149-mcp-advanced">
+        <button
+          type="button"
+          className="f149-mcp-advanced-trigger"
+          aria-expanded={advancedOpen}
+          onClick={() => setAdvancedOpen((current) => !current)}
+        >
+          高级 · 技术信息
+          <span aria-hidden="true">{advancedOpen ? "−" : "+"}</span>
+        </button>
+        {advancedOpen ? (
+          <div className="f149-mcp-advanced-body">
+            <dl>
+              <div>
+                <dt>启动命令</dt>
+                <dd>
+                  <code>{safeCommand(item)}</code>
+                </dd>
+              </div>
+              <div>
+                <dt>服务标识</dt>
+                <dd>
+                  <code>{item.provider_id}</code>
+                </dd>
+              </div>
+            </dl>
+            {tools.length > 0 ? (
+              <ul aria-label="工具列表">
+                {tools.map((tool) => (
+                  <li key={tool}>{tool}</li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+    </article>
+  );
+}
 
-function McpProviderModal({
+function SecretEditor({
+  secret,
+  index,
+  onChange,
+}: {
+  secret: SecretDraft;
+  index: number;
+  onChange: (index: number, next: SecretDraft) => void;
+}): ReactElement {
+  const suffix = index === 0 ? "" : ` ${index + 1}`;
+  return (
+    <fieldset className="f149-mcp-secret">
+      <legend>访问密钥{suffix}</legend>
+      <p>现有值不可查看。保存时只提交你的处理选择。</p>
+      <label>
+        <span>密钥名称</span>
+        <input
+          value={secret.name}
+          onChange={(event) =>
+            onChange(index, { ...secret, name: event.target.value })
+          }
+        />
+      </label>
+      <div className="f149-mcp-secret-options">
+        <label>
+          <input
+            type="radio"
+            name={`secret-mode-${index}`}
+            checked={secret.mode === "keep"}
+            onChange={() =>
+              onChange(index, { ...secret, mode: "keep", value: "" })
+            }
+          />
+          保留现有值
+        </label>
+        <label>
+          <input
+            type="radio"
+            name={`secret-mode-${index}`}
+            checked={secret.mode === "replace"}
+            onChange={() =>
+              onChange(index, { ...secret, mode: "replace", value: "" })
+            }
+          />
+          替换访问密钥
+        </label>
+        <label>
+          <input
+            type="radio"
+            name={`secret-mode-${index}`}
+            checked={secret.mode === "remove"}
+            onChange={() =>
+              onChange(index, { ...secret, mode: "remove", value: "" })
+            }
+          />
+          清空访问密钥
+        </label>
+      </div>
+      {secret.mode === "replace" ? (
+        <label>
+          <span>新的访问密钥</span>
+          <input
+            type="password"
+            autoComplete="new-password"
+            value={secret.value}
+            onChange={(event) =>
+              onChange(index, { ...secret, value: event.target.value })
+            }
+          />
+        </label>
+      ) : null}
+    </fieldset>
+  );
+}
+
+function ProviderDialog({
   mode,
   draft,
   busy,
-  error,
-  warnings,
-  onDraftChange,
+  onChange,
   onSave,
   onDelete,
   onClose,
@@ -94,287 +315,365 @@ function McpProviderModal({
   mode: "create" | "edit";
   draft: McpProviderDraft;
   busy: boolean;
-  error: string | null;
-  warnings: string[];
-  onDraftChange: <K extends keyof McpProviderDraft>(key: K, value: McpProviderDraft[K]) => void;
+  onChange: (next: McpProviderDraft) => void;
   onSave: () => void;
   onDelete: (() => void) | null;
   onClose: () => void;
-}) {
-  return document.body
-    ? createPortal(
-        <div
-          className="wb-modal-overlay"
-          onClick={(e) => {
-            // 仅响应真实指针点击（detail > 0），排除键盘或输入法触发的合成 click
-            if (e.target === e.currentTarget && e.detail > 0) onClose();
-          }}
-        >
-          <div className="wb-modal-body wb-mcp-modal" onKeyDown={(e) => e.stopPropagation()}>
-            <div className="wb-panel-head">
-              <h3>{mode === "create" ? "安装 MCP Provider" : `编辑 ${draft.provider_id}`}</h3>
-              <button
-                type="button"
-                className="wb-button wb-button-secondary"
-                onClick={onClose}
-              >
-                关闭
-              </button>
-            </div>
-
-            {error ? (
-              <div className="wb-inline-banner is-error">
-                <strong>发现失败</strong>
-                <span>{error}</span>
-              </div>
-            ) : null}
-
-            <div className="wb-agent-form-grid">
-              <label className="wb-field">
-                <span>Provider ID</span>
-                <input
-                  type="text"
-                  value={draft.provider_id}
-                  disabled={mode === "edit"}
-                  onChange={(e) => onDraftChange("provider_id", e.target.value)}
-                  placeholder="例如 local-files"
-                />
-              </label>
-              <label className="wb-field">
-                <span>启用状态</span>
-                <select
-                  value={draft.enabled ? "enabled" : "disabled"}
-                  onChange={(e) => onDraftChange("enabled", e.target.value === "enabled")}
-                >
-                  <option value="enabled">启用</option>
-                  <option value="disabled">停用</option>
-                </select>
-              </label>
-              <label className="wb-field wb-field-span-2">
-                <span>Command</span>
-                <input
-                  type="text"
-                  value={draft.command}
-                  onChange={(e) => onDraftChange("command", e.target.value)}
-                  placeholder="例如 npx"
-                />
-              </label>
-              <label className="wb-field">
-                <span>Args</span>
-                <textarea
-                  value={draft.args_text}
-                  onChange={(e) => onDraftChange("args_text", e.target.value)}
-                  placeholder="每行一个参数，例如 -y"
-                />
-              </label>
-              <label className="wb-field">
-                <span>工作目录</span>
-                <textarea
-                  value={draft.cwd}
-                  onChange={(e) => onDraftChange("cwd", e.target.value)}
-                  placeholder="可选，例如 /Users/connorlu/project"
-                />
-              </label>
-              <label className="wb-field wb-field-span-2">
-                <span>环境变量</span>
-                <textarea
-                  value={draft.env_text}
-                  onChange={(e) => onDraftChange("env_text", e.target.value)}
-                  placeholder={"每行一个 KEY=VALUE\n例如 PATH=/usr/local/bin"}
-                />
-              </label>
-            </div>
-
-            {warnings.length ? (
-              <div className="wb-note-stack">
-                {warnings.map((w) => (
-                  <div key={w} className="wb-note">
-                    <strong>提醒</strong>
-                    <span>{w}</span>
-                  </div>
-                ))}
-              </div>
-            ) : null}
-
-            <div className="wb-inline-actions">
-              <button
-                type="button"
-                className="wb-button wb-button-primary"
-                onClick={onSave}
-                disabled={busy}
-              >
-                {mode === "create" ? "安装" : "保存修改"}
-              </button>
-              {onDelete ? (
-                <button
-                  type="button"
-                  className="wb-button wb-button-tertiary"
-                  onClick={onDelete}
-                  disabled={busy}
-                >
-                  删除
-                </button>
-              ) : null}
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )
-    : null;
-}
-
-/* ── 页面主体 ────────────────────────────────────────────── */
-
-export default function McpProviderCenter() {
-  const { snapshot, submitAction, busyActionId } = useWorkbench();
-  const catalog = snapshot!.resources.mcp_provider_catalog;
-  const items = catalog?.items ?? [];
-
-  const [modalOpen, setModalOpen] = useState(false);
-  const [modalMode, setModalMode] = useState<"create" | "edit">("create");
-  const [editingProviderId, setEditingProviderId] = useState<string | null>(null);
-  const [draft, setDraft] = useState<McpProviderDraft>(emptyDraft());
-  const [installWizardOpen, setInstallWizardOpen] = useState(false);
-
-  const busy = busyActionId === "mcp_provider.save" || busyActionId === "mcp_provider.delete";
-
-  // action 完成后自动关闭 modal
-  const [prevBusy, setPrevBusy] = useState(busy);
+}): ReactElement {
+  const title =
+    mode === "edit"
+      ? `编辑${draft.displayName || draft.providerId}`
+      : "手动添加服务";
   useEffect(() => {
-    if (prevBusy && !busy && modalOpen) {
-      setModalOpen(false);
-    }
-    setPrevBusy(busy);
-  }, [busy]); // eslint-disable-line react-hooks/exhaustive-deps
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
 
-  function openCreate() {
-    setModalMode("create");
-    setEditingProviderId(null);
-    setDraft(emptyDraft());
-    setModalOpen(true);
-  }
-
-  function openEdit(item: McpProviderItem) {
-    setModalMode("edit");
-    setEditingProviderId(item.provider_id);
-    setDraft(draftFromItem(item));
-    setModalOpen(true);
-  }
-
-  function updateDraft<K extends keyof McpProviderDraft>(key: K, value: McpProviderDraft[K]) {
-    setDraft((cur) => ({ ...cur, [key]: value }));
-  }
-
-  async function handleSave() {
-    await submitAction("mcp_provider.save", {
-      provider: {
-        provider_id: draft.provider_id,
-        command: draft.command,
-        args: parseLines(draft.args_text),
-        cwd: draft.cwd,
-        env: parseEnvText(draft.env_text),
-        enabled: draft.enabled,
-      },
+  const updateSecret = (index: number, next: SecretDraft) => {
+    onChange({
+      ...draft,
+      secrets: draft.secrets.map((secret, current) =>
+        current === index ? next : secret,
+      ),
     });
-  }
+  };
 
-  async function handleDelete() {
-    if (!editingProviderId) return;
-    await submitAction("mcp_provider.delete", {
-      provider_id: editingProviderId,
-    });
-  }
-
-  const editingItem = editingProviderId
-    ? items.find((i) => i.provider_id === editingProviderId) ?? null
-    : null;
-
-  return (
-    <div className="wb-page">
-      {/* 顶栏：标题 + 新建按钮 */}
-      <div className="wb-topbar">
-        <div className="wb-topbar-copy">
-          <h2>MCP 服务商</h2>
-          <p className="wb-topbar-meta">
-            已安装 {items.length} · 已启用 {Number(catalog?.summary?.enabled_count ?? 0)} · 健康{" "}
-            {Number(catalog?.summary?.healthy_count ?? 0)}
-          </p>
-        </div>
-        <div className="wb-inline-actions">
+  return createPortal(
+    <div
+      className="f149-mcp-dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <section
+        className="f149-mcp-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+      >
+        <header>
+          <div>
+            <p className="f149-mcp-kicker">
+              {mode === "edit" ? "连接设置" : "高级配置"}
+            </p>
+            <h2>{title}</h2>
+          </div>
           <button
             type="button"
-            className="wb-button wb-button-primary"
-            onClick={() => setInstallWizardOpen(true)}
+            className="f149-mcp-button f149-mcp-button-quiet"
+            onClick={onClose}
           >
-            安装
+            关闭
           </button>
-          <button type="button" className="wb-button wb-button-secondary" onClick={openCreate}>
-            手动添加
-          </button>
+        </header>
+        <div className="f149-mcp-form">
+          <label>
+            <span>服务标识</span>
+            <input
+              value={draft.providerId}
+              disabled={mode === "edit"}
+              onChange={(event) =>
+                onChange({ ...draft, providerId: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            <span>启用状态</span>
+            <select
+              value={draft.enabled ? "enabled" : "disabled"}
+              onChange={(event) =>
+                onChange({
+                  ...draft,
+                  enabled: event.target.value === "enabled",
+                })
+              }
+            >
+              <option value="enabled">启用</option>
+              <option value="disabled">停用</option>
+            </select>
+          </label>
+          <label className="is-wide">
+            <span>启动方式</span>
+            <input
+              value={draft.command}
+              onChange={(event) =>
+                onChange({ ...draft, command: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            <span>启动参数（每行一项）</span>
+            <textarea
+              value={draft.argsText}
+              onChange={(event) =>
+                onChange({ ...draft, argsText: event.target.value })
+              }
+            />
+          </label>
+          <label>
+            <span>工作目录</span>
+            <textarea
+              value={draft.cwd}
+              onChange={(event) =>
+                onChange({ ...draft, cwd: event.target.value })
+              }
+            />
+          </label>
         </div>
+        {draft.secrets.map((secret, index) => (
+          <SecretEditor
+            key={index}
+            secret={secret}
+            index={index}
+            onChange={updateSecret}
+          />
+        ))}
+        <footer>
+          {onDelete ? (
+            <button
+              type="button"
+              className="f149-mcp-button f149-mcp-button-danger"
+              onClick={onDelete}
+              disabled={busy}
+            >
+              删除连接
+            </button>
+          ) : (
+            <span />
+          )}
+          <button
+            type="button"
+            className="f149-mcp-button f149-mcp-button-primary"
+            onClick={onSave}
+            disabled={
+              busy ||
+              !draft.providerId.trim() ||
+              !draft.command.trim() ||
+              draft.secrets.some(
+                (secret) =>
+                  secret.name.trim() &&
+                  secret.mode === "replace" &&
+                  !secret.value,
+              )
+            }
+          >
+            {busy ? "正在保存" : "保存并生效"}
+          </button>
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}
+
+function PageState({
+  title,
+  description,
+  action,
+}: {
+  title: string;
+  description: string;
+  action?: ReactElement;
+}): ReactElement {
+  return (
+    <section className="f149-mcp-state" aria-live="polite">
+      <span aria-hidden="true">◇</span>
+      <h2>{title}</h2>
+      <p>{description}</p>
+      {action}
+    </section>
+  );
+}
+
+export default function McpProviderCenter(): ReactElement {
+  const {
+    snapshot,
+    loading,
+    error,
+    authError,
+    submitAction,
+    refreshSnapshot,
+    busyActionId,
+  } = useWorkbench();
+  const catalog = snapshot?.resources.mcp_provider_catalog;
+  const items = catalog?.items ?? [];
+  const installTriggerRef = useRef<HTMLButtonElement>(null);
+  const manualTriggerRef = useRef<HTMLButtonElement>(null);
+  const dialogTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const [dialogMode, setDialogMode] = useState<"create" | "edit" | null>(null);
+  const [editingProviderId, setEditingProviderId] = useState<string | null>(
+    null,
+  );
+  const [draft, setDraft] = useState<McpProviderDraft>(emptyDraft());
+  const [installOpen, setInstallOpen] = useState(false);
+  const busy =
+    busyActionId === "mcp_provider.save" ||
+    busyActionId === "mcp_provider.delete";
+
+  const closeDialog = useCallback(() => {
+    setDialogMode(null);
+    setEditingProviderId(null);
+    setDraft(emptyDraft());
+    restoreFocus(dialogTriggerRef.current);
+  }, []);
+
+  const openCreate = () => {
+    dialogTriggerRef.current = manualTriggerRef.current;
+    setDraft(emptyDraft());
+    setEditingProviderId(null);
+    setDialogMode("create");
+  };
+
+  const openEdit = (item: McpProviderItem, trigger: HTMLButtonElement) => {
+    dialogTriggerRef.current = trigger;
+    setDraft(draftFromItem(item));
+    setEditingProviderId(item.provider_id);
+    setDialogMode("edit");
+  };
+
+  const saveProvider = async () => {
+    const outcome = await submitAction("mcp_provider.save", {
+      provider: {
+        provider_id: draft.providerId,
+        command: draft.command,
+        args: parseLines(draft.argsText),
+        cwd: draft.cwd,
+        enabled: draft.enabled,
+        env: secretMutations(draft.secrets),
+      },
+    });
+    if (outcome) {
+      closeDialog();
+    }
+  };
+
+  const deleteProvider = async () => {
+    if (!editingProviderId) {
+      return;
+    }
+    const outcome = await submitAction("mcp_provider.delete", {
+      provider_id: editingProviderId,
+    });
+    if (outcome) {
+      closeDialog();
+    }
+  };
+
+  let content: ReactElement;
+  if (authError?.status === 403) {
+    content = (
+      <PageState
+        title="当前账号没有权限管理外部服务"
+        description="你仍可使用已有能力。如需调整连接，请联系管理员。"
+      />
+    );
+  } else if (loading && !catalog) {
+    content = (
+      <PageState
+        title="正在加载外部服务"
+        description="正在确认已经连接的服务和可用工具。"
+      />
+    );
+  } else if (error && !catalog) {
+    content = (
+      <PageState
+        title="服务列表加载失败"
+        description="刚才没有取得最新列表，你可以重新尝试。"
+        action={
+          <button
+            type="button"
+            className="f149-mcp-button f149-mcp-button-primary"
+            onClick={() => void refreshSnapshot()}
+          >
+            重试
+          </button>
+        }
+      />
+    );
+  } else if (items.length === 0) {
+    content = (
+      <PageState
+        title="还没有连接外部服务"
+        description="安装一个服务，或使用高级配置手动添加。"
+      />
+    );
+  } else {
+    content = (
+      <div className="f149-mcp-grid">
+        {items.map((item) => (
+          <ProviderCard key={item.provider_id} item={item} onEdit={openEdit} />
+        ))}
       </div>
+    );
+  }
 
-      {/* Provider 列表 */}
-      {items.length === 0 ? (
-        <p className="wb-mcp-empty">当前未安装 MCP Provider</p>
-      ) : (
-        <div className="wb-note-stack">
-          {items.map((item) => (
-            <div key={item.provider_id} className="wb-list-row is-static wb-mcp-row">
-              <div>
-                <strong>{item.label}</strong>
-                <p>{item.command} {item.args.length ? item.args.join(" ") : ""}</p>
-                <div className="wb-chip-row">
-                  <span className={`wb-status-pill is-${item.status}`}>
-                    {statusLabel(item.status)}
-                  </span>
-                  {item.install_source && item.install_source !== "manual" ? (
-                    <span className="wb-chip">{item.install_source}</span>
-                  ) : (
-                    <span className="wb-chip">手动配置</span>
-                  )}
-                  {item.install_version ? (
-                    <span className="wb-chip">v{item.install_version}</span>
-                  ) : null}
-                  {item.tool_count > 0 ? (
-                    <span className="wb-chip">{item.tool_count} 个工具</span>
-                  ) : null}
-                </div>
-              </div>
-              <button
-                type="button"
-                className="wb-button wb-button-secondary"
-                onClick={() => openEdit(item)}
-              >
-                编辑
-              </button>
-            </div>
-          ))}
+  return (
+    <main className="f149-mcp-page">
+      <header className="f149-mcp-hero">
+        <div>
+          <p className="f149-mcp-kicker">能力连接</p>
+          <h1>外部服务</h1>
+          <p>把常用服务安全地交给 Agent 使用，并随时查看连接健康状态。</p>
         </div>
-      )}
-
-      {/* modal */}
-      {modalOpen ? (
-        <McpProviderModal
-          mode={modalMode}
+        <dl>
+          <div>
+            <dt>已连接</dt>
+            <dd>{items.length}</dd>
+          </div>
+          <div>
+            <dt>已启用</dt>
+            <dd>{Number(catalog?.summary?.enabled_count ?? 0)}</dd>
+          </div>
+          <div>
+            <dt>运行正常</dt>
+            <dd>{Number(catalog?.summary?.healthy_count ?? 0)}</dd>
+          </div>
+        </dl>
+      </header>
+      <div className="f149-mcp-actions">
+        <button
+          ref={installTriggerRef}
+          type="button"
+          className="f149-mcp-button f149-mcp-button-primary"
+          onClick={() => setInstallOpen(true)}
+        >
+          安装服务
+        </button>
+        <button
+          ref={manualTriggerRef}
+          type="button"
+          className="f149-mcp-button f149-mcp-button-secondary"
+          onClick={openCreate}
+        >
+          手动添加
+        </button>
+      </div>
+      {content}
+      {dialogMode ? (
+        <ProviderDialog
+          mode={dialogMode}
           draft={draft}
           busy={busy}
-          error={editingItem?.error ?? null}
-          warnings={editingItem?.warnings ?? []}
-          onDraftChange={updateDraft}
-          onSave={() => void handleSave()}
-          onDelete={modalMode === "edit" ? () => void handleDelete() : null}
-          onClose={() => setModalOpen(false)}
+          onChange={setDraft}
+          onSave={() => void saveProvider()}
+          onDelete={dialogMode === "edit" ? () => void deleteProvider() : null}
+          onClose={closeDialog}
         />
       ) : null}
-
-      {/* 安装向导 */}
       <McpInstallWizard
-        open={installWizardOpen}
-        onClose={() => setInstallWizardOpen(false)}
-        onComplete={() => setInstallWizardOpen(false)}
+        open={installOpen}
+        onClose={() => setInstallOpen(false)}
+        onComplete={() => setInstallOpen(false)}
         submitAction={submitAction}
+        returnFocusRef={installTriggerRef as RefObject<HTMLButtonElement>}
       />
-    </div>
+    </main>
   );
 }

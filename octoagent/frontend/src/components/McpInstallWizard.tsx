@@ -1,473 +1,533 @@
-import { useEffect, useRef, useState } from "react";
+import {
+  type RefObject,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { createPortal } from "react-dom";
+import {
+  executeF149Action,
+  type F149ActionResultById,
+} from "../platform/actions/f149Actions";
+import type { WorkbenchDataState } from "../platform/queries";
 
-/* ── 向导步骤定义 ────────────────────────────────────────── */
-
-type WizardStep =
-  | "source_select"
-  | "package_input"
-  | "confirm"
-  | "installing"
-  | "result";
-
+type WizardStep = "source" | "package" | "confirm" | "installing" | "result";
 type InstallSource = "npm" | "pip";
+type InstallStatusResult = F149ActionResultById["mcp_provider.install_status"];
 
-interface InstallResult {
-  server_id: string;
-  version: string;
-  install_path: string;
+interface InstallationSummary {
   command: string;
-  tools_count: number;
+  serverId: string;
   tools: Array<{ name: string; description: string }>;
+  toolsCount: number;
+  version: string;
 }
 
 interface McpInstallWizardProps {
   open: boolean;
   onClose: () => void;
   onComplete: () => void;
-  submitAction: (actionId: string, params: Record<string, unknown>) => Promise<unknown>;
+  submitAction: WorkbenchDataState["submitAction"];
+  returnFocusRef?: RefObject<HTMLButtonElement | null>;
 }
 
-/* ── 主组件 ──────────────────────────────────────────────── */
+const MAX_STATUS_CHECKS = 150;
+const POLL_DELAY_MS = 2_000;
+
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function resultView(
+  result: InstallStatusResult["result"],
+): InstallationSummary | null {
+  const object = objectValue(result);
+  if (!object) {
+    return null;
+  }
+  const tools = Array.isArray(object.tools)
+    ? object.tools.flatMap((raw) => {
+        const tool = objectValue(raw);
+        const name = stringValue(tool?.name);
+        return name
+          ? [{ name, description: stringValue(tool?.description) }]
+          : [];
+      })
+    : [];
+  const count = Number(object.tools_count);
+  return {
+    command: stringValue(object.command),
+    serverId: stringValue(object.server_id),
+    tools,
+    toolsCount: Number.isFinite(count) ? count : tools.length,
+    version: stringValue(object.version),
+  };
+}
+
+function restoreFocus(target: HTMLElement | null): void {
+  if (target) {
+    window.requestAnimationFrame(() => target.focus());
+  }
+}
 
 export default function McpInstallWizard({
   open,
   onClose,
   onComplete,
   submitAction,
+  returnFocusRef,
 }: McpInstallWizardProps) {
-  const [step, setStep] = useState<WizardStep>("source_select");
+  const [step, setStep] = useState<WizardStep>("source");
   const [source, setSource] = useState<InstallSource>("npm");
   const [packageName, setPackageName] = useState("");
-  const [envText, setEnvText] = useState("");
-  const [, setTaskId] = useState<string | null>(null);
+  const [secretName, setSecretName] = useState("API_KEY");
+  const [secretValue, setSecretValue] = useState("");
+  const [taskId, setTaskId] = useState<string | null>(null);
   const [progressMessage, setProgressMessage] = useState("");
-  const [error, setError] = useState("");
-  const [installResult, setInstallResult] = useState<InstallResult | null>(null);
+  const [problem, setProblem] = useState<
+    "failed" | "disconnected" | "timeout" | null
+  >(null);
+  const [result, setResult] = useState<InstallationSummary | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const pollCountRef = useRef(0);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const checkCountRef = useRef(0);
+  const mountedRef = useRef(false);
 
-  // 重置状态
+  const cancelTimer = useCallback(() => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, []);
+
+  const reset = useCallback(() => {
+    cancelTimer();
+    setStep("source");
+    setSource("npm");
+    setPackageName("");
+    setSecretName("API_KEY");
+    setSecretValue("");
+    setTaskId(null);
+    setProgressMessage("");
+    setProblem(null);
+    setResult(null);
+    setAdvancedOpen(false);
+    setBusy(false);
+    checkCountRef.current = 0;
+  }, [cancelTimer]);
+
+  const close = useCallback(() => {
+    reset();
+    onClose();
+    restoreFocus(returnFocusRef?.current ?? null);
+  }, [onClose, reset, returnFocusRef]);
+
   useEffect(() => {
+    mountedRef.current = open;
     if (open) {
-      setStep("source_select");
-      setSource("npm");
-      setPackageName("");
-      setEnvText("");
-      setTaskId(null);
-      setProgressMessage("");
-      setError("");
-      setInstallResult(null);
-      setBusy(false);
-      pollCountRef.current = 0;
+      reset();
     }
     return () => {
-      if (pollRef.current) clearInterval(pollRef.current);
+      mountedRef.current = false;
+      cancelTimer();
     };
-  }, [open]);
+  }, [cancelTimer, open, reset]);
 
-  // 解析环境变量
-  function parseEnv(): Record<string, string> {
-    const result: Record<string, string> = {};
-    for (const line of envText.split("\n")) {
-      const trimmed = line.trim();
-      if (!trimmed || !trimmed.includes("=")) continue;
-      const [key, ...rest] = trimmed.split("=");
-      if (key?.trim()) {
-        result[key.trim()] = rest.join("=").trim();
-      }
+  useEffect(() => {
+    if (!open) {
+      return undefined;
     }
-    return result;
-  }
-
-  // 步骤 3: 确认安装 -> 发起安装请求
-  async function handleConfirmInstall() {
-    setBusy(true);
-    setError("");
-    try {
-      const resp = (await submitAction("mcp_provider.install", {
-        install_source: source,
-        package_name: packageName.trim(),
-        env: parseEnv(),
-      })) as { data?: { task_id?: string } };
-
-      const id = resp?.data?.task_id;
-      if (!id) {
-        setError("未获取到安装任务 ID");
-        setBusy(false);
-        return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !busy) {
+        close();
       }
-      setTaskId(id);
-      setStep("installing");
-      setProgressMessage("安装任务已启动...");
-      startPolling(id);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
-      setError(msg);
-    }
-    setBusy(false);
-  }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [busy, close, open]);
 
-  // 轮询安装状态
-  function startPolling(id: string) {
-    pollCountRef.current = 0;
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      pollCountRef.current += 1;
-      // 超时保护：300 秒 / 2 秒 = 150 次
-      if (pollCountRef.current > 150) {
-        if (pollRef.current) clearInterval(pollRef.current);
-        setError("安装超时（超过 5 分钟）");
+  const scheduleCheck = useCallback(
+    (id: string, check: (task: string) => Promise<void>) => {
+      cancelTimer();
+      timerRef.current = setTimeout(() => void check(id), POLL_DELAY_MS);
+    },
+    [cancelTimer],
+  );
+
+  const checkStatus = useCallback(
+    async function check(task: string): Promise<void> {
+      cancelTimer();
+      checkCountRef.current += 1;
+      if (checkCountRef.current > MAX_STATUS_CHECKS) {
+        setProblem("timeout");
         setStep("result");
         return;
       }
-      try {
-        const resp = (await submitAction("mcp_provider.install_status", {
-          task_id: id,
-        })) as {
-          data?: {
-            status?: string;
-            progress_message?: string;
-            error?: string;
-            result?: InstallResult | null;
-          };
-        };
-        const data = resp?.data;
-        if (!data) return;
-        if (data.progress_message) setProgressMessage(data.progress_message);
-
-        if (data.status === "completed") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          setInstallResult(data.result ?? null);
-          setStep("result");
-        } else if (data.status === "failed") {
-          if (pollRef.current) clearInterval(pollRef.current);
-          setError(data.error || "安装失败");
-          setStep("result");
-        }
-      } catch {
-        // 轮询失败不中断
+      const outcome = await executeF149Action(
+        {
+          actionId: "mcp_provider.install_status",
+          params: { task_id: task },
+        },
+        submitAction,
+      );
+      if (!mountedRef.current) {
+        return;
       }
-    }, 2000);
+      if (!outcome.ok) {
+        setProblem("disconnected");
+        setStep("result");
+        return;
+      }
+      const data = outcome.data;
+      if (data.progress_message) {
+        setProgressMessage(data.progress_message);
+      }
+      if (data.status === "completed") {
+        setResult(resultView(data.result));
+        setProblem(null);
+        setStep("result");
+        return;
+      }
+      if (data.status === "failed") {
+        setProblem("failed");
+        setStep("result");
+        return;
+      }
+      scheduleCheck(task, check);
+    },
+    [cancelTimer, scheduleCheck, submitAction],
+  );
+
+  const startInstall = async () => {
+    setBusy(true);
+    setProblem(null);
+    const env =
+      secretName.trim() && secretValue
+        ? { [secretName.trim()]: secretValue }
+        : {};
+    const outcome = await executeF149Action(
+      {
+        actionId: "mcp_provider.install",
+        params: {
+          install_source: source,
+          package_name: packageName.trim(),
+          env,
+        },
+      },
+      submitAction,
+    );
+    if (!mountedRef.current) {
+      return;
+    }
+    setBusy(false);
+    if (!outcome.ok) {
+      setProblem("failed");
+      return;
+    }
+    setSecretValue("");
+    setTaskId(outcome.data.task_id);
+    setProgressMessage("安装已经开始");
+    setStep("installing");
+    scheduleCheck(outcome.data.task_id, checkStatus);
+  };
+
+  const retryStatus = () => {
+    if (!taskId) {
+      setProblem(null);
+      setStep("package");
+      return;
+    }
+    setProblem(null);
+    setStep("installing");
+    void checkStatus(taskId);
+  };
+
+  if (!open || !document.body) {
+    return null;
   }
 
-  // 重试
-  function handleRetry() {
-    setStep("package_input");
-    setError("");
-    setTaskId(null);
-    setInstallResult(null);
-  }
-
-  // 完成
-  function handleFinish() {
-    onComplete();
-    onClose();
-  }
-
-  if (!open) return null;
-
-  return document.body
-    ? createPortal(
-        <div
-          className="wb-modal-overlay"
-          onClick={(e) => {
-            // 仅响应真实指针点击（detail > 0），排除键盘或输入法触发的合成 click
-            if (e.target === e.currentTarget && step !== "installing" && e.detail > 0) onClose();
-          }}
-        >
-          <div
-            className="wb-modal-body wb-mcp-modal"
-            style={{ maxWidth: 520 }}
-            onKeyDown={(e) => e.stopPropagation()}
+  const stepNumber =
+    step === "source" ? 1 : step === "package" ? 2 : step === "confirm" ? 3 : 4;
+  return createPortal(
+    <div
+      className="f149-mcp-dialog-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget && !busy) {
+          close();
+        }
+      }}
+    >
+      <section
+        className="f149-mcp-dialog f149-mcp-install-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="f149-mcp-install-title"
+      >
+        <header>
+          <div>
+            <p className="f149-mcp-kicker">安全安装</p>
+            <h2 id="f149-mcp-install-title">安装外部服务</h2>
+          </div>
+          <button
+            type="button"
+            className="f149-mcp-button f149-mcp-button-quiet"
+            onClick={close}
+            disabled={busy}
           >
-            <div className="wb-panel-head">
-              <h3>安装 MCP Server</h3>
-              {step !== "installing" && (
+            关闭
+          </button>
+        </header>
+        <ol className="f149-mcp-steps" aria-label="安装进度">
+          {["选择来源", "填写信息", "检查改动", "安装"].map((label, index) => (
+            <li
+              key={label}
+              className={stepNumber === index + 1 ? "is-current" : ""}
+            >
+              <span>{index + 1}</span>
+              {label}
+            </li>
+          ))}
+        </ol>
+
+        {step === "source" ? (
+          <div className="f149-mcp-step">
+            <h3>这个服务从哪里安装？</h3>
+            <div className="f149-mcp-source-grid">
+              {(["npm", "pip"] as const).map((option) => (
                 <button
+                  key={option}
                   type="button"
-                  className="wb-button wb-button-secondary"
-                  onClick={onClose}
+                  className={source === option ? "is-selected" : ""}
+                  onClick={() => setSource(option)}
                 >
-                  关闭
-                </button>
-              )}
-            </div>
-
-            {/* 步骤指示器 */}
-            <div className="wb-chip-row" style={{ marginBottom: 16 }}>
-              <span className={`wb-chip ${step === "source_select" ? "is-active" : ""}`}>
-                1. 选择来源
-              </span>
-              <span className={`wb-chip ${step === "package_input" ? "is-active" : ""}`}>
-                2. 输入包名
-              </span>
-              <span className={`wb-chip ${step === "confirm" ? "is-active" : ""}`}>
-                3. 确认
-              </span>
-              <span
-                className={`wb-chip ${step === "installing" || step === "result" ? "is-active" : ""}`}
-              >
-                4. 安装
-              </span>
-            </div>
-
-            {/* Step 1: 来源选择 */}
-            {step === "source_select" && (
-              <div>
-                <p style={{ marginBottom: 12 }}>选择 MCP Server 的安装来源：</p>
-                <div style={{ display: "flex", gap: 12 }}>
-                  <button
-                    type="button"
-                    className={`wb-button ${source === "npm" ? "wb-button-primary" : "wb-button-secondary"}`}
-                    onClick={() => setSource("npm")}
-                    style={{ flex: 1, padding: "12px 16px" }}
-                  >
-                    <strong>npm</strong>
-                    <br />
-                    <small>适用于大多数 MCP server</small>
-                  </button>
-                  <button
-                    type="button"
-                    className={`wb-button ${source === "pip" ? "wb-button-primary" : "wb-button-secondary"}`}
-                    onClick={() => setSource("pip")}
-                    style={{ flex: 1, padding: "12px 16px" }}
-                  >
-                    <strong>pip</strong>
-                    <br />
-                    <small>适用于 Python 生态</small>
-                  </button>
-                </div>
-                <div className="wb-inline-actions" style={{ marginTop: 16 }}>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-primary"
-                    onClick={() => setStep("package_input")}
-                  >
-                    下一步
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 2: 包名输入 */}
-            {step === "package_input" && (
-              <div>
-                <label className="wb-field">
+                  <strong>{option === "npm" ? "npm" : "Python"}</strong>
                   <span>
-                    {source === "npm" ? "npm 包名" : "pip 包名"}
+                    {option === "npm"
+                      ? "适合 Node.js 服务"
+                      : "适合 Python 服务"}
                   </span>
-                  <input
-                    type="text"
-                    value={packageName}
-                    onChange={(e) => setPackageName(e.target.value)}
-                    placeholder={
-                      source === "npm"
-                        ? "例如 @anthropic/mcp-server-files"
-                        : "例如 mcp-server-fetch"
-                    }
-                    autoFocus
-                  />
-                  <small style={{ color: "var(--text-secondary)" }}>
-                    {source === "npm"
-                      ? "支持 @scope/name 格式"
-                      : "支持 PyPI 包名格式"}
-                  </small>
-                </label>
-                <label className="wb-field" style={{ marginTop: 12 }}>
-                  <span>环境变量（可选）</span>
-                  <textarea
-                    value={envText}
-                    onChange={(e) => setEnvText(e.target.value)}
-                    placeholder={"每行一个 KEY=VALUE\n例如 API_KEY=sk-xxx"}
-                    rows={3}
-                  />
-                </label>
-                {error && (
-                  <div className="wb-inline-banner is-error" style={{ marginTop: 8 }}>
-                    <span>{error}</span>
-                  </div>
-                )}
-                <div className="wb-inline-actions" style={{ marginTop: 16 }}>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-secondary"
-                    onClick={() => {
-                      setStep("source_select");
-                      setError("");
-                    }}
-                  >
-                    上一步
-                  </button>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-primary"
-                    disabled={!packageName.trim()}
-                    onClick={() => {
-                      setError("");
-                      setStep("confirm");
-                    }}
-                  >
-                    下一步
-                  </button>
-                </div>
-              </div>
-            )}
+                </button>
+              ))}
+            </div>
+            <footer>
+              <span />
+              <button
+                type="button"
+                className="f149-mcp-button f149-mcp-button-primary"
+                onClick={() => setStep("package")}
+              >
+                下一步
+              </button>
+            </footer>
+          </div>
+        ) : null}
 
-            {/* Step 3: 确认安装 */}
-            {step === "confirm" && (
+        {step === "package" ? (
+          <div className="f149-mcp-step">
+            <h3>填写安装信息</h3>
+            <label>
+              <span>{source === "npm" ? "npm 包名" : "Python 包名"}</span>
+              <input
+                autoFocus
+                value={packageName}
+                onChange={(event) => setPackageName(event.target.value)}
+              />
+            </label>
+            <div className="f149-mcp-secret-pair">
+              <label>
+                <span>密钥名称（可选）</span>
+                <input
+                  value={secretName}
+                  onChange={(event) => setSecretName(event.target.value)}
+                />
+              </label>
+              <label>
+                <span>访问密钥（可选）</span>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={secretValue}
+                  onChange={(event) => setSecretValue(event.target.value)}
+                />
+              </label>
+            </div>
+            <p className="f149-mcp-privacy-note">
+              访问密钥只用于本次保存，之后不会再次显示。
+            </p>
+            <footer>
+              <button
+                type="button"
+                className="f149-mcp-button f149-mcp-button-quiet"
+                onClick={() => setStep("source")}
+              >
+                上一步
+              </button>
+              <button
+                type="button"
+                className="f149-mcp-button f149-mcp-button-primary"
+                disabled={!packageName.trim()}
+                onClick={() => setStep("confirm")}
+              >
+                下一步
+              </button>
+            </footer>
+          </div>
+        ) : null}
+
+        {step === "confirm" ? (
+          <div className="f149-mcp-step">
+            <h3>检查改动</h3>
+            <dl className="f149-mcp-review">
               <div>
-                <p style={{ marginBottom: 12 }}>确认安装以下 MCP Server：</p>
-                <div className="wb-note-stack">
-                  <div className="wb-note">
-                    <strong>安装来源</strong>
-                    <span>{source === "npm" ? "NPM" : "PyPI"}</span>
-                  </div>
-                  <div className="wb-note">
-                    <strong>包名</strong>
-                    <span>{packageName.trim()}</span>
-                  </div>
-                  {envText.trim() && (
-                    <div className="wb-note">
-                      <strong>环境变量</strong>
-                      <span>{Object.keys(parseEnv()).length} 个</span>
-                    </div>
-                  )}
-                </div>
-                {error && (
-                  <div className="wb-inline-banner is-error" style={{ marginTop: 8 }}>
-                    <span>{error}</span>
-                  </div>
-                )}
-                <div className="wb-inline-actions" style={{ marginTop: 16 }}>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-secondary"
-                    onClick={() => {
-                      setStep("package_input");
-                      setError("");
-                    }}
-                  >
-                    上一步
-                  </button>
-                  <button
-                    type="button"
-                    className="wb-button wb-button-primary"
-                    disabled={busy}
-                    onClick={() => void handleConfirmInstall()}
-                  >
-                    {busy ? "正在启动..." : "确认安装"}
-                  </button>
-                </div>
+                <dt>安装来源</dt>
+                <dd>{source === "npm" ? "npm" : "Python"}</dd>
               </div>
-            )}
-
-            {/* Step 4: 安装进行中 */}
-            {step === "installing" && (
-              <div style={{ textAlign: "center", padding: "24px 0" }}>
-                <div className="wb-spinner" style={{ marginBottom: 16 }} />
-                <p style={{ fontSize: 16, fontWeight: 500 }}>正在安装...</p>
-                <p style={{ color: "var(--text-secondary)", marginTop: 8 }}>
-                  {progressMessage || "请稍候..."}
-                </p>
-                <p style={{ color: "var(--text-tertiary)", fontSize: 12, marginTop: 16 }}>
-                  安装过程可能需要 1-3 分钟，请勿关闭此窗口
-                </p>
-              </div>
-            )}
-
-            {/* Step 5: 安装结果 */}
-            {step === "result" && (
               <div>
-                {installResult ? (
-                  <>
+                <dt>服务包</dt>
+                <dd>{packageName.trim()}</dd>
+              </div>
+              <div>
+                <dt>访问密钥</dt>
+                <dd>{secretValue ? "将安全保存" : "未填写"}</dd>
+              </div>
+            </dl>
+            {problem === "failed" ? (
+              <p className="f149-mcp-error">安装未能开始，请检查后重试。</p>
+            ) : null}
+            <footer>
+              <button
+                type="button"
+                className="f149-mcp-button f149-mcp-button-quiet"
+                onClick={() => setStep("package")}
+              >
+                上一步
+              </button>
+              <button
+                type="button"
+                className="f149-mcp-button f149-mcp-button-primary"
+                disabled={busy}
+                onClick={() => void startInstall()}
+              >
+                {busy ? "正在启动" : "确认安装"}
+              </button>
+            </footer>
+          </div>
+        ) : null}
+
+        {step === "installing" ? (
+          <div className="f149-mcp-progress" aria-live="polite">
+            <span className="f149-mcp-spinner" aria-hidden="true" />
+            <h3>正在安装</h3>
+            <p>{progressMessage || "正在准备服务，请稍候。"}</p>
+          </div>
+        ) : null}
+
+        {step === "result" ? (
+          <div className="f149-mcp-step" aria-live="polite">
+            {result ? (
+              <>
+                <div className="f149-mcp-result is-success">
+                  <span aria-hidden="true">✓</span>
+                  <div>
+                    <h3>安装成功</h3>
+                    <p>发现 {result.toolsCount} 个可用工具</p>
+                  </div>
+                </div>
+                <section className="f149-mcp-advanced">
+                  <button
+                    type="button"
+                    className="f149-mcp-advanced-trigger"
+                    aria-expanded={advancedOpen}
+                    onClick={() => setAdvancedOpen((current) => !current)}
+                  >
+                    高级 · 安装详情
+                    <span aria-hidden="true">{advancedOpen ? "−" : "+"}</span>
+                  </button>
+                  {advancedOpen ? (
                     <div
-                      className="wb-inline-banner is-success"
-                      style={{ marginBottom: 12 }}
+                      className="f149-mcp-advanced-body"
+                      role="region"
+                      aria-label="安装详情"
                     >
-                      <strong>安装成功</strong>
-                    </div>
-                    <div className="wb-note-stack">
-                      <div className="wb-note">
-                        <strong>Server ID</strong>
-                        <span>{installResult.server_id}</span>
-                      </div>
-                      {installResult.version && (
-                        <div className="wb-note">
-                          <strong>版本</strong>
-                          <span>{installResult.version}</span>
-                        </div>
-                      )}
-                      <div className="wb-note">
-                        <strong>发现工具</strong>
-                        <span>{installResult.tools_count} 个</span>
-                      </div>
-                    </div>
-                    {installResult.tools.length > 0 && (
-                      <div style={{ marginTop: 12 }}>
-                        <p style={{ fontWeight: 500, marginBottom: 4 }}>工具列表：</p>
-                        <ul style={{ fontSize: 13, margin: 0, paddingLeft: 20 }}>
-                          {installResult.tools.slice(0, 10).map((t) => (
-                            <li key={t.name}>
-                              <code>{t.name}</code>
-                              {t.description && (
-                                <span style={{ color: "var(--text-secondary)", marginLeft: 4 }}>
-                                  {t.description.slice(0, 60)}
-                                </span>
-                              )}
-                            </li>
+                      {result.serverId ? (
+                        <p>
+                          服务标识：<code>{result.serverId}</code>
+                        </p>
+                      ) : null}
+                      {result.version ? <p>版本：{result.version}</p> : null}
+                      {result.tools.length > 0 ? (
+                        <ul>
+                          {result.tools.map((tool) => (
+                            <li key={tool.name}>{tool.name}</li>
                           ))}
-                          {installResult.tools.length > 10 && (
-                            <li style={{ color: "var(--text-secondary)" }}>
-                              ... 及其他 {installResult.tools.length - 10} 个工具
-                            </li>
-                          )}
                         </ul>
-                      </div>
-                    )}
-                    <div className="wb-inline-actions" style={{ marginTop: 16 }}>
-                      <button
-                        type="button"
-                        className="wb-button wb-button-primary"
-                        onClick={handleFinish}
-                      >
-                        完成
-                      </button>
+                      ) : null}
                     </div>
-                  </>
-                ) : (
-                  <>
-                    <div
-                      className="wb-inline-banner is-error"
-                      style={{ marginBottom: 12 }}
-                    >
-                      <strong>安装失败</strong>
-                      <span>{error || "未知错误"}</span>
-                    </div>
-                    <div className="wb-inline-actions" style={{ marginTop: 16 }}>
-                      <button
-                        type="button"
-                        className="wb-button wb-button-secondary"
-                        onClick={handleRetry}
-                      >
-                        重试
-                      </button>
-                      <button
-                        type="button"
-                        className="wb-button wb-button-tertiary"
-                        onClick={onClose}
-                      >
-                        关闭
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
+                  ) : null}
+                </section>
+                <footer>
+                  <span />
+                  <button
+                    type="button"
+                    className="f149-mcp-button f149-mcp-button-primary"
+                    onClick={() => {
+                      onComplete();
+                      close();
+                    }}
+                  >
+                    完成
+                  </button>
+                </footer>
+              </>
+            ) : (
+              <>
+                <div className="f149-mcp-result is-error">
+                  <span aria-hidden="true">!</span>
+                  <div>
+                    <h3>
+                      {problem === "disconnected"
+                        ? "状态检查暂时中断"
+                        : problem === "timeout"
+                          ? "状态确认超时"
+                          : "安装未完成"}
+                    </h3>
+                    <p>
+                      {problem === "disconnected"
+                        ? "上次已知的安装状态已保留。"
+                        : "你可以重新检查，不会重复创建安装任务。"}
+                    </p>
+                  </div>
+                </div>
+                <footer>
+                  <button
+                    type="button"
+                    className="f149-mcp-button f149-mcp-button-quiet"
+                    onClick={close}
+                  >
+                    关闭
+                  </button>
+                  <button
+                    type="button"
+                    className="f149-mcp-button f149-mcp-button-primary"
+                    onClick={retryStatus}
+                  >
+                    重新检查
+                  </button>
+                </footer>
+              </>
             )}
           </div>
-        </div>,
-        document.body,
-      )
-    : null;
+        ) : null}
+      </section>
+    </div>,
+    document.body,
+  );
 }

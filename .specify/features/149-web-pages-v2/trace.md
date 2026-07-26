@@ -296,5 +296,18 @@
   repository runtime architecture因F150仍保护SkillCenter transport-only
   authority而如实阻断，本task未修改、放宽或绕过跨Feature authority。390仍只作
   Web响应式检查，手机产品只走原生iOS。
+- T044完成MCP页面与安装向导重构。页面继续复用Workbench snapshot、
+  generated F149 action type与唯一submitAction seam；密钥编辑只提交
+  keep/replace/remove mutation，既有值不回填DOM，新安装密钥在启动后立即清空。
+  轮询使用可取消timer，断线与超时保留既有task并允许重新检查，不向产品文案承诺
+  固定频率。普通区隐藏command、env、provider id与命令型description，技术摘要
+  只在Advanced显示。Claude Design视觉复核保留宽松hero、卡片节奏、留白和
+  390底部双操作条；真实Chromium Desktop/390无横向溢出，移动滚动到底时操作条
+  不遮挡Advanced内容，编辑/安装关闭后焦点归还。最终精确13/13、全前端580/580、
+  build、OpenAPI、F149 boundary/style/complexity与changed-lines coverage
+  90.79%通过。首次exact RED的6个页面合同与1个generated-type合同稳定见红，
+  但4个wizard行为项被测试fake-timer timeout污染，因此证据标为partial，不伪称
+  完整test-first。repository runtime architecture因F151缺少
+  `McpInstallWizard.tsx` evidence slice而阻断；未修改或绕过跨Feature authority。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

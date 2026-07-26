@@ -1,0 +1,15 @@
+task_id: T044
+phase: GREEN
+behavior: MCP页面、write-only密钥与安装状态恢复
+command: cd octoagent/frontend && npx vitest run src/pages/McpProviderCenter.test.tsx src/components/McpInstallWizard.test.tsx
+executed_at_utc: 2026-07-26T07:53:48Z
+head_sha: db18cc21945c2eace257116031b48f4b6a9c3386
+exit_code: 0
+oracle_expected: 六项页面合同与五项安装向导合同全部通过
+oracle_observed: exact 11/11通过；状态、权限、write-only mutation、断线/超时、取消轮询、焦点与Advanced边界闭合
+raw_output_file: /tmp/f149-t044-green.log
+raw_output_sha256: 9e6aea35ec7a496f4788e18b1aba8f5ea9ba88faedf26d356243a6c550f458ce
+raw_output_size: 389
+secret_scan: pass
+network: false
+rerun: true

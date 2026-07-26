@@ -1,0 +1,16 @@
+task_id: T044
+phase: RED
+behavior: MCP v2 页面状态、write-only密钥、安装断线/超时恢复与技术信息边界
+command: cd octoagent/frontend && npx vitest run src/pages/McpProviderCenter.test.tsx src/components/McpInstallWizard.test.tsx
+executed_at_utc: 2026-07-26T07:39:00Z
+head_sha: db18cc21945c2eace257116031b48f4b6a9c3386
+exit_code: 1
+oracle_expected: 旧MCP页面无法满足六项页面合同与五项安装向导合同
+oracle_observed: 11项均失败；六项页面合同与generated-type合同为目标行为失败，四项wizard行为被fake-timer harness timeout污染
+evidence_quality: PARTIAL_RED
+valid_contract_failures: 7
+harness_timeouts: 4
+raw_output_file: unavailable
+capture_note: 初次exact RED未使用tee保存原始输出；后续没有倒退production或补造RED。本证据不得提升为完整test-first或rerun=false声明
+secret_scan: pass
+network: false

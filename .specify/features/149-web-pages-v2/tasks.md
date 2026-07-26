@@ -583,6 +583,19 @@
 
 ### T044 — MCP v2 与 write-only env/secret
 
+- **状态**：`[x]`；页面与安装向导实现完成，证据见 `evidence/tdd/T044/`。
+  loading/empty/recoverable/origin-403、write-only密钥保留/替换/清空、
+  可取消状态轮询、断线/超时恢复、Advanced技术信息与焦点归还均已闭合。
+  普通卡片不再把`command`或命令型description当用户说明；保存/删除失败时保留
+  当前对话框供重试。逐页对照Claude Design最初版后保留宽松hero、卡片节奏、
+  留白与底部抽屉；真实Chromium 1440/390 Web窄窗口无横向溢出，滚动容器内
+  sticky双操作条不遮挡Advanced内容。最终精确13/13、全前端580/580、
+  production build、OpenAPI、F149 boundary/style/complexity及changed-lines
+  coverage 90.79%通过。首次exact RED中7项为有效合同失败，另4项被测试
+  fake-timer harness timeout污染；证据明确标为partial，不伪称完整test-first。
+  repository runtime architecture因F151 evidence index缺少
+  `McpInstallWizard.tsx` slice而如实阻断，本task未修改、放宽或绕过F151。
+  390只作Web响应式检查，手机产品仍只走原生iOS。
 - **层/FR**：frontend L4 component/projection/security；FR-006/007/013/022。
 - **文件**：新 `pages/McpProviderCenter.test.tsx`、`components/McpInstallWizard.test.tsx`、MCP pure state/command/CSS。
 - **依赖**：T013/T015/T024/T025。
@@ -790,8 +803,10 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T025、T030–T034、T040–T043 中已执行的任务均有真实
-  证据；下一项是 T044 MCP v2。每个后续页面仍必须先逐页对照 Claude
+- 当前风险：T000–T015、T020–T025、T030–T034、T040–T044 中已执行的任务均有
+  可审计证据；T044首次exact RED含4项harness timeout，已如实标记partial，
+  不得在最终审查中提升为完整test-first证据。下一项是T045。每个后续页面仍必须
+  先逐页对照 Claude
   Design 最初版；现有 Web 只能作为实现现状，不得成为视觉基线。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

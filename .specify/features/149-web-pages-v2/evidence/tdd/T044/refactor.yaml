@@ -1,0 +1,43 @@
+task_id: T044
+phase: REFACTOR
+behavior: MCP Claude Design视觉迁移、write-only边界与Desktop/390 Web窄窗口验收
+command: cd octoagent/frontend && npx vitest run src/pages/McpProviderCenter.test.tsx src/components/McpInstallWizard.test.tsx scripts/check-f149-style-ratchet.test.ts
+executed_at_utc: 2026-07-26T07:55:55Z
+head_sha: db18cc21945c2eace257116031b48f4b6a9c3386
+exit_code: 0
+oracle_expected: exact合同不漂移；普通区无command/env/secret；页面保持Claude Design初版层级、留白、卡片节奏与390可见操作
+oracle_observed: exact 13/13、全前端580/580、build、OpenAPI、boundary/style/complexity及changed-lines coverage 90.79%通过；真实Chromium 1440/390视觉、溢出、滚动遮挡与焦点复核通过
+raw_output_file: /tmp/f149-t044-refactor.log
+raw_output_sha256: de97cb1970e323ede945b2688d792ef4ee2899b782973637e647f5b5cc2426bc
+raw_output_size: 449
+full_frontend_log_sha256: ba0c1f0a6a51a030f0fd2c8b20022edc26dde7635491270d6c14e54e0c9b9ada
+build_log_sha256: 74884db7ee3652327c192d6ac2892fba4cbb7bf0c296773d8c6e3fd92a05a00f
+openapi_log_sha256: a2a1d337c333d532687e8a6ee7bd008d774943a7977a7ce0addca6eb3a780a6e
+boundary_log_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_log_sha256: a5a686224bd489754ae68c3fd9b80be72a0cea85b7dea5113e4509b8381c3e04
+complexity_log_sha256: c5f8e856d7b16ed579f8650e841875df0ba352ba033e411d9eb60cfa7dbf471a
+coverage_log_sha256: e847b8224976ab12a7b96c5ba56b192f75d1ffa138e46e428576135e05781de0
+changed_lines_coverage_log_sha256: b00c68242cdd1cdca4cbe04f368a0ff0dd80a5159784c74e88cfbf5cc0716ea9
+runtime_architecture_log_sha256: d7d83fbcc694c0b157f4a91d63df90c7fcdcf19fb1293cf4b9bb1f8ea3c6b276
+runtime_architecture_gate: blocked
+runtime_architecture_observed: F151 evidence index缺少octoagent/frontend/src/components/McpInstallWizard.tsx slice；本task未修改、放宽或绕过F151 checker/index
+visual_review:
+  - Desktop使用宽松hero、双列服务卡、清晰统计和充足留白；没有回退旧Web密集列表
+  - 普通卡片不显示command、provider id、env或命令型description；Advanced才显示净化命令、标识和工具
+  - 编辑对话框不回填密钥，只提供保留、替换、清空；失败保留上下文，关闭后焦点回编辑入口
+  - 390 Web窄窗口无横向溢出；sticky双操作条在滚动到底时不遮挡Advanced内容，安装向导使用底部抽屉
+  - 本次只消费--cp-*与color-mix；Claude Design已有设计源足以实现，无需改动云端设计
+quality_review:
+  - 页面继续消费Workbench snapshot与submitAction，没有direct fetch、第二transport、store、service或registry
+  - 安装结果只从generated F149 action type解码为本地presentation，不定义手写wire DTO
+  - 轮询timer可取消；断线与超时保留task id并仅重新检查，不重复安装
+  - McpProviderCenter为679行、McpInstallWizard为533行，均低于1200行复杂度门
+file_sha256:
+  mcp-provider-center: f9f03b5cb38ebaf01f6952e6b91a87844c448537f697d86b74c61d6b8daae668
+  mcp-provider-center-css: 3f099622e4dbb1e1bed22677f0396ccdcb6dbac9aeab9cd39fe1023e857b28b1
+  mcp-provider-center-test: 97e2feb8f0cc85f565721800714ec23c23069c664096488c8fc1e9dec239b878
+  mcp-install-wizard: 3f26a55187be92e7dd052fa3a25cf74a9160a53fc5aa9989003144bb9d21d2dc
+  mcp-install-wizard-test: 4e1df322003f10a3e26c425bc176379fd9544b58402ba8c42d6290a1a99bb11d
+secret_scan: pass
+network: false
+rerun: true
