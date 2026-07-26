@@ -6,6 +6,22 @@ import FilesCenter from "./FilesCenter";
 import type { DiffResponse, LogicalFileItem } from "../types";
 
 vi.mock("../api/client", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    code?: string;
+    hint?: string;
+
+    constructor(
+      message: string,
+      options: { status: number; code?: string; hint?: string },
+    ) {
+      super(message);
+      this.name = "ApiError";
+      this.status = options.status;
+      this.code = options.code;
+      this.hint = options.hint;
+    }
+  },
   fetchFileTasks: vi.fn(),
   fetchLogicalFiles: vi.fn(),
   fetchLogicalFileDiff: vi.fn(),
@@ -13,6 +29,7 @@ vi.mock("../api/client", () => ({
 }));
 
 import {
+  ApiError,
   fetchFileTasks,
   fetchLogicalFileDiff,
   fetchLogicalFileVersions,
@@ -28,7 +45,7 @@ function renderPage() {
   return render(
     <MemoryRouter>
       <FilesCenter />
-    </MemoryRouter>
+    </MemoryRouter>,
   );
 }
 
@@ -92,7 +109,7 @@ describe("FilesCenter 两级导航", () => {
     await waitFor(() => {
       expect(fetchLogicalFileDiffMock).toHaveBeenCalledWith(
         "task-1",
-        "task-1/report.md"
+        "task-1/report.md",
       );
       expect(screen.getByText("新增内容")).toBeInTheDocument();
       expect(screen.getByText("删除内容")).toBeInTheDocument();
@@ -162,22 +179,28 @@ describe("FilesCenter 两级导航", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await waitFor(() => expect(screen.getByText("周报生成")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("周报生成")).toBeInTheDocument(),
+    );
     await user.click(screen.getByText("周报生成"));
-    await waitFor(() => expect(screen.getByText("report.md")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("report.md")).toBeInTheDocument(),
+    );
     await user.click(screen.getByText("report.md"));
-    await waitFor(() => expect(screen.getByText("当前内容")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("当前内容")).toBeInTheDocument(),
+    );
 
     // 收起状态下技术字段不出现在 DOM（默认收起 + 懒加载）
     expect(fetchLogicalFileVersionsMock).not.toHaveBeenCalled();
 
     // 展开 Advanced 折叠区
-    await user.click(screen.getByText("高级信息（版本详情）"));
+    await user.click(screen.getByText("高级 · 版本与存储信息"));
 
     await waitFor(() => {
       expect(fetchLogicalFileVersionsMock).toHaveBeenCalledWith(
         "task-1",
-        "task-1/report.md"
+        "task-1/report.md",
       );
       // 技术字段（版本号 / hash 前 8 位 / size / storage_kind）只在此区出现
       expect(screen.getByText("版本号：v2")).toBeInTheDocument();
@@ -217,7 +240,9 @@ describe("FilesCenter 两级导航", () => {
 
     await waitFor(() => expect(screen.getByText("草稿")).toBeInTheDocument());
     await user.click(screen.getByText("草稿"));
-    await waitFor(() => expect(screen.getByText("note.txt")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("note.txt")).toBeInTheDocument(),
+    );
     await user.click(screen.getByText("note.txt"));
 
     await waitFor(() => {
@@ -269,17 +294,19 @@ describe("FilesCenter 两级导航", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("导出")).toBeInTheDocument());
     await user.click(screen.getByText("导出"));
-    await waitFor(() => expect(screen.getByText("data.bin")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("data.bin")).toBeInTheDocument(),
+    );
     await user.click(screen.getByText("data.bin"));
 
     await waitFor(() =>
       expect(
-        screen.getByText("这是二进制文件，暂时无法显示内容对比。")
-      ).toBeInTheDocument()
+        screen.getByText("这是二进制文件，暂时无法显示内容对比。"),
+      ).toBeInTheDocument(),
     );
 
     // 即使内容不可 diff，Advanced 区版本元信息仍可展开
-    await user.click(screen.getByText("高级信息（版本详情）"));
+    await user.click(screen.getByText("高级 · 版本与存储信息"));
     await waitFor(() => {
       expect(screen.getByText("版本号：v2")).toBeInTheDocument();
       expect(screen.getByText("哈希：deadbeef")).toBeInTheDocument();
@@ -318,13 +345,15 @@ describe("FilesCenter 两级导航", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("日志")).toBeInTheDocument());
     await user.click(screen.getByText("日志"));
-    await waitFor(() => expect(screen.getByText("huge.log")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("huge.log")).toBeInTheDocument(),
+    );
     await user.click(screen.getByText("huge.log"));
 
     await waitFor(() =>
       expect(
-        screen.getByText("文件内容过大，暂时无法显示内容对比。")
-      ).toBeInTheDocument()
+        screen.getByText("文件内容过大，暂时无法显示内容对比。"),
+      ).toBeInTheDocument(),
     );
   });
 
@@ -365,7 +394,7 @@ describe("FilesCenter 两级导航", () => {
 
     await waitFor(() => {
       expect(
-        screen.getByText("上一版内容暂不可用，仅显示当前内容")
+        screen.getByText("上一版内容暂不可用，仅显示当前内容"),
       ).toBeInTheDocument();
       expect(screen.getByText("当前可用内容")).toBeInTheDocument();
     });
@@ -401,16 +430,18 @@ describe("FilesCenter 两级导航", () => {
 
     const user = userEvent.setup();
     renderPage();
-    await waitFor(() => expect(screen.getByText("稳定文档")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("稳定文档")).toBeInTheDocument(),
+    );
     await user.click(screen.getByText("稳定文档"));
-    await waitFor(() => expect(screen.getByText("same.md")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("same.md")).toBeInTheDocument(),
+    );
     await user.click(screen.getByText("same.md"));
 
     await waitFor(() => {
       expect(screen.getByText("无差异")).toBeInTheDocument();
-      expect(
-        screen.getByText("当前版与上一版内容相同。")
-      ).toBeInTheDocument();
+      expect(screen.getByText("当前版与上一版内容相同。")).toBeInTheDocument();
     });
     // 不渲染任何逐行 diff（无 data-diff-kind 行）
     expect(document.querySelector("[data-diff-kind]")).toBeNull();
@@ -448,14 +479,14 @@ describe("FilesCenter 两级导航", () => {
     renderPage();
     await waitFor(() => expect(screen.getByText("空文件")).toBeInTheDocument());
     await user.click(screen.getByText("空文件"));
-    await waitFor(() => expect(screen.getByText("empty.txt")).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("empty.txt")).toBeInTheDocument(),
+    );
     await user.click(screen.getByText("empty.txt"));
 
     await waitFor(() => {
       expect(screen.getByText("无差异")).toBeInTheDocument();
-      expect(
-        screen.getByText("当前版与上一版内容相同。")
-      ).toBeInTheDocument();
+      expect(screen.getByText("当前版与上一版内容相同。")).toBeInTheDocument();
     });
   });
 
@@ -477,11 +508,11 @@ describe("FilesCenter 两级导航", () => {
     renderPage();
 
     await waitFor(() =>
-      expect(screen.getByText("周报生成")).toBeInTheDocument()
+      expect(screen.getByText("周报生成")).toBeInTheDocument(),
     );
     await user.click(screen.getByText("周报生成"));
     await waitFor(() =>
-      expect(screen.getByText("report.md")).toBeInTheDocument()
+      expect(screen.getByText("report.md")).toBeInTheDocument(),
     );
 
     // 面包屑「任务」按钮回退
@@ -495,23 +526,75 @@ describe("FilesCenter 两级导航", () => {
   it("一级加载中显示 loading", () => {
     fetchFileTasksMock.mockReturnValue(new Promise(() => {}));
     renderPage();
-    expect(screen.getByText("正在加载任务列表…")).toBeInTheDocument();
+    expect(screen.getByText("正在加载文件")).toBeInTheDocument();
   });
 
-  it("一级加载失败显示错误", async () => {
+  it("一级加载失败显示可恢复错误", async () => {
     fetchFileTasksMock.mockRejectedValue(new Error("网络错误"));
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("加载失败：网络错误")).toBeInTheDocument();
+      expect(screen.getByText("文件列表加载失败")).toBeInTheDocument();
     });
+    expect(screen.queryByText("网络错误")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "重试" })).toBeInTheDocument();
   });
 
   it("一级空列表显示空态", async () => {
     fetchFileTasksMock.mockResolvedValue({ tasks: [] });
     renderPage();
     await waitFor(() => {
-      expect(screen.getByText("还没有可对比的文件")).toBeInTheDocument();
+      expect(screen.getByText("还没有产物文件")).toBeInTheDocument();
     });
+  });
+
+  it("空态使用任务产物语言，不把版本实现条件暴露给普通用户", async () => {
+    fetchFileTasksMock.mockResolvedValue({ tasks: [] });
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("还没有产物文件")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("任务完成后，产出的文件会出现在这里。"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/多个版本/u)).not.toBeInTheDocument();
+  });
+
+  it("可恢复错误使用普通语言并提供重试，不回显后端错误", async () => {
+    fetchFileTasksMock
+      .mockRejectedValueOnce(new Error("ECONNRESET /internal/files"))
+      .mockResolvedValueOnce({
+        tasks: [{ task_id: "task-1", title: "周报生成" }],
+      });
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("文件列表加载失败")).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/ECONNRESET|internal\/files/u),
+    ).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重试" }));
+    await waitFor(() => {
+      expect(screen.getByText("周报生成")).toBeInTheDocument();
+    });
+  });
+
+  it("origin 403 只说明文件权限并联系管理员，不提供重新登录", async () => {
+    fetchFileTasksMock.mockRejectedValue(
+      new ApiError("forbidden", { status: 403 }),
+    );
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("当前账号没有权限查看文件")).toBeInTheDocument();
+    });
+    expect(screen.getByText("如需访问，请联系管理员。")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /重新登录/u }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("forbidden")).not.toBeInTheDocument();
   });
 
   it("快速切换任务时旧响应被丢弃（files 层乱序返回）", async () => {
@@ -535,7 +618,7 @@ describe("FilesCenter 两级导航", () => {
       resolveB = r;
     });
     fetchLogicalFilesMock.mockImplementation((taskId: string) =>
-      taskId === "task-A" ? promiseA : promiseB
+      taskId === "task-A" ? promiseA : promiseB,
     );
 
     const user = userEvent.setup();
@@ -554,12 +637,20 @@ describe("FilesCenter 两级导航", () => {
     // 先 resolve A（旧请求），再 resolve B（新请求）
     resolveA({
       files: [
-        { logical_file_id: "task-A/a.md", display_name: "a.md", version_count: 2 },
+        {
+          logical_file_id: "task-A/a.md",
+          display_name: "a.md",
+          version_count: 2,
+        },
       ],
     });
     resolveB({
       files: [
-        { logical_file_id: "task-B/b.md", display_name: "b.md", version_count: 2 },
+        {
+          logical_file_id: "task-B/b.md",
+          display_name: "b.md",
+          version_count: 2,
+        },
       ],
     });
 
@@ -600,7 +691,7 @@ describe("FilesCenter 两级导航", () => {
     });
     fetchLogicalFileDiffMock.mockImplementation(
       (_taskId: string, logicalFileId: string) =>
-        logicalFileId === "task-1/file-A.md" ? diffA : diffB
+        logicalFileId === "task-1/file-A.md" ? diffA : diffB,
     );
 
     const user = userEvent.setup();
@@ -609,7 +700,7 @@ describe("FilesCenter 两级导航", () => {
     await waitFor(() => expect(screen.getByText("任务1")).toBeInTheDocument());
     await user.click(screen.getByText("任务1"));
     await waitFor(() =>
-      expect(screen.getByText("file-A.md")).toBeInTheDocument()
+      expect(screen.getByText("file-A.md")).toBeInTheDocument(),
     );
 
     // 点 file-A（pending，进入 diff 视图）
@@ -617,7 +708,7 @@ describe("FilesCenter 两级导航", () => {
     // 回退到文件列表（自增 seq 使 file-A 在途 diff 请求过期）
     await user.click(screen.getByRole("button", { name: "任务1" }));
     await waitFor(() =>
-      expect(screen.getByText("file-B.md")).toBeInTheDocument()
+      expect(screen.getByText("file-B.md")).toBeInTheDocument(),
     );
     // 点 file-B（pending）
     await user.click(screen.getByText("file-B.md"));
@@ -654,7 +745,7 @@ describe("FilesCenter 两级导航", () => {
 
     // 最终显示 B 的 diff 内容，A 响应被丢弃
     await waitFor(() =>
-      expect(screen.getByText("B 当前内容")).toBeInTheDocument()
+      expect(screen.getByText("B 当前内容")).toBeInTheDocument(),
     );
     expect(screen.getByText("B 旧内容")).toBeInTheDocument();
     expect(screen.queryByText("A 当前内容")).not.toBeInTheDocument();
@@ -675,13 +766,13 @@ describe("FilesCenter 两级导航", () => {
     renderPage();
 
     await waitFor(() =>
-      expect(screen.getByText("只产出单版本的任务")).toBeInTheDocument()
+      expect(screen.getByText("只产出单版本的任务")).toBeInTheDocument(),
     );
     await user.click(screen.getByText("只产出单版本的任务"));
 
     // 空态文案出现
     await waitFor(() =>
-      expect(screen.getByText("这个任务暂无可对比的文件")).toBeInTheDocument()
+      expect(screen.getByText("这个任务暂无可对比的文件")).toBeInTheDocument(),
     );
     // 不渲染任何文件卡片：无 "N 个版本" chip（chip 文案格式 "{n} 个版本"）
     expect(screen.queryByText(/1 个版本/)).not.toBeInTheDocument();

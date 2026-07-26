@@ -1,0 +1,49 @@
+task_id: T042
+phase: REFACTOR
+behavior: Files v2 Claude Design 视觉迁移、状态职责收敛与 Desktop/390 Web 窄窗口验收
+command: cd octoagent/frontend && npx vitest run src/pages/FilesCenter.test.tsx src/pages/WorkspaceGitView.test.tsx
+executed_at_utc: 2026-07-26T07:14:53Z
+head_sha: 2995c2754340f6eb89b9f458e51e5b8479a416b2
+exit_code: 0
+oracle_expected: exact 合同不漂移，Files/Workspace 职责保持分区，Desktop/390 保持 Claude Design 层级、留白、卡片节奏与视觉张力，窄窗口只有 diff 区域可横向滚动
+oracle_observed: exact 24/24、全前端 561/561、生产 build、OpenAPI、F149 boundary/style/complexity 与 changed-lines coverage 90.22%通过；repository runtime architecture 因当前 FilesCenter 缺 F151 evidence slice 而阻断；全量 L1 有 4 项通过、2 项既有聊天脚本回复超时，与 Files 页面无调用或行为交集
+raw_output_file: /tmp/f149-t042-refactor.log
+raw_output_sha256: 371a70c1b88ae225b3ffb38afa1c3578127f74443f487ff3e6f44517bdcb934c
+raw_output_size: 380
+full_frontend_log_sha256: 1e01853346991a6d87b6588ecc549caefe2a2dd176dbe7e2cfdd4d4bd010b718
+build_log_sha256: a7aee46c37b71fb42095967c7270a29d71484f31ce7cb9fc071e4dcea4d9372a
+openapi_log_sha256: 9ca2abe7a92d3f9149a865e4532296c40d80e66f46394938f393b30beb8c6078
+boundary_log_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_log_sha256: 26d21fc29da37f08e9be287bd06cf9b5f1fdff24f1ff5e10dd81b3d3c17ed40e
+complexity_log_sha256: f4049f85e4b3ef07a93e01ddfec422c6e52ede47bd092832bbd38078dbfcfa37
+coverage_log_sha256: 1e01853346991a6d87b6588ecc549caefe2a2dd176dbe7e2cfdd4d4bd010b718
+changed_lines_coverage_log_sha256: 428691b2b0e8bdccba3da2483b7a5ea416cb499435f09139d30cb585f8e90676
+runtime_architecture_log_sha256: e8b01601d11d39580a6d88060abe40c1d797fa5b9babe3958db2ccf21f4b0741
+runtime_architecture_gate: blocked
+runtime_architecture_observed: EVIDENCE_REQUIRED_SLICE_MISSING 拒绝 FilesCenter 当前路径；本 task 未修改、放宽或绕过 F151 checker，也未伪造跨 Feature evidence
+e2e_log_sha256: 94d1e8a953539f47e0e180067bcd65c840ea73b7fd465dea11dd3c9fa1f9668f
+e2e_gate: blocked
+e2e_observed: 4 项通过；chat-scripted-loop 与 bearer 消息链路等待既定 assistant reply 超时。两项失败均位于聊天脚本运行时，未经过 Files 页面；390px Web 窄窗口用例通过
+visual_review:
+  - 真实浏览器 Desktop 保留 Claude Design 初版的宽松 hero、任务产物卡片、版本历史双栏与清晰信息层级，没有回退旧 Web 密集列表
+  - 390px Web 窄窗口为单列且无页面级横向溢出；diff 仅在全屏详情内局部横向滚动。该检查不是手机产品或 iOS 验收
+  - 回滚先提交申请，再在独立横幅批准或拒绝；409 使用“回滚目标已变化，请重新发起”，不泄漏内部状态
+  - 普通区只显示逻辑相对路径并截断；完整路径、commit 与 blame 只在可访问 Advanced 中，完整路径复制权限也只在那里
+  - Advanced 与 diff 关闭后焦点回原触发器；操作控件不小于 44px
+  - 本次新增样式只消费 --cp-*；没有引入 Spotify、第二主题或以旧 Web 外观覆盖 Claude Design
+quality_review:
+  - FilesCenter 复用共享 resourcePageState；401 仍归 F150 global auth，403 保持资源权限语义
+  - 文件读取、工作区历史与回滚复用现有 api client/application seam；没有第二 transport、store、service、registry 或回滚状态机
+  - 两阶段回滚状态只保留 request_id，删除未消费的 commit 镜像，避免重复状态
+  - FilesAdvancedInfo 只负责技术详情 dialog；WorkspaceGitView 不吸收文件 API 或 blame 算法
+  - changed-lines authored executable coverage 为 2130/2361=90.22%；阈值未降低
+file_sha256:
+  files-center: 04799ad428ee7a5960846db763196fed421abe0e5aa333a65e747ff2606529b8
+  files-center-test: 0d8892f03f5ead83cb7cac3db1ea0b0de3238ea2c15b3989e22e0176bfc72b9c
+  files-advanced: 530ac013dac5ac7ebd728ba760c15d8f90a5ab5d4657f95181f1954a0cdf034e
+  files-css: 19eb857627fb240cead24fc94322f81717f5af31fbcc7cc14d8b55e2b52c4410
+  workspace-git: 5034513a2cd22634cba2b6e5fda8cb2f699702b58e6af6e497299cd80690bc92
+  workspace-git-test: bc08c913f392d2f2100f0d1c22395c46c596626f380da04904910d66a99e0bdb
+secret_scan: pass
+network: false
+rerun: false

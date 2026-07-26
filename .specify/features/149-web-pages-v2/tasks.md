@@ -534,6 +534,18 @@
 
 ### T042 — Files v2 与 path sensitivity
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T042/`。页面闭合 loading/empty/recoverable/origin-403、
+  文件读取与工作区历史，两阶段回滚严格分为申请与独立批准/拒绝，409 转为可恢复
+  用户提示。普通区只显示截断后的逻辑相对路径，完整路径、commit 与 blame 只在
+  可访问 Advanced，完整路径复制权限也只在那里。逐页对照 Claude Design Files
+  Desktop/390 后保留宽松 hero、产物卡片、版本历史双栏、留白与视觉张力；真实
+  Chromium 1440/390 Web 窄窗口无页面级横向溢出，只有全屏 diff 内容局部滚动，
+  Advanced/diff 关闭后焦点归位。最终精确24/24、全前端561/561、生产build、
+  OpenAPI、F149 boundary/style/complexity及changed-lines coverage 90.22%通过。
+  repository runtime architecture因F151缺FilesCenter evidence slice而如实阻断；
+  全量L1中4项通过，2项既有聊天脚本回复超时，与Files页面无调用交集。本task未
+  修改或放宽跨Feature authority。390只作Web响应式检查，手机产品仍只走原生iOS。
 - **层/FR**：frontend L4 component/projection；FR-006/007/022。
 - **文件**：`pages/FilesCenter*`、`WorkspaceGitView*`、files projection/CSS。
 - **依赖**：T024。
@@ -767,8 +779,8 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T025、T030–T034、T040–T041 中已执行的任务均有真实
-  证据；下一项是 T042 Files v2。每个后续页面仍必须先逐页对照 Claude
+- 当前风险：T000–T015、T020–T025、T030–T034、T040–T042 中已执行的任务均有真实
+  证据；下一项是 T043 Skills v2。每个后续页面仍必须先逐页对照 Claude
   Design 最初版；现有 Web 只能作为实现现状，不得成为视觉基线。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

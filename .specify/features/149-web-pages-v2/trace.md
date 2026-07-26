@@ -271,5 +271,18 @@
   MemoryDetailModal视觉class快照而如实阻断；本task未修改、放宽或绕过F151
   authority，也未为过门恢复旧`wb-*`样式。390仍只作Web响应式检查，手机产品
   只走原生iOS。
+- T042以旧Files页面形成6条稳定RED，既有18条文件读取、下载、版本历史与路径
+  控制继续通过。GREEN复用共享resource state与既有api/application seam，闭合
+  loading/empty/recoverable/origin-403、两阶段回滚申请后独立批准/拒绝、409
+  冲突恢复及Advanced技术字段边界；普通区只显示截断的逻辑相对路径，完整路径、
+  commit与blame只在Advanced，复制完整路径也只在该权限边界。REFACTOR逐页对照
+  Claude Design Files Desktop/390，保留宽松hero、产物卡片、版本历史双栏、
+  留白与视觉张力；真实Chromium 1440/390 Web窄窗口无页面级横向溢出，仅全屏
+  diff内容局部滚动，Advanced与diff关闭后焦点回原触发器。最终精确24/24、全前端
+  561/561、生产build、OpenAPI、F149 boundary/style/complexity及changed-lines
+  coverage 90.22%通过。repository runtime architecture因F151缺FilesCenter
+  evidence slice而如实阻断；全量L1中4项通过、2项既有聊天脚本回复超时且与Files
+  页面无调用交集。本task未修改、放宽或绕过跨Feature authority。390仍只作Web
+  响应式检查，手机产品只走原生iOS。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

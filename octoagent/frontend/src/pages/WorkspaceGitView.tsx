@@ -9,7 +9,8 @@
  * 默认选最近提交的项目；slug 即工具写快照的归一化目录名，与后端 _worktree 同款解析一致。
  */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   approveWorkspaceRollback,
   fetchWorkspaceBlame,
@@ -18,13 +19,16 @@ import {
   fetchWorkspaceHistory,
   fetchWorkspaceProjects,
   proposeWorkspaceRollback,
+  rejectWorkspaceRollback,
   type WorkspaceBlameLine,
   type WorkspaceCommit,
   type WorkspaceFileChange,
   type WorkspaceProjectItem,
 } from "../api/client";
 import { DiffBody } from "../components/diff/DiffBody";
+import { presentAdvancedValue } from "../domains/shared/resourcePageState";
 import type { DiffResponse } from "../types";
+import FilesAdvancedInfo from "./FilesAdvancedInfo";
 
 function fmtTs(iso: string): string {
   try {
@@ -39,6 +43,17 @@ function fmtTs(iso: string): string {
   }
 }
 
+function fileStatusLabel(status: string): string {
+  return (
+    {
+      added: "新文件",
+      deleted: "已删除",
+      modified: "已修改",
+      renamed: "已重命名",
+    }[status] ?? "有变化"
+  );
+}
+
 export default function WorkspaceGitView(props: { projectSlug?: string }) {
   const [projects, setProjects] = useState<WorkspaceProjectItem[]>([]);
   const [activeSlug, setActiveSlug] = useState<string | null>(
@@ -50,12 +65,18 @@ export default function WorkspaceGitView(props: { projectSlug?: string }) {
   const [loading, setLoading] = useState(true);
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const [files, setFiles] = useState<WorkspaceFileChange[]>([]);
+  const [filesError, setFilesError] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [diff, setDiff] = useState<DiffResponse | null>(null);
-  const [blame, setBlame] = useState<WorkspaceBlameLine[] | null>(null);
+  const [diffError, setDiffError] = useState(false);
   const [rollback, setRollback] = useState<{ commit: string } | null>(null);
+  const [pendingRollback, setPendingRollback] = useState<{
+    requestId: string;
+  } | null>(null);
   const [rollbackMsg, setRollbackMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const rollbackTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const fileTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   // 无显式 prop → 解析有历史的项目列表，默认选第一个（最近提交）
   useEffect(() => {
@@ -108,37 +129,52 @@ export default function WorkspaceGitView(props: { projectSlug?: string }) {
     setSelectedIdx(idx);
     setSelectedFile(null);
     setDiff(null);
-    setBlame(null);
-    const resp = await fetchWorkspaceCommitFiles(activeSlug, commits[idx].commit);
-    setFiles(resp.files);
+    setFilesError(false);
+    try {
+      const resp = await fetchWorkspaceCommitFiles(
+        activeSlug,
+        commits[idx].commit,
+      );
+      setFiles(resp.files);
+    } catch {
+      setFiles([]);
+      setFilesError(true);
+    }
   };
 
   const openFile = async (path: string) => {
     if (selectedIdx === null || activeSlug == null) return;
     setSelectedFile(path);
-    setBlame(null);
+    setDiffError(false);
     const commitA = commits[selectedIdx].commit;
     const commitB = commits[selectedIdx + 1]?.commit; // 次新（父）作上一版
-    const d = await fetchWorkspaceDiff({
-      project_slug: activeSlug,
-      commit_a: commitA,
-      commit_b: commitB,
-      path,
-    });
-    setDiff(d);
+    try {
+      const d = await fetchWorkspaceDiff({
+        project_slug: activeSlug,
+        commit_a: commitA,
+        commit_b: commitB,
+        path,
+      });
+      setDiff(d);
+    } catch {
+      setDiff(null);
+      setDiffError(true);
+    }
   };
 
-  const showBlame = async () => {
-    if (selectedIdx === null || selectedFile === null || activeSlug == null) return;
+  const loadBlame = async (): Promise<WorkspaceBlameLine[]> => {
+    if (selectedIdx === null || selectedFile === null || activeSlug == null) {
+      return [];
+    }
     const resp = await fetchWorkspaceBlame(
       activeSlug,
       commits[selectedIdx].commit,
       selectedFile,
     );
-    setBlame(resp.lines);
+    return resp.lines;
   };
 
-  const confirmRollback = async () => {
+  const submitRollback = async () => {
     if (rollback === null || activeSlug == null) return;
     setBusy(true);
     setRollbackMsg(null);
@@ -147,29 +183,81 @@ export default function WorkspaceGitView(props: { projectSlug?: string }) {
         project_slug: activeSlug,
         target_commit: rollback.commit,
       });
-      const result = await approveWorkspaceRollback(proposal.request_id);
-      setRollbackMsg(
-        result.status === "executed" ? "已恢复到此版本" : `回滚未完成：${result.status}`,
-      );
+      setPendingRollback({
+        requestId: proposal.request_id,
+      });
       setRollback(null);
-      await loadHistory();
-    } catch (e) {
-      setRollbackMsg(e instanceof Error ? e.message : "回滚失败");
+      window.requestAnimationFrame(() => rollbackTriggerRef.current?.focus());
+    } catch {
+      setRollbackMsg("回滚申请提交失败，请重试");
     } finally {
       setBusy(false);
     }
   };
 
+  const decideRollback = async (decision: "approve" | "reject") => {
+    if (!pendingRollback) return;
+    setBusy(true);
+    setRollbackMsg(null);
+    try {
+      if (decision === "approve") {
+        const result = await approveWorkspaceRollback(
+          pendingRollback.requestId,
+        );
+        setRollbackMsg(
+          result.status === "executed" ? "已恢复到此版本" : "回滚申请尚未完成",
+        );
+        await loadHistory();
+      } else {
+        await rejectWorkspaceRollback(pendingRollback.requestId);
+        setRollbackMsg("已拒绝回滚申请");
+      }
+      setPendingRollback(null);
+    } catch (error) {
+      const status =
+        error && typeof error === "object" && "status" in error
+          ? Number(error.status)
+          : 0;
+      setRollbackMsg(
+        status === 409 ? "回滚目标已变化，请重新发起" : "回滚处理失败，请重试",
+      );
+      if (status === 409) setPendingRollback(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const closeRollbackDialog = useCallback(() => {
+    setRollback(null);
+    window.requestAnimationFrame(() => rollbackTriggerRef.current?.focus());
+  }, []);
+
+  useEffect(() => {
+    if (!rollback) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") closeRollbackDialog();
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [closeRollbackDialog, rollback]);
+
+  const closeDiff = () => {
+    setSelectedFile(null);
+    setDiff(null);
+    setDiffError(false);
+    window.requestAnimationFrame(() => fileTriggerRef.current?.focus());
+  };
+
   if (resolving || loading) {
     return (
-      <div className="wb-note">
+      <div className="f149-files-state">
         <span>正在加载工作区版本历史…</span>
       </div>
     );
   }
   if (!available) {
     return (
-      <div className="wb-empty-state">
+      <div className="f149-files-state">
         <strong>工作区版本历史暂不可用</strong>
         <span>此功能需要系统安装 git。其它功能不受影响。</span>
       </div>
@@ -177,7 +265,7 @@ export default function WorkspaceGitView(props: { projectSlug?: string }) {
   }
   if (activeSlug == null || (commits.length === 0 && projects.length === 0)) {
     return (
-      <div className="wb-empty-state">
+      <div className="f149-files-state">
         <strong>暂无工作区版本历史</strong>
         <span>当 Agent 在工作区里改动文件后，这里会显示历史版本。</span>
       </div>
@@ -185,10 +273,10 @@ export default function WorkspaceGitView(props: { projectSlug?: string }) {
   }
 
   return (
-    <section className="wb-panel" aria-label="工作区版本历史">
-      <div className="wb-panel-head">
+    <section className="f149-workspace" aria-label="工作区版本历史">
+      <div className="f149-workspace-head">
         <div>
-          <p className="wb-card-label">工作区版本历史</p>
+          <p className="f149-files-kicker">工作区版本</p>
           {projects.length > 1 ? (
             <select
               aria-label="选择项目"
@@ -208,69 +296,111 @@ export default function WorkspaceGitView(props: { projectSlug?: string }) {
       </div>
 
       {commits.length === 0 ? (
-        <div className="wb-note">
+        <div className="f149-files-state">
           <span>此项目暂无历史版本。</span>
         </div>
       ) : (
-        <div className="wb-note-stack">
+        <div className="f149-workspace-history">
           {commits.map((c, idx) => (
-            <div key={c.commit} className="wb-agent-tool-row">
+            <article key={c.commit} className="f149-workspace-commit">
               <button
                 type="button"
-                className="wb-chip"
-                style={{ textAlign: "left", flex: 1 }}
+                className="f149-workspace-commit-open"
                 onClick={() => openCommit(idx)}
               >
                 <strong>{c.summary || "（无说明）"}</strong>
-                <small style={{ display: "block", color: "var(--cp-muted)" }}>
-                  {fmtTs(c.ts)} · <span title={c.commit}>{c.short}</span>
+                <small>
+                  {fmtTs(c.ts)} · {c.files_changed} 个文件有变化
                 </small>
               </button>
               <button
                 type="button"
-                className="wb-chip"
-                onClick={() => {
+                className="f149-workspace-restore"
+                onClick={(event) => {
+                  rollbackTriggerRef.current = event.currentTarget;
                   setRollback({ commit: c.commit });
                   setRollbackMsg(null);
                 }}
               >
                 恢复到此版本
               </button>
-            </div>
+            </article>
           ))}
         </div>
       )}
 
       {selectedIdx !== null && (
-        <div className="wb-card">
-          <p className="wb-card-label">改了哪些文件</p>
-          {files.length === 0 ? (
+        <div className="f149-workspace-files">
+          <p className="f149-files-kicker">改了哪些文件</p>
+          {filesError ? (
+            <div className="f149-files-state" role="alert">
+              <strong>文件列表加载失败</strong>
+              <span>暂时无法取得这个版本的文件，请重试。</span>
+            </div>
+          ) : files.length === 0 ? (
             <span>（无文件改动）</span>
           ) : (
-            <div className="wb-agent-check-grid">
-              {files.map((f) => (
-                <button
-                  key={f.path}
-                  type="button"
-                  className="wb-chip"
-                  onClick={() => openFile(f.path)}
-                >
-                  {f.path} · {f.status}
-                </button>
-              ))}
+            <div className="f149-workspace-file-list">
+              {files.map((file) => {
+                const path = presentAdvancedValue({
+                  value: file.path,
+                  kind: "path",
+                  sensitivity: "operator_sensitive",
+                  sanitized: true,
+                  copyPermitted: false,
+                  maxDisplayLength: 44,
+                });
+                return (
+                  <button
+                    key={file.path}
+                    type="button"
+                    onClick={(event) => {
+                      fileTriggerRef.current = event.currentTarget;
+                      void openFile(file.path);
+                    }}
+                  >
+                    <span>{path.displayValue}</span>
+                    <small>{fileStatusLabel(file.status)}</small>
+                  </button>
+                );
+              })}
             </div>
           )}
         </div>
       )}
 
+      {selectedFile !== null && diffError && (
+        <div className="f149-files-state" role="alert">
+          <strong>文件对比加载失败</strong>
+          <span>暂时无法显示这个文件的变化。</span>
+          <button type="button" onClick={() => void openFile(selectedFile)}>
+            重试
+          </button>
+        </div>
+      )}
+
       {selectedFile !== null && diff !== null && (
-        <div className="wb-card">
-          <div className="wb-panel-head">
-            <p className="wb-card-label">{selectedFile}</p>
-            <button type="button" className="wb-chip" onClick={showBlame}>
-              谁改的
+        <section className="f149-workspace-diff" aria-label="文件版本对比">
+          <header>
+            <div>
+              <p className="f149-files-kicker">只读对比</p>
+              <h3>
+                {
+                  presentAdvancedValue({
+                    value: selectedFile,
+                    kind: "path",
+                    sensitivity: "operator_sensitive",
+                    sanitized: true,
+                    copyPermitted: false,
+                    maxDisplayLength: 44,
+                  }).displayValue
+                }
+              </h3>
+            </div>
+            <button type="button" onClick={closeDiff}>
+              返回文件列表
             </button>
-          </div>
+          </header>
           {diff.binary ? (
             <span>（二进制文件，不显示内容）</span>
           ) : diff.oversize ? (
@@ -278,47 +408,99 @@ export default function WorkspaceGitView(props: { projectSlug?: string }) {
           ) : (
             <DiffBody diff={diff} />
           )}
-          {blame !== null && (
-            <details open>
-              <summary>逐行修改记录</summary>
-              <div style={{ fontFamily: "monospace", fontSize: "12px" }}>
-                {blame.map((ln) => (
-                  <div key={ln.line_no}>
-                    <span style={{ color: "var(--cp-muted)" }} title={ln.commit}>
-                      {ln.short} {fmtTs(ln.ts)}
-                    </span>{" "}
-                    {ln.content}
-                  </div>
-                ))}
-              </div>
-            </details>
+          <p className="f149-workspace-readonly">
+            对比只读；需要修改内容，请回到对话让助手更新。
+          </p>
+          {selectedIdx !== null && (
+            <FilesAdvancedInfo
+              commit={commits[selectedIdx].commit}
+              path={selectedFile}
+              onLoadBlame={loadBlame}
+            />
           )}
-        </div>
+        </section>
       )}
 
-      {rollback !== null && (
-        <div className="wb-inline-banner is-warning">
-          <span>将把工作区文件恢复到此版本（会记为一次新的版本）。确认吗？</span>
-          <div style={{ display: "flex", gap: "var(--space-sm)" }}>
-            <button type="button" className="wb-chip" disabled={busy} onClick={confirmRollback}>
-              {busy ? "恢复中…" : "确认恢复"}
+      {pendingRollback && (
+        <section
+          className="f149-workspace-pending"
+          aria-label="待批准的回滚申请"
+        >
+          <div>
+            <strong>回滚申请 · 待批准</strong>
+            <span>批准后才会执行，期间文件保持只读。</span>
+          </div>
+          <div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void decideRollback("approve")}
+            >
+              批准
             </button>
             <button
               type="button"
-              className="wb-chip"
               disabled={busy}
-              onClick={() => setRollback(null)}
+              onClick={() => void decideRollback("reject")}
             >
-              取消
+              拒绝
             </button>
           </div>
-        </div>
+        </section>
       )}
       {rollbackMsg && (
-        <div className="wb-note">
+        <div className="f149-workspace-message" role="status">
           <span>{rollbackMsg}</span>
         </div>
       )}
+
+      {rollback && document.body
+        ? createPortal(
+            <div
+              className="f149-files-dialog-backdrop"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) closeRollbackDialog();
+              }}
+            >
+              <section
+                className="f149-files-dialog"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="files-rollback-title"
+              >
+                <header>
+                  <div>
+                    <p>需要确认</p>
+                    <h2 id="files-rollback-title">提交回滚申请</h2>
+                  </div>
+                  <button type="button" onClick={closeRollbackDialog}>
+                    关闭
+                  </button>
+                </header>
+                <p>
+                  这会提交一份回滚申请。申请获批后，系统才会把工作区恢复到所选版本。
+                </p>
+                <div className="f149-files-dialog-actions">
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void submitRollback()}
+                  >
+                    {busy ? "正在提交…" : "提交申请"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={closeRollbackDialog}
+                  >
+                    取消
+                  </button>
+                </div>
+              </section>
+            </div>,
+            document.body,
+          )
+        : null}
     </section>
   );
 }

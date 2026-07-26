@@ -1,0 +1,15 @@
+task_id: T042
+phase: GREEN
+behavior: Files v2 页面状态、两阶段回滚、冲突恢复、路径敏感信息与 Advanced 边界
+command: cd octoagent/frontend && npx vitest run src/pages/FilesCenter.test.tsx src/pages/WorkspaceGitView.test.tsx
+executed_at_utc: 2026-07-26T07:08:09Z
+head_sha: 2995c2754340f6eb89b9f458e51e5b8479a416b2
+exit_code: 0
+oracle_expected: loading、empty、recoverable error 与 origin-403 互斥；回滚先申请后独立批准或拒绝；409 可恢复；普通区不显示 commit、完整路径或 blame，Advanced 可见且焦点归位
+oracle_observed: exact 24/24 通过；页面状态、文件操作、两阶段回滚批准/拒绝、冲突提示、相对路径截断、Advanced 技术信息与焦点返回全部通过
+raw_output_file: /tmp/f149-t042-green.log
+raw_output_sha256: 052123e51a18674832379a4391fede11814ac7616838703acb74980dcc2f246c
+raw_output_size: 380
+secret_scan: pass
+network: false
+rerun: false

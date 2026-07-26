@@ -1,0 +1,16 @@
+task_id: T042
+phase: RED
+behavior: Files v2 页面状态、两阶段回滚、冲突恢复、路径敏感信息与 Advanced 边界
+command: cd octoagent/frontend && npx vitest run src/pages/FilesCenter.test.tsx src/pages/WorkspaceGitView.test.tsx
+executed_at_utc: 2026-07-26T07:00:52Z
+head_sha: 2995c2754340f6eb89b9f458e51e5b8479a416b2
+exit_code: 1
+oracle_expected: 旧 Files 页面无法同时满足 loading、empty、recoverable error、origin-403、两阶段回滚、409 冲突恢复、普通区隐藏 commit/path/blame 与可访问 Advanced；既有文件和工作区控制继续通过
+oracle_observed: exact 24 项中 6 项稳定失败、18 项通过；失败均为目标 empty/error/403、两阶段回滚、409 冲突或 Advanced 边界断言，不是 import、collection、路径或基础设施错误
+raw_output_file: /tmp/f149-t042-red.log
+raw_output_sha256: 39eb0ef1842f0ce5f115cab645b1fb2c6532666dee70411da5196954e776275e
+raw_output_size: 57474
+capture_note: 同一命令此前曾因 tee 未启用 pipefail 得到错误 shell 状态；该无效捕获已被本次启用 pipefail 的唯一有效 RED 证据替代，未作为 TDD 证据引用
+secret_scan: pass
+network: false
+rerun: false

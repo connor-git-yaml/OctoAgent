@@ -13,14 +13,10 @@
  * - 所有请求经 src/api/client 的内部 apiFetch（front-door 鉴权）
  */
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DiffBody } from "../components/diff/DiffBody";
+import { resolveResourcePageState } from "../domains/shared/resourcePageState";
+import ResourceState from "../ui/primitives/ResourceState";
 import WorkspaceGitView from "./WorkspaceGitView";
 import {
   fetchFileTasks,
@@ -34,6 +30,7 @@ import type {
   LogicalFileItem,
   VersionMetaItem,
 } from "../types";
+import "./FilesCenter.css";
 
 type ViewLevel = "tasks" | "files" | "diff";
 
@@ -46,19 +43,21 @@ export default function FilesCenter() {
   // 一级：任务列表
   const [tasks, setTasks] = useState<FileTaskItem[]>([]);
   const [tasksLoading, setTasksLoading] = useState(true);
-  const [tasksError, setTasksError] = useState<string | null>(null);
+  const [tasksError, setTasksError] = useState<Error | null>(null);
 
   // 二级：选中的任务 + 逻辑文件列表
   const [selectedTask, setSelectedTask] = useState<FileTaskItem | null>(null);
   const [files, setFiles] = useState<LogicalFileItem[]>([]);
   const [filesLoading, setFilesLoading] = useState(false);
-  const [filesError, setFilesError] = useState<string | null>(null);
+  const [filesError, setFilesError] = useState<Error | null>(null);
 
   // 详情：选中的逻辑文件 + diff 数据
-  const [selectedFile, setSelectedFile] = useState<LogicalFileItem | null>(null);
+  const [selectedFile, setSelectedFile] = useState<LogicalFileItem | null>(
+    null,
+  );
   const [diff, setDiff] = useState<DiffResponse | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
-  const [diffError, setDiffError] = useState<string | null>(null);
+  const [diffError, setDiffError] = useState<Error | null>(null);
 
   // 异步竞态防护：单调递增的请求序号。
   // 任何会发起异步加载或改变当前选择的操作（openTask / openFile / 回退）
@@ -67,31 +66,35 @@ export default function FilesCenter() {
   const requestSeq = useRef(0);
 
   // 一级：加载任务列表
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
+  const loadTasks = useCallback(
+    async (isCurrent: () => boolean = () => true) => {
       setTasksLoading(true);
       setTasksError(null);
       try {
         const data = await fetchFileTasks();
-        if (!cancelled) {
+        if (isCurrent()) {
           setTasks(data.tasks);
         }
       } catch (err) {
-        if (!cancelled) {
-          setTasksError(err instanceof Error ? err.message : "加载任务失败");
+        if (isCurrent()) {
+          setTasksError(err instanceof Error ? err : new Error("加载任务失败"));
         }
       } finally {
-        if (!cancelled) {
+        if (isCurrent()) {
           setTasksLoading(false);
         }
       }
-    }
-    load();
+    },
+    [],
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadTasks(() => !cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadTasks]);
 
   // 二级：选中任务 -> 加载逻辑文件
   const openTask = useCallback(async (task: FileTaskItem) => {
@@ -114,7 +117,7 @@ export default function FilesCenter() {
       if (seq !== requestSeq.current) {
         return;
       }
-      setFilesError(err instanceof Error ? err.message : "加载文件失败");
+      setFilesError(err instanceof Error ? err : new Error("加载文件失败"));
     } finally {
       if (seq === requestSeq.current) {
         setFilesLoading(false);
@@ -137,7 +140,7 @@ export default function FilesCenter() {
       try {
         const data = await fetchLogicalFileDiff(
           selectedTask.task_id,
-          file.logical_file_id
+          file.logical_file_id,
         );
         if (seq !== requestSeq.current) {
           return; // 已有更新的操作，丢弃过期响应
@@ -147,14 +150,14 @@ export default function FilesCenter() {
         if (seq !== requestSeq.current) {
           return;
         }
-        setDiffError(err instanceof Error ? err.message : "加载差异失败");
+        setDiffError(err instanceof Error ? err : new Error("加载差异失败"));
       } finally {
         if (seq === requestSeq.current) {
           setDiffLoading(false);
         }
       }
     },
-    [selectedTask]
+    [selectedTask],
   );
 
   // 回退：详情 -> 文件列表
@@ -184,8 +187,8 @@ export default function FilesCenter() {
   }, []);
 
   return (
-    <div className="wb-page">
-      <section className="wb-hero wb-hero-compact">
+    <div className="f149-files-page">
+      <section className="f149-files-hero">
         <div className="wb-hero-copy">
           <p className="wb-kicker">文件</p>
           <h1>文件工作台</h1>
@@ -194,13 +197,10 @@ export default function FilesCenter() {
       </section>
 
       {/* F107 W2：切换 任务产物版本 / 工作区 git 版本 */}
-      <div
-        className="wb-agent-check-grid"
-        style={{ marginBottom: "var(--space-md)" }}
-      >
+      <div className="f149-files-tabs" aria-label="文件视图">
         <button
           type="button"
-          className="wb-chip"
+          className="f149-files-tab"
           aria-pressed={mode === "artifacts"}
           onClick={() => setMode("artifacts")}
         >
@@ -208,7 +208,7 @@ export default function FilesCenter() {
         </button>
         <button
           type="button"
-          className="wb-chip"
+          className="f149-files-tab"
           aria-pressed={mode === "workspace"}
           onClick={() => setMode("workspace")}
         >
@@ -219,44 +219,49 @@ export default function FilesCenter() {
       {mode === "workspace" ? (
         <WorkspaceGitView />
       ) : (
-        <>
-      <FilesBreadcrumb
-        level={level}
-        taskTitle={selectedTask?.title ?? null}
-        fileName={selectedFile?.display_name ?? null}
-        onBackToTasks={backToTasks}
-        onBackToFiles={backToFiles}
-      />
+        <section className="f149-files-artifacts" aria-label="任务产物">
+          <FilesBreadcrumb
+            level={level}
+            taskTitle={selectedTask?.title ?? null}
+            fileName={selectedFile?.display_name ?? null}
+            onBackToTasks={backToTasks}
+            onBackToFiles={backToFiles}
+          />
 
-      {level === "tasks" && (
-        <TasksView
-          tasks={tasks}
-          loading={tasksLoading}
-          error={tasksError}
-          onOpenTask={openTask}
-        />
-      )}
+          {level === "tasks" && (
+            <TasksView
+              tasks={tasks}
+              loading={tasksLoading}
+              error={tasksError}
+              onRetry={() => void loadTasks()}
+              onOpenTask={openTask}
+            />
+          )}
 
-      {level === "files" && (
-        <FilesView
-          files={files}
-          loading={filesLoading}
-          error={filesError}
-          onOpenFile={openFile}
-        />
-      )}
+          {level === "files" && (
+            <FilesView
+              files={files}
+              loading={filesLoading}
+              error={filesError}
+              onRetry={() => {
+                if (selectedTask) void openTask(selectedTask);
+              }}
+              onOpenFile={openFile}
+            />
+          )}
 
-      {level === "diff" && selectedFile && selectedTask && (
-        <DiffView
-          fileName={selectedFile.display_name}
-          taskId={selectedTask.task_id}
-          logicalFileId={selectedFile.logical_file_id}
-          diff={diff}
-          loading={diffLoading}
-          error={diffError}
-        />
-      )}
-        </>
+          {level === "diff" && selectedFile && selectedTask && (
+            <DiffView
+              fileName={selectedFile.display_name}
+              taskId={selectedTask.task_id}
+              logicalFileId={selectedFile.logical_file_id}
+              diff={diff}
+              loading={diffLoading}
+              error={diffError}
+              onRetry={() => void openFile(selectedFile)}
+            />
+          )}
+        </section>
       )}
     </div>
   );
@@ -275,10 +280,10 @@ function FilesBreadcrumb(props: {
 }) {
   const { level, taskTitle, fileName, onBackToTasks, onBackToFiles } = props;
   return (
-    <nav className="wb-chip-row" aria-label="文件工作台导航">
+    <nav className="f149-files-breadcrumb" aria-label="文件工作台导航">
       <button
         type="button"
-        className="wb-button wb-button-tertiary"
+        className="f149-files-back"
         onClick={onBackToTasks}
         disabled={level === "tasks"}
       >
@@ -289,7 +294,7 @@ function FilesBreadcrumb(props: {
           <span aria-hidden="true">/</span>
           <button
             type="button"
-            className="wb-button wb-button-tertiary"
+            className="f149-files-back"
             onClick={onBackToFiles}
             disabled={level === "files"}
           >
@@ -300,7 +305,7 @@ function FilesBreadcrumb(props: {
       {level === "diff" && fileName && (
         <>
           <span aria-hidden="true">/</span>
-          <span className="wb-chip">{fileName}</span>
+          <span className="f149-files-current">{fileName}</span>
         </>
       )}
     </nav>
@@ -314,44 +319,73 @@ function FilesBreadcrumb(props: {
 function TasksView(props: {
   tasks: FileTaskItem[];
   loading: boolean;
-  error: string | null;
+  error: Error | null;
+  onRetry: () => void;
   onOpenTask: (task: FileTaskItem) => void;
 }) {
-  const { tasks, loading, error, onOpenTask } = props;
-
-  if (loading) {
-    return (
-      <div className="wb-empty-state">
-        <span>正在加载任务列表…</span>
-      </div>
-    );
+  const { tasks, loading, error, onRetry, onOpenTask } = props;
+  const resolution = resolveResourcePageState({
+    loading,
+    hasContent: tasks.length > 0,
+    connected: true,
+    error,
+  });
+  if (resolution.owner === "global-auth") {
+    return null;
   }
-  if (error) {
+  if (resolution.state.kind !== "ready") {
+    const copy = {
+      loading: {
+        title: "正在加载文件",
+        detail: "正在整理任务产物，请稍候。",
+      },
+      empty: {
+        title: "还没有产物文件",
+        detail: "任务完成后，产出的文件会出现在这里。",
+      },
+      "permission-denied": {
+        title: "当前账号没有权限查看文件",
+        detail: "如需访问，请联系管理员。",
+      },
+      "recoverable-error": {
+        title: "文件列表加载失败",
+        detail: "暂时无法取得文件列表，请重试。",
+      },
+      "not-found": {
+        title: "文件列表暂不可用",
+        detail: "请返回后重试。",
+      },
+      disconnected: {
+        title: "文件列表已断开",
+        detail: "请重新连接后重试。",
+      },
+      conflict: {
+        title: "文件列表已变化",
+        detail: "请刷新后继续。",
+      },
+    }[resolution.state.kind];
     return (
-      <div className="wb-inline-banner is-warning">
-        <span>加载失败：{error}</span>
-      </div>
-    );
-  }
-  if (tasks.length === 0) {
-    return (
-      <div className="wb-empty-state">
-        <strong>还没有可对比的文件</strong>
-        <span>当任务产出文件并有多个版本时，会出现在这里。</span>
-      </div>
+      <ResourceState
+        resolution={resolution}
+        title={copy.title}
+        detail={copy.detail}
+        retryLabel="重试"
+        onRetry={onRetry}
+      />
     );
   }
 
   return (
-    <section className="wb-card-grid wb-card-grid-3">
+    <section className="f149-files-task-grid">
       {tasks.map((task) => (
         <button
           key={task.task_id}
           type="button"
-          className="wb-card"
+          className="f149-files-task-card"
           onClick={() => onOpenTask(task)}
         >
           <strong>{task.title}</strong>
+          <span>查看产出的文件</span>
         </button>
       ))}
     </section>
@@ -365,28 +399,33 @@ function TasksView(props: {
 function FilesView(props: {
   files: LogicalFileItem[];
   loading: boolean;
-  error: string | null;
+  error: Error | null;
+  onRetry: () => void;
   onOpenFile: (file: LogicalFileItem) => void;
 }) {
-  const { files, loading, error, onOpenFile } = props;
+  const { files, loading, error, onRetry, onOpenFile } = props;
 
   if (loading) {
     return (
-      <div className="wb-empty-state">
+      <div className="f149-files-state">
         <span>正在加载文件列表…</span>
       </div>
     );
   }
   if (error) {
     return (
-      <div className="wb-inline-banner is-warning">
-        <span>加载失败：{error}</span>
+      <div className="f149-files-state" role="alert">
+        <strong>文件列表加载失败</strong>
+        <span>暂时无法取得这个任务的文件。</span>
+        <button type="button" onClick={onRetry}>
+          重试
+        </button>
       </div>
     );
   }
   if (files.length === 0) {
     return (
-      <div className="wb-empty-state">
+      <div className="f149-files-state">
         <strong>这个任务暂无可对比的文件</strong>
         <span>只有产生了多个版本的文件才能查看变化。</span>
       </div>
@@ -394,16 +433,16 @@ function FilesView(props: {
   }
 
   return (
-    <section className="wb-card-grid wb-card-grid-3">
+    <section className="f149-files-list">
       {files.map((file) => (
         <button
           key={file.logical_file_id}
           type="button"
-          className="wb-card"
+          className="f149-files-card"
           onClick={() => onOpenFile(file)}
         >
           <strong>{file.display_name}</strong>
-          <span className="wb-chip">{file.version_count} 个版本</span>
+          <span>{file.version_count} 个版本</span>
         </button>
       ))}
     </section>
@@ -422,27 +461,33 @@ function DiffView(props: {
   logicalFileId: string;
   diff: DiffResponse | null;
   loading: boolean;
-  error: string | null;
+  error: Error | null;
+  onRetry: () => void;
 }) {
-  const { fileName, taskId, logicalFileId, diff, loading, error } = props;
+  const { fileName, taskId, logicalFileId, diff, loading, error, onRetry } =
+    props;
 
   if (loading) {
     return (
-      <div className="wb-empty-state">
+      <div className="f149-files-state">
         <span>正在加载差异…</span>
       </div>
     );
   }
   if (error) {
     return (
-      <div className="wb-inline-banner is-warning">
-        <span>加载失败：{error}</span>
+      <div className="f149-files-state" role="alert">
+        <strong>文件对比加载失败</strong>
+        <span>暂时无法显示这个文件的变化。</span>
+        <button type="button" onClick={onRetry}>
+          重试
+        </button>
       </div>
     );
   }
   if (!diff || !diff.current) {
     return (
-      <div className="wb-empty-state">
+      <div className="f149-files-state">
         <strong>无法显示这个文件的内容</strong>
         <span>稍后再试，或选择其他文件。</span>
       </div>
@@ -450,7 +495,7 @@ function DiffView(props: {
   }
 
   return (
-    <section className="wb-card">
+    <section className="f149-files-diff">
       <p className="wb-card-label">{fileName}</p>
       <DiffBody diff={diff} />
       {/* FR-017：技术字段（版本号 / hash / size / storage_kind）仅在 Advanced 折叠区，
@@ -505,27 +550,23 @@ function AdvancedVersionMeta(props: { taskId: string; logicalFileId: string }) {
         }
       }
     },
-    [taskId, logicalFileId, loading]
+    [taskId, logicalFileId, loading],
   );
 
   return (
-    <details
-      className="wb-field-guide wb-field-guide-disclosure"
-      style={ADVANCED_DETAILS_STYLE}
-      onToggle={handleToggle}
-    >
-      <summary>高级信息（版本详情）</summary>
+    <details className="f149-files-version-details" onToggle={handleToggle}>
+      <summary>高级 · 版本与存储信息</summary>
       {loading && <p>正在加载版本详情…</p>}
       {loadError && (
-        <p className="wb-field-error">加载失败：{loadError}</p>
+        <p className="f149-files-field-error">加载失败：{loadError}</p>
       )}
       {!loading && !loadError && versions && versions.length === 0 && (
         <p>暂无版本元信息。</p>
       )}
       {!loading && !loadError && versions && versions.length > 0 && (
-        <ul style={VERSION_LIST_STYLE}>
+        <ul className="f149-files-version-list">
           {versions.map((v) => (
-            <li key={v.version_no} style={VERSION_ITEM_STYLE}>
+            <li key={v.version_no}>
               <span>版本号：v{v.version_no}</span>
               <span>时间：{v.ts}</span>
               <span>大小：{v.size} 字节</span>
@@ -538,28 +579,3 @@ function AdvancedVersionMeta(props: { taskId: string; logicalFileId: string }) {
     </details>
   );
 }
-
-// 纯手工样式（tokens 驱动，不引 CSS 库）---------------------------------------
-
-const ADVANCED_DETAILS_STYLE: CSSProperties = {
-  marginTop: "var(--space-md)",
-};
-
-const VERSION_LIST_STYLE: CSSProperties = {
-  listStyle: "none",
-  margin: 0,
-  padding: 0,
-  display: "flex",
-  flexDirection: "column",
-  gap: "var(--space-sm)",
-};
-
-const VERSION_ITEM_STYLE: CSSProperties = {
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "var(--space-md)",
-  fontSize: "13px",
-  color: "var(--cp-muted)",
-  borderTop: "1px solid var(--cp-border)",
-  paddingTop: "var(--space-sm)",
-};
