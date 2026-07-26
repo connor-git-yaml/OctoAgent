@@ -61,6 +61,24 @@ export const L1_A_WAVE_DIAGNOSTIC_EVENT_ID =
 export const L1_A_WAVE_DIAGNOSTIC_SUMMARY = "历史诊断已净化";
 export const L1_A_WAVE_PRIVATE_VALUE = "f149-a-wave-private-value";
 
+// --- F149 T053 B 波 ---
+export const L1_B_WAVE_SKILL_NAME = "f149-b-wave-skill";
+export const L1_B_WAVE_SKILL_BODY = [
+  "# B Wave Skill",
+  "",
+  "由真实浏览器文件选择器安装。",
+].join("\n");
+export const L1_B_WAVE_SKILL_CONTENT = [
+  "---",
+  `name: ${L1_B_WAVE_SKILL_NAME}`,
+  "description: B 波浏览器安装验收",
+  "version: 1.0.0",
+  "tags:",
+  "  - e2e",
+  "---",
+  L1_B_WAVE_SKILL_BODY,
+].join("\n");
+
 // --- 已知失败 marker（UI 稳定错误文案；命中即定性失败而非裸超时） ---
 export const KNOWN_FAILURE_MARKERS = [
   "刚才没有发送成功",
@@ -120,6 +138,25 @@ export async function fetchTaskDetail(
   });
   if (!resp.ok) throw new Error(`GET /api/tasks/${taskId} ${resp.status}`);
   return (await resp.json()) as TaskDetail;
+}
+
+export interface SkillDetail {
+  name: string;
+  description: string;
+  source: string;
+  content: string;
+}
+
+export async function fetchSkillDetail(
+  mode: L1Mode,
+  name: string,
+): Promise<SkillDetail> {
+  const resp = await fetch(
+    `${l1ServerUrl(mode)}/api/skills/${encodeURIComponent(name)}`,
+    { headers: authHeaders(mode) },
+  );
+  if (!resp.ok) throw new Error(`GET /api/skills/${name} ${resp.status}`);
+  return (await resp.json()) as SkillDetail;
 }
 
 /** 轮询 task 到终态 SUCCEEDED（SSE 回复先于终态持久化的窗口兜底）。 */

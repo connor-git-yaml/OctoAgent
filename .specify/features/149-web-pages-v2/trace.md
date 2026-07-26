@@ -337,5 +337,14 @@
   只替换测试控制方式，不计产品失败。最终GREEN/REFACTOR均exact 1/1，全前端
   594/594、build、OpenAPI、boundary/style/complexity、pre-commit后端26项和
   changed-lines coverage 90.06%全部通过。
+- T053新增B波Skill单一L1旅程。首次exact行为因安装弹层打开后焦点仍停在背景
+  触发器而稳定见红；由于T043早已GREEN，证据明确标记为late RED，不倒签
+  test-first顺序。GREEN只补既有文件输入的原生初始焦点，并用稳定语义标记处理
+  安装刷新列表后触发器重挂载的焦点归还；没有修改CSS、布局、卡片节奏或
+  Claude Design排版。真实浏览器上传完整SKILL.md、POST安装、打开详情并用
+  Escape返回焦点；API独立核验解析后的正文，隔离HOME磁盘独立核验原始完整
+  字节。旧dist与错误API正文预期的中间尝试均明确拒绝。最终GREEN/REFACTOR均
+  exact 1/1，全前端594/594、build、OpenAPI、boundary/style/complexity与
+  changed-lines coverage 90.08%全部通过。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

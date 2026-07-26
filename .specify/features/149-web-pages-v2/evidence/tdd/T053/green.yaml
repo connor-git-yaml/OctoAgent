@@ -1,0 +1,25 @@
+task_id: T053
+phase: GREEN
+behavior: B波Skill文件选择器、模态焦点与安装结果真实浏览器旅程
+command: cd octoagent/frontend && npx playwright test e2e/f149-b-wave.spec.ts
+executed_at_utc: 2026-07-26T08:43:14Z
+head_sha: a2456a4357e6c31218b010bb932c9246fba23d77
+exit_code: 0
+oracle_expected: 真实文件chooser、安装/详情模态焦点、API解析结果与磁盘原始字节全部一致
+oracle_observed: exact 1/1通过；文件输入获得初始焦点，真实POST返回201，列表刷新后焦点回到重新挂载的安装触发器，详情Escape后焦点回原按钮；API返回解析后正文，磁盘SKILL.md保持完整原始字节
+selected: 1
+passed: 1
+failed: 0
+raw_output_file: /tmp/f149-t053-green-final.log
+raw_output_sha256: 5b46a6e7c113e678379297628cbeb5d16f3f8f04d9275e104ba7be4209a6b6c8
+raw_output_size: 60089
+rejected_attempts:
+  - raw_output_file: /tmp/f149-t053-green.log
+    raw_output_sha256: 654f422205d3290edb0b7cce47ecae9ad7adf6b8690dd7bc3816b2806984af
+    raw_output_size: 59544
+    reason: 首次GREEN未先重建dist，Playwright仍加载修改前SkillCenter产物；不是新代码的行为结果
+  - raw_output_file: not_preserved
+    reason: 重建后焦点与安装链已通过，但测试把磁盘完整SKILL.md误当成详情API正文；修正为API解析正文与磁盘原始字节两个独立oracle，未改产品语义
+external_network_warning: absent
+secret_scan: pass
+rerun: true

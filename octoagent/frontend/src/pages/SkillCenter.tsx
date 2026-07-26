@@ -26,11 +26,17 @@ const SOURCE_LABELS: Record<SkillItem["source"], string> = {
   project: "项目",
 };
 
-function restoreFocus(target: HTMLElement | null): void {
-  if (!target) {
-    return;
-  }
-  window.requestAnimationFrame(() => target.focus());
+function restoreFocus(
+  target: HTMLElement | null,
+  fallbackSelector: string | null,
+): void {
+  window.requestAnimationFrame(() => {
+    const fallback = fallbackSelector
+      ? document.querySelector<HTMLElement>(fallbackSelector)
+      : null;
+    const nextTarget = target?.isConnected ? target : fallback;
+    nextTarget?.focus();
+  });
 }
 
 function useEscapeToClose(open: boolean, onClose: () => void): void {
@@ -296,6 +302,7 @@ function InstallDialog({
           <input
             type="file"
             accept=".md,text/markdown,text/plain"
+            autoFocus
             onChange={(event) =>
               void handleFile(event.currentTarget.files?.[0])
             }
@@ -399,6 +406,7 @@ export default function SkillCenter(): ReactElement {
   const [detail, setDetail] = useState<SkillDetail | null>(null);
   const [busy, setBusy] = useState(false);
   const focusReturnRef = useRef<HTMLElement | null>(null);
+  const focusReturnSelectorRef = useRef<string | null>(null);
 
   const loadSkills = useCallback(async () => {
     setLoading(true);
@@ -422,17 +430,19 @@ export default function SkillCenter(): ReactElement {
     setSelectedSkill(null);
     setDetail(null);
     setActionError(null);
-    restoreFocus(focusReturnRef.current);
+    restoreFocus(focusReturnRef.current, focusReturnSelectorRef.current);
   }, []);
 
   const openInstall = (trigger: HTMLButtonElement) => {
     focusReturnRef.current = trigger;
+    focusReturnSelectorRef.current = '[data-focus-return="skill-install"]';
     setActionError(null);
     setDialog("install");
   };
 
   const openDetail = async (skill: SkillItem, trigger: HTMLButtonElement) => {
     focusReturnRef.current = trigger;
+    focusReturnSelectorRef.current = null;
     setSelectedSkill(skill);
     setActionError(null);
     try {
@@ -446,6 +456,7 @@ export default function SkillCenter(): ReactElement {
 
   const openUninstall = (skill: SkillItem, trigger: HTMLButtonElement) => {
     focusReturnRef.current = trigger;
+    focusReturnSelectorRef.current = null;
     setSelectedSkill(skill);
     setActionError(null);
     setDialog("uninstall");
@@ -456,8 +467,8 @@ export default function SkillCenter(): ReactElement {
     setActionError(null);
     try {
       await installSkill(name, content);
-      closeDialog();
       await loadSkills();
+      closeDialog();
     } catch (error) {
       setActionError(
         error instanceof ApiError && error.status === 409
@@ -509,6 +520,7 @@ export default function SkillCenter(): ReactElement {
             <button
               type="button"
               className="f149-skills-button f149-skills-button-primary"
+              data-focus-return="skill-install"
               onClick={(event) => openInstall(event.currentTarget)}
             >
               安装 Skill
@@ -543,6 +555,7 @@ export default function SkillCenter(): ReactElement {
             <button
               type="button"
               className="f149-skills-button f149-skills-button-primary"
+              data-focus-return="skill-install"
               onClick={(event) => openInstall(event.currentTarget)}
             >
               安装 Skill

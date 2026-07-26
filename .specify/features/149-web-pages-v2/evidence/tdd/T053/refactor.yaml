@@ -1,0 +1,44 @@
+task_id: T053
+phase: REFACTOR
+behavior: B波Skill文件选择器、模态焦点与安装结果真实浏览器旅程
+command: cd octoagent/frontend && npx playwright test e2e/f149-b-wave.spec.ts
+executed_at_utc: 2026-07-26T08:43:43Z
+head_sha: a2456a4357e6c31218b010bb932c9246fba23d77
+exit_code: 0
+oracle_expected: 同字节复验保持chooser、modal、focus、API与文件外部oracle，不复制安装规则或改变Claude Design布局
+oracle_observed: exact 1/1、全前端594/594、build、OpenAPI、boundary/style/complexity与changed-lines coverage 90.08%全部通过；实现仅补原生文件输入焦点及列表重挂载后的稳定焦点归还，安装规则继续由既有adapter/backend负责
+selected: 1
+passed: 1
+failed: 0
+raw_output_file: /tmp/f149-t053-refactor-final.log
+raw_output_sha256: 6e2fdc6148503efcaacc780382a38c13872f9f7ff7ace117e2e463e27633bc9c
+raw_output_size: 60086
+file_sha256:
+  skill-center: 5af0be906425aba1235087cd0f70df1e6a5b317fe7f665787902b53f53c342e7
+  e2e-support: b8e4be206fa67b35ff49301d4569cd8722c898a01c5ba14c4b463e5c9730b420
+  b-wave-spec: bec2a291a935ab53524361f28d18d214f583ac643350c16ec62cec450530d9f3
+frontend_gates:
+  raw_output_file: /tmp/f149-t053-frontend-gates.log
+  raw_output_sha256: 76d572eeb70c98ab8dd8e998d2e795337b4abb87fcc6850c8411e653265a977b
+  raw_output_size: 24078
+  vitest: 594/594
+coverage:
+  raw_output_file: /tmp/f149-t053-coverage-final-clean.log
+  raw_output_sha256: 992fd92fffa64c50681af9dcfd78a77daa007e08aa186a2f0e40e8edf26dda4f
+  raw_output_size: 39063
+  changed_lines_covered: 2951
+  changed_lines_total: 3276
+  changed_lines_percent: 90.08
+pre_commit:
+  raw_output_file: /tmp/f149-t053-precommit.log
+  raw_output_sha256: fd9b45413768ed646d5998e4095de9012622eeda2642bf0c7241d193c4920ef8
+  raw_output_size: 236
+  result: 26 passed, 1 skipped, 5679 deselected
+quality_review:
+  - 没有修改CSS、布局token、卡片结构或Claude Design视觉节奏
+  - 浏览器通过真实input文件选择器、真实POST、API读取与隔离HOME磁盘读取形成外部闭环
+  - 列表刷新会重挂载安装按钮，焦点归还使用稳定语义标记而非测试专用延时
+  - RED发生在页面GREEN之后，证据明确标记late_red，不倒签、不冒充pre-page TDD
+external_network_warning: absent
+secret_scan: pass
+rerun: true

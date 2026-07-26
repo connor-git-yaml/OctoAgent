@@ -681,6 +681,16 @@
 
 ### T053 — B 波 Skill file chooser/modal/focus 旅程
 
+- **状态**：`[x]`；真实但迟到的RED→GREEN→REFACTOR已完成，证据见
+  `evidence/tdd/T053/`。由于T043页面先于本task完成，RED不满足原计划的
+  pre-page chronology：首次exact行为因安装弹层打开后焦点仍停在背景按钮而稳定
+  失败。GREEN只为既有文件输入补初始焦点，并在安装刷新列表、触发器重新挂载后
+  通过稳定语义标记归还焦点；没有修改CSS、布局、卡片节奏或Claude Design排版。
+  真实浏览器使用`input[type=file]`上传完整SKILL.md，POST返回201；API外部oracle
+  核验解析后的详情正文，隔离HOME文件oracle核验原始完整字节，详情Escape也回到
+  原触发器。旧dist与错误API正文预期的两次中间尝试均明确拒绝，不冒充产品失败。
+  最终GREEN/REFACTOR均exact 1/1，全前端594/594、build、OpenAPI、
+  boundary/style/complexity与changed-lines coverage 90.08%全部通过。
 - **层/FR**：L1；FR-006/008/016。
 - **文件**：新 `frontend/e2e/f149-b-wave.spec.ts`、deterministic fixture/support。
 - **RED_DEPENDS**：T050 与 deterministic fixture；RED 必须在 T043 页面 GREEN 前执行。

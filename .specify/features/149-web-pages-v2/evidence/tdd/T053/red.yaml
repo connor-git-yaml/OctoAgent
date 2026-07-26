@@ -1,0 +1,20 @@
+task_id: T053
+phase: RED
+behavior: B波Skill文件选择器、模态焦点与安装结果真实浏览器旅程
+chronology: late_red_after_page_green
+chronology_note: T043页面已经完成后才补建本L1合同；这是迟到但真实的RED，不宣称满足原计划的pre-page test-first顺序
+command: cd octoagent/frontend && npx playwright test e2e/f149-b-wave.spec.ts
+executed_at_utc: 2026-07-26T08:40:08Z
+head_sha: a2456a4357e6c31218b010bb932c9246fba23d77
+exit_code: 1
+oracle_expected: F149_B_WAVE_BROWSER_CONTRACT_MISSING
+oracle_observed: 唯一浏览器旅程失败；安装弹层已有accessible name，但打开后焦点仍停留在背景的安装Skill按钮，未进入模态内容
+selected: 1
+passed: 0
+failed: 1
+raw_output_file: /tmp/f149-t053-red.log
+raw_output_sha256: 2f80011292e98b2b9a1a2cfe0b10ab4c4b9cd4e978967ad01a326628fe67d10a
+raw_output_size: 59546
+external_network_warning: absent
+secret_scan: pass
+rerun: false
