@@ -18,14 +18,24 @@
   box-shadow: var(--cp-shadow);
 }
 
-.f149-files-hero .wb-hero-copy {
+.f149-files-hero-copy {
+  display: grid;
+  min-width: 0;
+  gap: 10px;
   max-width: 58ch;
 }
 
-.f149-files-hero .wb-kicker,
+.f149-files-kicker,
+.f149-files-card-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.f149-files-hero .f149-files-kicker,
 .f149-files-kicker,
 .f149-files-dialog header p,
-.f149-files-diff > .wb-card-label {
+.f149-files-diff > .f149-files-card-label {
   margin: 0 0 var(--cp-space-2);
   color: var(--cp-primary);
   font-size: 0.7rem;
@@ -42,7 +52,7 @@
   letter-spacing: -0.065em;
 }
 
-.f149-files-hero .wb-hero-copy > p:last-child {
+.f149-files-hero .f149-files-hero-copy > p:last-child {
   margin: var(--cp-space-4) 0 0;
   color: var(--cp-muted);
   line-height: 1.7;

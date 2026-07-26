@@ -1,0 +1,33 @@
+task_id: T051
+phase: REFACTOR
+behavior: 10个Web surface的390px窄窗口geometry/a11y sweep
+command: cd octoagent/frontend && npx playwright test e2e/f149-responsive-a11y.spec.ts
+executed_at_utc: 2026-07-26T08:22:07Z
+head_sha: 4c8f32c649f01ae05f232d82fed3a99cd65a2555
+exit_code: 0
+oracle_expected: exact合同复验不漂移，语义化landmark不改变Claude Design视觉与页面业务行为
+oracle_observed: exact 10/10、相关页面77/77、全前端593/593、build、OpenAPI与复杂度检查通过
+selected: 10
+passed: 10
+failed: 0
+raw_output_file: /tmp/f149-t051-refactor-final.log
+raw_output_sha256: f8af9478ab3734056b20c399aeae29bf3fff36a4bc4b5b6b103bb031760d8862
+raw_output_size: 143863
+targeted_vitest_log_sha256: 31b48354a9251ceeb3300dcf6e897a2347a0c4a4bf91a42a24cbf9d165f18570
+full_frontend_log_sha256: 72875727373b796deb07ab96b6a25b3caaf971846c7dd6636d396195abc56bb5
+external_network_warning: absent
+quality_review:
+  - 390px仅是桌面Web窄浏览器窗口健壮性，不是手机产品、移动认证或原生iOS验收
+  - 10个surface共享一个参数化browser合同，不复制页面业务状态矩阵
+  - 五个页面根节点仅补main语义；Files三个旧wb视觉类以同值co-located CSS迁移，布局和交互保持Claude Design基线
+  - RED发生在页面GREEN之后，证据明确标记late_red，不倒签、不冒充pre-page TDD
+file_sha256:
+  responsive-a11y-spec: 01220a80f954baa852caf909643baa52596ea841c69d3edebece7285c206a425
+  task-detail: 8169a193832618b39a36ff39bb3183599890faa796fa07df4c33e1923ac71703
+  automation: cd1fef5d62cf083489efedef2df282ae7e41c548f8f2216abee78f0eb6dbe6f8
+  settings: 6bcf44136200e6157fdf23438ae40014801885fc0211919a9f8429e1919d38cd
+  agents: 1c596b69b7803dd3461c311baf844fc0f55dd253866c392e0d80232d9354a3c8
+  files: b18b1004b66701ef2bb4dd974b2ac1b3e5700afee907e4692dd72bf2eeb4e6be
+  files-css: 9771f8c6b003d2cc425e13d5ca3e6f256c4cd4b7643614b6c7b6dce49d0923b7
+secret_scan: pass
+rerun: true

@@ -187,10 +187,10 @@ export default function FilesCenter() {
   }, []);
 
   return (
-    <div className="f149-files-page">
+    <main className="f149-files-page">
       <section className="f149-files-hero">
-        <div className="wb-hero-copy">
-          <p className="wb-kicker">文件</p>
+        <div className="f149-files-hero-copy">
+          <p className="f149-files-kicker">文件</p>
           <h1>文件工作台</h1>
           <p>查看任务产出文件的版本变化，对比当前版本和上一个版本的内容。</p>
         </div>
@@ -263,7 +263,7 @@ export default function FilesCenter() {
           )}
         </section>
       )}
-    </div>
+    </main>
   );
 }
 
@@ -496,7 +496,7 @@ function DiffView(props: {
 
   return (
     <section className="f149-files-diff">
-      <p className="wb-card-label">{fileName}</p>
+      <p className="f149-files-card-label">{fileName}</p>
       <DiffBody diff={diff} />
       {/* FR-017：技术字段（版本号 / hash / size / storage_kind）仅在 Advanced 折叠区，
           即使主内容不可 diff（二进制 / 超限 / 不可用），版本元信息仍可展开查看 */}

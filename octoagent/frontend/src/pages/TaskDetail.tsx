@@ -302,7 +302,7 @@ export default function TaskDetail() {
   );
 
   if (loading) {
-    return <div className="loading">加载任务详情…</div>;
+    return <main className="loading">加载任务详情…</main>;
   }
 
   if (authError) {
@@ -329,7 +329,7 @@ export default function TaskDetail() {
               detail: "请稍后重试；你当前的页面内容不会受到影响。",
             };
     return (
-      <div className="tv-page">
+      <main className="tv-page">
         <Link to="/" className="tv-detail-back">&larr;</Link>
         <h1>{copy.title}</h1>
         <p>{copy.detail}</p>
@@ -338,7 +338,7 @@ export default function TaskDetail() {
             重试
           </button>
         )}
-      </div>
+      </main>
     );
   }
 
@@ -358,7 +358,7 @@ export default function TaskDetail() {
   });
 
   return (
-    <div className="tv-page">
+    <main className="tv-page">
       {/* 单行头部：← 标题 | 元信息 … 状态badge + 视图切换 */}
       <div className="tv-detail-header">
         <div className="tv-detail-header-row">
@@ -493,6 +493,6 @@ export default function TaskDetail() {
           )}
         </>
       )}
-    </div>
+    </main>
   );
 }

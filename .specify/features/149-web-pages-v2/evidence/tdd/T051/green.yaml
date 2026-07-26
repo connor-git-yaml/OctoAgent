@@ -1,0 +1,18 @@
+task_id: T051
+phase: GREEN
+behavior: 10个Web surface的390px窄窗口geometry/a11y sweep
+command: cd octoagent/frontend && npx playwright test e2e/f149-responsive-a11y.spec.ts
+executed_at_utc: 2026-07-26T08:11:02Z
+head_sha: 4c8f32c649f01ae05f232d82fed3a99cd65a2555
+exit_code: 0
+oracle_expected: 十页无页面级横向溢出，具备main与一级标题，操作可键盘到达且有accessible name，并尊重reduced-motion
+oracle_observed: exact 10/10通过；五页根节点改为main，Files剩余三个旧wb视觉类机械迁到co-located f149-files类并保留同值样式；未改变排版、交互或业务分支
+selected: 10
+passed: 10
+failed: 0
+raw_output_file: /tmp/f149-t051-green.log
+raw_output_sha256: eef9d8febc362b688c6ffe8de30344789f485dab9daad56e425a222afa983989
+raw_output_size: 143867
+external_network_warning: absent
+secret_scan: pass
+rerun: false

@@ -1,0 +1,20 @@
+task_id: T051
+phase: RED
+behavior: 10个Web surface的390px窄窗口geometry/a11y sweep
+chronology: late_red_after_page_green
+chronology_note: 页面T030-T044已经完成后才补建本L1合同；这是迟到但真实的RED，不宣称满足原计划的pre-page test-first顺序
+command: cd octoagent/frontend && npx playwright test e2e/f149-responsive-a11y.spec.ts
+executed_at_utc: 2026-07-26T08:09:21Z
+head_sha: 4c8f32c649f01ae05f232d82fed3a99cd65a2555
+exit_code: 1
+oracle_expected: 任一目标Web页缺main landmark、标题、窄窗口几何、键盘焦点或reduced-motion合同即失败
+oracle_observed: 5项通过、5项失败；Task Detail、Automation、Settings、Agents、Files都因可见main landmark缺失而稳定失败
+selected: 10
+passed: 5
+failed: 5
+raw_output_file: /tmp/f149-t051-first.log
+raw_output_sha256: 72fafd18799e4f3a7a357c3b6ad72068802b71772edca60d853cedcfa4bb0913
+raw_output_size: 167166
+external_network_warning: LiteLLM尝试读取remote cost map失败后使用本地backup；如实保留，不把本轮RED标为零网络
+secret_scan: pass
+rerun: false

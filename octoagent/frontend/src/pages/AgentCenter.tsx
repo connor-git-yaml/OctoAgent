@@ -622,7 +622,7 @@ export default function AgentCenter() {
       : "recoverable-error";
 
   return (
-    <div className="f149-agent-page">
+    <main className="f149-agent-page">
       <section className="f149-agent-hero">
         <div>
           <p className="f149-agent-kicker">AGENTS</p>
@@ -931,6 +931,6 @@ export default function AgentCenter() {
             document.body,
           )
         : null}
-    </div>
+    </main>
   );
 }

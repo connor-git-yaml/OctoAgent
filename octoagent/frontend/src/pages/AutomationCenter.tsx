@@ -270,7 +270,7 @@ export default function AutomationCenter() {
   }, [advancedJobId, closeAdvanced]);
 
   return (
-    <div className="f149-automation-page">
+    <main className="f149-automation-page">
       <section className="f149-automation-hero">
         <div className="f149-automation-hero-copy">
           <p className="f149-automation-kicker">AUTOMATION</p>
@@ -466,6 +466,6 @@ export default function AutomationCenter() {
           </section>
         </div>
       )}
-    </div>
+    </main>
   );
 }

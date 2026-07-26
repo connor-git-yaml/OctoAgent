@@ -631,6 +631,16 @@
 
 ### T051 — 10 个 Web surface × 390 窄窗口 geometry/a11y sweep
 
+- **状态**：`[x]`；真实但迟到的RED→GREEN→REFACTOR已完成，证据见
+  `evidence/tdd/T051/`。由于T030–T044页面先于本task完成，RED不满足原计划的
+  pre-page chronology：首次exact行为是5/10通过，Task Detail、Automation、
+  Settings、Agents、Files因缺少`main` landmark而5/10失败；随后把五页的既有
+  根节点由`div`改为`main`。Files同时把仅剩的三个旧`wb-*`视觉类机械迁到
+  co-located `f149-files-*`并保留同值样式，以满足F151语义门而不改变视觉；
+  全程不改布局、交互或业务分支。
+  GREEN与REFACTOR均为10/10，相关页面77/77、全前端593/593、build、OpenAPI
+  与复杂度检查通过。390px仍只代表桌面Web窄浏览器窗口，不是手机产品或原生
+  iOS验收；首轮LiteLLM remote cost-map失败并本地回退也已如实写入RED证据。
 - **层/FR**：L1；FR-001/007/008/016。
 - **文件**：新 `frontend/e2e/f149-responsive-a11y.spec.ts`、selectors/support。
 - **RED_DEPENDS**：T050；RED 必须在 T030–T044 页面 GREEN 前执行。

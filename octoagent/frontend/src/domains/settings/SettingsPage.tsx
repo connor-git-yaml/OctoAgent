@@ -729,7 +729,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="f149-settings-page f149-settings-page-layout">
+    <main className="f149-settings-page f149-settings-page-layout">
       {/* Feature 079 Phase 1：错误 modal 用 portal 渲染到 body，不受本子树异常影响 */}
       <SettingsErrorModal
         open={errorModal.open}
@@ -987,6 +987,6 @@ export default function SettingsPage() {
           </div>
         </div>
       </section>
-    </div>
+    </main>
   );
 }

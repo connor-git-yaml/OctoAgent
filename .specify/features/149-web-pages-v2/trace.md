@@ -316,5 +316,15 @@
   fallback或环境继承。REFACTOR exact 25/25、全前端593/593通过，
   `playwright test --list`稳定收集现有6项且未启动webServer或行为测试。
   这是L4 harness合同，不修改任何页面、Claude Design制品或iOS边界。
+- T051新增十个Web surface的390px窄窗口参数化L1合同，统一验证页面级横向
+  溢出、`main`/一级标题、键盘焦点、accessible name与reduced-motion。首次
+  exact行为为5/10通过，Task Detail、Automation、Settings、Agents、Files都因
+  缺`main` landmark失败；由于页面GREEN早已完成，该RED被明确记录为late RED，
+  不倒签为pre-page TDD。GREEN把五页既有根`div`改为`main`；Files同时把仅剩
+  的三个旧`wb-*`视觉类机械迁到co-located `f149-files-*`，以同值CSS保持外观
+  并满足F151语义门。全程不改布局、交互或业务分支，继续以Claude Design
+  原始视觉为准。GREEN与
+  REFACTOR均10/10，相关页面77/77、全前端593/593、build、OpenAPI和复杂度
+  检查通过。390px仅为桌面Web窄浏览器窗口健壮性，不代表手机产品或原生iOS。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。
