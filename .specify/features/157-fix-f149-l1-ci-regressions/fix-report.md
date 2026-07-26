@@ -1,4 +1,4 @@
-# F152 故障诊断报告
+# F157 故障诊断报告
 
 ## 权威失败
 
@@ -37,6 +37,28 @@ fixture 使用固定过去时间创建 RUNNING task。CI 执行时间晚于 watc
 - 前端架构说明。
 
 不影响生产数据模型、OpenAPI endpoint、视觉设计、iOS 范围、watchdog 阈值或部署协议。
+
+## 第二轮权威 CI：干净检出差异
+
+- GitHub Actions run：`30197077191`
+- 已通过：`l1-playwright`、frontend、architecture、benchmark
+- 失败 job：`backend-deterministic`
+- 失败摘要：5 failed；其余 `Event loop is closed` 为 pytest 退出阶段日志噪声，不是额外失败。
+
+五项根因均位于测试 fixture：
+
+1. atomic namespace 测试读取被忽略的本地 BEFORE snapshot；改为从 manifest
+   `base_sha` 的 Git blob 读取并 AST 校验。
+2. cross-role 临时仓库复制本地 bootstrap `tree.json`；改为生成 exact 12-field
+   hermetic tree，并同步临时 anchor/index hash。
+3. F150 临时实现 fixture 缺少当前受保护的
+   `_validate_request_front_door_config` sibling；补齐后继续独立验证 sibling drift。
+4. quarantine rerun report 直接读取 canonical local JUnit；改为在独立临时仓库按
+   committed index 的 nodeids 物化 clean JUnit，再调用原 checker 报告链路。
+5. historic formal invocation 检查把 ignored raw 当成 committed truth；改为始终校验
+   immutable index metadata，并仅在完整 raw artifact set 存在时做逐字节交叉验证。
+
+生产 `check-runtime-architecture.py` 保持原字节，不增加干净检出的兼容旁路。
 
 ## 在线调研
 

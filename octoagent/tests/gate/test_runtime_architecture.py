@@ -9,7 +9,6 @@ usage error 冒充 RED。T005 实现 checker 后，同一批 nodeids 会在临�
 from __future__ import annotations
 
 import ast
-import base64
 import hashlib
 import importlib.util
 import inspect
@@ -329,6 +328,8 @@ def _f150_authority_sources() -> dict[str, tuple[str, str]]:
             "    return request\n",
             "def get_front_door_guard(config):\n"
             "    return config.front_door_guard()\n\n"
+            "def _validate_request_front_door_config(request):\n"
+            "    return request.app.state.front_door_guard\n\n"
             "def require_front_door_access(request):\n"
             "    return request.state.front_door_guard.authenticate(request)\n",
         ),
@@ -952,10 +953,48 @@ def _seed_precommit_cross_role_repo(tmp_path: Path) -> Path:
     relative = INVENTORY_REL / "cross-role-edges.v1.json"
     _git(repo, "rm", "-q", "--cached", relative.as_posix())
     _git(repo, "commit", "-q", "-m", "inventory absent from pre-feature HEAD")
-    source_tree = FEATURE_ROOT / "evidence/local/bootstrap/S002-manifest-integrity/RED/tree.json"
-    target_tree = repo / source_tree.relative_to(REPO_ROOT)
+    inventory = repo / relative
+    head = _git(repo, "rev-parse", "HEAD").stdout.strip()
+    head_tree = _git(repo, "rev-parse", "HEAD^{tree}").stdout.strip()
+    target_tree = (
+        repo / FEATURE_REL / "evidence/local/bootstrap/S002-manifest-integrity/RED/tree.json"
+    )
     target_tree.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source_tree, target_tree)
+    _write_json(
+        target_tree,
+        {
+            "version": 1,
+            "slice_id": "S002-manifest-integrity",
+            "phase": "RED",
+            "base_ref": "HEAD",
+            "merge_base_sha": head,
+            "head_sha": head,
+            "head_tree_sha": head_tree,
+            "worktree_fingerprint": "0" * 64,
+            "fingerprint_scope": "hermetic cross-role fixture",
+            "fingerprint_files": [
+                {
+                    "kind": "file",
+                    "path": relative.as_posix(),
+                    "sha256": _sha(inventory),
+                    "size_bytes": inventory.stat().st_size,
+                }
+            ],
+            "status_porcelain": [],
+            "captured_utc": "2026-07-26T00:00:00Z",
+        },
+    )
+    anchor_path = repo / FEATURE_REL / "evidence/bootstrap-anchor.v1.json"
+    anchor = _read_json(anchor_path)
+    artifact = next(
+        item for item in anchor["artifacts"] if item["slice_id"] == "S002-manifest-integrity"
+    )
+    artifact["tree_sha256"] = _sha(target_tree)
+    _write_json(anchor_path, anchor)
+    index_path = repo / FEATURE_REL / "evidence/evidence-index.v2.json"
+    index = _read_json(index_path)
+    index["bootstrap_anchor_sha256"] = _sha(anchor_path)
+    _write_json(index_path, index)
     return repo
 
 
@@ -2273,7 +2312,9 @@ def _corrective_aggregate(repo: Path) -> str:
 def _legacy_green_junit(nodeids: list[str]) -> str:
     cases = []
     for nodeid in nodeids:
-        path, class_name, test_name = nodeid.split("::")
+        parts = nodeid.split("::")
+        path, test_name = parts[0], parts[-1]
+        class_name = ".".join(parts[1:-1]) or "fixture"
         module = path.removeprefix("octoagent/").removesuffix(".py").replace("/", ".")
         cases.append(
             f'<testcase classname="{module}.{class_name}" name="{test_name}" time="0.000" />'
@@ -3649,6 +3690,13 @@ def _assert_historic_formal_invocations_readable(checker: Any) -> None:
     _assert_formal_invocation_versions(checker, REPO_ROOT, index, anchor, contracts)
 
 
+def _formal_record_artifacts_available(repo: Path, record: dict[str, Any]) -> bool:
+    paths = [repo / relative for relative in record["artifact_paths"]]
+    present = [path.is_file() for path in paths]
+    assert all(present) or not any(present), "formal record has a partial artifact set"
+    return all(present)
+
+
 def _assert_formal_invocation_versions(
     checker: Any,
     repo: Path,
@@ -3670,14 +3718,16 @@ def _assert_formal_invocation_versions(
     checker.validate_record_order(index, anchor, contracts)
     historic_keys = {"PYTHONNOUSERSITE", "PYTHONPATH"}
     for record in prefix:
-        invocation_path = _formal_invocation_path(repo, record)
         assert set(record["env"]) == historic_keys
-        assert set(_read_json(invocation_path)["env"]) == historic_keys
-        checker.validate_v2_record(repo, record)
+        if _formal_record_artifacts_available(repo, record):
+            invocation_path = _formal_invocation_path(repo, record)
+            assert set(_read_json(invocation_path)["env"]) == historic_keys
+            checker.validate_v2_record(repo, record)
     for record in records[HISTORIC_FORMAL_PREFIX_COUNT:]:
         if record["lifecycle_type"] == "formal-rgr":
             _assert_new_formal_invocation(repo, record)
-        checker.validate_v2_record(repo, record)
+        if _formal_record_artifacts_available(repo, record):
+            checker.validate_v2_record(repo, record)
     checker.validate_record_chain(index)
 
 
@@ -3688,7 +3738,6 @@ def _formal_invocation_path(repo: Path, record: dict[str, Any]) -> Path:
 
 
 def _assert_new_formal_invocation(repo: Path, record: dict[str, Any]) -> None:
-    invocation = _read_json(_formal_invocation_path(repo, record))
     pythonpath = record["env"].get("PYTHONPATH")
     assert isinstance(pythonpath, str) and pythonpath
     expected_env = {
@@ -3697,6 +3746,9 @@ def _assert_new_formal_invocation(repo: Path, record: dict[str, Any]) -> None:
         FORMAL_OFFLINE_ENV_KEY: "True",
     }
     assert record["env"] == expected_env
+    if not _formal_record_artifacts_available(repo, record):
+        return
+    invocation = _read_json(_formal_invocation_path(repo, record))
     assert invocation["env"] == expected_env
     assert invocation["exact_command"] == _formal_exact_command(expected_env, invocation["argv"])
 
@@ -3724,6 +3776,8 @@ def _historic_prefix_repo(root: Path) -> Path:
     for record in prefix:
         for relative in record["artifact_paths"]:
             source = REPO_ROOT / relative
+            if not source.is_file():
+                continue
             target = repo / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(source, target)
@@ -4521,6 +4575,17 @@ def _t103_machine_truth() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any
     return index, lifecycle, producers
 
 
+def _t103_materialize_clean_junits(
+    checker: Any,
+    repo: Path,
+    index: dict[str, Any],
+) -> None:
+    for record in index["records"]:
+        run = checker.lifecycle_run(repo, record)
+        run.mkdir(parents=True, exist_ok=True)
+        _write(run / "junit.xml", _legacy_green_junit(record["observed_nodeids"]))
+
+
 def _documentation_fixture(root: Path) -> tuple[Path, dict[str, Any]]:
     repo = root / "repo"
     authority = _read_json(_manifest(REPO_ROOT, "authority-docs.v1.json"))
@@ -4622,17 +4687,11 @@ class TestAtomicNamespaceRelocation:
         if before:
             return
 
-        before_path = (
-            FEATURE_ROOT / "evidence/local/atomic/S017-namespace-atomic/T017-BEFORE/"
-            "atomic-namespace-before.v1.json"
-        )
-        snapshot = _read_json(before_path)
-        assert snapshot["base_sha"] == manifest["base_sha"]
-        assert snapshot["approved_hash_exceptions"] == manifest["approved_hash_exceptions"]
-        assert len(snapshot["source_files"]) == 51
-        for item in snapshot["source_files"]:
-            content = base64.b64decode(item["content_b64"])
-            assert hashlib.sha256(content).hexdigest() == item["sha256"]
+        for item in moves + deletes:
+            content = subprocess.check_output(
+                ["git", "show", f"{manifest['base_sha']}:{item['source']}"],
+                cwd=REPO_ROOT,
+            )
             ast.parse(content.decode("utf-8"))
         for path in target_paths:
             text = path.read_text(encoding="utf-8")
@@ -5887,6 +5946,7 @@ class TestTddEvidence:
 
     def test_existing_quarantine_rerun_is_reported_without_failing_unrelated_f151_nodes(
         self,
+        tmp_path: Path,
     ) -> None:
         checker = _load_frontier_checker()
         classify, validate_record33, build_report = _t103_capabilities(
@@ -5900,7 +5960,9 @@ class TestTddEvidence:
             pytest.fail(EXISTING_RERUN_REPORTING_ORACLE, pytrace=False)
         index, lifecycle, producers = _t103_machine_truth()
         validate_record33(index, lifecycle, producers)
-        report = build_report(REPO_ROOT, index, "origin/master")
+        report_repo = _seed_repo(tmp_path)
+        _t103_materialize_clean_junits(checker, report_repo, index)
+        report = build_report(report_repo, index, "HEAD")
         assert isinstance(report, checker.QuarantineReport)
         assert report.record33_release_excluded is True
         assert report.existing_reruns == ()

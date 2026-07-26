@@ -11,13 +11,13 @@
 - 项目名称：**OctoAgent**
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
-- 版本：v0.1（Roadmap 已增量同步至 M12；架构正文的历史漂移待 F151 收敛）
-- 状态：M0-M9 Delivered；M10 功能 Delivered、物理远程验收待闭环；**M11 Active**；M12 Planned（privacy/identity gate first）
+- 版本：v0.1（Roadmap 已增量同步至 M12；F151 已完成运行边界与架构真值收敛）
+- 状态：M0-M11 Delivered；M10 的独立物理启动验收仍待闭环；M12 Planned（privacy/identity gate first）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - M5 完成日期：2026-05-25（F102 commit `9185862` + F103 同步）
 - M9 完成日期：2026-07-13
 - M10 功能完成日期：2026-07-19（仅 ATT-129-BOOT 待物理验收）
-- M11 启动日期：2026-07-19；2026-07-20 完成 F148，二次架构复审后顺序调整为 F151 → F150 → F149（F150 live spike 可提前）；2026-07-22 F151 已收敛 Gateway 唯一 module entry、静态 exit 64/78 与 descriptor 只读边界，后续任务继续推进
+- M11：2026-07-19 启动，2026-07-26 完成；F148/F151/F150/F149 依次交付 Web 视觉地基、运行边界、电脑 Web 远程访问与全站 Web v2
 - 目标读者：
   - 你（Owner / PM / 架构师 / 最终用户）
   - 未来可能加入的 1-3 名协作者（工程实现、前端、运维）
@@ -385,7 +385,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 | **M8 部署与日常使用** | ✅ 功能 | F129、F131-F133；F134 在 M10 完成；远程访问统一转入 F150 |
 | **M9 质量保证体系** | ✅ | L1-L4、LLM 网络硬闸、scripted harness、wire replay、三模式 lane、attestation |
 | **M10 部署完成度收尾** | ✅ 功能 | F145/F134/F146/F147 全完成；ATT-129-BOOT 作为独立物理验收保留 |
-| **M11 运行边界收口 + Cloudflare 远程访问 + Web v2** | ⏳ | F148 ✅、F151 ✅、F150 ✅（stable `5e6f4846`）→ F149 全站 Web v2；手机产品只走 M12 原生 iOS，不以手机浏览器交付 |
+| **M11 运行边界收口 + Cloudflare 远程访问 + Web v2** | ✅ | F148/F151/F150/F149 全部完成；电脑保留 Web，手机产品只走 M12 原生 iOS，不以手机浏览器交付 |
 | **M12 原生 iOS + 健康/日程感知** | 📋 | F152-F156 编号预留；privacy/identity/ingestion → 真机 transport/device proof → HealthKit → EventKit OS full-access 决策门 → native UX |
 
 ### 待办汇总
@@ -394,7 +394,12 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 > 历史短板 1-5 ✅ | 旧架构 A1-A7 曾关闭，但 2026-07-20 复审确认 A2 反向依赖再次存在并纳入 F151 | Worker W1-W5 历史状态见审计
 > **M5 增补审计** §14.9-14.13：F084-F088 ✅ / F090-F092 ✅ / F093-F096 ✅ / F097-F100 ✅ / F101-F102 ✅
 
-**当前 P0（2026-07-25）**：F151 已稳定；F150 电脑 Web Access + named-tunnel 地基已完成并稳定在`5e6f4846703b7126cd104c8b9678e0c2f5300cc8`，F149 T000已解锁，下一步是rebase/recon后推进Web v2。手机端不交付 Safari/WebView，只在 M12 由 F153+ 原生 iOS 通过真机 transport/device-proof 门。Web 与 iOS 均以 Claude Design 初稿为视觉/交互基线，实现适配设计而不是反向迁就当前 Web 外观。ATT-129-BOOT 作为独立物理验收项保留。准确顺序、Web/iOS trust 边界和 M12 Apple 权限门禁见 [blueprint/milestones.md](blueprint/milestones.md) §M10-M12。
+**当前 P0（2026-07-26）**：M11 已完成。下一波从 M12 F152 privacy/identity/ingestion
+contract 开始；在该 Gate 与 F153 真机 transport/device-proof 通过前，不启动原生 iOS
+生产实现。手机端不交付 Safari/WebView；Web 与 iOS 均以 Claude Design 初稿为视觉/
+交互基线，实现适配设计而不是反向迁就旧 Web 外观。ATT-129-BOOT 继续作为独立物理
+验收项保留。准确顺序、Web/iOS trust 边界和 Apple 权限门禁见
+[blueprint/milestones.md](blueprint/milestones.md) §M10-M12。
 
 ### 三条设计哲学（M5 引入）
 

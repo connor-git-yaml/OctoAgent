@@ -1,4 +1,4 @@
-# F152：修复 F149 L1 CI 回归
+# F157：修复 F149 L1 CI 回归
 
 ## 背景
 
@@ -7,6 +7,11 @@ F149 合并后的权威 `master` CI（run `30196329042`）在 `l1-playwright` �
 1. 两个聊天场景的模型回复在 Web 中变成“已收到回复，但没有可显示的正文”。
 2. A-wave 固定的历史时间触发 watchdog，导致预期事件链多出 drift 事件。
 3. 390px Approvals 空状态没有页面内交互控件，被通用无障碍断言误判。
+
+修复上述四项后，第二轮权威 `master` CI（run `30197077191`）确认
+`l1-playwright`、frontend、architecture 与 benchmark 已通过，但
+`backend-deterministic` 暴露五项 F151 gate 测试对开发机本地 ignored
+evidence 的隐式依赖，以及一项 F150 临时实现 fixture 与当前合同不同步的问题。
 
 本 Fix 只恢复已批准行为，不新增页面、产品能力、协议入口或视觉方案。
 
@@ -39,6 +44,14 @@ F149 合并后的权威 `master` CI（run `30196329042`）在 `l1-playwright` �
 - 合法只读空状态可以没有业务操作，但全局 shell 必须仍提供可聚焦操作。
 - 不得为满足测试给空状态添加无业务意义的 CTA，也不得改变 Claude Design 最初方案的视觉层级、留白、卡片节奏或排版。
 
+### FR-005 Gate 测试的干净检出可移植性
+
+- F151 gate 测试不得依赖仅存在于开发机、被 Git 忽略的 `evidence/local/**` 原始文件。
+- 需要校验 committed truth 时，测试必须读取已提交的 anchor/index 元数据或指定 Git baseline。
+- 需要原始 JUnit/tree/invocation 的场景必须在独立临时仓库构造 hermetic fixture，不得伪造 production checker 的兼容分支。
+- F150 临时实现 fixture 必须与当前受保护合同完整一致，仍需独立验证 sibling drift。
+- 不得放宽 F151 checker、evidence schema、run↔index 闭包或 no-growth ceiling。
+
 ## 非目标
 
 - 不调整 Claude Design 视觉方案。
@@ -50,5 +63,5 @@ F149 合并后的权威 `master` CI（run `30196329042`）在 `l1-playwright` �
 
 1. 四个原失败 L1 场景全部通过。
 2. 新增合同测试证明 Chat 可见字段存在、额外原始字段不会穿透、畸形历史事件仍进入 diagnostic。
-3. F149 前端单元测试、Gateway 合同测试、完整 L1、架构门和权威 `master` CI 全绿。
+3. F149 前端单元测试、Gateway 合同测试、完整 L1、F151 gate、架构门和权威 `master` CI 全绿。
 4. UI 像素与设计制品不发生变化。

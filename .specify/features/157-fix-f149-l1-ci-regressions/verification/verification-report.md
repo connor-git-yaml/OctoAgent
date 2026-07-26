@@ -1,4 +1,4 @@
-# F152 验证报告
+# F157 验证报告
 
 ## 结论
 
@@ -38,6 +38,17 @@
   `docs/codebase-architecture/modules/06-frontend-workbench.md`。
 - 没有新增 endpoint、transport、store、service、registry、兼容层或 UI。
 
+### 干净检出 corrective
+
+- 权威 run `30197077191`：L1、frontend、architecture、benchmark 通过；
+  backend 的唯一失败为 5 项 F151 clean-checkout fixture。
+- 五个原失败 exact node 本地复验：`5 passed`。
+- 完整 `test_runtime_architecture.py`：`83 passed`。
+- 完整 `octoagent/tests/gate`：`206 passed`。
+- F151 runtime checker 无 diff；修复只在 gate test 的 Git baseline、临时 tree/JUnit
+  fixture、F150 fixture 与 optional raw cross-check。
+- 新权威 `master` CI 尚待本次 corrective 提交后最终确认。
+
 ## 回归闭环
 
 1. Chat 重新收到有界 `response_summary` / `error`，原始 provider、token usage、tool
@@ -50,6 +61,5 @@
 
 ## 待完成
 
-- 提交并推送修复分支。
-- fast-forward 合并到 `master` 并推送。
+- 提交并推送 corrective。
 - 等待新的权威 `master` CI 全部 job 通过。
