@@ -1,7 +1,8 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { ApiError } from "../api/client";
 import AgentCenter from "./AgentCenter";
 
 const useWorkbenchMock = vi.fn();
@@ -815,7 +816,7 @@ describe("AgentCenter", () => {
     );
 
     // 打开主 Agent 编辑器
-    const mainCard = (await screen.findByText("主 Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    const mainCard = (await screen.findByText("主 Agent")).closest(".f149-agent-card") as HTMLElement | null;
     await userEvent.click(within(mainCard!).getByRole("button", { name: "编辑" }));
 
     // 等待审批覆盖列表加载完成
@@ -894,7 +895,7 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    const agentCard = (await screen.findByText("从运行时整理的 Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    const agentCard = (await screen.findByText("从运行时整理的 Agent")).closest(".f149-agent-card") as HTMLElement | null;
     expect(agentCard).not.toBeNull();
 
     await userEvent.click(within(agentCard!).getByRole("button", { name: "编辑" }));
@@ -944,7 +945,7 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    const mainCard = (await screen.findByText("主 Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    const mainCard = (await screen.findByText("主 Agent")).closest(".f149-agent-card") as HTMLElement | null;
     expect(mainCard).not.toBeNull();
     await userEvent.click(within(mainCard!).getByRole("button", { name: "编辑" }));
 
@@ -997,7 +998,7 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    const agentCard = (await screen.findByText("旧版 alias Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    const agentCard = (await screen.findByText("旧版 alias Agent")).closest(".f149-agent-card") as HTMLElement | null;
     expect(agentCard).not.toBeNull();
     await userEvent.click(within(agentCard!).getByRole("button", { name: "编辑" }));
 
@@ -1100,7 +1101,7 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    const agentCard = (await screen.findByText("NAS 巡检")).closest(".wb-agent-card") as HTMLElement | null;
+    const agentCard = (await screen.findByText("NAS 巡检")).closest(".f149-agent-card") as HTMLElement | null;
     expect(agentCard).not.toBeNull();
 
     // 当前组件中，非主 Agent 卡片有"删除"按钮
@@ -1126,7 +1127,7 @@ describe("AgentCenter", () => {
       </MemoryRouter>
     );
 
-    const agentCard = (await screen.findByText("NAS 巡检")).closest(".wb-agent-card") as HTMLElement | null;
+    const agentCard = (await screen.findByText("NAS 巡检")).closest(".f149-agent-card") as HTMLElement | null;
     expect(agentCard).not.toBeNull();
 
     await userEvent.click(within(agentCard!).getByRole("button", { name: "编辑" }));
@@ -1195,19 +1196,19 @@ describe("AgentCenter", () => {
     );
 
     // 主 Agent 卡片应包含模型 alias
-    const mainCard = (await screen.findByText("主 Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    const mainCard = (await screen.findByText("主 Agent")).closest(".f149-agent-card") as HTMLElement | null;
     expect(mainCard).not.toBeNull();
     expect(
       within(mainCard!).getAllByText(
-        (_, node) => node?.tagName === "SPAN" && node.textContent === "模型 main"
+        (_, node) => node?.tagName === "SPAN" && node.textContent === "模型 · 默认模型"
       )[0]
     ).toBeInTheDocument();
 
-    const nasCard = (await screen.findByText("NAS 巡检")).closest(".wb-agent-card") as HTMLElement | null;
+    const nasCard = (await screen.findByText("NAS 巡检")).closest(".f149-agent-card") as HTMLElement | null;
     expect(nasCard).not.toBeNull();
     expect(
       within(nasCard!).getAllByText(
-        (_, node) => node?.tagName === "SPAN" && node.textContent === "进行中 1"
+        (_, node) => node?.tagName === "SPAN" && node.textContent === "进行中 · 1"
       )[0]
     ).toBeInTheDocument();
   });
@@ -1257,7 +1258,7 @@ describe("AgentCenter", () => {
     );
 
     // 打开主 Agent 编辑器
-    const mainCard = (await screen.findByText("主 Agent")).closest(".wb-agent-card") as HTMLElement | null;
+    const mainCard = (await screen.findByText("主 Agent")).closest(".f149-agent-card") as HTMLElement | null;
     await userEvent.click(within(mainCard!).getByRole("button", { name: "编辑" }));
 
     // 编辑器中应展示 3 个行为文件
@@ -1267,5 +1268,160 @@ describe("AgentCenter", () => {
 
     // 行为文件区域标签（页面顶部也有同名标题，所以用 getAllByText）
     expect(screen.getAllByText("行为文件").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("加载中使用页面骨架，不提前暴露旧列表", () => {
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      loading: true,
+      error: null,
+      authError: null,
+      refreshSnapshot: vi.fn(),
+      submitAction: vi.fn(),
+      busyActionId: "",
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("正在整理智能体")).toBeInTheDocument();
+    expect(screen.queryByText("NAS 巡检")).not.toBeInTheDocument();
+  });
+
+  it("没有项目智能体时提供新建入口而不是伪造主 Agent", () => {
+    const snapshot = buildSnapshot({ customAgents: [] });
+    snapshot.resources.agent_profiles.profiles = [];
+    snapshot.resources.worker_profiles.profiles = [];
+    useWorkbenchMock.mockReturnValue({
+      snapshot,
+      loading: false,
+      error: null,
+      authError: null,
+      refreshSnapshot: vi.fn(),
+      submitAction: vi.fn(),
+      busyActionId: "",
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("还没有智能体")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "新建 Agent" })).toBeInTheDocument();
+  });
+
+  it("可恢复错误提供重试，origin 403 只说明资源权限", async () => {
+    const refreshSnapshot = vi.fn();
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      loading: false,
+      error: "temporary failure",
+      authError: null,
+      refreshSnapshot,
+      submitAction: vi.fn(),
+      busyActionId: "",
+    });
+    const recoverable = render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("智能体列表加载失败")).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: "重试" }));
+    expect(refreshSnapshot).toHaveBeenCalledTimes(1);
+    recoverable.unmount();
+
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      loading: false,
+      error: "forbidden",
+      authError: new ApiError("forbidden", { status: 403 }),
+      refreshSnapshot,
+      submitAction: vi.fn(),
+      busyActionId: "",
+    });
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("当前账号没有权限管理智能体")).toBeInTheDocument();
+    expect(screen.getByText("请联系管理员确认这项资源的访问权限。")).toBeInTheDocument();
+    expect(screen.queryByText("重新登录")).not.toBeInTheDocument();
+  });
+
+  it("原始模型、profile id 与行为路径只在可聚焦 Advanced 中出现并归还焦点", async () => {
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      loading: false,
+      error: null,
+      authError: null,
+      refreshSnapshot: vi.fn(),
+      submitAction: vi.fn(),
+      busyActionId: "",
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByText("模型 main")).not.toBeInTheDocument();
+    expect(screen.queryByText("project-home:main")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("behavior/agents/butler/IDENTITY.md")
+    ).not.toBeInTheDocument();
+
+    const trigger = screen.getAllByRole("button", {
+      name: "高级 · 模型与文件信息",
+    })[0];
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    trigger.focus();
+    await userEvent.click(trigger);
+
+    expect(screen.getByRole("dialog", { name: "模型与文件信息" })).toBeInTheDocument();
+    expect(screen.getByText("main")).toBeInTheDocument();
+    expect(screen.getByText("project-home:main")).toBeInTheDocument();
+    expect(
+      screen.getByText("behavior/agents/butler/IDENTITY.md")
+    ).toBeInTheDocument();
+
+    fireEvent.mouseDown(document.querySelector(".f149-agent-sheet-backdrop")!);
+    expect(trigger).toHaveFocus();
+    await userEvent.click(trigger);
+    await userEvent.keyboard("{Escape}");
+    expect(trigger).toHaveFocus();
+  });
+
+  it("审批覆盖加载失败会在编辑器内明确可见", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    useWorkbenchMock.mockReturnValue({
+      snapshot: buildSnapshot(),
+      loading: false,
+      error: null,
+      authError: null,
+      refreshSnapshot: vi.fn(),
+      submitAction: vi.fn(),
+      busyActionId: "",
+    });
+
+    render(
+      <MemoryRouter>
+        <AgentCenter />
+      </MemoryRouter>
+    );
+
+    const mainCard = (await screen.findByText("主 Agent")).closest("article");
+    await userEvent.click(within(mainCard!).getByRole("button", { name: "编辑" }));
+
+    expect(await screen.findByText("临时授权加载失败，请重试。")).toBeInTheDocument();
   });
 });

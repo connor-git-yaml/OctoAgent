@@ -1,0 +1,15 @@
+task_id: T040
+phase: GREEN
+behavior: Agents v2 页面状态、Behavior 恢复、Advanced 技术字段与冲突边界
+command: cd octoagent/frontend && npx vitest run src/pages/AgentCenter.test.tsx src/domains/agents/BehaviorVersionHistory.test.tsx src/domains/agents/agentManagementData.test.ts
+executed_at_utc: 2026-07-26T06:30:42Z
+head_sha: e4f5ee081a8e5a74ee9ba2df4f171f8c7ec11d70
+exit_code: 0
+oracle_expected: loading、empty、recoverable error 与 origin-403 互斥；Behavior restore 使用 typed action 并处理 409；原始 alias、profile ID 和文件路径只在 Advanced；覆盖加载失败可见
+oracle_observed: exact 39/39 通过；页面状态、主/项目 Agent 投影、typed Behavior read/write/restore、409 重新加载、覆盖加载失败、Advanced 可见性与焦点返回全部通过
+raw_output_file: /tmp/f149-t040-green.log
+raw_output_sha256: b6ecd37f45b7419b0e3a8c4cb946cbaf661a6c2a33f869a6e07892db5882a0ae
+raw_output_size: 462
+secret_scan: pass
+network: false
+rerun: false

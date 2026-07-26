@@ -244,5 +244,18 @@
   style/complexity、changed-lines coverage 92.46%与repository runtime
   architecture全部通过。未新增第二transport/store/service/registry或未授权动作；
   390仍只作Web响应式检查，手机产品只走原生iOS。
+- T040以旧Agents页面与行为历史形成6条稳定RED，既有32条Agent编辑、投影与
+  行为控制继续通过。GREEN复用typed F149 action与共享resource state，闭合
+  loading/empty/recoverable/origin-403、覆盖加载失败、Behavior restore 409重新
+  加载及Advanced原始字段边界；Agent卡片与dialog提炼到窄`AgentOverview`，没有
+  第二transport、action pipeline、store、service或registry。REFACTOR逐页对照
+  Claude Design Agents Desktop/390，保留宽松hero、桌面卡片/历史双栏、留白与
+  视觉张力；真实Chromium 1440/390 Web窄窗口无横向溢出，全部操作≥44px，
+  Advanced与历史面板关闭后焦点回原触发器。最终精确39/39、全前端553/553、
+  生产build、OpenAPI、F149 boundary/style/complexity及changed-lines coverage
+  90.06%通过。repository runtime architecture因F151仍永久冻结T022
+  transport-only阶段的AgentCenter旧视觉class multiset而如实阻断；本task未修改、
+  放宽或绕过F151 authority，也未为过门恢复旧`wb-*`样式。390仍只作Web响应式检查，
+  手机产品只走原生iOS。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

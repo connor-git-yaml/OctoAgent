@@ -42,6 +42,7 @@ export interface AgentCardViewModel {
   projectId: string;
   projectName: string;
   modelAlias: string;
+  modelLabel: string;
   /** Feature 061: 权限 Preset 显示标签 */
   permissionPreset: string;
   defaultToolGroups: string[];
@@ -177,6 +178,19 @@ export function formatPermissionPreset(preset: string): string {
   return PRESET_LABELS[preset] ?? formatTokenLabel(preset);
 }
 
+export function formatAgentModelLabel(alias: string): string {
+  switch (alias.trim()) {
+    case "main":
+      return "默认模型";
+    case "reasoning":
+      return "深度思考";
+    case "cheap":
+      return "轻量模型";
+    default:
+      return "已配置模型";
+  }
+}
+
 export function formatProjectName(projects: ProjectOption[] | undefined | null, projectId: string): string {
   return (projects ?? []).find((project) => project.project_id === projectId)?.name ?? projectId;
 }
@@ -300,7 +314,9 @@ function formatSourceLabel(profile: WorkerProfileItem): string {
 
 const AGENT_PRIVATE_FILE_IDS = new Set(["IDENTITY.md", "SOUL.md", "HEARTBEAT.md"]);
 
-function extractAgentPrivateBehaviorFiles(profile: WorkerProfileItem): BehaviorFileInfo[] {
+function extractAgentPrivateBehaviorFiles(
+  profile: Pick<WorkerProfileItem, "behavior_system">
+): BehaviorFileInfo[] {
   const files = profile.behavior_system?.path_manifest?.effective_behavior_files;
   if (!Array.isArray(files)) {
     return [];
@@ -310,7 +326,22 @@ function extractAgentPrivateBehaviorFiles(profile: WorkerProfileItem): BehaviorF
   );
 }
 
+function resolveAgentBehaviorFiles(
+  snapshot: ControlPlaneSnapshot,
+  profile: WorkerProfileItem
+): BehaviorFileInfo[] {
+  const workerFiles = extractAgentPrivateBehaviorFiles(profile);
+  if (workerFiles.length > 0) {
+    return workerFiles;
+  }
+  const projectedProfile = snapshot.resources.agent_profiles?.profiles.find(
+    (item) => item.profile_id === profile.profile_id
+  );
+  return projectedProfile ? extractAgentPrivateBehaviorFiles(projectedProfile) : [];
+}
+
 function mapProfileToCard(
+  snapshot: ControlPlaneSnapshot,
   profile: WorkerProfileItem,
   projects: ProjectOption[],
   isMainAgent: boolean
@@ -324,6 +355,9 @@ function mapProfileToCard(
     projectId: profile.project_id,
     projectName: formatProjectName(projects, profile.project_id),
     modelAlias: profile.static_config.model_alias || DEFAULT_MODEL_ALIAS,
+    modelLabel: formatAgentModelLabel(
+      profile.static_config.model_alias || DEFAULT_MODEL_ALIAS
+    ),
     permissionPreset: profile.static_config.permission_preset || DEFAULT_PERMISSION_PRESET,
     defaultToolGroups: profile.static_config.default_tool_groups ?? [],
     selectedTools: profile.static_config.selected_tools ?? [],
@@ -336,7 +370,7 @@ function mapProfileToCard(
     sourceLabel: formatSourceLabel(profile),
     isMainAgent,
     removable: !isMainAgent,
-    behaviorFiles: extractAgentPrivateBehaviorFiles(profile),
+    behaviorFiles: resolveAgentBehaviorFiles(snapshot, profile),
   };
 }
 
@@ -369,12 +403,11 @@ export function deriveAgentManagementView(
   const fallbackTemplate =
     builtinProfileById[defaultProfileId] ??
     builtinProfiles[0] ??
-    builtinProfiles[0] ??
     null;
 
   const mainAgent =
     mainProfile !== null
-      ? mapProfileToCard(mainProfile, selector.available_projects, true)
+      ? mapProfileToCard(snapshot, mainProfile, selector.available_projects, true)
       : {
           profileId: fallbackTemplate?.profile_id ?? "",
           name: `${currentProjectName} 主 Agent`,
@@ -386,6 +419,9 @@ export function deriveAgentManagementView(
           projectId: currentProjectId,
           projectName: currentProjectName,
           modelAlias: fallbackTemplate?.static_config.model_alias || DEFAULT_MODEL_ALIAS,
+          modelLabel: formatAgentModelLabel(
+            fallbackTemplate?.static_config.model_alias || DEFAULT_MODEL_ALIAS
+          ),
           permissionPreset: fallbackTemplate?.static_config.permission_preset || DEFAULT_PERMISSION_PRESET,
           defaultToolGroups: fallbackTemplate?.static_config.default_tool_groups ?? [],
           selectedTools: fallbackTemplate?.static_config.selected_tools ?? [],
@@ -398,12 +434,15 @@ export function deriveAgentManagementView(
             : "当前还没有主 Agent",
           isMainAgent: true,
           removable: false,
-          behaviorFiles: fallbackTemplate ? extractAgentPrivateBehaviorFiles(fallbackTemplate) : [],
+          behaviorFiles: fallbackTemplate
+            ? resolveAgentBehaviorFiles(snapshot, fallbackTemplate)
+            : [],
         };
 
   const projectAgents = currentProjectProfiles
     .filter((profile) => profile.profile_id !== mainProfile?.profile_id)
     .map((profile) => mapProfileToCard(
+      snapshot,
       profile,
       selector.available_projects,
       false, // 只有 mainProfile 才是主 Agent，其他 profile 即使是某项目的 default 也不标"主 Agent"

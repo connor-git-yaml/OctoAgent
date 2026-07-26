@@ -483,6 +483,18 @@
 
 ### T040 — Agents v2 与 behavior restore
 
+- **状态**：`[x]`；真实 RED→GREEN→REFACTOR 已完成，证据见
+  `evidence/tdd/T040/`。页面复用 typed F149 action 与共享 resource state，
+  Behavior restore 的 409 冲突可重新加载，覆盖加载失败不再静默；普通卡片只显示
+  人话模型标签、能力数量与行为摘要，原始 alias、profile ID 和文件路径仅在
+  Advanced。Agent 卡片与 dialog 已提炼到窄组件，未继续扩大 AgentCenter。
+  逐页对照 Claude Design Agents Desktop/390 后保留宽松 hero、桌面双栏、
+  卡片留白与历史侧栏；真实 Chromium 1440/390 Web 窄窗口无横向溢出，全部操作与
+  Advanced 触发器≥44px，焦点关闭后归位。最终精确39/39、全前端553/553、生产
+  build、OpenAPI、F149 boundary/style/complexity及changed-lines coverage
+  90.06%通过。repository runtime architecture因F151仍把T022 transport-only
+  阶段的旧视觉class快照当永久合同而如实阻断；本task未修改或放宽F151 authority，
+  也未把旧`wb-*`视觉类塞回新页面。390只作Web响应式检查，手机产品仍只走原生iOS。
 - **层/FR**：frontend L4 component/projection；FR-006/007/026。
 - **文件**：Agent page、existing agent domain files/tests、co-located CSS。
 - **依赖**：T022/T024/T025。
@@ -742,8 +754,8 @@
 - 测试分层：纯逻辑/view-model/state/DTO mapping/a11y 归 L4；全链归 deterministic L3；L1 只有 390px Web 窄窗口、A/B/Web auth 与浏览器独有语义，不覆盖移动认证或原生 iOS；L2 不新增。
 - 架构分层：唯一 transport、application orchestration、pure projection、UI composition 与禁止 import 已映射到任务/checker。
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
-- 当前风险：T000–T015、T020–T025、T030–T034 中已执行的任务均有真实证据；下一项是
-  T040 Agents v2。每个后续页面仍必须先逐页对照 Claude
+- 当前风险：T000–T015、T020–T025、T030–T034、T040 中已执行的任务均有真实
+  证据；下一项是 T041 Memory v2。每个后续页面仍必须先逐页对照 Claude
   Design 最初版；现有 Web 只能作为实现现状，不得成为视觉基线。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与
   前序完成均不豁免后续证据门。

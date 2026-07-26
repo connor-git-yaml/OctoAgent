@@ -15,6 +15,7 @@ import {
 } from "../../api/client";
 import { DiffBody } from "../../components/diff/DiffBody";
 import { executeWorkbenchAction } from "../../platform/actions/controlPlaneActions";
+import { executeF149Action } from "../../platform/actions/f149Actions";
 import type { DiffResponse } from "../../types";
 
 interface BehaviorVersionHistoryProps {
@@ -129,12 +130,33 @@ export default function BehaviorVersionHistory({
     setRestoreBusy(true);
     setRestoreMsg(null);
     try {
-      const result = await executeWorkbenchAction(
-        undefined,
-        "behavior.restore_version",
-        { ...keyParams, target_version: restoreTarget, confirmed: true },
+      const outcome = await executeF149Action(
+        {
+          actionId: "behavior.restore_version",
+          params: {
+            agent_slug: agentSlug ?? "",
+            confirmed: true,
+            file_id: fileId,
+            project_slug: projectSlug ?? "",
+            target_version: restoreTarget,
+          },
+        },
+        (actionId, params) =>
+          executeWorkbenchAction(undefined, actionId, params),
       );
-      setRestoreMsg(result.message || "已恢复");
+      if (!outcome.ok) {
+        if (
+          outcome.error.kind === "action-failed" &&
+          outcome.error.code?.includes("CONFLICT")
+        ) {
+          setRestoreMsg("行为文件已被更新，请重新加载");
+          setRestoreTarget(null);
+          return;
+        }
+        setRestoreMsg("恢复未完成，请稍后重试");
+        return;
+      }
+      setRestoreMsg(outcome.envelope.message || "已恢复");
       setRestoreTarget(null);
       await loadVersions();
     } catch (e) {
@@ -145,36 +167,38 @@ export default function BehaviorVersionHistory({
   };
 
   return (
-    <section className="wb-panel" aria-label={`${fileId} 版本历史`}>
-      <div className="wb-panel-head">
+    <section className="f149-agent-history" aria-label={`${fileId} 版本历史`}>
+      <div className="f149-agent-history-header">
         <div>
-          <p className="wb-card-label">版本历史</p>
+          <p>VERSION HISTORY</p>
           <h3>{fileId}</h3>
         </div>
-        <button type="button" className="wb-chip" onClick={onClose}>
+        <button type="button" onClick={onClose}>
           关闭
         </button>
       </div>
 
       {loading ? (
-        <div className="wb-note">
-          <span>正在加载版本历史…</span>
+        <div className="f149-agent-history-state">
+          <span>正在加载版本历史</span>
         </div>
       ) : error ? (
-        <div className="wb-inline-banner is-warning">
+        <div className="f149-agent-history-state is-error" role="alert">
           <span>{error}</span>
+          <button type="button" onClick={() => void loadVersions()}>
+            重试
+          </button>
         </div>
       ) : versions.length === 0 ? (
-        <div className="wb-empty-state">
+        <div className="f149-agent-history-state">
           <strong>暂无版本历史</strong>
           <span>这个文件被改过之后，这里会显示它的历史版本。</span>
         </div>
       ) : (
         <>
-          {/* 版本对比选择（平实：选两版看差异） */}
-          <div className="wb-field">
+          <div className="f149-agent-version-selectors">
             <span>对比版本</span>
-            <div style={{ display: "flex", gap: "var(--space-sm)", flexWrap: "wrap" }}>
+            <div>
               <select
                 aria-label="较新版本"
                 value={newerNo ?? ""}
@@ -186,7 +210,7 @@ export default function BehaviorVersionHistory({
                   </option>
                 ))}
               </select>
-              <span style={{ alignSelf: "center" }}>对比</span>
+              <span>对比</span>
               <select
                 aria-label="较旧版本"
                 value={olderNo ?? ""}
@@ -206,33 +230,27 @@ export default function BehaviorVersionHistory({
 
           {/* diff 主视图（复用共享 DiffBody） */}
           {diffLoading ? (
-            <div className="wb-note">
+            <div className="f149-agent-history-state">
               <span>正在加载差异…</span>
             </div>
           ) : diff && diff.current ? (
             <DiffBody diff={diff} />
           ) : (
-            <div className="wb-empty-state">
+            <div className="f149-agent-history-state">
               <span>选择版本以查看差异。</span>
             </div>
           )}
 
-          {/* 版本时间线 + 恢复 */}
-          <div className="wb-note-stack">
-            <div className="wb-panel-head">
-              <strong>历史版本</strong>
-            </div>
+          <div className="f149-agent-version-list">
+            <strong>历史版本</strong>
             {versions.map((v) => (
-              <div key={v.version_no} className="wb-agent-tool-row">
+              <div key={v.version_no} className="f149-agent-version-row">
                 <div>
                   <strong>版本 {v.version_no}</strong>
-                  <small style={{ display: "block", color: "var(--cp-muted)" }}>
-                    {formatTs(v.ts)}
-                  </small>
+                  <small>{formatTs(v.ts)}</small>
                 </div>
                 <button
                   type="button"
-                  className="wb-chip"
                   onClick={() => {
                     setRestoreTarget(v.version_no);
                     setRestoreMsg(null);
@@ -246,14 +264,13 @@ export default function BehaviorVersionHistory({
 
           {/* 恢复确认（Two-Phase：proposal → 确认） */}
           {restoreTarget !== null && (
-            <div className="wb-inline-banner is-warning">
+            <div className="f149-agent-restore-confirm" role="alert">
               <span>
                 将把 {fileId} 恢复到版本 {restoreTarget}，并记为一个新版本。确认吗？
               </span>
-              <div style={{ display: "flex", gap: "var(--space-sm)" }}>
+              <div>
                 <button
                   type="button"
-                  className="wb-chip"
                   disabled={restoreBusy}
                   onClick={confirmRestore}
                 >
@@ -261,7 +278,6 @@ export default function BehaviorVersionHistory({
                 </button>
                 <button
                   type="button"
-                  className="wb-chip"
                   disabled={restoreBusy}
                   onClick={() => setRestoreTarget(null)}
                 >
@@ -271,8 +287,24 @@ export default function BehaviorVersionHistory({
             </div>
           )}
           {restoreMsg && (
-            <div className="wb-note">
+            <div
+              className={`f149-agent-restore-message ${
+                restoreMsg.includes("更新") ? "is-conflict" : ""
+              }`}
+              role="status"
+            >
               <span>{restoreMsg}</span>
+              {restoreMsg.includes("更新") ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRestoreMsg(null);
+                    void loadVersions();
+                  }}
+                >
+                  重新加载
+                </button>
+              ) : null}
             </div>
           )}
         </>

@@ -1,0 +1,47 @@
+task_id: T040
+phase: REFACTOR
+behavior: Agents v2 Claude Design 视觉迁移、AgentCenter 职责拆分与 Desktop/390 Web 窄窗口验收
+command: cd octoagent/frontend && npx vitest run src/pages/AgentCenter.test.tsx src/domains/agents/BehaviorVersionHistory.test.tsx src/domains/agents/agentManagementData.test.ts
+executed_at_utc: 2026-07-26T06:30:49Z
+head_sha: e4f5ee081a8e5a74ee9ba2df4f171f8c7ec11d70
+exit_code: 0
+oracle_expected: exact 合同不漂移，Agent 卡片职责从页面提炼，旧 wb 视觉依赖清零，Desktop/390 保持 Claude Design 层级、留白与卡片节奏且无横向溢出
+oracle_observed: exact 39/39、全前端 553/553、生产 build、OpenAPI、F149 boundary/style/complexity 与 changed-lines coverage 90.06%通过；repository runtime architecture 因 F151 永久冻结 T022 transport-only 视觉 class 快照而阻断
+raw_output_file: /tmp/f149-t040-refactor.log
+raw_output_sha256: 2fe4cf6002fc20788b1ae7633611fad72f69a1b7e327d624d29d9cb0f5ae52e1
+raw_output_size: 462
+full_frontend_log_sha256: d08fbbd25267439bdaff1bd4a3b68a8bd649c618c29f91723b7953f4bd1a1d79
+build_log_sha256: 47f36c3f73677b66603e2740e80c20eb5af03b40fb269f423e64b57b4a2a972d
+openapi_log_sha256: 3f337ed13e1b317949d3f3fe90480149f1ef274ab8b95fd21c04a84fd9169b17
+boundary_log_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_log_sha256: f7e48d70fc3e91d47a271aa6709c959ca1ef1cda177da0d2d90cfe52b8d57ba1
+complexity_log_sha256: 95b22e05c92d62db5610f85e298f3725337d3bc614e0ee415265471c98558331
+coverage_log_sha256: 00ddcc6c11e5a42bd1689ae495b79543b69a2822ff709b603e4ab09472c10144
+changed_lines_coverage_log_sha256: 092f5bd91d8525725b6ecf60e5c78e6d4a99527466bcee3989822f26713a4eff
+runtime_architecture_log_sha256: 23c2f2d632495cedffa4e3226101fd5533beb4ea6a2a39ce6abe59ca5e9a4daa
+runtime_architecture_gate: blocked
+runtime_architecture_observed: F150_PROTECTED_SEMANTIC_DRIFT 拒绝 AgentCenter 的视觉 class 变化；F151 T022 authority 仍把当时 transport-only 的 wb class multiset 固定为永久合同，与已批准的 T040 视觉迁移冲突。本任务未修改、放宽或绕过 F151 checker，也未把旧 wb class 塞回新页面。
+visual_review:
+  - 真实浏览器 Desktop 为宽松 hero、左侧 Agent 卡片与右侧行为版本区双栏；层级、留白、卡片节奏和视觉张力以 Claude Design 初版为准，未回退旧 Web 密集布局
+  - 390px Web 窄窗口为单列，scrollWidth 精确等于 clientWidth；编辑、删除、行为记录、版本与 Advanced 触发器均不小于 44px。该检查不是手机产品或 iOS 验收
+  - Behavior 历史在 390px 以接近全屏的固定面板打开；Escape 或关闭按钮关闭后焦点回原版本按钮
+  - 普通卡片只显示人话模型标签、能力数量、行为摘要与临时授权；原始模型 alias、profile ID 和行为文件路径仅在 Advanced
+  - Advanced 使用 portal dialog，打开后关闭按钮获得焦点；Escape 关闭后焦点回原触发器
+  - 本次触及页面旧 wb 视觉类清零，新增样式只消费 --cp-*；没有引入 Spotify 或第二主题
+quality_review:
+  - Agent 卡片提炼到 AgentOverview，AgentCenter 不继续吸收卡片与 Advanced dialog 职责
+  - Behavior read/write/restore 复用唯一 executeF149Action application seam；没有第二 transport、action pipeline、store、service 或 registry
+  - loading、empty、recoverable 与 403 继续复用共享 resourcePageState；401 仍归 F150 global auth
+  - Behavior 409 显示普通用户冲突提示并提供重新加载；generic failure 不回显后端技术错误
+  - changed-lines authored executable coverage 为 1676/1861=90.06%；阈值未降低
+file_sha256:
+  agent-page: 8b7ae990fb430f6be7861291685f6eda6c599856196f4181e873491285a1af48
+  agent-page-test: a1f5234ad9a31fc20dd390f9229675be0e0acd99cf84765749c706a880b5d241
+  agent-css: f60201e1f4c8d233beeae8361e7eb613353d242e185df5a00f972d4170b55a8e
+  agent-overview: e562e9cdb9cfe4556abffbc5e69d826e13054d458eb9b48a4ead0aef9e59cae4
+  behavior-history: f005c419e2e6a69d662fb207c82a4320fcfd42c012af6e3e1779a8e83c7ea5e2
+  behavior-history-test: 0bc5b7935ae829b7c96bbcfc2286dd79a9503be89591eabfca58eec14a372be4
+  agent-projection: 5b5eeddfaae8fe818724120133ec980afde3e2f7f566c32a9303f32cfac54fc2
+secret_scan: pass
+network: false
+rerun: false

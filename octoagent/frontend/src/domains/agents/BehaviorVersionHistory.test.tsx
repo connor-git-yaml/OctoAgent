@@ -56,8 +56,23 @@ describe("BehaviorVersionHistory", () => {
 
   it("恢复 Two-Phase：点恢复 → 出现确认 → 确认调用 action(confirmed=true)", async () => {
     actionMock.mockResolvedValue({
-      code: "BEHAVIOR_RESTORED",
+      action_id: "behavior.restore_version",
+      code: "OK",
+      contract_version: "1.0.0",
+      correlation_id: "corr-restore",
+      data: {
+        file_id: "USER.md",
+        preview: null,
+        proposal: false,
+        restored_from_version: 3,
+        target_version: 3,
+      },
+      handled_at: "2026-07-26T00:00:00Z",
       message: "已恢复 USER.md 到版本 1（记为新版本）",
+      request_id: "req-restore",
+      resource_refs: [],
+      status: "completed",
+      target_refs: [],
     } as never);
     const user = userEvent.setup();
     render(<BehaviorVersionHistory fileId="USER.md" onClose={() => {}} />);
@@ -76,6 +91,63 @@ describe("BehaviorVersionHistory", () => {
         expect.objectContaining({ target_version: 3, confirmed: true }),
       ),
     );
+    expect(await screen.findByText("已恢复 USER.md 到版本 1（记为新版本）")).toBeInTheDocument();
+  });
+
+  it("恢复版本遇到409时保留面板并要求重新加载", async () => {
+    actionMock.mockResolvedValue({
+      action_id: "behavior.restore_version",
+      code: "BEHAVIOR_VERSION_CONFLICT",
+      contract_version: "1.0.0",
+      correlation_id: "corr-conflict",
+      data: {},
+      handled_at: "2026-07-26T00:00:00Z",
+      message: "stale revision 3",
+      request_id: "req-conflict",
+      resource_refs: [],
+      status: "rejected",
+      target_refs: [],
+    } as never);
+    const user = userEvent.setup();
+    render(<BehaviorVersionHistory fileId="USER.md" onClose={() => {}} />);
+    await waitFor(() =>
+      expect(screen.getByText("USER.md")).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getAllByText("恢复到此版本")[0]);
+    await user.click(screen.getByText("确认恢复"));
+
+    expect(
+      await screen.findByText("行为文件已被更新，请重新加载"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "重新加载" }));
+    await waitFor(() => expect(versionsMock).toHaveBeenCalledTimes(2));
+    expect(screen.getByText("USER.md")).toBeInTheDocument();
+  });
+
+  it("非冲突恢复失败展示可重试普通文案", async () => {
+    actionMock.mockResolvedValue({
+      action_id: "behavior.restore_version",
+      code: "BEHAVIOR_RESTORE_FAILED",
+      contract_version: "1.0.0",
+      correlation_id: "corr-failed",
+      data: {},
+      handled_at: "2026-07-26T00:00:00Z",
+      message: "raw backend detail",
+      request_id: "req-failed",
+      resource_refs: [],
+      status: "rejected",
+      target_refs: [],
+    } as never);
+    const user = userEvent.setup();
+    render(<BehaviorVersionHistory fileId="USER.md" onClose={() => {}} />);
+    await screen.findAllByText("恢复到此版本");
+
+    await user.click(screen.getAllByText("恢复到此版本")[0]);
+    await user.click(screen.getByText("确认恢复"));
+
+    expect(await screen.findByText("恢复未完成，请稍后重试")).toBeInTheDocument();
+    expect(screen.queryByText("raw backend detail")).not.toBeInTheDocument();
   });
 
   it("空状态：无版本历史", async () => {

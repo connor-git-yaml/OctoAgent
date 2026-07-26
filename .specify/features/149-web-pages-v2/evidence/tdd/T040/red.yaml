@@ -1,0 +1,15 @@
+task_id: T040
+phase: RED
+behavior: Agents v2 页面状态、Behavior 恢复、Advanced 技术字段与冲突边界
+command: cd octoagent/frontend && npx vitest run src/pages/AgentCenter.test.tsx src/domains/agents/BehaviorVersionHistory.test.tsx src/domains/agents/agentManagementData.test.ts
+executed_at_utc: 2026-07-26T06:13:29Z
+head_sha: e4f5ee081a8e5a74ee9ba2df4f171f8c7ec11d70
+exit_code: 1
+oracle_expected: 旧 Agents 页面无法同时满足 loading、recoverable error、origin-403、Advanced 原始字段隔离、授权覆盖加载失败可见与 Behavior restore 409 冲突恢复；既有 Agent 编辑与投影控制继续通过
+oracle_observed: exact 38 项中 6 项稳定失败、32 项通过；失败均为目标页面状态、Advanced 边界、覆盖加载失败或 Behavior 409 合同断言，不是 import、collection、路径或基础设施错误
+raw_output_file: /tmp/f149-t040-red.log
+raw_output_sha256: 6d6fd8fdf4ff9dfe0f4addc0c3c0cb9e866ced338eafbb4c299dde9a15a53eab
+raw_output_size: 163836
+secret_scan: pass
+network: false
+rerun: false

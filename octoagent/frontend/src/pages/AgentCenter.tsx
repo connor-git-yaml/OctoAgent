@@ -3,7 +3,9 @@ import { createPortal } from "react-dom";
 import { useSearchParams } from "react-router-dom";
 import { useWorkbench } from "../components/shell/WorkbenchLayout";
 import AgentEditorSection from "../domains/agents/AgentEditorSection";
+import AgentCard from "../domains/agents/AgentOverview";
 import AgentTemplatePicker from "../domains/agents/AgentTemplatePicker";
+import BehaviorVersionHistory from "../domains/agents/BehaviorVersionHistory";
 import {
   buildAgentEditorDraftFromProfile,
   buildAgentEditorDraftFromTemplate,
@@ -20,12 +22,14 @@ import {
   type ApprovalOverrideDisplay,
   type BehaviorFileInfo,
 } from "../domains/agents/agentManagementData";
+import { resolveResourcePageState } from "../domains/shared/resourcePageState";
 import {
   fetchAgentApprovalOverrides,
   revokeAgentApprovalOverride,
 } from "../api/f149/adapters";
+import { executeF149Action } from "../platform/actions/f149Actions";
 import type { AgentProfileItem } from "../types";
-import { formatDateTime } from "../workbench/utils";
+import "./AgentCenter.css";
 
 type EditorMode = "main" | "agent" | "create";
 
@@ -153,79 +157,16 @@ function buildBehaviorScopeGroups(summary: BehaviorSystemSummary | undefined): B
 }
 
 
-function renderAgentCard(
-  agent: AgentCardViewModel,
-  options: {
-    onEdit: () => void;
-    onDelete?: () => void;
-    onOpenBehaviorFile?: (filePath: string, fileId: string) => void;
-    primaryActionLabel: string;
-    busyActionId: string | null;
-    activeFilePath?: string;
-  }
-) {
-
-  return (
-    <article key={agent.profileId || agent.name} className={`wb-agent-card ${agent.isMainAgent ? "is-main" : ""}`}>
-      {/* 标题行：名称 + badge + 操作按钮 */}
-      <div className="wb-agent-card-topline">
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <strong style={{ fontSize: "1rem", color: "var(--cp-ink)" }}>{agent.name}</strong>
-          <span className={`wb-status-pill ${agent.status === "needs_setup" ? "is-warning" : "is-ready"}`}>
-            {agent.isMainAgent ? "主 Agent" : agent.profileStatus}
-          </span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <button type="button" className="wb-button wb-button-secondary" style={{ padding: "4px 12px", fontSize: "0.82rem" }} onClick={options.onEdit}>
-            {options.primaryActionLabel}
-          </button>
-          {typeof options.onDelete === "function" ? (
-            <button
-              type="button"
-              className="wb-button wb-button-tertiary"
-              style={{ padding: "4px 12px", fontSize: "0.82rem" }}
-              disabled={options.busyActionId === "worker_profile.archive"}
-              onClick={options.onDelete}
-            >
-              删除
-            </button>
-          ) : null}
-        </div>
-      </div>
-
-      {/* 元信息：项目 + 模型 + 进行中 */}
-      <div className="wb-agent-card-meta">
-        {agent.projectName ? <span>{agent.projectName}</span> : null}
-        <span>模型 {agent.modelAlias}</span>
-        {agent.activeWorkCount > 0 && <span>进行中 {agent.activeWorkCount}</span>}
-      </div>
-
-      {/* 行为文件快捷按钮 */}
-      {agent.behaviorFiles.length > 0 && options.onOpenBehaviorFile ? (
-        <div className="wb-chip-row">
-          {agent.behaviorFiles.map((file) => (
-            <button
-              key={file.file_id}
-              type="button"
-              className={`wb-chip ${options.activeFilePath === file.path ? "is-active" : ""}`}
-              onClick={() => options.onOpenBehaviorFile!(file.path, file.file_id)}
-              style={{ cursor: "pointer" }}
-            >
-              {file.file_id}
-            </button>
-          ))}
-        </div>
-      ) : null}
-
-      <small className="wb-inline-note">
-        {agent.updatedAt ? `最近更新于 ${formatDateTime(agent.updatedAt)}` : "还没有更新记录"}
-      </small>
-    </article>
-  );
-}
-
 export default function AgentCenter() {
-  const { snapshot, submitAction, busyActionId } = useWorkbench();
+  const {
+    snapshot,
+    loading = false,
+    error = null,
+    authError = null,
+    refreshSnapshot,
+    submitAction,
+    busyActionId,
+  } = useWorkbench();
   const [searchParams] = useSearchParams();
   const behaviorCenterRef = useRef<HTMLElement | null>(null);
   const mainAgentRef = useRef<HTMLElement | null>(null);
@@ -270,15 +211,22 @@ export default function AgentCenter() {
   // 审批覆盖（全局，不区分 profile）
   const [approvalOverrides, setApprovalOverrides] = useState<ApprovalOverrideDisplay[]>([]);
   const [approvalOverridesLoading, setApprovalOverridesLoading] = useState(false);
+  const [approvalOverridesError, setApprovalOverridesError] = useState("");
+  const [historyFile, setHistoryFile] = useState<{
+    file: BehaviorFileInfo;
+    trigger: HTMLButtonElement;
+  } | null>(null);
 
   async function fetchApprovalOverrides() {
     setApprovalOverridesLoading(true);
+    setApprovalOverridesError("");
     try {
       const items: ApprovalOverrideDisplay[] =
         await fetchAgentApprovalOverrides();
       setApprovalOverrides(items);
     } catch {
-      // 静默失败，列表保持空
+      setApprovalOverrides([]);
+      setApprovalOverridesError("临时授权加载失败，请重试。");
     } finally {
       setApprovalOverridesLoading(false);
     }
@@ -308,6 +256,7 @@ export default function AgentCenter() {
     setReview(null);
     setFlashMessage("");
     setViewingFilePath("");
+    setHistoryFile(null);
   }, [agentView.currentProjectId]);
 
   useEffect(() => {
@@ -348,6 +297,12 @@ export default function AgentCenter() {
     }
   }, [searchParams]);
 
+  function closeHistory() {
+    const trigger = historyFile?.trigger ?? null;
+    setHistoryFile(null);
+    window.requestAnimationFrame(() => trigger?.focus());
+  }
+
   async function handleOpenBehaviorFile(filePath: string, fileId: string) {
     if (!filePath) {
       return;
@@ -359,16 +314,26 @@ export default function AgentCenter() {
     setEditingFile(false);
     setFileContentLoading(true);
     try {
-      const result = await submitAction("behavior.read_file", { file_path: filePath });
-      if (result?.data?.exists) {
-        setFileContent(String(result.data.content ?? ""));
+      const outcome = await executeF149Action(
+        {
+          actionId: "behavior.read_file",
+          params: { file_path: filePath },
+        },
+        submitAction,
+      );
+      if (outcome.ok && outcome.data.exists) {
+        setFileContent(outcome.data.content);
       } else {
         setFileContent("");
-        setFlashMessage("文件尚未创建，保存后将自动 materialize。");
+        setFlashMessage(
+          outcome.ok
+            ? "文件尚未创建，保存后会自动建立。"
+            : "读取行为文件失败，请重试。",
+        );
       }
     } catch {
       setFileContent("");
-      setFlashMessage("读取文件失败。");
+      setFlashMessage("读取行为文件失败，请重试。");
     } finally {
       setFileContentLoading(false);
     }
@@ -379,10 +344,26 @@ export default function AgentCenter() {
       return;
     }
     try {
-      await submitAction("behavior.write_file", {
-        file_path: viewingFilePath,
-        content: editFileContent,
-      });
+      const agentSlug =
+        viewingFilePath.match(/behavior\/agents\/([^/]+)\//)?.[1] ?? "";
+      const projectSlug =
+        viewingFilePath.match(/projects\/([^/]+)\//)?.[1] ?? "";
+      const outcome = await executeF149Action(
+        {
+          actionId: "behavior.write_file",
+          params: {
+            agent_slug: agentSlug,
+            content: editFileContent,
+            file_id: viewingFileId,
+            project_slug: projectSlug,
+          },
+        },
+        submitAction,
+      );
+      if (!outcome.ok) {
+        setFlashMessage("保存失败，请重新加载后再试。");
+        return;
+      }
       setFileContent(editFileContent);
       setEditingFile(false);
       setFlashMessage("已保存。");
@@ -623,212 +604,333 @@ export default function AgentCenter() {
     busyActionId === "worker_profile.review" ||
     busyActionId === "worker_profile.apply" ||
     busyActionId === "agent.create_worker_with_project";
+  const agents = [
+    ...(agentView.mainAgent.status === "ready" || agentView.projectAgents.length > 0
+      ? [agentView.mainAgent]
+      : []),
+    ...agentView.projectAgents,
+  ];
+  const pageResolution = resolveResourcePageState({
+    loading,
+    hasContent: agents.length > 0,
+    connected: true,
+    error: authError ?? (error ? new Error(error) : null),
+  });
+  const pageState =
+    pageResolution.owner === "surface"
+      ? pageResolution.state.kind
+      : "recoverable-error";
 
   return (
-    <div className="wb-page wb-agent-management-page">
-      {flashMessage ? (
-        <div className="wb-inline-banner is-muted">
-          <strong>{flashMessage}</strong>
+    <div className="f149-agent-page">
+      <section className="f149-agent-hero">
+        <div>
+          <p className="f149-agent-kicker">AGENTS</p>
+          <h1>智能体</h1>
+          <p>管理主助手和分工，让不同角色各自负责最合适的工作。</p>
         </div>
-      ) : null}
-
-      <section id="agents-behavior-center" ref={behaviorCenterRef} className="wb-panel">
-        <div className="wb-panel-head">
-          <div>
-            <h3>行为文件</h3>
-          </div>
+        <div className="f149-agent-hero-actions">
+          <span aria-label={`共 ${agents.length} 个智能体`}>
+            <strong>{agents.length}</strong>
+            个
+          </span>
+          <button type="button" onClick={openCreatePicker}>
+            新建 Agent
+          </button>
         </div>
-
-        {behaviorProfiles.length === 0 || selectedBehaviorProfile === null ? (
-          <div className="wb-empty-state">
-            <strong>暂无行为文件</strong>
-            <small>系统会在 Agent 创建后自动生成对应的行为文件。</small>
-          </div>
-        ) : (
-          <>
-            <div className="wb-behavior-scope-grid">
-              {behaviorScopeGroups.filter((group) => group.scope !== "agent_private").map((group) => (
-                <article key={group.scope} className="wb-note wb-behavior-scope-card">
-                  <strong>{group.title}</strong>
-                  <div className="wb-note-stack">
-                    {group.files.map((file) => (
-                      <button
-                        key={`${group.scope}:${file.file_id}`}
-                        type="button"
-                        className={`wb-note wb-behavior-file-row ${
-                          viewingFilePath === file.path ? "is-active" : ""
-                        }`}
-                        onClick={() => void handleOpenBehaviorFile(file.path, file.file_id)}
-                      >
-                        <strong>{file.file_id}</strong>
-                        <span>{file.title}</span>
-                        <small className="wb-inline-note">
-                          {file.exists_on_disk ? "已创建" : "待创建"}
-                        </small>
-                      </button>
-                    ))}
-                  </div>
-                </article>
-              ))}
-            </div>
-          </>
-        )}
       </section>
 
-      <div className="wb-agent-management-layout">
-        <section id="agents-main-agent" ref={mainAgentRef} className="wb-panel">
-          <div className="wb-panel-head">
-            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              <p className="wb-card-label">智能体</p>
-              <span className="wb-chip">{1 + agentView.projectAgents.length}</span>
-            </div>
-            <button type="button" className="wb-button wb-button-primary" onClick={openCreatePicker}>
-              新建 Agent
-            </button>
-          </div>
-          {renderAgentCard(agentView.mainAgent, {
-            onEdit: openMainEditor,
-            onOpenBehaviorFile: (filePath, fileId) => void handleOpenBehaviorFile(filePath, fileId),
-            primaryActionLabel: "编辑",
-            busyActionId,
-            activeFilePath: viewingFilePath,
-          })}
-          {agentView.projectAgents.length > 0 ? (
-            <div className="wb-section-stack">
-              {agentView.projectAgents.map((agent) =>
-                renderAgentCard(agent, {
-                  onEdit: () => openAgentEditor(agent.profileId),
-                  onDelete: () => void handleDeleteAgent(agent),
-                  onOpenBehaviorFile: (filePath, fileId) => void handleOpenBehaviorFile(filePath, fileId),
-                  primaryActionLabel: "编辑",
-                  busyActionId,
-                  activeFilePath: viewingFilePath,
-                })
-              )}
-            </div>
-          ) : null}
-        </section>
-      </div>
-
-      {/* ── Modal: 编辑器 / 模板选择 / 行为文件查看 ── */}
-      {(showTemplatePicker || editorState || viewingFilePath) && document.body ? createPortal(
-        <div className="wb-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget && e.detail > 0) closeComposer(); }}>
-          <div className="wb-modal-body">
-            {showTemplatePicker ? (
-              <AgentTemplatePicker
-                currentProjectName={agentView.currentProjectName}
-                templates={agentView.builtinTemplates}
-                onPickTemplate={openTemplateCreate}
-                onPickBlank={openBlankCreate}
-                onCancel={closeComposer}
-              />
-            ) : editorState ? (
-              <AgentEditorSection
-                title={
-                  editorState.mode === "main"
-                    ? "主 Agent"
-                    : editorState.draft.profileId
-                      ? editorState.draft.name
-                      : "新建 Agent"
-                }
-                description={
-                  editorState.mode === "main"
-                    ? "当前项目默认 Agent。"
-                    : editorState.draft.profileId
-                      ? "编辑 Agent 配置。"
-                      : "创建新 Agent。"
-                }
-                isCreate={editorState.mode === "create" && !editorState.draft.profileId}
-                saveLabel={
-                  editorState.mode === "main"
-                    ? "保存"
-                    : editorState.draft.profileId
-                      ? "保存"
-                      : "创建"
-                }
-                draft={editorState.draft}
-                review={review}
-                busy={busySaving}
-                modelAliasOptions={modelAliasOptions}
-                behaviorFiles={editorState.behaviorFiles}
-                approvalOverrides={approvalOverrides}
-                approvalOverridesLoading={approvalOverridesLoading}
-                onChangeDraft={updateDraft}
-                onOpenBehaviorFile={(path, fileId) => void handleOpenBehaviorFile(path, fileId)}
-                onRevokeOverride={(agentRuntimeId, toolName) => void handleRevokeOverride(agentRuntimeId, toolName)}
-                onSave={() => void handleSave()}
-                onCancel={closeComposer}
-                formatTokenLabel={formatTokenLabel}
-              />
-            ) : viewingFilePath ? (
-              <section className="wb-panel wb-agent-editor-shell">
-                <div className="wb-panel-head">
-                  <div>
-                    <p className="wb-card-label">{viewingFileId}</p>
-                    <h3>{viewingFilePath.split("/").pop()}</h3>
-                  </div>
-                  <div className="wb-inline-actions">
-                    {editingFile ? (
-                      <>
-                        <button
-                          type="button"
-                          className="wb-button wb-button-primary"
-                          disabled={busyActionId === "behavior.write_file"}
-                          onClick={() => void handleSaveBehaviorFile()}
-                        >
-                          保存
-                        </button>
-                        <button
-                          type="button"
-                          className="wb-button wb-button-tertiary"
-                          onClick={() => setEditingFile(false)}
-                        >
-                          取消
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        className="wb-button wb-button-secondary"
-                        onClick={() => {
-                          setEditFileContent(fileContent);
-                          setEditingFile(true);
-                        }}
-                      >
-                        编辑
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="wb-button wb-button-tertiary"
-                      onClick={() => setViewingFilePath("")}
-                    >
-                      关闭
-                    </button>
-                  </div>
-                </div>
-                {fileContentLoading ? (
-                  <div className="wb-empty-state">
-                    <span>加载中…</span>
-                  </div>
-                ) : editingFile ? (
-                  <textarea
-                    className="wb-textarea-prose wb-behavior-file-editor"
-                    value={editFileContent}
-                    onChange={(e) => setEditFileContent(e.target.value)}
-                    style={{ minHeight: "400px", fontFamily: "monospace", fontSize: "0.85rem" }}
-                  />
-                ) : (
-                  <pre className="wb-behavior-file-content" style={{ whiteSpace: "pre-wrap", padding: "1rem", fontSize: "0.85rem", lineHeight: "1.6", maxHeight: "600px", overflow: "auto" }}>
-                    {fileContent || "（文件为空或尚未创建）"}
-                  </pre>
-                )}
-              </section>
-            ) : null}
-          </div>
-        </div>,
-        document.body
+      {flashMessage ? (
+        <div className="f149-agent-banner" role="status">
+          {flashMessage}
+        </div>
       ) : null}
+
+      {pageState === "loading" ? (
+        <div className="f149-agent-state" aria-live="polite">
+          <span className="f149-agent-state-mark" aria-hidden="true" />
+          <strong>正在整理智能体</strong>
+          <p>正在准备角色与行为文件。</p>
+        </div>
+      ) : null}
+
+      {pageState === "empty" ? (
+        <div className="f149-agent-state">
+          <span className="f149-agent-state-mark is-empty" aria-hidden="true" />
+          <strong>还没有智能体</strong>
+          <p>新建一个开始分工，先从主助手或空白角色起步。</p>
+        </div>
+      ) : null}
+
+      {pageState === "permission-denied" ? (
+        <div className="f149-agent-state is-error" role="alert">
+          <strong>当前账号没有权限管理智能体</strong>
+          <p>请联系管理员确认这项资源的访问权限。</p>
+        </div>
+      ) : null}
+
+      {[
+        "recoverable-error",
+        "conflict",
+        "not-found",
+        "disconnected",
+      ].includes(pageState) ? (
+        <div className="f149-agent-state is-error" role="alert">
+          <strong>智能体列表加载失败</strong>
+          <p>连接可能暂时不稳定，请稍后再试。</p>
+          <button type="button" onClick={() => void refreshSnapshot?.()}>
+            重试
+          </button>
+        </div>
+      ) : null}
+
+      {pageState === "ready" ? (
+        <div className="f149-agent-workspace">
+          <section
+            id="agents-main-agent"
+            ref={mainAgentRef}
+            className="f149-agent-list"
+            aria-label="智能体列表"
+          >
+            {agents.map((agent) => (
+              <AgentCard
+                key={agent.profileId}
+                agent={agent}
+                busyActionId={busyActionId}
+                onEdit={
+                  agent.isMainAgent
+                    ? openMainEditor
+                    : () => openAgentEditor(agent.profileId)
+                }
+                onDelete={
+                  agent.removable
+                    ? () => void handleDeleteAgent(agent)
+                    : undefined
+                }
+                onOpenBehaviorFile={(file) =>
+                  void handleOpenBehaviorFile(file.path, file.file_id)
+                }
+                onOpenHistory={(file, trigger) =>
+                  setHistoryFile({ file, trigger })
+                }
+              />
+            ))}
+          </section>
+
+          <aside
+            id="agents-behavior-center"
+            ref={behaviorCenterRef}
+            className={`f149-agent-side-panel ${
+              historyFile ? "is-history-open" : ""
+            }`}
+          >
+            {historyFile ? (
+              <BehaviorVersionHistory
+                fileId={historyFile.file.file_id}
+                scope={historyFile.file.scope || "agent_private"}
+                agentSlug={
+                  historyFile.file.path.match(
+                    /behavior\/agents\/([^/]+)\//,
+                  )?.[1] ?? ""
+                }
+                projectSlug={
+                  historyFile.file.path.match(/projects\/([^/]+)\//)?.[1] ?? ""
+                }
+                onClose={closeHistory}
+              />
+            ) : (
+              <>
+                <header className="f149-agent-side-header">
+                  <div>
+                    <p>BEHAVIOR</p>
+                    <h2>行为文件</h2>
+                  </div>
+                </header>
+                {behaviorProfiles.length === 0 ||
+                selectedBehaviorProfile === null ? (
+                  <div className="f149-agent-side-empty">
+                    <strong>暂无行为文件</strong>
+                    <span>创建智能体后会在这里显示。</span>
+                  </div>
+                ) : (
+                  <div className="f149-agent-behavior-groups">
+                    {behaviorScopeGroups
+                      .filter((group) => group.scope !== "agent_private")
+                      .map((group) => (
+                        <article key={group.scope}>
+                          <header>
+                            <strong>{group.title}</strong>
+                            <span>{group.files.length}</span>
+                          </header>
+                          {group.files.map((file) => (
+                            <button
+                              key={`${group.scope}:${file.file_id}`}
+                              type="button"
+                              className={
+                                viewingFilePath === file.path
+                                  ? "is-active"
+                                  : ""
+                              }
+                              onClick={() =>
+                                void handleOpenBehaviorFile(
+                                  file.path,
+                                  file.file_id,
+                                )
+                              }
+                            >
+                              <span>
+                                <strong>{file.file_id}</strong>
+                                <small>{file.title}</small>
+                              </span>
+                              <small>
+                                {file.exists_on_disk ? "已创建" : "待创建"}
+                              </small>
+                            </button>
+                          ))}
+                        </article>
+                      ))}
+                  </div>
+                )}
+              </>
+            )}
+          </aside>
+        </div>
+      ) : null}
+
+      {(showTemplatePicker || editorState || viewingFilePath) && document.body
+        ? createPortal(
+            <div
+              className="f149-agent-modal-backdrop"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) {
+                  closeComposer();
+                }
+              }}
+            >
+              <div className="f149-agent-modal">
+                {showTemplatePicker ? (
+                  <AgentTemplatePicker
+                    currentProjectName={agentView.currentProjectName}
+                    templates={agentView.builtinTemplates}
+                    onPickTemplate={openTemplateCreate}
+                    onPickBlank={openBlankCreate}
+                    onCancel={closeComposer}
+                  />
+                ) : editorState ? (
+                  <>
+                    {approvalOverridesError ? (
+                      <div className="f149-agent-modal-error" role="alert">
+                        {approvalOverridesError}
+                      </div>
+                    ) : null}
+                    <AgentEditorSection
+                      title={
+                        editorState.mode === "main"
+                          ? "主 Agent"
+                          : editorState.draft.profileId
+                            ? editorState.draft.name
+                            : "新建 Agent"
+                      }
+                      description={
+                        editorState.mode === "main"
+                          ? "当前项目默认 Agent。"
+                          : editorState.draft.profileId
+                            ? "编辑 Agent 配置。"
+                            : "创建新 Agent。"
+                      }
+                      isCreate={
+                        editorState.mode === "create" &&
+                        !editorState.draft.profileId
+                      }
+                      saveLabel={
+                        editorState.draft.profileId ||
+                        editorState.mode === "main"
+                          ? "保存"
+                          : "创建"
+                      }
+                      draft={editorState.draft}
+                      review={review}
+                      busy={busySaving}
+                      modelAliasOptions={modelAliasOptions}
+                      behaviorFiles={editorState.behaviorFiles}
+                      approvalOverrides={approvalOverrides}
+                      approvalOverridesLoading={approvalOverridesLoading}
+                      onChangeDraft={updateDraft}
+                      onOpenBehaviorFile={(path, fileId) =>
+                        void handleOpenBehaviorFile(path, fileId)
+                      }
+                      onRevokeOverride={(agentRuntimeId, toolName) =>
+                        void handleRevokeOverride(agentRuntimeId, toolName)
+                      }
+                      onSave={() => void handleSave()}
+                      onCancel={closeComposer}
+                      formatTokenLabel={formatTokenLabel}
+                    />
+                  </>
+                ) : viewingFilePath ? (
+                  <section className="f149-agent-file-editor">
+                    <header>
+                      <div>
+                        <p>{viewingFileId}</p>
+                        <h2>{viewingFilePath.split("/").pop()}</h2>
+                      </div>
+                      <div>
+                        {editingFile ? (
+                          <>
+                            <button
+                              type="button"
+                              disabled={
+                                busyActionId === "behavior.write_file"
+                              }
+                              onClick={() => void handleSaveBehaviorFile()}
+                            >
+                              保存
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingFile(false)}
+                            >
+                              取消
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditFileContent(fileContent);
+                              setEditingFile(true);
+                            }}
+                          >
+                            编辑
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setViewingFilePath("")}
+                        >
+                          关闭
+                        </button>
+                      </div>
+                    </header>
+                    {fileContentLoading ? (
+                      <div className="f149-agent-file-state">加载中…</div>
+                    ) : editingFile ? (
+                      <textarea
+                        value={editFileContent}
+                        onChange={(event) =>
+                          setEditFileContent(event.target.value)
+                        }
+                      />
+                    ) : (
+                      <pre>{fileContent || "（文件为空或尚未创建）"}</pre>
+                    )}
+                  </section>
+                ) : null}
+              </div>
+            </div>,
+            document.body,
+          )
+        : null}
     </div>
   );
 }
