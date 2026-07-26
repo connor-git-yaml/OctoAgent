@@ -1,0 +1,15 @@
+task_id: T043
+phase: GREEN
+behavior: Skills v2 列表状态、详情 Advanced、文件安装、卸载确认与统一 transport
+command: cd octoagent/frontend && npx vitest run src/pages/SkillCenter.test.tsx
+executed_at_utc: 2026-07-26T07:25:48Z
+head_sha: 2c094e47927a1e5fa6ae4640c7e69423c06bb48a
+exit_code: 0
+oracle_expected: loading/empty/recoverable error/origin-403 互斥；详情技术正文默认折叠；安装只提交文件事实并保留 409 重试；卸载使用页面内确认；焦点归还
+oracle_observed: exact 8/8 通过；列表、权限、Advanced、净化文本、安装冲突、卸载刷新、焦点与旧视觉 absence 全部闭合
+raw_output_file: /tmp/f149-t043-green.log
+raw_output_sha256: 1c0134c1b8d77e9f987c459d0f72f5a7f06afd9a5329cc7c51175d555925eb74
+raw_output_size: 318
+secret_scan: pass
+network: false
+rerun: false

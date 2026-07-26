@@ -284,5 +284,17 @@
   evidence slice而如实阻断；全量L1中4项通过、2项既有聊天脚本回复超时且与Files
   页面无调用交集。本task未修改、放宽或绕过跨Feature authority。390仍只作Web
   响应式检查，手机产品只走原生iOS。
+- T043以旧Skills页面形成8条稳定RED，分别覆盖独立详情、empty/error/origin-403、
+  Advanced技术正文、文件安装冲突重试、页面内卸载确认、焦点与旧视觉absence。
+  GREEN继续复用统一F149 adapter/generated contract与共享resource state；安装端
+  只读取SKILL.md名称和原始内容，不复制后端合法性算法。REFACTOR逐页对照Claude
+  Design Skills Desktop/390，保留宽松hero、双列卡片、留白与清晰层级；长描述
+  在卡片中收敛，完整详情仍可访问。真实Chromium 1440/390 Web窄窗口无页面级
+  横向溢出；详情/安装在390使用全屏抽屉，Advanced原始正文只有代码块局部横向
+  滚动，关闭后焦点回原按钮。最终精确10/10、全前端569/569、生产build、
+  OpenAPI、F149 boundary/style/complexity及changed-lines coverage 90.53%通过。
+  repository runtime architecture因F150仍保护SkillCenter transport-only
+  authority而如实阻断，本task未修改、放宽或绕过跨Feature authority。390仍只作
+  Web响应式检查，手机产品只走原生iOS。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

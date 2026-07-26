@@ -1,0 +1,43 @@
+task_id: T043
+phase: REFACTOR
+behavior: Skills v2 Claude Design 视觉迁移、技术信息边界与 Desktop/390 Web 窄窗口验收
+command: cd octoagent/frontend && npx vitest run src/pages/SkillCenter.test.tsx scripts/check-f149-style-ratchet.test.ts
+executed_at_utc: 2026-07-26T07:33:45Z
+head_sha: 2c094e47927a1e5fa6ae4640c7e69423c06bb48a
+exit_code: 0
+oracle_expected: exact 合同不漂移；页面保持 Claude Design 初版宽松 hero、卡片节奏、清晰层级与全屏窄窗口抽屉；只有 Advanced 代码块局部横向滚动
+oracle_observed: exact 10/10、全前端 569/569、生产 build、OpenAPI、F149 boundary/style/complexity 与 changed-lines coverage 90.53% 通过；真实 Chromium 1440/390 视觉、溢出与焦点复核通过
+raw_output_file: /tmp/f149-t043-refactor.log
+raw_output_sha256: 9147a797f0cb8745ae9c850934619a7d45022818676c5ab07d78bcc89223bf4b
+raw_output_size: 380
+full_frontend_log_sha256: f0926c89a26768bf46fbbf381e40a01f61f21796296744cbc1df3d6af45eb998
+build_log_sha256: 72d63375636c8c10108fd3c1afa776caf28a166fc0291a5caf8449c036ef062a
+openapi_log_sha256: c83ed00157044c7f210150804ea67bc92f6372f3c1524d8ff0ae4dd395ffa649
+boundary_log_sha256: 4a196f8716665b34f6a8b9162c27ab44af06946146572dbd7ec6ed4837452f69
+style_log_sha256: 10a594fd0c3e59c0243ce92f771cfd42a7ed30e0cb7d1a5ff0b2c2f3837369d2
+complexity_log_sha256: 7a73b905dffdf027c7c7bfa2cb5e63897f9800ccddb93e92869b2171aa030549
+coverage_log_sha256: 9c13dd7550c9b4d6ae857bcc62ef54c4f64a246d5762f7a0260a08136089ae73
+changed_lines_coverage_log_sha256: 6353959c5dd7bdfd367cd0906caabe36d7cada31a95eded95ca3bc7f1f958e95
+runtime_architecture_log_sha256: ce03c3a04862d4c3352682115051620aaf061ced3e4d39f60b09a87d63c2aadc
+runtime_architecture_gate: blocked
+runtime_architecture_observed: F150_PROTECTED_SEMANTIC_DRIFT 拒绝 SkillCenter transport-only authority；本 task 未修改、放宽或绕过 F150/F151 checker，也未伪造跨 Feature evidence
+visual_review:
+  - 真实浏览器 Desktop 使用宽松 hero、两列技能卡与清晰的技能库层级；长描述在卡片中收敛，完整详情仍可访问，没有回退旧 Web 密集列表
+  - 详情普通区只显示描述、版本、作者与标签；触发方式、工具清单和原始 SKILL.md 默认收进 Advanced，文本由 React 安全呈现
+  - Advanced 展开后页面本身不横向溢出；Desktop 代码区 client/scroll width 为 630/1107，390 Web 窄窗口为 322/1107，仅代码块局部滚动
+  - 390 Web 窄窗口为单列卡片，安装入口固定可见；详情与安装使用 390x844 全屏抽屉。该检查不是手机产品或原生 iOS 验收
+  - Desktop 与 390 的 document client/scroll width 均相等；详情关闭后焦点回到原“查看详情”按钮；主要操作控件不小于 44px
+  - 本次只消费 --cp-* 与 color-mix；无 wb-*、内联 style、硬编码浅色 palette、Spotify 或第二主题。Claude Design 已有设计源足以实现，本 task 无需改动云端设计
+quality_review:
+  - 页面复用 api/f149 adapters、generated contract 与共享 resourcePageState；没有 direct fetch、第二 transport、store、service 或 registry
+  - 安装端只读取 SKILL.md 的名称与原始内容以形成请求，不复制 kebab-case、schema 或工具校验；最终合法性只由后端判断
+  - 401 继续归全局 auth，403 只显示资源权限不足且没有重新登录动作；原始列表错误不泄漏到普通 UI
+  - 详情、安装、卸载三个对话框职责分开；卸载确认不使用 window.confirm；操作失败保留原上下文供重试
+  - SkillCenter 为 616 行，complexity ratchet 617/1200；changed-lines authored executable coverage 为 2381/2630=90.53%，阈值未降低
+file_sha256:
+  skill-center: 12183be9167bb8351c78d82b9c9b3ad8aee26b3cf919288d55131081caefbbf3
+  skill-center-css: eead0e0d0495918392532c070890ccd1bb5f54d01b657288019da245d9811819
+  skill-center-test: cc3b231d46a5f7245cc2477e1ff0d8478cff45696c1c41a5322edb8aa8f9ab73
+secret_scan: pass
+network: false
+rerun: false

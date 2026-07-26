@@ -1,0 +1,16 @@
+task_id: T043
+phase: RED
+behavior: Skills v2 列表状态、详情 Advanced、文件安装、卸载确认与 Claude Design 视觉边界
+command: cd octoagent/frontend && npx vitest run src/pages/SkillCenter.test.tsx
+executed_at_utc: 2026-07-26T07:21:57Z
+head_sha: 2c094e47927a1e5fa6ae4640c7e69423c06bb48a
+exit_code: 1
+oracle_expected: 旧 Skills 页面无法同时满足独立详情动作、empty/error/origin-403、Advanced 技术正文、文件安装冲突重试、页面内卸载确认、焦点归还与旧视觉 absence
+oracle_observed: exact 8 项全部稳定失败；分别命中独立详情、空态、可恢复错误、403、Advanced、安装对话框、卸载确认与 wb/inline style 边界，不是 import、collection、路径或基础设施错误
+raw_output_file: /tmp/f149-t043-red.log
+raw_output_sha256: b8a871ed3a4c07d0bff75d6e32479094631269a435f356531c43d32da263d244
+raw_output_size: 126864
+capture_note: 行为 RED 前的 collect-only 尝试因当前 Vitest 2.1.9 不支持 --collect-only 而退出；它未执行测试体、未作为行为证据。本文件只引用随后执行的 exact RED command
+secret_scan: pass
+network: false
+rerun: false
