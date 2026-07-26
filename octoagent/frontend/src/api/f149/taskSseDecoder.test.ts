@@ -145,6 +145,56 @@ describe("F149 Task SSE frontend decoder", () => {
     );
   });
 
+  it("已知 model-call 有限帧只进入 Advanced 诊断，不驱动 TaskDetail 业务状态", () => {
+    const completed = decodeTaskSseFrame(
+      frame({
+        event_id: "event-model-completed",
+        type: "MODEL_CALL_COMPLETED",
+        payload: {
+          kind: "model_call_completed",
+          skill_id: null,
+          artifact_ref: "artifact-answer",
+          response_summary: "文件已写好。",
+        },
+      }),
+    );
+
+    expect(completed, ORACLE).toEqual({
+      ok: true,
+      event: {
+        kind: "diagnostic",
+        eventId: "event-model-completed",
+        taskId: "task-1",
+        taskSeq: 7,
+        timestamp: "2026-07-25T12:00:00Z",
+        sourceType: "MODEL_CALL_COMPLETED",
+        actor: "system",
+        final: false,
+        diagnostic: {
+          phase: "completed",
+        },
+        truncated: false,
+      },
+    });
+    expect(JSON.stringify(completed), ORACLE).not.toContain("文件已写好。");
+
+    expect(
+      decodeTaskSseFrame(
+        frame({
+          type: "MODEL_CALL_COMPLETED",
+          payload: {
+            kind: "model_call_completed",
+            skill_id: null,
+            artifact_ref: "artifact-answer",
+            response_summary: "文件已写好。",
+            token_usage: { total_tokens: 42 },
+          },
+        }),
+      ).ok,
+      ORACLE,
+    ).toBe(false);
+  });
+
   it("拒绝业务 type 与 payload kind 不一致及额外 raw 字段", () => {
     expect(
       decodeTaskSseFrame(

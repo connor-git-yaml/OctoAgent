@@ -77,7 +77,7 @@ async def provision_f149_a_wave_scenario(store_group: Any) -> None:
         TaskStatus,
     )
 
-    created_at = datetime(2026, 7, 26, 8, 30, tzinfo=UTC)
+    created_at = datetime.now(UTC)
     task = Task(
         task_id=L1_A_WAVE_TASK_ID,
         created_at=created_at,

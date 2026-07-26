@@ -131,6 +131,96 @@ def test_history_payload_is_bounded_scrubbed_diagnostic_only() -> None:
     assert _json_depth(payload["diagnostic"]) <= contract.MAX_DIAGNOSTIC_DEPTH, ORACLE
 
 
+def test_model_call_frames_keep_only_chat_safe_fields() -> None:
+    contract = _contract_module()
+    synthetic_secret = "F149_" + "SECRET_SENTINEL_DO_NOT_STORE"
+    cases = [
+        (
+            EventType.MODEL_CALL_STARTED,
+            {
+                "skill_id": "chat.general.inline",
+                "artifact_ref": None,
+                "model_alias": "default",
+                "request_summary": "内部请求",
+                "access_token": synthetic_secret,
+            },
+            {
+                "kind": "model_call_started",
+                "skill_id": "chat.general.inline",
+                "artifact_ref": None,
+            },
+        ),
+        (
+            EventType.MODEL_CALL_COMPLETED,
+            {
+                "response_summary": "文件已写好。",
+                "artifact_ref": "artifact-answer",
+                "token_usage": {"total_tokens": 42},
+                "provider": "scripted",
+                "access_token": synthetic_secret,
+            },
+            {
+                "kind": "model_call_completed",
+                "skill_id": None,
+                "artifact_ref": "artifact-answer",
+                "response_summary": "文件已写好。",
+            },
+        ),
+        (
+            EventType.MODEL_CALL_FAILED,
+            {
+                "skill_id": "chat.general.inline",
+                "error_message": "模型暂时不可用",
+                "provider": "scripted",
+                "access_token": synthetic_secret,
+            },
+            {
+                "kind": "model_call_failed",
+                "skill_id": "chat.general.inline",
+                "artifact_ref": None,
+                "error": "模型暂时不可用",
+            },
+        ),
+    ]
+
+    for event_type, raw_payload, expected_payload in cases:
+        data = stream._event_to_sse_data(_event(event_type, raw_payload))
+        assert data["payload"] == expected_payload, ORACLE
+        assert synthetic_secret not in json.dumps(data, sort_keys=True), ORACLE
+        assert contract.decode_task_sse_frame(data).payload.kind == expected_payload["kind"], ORACLE
+
+    malformed = stream._event_to_sse_data(
+        _event(
+            EventType.MODEL_CALL_COMPLETED,
+            {
+                "password": synthetic_secret,
+                "token_usage": {"total_tokens": 42},
+            },
+        )
+    )
+    assert malformed["payload"]["kind"] == "diagnostic", ORACLE
+    assert synthetic_secret not in json.dumps(malformed, sort_keys=True), ORACLE
+
+    sensitive_failure = stream._event_to_sse_data(
+        _event(
+            EventType.MODEL_CALL_FAILED,
+            {"error_message": f"Bearer {synthetic_secret}"},
+        )
+    )
+    assert sensitive_failure["payload"] == {
+        "kind": "model_call_failed",
+        "skill_id": None,
+        "artifact_ref": None,
+        "error": "模型调用未能完成",
+    }, ORACLE
+    assert synthetic_secret not in json.dumps(sensitive_failure, sort_keys=True), ORACLE
+
+    mismatched = dict(sensitive_failure)
+    mismatched["type"] = EventType.MODEL_CALL_COMPLETED.value
+    with pytest.raises(ValueError, match="MODEL_CALL_COMPLETED payload kind 不合法"):
+        contract.decode_task_sse_frame(mismatched)
+
+
 def test_contract_stays_in_gateway_and_openapi_only_declares_event_stream() -> None:
     contract = _contract_module()
     contract_path = Path(contract.__file__).resolve()

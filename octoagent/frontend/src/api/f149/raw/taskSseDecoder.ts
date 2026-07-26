@@ -49,6 +49,9 @@ const MAX_DIAGNOSTIC_DEPTH = 4;
 const MAX_DIAGNOSTIC_ITEMS = 16;
 const MAX_DIAGNOSTIC_STRING_LENGTH = 267;
 const MAX_DIAGNOSTIC_BYTES = 4096;
+const MAX_MODEL_ID_LENGTH = 512;
+const MAX_MODEL_RESPONSE_LENGTH = 8192;
+const MAX_MODEL_ERROR_LENGTH = 512;
 const REDACTED_VALUE = "[REDACTED]";
 const TRUNCATED_VALUE = "[TRUNCATED]";
 
@@ -107,6 +110,16 @@ function hasExactKeys(
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
+}
+
+function isNullableBoundedString(
+  value: unknown,
+  maxLength: number,
+): value is string | null {
+  return (
+    value === null ||
+    (isNonEmptyString(value) && value.length <= maxLength)
+  );
 }
 
 function isSensitiveKey(key: string): boolean {
@@ -197,6 +210,73 @@ function decodeBase(
   };
 }
 
+function decodeModelCallDiagnostic(
+  base: TaskSseBaseProjection,
+  payload: Record<string, unknown>,
+): TaskSseDecodeResult | null {
+  const contracts = {
+    MODEL_CALL_STARTED: {
+      kind: "model_call_started",
+      phase: "started",
+      keys: ["artifact_ref", "kind", "skill_id"],
+      textKey: null,
+      maxTextLength: 0,
+    },
+    MODEL_CALL_COMPLETED: {
+      kind: "model_call_completed",
+      phase: "completed",
+      keys: [
+        "artifact_ref",
+        "kind",
+        "response_summary",
+        "skill_id",
+      ],
+      textKey: "response_summary",
+      maxTextLength: MAX_MODEL_RESPONSE_LENGTH,
+    },
+    MODEL_CALL_FAILED: {
+      kind: "model_call_failed",
+      phase: "failed",
+      keys: ["artifact_ref", "error", "kind", "skill_id"],
+      textKey: "error",
+      maxTextLength: MAX_MODEL_ERROR_LENGTH,
+    },
+  } as const;
+  const contract = contracts[base.sourceType as keyof typeof contracts];
+  if (!contract) {
+    return null;
+  }
+  if (payload.kind === "diagnostic") {
+    return null;
+  }
+  if (
+    payload.kind !== contract.kind ||
+    !hasExactKeys(payload, contract.keys) ||
+    !isNullableBoundedString(payload.skill_id, MAX_MODEL_ID_LENGTH) ||
+    !isNullableBoundedString(payload.artifact_ref, MAX_MODEL_ID_LENGTH)
+  ) {
+    return invalid("model-call");
+  }
+  if (
+    contract.textKey !== null &&
+    (!isNonEmptyString(payload[contract.textKey]) ||
+      (payload[contract.textKey] as string).length > contract.maxTextLength)
+  ) {
+    return invalid("model-call");
+  }
+  return {
+    ok: true,
+    event: {
+      ...base,
+      kind: "diagnostic",
+      diagnostic: {
+        phase: contract.phase,
+      },
+      truncated: false,
+    },
+  };
+}
+
 export function decodeTaskSseFrame(
   value: RawTaskSseFrame,
 ): TaskSseDecodeResult {
@@ -247,6 +327,11 @@ export function decodeTaskSseFrame(
         kind: "artifact-refresh",
       },
     };
+  }
+
+  const modelCall = decodeModelCallDiagnostic(base, payload);
+  if (modelCall) {
+    return modelCall;
   }
 
   if (

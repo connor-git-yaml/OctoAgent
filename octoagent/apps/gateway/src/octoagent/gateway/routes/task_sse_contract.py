@@ -16,6 +16,9 @@ MAX_DIAGNOSTIC_DEPTH = 4
 MAX_DIAGNOSTIC_ITEMS = 16
 MAX_DIAGNOSTIC_STRING_LENGTH = 256
 MAX_DIAGNOSTIC_BYTES = 4096
+MAX_MODEL_ID_LENGTH = 512
+MAX_MODEL_RESPONSE_LENGTH = 8192
+MAX_MODEL_ERROR_LENGTH = 512
 REDACTED_VALUE = "[REDACTED]"
 TRUNCATED_VALUE = "[TRUNCATED]"
 
@@ -55,6 +58,38 @@ class F149ArtifactRefreshPayload(BaseModel):
     refresh_artifacts: Literal[True] = True
 
 
+class F149ModelCallStartedPayload(BaseModel):
+    """Chat 只消费调用归属，不接收原始请求、模型或 token 数据。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["model_call_started"] = "model_call_started"
+    skill_id: str | None = Field(default=None, max_length=MAX_MODEL_ID_LENGTH)
+    artifact_ref: str | None = Field(default=None, max_length=MAX_MODEL_ID_LENGTH)
+
+
+class F149ModelCallCompletedPayload(BaseModel):
+    """Chat 用户可见回复的有限投影。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["model_call_completed"] = "model_call_completed"
+    skill_id: str | None = Field(default=None, max_length=MAX_MODEL_ID_LENGTH)
+    artifact_ref: str | None = Field(default=None, max_length=MAX_MODEL_ID_LENGTH)
+    response_summary: str = Field(min_length=1, max_length=MAX_MODEL_RESPONSE_LENGTH)
+
+
+class F149ModelCallFailedPayload(BaseModel):
+    """Chat 失败提示的有限投影。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["model_call_failed"] = "model_call_failed"
+    skill_id: str | None = Field(default=None, max_length=MAX_MODEL_ID_LENGTH)
+    artifact_ref: str | None = Field(default=None, max_length=MAX_MODEL_ID_LENGTH)
+    error: str = Field(min_length=1, max_length=MAX_MODEL_ERROR_LENGTH)
+
+
 class F149SafeDiagnosticPayload(BaseModel):
     """已净化且有界的 Advanced 诊断数据。"""
 
@@ -67,7 +102,12 @@ class F149SafeDiagnosticPayload(BaseModel):
 
 
 F149TaskSSEPayload = Annotated[
-    F149StateTransitionPayload | F149ArtifactRefreshPayload | F149SafeDiagnosticPayload,
+    F149StateTransitionPayload
+    | F149ArtifactRefreshPayload
+    | F149ModelCallStartedPayload
+    | F149ModelCallCompletedPayload
+    | F149ModelCallFailedPayload
+    | F149SafeDiagnosticPayload,
     Field(discriminator="kind"),
 ]
 
@@ -180,22 +220,108 @@ def _safe_diagnostic(
     )
 
 
+def _optional_model_field(raw_payload: RawEventPayload, key: str) -> str | None:
+    value = raw_payload.get(key)
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized[:MAX_MODEL_ID_LENGTH]
+
+
+def _model_response_summary(raw_payload: RawEventPayload) -> str | None:
+    value = raw_payload.get("response_summary")
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    if not normalized:
+        return None
+    return normalized[:MAX_MODEL_RESPONSE_LENGTH]
+
+
+def _model_error(raw_payload: RawEventPayload) -> str | None:
+    for key in ("user_message", "error", "error_message", "message"):
+        value = raw_payload.get(key)
+        if not isinstance(value, str):
+            continue
+        normalized = value.strip()
+        if not normalized:
+            continue
+        if _SENSITIVE_TEXT_PATTERN.search(normalized):
+            return "模型调用未能完成"
+        return normalized[:MAX_MODEL_ERROR_LENGTH]
+    return None
+
+
+def _state_transition_payload(
+    raw_payload: RawEventPayload,
+) -> F149StateTransitionPayload | None:
+    try:
+        return F149StateTransitionPayload(
+            to_status=raw_payload["to_status"],
+        )
+    except (KeyError, ValidationError):
+        return None
+
+
+def _model_completed_payload(
+    raw_payload: RawEventPayload,
+) -> F149ModelCallCompletedPayload | None:
+    response_summary = _model_response_summary(raw_payload)
+    if response_summary is None:
+        return None
+    return F149ModelCallCompletedPayload(
+        skill_id=_optional_model_field(raw_payload, "skill_id"),
+        artifact_ref=_optional_model_field(raw_payload, "artifact_ref"),
+        response_summary=response_summary,
+    )
+
+
+def _model_failed_payload(
+    raw_payload: RawEventPayload,
+) -> F149ModelCallFailedPayload | None:
+    error = _model_error(raw_payload)
+    if error is None:
+        return None
+    return F149ModelCallFailedPayload(
+        skill_id=_optional_model_field(raw_payload, "skill_id"),
+        artifact_ref=_optional_model_field(raw_payload, "artifact_ref"),
+        error=error,
+    )
+
+
+def _known_task_sse_payload(
+    event_type: str,
+    raw_payload: RawEventPayload,
+) -> F149TaskSSEPayload | None:
+    payload: F149TaskSSEPayload | None = None
+    if event_type == "STATE_TRANSITION":
+        payload = _state_transition_payload(raw_payload)
+    elif event_type == "ARTIFACT_CREATED":
+        payload = F149ArtifactRefreshPayload()
+    elif event_type == "MODEL_CALL_STARTED":
+        payload = F149ModelCallStartedPayload(
+            skill_id=_optional_model_field(raw_payload, "skill_id"),
+            artifact_ref=_optional_model_field(raw_payload, "artifact_ref"),
+        )
+    elif event_type == "MODEL_CALL_COMPLETED":
+        payload = _model_completed_payload(raw_payload)
+    elif event_type == "MODEL_CALL_FAILED":
+        payload = _model_failed_payload(raw_payload)
+    return payload
+
+
 def decode_task_sse_payload(
     event_type: str,
     raw_payload: RawEventPayload,
 ) -> F149TaskSSEPayload:
     """把 core raw payload 投影为 F149 有限业务 payload 或安全诊断。"""
 
-    if event_type == "STATE_TRANSITION":
-        try:
-            return F149StateTransitionPayload(
-                to_status=raw_payload["to_status"],
-            )
-        except (KeyError, ValidationError):
-            return _safe_diagnostic(event_type, raw_payload)
-    if event_type == "ARTIFACT_CREATED":
-        return F149ArtifactRefreshPayload()
-    return _safe_diagnostic(event_type, raw_payload)
+    projected = _known_task_sse_payload(event_type, raw_payload)
+    if projected is None:
+        return _safe_diagnostic(event_type, raw_payload)
+    return projected
 
 
 def encode_task_sse_event(event: Event, *, is_final: bool) -> F149TaskSSEFrame:
@@ -225,6 +351,18 @@ def decode_task_sse_frame(raw_frame: Mapping[str, JsonValue]) -> F149TaskSSEFram
     elif frame.type == "ARTIFACT_CREATED":
         if payload_kind != "artifact_refresh":
             raise ValueError("ARTIFACT_CREATED payload kind 不合法")
+    elif frame.type in {
+        "MODEL_CALL_STARTED",
+        "MODEL_CALL_COMPLETED",
+        "MODEL_CALL_FAILED",
+    }:
+        expected_kind = {
+            "MODEL_CALL_STARTED": "model_call_started",
+            "MODEL_CALL_COMPLETED": "model_call_completed",
+            "MODEL_CALL_FAILED": "model_call_failed",
+        }[frame.type]
+        if payload_kind not in {expected_kind, "diagnostic"}:
+            raise ValueError(f"{frame.type} payload kind 不合法")
     elif payload_kind != "diagnostic":
         raise ValueError("非业务事件只能输出 diagnostic payload")
     return frame

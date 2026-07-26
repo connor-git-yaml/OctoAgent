@@ -330,3 +330,23 @@ Claude Design 最初方案是 Web 与未来 iOS 的共同视觉/交互基线。F
 390px 只用于桌面 Web 窄窗口 overflow/focus/reduced-motion 健壮性，不是手机产品入口。
 手机产品只走原生 iOS App；iOS 延续同一视觉语言，但使用 SwiftUI / Apple 原生导航、
 手势、控件与无障碍语义，不复制 Web 组件结构。
+
+### 8.5 Chat 与 Task Detail 的共享 SSE 边界
+
+`/api/stream/task/{task_id}` 同时服务 Chat scripted loop 与 Task Detail，但两个消费者的
+投影职责不同：
+
+- Gateway 只允许有限且可校验的 `state_transition`、`artifact` 与
+  `model_call_started / completed / failed` 字段通过。model-call 只保留有限长度的
+  `response_summary`、`error`、`skill_id` 和 `artifact_ref`，不得透传 token、
+  provider raw payload、工具参数、secret 或其他任意字段。
+- Chat 消费上述安全的 model-call payload，用 `response_summary` 或净化后的 `error`
+  完成对话回复；不得从原始 provider 事件恢复被 Gateway 丢弃的字段。
+- Task Detail 的 runtime decoder 将 model-call 仅投影为 Advanced diagnostics 中的
+  `started / completed / failed` phase，不保留回复正文，也不得据此驱动任务阶段、
+  页面状态、artifact 或新增普通界面。
+- 历史或畸形事件只能降级为有界、净化的 diagnostic；不得因兼容需要恢复无 schema 的
+  raw JSON 通道。
+
+因此，扩展 task SSE 时必须同时验证 Gateway finite projection、Chat reducer 与
+Task Detail decoder，不能用统一的“全部 diagnostic 化”替代消费者各自的安全合同。

@@ -51,12 +51,24 @@ async function expectKeyboardReachableOperation(
   main: Locator,
 ): Promise<void> {
   const operations = main.locator(INTERACTIVE_SELECTOR);
-  await expect(operations.first()).toBeVisible();
+  const hasVisibleMainOperation = await operations.evaluateAll((elements) =>
+    elements.some((element) => {
+      const style = getComputedStyle(element);
+      return (
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        element.getClientRects().length > 0
+      );
+    }),
+  );
+  const operationScope = hasVisibleMainOperation
+    ? main
+    : page.locator("body");
 
   await page.locator("body").focus();
   for (let attempt = 0; attempt < 40; attempt += 1) {
     await page.keyboard.press("Tab");
-    const reached = await main.evaluate(
+    const reached = await operationScope.evaluate(
       (element, selector) =>
         element.contains(document.activeElement) &&
         document.activeElement?.matches(selector) === true,
@@ -69,7 +81,11 @@ async function expectKeyboardReachableOperation(
       return;
     }
   }
-  throw new Error("F149 窄窗口页面的可见操作无法通过键盘 Tab 到达");
+  throw new Error(
+    hasVisibleMainOperation
+      ? "F149 窄窗口页面的可见操作无法通过键盘 Tab 到达"
+      : "F149 只读空状态缺少可通过键盘 Tab 到达的全局操作",
+  );
 }
 
 async function expectReducedMotion(page: Page, main: Locator): Promise<void> {

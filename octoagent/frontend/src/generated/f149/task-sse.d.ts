@@ -25,6 +25,73 @@ export interface components {
             refresh_artifacts: true;
         };
         /**
+         * F149ModelCallCompletedPayload
+         * @description Chat 用户可见回复的有限投影。
+         */
+        F149ModelCallCompletedPayload: {
+            /**
+             * Artifact Ref
+             * @default null
+             */
+            artifact_ref: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "model_call_completed";
+            /** Response Summary */
+            response_summary: string;
+            /**
+             * Skill Id
+             * @default null
+             */
+            skill_id: string | null;
+        };
+        /**
+         * F149ModelCallFailedPayload
+         * @description Chat 失败提示的有限投影。
+         */
+        F149ModelCallFailedPayload: {
+            /**
+             * Artifact Ref
+             * @default null
+             */
+            artifact_ref: string | null;
+            /** Error */
+            error: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "model_call_failed";
+            /**
+             * Skill Id
+             * @default null
+             */
+            skill_id: string | null;
+        };
+        /**
+         * F149ModelCallStartedPayload
+         * @description Chat 只消费调用归属，不接收原始请求、模型或 token 数据。
+         */
+        F149ModelCallStartedPayload: {
+            /**
+             * Artifact Ref
+             * @default null
+             */
+            artifact_ref: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "model_call_started";
+            /**
+             * Skill Id
+             * @default null
+             */
+            skill_id: string | null;
+        };
+        /**
          * F149SafeDiagnosticPayload
          * @description 已净化且有界的 Advanced 诊断数据。
          */
@@ -64,7 +131,7 @@ export interface components {
             /** Final */
             final: boolean;
             /** Payload */
-            payload: components["schemas"]["F149StateTransitionPayload"] | components["schemas"]["F149ArtifactRefreshPayload"] | components["schemas"]["F149SafeDiagnosticPayload"];
+            payload: components["schemas"]["F149StateTransitionPayload"] | components["schemas"]["F149ArtifactRefreshPayload"] | components["schemas"]["F149ModelCallStartedPayload"] | components["schemas"]["F149ModelCallCompletedPayload"] | components["schemas"]["F149ModelCallFailedPayload"] | components["schemas"]["F149SafeDiagnosticPayload"];
             /** Task Id */
             task_id: string;
             /** Task Seq */
