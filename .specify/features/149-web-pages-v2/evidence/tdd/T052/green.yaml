@@ -1,0 +1,23 @@
+task_id: T052
+phase: GREEN
+behavior: A波Task→Detail/EventSource/Advanced clipboard真实浏览器旅程
+command: cd octoagent/frontend && npx playwright test e2e/f149-a-wave.spec.ts
+executed_at_utc: 2026-07-26T08:30:48Z
+head_sha: 7af4654319c6a03933d22e9da13c57918b2846d9
+exit_code: 0
+oracle_expected: 真实任务从列表进入详情后，EventSource状态/断连恢复、Advanced焦点归还、剪贴板净化和REST事件链全部一致
+oracle_observed: exact 1/1通过；普通详情隐藏内部task id，复制内容只含轮次摘要，diagnostic私密值只以REDACTED进入Advanced；真实EventSource请求失败后显示断连并原生重连，REST链精确匹配
+selected: 1
+passed: 1
+failed: 0
+raw_output_file: /tmp/f149-t052-green-final.log
+raw_output_sha256: 879742c0556c173a32dfd3ec4b3d10811063171157e137e8f30520f20c93baa8
+raw_output_size: 66605
+rejected_attempt:
+  raw_output_file: /tmp/f149-t052-green.log
+  raw_output_sha256: b1f6851b5778ec225ab861b06f71124f2b39af8fa94f36ed93da9a09bc1b59c8
+  raw_output_size: 62641
+  reason: context.setOffline未在超时内让已经建立的SSE socket产生可见断连；仅把测试控制改为阻断真实EventSource请求并reload，未改产品行为
+external_network_warning: absent
+secret_scan: pass
+rerun: true

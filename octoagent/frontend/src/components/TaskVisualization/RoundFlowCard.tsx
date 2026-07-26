@@ -11,7 +11,11 @@
 
 import { useState, useMemo } from "react";
 import type { Round, FlowNode } from "../../utils/roundSplitter";
-import { groupByAgent, computeTimelineLayout, MIN_NODE_WIDTH } from "../../utils/roundSplitter";
+import {
+  groupByAgent,
+  computeTimelineLayout,
+  MIN_NODE_WIDTH,
+} from "../../utils/roundSplitter";
 import { formatTime } from "../../utils/formatTime";
 
 // ─── 节点图标 ────────────────────────────────────────────────
@@ -72,10 +76,14 @@ function fmtDur(ms: number): string {
 
 function laneStatusIcon(status: string): string {
   switch (status) {
-    case "success": return "✓";
-    case "error": return "✗";
-    case "running": return "…";
-    default: return "";
+    case "success":
+      return "✓";
+    case "error":
+      return "✗";
+    case "running":
+      return "…";
+    default:
+      return "";
   }
 }
 
@@ -95,6 +103,16 @@ interface Props {
 
 const COLLAPSE_THRESHOLD = 30;
 
+export function buildRoundDiagnosticSummary(round: Round): string {
+  const agentCount = new Set(round.nodes.map((node) => node.agent)).size;
+  return [
+    `轮次: #${round.index}`,
+    `开始时间: ${formatTime(round.startTime)}`,
+    `步骤数: ${round.nodes.length}`,
+    `Agent 数: ${agentCount}`,
+  ].join("\n");
+}
+
 export default function RoundFlowCard({ round, onNodeClick }: Props) {
   const [expanded, setExpanded] = useState(false);
 
@@ -106,8 +124,7 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
     [lanes, round.startTime, round.endTime],
   );
 
-  const shouldCollapse =
-    round.nodes.length > COLLAPSE_THRESHOLD && !expanded;
+  const shouldCollapse = round.nodes.length > COLLAPSE_THRESHOLD && !expanded;
 
   return (
     <div className="tv-round-card">
@@ -118,19 +135,17 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
           {round.triggerMessage || "（无消息内容）"}
         </span>
         <button
+          type="button"
           className="tv-debug-btn"
-          title="复制 Debug Info"
+          title="复制诊断信息"
           onClick={(e) => {
             e.stopPropagation();
-            const info = [
-              `Task ID: ${round.taskId}`,
-              `User Message ID: ${round.triggerEventId}`,
-              `User Message: ${round.triggerMessage}`,
-            ].join("\n");
-            void navigator.clipboard.writeText(info);
+            void navigator.clipboard.writeText(
+              buildRoundDiagnosticSummary(round),
+            );
           }}
         >
-          Debug
+          复制诊断信息
         </button>
         <span className="tv-round-time">
           {formatTime(round.startTime)}
@@ -176,7 +191,9 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
                   <span className="tv-lane-label-text">{lane.agent}</span>
                   <span className="tv-lane-label-meta">
                     {statusIco && (
-                      <span className={`tv-lane-status tv-lane-status--${lane.laneStatus}`}>
+                      <span
+                        className={`tv-lane-status tv-lane-status--${lane.laneStatus}`}
+                      >
                         {statusIco}
                       </span>
                     )}
@@ -198,14 +215,19 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
                         >
                           {/* 耗时角标（右上角） */}
                           {node.durationMs > 0 && (
-                            <span className="tv-flow-node-dur">{fmtDur(node.durationMs)}</span>
+                            <span className="tv-flow-node-dur">
+                              {fmtDur(node.durationMs)}
+                            </span>
                           )}
                           <span className="tv-flow-node-circle">
                             {iconFor(node)}
                           </span>
                           {/* Artifact 角标（右下角） */}
                           {node.artifacts.length > 0 && (
-                            <span className="tv-flow-node-artifact" title={`${node.artifacts.length} 个产物`}>
+                            <span
+                              className="tv-flow-node-artifact"
+                              title={`${node.artifacts.length} 个产物`}
+                            >
                               📦
                             </span>
                           )}
@@ -228,12 +250,19 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
             {/* 泳道列表 */}
             <div className="tv-lanes">
               {lanes.map((lane, laneIdx) => {
-                if (shouldCollapse && laneIdx >= 2 && laneIdx < lanes.length - 1) {
+                if (
+                  shouldCollapse &&
+                  laneIdx >= 2 &&
+                  laneIdx < lanes.length - 1
+                ) {
                   if (laneIdx === 2) {
                     return (
                       <div key="collapse" className="tv-lane">
                         <div className="tv-lane-label" />
-                        <div className="tv-lane-track" style={{ width: layout.totalWidthPx }}>
+                        <div
+                          className="tv-lane-track"
+                          style={{ width: layout.totalWidthPx }}
+                        >
                           <button
                             className="tv-flow-collapse-btn"
                             onClick={() => setExpanded(true)}
@@ -258,11 +287,15 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
                       <span className="tv-lane-label-text">{lane.agent}</span>
                       <span className="tv-lane-label-meta">
                         {statusIco && (
-                          <span className={`tv-lane-status tv-lane-status--${lane.laneStatus}`}>
+                          <span
+                            className={`tv-lane-status tv-lane-status--${lane.laneStatus}`}
+                          >
                             {statusIco}
                           </span>
                         )}
-                        {durText && <span className="tv-lane-dur">{durText}</span>}
+                        {durText && (
+                          <span className="tv-lane-dur">{durText}</span>
+                        )}
                       </span>
                     </div>
 
@@ -293,7 +326,9 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
                           >
                             {/* 耗时角标 */}
                             {node.durationMs > 0 && (
-                              <span className="tv-flow-node-dur">{fmtDur(node.durationMs)}</span>
+                              <span className="tv-flow-node-dur">
+                                {fmtDur(node.durationMs)}
+                              </span>
                             )}
                             <div className="tv-flow-node-bar">
                               <span className="tv-flow-node-bar-icon">
@@ -305,7 +340,10 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
                             </div>
                             {/* Artifact 角标 */}
                             {node.artifacts.length > 0 && (
-                              <span className="tv-flow-node-artifact" title={`${node.artifacts.length} 个产物`}>
+                              <span
+                                className="tv-flow-node-artifact"
+                                title={`${node.artifacts.length} 个产物`}
+                              >
                                 📦
                               </span>
                             )}
@@ -325,14 +363,19 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
                           >
                             {/* 耗时角标 */}
                             {node.durationMs > 0 && (
-                              <span className="tv-flow-node-dur">{fmtDur(node.durationMs)}</span>
+                              <span className="tv-flow-node-dur">
+                                {fmtDur(node.durationMs)}
+                              </span>
                             )}
                             <span className="tv-flow-node-circle">
                               {iconFor(node)}
                             </span>
                             {/* Artifact 角标 */}
                             {node.artifacts.length > 0 && (
-                              <span className="tv-flow-node-artifact" title={`${node.artifacts.length} 个产物`}>
+                              <span
+                                className="tv-flow-node-artifact"
+                                title={`${node.artifacts.length} 个产物`}
+                              >
                                 📦
                               </span>
                             )}
@@ -363,12 +406,18 @@ export default function RoundFlowCard({ round, onNodeClick }: Props) {
           ) : null;
         })()}
         {shouldCollapse && (
-          <button className="tv-phase-expand-btn" onClick={() => setExpanded(true)}>
+          <button
+            className="tv-phase-expand-btn"
+            onClick={() => setExpanded(true)}
+          >
             展开全部
           </button>
         )}
         {expanded && round.nodes.length > COLLAPSE_THRESHOLD && (
-          <button className="tv-phase-expand-btn" onClick={() => setExpanded(false)}>
+          <button
+            className="tv-phase-expand-btn"
+            onClick={() => setExpanded(false)}
+          >
             收起
           </button>
         )}

@@ -655,6 +655,18 @@
 
 ### T052 — A 波 Task→Detail/EventSource/Advanced clipboard 旅程
 
+- **状态**：`[x]`；真实但迟到的RED→GREEN→REFACTOR已完成，证据见
+  `evidence/tdd/T052/`。由于T023/T031页面先于本task完成，RED不满足原计划的
+  pre-page chronology：首次exact行为因普通详情直接显示完整内部task id而稳定
+  失败。GREEN隐藏普通区内部ID，把复制内容收敛为不含task/event/message/private
+  value的轮次摘要，并用原生`details`补齐Esc关闭后的焦点归还；没有修改CSS、
+  留白、卡片节奏或Claude Design排版。确定性fixture使用真实Task store、
+  EventSource和REST事件链；断开真实stream请求后页面显示断连并原生重连，
+  diagnostic私密值只以`[REDACTED]`进入Advanced。一次中间GREEN因
+  `context.setOffline`无法中断已建立socket而被明确拒绝，只替换测试控制方式，
+  未改产品行为。最终GREEN与REFACTOR均exact 1/1，全前端594/594、build、
+  OpenAPI、boundary/style/complexity、pre-commit后端26项与changed-lines
+  coverage 90.06%全部通过。
 - **层/FR**：L1；FR-003/008/016/028。
 - **文件**：新 `frontend/e2e/f149-a-wave.spec.ts`、deterministic fixture/support。
 - **RED_DEPENDS**：T050 与 deterministic fixture；RED 必须在 T023/T031 页面 GREEN 前执行。

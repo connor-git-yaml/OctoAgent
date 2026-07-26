@@ -38,7 +38,8 @@ export function l1InstanceRoot(mode: L1Mode): string {
 // --- 场景契约常量（scenario_brain.py 同步字面量） ---
 export const L1_WRITE_MARKER = "L1-WRITE";
 export const L1_WRITE_FILE_RELPATH = "l1_e2e/note.md";
-export const L1_WRITE_FILE_CONTENT = "F140-L1-MARKER：这行内容由脚本决策环真实写盘";
+export const L1_WRITE_FILE_CONTENT =
+  "F140-L1-MARKER：这行内容由脚本决策环真实写盘";
 export const L1_WRITE_REPLY = "文件已写好（L1 场景①）";
 
 // --- 场景③（F145 审批中心）契约常量（scenario_brain.py 同步字面量） ---
@@ -50,6 +51,15 @@ export const L1_COMPACT_COMPACTED_CONTENT = [
   "- commit message 用中文",
   "",
 ].join("\n");
+
+// --- F149 T052 A 波（scenario_brain.py 同步字面量） ---
+export const L1_A_WAVE_TASK_ID = "l1-f149-a-wave-task-7d30b793";
+export const L1_A_WAVE_TITLE = "A 波实时任务";
+export const L1_A_WAVE_STATE_EVENT_ID = "l1-f149-a-wave-state-6f142ca1";
+export const L1_A_WAVE_DIAGNOSTIC_EVENT_ID =
+  "l1-f149-a-wave-diagnostic-a48fcb2e";
+export const L1_A_WAVE_DIAGNOSTIC_SUMMARY = "历史诊断已净化";
+export const L1_A_WAVE_PRIVATE_VALUE = "f149-a-wave-private-value";
 
 // --- 已知失败 marker（UI 稳定错误文案；命中即定性失败而非裸超时） ---
 export const KNOWN_FAILURE_MARKERS = [
@@ -64,7 +74,7 @@ export const KNOWN_FAILURE_MARKERS = [
  */
 export async function withFailureMarkerScan<T>(
   page: Page,
-  run: () => Promise<T>
+  run: () => Promise<T>,
 ): Promise<T> {
   try {
     return await run();
@@ -73,7 +83,7 @@ export async function withFailureMarkerScan<T>(
     for (const marker of KNOWN_FAILURE_MARKERS) {
       if (body && body.includes(marker)) {
         throw new Error(
-          `L1 定性失败：UI 出现已知失败文案「${marker}」（原始等待错误：${String(err)}）`
+          `L1 定性失败：UI 出现已知失败文案「${marker}」（原始等待错误：${String(err)}）`,
         );
       }
     }
@@ -83,7 +93,9 @@ export async function withFailureMarkerScan<T>(
 
 // --- REST 事件链断言通道（node fetch，走 UI 外） ---
 
-interface TaskEvent {
+export interface TaskEvent {
+  event_id: string;
+  task_seq: number;
   type: string;
   payload?: Record<string, unknown>;
 }
@@ -94,10 +106,15 @@ export interface TaskDetail {
 }
 
 function authHeaders(mode: L1Mode): Record<string, string> {
-  return mode === "bearer" ? { Authorization: `Bearer ${L1_FD_TOKEN_VALUE}` } : {};
+  return mode === "bearer"
+    ? { Authorization: `Bearer ${L1_FD_TOKEN_VALUE}` }
+    : {};
 }
 
-export async function fetchTaskDetail(mode: L1Mode, taskId: string): Promise<TaskDetail> {
+export async function fetchTaskDetail(
+  mode: L1Mode,
+  taskId: string,
+): Promise<TaskDetail> {
   const resp = await fetch(`${l1ServerUrl(mode)}/api/tasks/${taskId}`, {
     headers: authHeaders(mode),
   });
@@ -109,7 +126,7 @@ export async function fetchTaskDetail(mode: L1Mode, taskId: string): Promise<Tas
 export async function pollTaskSucceeded(
   mode: L1Mode,
   taskId: string,
-  timeoutMs = 15_000
+  timeoutMs = 15_000,
 ): Promise<TaskDetail> {
   const deadline = Date.now() + timeoutMs;
   let last: TaskDetail | null = null;
@@ -121,7 +138,9 @@ export async function pollTaskSucceeded(
     }
     await new Promise((r) => setTimeout(r, 300));
   }
-  throw new Error(`L1: task ${taskId} 未在 ${timeoutMs}ms 内 SUCCEEDED（最后状态 ${last?.task.status}）`);
+  throw new Error(
+    `L1: task ${taskId} 未在 ${timeoutMs}ms 内 SUCCEEDED（最后状态 ${last?.task.status}）`,
+  );
 }
 
 export function eventsOfType(detail: TaskDetail, type: string): TaskEvent[] {
@@ -130,10 +149,14 @@ export function eventsOfType(detail: TaskDetail, type: string): TaskEvent[] {
 
 /** 场景③：behavior compact pending 计数（REST 外部断言通道） */
 export async function fetchCompactPendingCount(mode: L1Mode): Promise<number> {
-  const resp = await fetch(`${l1ServerUrl(mode)}/api/behavior/compact/candidates`, {
-    headers: authHeaders(mode),
-  });
-  if (!resp.ok) throw new Error(`GET /api/behavior/compact/candidates ${resp.status}`);
+  const resp = await fetch(
+    `${l1ServerUrl(mode)}/api/behavior/compact/candidates`,
+    {
+      headers: authHeaders(mode),
+    },
+  );
+  if (!resp.ok)
+    throw new Error(`GET /api/behavior/compact/candidates ${resp.status}`);
   const body = (await resp.json()) as { pending_count: number };
   return body.pending_count;
 }
@@ -141,10 +164,11 @@ export async function fetchCompactPendingCount(mode: L1Mode): Promise<number> {
 export function toolCallEvents(
   detail: TaskDetail,
   type: "TOOL_CALL_STARTED" | "TOOL_CALL_COMPLETED" | "TOOL_CALL_FAILED",
-  toolName: string
+  toolName: string,
 ): TaskEvent[] {
   return eventsOfType(detail, type).filter(
-    (e) => (e.payload as { tool_name?: string } | undefined)?.tool_name === toolName
+    (e) =>
+      (e.payload as { tool_name?: string } | undefined)?.tool_name === toolName,
   );
 }
 
@@ -167,7 +191,7 @@ export function assertBombNotTripped(mode: L1Mode): void {
   const sentinel = join(l1InstanceRoot(mode), "L1_BOMB_TRIPPED");
   if (existsSync(sentinel)) {
     throw new Error(
-      `L1 零真 LLM 防线击穿：resolve bomb 被触发。现场：\n${readFileSync(sentinel, "utf-8")}`
+      `L1 零真 LLM 防线击穿：resolve bomb 被触发。现场：\n${readFileSync(sentinel, "utf-8")}`,
     );
   }
 }

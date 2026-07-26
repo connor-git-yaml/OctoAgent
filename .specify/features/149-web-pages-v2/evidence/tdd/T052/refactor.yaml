@@ -1,0 +1,38 @@
+task_id: T052
+phase: REFACTOR
+behavior: A波Task→Detail/EventSource/Advanced clipboard真实浏览器旅程
+command: cd octoagent/frontend && npx playwright test e2e/f149-a-wave.spec.ts
+executed_at_utc: 2026-07-26T08:37:11Z
+head_sha: 7af4654319c6a03933d22e9da13c57918b2846d9
+exit_code: 0
+oracle_expected: 同字节复验保持EventSource、clipboard、focus与外部事件链合同，不为测试复制第二状态机或改变Claude Design布局
+oracle_observed: exact 1/1、全前端594/594、build、OpenAPI、boundary/style/complexity、pre-commit后端26项与changed-lines coverage 90.06%全部通过；代码审查确认使用既有EventSource、decoder和REST seam，clipboard摘要为窄纯函数，Advanced使用原生details键盘语义
+selected: 1
+passed: 1
+failed: 0
+raw_output_file: /tmp/f149-t052-refactor-final.log
+raw_output_sha256: 0be24c3593201b3a347334f673257f4839fb37e2684e3007c7453efd53558844
+raw_output_size: 66599
+file_sha256:
+  scenario-brain: c8cbe6c9105c949b11a50aa698ed4c06e2dc5491a9c8df4478c06dda50f969ee
+  serve-l1-gateway: cde27a6a3122a7330ac8d19c8edb6ac488ceaee1ddb15f67f66e5422ae1a0734
+  e2e-support: ff7316f9d679f192ec2df26862be10c32a9287d3ecc4b04e77dd2587f4339239
+  a-wave-spec: bd6de85b6189841bdac28c0110b0bfead3ead83eadf1f96725c0950753598842
+  round-flow-card: 1728ef37562049dd1f298206f6dae0ce897ad98f81e801784bdbec9494b5c980
+  round-flow-card-test: eaec41ff9ccc3005fc983b175f3adc3111b630c2857fb1d1047cb243662302f0
+  task-detail: f6978cfcfd12f9d38f896747ef85127de1c50004e19b344128578e48de8d4662
+coverage:
+  raw_output_file: /tmp/f149-t052-coverage-final.log
+  raw_output_sha256: a0a1fe164712f28a22ba7ab9fd1fe559cdf5f8fcc6dd0d962bc4ee189044d83b
+  raw_output_size: 26033
+  changed_lines_covered: 2945
+  changed_lines_total: 3270
+  changed_lines_percent: 90.06
+quality_review:
+  - 没有修改CSS、布局token或页面结构节奏；实现适配Claude Design已冻结的普通信息与Advanced边界
+  - fixture使用真实Task store、真实EventSource与REST事件链，不复制页面状态机
+  - 剪贴板内容不含task id、event id、用户消息或私密值
+  - RED发生在页面GREEN之后，证据明确标记late_red，不倒签、不冒充pre-page TDD
+external_network_warning: absent
+secret_scan: pass
+rerun: true

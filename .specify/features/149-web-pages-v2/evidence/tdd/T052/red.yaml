@@ -1,0 +1,20 @@
+task_id: T052
+phase: RED
+behavior: A波Task→Detail/EventSource/Advanced clipboard真实浏览器旅程
+chronology: late_red_after_page_green
+chronology_note: T023/T031已经完成后才补建本L1合同；这是迟到但真实的RED，不宣称满足原计划的pre-page test-first顺序
+command: cd octoagent/frontend && npx playwright test e2e/f149-a-wave.spec.ts
+executed_at_utc: 2026-07-26T08:28:19Z
+head_sha: 7af4654319c6a03933d22e9da13c57918b2846d9
+exit_code: 1
+oracle_expected: F149_A_WAVE_BROWSER_CONTRACT_MISSING
+oracle_observed: 唯一浏览器旅程失败；普通任务详情头部仍直接显示完整内部task id，稳定违反普通界面净化合同
+selected: 1
+passed: 0
+failed: 1
+raw_output_file: /tmp/f149-t052-red.log
+raw_output_sha256: bacf38fa9c090e0eccb5e41c7c90928eaff6aae58b176596b99fb24bad23df46
+raw_output_size: 62663
+external_network_warning: absent
+secret_scan: pass
+rerun: false

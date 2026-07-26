@@ -175,6 +175,7 @@ def main() -> None:
     from scenario_brain import (  # noqa: PLC0415
         L1ScenarioModelClient,
         provision_approval_center_scenario,
+        provision_f149_a_wave_scenario,
     )
 
     bomb_sentinel = root / "L1_BOMB_TRIPPED"
@@ -214,6 +215,7 @@ def main() -> None:
             # 多一条 pending 候选只体现为 nav badge，无断言干扰。
             assert self._store_group is not None, "bootstrap 后 store_group 必已就绪"
             await provision_approval_center_scenario(root, self._store_group)
+            await provision_f149_a_wave_scenario(self._store_group)
 
         def commit_to_app(self, app) -> None:  # type: ignore[override]
             super().commit_to_app(app)

@@ -46,11 +46,83 @@ L1_COMPACT_ORIGINAL = (
     "- commit message 用中文书写\n"
     "- 提交说明必须使用中文\n"
 )
-L1_COMPACT_COMPACTED = (
-    "# AGENTS\n\n"
-    "- 回复简洁精炼（L1-COMPACT-MARKER）\n"
-    "- commit message 用中文\n"
-)
+L1_COMPACT_COMPACTED = "# AGENTS\n\n- 回复简洁精炼（L1-COMPACT-MARKER）\n- commit message 用中文\n"
+
+# --- F149 T052 A 波（TS 侧 frontend/e2e/support.ts 同步字面量） ---
+L1_A_WAVE_TASK_ID = "l1-f149-a-wave-task-7d30b793"
+L1_A_WAVE_TITLE = "A 波实时任务"
+L1_A_WAVE_STATE_EVENT_ID = "l1-f149-a-wave-state-6f142ca1"
+L1_A_WAVE_DIAGNOSTIC_EVENT_ID = "l1-f149-a-wave-diagnostic-a48fcb2e"
+L1_A_WAVE_DIAGNOSTIC_SUMMARY = "历史诊断已净化"
+L1_A_WAVE_PRIVATE_VALUE = "f149-a-wave-private-value"
+
+
+async def provision_f149_a_wave_scenario(store_group: Any) -> None:
+    """写入一个保持 RUNNING 的真实 Task/EventSource 场景。
+
+    任务不交给 runner，避免 L1 场景与脚本脑的单会话消息纪律耦合。浏览器仍经
+    正式 ``/api/tasks`` 与 ``/api/stream/task`` 读取真实 SQLite/SSE 数据；
+    diagnostic 原始值只用于证明 Gateway SSE adapter 会在出站前净化。
+    """
+    from datetime import datetime
+
+    from octoagent.core.models import (
+        ActorType,
+        Event,
+        EventType,
+        RequesterInfo,
+        RiskLevel,
+        Task,
+        TaskPointers,
+        TaskStatus,
+    )
+
+    created_at = datetime(2026, 7, 26, 8, 30, tzinfo=UTC)
+    task = Task(
+        task_id=L1_A_WAVE_TASK_ID,
+        created_at=created_at,
+        updated_at=created_at,
+        status=TaskStatus.RUNNING,
+        title=L1_A_WAVE_TITLE,
+        thread_id="l1-f149-a-wave-thread",
+        scope_id="default",
+        requester=RequesterInfo(channel="web", sender_id="l1-user"),
+        risk_level=RiskLevel.LOW,
+        pointers=TaskPointers(),
+        trace_id="l1-f149-a-wave-trace",
+    )
+    await store_group.task_store.create_task(task)
+
+    events = (
+        Event(
+            event_id=L1_A_WAVE_STATE_EVENT_ID,
+            task_id=task.task_id,
+            task_seq=1,
+            ts=created_at,
+            type=EventType.STATE_TRANSITION,
+            actor=ActorType.SYSTEM,
+            payload={
+                "from_status": TaskStatus.CREATED.value,
+                "to_status": TaskStatus.RUNNING.value,
+            },
+            trace_id=task.trace_id,
+        ),
+        Event(
+            event_id=L1_A_WAVE_DIAGNOSTIC_EVENT_ID,
+            task_id=task.task_id,
+            task_seq=2,
+            ts=created_at,
+            type=EventType.MODEL_CALL_COMPLETED,
+            actor=ActorType.SYSTEM,
+            payload={
+                "summary": L1_A_WAVE_DIAGNOSTIC_SUMMARY,
+                "password": L1_A_WAVE_PRIVATE_VALUE,
+            },
+            trace_id=task.trace_id,
+        ),
+    )
+    for event in events:
+        await store_group.event_store.append_event_committed(event)
 
 
 async def provision_approval_center_scenario(root: Any, store_group: Any) -> None:
@@ -139,5 +211,12 @@ __all__ = [
     "L1_COMPACT_FILE_ID",
     "L1_COMPACT_ORIGINAL",
     "L1_COMPACT_COMPACTED",
+    "L1_A_WAVE_TASK_ID",
+    "L1_A_WAVE_TITLE",
+    "L1_A_WAVE_STATE_EVENT_ID",
+    "L1_A_WAVE_DIAGNOSTIC_EVENT_ID",
+    "L1_A_WAVE_DIAGNOSTIC_SUMMARY",
+    "L1_A_WAVE_PRIVATE_VALUE",
+    "provision_f149_a_wave_scenario",
     "provision_approval_center_scenario",
 ]

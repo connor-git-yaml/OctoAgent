@@ -326,5 +326,16 @@
   原始视觉为准。GREEN与
   REFACTOR均10/10，相关页面77/77、全前端593/593、build、OpenAPI和复杂度
   检查通过。390px仅为桌面Web窄浏览器窗口健壮性，不代表手机产品或原生iOS。
+- T052新增A波Task→Detail单一L1旅程。首次exact行为因普通详情头部仍显示完整
+  内部task id而稳定见红；由于T023/T031早已GREEN，证据明确标记为late RED，
+  不倒签test-first顺序。GREEN隐藏普通区内部ID，把复制操作收敛为不含task id、
+  event id、用户消息或私密值的轮次摘要，并为原生Advanced details补齐Esc关闭
+  后焦点归还；未修改CSS、留白、卡片节奏或Claude Design排版。确定性fixture
+  使用真实Task store、EventSource和REST事件链，stream请求失败时页面显示断连，
+  恢复后由原生EventSource重连；合成diagnostic私密值只以`[REDACTED]`进入
+  Advanced。一次`context.setOffline`中间尝试因无法中断已建立socket而被拒绝，
+  只替换测试控制方式，不计产品失败。最终GREEN/REFACTOR均exact 1/1，全前端
+  594/594、build、OpenAPI、boundary/style/complexity、pre-commit后端26项和
+  changed-lines coverage 90.06%全部通过。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

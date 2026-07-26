@@ -11,11 +11,7 @@
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import {
-  ApiError,
-  fetchTaskDetail,
-  isFrontDoorApiError,
-} from "../api/client";
+import { ApiError, fetchTaskDetail, isFrontDoorApiError } from "../api/client";
 import { mapF149ErrorOwnership } from "../api/f149/errorOwnership";
 import {
   decodeTaskSseFrame,
@@ -93,16 +89,20 @@ function projectTaskDetailEvents(events: TaskEvent[]): TaskEvent[] {
       typeof event.payload.to_status === "string" &&
       event.payload.to_status in STATUS_LABEL
     ) {
-      return [{
-        ...projection,
-        payload: { to_status: event.payload.to_status },
-      }];
+      return [
+        {
+          ...projection,
+          payload: { to_status: event.payload.to_status },
+        },
+      ];
     }
     if (event.type === "ARTIFACT_CREATED") {
-      return [{
-        ...projection,
-        payload: { refresh_artifacts: true },
-      }];
+      return [
+        {
+          ...projection,
+          payload: { refresh_artifacts: true },
+        },
+      ];
     }
     return [];
   });
@@ -120,9 +120,10 @@ function mergeTaskSnapshot(
   return {
     ...nextTask,
     status: currentTask.status,
-    updated_at: currentTask.updated_at > nextTask.updated_at
-      ? currentTask.updated_at
-      : nextTask.updated_at,
+    updated_at:
+      currentTask.updated_at > nextTask.updated_at
+        ? currentTask.updated_at
+        : nextTask.updated_at,
   };
 }
 
@@ -158,6 +159,7 @@ export default function TaskDetail() {
   const latestStatusSeqRef = useRef(0);
   const artifactRefreshInFlightRef = useRef(false);
   const artifactRefreshQueuedRef = useRef(false);
+  const advancedSummaryRef = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     latestStatusSeqRef.current = 0;
@@ -166,24 +168,24 @@ export default function TaskDetail() {
     setDiagnostics([]);
   }, [taskId]);
 
-  const applyTaskDetail = useCallback((
-    data: TaskDetailResponse,
-    options?: { replaceEvents?: boolean },
-  ) => {
-    const projectedEvents = projectTaskDetailEvents(data.events);
-    const currentStatusSeq = latestStatusSeqRef.current;
-    const nextStatusSeq = getLatestStateTransitionSeq(projectedEvents);
-    latestStatusSeqRef.current = Math.max(currentStatusSeq, nextStatusSeq);
+  const applyTaskDetail = useCallback(
+    (data: TaskDetailResponse, options?: { replaceEvents?: boolean }) => {
+      const projectedEvents = projectTaskDetailEvents(data.events);
+      const currentStatusSeq = latestStatusSeqRef.current;
+      const nextStatusSeq = getLatestStateTransitionSeq(projectedEvents);
+      latestStatusSeqRef.current = Math.max(currentStatusSeq, nextStatusSeq);
 
-    setTask((prev) =>
-      mergeTaskSnapshot(prev, data.task, currentStatusSeq, nextStatusSeq)
-    );
-    if (options?.replaceEvents ?? true) {
-      setEvents(projectedEvents);
-    }
-    setArtifacts(data.artifacts);
-    setAuthError(null);
-  }, []);
+      setTask((prev) =>
+        mergeTaskSnapshot(prev, data.task, currentStatusSeq, nextStatusSeq),
+      );
+      if (options?.replaceEvents ?? true) {
+        setEvents(projectedEvents);
+      }
+      setArtifacts(data.artifacts);
+      setAuthError(null);
+    },
+    [],
+  );
 
   const loadTask = useCallback(async () => {
     if (!taskId) {
@@ -233,55 +235,60 @@ export default function TaskDetail() {
   }, [loadTask]);
 
   // SSE 事件回调
-  const handleSSEEvent = useCallback((rawEvent: RawTaskSseFrame): boolean => {
-    const decoded = decodeTaskSseFrame(rawEvent);
-    if (!decoded.ok) {
-      return false;
-    }
-    const eventData = decoded.event;
-    if (eventData.taskId !== taskId) {
-      return false;
-    }
-    if (eventData.kind === "diagnostic") {
-      setDiagnostics((prev) => {
-        if (prev.some((event) => event.eventId === eventData.eventId)) {
-          return prev;
-        }
-        return [...prev, eventData];
-      });
-      return eventData.final;
-    }
-
-    const taskEvent = taskEventFromProjection(eventData);
-    setEvents((prev) => {
-      const exists = prev.some((event) => event.event_id === eventData.eventId);
-      if (exists) return prev;
-      return [...prev, taskEvent];
-    });
-
-    // 只用当前任务自己的、且 task_seq 单调递增的 transition 更新头部状态，
-    // 避免子任务冒泡事件或历史重放把 badge 回刷到旧状态。
-    if (
-      eventData.kind === "state-transition" &&
-      eventData.taskSeq > latestStatusSeqRef.current
-    ) {
-      latestStatusSeqRef.current = eventData.taskSeq;
-      setTask((prev) =>
-        prev
-          ? {
-            ...prev,
-            status: eventData.toStatus,
-            updated_at: eventData.timestamp,
+  const handleSSEEvent = useCallback(
+    (rawEvent: RawTaskSseFrame): boolean => {
+      const decoded = decodeTaskSseFrame(rawEvent);
+      if (!decoded.ok) {
+        return false;
+      }
+      const eventData = decoded.event;
+      if (eventData.taskId !== taskId) {
+        return false;
+      }
+      if (eventData.kind === "diagnostic") {
+        setDiagnostics((prev) => {
+          if (prev.some((event) => event.eventId === eventData.eventId)) {
+            return prev;
           }
-          : prev
-      );
-    }
+          return [...prev, eventData];
+        });
+        return eventData.final;
+      }
 
-    if (eventData.kind === "artifact-refresh") {
-      void refreshArtifacts();
-    }
-    return eventData.final;
-  }, [taskId, refreshArtifacts]);
+      const taskEvent = taskEventFromProjection(eventData);
+      setEvents((prev) => {
+        const exists = prev.some(
+          (event) => event.event_id === eventData.eventId,
+        );
+        if (exists) return prev;
+        return [...prev, taskEvent];
+      });
+
+      // 只用当前任务自己的、且 task_seq 单调递增的 transition 更新头部状态，
+      // 避免子任务冒泡事件或历史重放把 badge 回刷到旧状态。
+      if (
+        eventData.kind === "state-transition" &&
+        eventData.taskSeq > latestStatusSeqRef.current
+      ) {
+        latestStatusSeqRef.current = eventData.taskSeq;
+        setTask((prev) =>
+          prev
+            ? {
+                ...prev,
+                status: eventData.toStatus,
+                updated_at: eventData.timestamp,
+              }
+            : prev,
+        );
+      }
+
+      if (eventData.kind === "artifact-refresh") {
+        void refreshArtifacts();
+      }
+      return eventData.final;
+    },
+    [taskId, refreshArtifacts],
+  );
 
   // SSE 连接（仅非终态任务）
   const isTerminal = task ? TERMINAL_STATUSES.has(task.status) : true;
@@ -293,7 +300,10 @@ export default function TaskDetail() {
 
   // 可视化数据（hooks 必须在 early return 之前）
   const classified = useMemo(
-    () => (task && viewMode === "visual" ? classifyEvents(events, task.status) : null),
+    () =>
+      task && viewMode === "visual"
+        ? classifyEvents(events, task.status)
+        : null,
     [events, task, viewMode],
   );
   const rounds = useMemo(
@@ -306,7 +316,9 @@ export default function TaskDetail() {
   }
 
   if (authError) {
-    return <FrontDoorGate error={authError} title="任务详情" onRetry={loadTask} />;
+    return (
+      <FrontDoorGate error={authError} title="任务详情" onRetry={loadTask} />
+    );
   }
 
   if (error || !task) {
@@ -330,7 +342,9 @@ export default function TaskDetail() {
             };
     return (
       <main className="tv-page">
-        <Link to="/" className="tv-detail-back">&larr;</Link>
+        <Link to="/" className="tv-detail-back">
+          &larr;
+        </Link>
         <h1>{copy.title}</h1>
         <p>{copy.detail}</p>
         {state.state !== "not-found" && (
@@ -362,10 +376,14 @@ export default function TaskDetail() {
       {/* 单行头部：← 标题 | 元信息 … 状态badge + 视图切换 */}
       <div className="tv-detail-header">
         <div className="tv-detail-header-row">
-          <Link to="/" className="tv-detail-back" aria-label="返回任务列表">&larr;</Link>
+          <Link to="/" className="tv-detail-back" aria-label="返回任务列表">
+            &larr;
+          </Link>
           <h1 className="tv-detail-title">{taskDisplayTitle}</h1>
           <div className="tv-detail-meta">
-            <span className="tv-detail-meta-item">{task.requester.channel}</span>
+            <span className="tv-detail-meta-item">
+              {task.requester.channel}
+            </span>
             <span className="tv-detail-meta-sep" />
             <span className="tv-detail-meta-item">
               {new Date(task.created_at).toLocaleString("zh-CN")}
@@ -376,13 +394,11 @@ export default function TaskDetail() {
                 <span className="tv-detail-meta-item">耗时 {duration}</span>
               </>
             )}
-            <span className="tv-detail-meta-sep" />
-            <span className="tv-detail-meta-item tv-detail-meta-id" title={task.task_id}>
-              {task.task_id}
-            </span>
           </div>
           <div className="tv-detail-header-right">
-            <span className={`tv-detail-badge tv-detail-badge--${task.status.toLowerCase()}`}>
+            <span
+              className={`tv-detail-badge tv-detail-badge--${task.status.toLowerCase()}`}
+            >
               {STATUS_LABEL[task.status] || task.status}
             </span>
             {!isTerminal && (
@@ -438,15 +454,26 @@ export default function TaskDetail() {
                 <span className="event-type">{event.type}</span>
                 <span className="event-time">{formatTime(event.ts)}</span>
                 {Object.keys(event.payload).length > 0 && (
-                  <div className="event-payload">{payloadSummary(event.payload)}</div>
+                  <div className="event-payload">
+                    {payloadSummary(event.payload)}
+                  </div>
                 )}
               </div>
             ))}
           </div>
 
           {diagnostics.length > 0 && (
-            <details>
-              <summary>高级诊断</summary>
+            <details
+              onKeyDown={(event) => {
+                if (event.key !== "Escape" || !event.currentTarget.open) {
+                  return;
+                }
+                event.preventDefault();
+                event.currentTarget.open = false;
+                advancedSummaryRef.current?.focus();
+              }}
+            >
+              <summary ref={advancedSummaryRef}>高级诊断</summary>
               {diagnostics.map((diagnostic) => (
                 <div key={diagnostic.eventId} className="timeline-item">
                   <span className="event-type">{diagnostic.sourceType}</span>
@@ -464,24 +491,33 @@ export default function TaskDetail() {
           {/* Artifacts */}
           {artifacts.length > 0 && (
             <>
-              <h2 style={{ marginTop: "var(--space-lg)" }}>产出物 ({artifacts.length})</h2>
+              <h2 style={{ marginTop: "var(--space-lg)" }}>
+                产出物 ({artifacts.length})
+              </h2>
               {artifacts.map((artifact) => (
                 <div key={artifact.artifact_id} className="card">
                   <div style={{ fontWeight: 600 }}>{artifact.name}</div>
-                  <div style={{ fontSize: "12px", color: "var(--color-text-secondary)" }}>
+                  <div
+                    style={{
+                      fontSize: "12px",
+                      color: "var(--color-text-secondary)",
+                    }}
+                  >
                     {artifact.size} bytes
                   </div>
                   {artifact.parts.map((part, i) => (
                     <div key={i} style={{ marginTop: "var(--space-sm)" }}>
                       {part.content && (
-                        <pre style={{
-                          background: "var(--color-bg)",
-                          padding: "var(--space-sm)",
-                          borderRadius: "4px",
-                          fontSize: "12px",
-                          whiteSpace: "pre-wrap",
-                          wordBreak: "break-all",
-                        }}>
+                        <pre
+                          style={{
+                            background: "var(--color-bg)",
+                            padding: "var(--space-sm)",
+                            borderRadius: "4px",
+                            fontSize: "12px",
+                            whiteSpace: "pre-wrap",
+                            wordBreak: "break-all",
+                          }}
+                        >
                           {part.content}
                         </pre>
                       )}
