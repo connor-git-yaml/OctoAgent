@@ -8,8 +8,8 @@
  * `uv run --project <octoagent> --no-sync python <launcher>` + 显式 PYTHONPATH
  * 锁——worktree 下防共享 venv editable 指向漂移（假绿），CI 同树无害。
  *
- * 确定性纪律：workers=1 串行；重试只在 CI 开 1 次（trace 保留可查，本地零
- * 重试让 flake 现形）。
+ * 确定性纪律：workers=1 串行；本地与 CI 都禁止自动重试，避免首次失败被第二次
+ * 运行掩盖。
  */
 import { defineConfig } from "@playwright/test";
 import { fileURLToPath } from "node:url";
@@ -26,7 +26,7 @@ import {
 const FRONTEND_DIR = dirname(fileURLToPath(import.meta.url));
 const OCTOAGENT_DIR = join(FRONTEND_DIR, "..");
 
-/** worktree/CI 双态成立的 PYTHONPATH 锁（六 packages src + gateway src）。 */
+/** worktree/CI 双态成立的 PYTHONPATH 锁（七 packages src + gateway src）。 */
 const PYTHONPATH_LOCK = [
   "packages/core/src",
   "packages/provider/src",
@@ -53,7 +53,7 @@ export default defineConfig({
   outputDir: "./e2e/.l1-runtime/test-results",
   workers: 1,
   fullyParallel: false,
-  retries: process.env.CI ? 1 : 0,
+  retries: 0,
   timeout: 60_000,
   expect: { timeout: 15_000 },
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"]],

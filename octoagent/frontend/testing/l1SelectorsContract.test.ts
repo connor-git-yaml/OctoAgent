@@ -17,6 +17,25 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { L1_TESTIDS } from "../e2e/selectors";
 
+interface L1ConfigFacts {
+  ambientOrHostPath: boolean;
+  noSync: boolean;
+  pythonNoUserSite: boolean;
+  pythonPaths: string[];
+  retries: number;
+}
+
+const CANONICAL_PYTHON_PATHS = [
+  "packages/core/src",
+  "packages/provider/src",
+  "packages/protocol/src",
+  "packages/tooling/src",
+  "packages/skills/src",
+  "packages/policy/src",
+  "packages/memory/src",
+  "apps/gateway/src",
+] as const;
+
 function collectTsxSources(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
@@ -29,6 +48,51 @@ function collectTsxSources(dir: string, acc: string[] = []): string[] {
     }
   }
   return acc;
+}
+
+function validateL1ConfigContract(facts: L1ConfigFacts): boolean {
+  return (
+    !facts.ambientOrHostPath &&
+    facts.noSync &&
+    facts.pythonNoUserSite &&
+    facts.retries === 0 &&
+    facts.pythonPaths.length === CANONICAL_PYTHON_PATHS.length &&
+    new Set(facts.pythonPaths).size === facts.pythonPaths.length &&
+    facts.pythonPaths.every(
+      (path, index) => path === CANONICAL_PYTHON_PATHS[index],
+    )
+  );
+}
+
+function actualL1ConfigFacts(source: string): L1ConfigFacts {
+  const pathBlock = source.match(
+    /const PYTHONPATH_LOCK = \[([\s\S]*?)\]\s*\.map/,
+  )?.[1];
+  const launcherCommand =
+    source.match(/const LAUNCHER_CMD =\s*"([^"]+)"/)?.[1] ?? "";
+  const sharedEnvironment =
+    source.match(/const SHARED_ENV = \{([\s\S]*?)\n\};/)?.[1] ?? "";
+  const pythonPaths = pathBlock
+    ? [...pathBlock.matchAll(/"([^"]+)"/g)].map((match) => match[1])
+    : [];
+  return {
+    ambientOrHostPath:
+      /process\.env\.PYTHONPATH|\/Users\/|\/home\/|~\//.test(source),
+    noSync: /^uv run --project \. --no-sync python /.test(launcherCommand),
+    pythonNoUserSite: /PYTHONNOUSERSITE:\s*"1"/.test(sharedEnvironment),
+    pythonPaths,
+    retries: /retries:\s*0\b/.test(source) ? 0 : 1,
+  };
+}
+
+function acceptedL1ConfigFacts(): L1ConfigFacts {
+  return {
+    ambientOrHostPath: false,
+    noSync: true,
+    pythonNoUserSite: true,
+    pythonPaths: [...CANONICAL_PYTHON_PATHS],
+    retries: 0,
+  };
 }
 
 describe("L1 selectors 契约（F140 AC-4）", () => {
@@ -56,5 +120,47 @@ describe("L1 selectors 契约（F140 AC-4）", () => {
     const values = Object.values(L1_TESTIDS);
     expect(values.length).toBeGreaterThan(0);
     expect(new Set(values).size).toBe(values.length);
+  });
+});
+
+describe("F149 L1 harness 环境契约", () => {
+  const accepted = acceptedL1ConfigFacts();
+  const seededNegatives: Array<[string, L1ConfigFacts]> = [
+    [
+      "retired SDK path",
+      {
+        ...accepted,
+        pythonPaths: [...accepted.pythonPaths, "packages/sdk/src"],
+      },
+    ],
+    ...CANONICAL_PYTHON_PATHS.map(
+      (missing): [string, L1ConfigFacts] => [
+        `missing ${missing}`,
+        {
+          ...accepted,
+          pythonPaths: accepted.pythonPaths.filter((path) => path !== missing),
+        },
+      ],
+    ),
+    ["CI retry", { ...accepted, retries: 1 }],
+    ["ambient host path", { ...accepted, ambientOrHostPath: true }],
+  ];
+
+  it("接受精确七个保留包、Gateway 与确定性运行参数", () => {
+    expect(validateL1ConfigContract(accepted)).toBe(true);
+  });
+
+  it.each(seededNegatives)("拒绝 %s", (_label, facts) => {
+    expect(validateL1ConfigContract(facts)).toBe(false);
+  });
+
+  it("actual post-F151 Playwright config 满足同一合同", () => {
+    const configSource = readFileSync(
+      join(process.cwd(), "playwright.config.ts"),
+      "utf-8",
+    );
+    expect(validateL1ConfigContract(actualL1ConfigFacts(configSource))).toBe(
+      true,
+    );
   });
 });

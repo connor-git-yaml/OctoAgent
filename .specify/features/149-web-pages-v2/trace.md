@@ -309,5 +309,12 @@
   但4个wizard行为项被测试fake-timer timeout污染，因此证据标为partial，不伪称
   完整test-first。repository runtime architecture因F151缺少
   `McpInstallWizard.tsx` evidence slice而阻断；未修改或绕过跨Feature authority。
+- T050用独立test-only facts validator先形成11条稳定RED：retired SDK、逐项缺失
+  七个保留package/Gateway、CI retry与ambient/host path都被惰性validator错误
+  接受。GREEN实现精确有序path、unique、`PYTHONNOUSERSITE=1`、`--no-sync`、
+  `retries=0`与host absence校验，并把Playwright本地/CI统一改为零重试；没有
+  fallback或环境继承。REFACTOR exact 25/25、全前端593/593通过，
+  `playwright test --list`稳定收集现有6项且未启动webServer或行为测试。
+  这是L4 harness合同，不修改任何页面、Claude Design制品或iOS边界。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。

@@ -1,0 +1,15 @@
+task_id: T050
+phase: GREEN
+behavior: L1 harness canonical PYTHONPATH、零重试与宿主环境隔离
+command: cd octoagent/frontend && npx vitest run testing/l1SelectorsContract.test.ts
+executed_at_utc: 2026-07-26T08:00:55Z
+head_sha: b7b100e0a2316e4c3c41cf074691781c1a2372b0
+exit_code: 0
+oracle_expected: 11个negative全部拒绝，accept与actual config通过
+oracle_observed: exact 25/25通过；actual config为有序七包+Gateway、SDK absent、PYTHONNOUSERSITE、no-sync与retries=0
+raw_output_file: /tmp/f149-t050-green.log
+raw_output_sha256: f976ae1923055bfc3a0d3b8229e0a77a98549b7b8b4be8cc2b6adc7031892b1a
+raw_output_size: 322
+secret_scan: pass
+network: false
+rerun: false

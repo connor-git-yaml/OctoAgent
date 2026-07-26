@@ -611,6 +611,13 @@
 
 ### T050 — L1 harness worktree/PYTHONPATH contract
 
+- **状态**：`[x]`；真实RED→GREEN→REFACTOR已完成，证据见
+  `evidence/tdd/T050/`。test-only validator以11个seeded negative分别证明
+  retired SDK、逐项缺失七包/Gateway、CI retry及ambient/host path会被拒绝；
+  accept control与actual config都要求精确七包+Gateway、`PYTHONNOUSERSITE=1`、
+  `--no-sync`、`retries=0`。exact 25/25与全前端593/593通过，Playwright
+  `--list`稳定收集6项且未启动行为测试。该task只修harness确定性，不涉及页面
+  视觉、手机产品或原生iOS。
 - **层/FR**：L4 config contract；FR-016/017。
 - **文件**：`frontend/testing/l1SelectorsContract.test.ts`、`playwright.config.ts`、narrow L1 support/launcher。
 - **依赖**：T000。
@@ -805,7 +812,8 @@
 - 坏味道：baseline、mechanical AST、adversarial review、MUST FIX/ratchet/future owner 均进入 T064。
 - 当前风险：T000–T015、T020–T025、T030–T034、T040–T044 中已执行的任务均有
   可审计证据；T044首次exact RED含4项harness timeout，已如实标记partial，
-  不得在最终审查中提升为完整test-first证据。下一项是T045。每个后续页面仍必须
+  不得在最终审查中提升为完整test-first证据。T050 deterministic L1 harness
+  已完成，下一项是T051。每个后续页面仍必须
   先逐页对照 Claude
   Design 最初版；现有 Web 只能作为实现现状，不得成为视觉基线。F149 仍须逐 task 通过
   RED→GREEN→REFACTOR，Tasks Gate 与

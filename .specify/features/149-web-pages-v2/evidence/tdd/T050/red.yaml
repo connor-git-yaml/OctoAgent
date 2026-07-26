@@ -1,0 +1,15 @@
+task_id: T050
+phase: RED
+behavior: L1 harness canonical PYTHONPATH、零重试与宿主环境隔离
+command: cd octoagent/frontend && npx vitest run testing/l1SelectorsContract.test.ts
+executed_at_utc: 2026-07-26T08:00:32Z
+head_sha: b7b100e0a2316e4c3c41cf074691781c1a2372b0
+exit_code: 1
+oracle_expected: 惰性validator错误接受retired SDK、缺任一canonical path、CI retry与ambient host path
+oracle_observed: exact 25项中11项seeded negative稳定失败；14项既有selector与accept control通过，无import、collection或环境错误
+raw_output_file: /tmp/f149-t050-red.log
+raw_output_sha256: 7109b33a6bacad393a11e6c1fb94c23f78b8f7373dfc5cd350472b72b6d24d15
+raw_output_size: 3467
+secret_scan: pass
+network: false
+rerun: false

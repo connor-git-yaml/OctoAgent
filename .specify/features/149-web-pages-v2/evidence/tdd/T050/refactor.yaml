@@ -1,0 +1,25 @@
+task_id: T050
+phase: REFACTOR
+behavior: L1 harness config-contract与existing selector contract同文件收敛
+command: cd octoagent/frontend && npx vitest run testing/l1SelectorsContract.test.ts
+executed_at_utc: 2026-07-26T08:01:50Z
+head_sha: b7b100e0a2316e4c3c41cf074691781c1a2372b0
+exit_code: 0
+oracle_expected: exact合同不漂移，actual parser不以注释或ambient值假通过
+oracle_observed: exact 25/25、全前端593/593通过；Playwright list稳定收集6项且没有执行行为测试
+raw_output_file: /tmp/f149-t050-refactor.log
+raw_output_sha256: 958a6b36e60d39200e72c903d6d7924db7fb17800278c5f36e156e6fd2484f36
+raw_output_size: 322
+full_frontend_log_sha256: e4c3471636a03d603592c42265f55a637b8c7883620d1439ceb38ff7659bde79
+playwright_list_log_sha256: 373fcea8b8ba31dbc693f593f0ddeee487e794e130878ff192b2d100e8bb675e
+quality_review:
+  - validator只消费结构化facts，seeded negative不依赖当前config漂移
+  - actual parser只从PYTHONPATH_LOCK、LAUNCHER_CMD与SHARED_ENV窄事实取值，不读取运行时PYTHONPATH
+  - canonical path精确有序且unique；retired SDK、缺项、重复或额外路径均失败
+  - CI与本地统一retries=0，首次失败不会被blanket rerun掩盖
+file_sha256:
+  l1-contract-test: b56d9df769b7714f33bae51a8d32b452b402db1921e7ac193e832f7ea5c8b468
+  playwright-config: 2dd2228c737fc74868ef11bf0dabaa848e03c1eeafd54382f00938a32c93c436
+secret_scan: pass
+network: false
+rerun: true
