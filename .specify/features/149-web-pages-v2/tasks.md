@@ -730,6 +730,8 @@
 
 ### T060 — authored executable frontend changed-lines ≥90%
 
+- **状态**：`[x]`；最终 2973/3299 authored executable lines，90.12%。
+  原始 coverage 与 checker 日志及 SHA 见 `review/quality-gates.md`。
 - **类型**：quality gate；不新增行为。
 - **依赖**：T004/T005/T020–T054。
 - **COMMAND_1**：`cd octoagent/frontend && npm run test:coverage`
@@ -738,6 +740,9 @@
 
 ### T061 — frontend contract/architecture/style/type/test gates
 
+- **状态**：`[x]`；OpenAPI、boundary、style、TypeScript、69 files/
+  596 tests、complexity 与 production build 全通过，见
+  `review/quality-gates.md`。
 - **类型**：quality gate；不新增行为。
 - **依赖**：T001–T005/T015/T020–T054。
 - **COMMANDS**：
@@ -752,6 +757,8 @@
 
 ### T062 — Gateway L4/L3 与 deterministic regression
 
+- **状态**：`[x]`；F149 Gateway contract 14/14，deterministic
+  smoke/scripted 26 passed、1 skipped，见 `review/quality-gates.md`。
 - **类型**：quality gate；不新增行为。
 - **依赖**：T010–T014。
 - **COMMANDS**：
@@ -761,6 +768,11 @@
 
 ### T063 — TDD evidence 与 command-policy Review
 
+- **状态**：`[x]`；结论为 `PASS WITH DISCLOSED EVIDENCE LIMITATIONS`。
+  32 个 behavior task、96 个 machine phase record 均存在且 exit shape 为
+  `1/0/0`；27 项正常 test-first，T044 partial，T051–T054 late RED，
+  T041 GREEN/T044 RED 原始日志缺失。限制逐项见
+  `review/tdd-evidence-audit.md`，未通过事后重跑倒签历史。
 - **类型**：process review。
 - **依赖**：全部行为 tasks。
 - **REVIEW**：逐 task 解析真实 command/evidence，核对 RED assertion、GREEN/REFACTOR 同 oracle、UTC/HEAD/status/exit/log/secret scan；不得对 tasks 文本做会命中禁令说明的负向 rg。
@@ -769,6 +781,10 @@
 
 ### T064 — 可执行坏味道审计
 
+- **状态**：`[x]`；MUST FIX=0、cycle=0、page/domain direct fetch=0、
+  token helper=0、secret leak=0、`index.css` 4476 行零增长。高行数文件与
+  private auth event 字面量保留为 ratchet/future owner，见
+  `review/code-smell-audit.md`。
 - **类型**：mechanical + adversarial review；FR-019/029。
 - **文件**：`review/code-smell-audit.md`。
 - **MECHANICAL_COMMANDS**：T061 boundary/style/complexity checkers + AST report。
@@ -777,6 +793,10 @@
 
 ### T065 — 20-frame Design fidelity Review
 
+- **状态**：`[x]`；十页 Desktop 真实截图与十页 390px formal Playwright
+  合同共 20 个 viewport surface 通过。浏览器工具在切到390后受本地URL安全策略
+  阻止，没有绕过或伪造截图；证据边界和逐页结果见
+  `review/design-fidelity.md`。未发现需要修改 Claude Design 源文件的视觉缺陷。
 - **类型**：visual review；FR-009/023。
 - **文件**：实现截图/逐 frame checklist、`review/design-fidelity.md`。
 - **REFERENCE**：`design-output/2026-07-21/OctoAgent Web.dc.html`，SHA-256=`a2db08ea0eb39278558e61e87a355b042c98ad24273b201940925f310271d98a`。
@@ -785,6 +805,9 @@
 
 ### T066 — Blueprint/living docs/scope Review
 
+- **状态**：`[x]`；权威 milestone 与 frontend workbench 架构文档已同步，
+  scope 未新增第二 transport/store/theme/secret registry/per-page service，
+  completion report 见 `completion-report.md`。
 - **类型**：docs + scope gate；FR-020。
 - **文件**：`docs/blueprint/milestones.md`、`docs/codebase-architecture/modules/06-frontend-workbench.md`、Feature trace/completion report。
 - **REVIEW**：实施完成后同步 `blueprint-sync.md` 的 auth/contract/sensitivity/scope；确认未改 F150/F151 owner、未建第二 transport/store/theme/secret registry/per-page service。

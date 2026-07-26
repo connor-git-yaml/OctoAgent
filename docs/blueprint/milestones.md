@@ -675,7 +675,7 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 
 ---
 
-### M11（运行边界收口 + Cloudflare 远程访问 + Web 工作台 v2）⏳ 进行中（2026-07-20 二次重评）
+### M11（运行边界收口 + Cloudflare 远程访问 + Web 工作台 v2）✅ 完成（2026-07-26）
 
 > **来源**：用户在 Claude Design 产出 Web v2 与移动视觉探索（project 851e3fb2），F148 已完成主工作台。Claude Design 初稿是 Web 与未来 iOS 的视觉/交互基线；实现必须适配设计，非功能合同、可用性或无障碍所必需，不得让设计迁就当前 Web 外观。2026-07-20 又对 Octo、OpenClaw、Hermes Agent、Agent Zero 做固定版本源码审计，结论见 [architecture-audit.md](architecture-audit.md) §14.14：三个项目都值得借局部运行机制，但它们的兼容层、全局状态、Plugin/Memory 膨胀和 host-first 安全模型不应成为 Octo 的目标架构。
 > **架构定位**：Octo 保持单用户、单 Gateway application host 的模块化单体；`apps/kernel`、`workers/*` 是历史物理拆分设想，不新建这些目录、`packages/management` 或第二套 runtime。先修真实依赖环、打包与失真配置，再开放公网；God service 只按后续触达的垂直切片收敛，不做 big-bang 重写。
@@ -687,13 +687,19 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | **F148 设计系统 + Web 主工作台 v2** ✅ 完成（2026-07-20，9 commits ff push master；Codex spec+final 2 finding 全闭环 + Opus 自审 0 HIGH；438 vitest + L1 4/4 + tsc 0 + complexity 过）| L | 已交付：**Phase 0** `tokens.css` `--cp-*` 原地翻转 Spotify 深色（committed dark 删冗余 dark-media 块，不并造第二套）+ Figtree/remixicon 自托管 + `theme-v2.css` 三动画（octoPulse/octoBar/octoJelly）+ 旧 accent 覆盖；**Phase 1** 三栏——左栏会话按 `project_id` 分组+折叠+octoBar 运行指示+就绪卡 / 中栏对话加壳（内核 JSX 保留）+octoJelly 空舞台 / 右栏新 `SessionRunPanel`（本会话运行状态只读镜像：状态/进度/事件流/工件/打开任务）；**Phase 2** `GlobalTaskOverlay`（读 `delegation.works` 同源同状态词表）；**Phase 3** 加载页 octoPulse。**纯前端零后端**（勘察先验：跨项目会话+当前运行任务现成；多并发任务列表 defer）。**复用数据逻辑只换视觉/结构**（零新 hook/fetch/协议）。文案映射 Butler→主 Agent、无 LiteLLM 泄漏。`index.css` 4477 零增长。**限制**：原稿逐像素未自证（DesignSync 不可达，按 §M11 书面规格+Spotify 语言实现）/ 右栏停止控制+多任务列表 defer / octo-mark 已换设计稿绿泡泡（主 session 从原稿 assets 取，subagent DesignSync 不可达） / F149 页 accent 残留渐进边界。详见 `.specify/features/148-web-workbench-v2/completion-report.md` | ① |
 | **F151 Runtime Boundary & Architecture Truth** ✅ 稳定（2026-07-22） | XL | 已完成Gateway唯一module entry、运行/打包边界、retired Proxy/SDK路径清理与F150 exact authority；stable commit `687f20fc6246e7157957ab51ac474d46e91578b6`。后续仍按其复杂度与ownership ratchet演进，不恢复management/kernel/worker平行体系 | ① 硬前置 |
 | **F150 Cloudflare 零信任远程** ✅ 稳定（2026-07-25）| M | 唯一 named-tunnel 网络地基 + 电脑 Web 入口已通过：官方 service、Gateway loopback 回源、Web Access 全站保护、origin JWT + owner allowlist、Host/Origin/CSRF、真实 SSE与production浏览器旅程。Web复用Access application session且不新增browser session/device；iOS route/device trust归F153，禁App内service token。产品实现提交`bf29d6be7d7a86c298cd45699488a8640065a566`，仓库级门禁配套提交及stable tip `5e6f4846703b7126cd104c8b9678e0c2f5300cc8`。制品 `.specify/features/150-cloudflare-tunnel/` | ② |
-| **F149 Web 其余页面 v2** 🚧 Design/Tasks Gate 已通过，T000已解锁 | M-L | 两波完成全站：A 波=审批/任务/自动化/设置高频页；B 波=智能体/记忆/文件/技能/MCP 高信息密度页。网络 DTO 从 OpenAPI 生成，手写类型只保留 UI view model；所有页面消费 F148 token，普通界面不暴露内部字段。Claude Design 初稿是视觉基线，实现适配设计；390px 只作 Web 窄窗口回归，不代表手机产品。下一步先对stable F150执行rebase/recon，再进入Implement。 | ③ |
+| **F149 Web 其余页面 v2** ✅ 完成（2026-07-26，branch `codex/f149-web-pages-v2`） | M-L | 两波全站已交付：A 波=审批/任务/自动化/设置，B 波=智能体/记忆/文件/技能/MCP。REST DTO 从 OpenAPI generated boundary进入runtime decoder与pure projection；页面统一消费`api/client`、`platform/queries/actions`，page/domain direct transport与token helper清零。write-only secret、task SSE Advanced diagnostic、F150 global 401/F149 origin-403 owner闭合。69 files/596 Vitest、Gateway contract 14/14、deterministic smoke/scripted 26 passed、changed-lines 90.12%、20 viewport surface与坏味道MUST FIX=0全部通过。Claude Design初稿仍是视觉基线，没有为迁就旧Web回退；390px只作Web窄窗口回归，手机产品只走原生iOS。历史证据限制（T044 partial、T051–T054 late RED、两份raw log缺失）已在completion report如实归档。制品`.specify/features/149-web-pages-v2/` | ③ |
 
 **新波次**：0️⃣ 旧 VPN 删除与全绿baseline ✅ → ① F151完整Spec Driver闭环 ✅ → ② F150实施、live、验证与stable commit ✅ → ③ F149 T000 rebase/recon后两波全站v2。
 
 **推进协议**：Spec Driver 是外层唯一研发流程（constitution → spec/research → plan → tasks → implement → verify）；每次只有一个生产 Feature 处于 implement。Superpowers 的小任务、先写失败测试、频繁 review 用作 Feature 内执行纪律，不另建第二套制品或状态机。每个 task 应是可独立验证的垂直切片，竞品代码只作为 evidence，不作为兼容目标。
 
 **M11 完成定义**：F148/F149/F150/F151 全部 ✅；电脑 Web 的 Cloudflare owner/JWKS/Host/Origin/CSRF fail-closed、Access 登出/过期与真实 SSE 延迟通过；Web v2 全站切换且保持 Claude Design 初稿视觉基线；手机浏览器不列为产品入口；干净环境安装 Gateway wheel 可启动；Provider 无 Gateway 反向 import；Blueprint、constitution 与实现级文档不再描述已退役的 Proxy/Docker backend。
+
+**M11 收官（2026-07-26）**：F151运行/打包边界、F150 named-tunnel与电脑Web
+Access、F148主工作台和F149其余十页全部完成。桌面Web保留；手机产品只走原生iOS，
+不把390px窄窗口或Safari/WebView列为移动入口。Web实现保持Claude Design最初视觉语言，
+没有用旧Web外观反向改造设计。M12可按隐私→设备信任→HealthKit/EventKit→SwiftUI体验的
+严格顺序启动。
 
 ### M12（原生 iOS + 健康/日程感知）📋 设计门禁先行（2026-07-20 重排）
 

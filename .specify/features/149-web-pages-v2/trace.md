@@ -358,3 +358,31 @@
   没有第二认证状态机、公开API、CSS、布局或Claude Design视觉改动。
 - 只读`npm audit --omit=dev`仍报告既有DOMPurify与React Router生产依赖风险；
   本task未越界自动升级，留待最终安全审查显式处置。
+
+## P6 — Final Quality / Review / Docs
+
+- T060最终 authored executable changed-lines coverage 为2973/3299=90.12%；
+  tests与checker原始日志及SHA固定在`review/quality-gates.md`。
+- T061最终全前端为69 files、596/596；OpenAPI、F149 boundary、style ratchet、
+  TypeScript、complexity与production build全部通过。`index.css`保持4476物理行，
+  没有为F149继续堆叠全局样式。
+- T062 Gateway F149 contract 14/14；deterministic smoke/scripted为26 passed、
+  1 skipped，无网络、真LLM、宿主credential或固定sleep。
+- T063审计32个behavior task与96个phase record：exit shape全部为1/0/0，
+  27项正常test-first；T044为partial RED，T051–T054为late RED；
+  T041 GREEN和T044 RED缺原始日志。结论为
+  `PASS WITH DISCLOSED EVIDENCE LIMITATIONS`，没有事后重跑制造历史。
+- T064 mechanical+adversarial审查完成：MUST FIX=0、cycle=0、
+  page/domain direct fetch=0、token helper=0、secret leak=0。高行数文件、
+  internal auth event literal与可恢复catch均登记ratchet/future owner。
+- T065完成十页Desktop真实截图与十页390px formal Playwright合同的20个
+  viewport surface审查。Desktop均1440无横向溢出且恰一`main`；390本轮截图受
+  浏览器本地URL安全策略阻止，没有绕过，使用已通过T051 formal evidence。
+  Claude Design原始层级、留白、卡片节奏、信息密度、视觉张力和排版保持；
+  未发现需要回写设计源的缺陷。
+- T066同步`docs/blueprint/milestones.md`与
+  `docs/codebase-architecture/modules/06-frontend-workbench.md`。F149没有改变
+  F150/F151 ownership，没有新增第二transport/store/theme/secret registry或
+  per-page service。最终报告见`completion-report.md`。
+- F149最终状态为完成。桌面Web保留；390只作Web窄窗口健壮性；手机产品只走
+  原生iOS。iOS使用Claude Design同一视觉语言，但按SwiftUI/Apple原生语义实现。

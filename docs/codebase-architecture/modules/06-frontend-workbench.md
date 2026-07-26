@@ -266,3 +266,67 @@ Settings 现有结构已经说明：
 - config payload 是提交态
 
 这三层混在一起会让配置页非常难维护。
+
+## 8. F149 Web Pages v2 的稳定边界
+
+F149 将审批、任务、自动化、设置、智能体、记忆、文件、技能和 MCP 十个页面统一到
+F148 shell，但没有为每页创建独立 service、transport 或 store。稳定调用方向为：
+
+```text
+OpenAPI generated wire types
+  → api adapter / runtime decoder
+  → platform queries + actions
+  → pure projection / resource state
+  → page + WorkbenchContext composition
+```
+
+generated type 只停留在 adapter boundary。页面消费的是经过 decoder 和 projection
+收敛的 view model；`unknown`、递归 JSON、raw task event 和 action schema 不得直接进入
+普通 UI。未知、历史或扩展 task event 经净化后只进入默认收起的 Advanced diagnostics，
+不驱动业务状态。
+
+### 8.1 唯一 transport 与 action seam
+
+- `src/api/client.ts` 是页面业务请求的唯一 transport。
+- `src/platform/queries/useWorkbenchData.ts` 维护 snapshot/resource 读取与共享状态。
+- `src/platform/actions/f149Actions.ts` 提供有限、typed 的 F149 action seam。
+- 页面和 domain projection 不得直接 `fetch`、自建 token/header helper 或可选 fallback。
+- build version watcher 属 shell 基础设施，不是页面业务 transport。
+
+这条边界由 `scripts/check-f149-boundaries.mjs` 与 component/L1 合同共同保护。新增 endpoint
+时先扩展 generated contract、adapter 和 application seam，不在页面旁边创建临时 service。
+
+### 8.2 401 与 403 的 ownership
+
+F150 唯一拥有 Web Access Gate：
+
+- 未登录、HTTP 401、session 过期与登出进入 global shell owner。
+- canonical client 在 401 时发出内部 `octoagent:front-door-auth-error` 浏览器信号；
+  `useWorkbenchData()` 清除失效 snapshot，由既有 `WorkbenchLayout` 自然显示
+  `FrontDoorGate`。
+- 该信号是 client→platform query 的 private DOM protocol，不是公开 API、第二 store
+  或页面订阅机制；不得扩散到第三个 owner。
+
+F149 页面只拥有已登录用户的 origin 403 / resource permission。403 保持 shell，
+显示普通语言的资源权限不足，不提供 owner 身份切换或重新登录动作。404 与 409 分别进入
+not-found 与 conflict mapper，不并入 auth error。
+
+### 8.3 敏感信息
+
+- secret value 在 Gateway/application boundary 移除，不下发给前端。
+- UI 只接收变量名、是否已配置和服务端生成的脱敏摘要。
+- edit/create 采用 write-only `keep / replace / remove` mutation；redacted placeholder
+  不得回写，提交后清空临时 input。
+- response、SSE、错误、日志、DOM、clipboard 与测试 evidence 都不得回显 secret。
+- path/command 默认属于 operator-sensitive：普通区域隐藏；Advanced 只能展示经过净化、
+  截断且权限允许的摘要。
+
+### 8.4 视觉与客户端边界
+
+Claude Design 最初方案是 Web 与未来 iOS 的共同视觉/交互基线。F148 `--cp-*` 负责共享
+主题与组件约束，但现有旧 Web 外观不是基线。页面实现应适配设计的层级、留白、卡片节奏、
+信息密度、视觉张力与排版；只有明确功能合同、可用性或无障碍需要才允许偏离并记录原因。
+
+390px 只用于桌面 Web 窄窗口 overflow/focus/reduced-motion 健壮性，不是手机产品入口。
+手机产品只走原生 iOS App；iOS 延续同一视觉语言，但使用 SwiftUI / Apple 原生导航、
+手势、控件与无障碍语义，不复制 Web 组件结构。

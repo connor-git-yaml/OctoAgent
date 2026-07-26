@@ -1,7 +1,8 @@
-# F149 Blueprint 待同步文案
+# F149 Blueprint 同步记录
 
-> 当前只允许修改 F149 Spec Driver 制品，本文件是待审文案，不是对权威 Blueprint 的修改。
-> 应用时机：Claude Design 通过、F150/F151 契约稳定且 main 放行生产实施后。
+> 状态：`APPLIED`（2026-07-26）。以下权威表述已同步到
+> `docs/blueprint/milestones.md` 与
+> `docs/codebase-architecture/modules/06-frontend-workbench.md`。
 
 ## 建议同步目标
 

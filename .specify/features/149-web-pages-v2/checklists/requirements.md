@@ -56,7 +56,7 @@
 - [x] Claude Design 已移除 unknown task event 默认时间线、MCP `5s`、restart `约 1 分钟/检查点续跑`、403 owner/重新登录、390 Web 窄窗口长按-only Advanced 与普通区实现词漂移
 - [x] active Spotify selector=`0`，真实云端导出中 `_ds/spotify-design-system`、Spotify asset UUID 外链与 `Figtree` 均为 `0`
 - [x] REST endpoint、SSE data、action-specific schema 缺口已进入 `contract-manifest.md`
-- [x] F150 全局 Access 与 F149 origin-403 ownership 已进入 Spec，并有 Blueprint 待同步文案
+- [x] F150 全局 Access 与 F149 origin-403 ownership 已进入 Spec，并已同步权威 Blueprint 与实现级架构文档
 - [x] secret/env/path/command sensitivity policy 已进入 Spec 与 Prompt
 - [x] main 已决定：审批维持 F145 三类候选；自动化只 pause/resume；任务不新增 cancel/resume
 - [x] main 已逐项决定 Tasks OperatorInbox/Recovery backup/export/update dry-run/apply/restart/verify 的页面位置：Tasks“待处理事项” + Settings Advanced“维护与恢复”
@@ -91,3 +91,16 @@
 - [x] main 明确 `GATE_TASKS=true`（2026-07-21 PASS；不得据此 Implement）
 - [x] T000已记录F151 stable、F150 stable、`origin/master`、无冲突rebase、Design export
   SHA与post-SDK七包+Gateway profile；T001可以开始
+
+## Completion Gate
+
+- [x] T060 authored executable changed-lines coverage=90.12%（2973/3299）
+- [x] T061 OpenAPI/boundary/style/type/596 Vitest/complexity/build 全通过
+- [x] T062 Gateway contract 14/14；deterministic smoke/scripted 26 passed、1 skipped
+- [x] T063 32 behavior task/96 phase record已审计；T044 partial、T051–T054 late RED、两份raw log缺口已显式披露
+- [x] T064 mechanical+adversarial审查MUST FIX=0、cycle=0、page/domain direct fetch=0、token helper=0、secret leak=0
+- [x] T065 20 viewport surface视觉审查通过；Claude Design初稿仍是基线，现有旧Web不是基线
+- [x] T066 Blueprint、实现级架构文档、trace与completion report已同步
+- [x] 390px只代表桌面Web窄窗口健壮性；手机产品只走原生iOS App
+- [x] 本轮未发现Claude Design源缺陷，未为了实现方便修改设计；token保留给真实设计返修
+- [x] F149最终状态：✅ 完成
