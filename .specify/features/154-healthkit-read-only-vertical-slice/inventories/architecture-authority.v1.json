@@ -1,0 +1,152 @@
+{
+  "version": 1,
+  "feature_id": "F154",
+  "authority_status": "DESIGN_TASKS_APPROVED_IMPLEMENT_LOCKED_ON_F153_VERIFY",
+  "approval_date": "2026-07-29",
+  "architecture_checker": "repo-scripts/check-runtime-architecture.py",
+  "precondition": {
+    "feature_id": "F153",
+    "required_gate": "GATE_VERIFY",
+    "current_state": false
+  },
+  "production_paths": [
+    {
+      "path": "repo-scripts/check-runtime-architecture.py",
+      "state": "existing_future_t001",
+      "owner": "architecture",
+      "role": "single_feature_authority_checker"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/models/privacy_ingestion.py",
+      "state": "existing_locked",
+      "owner": "core",
+      "role": "finite_health_capabilities"
+    },
+    {
+      "path": "octoagent/packages/policy/src/octoagent/policy/privacy_ingestion_policy.py",
+      "state": "existing_locked",
+      "owner": "policy",
+      "role": "existing_device_capability_authorization"
+    },
+    {
+      "path": "octoagent/packages/protocol/src/octoagent/protocol/privacy_ingestion.py",
+      "state": "existing_locked",
+      "owner": "protocol",
+      "role": "existing_f154_consumer_schema"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/health_ingestion.py",
+      "state": "planned_locked",
+      "owner": "gateway",
+      "role": "single_health_application_orchestration"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/mobile_health.py",
+      "state": "planned_locked",
+      "owner": "gateway",
+      "role": "single_mobile_health_router"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+      "state": "existing_locked",
+      "owner": "gateway",
+      "role": "existing_store_and_service_composition"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/main.py",
+      "state": "existing_locked",
+      "owner": "gateway",
+      "role": "existing_router_composition"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent.xcodeproj/project.pbxproj",
+      "state": "existing_locked",
+      "owner": "ios",
+      "role": "healthkit_capability_and_file_membership"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/App/OctoAgentApp.swift",
+      "state": "existing_locked",
+      "owner": "ios",
+      "role": "connected_slice_composition"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/Health/HealthImportModels.swift",
+      "state": "planned_locked",
+      "owner": "ios",
+      "role": "local_exact_models_and_normalization"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/Health/AppleHealthDataStore.swift",
+      "state": "planned_locked",
+      "owner": "ios",
+      "role": "single_healthkit_adapter"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/Health/HealthImportCoordinator.swift",
+      "state": "planned_locked",
+      "owner": "ios",
+      "role": "finite_local_flow_state"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/Health/HealthReviewView.swift",
+      "state": "planned_locked",
+      "owner": "ios",
+      "role": "slice_specific_swiftui"
+    }
+  ],
+  "test_paths": [
+    "octoagent/apps/ios/OctoAgentTests/HealthImportTests.swift",
+    "octoagent/apps/ios/OctoAgentUITests/HealthImportFlowUITests.swift",
+    "octoagent/apps/gateway/tests/test_mobile_health_ingestion.py",
+    "octoagent/packages/core/tests/test_f154_health_capabilities.py",
+    "octoagent/packages/policy/tests/test_f154_health_policy.py",
+    "octoagent/packages/protocol/tests/test_f154_health_contract.py",
+    "octoagent/tests/gate/test_f154_architecture_authority.py"
+  ],
+  "artifact_paths": [
+    ".specify/features/154-healthkit-read-only-vertical-slice/spec.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/research.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/research/online-research.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/research/product-research.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/research/tech-research.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/plan.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/tasks.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/data-model.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/threat-model.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/contracts/health-read-only-contract.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/checklists/requirements.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/plan-tasks-gate-review.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/trace.md",
+    ".specify/features/154-healthkit-read-only-vertical-slice/inventories/architecture-authority.v1.json"
+  ],
+  "allowed_health_types": [
+    "stepCount",
+    "sleepAnalysis"
+  ],
+  "allowed_capabilities": [
+    "health.review.submit",
+    "health.analysis.run",
+    "health.source.delete"
+  ],
+  "forbidden_prefixes": [
+    "octoagent/apps/ios/OctoAgent/EventKit/",
+    "octoagent/apps/ios/OctoAgent/WebView/",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/health_store",
+    "octoagent/packages/core/src/octoagent/core/store/health",
+    "octoagent/packages/core/src/octoagent/core/store/session"
+  ],
+  "forbidden_terms": [
+    "HKHealthStore.save",
+    "HKHealthStore.delete",
+    "enableBackgroundDelivery",
+    "HKObserverQuery",
+    "Clinical Health Records",
+    "NSHealthUpdateUsageDescription",
+    "WebView",
+    "Cloudflare service token",
+    "Web Access Cookie"
+  ],
+  "scope_hash_algorithm": "sha256(canonical_json(document_without_approved_scope_sha256))",
+  "approved_scope_sha256": "100cf04fdf431ba118af8710141b3929792244ff3e0ad86228c14baef0e6bdcf"
+}

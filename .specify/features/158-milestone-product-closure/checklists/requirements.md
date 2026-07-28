@@ -25,6 +25,7 @@
 - [x] 原生 SwiftUI App 已在 Simulator 或真机真实启动（F153 registration 范围）
 - [x] F152 隐私/身份 Research/Design/Tasks Gate 与 architecture authority 通过
 - [ ] F153 真机 device trust/transport 通过
+- [x] F154 HealthKit Research/Design/Tasks Gate 通过，production 仍由 F153 Verify 关闭
 - [ ] F154 HealthKit 通过
 - [ ] F155 EventKit 决策门通过或明确移出范围
 - [ ] F156 Native Companion 场景通过

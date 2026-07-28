@@ -11,11 +11,12 @@
 - 项目名称：**OctoAgent**
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
-- 版本：v0.1（Roadmap 已增量同步至 M12；F152 已 Verify，F153 Simulator Gate 已通过）
+- 版本：v0.1（Roadmap 已增量同步至 M12；F152 已 Verify，F153 Simulator Gate 与
+  F154 Research/Design/Tasks Gate 已通过）
 - 状态：M0-M11 Delivered；M10 的独立物理启动验收仍待闭环；M12 In Progress
   （F152 T001-T014 已验证；F153 Gateway/device trust/原生 registration App 已完成
   T001-T013、T016、T017，Simulator 功能/视觉/a11y 已通过，真机与 Cloudflare live
-  仍未完成）
+  仍未完成；F154 只完成 Research/Design/Tasks Gate，production 仍关闭）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - M5 完成日期：2026-05-25（F102 commit `9185862` + F103 同步）
 - M9 完成日期：2026-07-13
@@ -390,7 +391,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 | **M9 质量保证体系** | ✅ | L1-L4、LLM 网络硬闸、scripted harness、wire replay、三模式 lane、attestation |
 | **M10 部署完成度收尾** | ✅ 功能 | F145/F134/F146/F147 全完成；ATT-129-BOOT 作为独立物理验收保留 |
 | **M11 运行边界收口 + Cloudflare 远程访问 + Web v2** | ✅ | F148/F151/F150/F149 全部完成；电脑保留 Web，手机产品只走 M12 原生 iOS，不以手机浏览器交付 |
-| **M12 原生 iOS + 健康/日程感知** | 🚧 | F152 已 Verify；F153 Gateway/device trust 与原生 registration App 已通过 iOS 26.5 Simulator：42 项 focused regression、12 项 scheme tests、6 状态视觉回归、Dynamic Type、Reduce Motion、generic iPhoneOS Release build、架构与 bundle scan 均通过；真机、Cloudflare live 及 F154-F156 仍是硬门 |
+| **M12 原生 iOS + 健康/日程感知** | 🚧 | F152 已 Verify；F153 Gateway/device trust 与原生 registration App 已通过 iOS 26.5 Simulator：42 项 focused regression、12 项 scheme tests、6 状态视觉回归、Dynamic Type、Reduce Motion、generic iPhoneOS Release build、架构与 bundle scan 均通过；F154 Research/Design/Tasks Gate 已通过但 production=0；真机、Cloudflare live、F153 Verify、F154 Implement/Verify 及 F155-F156 仍是硬门 |
 
 ### 待办汇总
 
@@ -405,11 +406,13 @@ owner/mobile routes、P-256 proof、durable replay/revoke、Secure Enclave/Keych
 单 URLSession client 与原生 registration states；iOS 26.5 Simulator 上 42 项 focused
 regression、12 项 scheme tests、6 状态视觉回归、Dynamic Type、Reduce Motion、
 generic iPhoneOS Release build、架构与 bundle secret scan 均通过。Cloudflare live
-与真机 Secure Enclave/网络生命周期仍未完成，F154-F156 也尚未实施；在 F153 Verify
-通过前，不启动 HealthKit production 实现。手机端不交付 Safari/WebView；Web 与 iOS
-均以 Claude Design 初稿为视觉/交互基线，实现适配设计而不是反向迁就旧 Web 外观。
-ATT-129-BOOT 继续作为独立物理验收项保留。准确顺序、Web/iOS trust 边界和 Apple
-权限门禁见
+与真机 Secure Enclave/网络生命周期仍未完成。F154 Apple 官方调研、Spec、Threat
+Model、Data Model、Contract 与 Tasks 已通过 Research/Design/Tasks Gate，但
+HealthKit production/entitlement/行为证据仍为 0；F155-F156 也尚未立项或实施。在
+F153 Verify 通过前，不启动 HealthKit production 实现。手机端不交付
+Safari/WebView；Web 与 iOS 均以 Claude Design 初稿为视觉/交互基线，实现适配设计
+而不是反向迁就旧 Web 外观。ATT-129-BOOT 继续作为独立物理验收项保留。准确顺序、
+Web/iOS trust 边界和 Apple 权限门禁见
 [blueprint/milestones.md](blueprint/milestones.md) §M10-M12。
 
 ### 三条设计哲学（M5 引入）

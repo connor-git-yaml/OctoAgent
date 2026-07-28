@@ -235,3 +235,14 @@
   architecture、backend-deterministic 五个 job 全部 `success`。F157 T013、
   plan、fix report 与 verification report 已同步为完成；F158 审计不再把该项标成
   `DOC DRIFT`，M9 提升为 `PROVEN`。
+- 2026-07-29：只读核验个人 Cloudflare 当前态：named tunnel
+  `19957901-f4e1-4cb0-b387-37258436644d` 只有
+  `octo.maojiwang.work -> 127.0.0.1:8000` 的 Web ingress；mobile/native/ios
+  hostname 均无 DNS，个人部署 doctor 也报告原生 iOS 远程入口未启用。该事实保持
+  F153 T014 未完成，不能用 Web Access 302 或健康 connector 冒充 mobile live。
+- 2026-07-29：建立 F154 Apple 健康只读垂直切片。Apple 官方调研、Spec、Data
+  Model、Threat Model、Contract、architecture authority inventory、Plan 与 Tasks
+  已完成 Research/Design/Tasks Gate；v0.1 exact 为 stepCount + sleepAnalysis、
+  24h/3d/7d、本地 raw zero-retention、用户预览/当次批准/单次分析/删除。F153
+  T014/T015/T018 未通过，因此 F154 entitlement、production Swift/Python、Gateway
+  route 与行为 RED 均为 0，Implement/Verify 继续关闭。

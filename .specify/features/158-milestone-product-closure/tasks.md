@@ -45,7 +45,8 @@
 - [ ] **T027** 创建并通过 F153 真机 transport/device-proof Feature
   （T001-T013/T016/T017 已完成；Simulator registration 功能/视觉已通过，
   Cloudflare live/真机/Verify 仍阻断）
-- [ ] **T028** 创建并通过 F154 HealthKit Feature
+- [ ] **T028** 完成 F154 HealthKit Feature（Research/Design/Tasks Gate 已通过；
+  production Implement 与 Verify 继续被 F153 T014/T015/T018 硬门关闭）
 - [ ] **T029** 创建并通过 F155 EventKit 决策门与 Feature
 - [ ] **T030** 创建并通过 F156 SwiftUI Native Companion Feature
 - [ ] **T031 [SIMULATOR]** 原生 iOS 冷启动、导航、状态与视觉回归（F153 registration

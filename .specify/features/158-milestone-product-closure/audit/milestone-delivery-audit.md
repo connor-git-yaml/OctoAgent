@@ -20,9 +20,9 @@
 | Web 功能 E2E | 11 个 Playwright spec / 39 nodes + fresh approval rerun | PROVEN_BRANCH_CI_DEPLOYED | 完整 38 pass/1 once-only skip；fresh approval 1/1 pass；当前 runtime 已部署 | F158 |
 | Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_BRANCH_CI_DEPLOYED | 主框架与 9 surface + 真实任务详情进入像素门；部署 CSS map 与分支一致 | F158 |
 | 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
-| 原生 iOS 可启动 | iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 12/12 + detached clean-checkout 12/12 | PROVEN_PUSHED（F153 scope） | F153 registration 已真实启动；F154-F156 完整 companion 与真机仍缺 | F153-F156 |
-| iOS 功能 E2E | Swift unit 9/9、Simulator UI 3/3、六态冷启动 | PARTIAL | F153 registration 已证；Cloudflare mobile live、真机及 F154-F156 场景仍缺 | F153-F156 |
-| iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
+| 原生 iOS 可启动 | iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 12/12 + detached clean-checkout 12/12 | PROVEN_PUSHED（F153 scope） | F153 registration 已真实启动；F154 Research/Design/Tasks Gate 已通过但 production=0；F155-F156、完整 companion 与真机仍缺 | F153-F156 |
+| iOS 功能 E2E | Swift unit 9/9、Simulator UI 3/3、六态冷启动 | PARTIAL | F153 registration 已证；F154 exact HealthKit 场景与测试矩阵已冻结但未执行；Cloudflare mobile live、真机及 F154-F156 行为仍缺 | F153-F156 |
+| iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；F154 已冻结 Claude early + SwiftUI native visual contract，但完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
 | Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_BRANCH_CI_DEPLOYED | 最终总 completion audit 尚未完成 | F158 |
 | F151 runtime/architecture | verification report + CI | PROVISIONAL PASS | 仍需纳入最终干净检出回归 | F151 / F158 |
 | F157 CI 回归修复 | `master=db3214ff`；CI run `30198514576` 五个 job 全绿；T001-T013 全完成 | PROVEN | 无 | F157 / F158 |
@@ -45,7 +45,7 @@
 | M9 | 完成 | 四层测试门、F151/F157 corrective 与 exact master CI 已闭环 | PROVEN | 最终总审计继续复用 run `30198514576` 与当前 F158 branch CI |
 | M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
 | M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 9 surface/任务详情视觉及功能 E2E 通过；Claude 云端谱系已清理并导出；当前 runtime 已部署 | PROVEN_BRANCH_CI_DEPLOYED | 登录后个人旅程与最终 completion audit |
-| M12 | In Progress | F152 Verify；F153 T001-T013/T016 已实现，Simulator registration 功能/视觉通过 | PARTIAL | Cloudflare mobile live、真机、F153 Verify、F154-F156 |
+| M12 | In Progress | F152 Verify；F153 T001-T013/T016 已实现，Simulator registration 功能/视觉通过；F154 Research/Design/Tasks Gate 已通过 | PARTIAL | Cloudflare mobile live、真机、F153 Verify、F154 Implement/Verify 与 F155-F156 |
 
 该矩阵的 `PROVISIONAL` 不是重新否定历史交付，而是区分“历史报告存在”与“当前
 Milestone Goal 已在同一 commit/环境复验”。最终 completion audit 只允许将取得当前
