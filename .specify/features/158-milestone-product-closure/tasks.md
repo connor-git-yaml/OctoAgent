@@ -33,8 +33,8 @@
 - [x] **T020 [RED→GREEN→REFACTOR]** Automation / Settings
 - [x] **T021 [RED→GREEN→REFACTOR]** Agents / Memory / Files
 - [x] **T022 [RED→GREEN→REFACTOR]** Skills / MCP
-- [x] **T023 [L1]** 全 Web 用户场景与异常态 E2E（完整 suite 38 pass / 1
-  once-only conditional skip；fresh approval fixture 另行 1/1 pass）
+- [x] **T023 [L1]** 全 Web 用户场景与异常态 E2E（当前完整 suite 39/39 pass，
+  0 failed / 0 retry）
 - [x] **T024 [VISUAL]** desktop 关键 frame 与状态 screenshot diff
 - [x] **T025 [VISUAL/A11Y]** 390px Web 窄窗口、focus、reduced motion
 

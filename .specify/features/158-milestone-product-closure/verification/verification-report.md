@@ -16,6 +16,16 @@ F158 已完成 Milestone/Blueprint/Feature 真值审计、F150 Settings 用户�
 authority 与 F153 device-trust/registration Simulator 闭环。确定性前端、后端和
 repository architecture gate 均通过。
 
+2026-07-29 在当前分支提交 `1d6b11704aa6` 再次从实际运行界面与测试入口复核：
+本机 Gateway Web 能加载三栏工作台并从真实导航进入 Settings；F150
+“从电脑安全访问 Octo”区块、脱敏网页地址/使用者、打开网页、退出登录、重新检查与
+高级诊断全部可达。当前瞬时状态诚实显示 `pending_verification`，没有把 Access
+`302` 冒充登录后 ready。随后同一当前字节的 Vitest 为 `70 files / 598 passed`，
+Playwright 为 `39/39 passed / retries=0`；14 个 `claude-early-*` 像素基线未更新。
+同一已启动的 iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 再次为
+`12/12 passed`，本次 result bundle 位于
+`/tmp/f158-ios-rerun.iZzEea/current.xcresult`。这些复验不改变真机与远程认证边界。
+
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
 个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
 真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154-F156 尚未开始；iOS
@@ -146,6 +156,11 @@ checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均�
 内置浏览器与 Chrome 均能枚举或打开 Access 登录页，但在 DOM 读取/交互阶段持续
 超时；本轮没有读取浏览器 cookie 或 local storage 绕过认证。因此登录后的 SPA、
 API、SSE、刷新、过期、重新认证、登出和 Settings remote-access 仍保持 MISSING。
+
+2026-07-29 的后续复核确认远程地址仍稳定返回 Cloudflare Access `302`，不再是
+`Bad Gateway`。本机实际 Web 页面和 Settings 已通过浏览器读取；Chrome 现有标签仍
+停在 Access 登录页，没有可复用的已认证 OctoAgent 页面。该事实只把“本机产品入口”
+保持为 PASS，不能把远程认证旅程提升为 PASS。
 
 Gateway 日志同时显示 OpenAI Codex refresh token 已被复用并在刷新时返回 401。ready
 只证明 provider route 配置存在，不证明真实模型对话可用；重新登录 provider 与真实

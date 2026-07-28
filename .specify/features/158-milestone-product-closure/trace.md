@@ -246,3 +246,12 @@
   24h/3d/7d、本地 raw zero-retention、用户预览/当次批准/单次分析/删除。F153
   T014/T015/T018 未通过，因此 F154 entitlement、production Swift/Python、Gateway
   route 与行为 RED 均为 0，Implement/Verify 继续关闭。
+- 2026-07-29：在提交 `1d6b11704aa6` 上重新执行当前产品字节验收。本机真实 Web
+  加载三栏工作台，Settings 中 F150 远程访问卡片、脱敏事实、动作、重试和高级诊断
+  可达；远程地址稳定返回 Access `302` 而非 502，但 Chrome 没有可复用登录态，
+  当前投影保持 `pending_verification`。同一字节 Vitest 为
+  `70 files / 598 passed`，完整 Playwright 为 `39/39 passed / 0 retry`，14 个
+  `claude-early-*` 像素基线未更新。iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme
+  再次为 `12/12 passed`，result bundle 为
+  `/tmp/f158-ios-rerun.iZzEea/current.xcresult`。这些当前证据不替代 Access 登录后
+  SPA/API/SSE、真实 Provider OAuth、Cloudflare mobile live 或真 iPhone 验收。
