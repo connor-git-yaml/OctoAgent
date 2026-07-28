@@ -25,7 +25,7 @@
 | iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
 | Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_BRANCH_CI_DEPLOYED | 最终总 completion audit 尚未完成 | F158 |
 | F151 runtime/architecture | verification report + CI | PROVISIONAL PASS | 仍需纳入最终干净检出回归 | F151 / F158 |
-| F157 CI 回归修复 | master CI 已绿 | DOC DRIFT | F157 tasks T013 仍未勾选 | F157 / F158 |
+| F157 CI 回归修复 | `master=db3214ff`；CI run `30198514576` 五个 job 全绿；T001-T013 全完成 | PROVEN | 无 | F157 / F158 |
 | M10 物理启动验收 | plist 早于当前 boot；launchd/service/ready 当前均健康 | INCOMPLETE | 本轮部署曾手工 kickstart，仍缺一次明确物理重启后的 ATT-129-BOOT | 原 owner / F158 audit |
 
 ## M0-M12 全量真值矩阵
@@ -42,7 +42,7 @@
 | M6 | 完成 | F104-F122 surface/地基代码与完成记录存在 | PROVISIONAL | 当前全量门与相关 surface E2E |
 | M7 | 完成 | memory/learning owner 与 defer 条件有记录 | PROVISIONAL | 当前 memory/learning 行为和 defer 条件复验 |
 | M8 | 功能完成 | service/Telegram/cron/voice owner 存在 | PROVISIONAL | 常驻服务与个人部署复验 |
-| M9 | 完成 | 四层测试门与 F151/F157 后续修复存在 | PROVISIONAL | 当前主线 authoritative CI；修正文档未勾选状态 |
+| M9 | 完成 | 四层测试门、F151/F157 corrective 与 exact master CI 已闭环 | PROVEN | 最终总审计继续复用 run `30198514576` 与当前 F158 branch CI |
 | M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
 | M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 9 surface/任务详情视觉及功能 E2E 通过；Claude 云端谱系已清理并导出；当前 runtime 已部署 | PROVEN_BRANCH_CI_DEPLOYED | 登录后个人旅程与最终 completion audit |
 | M12 | In Progress | F152 Verify；F153 T001-T013/T016 已实现，Simulator registration 功能/视觉通过 | PARTIAL | Cloudflare mobile live、真机、F153 Verify、F154-F156 |

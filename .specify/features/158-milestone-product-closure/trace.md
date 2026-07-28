@@ -229,3 +229,9 @@
   `kickstart -k`，当前 pid 不能作为登录自启动证据。新增 T046，只有一次用户明确
   允许的物理重启后复核才能签署 `ATT-129-BOOT`。同日
   `xcrun devicectl list devices` 仍为 `No devices found`，F153 T015 保持未完成。
+- 2026-07-29：复核 F157 最终提交
+  `db3214fff722c6f969baf99528a76fc03a1e21a1` 已是 `origin/master`，对应权威
+  GitHub Actions run `30198514576` 的 benchmark、frontend、l1-playwright、
+  architecture、backend-deterministic 五个 job 全部 `success`。F157 T013、
+  plan、fix report 与 verification report 已同步为完成；F158 审计不再把该项标成
+  `DOC DRIFT`，M9 提升为 `PROVEN`。
