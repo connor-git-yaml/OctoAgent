@@ -416,6 +416,56 @@ class TestDoctorOverall:
         assert "重新授权" in model_live.fix_hint
         assert report.overall_status == CheckStatus.FAIL
 
+    async def test_model_live_missing_config_is_blocking(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_model_live()
+
+        assert result.status == CheckStatus.FAIL
+        assert result.level == CheckLevel.REQUIRED
+        assert "RuntimeError" in result.message
+        assert "配置与网络连通性" in result.fix_hint
+
+    async def test_model_live_empty_response_is_blocking(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "octoagent.gateway.services.config.config_wizard.load_config",
+            lambda _root: SimpleNamespace(model_aliases={"main": object()}),
+        )
+
+        async def fake_complete(
+            _adapter: object,
+            *,
+            messages: list[dict[str, str]],
+            model_alias: str,
+        ) -> SimpleNamespace:
+            assert messages
+            assert model_alias == "main"
+            return SimpleNamespace(
+                content="",
+                provider="doctor-provider",
+                model_name="doctor-main",
+            )
+
+        monkeypatch.setattr(
+            "octoagent.provider.ProviderRouterMessageAdapter.complete",
+            fake_complete,
+        )
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_model_live()
+
+        assert result.status == CheckStatus.FAIL
+        assert result.level == CheckLevel.REQUIRED
+        assert "RuntimeError" in result.message
+        assert "配置与网络连通性" in result.fix_hint
+
     async def test_model_live_uses_instance_dotenv_and_prefers_main(
         self,
         tmp_path: Path,
