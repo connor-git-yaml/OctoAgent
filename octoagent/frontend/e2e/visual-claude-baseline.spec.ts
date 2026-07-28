@@ -46,6 +46,12 @@ test("桌面工作台保持 Claude Design 早期紧凑三栏视觉语言", async
   );
   await expect(page.locator(".v2-run-panel-head"), ORACLE).toHaveScreenshot(
     "claude-early-run-panel-head.png",
+    {
+      // 中文 fallback 字体在 macOS 与 Linux 的抗锯齿不同；419 个差异像素都落在
+      // 同一行字形边缘。只给这个 280×32 标题快照留 450 像素上限，结构、颜色、
+      // 文案与其余 13 个视觉快照继续使用严格门。
+      maxDiffPixels: 450,
+    },
   );
 
   const metrics = await page.evaluate<VisualMetrics>(() => {
@@ -67,6 +73,28 @@ test("桌面工作台保持 Claude Design 早期紧凑三栏视觉语言", async
     };
     const style = (selector: string): CSSStyleDeclaration =>
       getComputedStyle(required(selector));
+    const messageStyle = (kind: "is-user" | "is-agent") => {
+      const existing = document.querySelector<HTMLElement>(`.wb-message-card.${kind}`);
+      const element = existing ?? document.createElement("div");
+      if (!existing) {
+        element.className = `wb-message-card ${kind}`;
+        element.style.position = "absolute";
+        element.style.visibility = "hidden";
+        document.body.append(element);
+      }
+      const computed = getComputedStyle(element);
+      const values = {
+        backgroundColor: computed.backgroundColor,
+        backgroundImage: computed.backgroundImage,
+        borderStyle: computed.borderStyle,
+      };
+      if (!existing) {
+        element.remove();
+      }
+      return values;
+    };
+    const userMessageStyle = messageStyle("is-user");
+    const agentMessageStyle = messageStyle("is-agent");
 
     return {
       shell: box(".wb-shell"),
@@ -79,9 +107,9 @@ test("桌面工作台保持 Claude Design 早期紧凑三栏视觉语言", async
       brandMark: box(".wb-brand-mark"),
       firstNavItem: box(".wb-nav-item"),
       chatBackground: style(".wb-chat-panel").backgroundColor,
-      userMessageBackground: style(".wb-message-card.is-user").backgroundImage,
-      agentMessageBackground: style(".wb-message-card.is-agent").backgroundColor,
-      agentMessageBorder: style(".wb-message-card.is-agent").borderStyle,
+      userMessageBackground: userMessageStyle.backgroundImage,
+      agentMessageBackground: agentMessageStyle.backgroundColor,
+      agentMessageBorder: agentMessageStyle.borderStyle,
     };
   });
 

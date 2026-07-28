@@ -437,6 +437,11 @@ body {
   background: #25272a;
 }
 
+.wb-chat-form.is-empty {
+  width: calc(100% - 52px);
+  margin: 0 26px 18px;
+}
+
 .wb-chat-form textarea {
   min-height: 42px;
   max-height: 132px;
@@ -630,6 +635,11 @@ body {
     padding: 7px 8px 7px 14px;
     flex-direction: row;
     align-items: flex-end;
+  }
+
+  .wb-chat-form.is-empty {
+    width: calc(100% - 24px);
+    margin: 0 12px 12px;
   }
 
   .wb-chat-form textarea {
