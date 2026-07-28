@@ -2,12 +2,13 @@
 
 ## 当前结论
 
-- 日期：2026-07-28
+- 日期：2026-07-29
 - 状态：`PARTIAL`
 - `GATE_VERIFY=false`
 - 当前分支：`codex/f158-milestone-product-closure`
 - 基线：`origin/master=db3214fff722c6f969baf99528a76fc03a1e21a1`
-- 当前已提交父节点：`61032e141f86636abaf08646207164ad1d9f8fda`
+- 当前已推送提交：`ebe8cd29f4c4c3b46e79edfed93a726cde537af6`
+- 当前个人部署提交：`35d7aa14f6f146a47084e4725e11df83cf034152`
 
 F158 已完成 Milestone/Blueprint/Feature 真值审计、F150 Settings 用户入口、桌面 Web
 逐 route/state 功能 E2E、Claude 早期设计视觉恢复、视觉 regression、F152 privacy
@@ -16,8 +17,9 @@ repository architecture gate 均通过。
 
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
 个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
-真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154-F156 尚未开始；
-当前 iOS 变更尚待提交/CI，主线确认仍未完成。
+真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154-F156 尚未开始；iOS
+变更已提交、推送并在干净 detached worktree 复验；权威 GitHub Actions run
+`30378276329` 五个 job 全绿，主线确认仍未完成。
 
 ## 已通过
 
@@ -55,8 +57,11 @@ repository architecture gate 均通过。
 ### 后端与架构
 
 - F152/F153/F158 focused：`77 passed / 1 existing warning`
-- 确定性后端完整回归：
-  `5709 passed / 9 skipped / 1 xfailed / 1 xpassed`
+- 确定性后端完整回归（无 coverage）：
+  `5716 passed / 9 skipped / 1 xfailed / 1 xpassed`
+- CI 等价 coverage 回归：
+  `5715 passed / 10 skipped / 1 xfailed / 1 xpassed`，scripted gate `18 passed`
+- changed-lines coverage：`38/42 = 90.5%`，PASS
 - repository architecture gate：PASS
 - 七个 F153/F158 新增多参数函数已收敛为 typed request/options/context；
   `PLR0913` 没有新增豁免。
@@ -103,6 +108,10 @@ doctor、TaskService、WorkerRuntime 四文件回归为 `66 passed`。普通瞬�
 `octoagent/apps/ios/OctoAgentUITests/__Snapshots__/`；AXXXL 证据和完整运行说明位于
 `../153-ios-device-trust-secure-transport/evidence/simulator/2026-07-28/`。
 
+同一推送提交在独立 detached worktree
+`/tmp/f158-ios-clean-worktree.YDqxgp/repo` 中再次执行完整 scheme，结果仍为
+`12/12 PASS`，运行后工作树 clean；这不是复用原工作树的 DerivedData 或未提交字节。
+
 这些证据把 F153 registration/device-trust 的 Simulator 范围提升为
 `PROVEN_IN_BRANCH`，仍不证明真机 Secure Enclave/Keychain 或 F156 完整 companion。
 
@@ -113,17 +122,19 @@ doctor、TaskService、WorkerRuntime 四文件回归为 `66 passed`。普通瞬�
 - Cloudflare named tunnel：`4` 条 active connection，request error=`0`
 - 本轮没有修改 Cloudflare 账户、DNS、Access application、tunnel 或凭证
 
-仓库正式 managed-checkout installer 已把 `~/.octoagent/app` 更新为上一批 Web
-交付提交
-`e84ffd435f742ba2784b85c074346ab63ecedbc1`，完成依赖同步和 production build；
+仓库正式 managed-checkout installer 已把 `~/.octoagent/app` 更新到包含 Web、F150、
+F153 Simulator 与真实模型终态修复的运行提交
+`35d7aa14f6f146a47084e4725e11df83cf034152`，完成依赖同步和 production build；
 checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均为 `200`，
-个人域名返回预期 Access `302`，tunnel LaunchAgent running。部署 checkout 的
-`claude-workbench.css` SHA 与分支均为
-`c550467990e6cf04f9822d15da142a3758b422aea464fb2d2ab0f5612618a325`。
+个人域名返回预期 Access `302`，tunnel LaunchAgent running。部署目录的 11 个 CSS
+文件与当前分支 build 逐字节相等，canonical path→SHA map 为
+`6330b1b01cebdddfef3a21507a7e2874c1ee63e518651f2a99bb0e0613230e00`。
+构建工具会为 JS chunk 生成不同文件名，因此没有把两次 build 的完整 asset
+目录误报为逐字节相同。
 
-Chrome 能枚举已有 Access 登录页，但接管页面超时；本轮没有读取浏览器 cookie 或
-local storage 绕过认证。因此登录后的 SPA、API、SSE、刷新、过期、重新认证、登出和
-Settings remote-access 仍保持 MISSING。
+内置浏览器与 Chrome 均能枚举或打开 Access 登录页，但在 DOM 读取/交互阶段持续
+超时；本轮没有读取浏览器 cookie 或 local storage 绕过认证。因此登录后的 SPA、
+API、SSE、刷新、过期、重新认证、登出和 Settings remote-access 仍保持 MISSING。
 
 Gateway 日志同时显示 OpenAI Codex refresh token 已被复用并在刷新时返回 401。ready
 只证明 provider route 配置存在，不证明真实模型对话可用；重新登录 provider 与真实
@@ -163,17 +174,18 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | deterministic backend regression | PASS |
 | repository architecture gate | PASS |
 | iPhoneOS target compilation | PASS |
-| GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（上一批 Web 提交） |
-| GitHub Actions backend deterministic | PASS（上一批 Web 提交） |
-| personal deployment | PASS（上一批 Web 提交；登录后旅程仍缺） |
+| GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（当前提交 `ebe8cd29`） |
+| GitHub Actions backend deterministic | PASS（run `30378276329`） |
+| personal deployment | PASS（运行提交 `35d7aa14`；登录后旅程仍缺） |
 | authenticated personal SPA/API/SSE | MISSING |
 | personal real-model conversation | BLOCKED（provider refresh token 401） |
 | F153 iOS Simulator functional/visual E2E | PASS |
 | F154-F156 complete iOS product E2E | MISSING |
 | real-device security/lifecycle | BLOCKED |
 | F154-F156 product implementation | CLOSED |
-| current iOS commit / push | MISSING |
-| current iOS complete CI | MISSING |
+| current iOS commit / push | PASS（`35d7aa14`，后续测试提交 `ebe8cd29`） |
+| current iOS clean-checkout scheme | PASS（12/12） |
+| current complete CI | PASS（run `30378276329`） |
 | mainline confirmation | MISSING |
 
 因此当前不能把 F158 或跨 Milestone Goal 标记完成。

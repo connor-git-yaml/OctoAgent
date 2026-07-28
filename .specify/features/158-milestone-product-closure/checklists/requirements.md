@@ -36,6 +36,8 @@
 - [x] Claude Design 后期不佳方案已删除或改回
 - [x] 最终设计导出、frame/superseded manifest 已回存
 - [x] F150 verification report 完成
+- [x] 当前 iOS 提交已推送并在 detached clean-checkout 完整 scheme 12/12 通过
+- [x] 个人 managed checkout 已部署当前运行提交，loopback/Access/CSS 字节通过
 - [ ] Blueprint/Milestone/Feature 状态无漂移
 - [ ] 干净检出、CI、个人部署和 completion audit 全部通过
 

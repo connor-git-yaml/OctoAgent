@@ -194,3 +194,21 @@
   `30364899065` 最终 success：backend deterministic、frontend、architecture、
   benchmark、L1 Playwright 五个 job 全部通过。L1 在 Linux/Chromium 上证明功能和
   视觉基线可复现；Node 20 action deprecation 仅为上游 action annotation，不是失败。
+- 2026-07-29：提交并推送 F153 registration 六态视觉、Simulator UI/Swift unit
+  与真实模型终态收口 `35d7aa14`；iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme
+  为 12/12。随后在 detached clean worktree
+  `/tmp/f158-ios-clean-worktree.YDqxgp/repo` 对同一提交再执行完整 scheme，仍为
+  12/12，运行后 worktree clean。
+- 2026-07-29：使用仓库正式 `install-octo-user.sh` 把个人 managed checkout 更新到
+  `35d7aa14` 并重启 Gateway；loopback ready/home=200，`octo.maojiwang.work`
+  返回 Access 302，11 个部署 CSS 与当前分支 build 的 path→SHA map 逐字节一致。
+  内置浏览器和 Chrome 都能到达 Access 登录页，但 DOM/交互通道超时；没有读取
+  cookie/local storage 绕过认证，登录后 SPA/API/SSE 继续保持未验证。
+- 2026-07-29：提交 `35d7aa14` 的权威 run `30376168635` 中 frontend、
+  architecture、benchmark、L1 Playwright 均通过；backend 的 pytest assertions
+  通过，但 changed-lines coverage 为 36/42，未达 90%，所以该 run 正确失败。
+  没有使用 `[cov-exempt]` 绕过；新增两个 doctor 真实模型探针失败边界测试后，
+  本地 CI 等价回归为 `5715 passed / 10 skipped / 1 xfailed / 1 xpassed`，
+  scripted gate `18 passed`，changed-lines coverage 提升为 38/42=90.5% PASS。
+  修复提交 `ebe8cd29` 已推送，权威 run `30378276329` 的四个前端/架构 job 已通过，
+  随后 backend deterministic 也通过；该 run 最终五个 job 全绿。

@@ -70,7 +70,8 @@ Phase 5 的设计子项 1–2 已于 2026-07-28 完成：云端必需 frames 已
 `1a` 的紧凑工作台视觉，未发现可安全删除的重复 frame；最终导出与谱系/验收
 manifest 已不可变回存。当前交付提交已推送、权威 CI 五个 job 全绿，个人
 managed checkout 已更新并通过 loopback/Access 边界复验；登录后个人产品旅程、
-iOS Simulator/真机、F154-F156、主线合并与总 completion audit 仍未完成。
+iOS F153 Simulator 与 detached clean-checkout scheme 已通过；当前修复提交的权威
+CI 五个 job 全绿，真机、F154-F156、主线合并与总 completion audit 仍未完成。
 
 ### Phase 6：真实模型运行真值
 

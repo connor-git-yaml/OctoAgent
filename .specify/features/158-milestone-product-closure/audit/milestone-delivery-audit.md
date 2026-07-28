@@ -4,7 +4,9 @@
 
 - 审计日期：2026-07-28
 - `origin/master`：`db3214fff722c6f969baf99528a76fc03a1e21a1`
-- F149 design export：
+- F149 最终 design export：
+  `1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`
+- F149 初始审计 export（历史对照）：
   `a2db08ea0eb39278558e61e87a355b042c98ad24273b201940925f310271d98a`
 - Claude Design project：`851e3fb2-2b5b-4251-a095-8a678b1b7fec`
 
@@ -12,16 +14,16 @@
 
 | 要求 | 当前证据 | 判定 | 缺口 | owner |
 |---|---|---|---|---|
-| M11 Web 视觉保持早期 Claude Design | 早期 frame、恢复后 1440 截图、14 个 pixel snapshot、逐 surface 结构合同、云端最终导出 | PROVEN_IN_BRANCH | 待提交/CI 与个人部署复验 | F158 / F149 |
-| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1 与真实截图 | PROVEN_IN_BRANCH | 待提交、CI 与个人部署复验 | F158 / F150 |
-| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery | PARTIAL | origin/DNS/Access/4 条 connector 已恢复；登录后 SPA/API/SSE 与最终 commit/CI 仍待验证 | F158 / F150 |
-| Web 功能 E2E | 11 个 Playwright spec / 39 nodes + fresh approval rerun | PROVEN_IN_BRANCH | 完整 38 pass/1 once-only skip；fresh approval 1/1 pass；待 CI/部署 | F158 |
-| Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_IN_BRANCH | 主框架与 9 surface + 真实任务详情均进入像素门；待 CI/部署 | F158 |
+| M11 Web 视觉保持早期 Claude Design | 早期 frame、恢复后 1440 截图、14 个 pixel snapshot、逐 surface 结构合同、云端最终导出、当前个人部署 CSS | PROVEN_BRANCH_CI_DEPLOYED | 当前运行提交已部署；登录后旅程与总 completion audit 仍缺 | F158 / F149 |
+| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access 前边界通过；登录后 Settings 仍受浏览器接管超时阻断 | F158 / F150 |
+| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery | PARTIAL | origin/DNS/Access/4 条 connector 与当前 runtime 已恢复；登录后 SPA/API/SSE 仍待验证 | F158 / F150 |
+| Web 功能 E2E | 11 个 Playwright spec / 39 nodes + fresh approval rerun | PROVEN_BRANCH_CI_DEPLOYED | 完整 38 pass/1 once-only skip；fresh approval 1/1 pass；当前 runtime 已部署 | F158 |
+| Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_BRANCH_CI_DEPLOYED | 主框架与 9 surface + 真实任务详情进入像素门；部署 CSS map 与分支一致 | F158 |
 | 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
-| 原生 iOS 可启动 | iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 12/12 | PROVEN_IN_BRANCH（F153 scope） | F153 registration 已真实启动；F154-F156 完整 companion 与真机仍缺 | F153-F156 |
+| 原生 iOS 可启动 | iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 12/12 + detached clean-checkout 12/12 | PROVEN_PUSHED（F153 scope） | F153 registration 已真实启动；F154-F156 完整 companion 与真机仍缺 | F153-F156 |
 | iOS 功能 E2E | Swift unit 9/9、Simulator UI 3/3、六态冷启动 | PARTIAL | F153 registration 已证；Cloudflare mobile live、真机及 F154-F156 场景仍缺 | F153-F156 |
 | iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
-| Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_IN_BRANCH | 待提交/CI 与最终交付审计 | F158 |
+| Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_BRANCH_CI_DEPLOYED | 最终总 completion audit 尚未完成 | F158 |
 | F151 runtime/architecture | verification report + CI | PROVISIONAL PASS | 仍需纳入最终干净检出回归 | F151 / F158 |
 | F157 CI 回归修复 | master CI 已绿 | DOC DRIFT | F157 tasks T013 仍未勾选 | F157 / F158 |
 | M10 物理启动验收 | Blueprint 明示独立待闭环 | INCOMPLETE | ATT-129-BOOT 仍无完成证据 | 原 owner / F158 audit |
@@ -42,7 +44,7 @@
 | M8 | 功能完成 | service/Telegram/cron/voice owner 存在 | PROVISIONAL | 常驻服务与个人部署复验 |
 | M9 | 完成 | 四层测试门与 F151/F157 后续修复存在 | PROVISIONAL | 当前主线 authoritative CI；修正文档未勾选状态 |
 | M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
-| M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 9 surface/任务详情视觉及功能 E2E 通过；Claude 云端谱系已清理并导出 | PROVEN_IN_BRANCH | 当前提交 CI 与个人部署复验 |
+| M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 9 surface/任务详情视觉及功能 E2E 通过；Claude 云端谱系已清理并导出；当前 runtime 已部署 | PROVEN_BRANCH_CI_DEPLOYED | 登录后个人旅程与最终 completion audit |
 | M12 | In Progress | F152 Verify；F153 T001-T013/T016 已实现，Simulator registration 功能/视觉通过 | PARTIAL | Cloudflare mobile live、真机、F153 Verify、F154-F156 |
 
 该矩阵的 `PROVISIONAL` 不是重新否定历史交付，而是区分“历史报告存在”与“当前
@@ -100,8 +102,9 @@ Playwright 新增固定 1440×900/dark 的结构合同与四个真实 pixel snap
 最终导出 SHA
 `1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`，
 `4a`–`4o`、20 行验收表与 10×7 状态矩阵机械闭合，后期 radial glow、大 Hero 与
-卡片墙原位改回早期视觉。当前只剩提交/CI 和个人部署复验，完成前仍不能提升为最终
-`PROVEN`。
+卡片墙原位改回早期视觉。当前运行提交已进入个人部署，11 个 CSS 文件的
+path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 completion audit
+完成前仍不能提升为最终 `PROVEN`。
 
 ## 机械事实
 

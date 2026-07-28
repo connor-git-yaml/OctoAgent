@@ -59,7 +59,8 @@
 - [ ] **T035** 双端场景、功能、视觉、无障碍与安全 completion audit
 - [ ] **T036** 同步 Blueprint、Milestone 与所有 Feature verification reports
 - [ ] **T037** 干净检出、权威 CI、个人部署复验（上一批 Web 提交/CI/managed
-  checkout 已通过；当前 iOS 提交/CI、登录后 SPA/API/SSE 与真实模型对话仍缺）
+  checkout 已通过；当前 iOS 提交/推送与 detached clean-checkout 12/12 已通过，
+  run `30378276329` 五个 job 全绿；登录后 SPA/API/SSE 与真实模型对话仍缺）
 - [ ] **T038** 提交、推送、合并并确认主线真实交付
 
 ## Phase 5：真实模型运行真值
