@@ -1532,6 +1532,16 @@ F158_F150_OVERLAP_PATHS = frozenset(
 F158_DOCTOR_METHOD_AST_SHA256 = MappingProxyType(
     {
         "_probe_live_model": (
+            "ec17bb64660edd8199c61ae07407709a767b4cd650f47c7e265ae94c263ec588"
+        ),
+        "check_model_live": (
+            "4dc3c71bf3e6fd56b9ca1be6bc4186887bcc7b619ba84d3e3135dcf889609f85"
+        ),
+    }
+)
+F158_DOCTOR_PREVIOUS_METHOD_AST_SHA256 = MappingProxyType(
+    {
+        "_probe_live_model": (
             "ed99420b2f5ada3f927ed5ef1c636182ea6a13c26b56074ec095e030e396a9e3"
         ),
         "check_model_live": (
@@ -2946,7 +2956,12 @@ def _f158_remove_init_overlay(tree: ast.Module) -> None:
     )
 
 
-def _f158_remove_doctor_method(tree: ast.Module, method_name: str) -> None:
+def _f158_remove_doctor_method(
+    tree: ast.Module,
+    method_name: str,
+    *,
+    expected_hashes: MappingProxyType[str, str] = F158_DOCTOR_METHOD_AST_SHA256,
+) -> None:
     error_code = "F158_F150_AUTHORITY_OVERLAP_INVALID"
     method = _f153_class_method(
         tree,
@@ -2956,7 +2971,7 @@ def _f158_remove_doctor_method(tree: ast.Module, method_name: str) -> None:
     )
     digest = hashlib.sha256(ast.unparse(method).encode("utf-8")).hexdigest()
     require(
-        digest == F158_DOCTOR_METHOD_AST_SHA256[method_name],
+        digest == expected_hashes[method_name],
         error_code,
         f"DoctorRunner.{method_name} semantic drift: {digest}",
     )
@@ -2968,7 +2983,11 @@ def _f158_remove_doctor_method(tree: ast.Module, method_name: str) -> None:
     doctor.body.remove(method)
 
 
-def _strip_f158_doctor_overlay(tree: ast.Module) -> None:
+def _strip_f158_doctor_overlay(
+    tree: ast.Module,
+    *,
+    expected_hashes: MappingProxyType[str, str] = F158_DOCTOR_METHOD_AST_SHA256,
+) -> None:
     error_code = "F158_F150_AUTHORITY_OVERLAP_INVALID"
     for module, name in (
         ("collections.abc", "Awaitable"),
@@ -3016,7 +3035,11 @@ def _strip_f158_doctor_overlay(tree: ast.Module) -> None:
         error_code=error_code,
     )
     for method_name in F158_DOCTOR_METHOD_AST_SHA256:
-        _f158_remove_doctor_method(tree, method_name)
+        _f158_remove_doctor_method(
+            tree,
+            method_name,
+            expected_hashes=expected_hashes,
+        )
     _f153_require_no_overlay_refs(
         tree,
         frozenset(
@@ -3037,7 +3060,12 @@ def _strip_f158_doctor_overlay(tree: ast.Module) -> None:
     )
 
 
-def _strip_f158_f150_overlay(relative: str, current: str) -> str:
+def _strip_f158_f150_overlay(
+    relative: str,
+    current: str,
+    *,
+    expected_hashes: MappingProxyType[str, str] = F158_DOCTOR_METHOD_AST_SHA256,
+) -> str:
     require(
         relative in F158_F150_OVERLAP_PATHS,
         "F158_F150_AUTHORITY_OVERLAP_INVALID",
@@ -3047,7 +3075,7 @@ def _strip_f158_f150_overlay(relative: str, current: str) -> str:
         tree = ast.parse(current)
     except SyntaxError as exc:
         fail("F158_F150_AUTHORITY_OVERLAP_INVALID", str(exc))
-    _strip_f158_doctor_overlay(tree)
+    _strip_f158_doctor_overlay(tree, expected_hashes=expected_hashes)
     return ast.unparse(tree)
 
 
@@ -3089,22 +3117,38 @@ def _validate_f150_authority_path(
         validate_f153_security_surface(relative, current, baseline)
     else:
         validate_f150_security_surface(relative, current, baseline)
+    structural_baseline = baseline
     structural_current = current
     if allow_f153_overlay and not _f153_overlay_in_baseline(relative, baseline):
         structural_current = _strip_f153_f150_overlay(relative, structural_current)
-    if allow_f158_overlay and not _f158_overlay_in_baseline(relative, baseline):
+    if allow_f158_overlay and _f158_overlay_in_baseline(relative, baseline):
+        structural_baseline = _strip_f158_f150_overlay(
+            relative,
+            structural_baseline,
+            expected_hashes=F158_DOCTOR_PREVIOUS_METHOD_AST_SHA256,
+        )
+    if allow_f158_overlay:
         structural_current = _strip_f158_f150_overlay(relative, structural_current)
     if kind == "class":
-        _validate_f150_class(baseline, structural_current, str(name), allowed)
+        _validate_f150_class(
+            structural_baseline,
+            structural_current,
+            str(name),
+            allowed,
+        )
     elif kind in {"module", "new-module"}:
         _validate_f150_module(
-            baseline,
+            structural_baseline,
             structural_current,
             allowed,
             exact_new=kind == "new-module",
         )
     else:
-        _validate_f150_typescript(baseline, structural_current, allowed)
+        _validate_f150_typescript(
+            structural_baseline,
+            structural_current,
+            allowed,
+        )
 
 
 def _validate_f149_early_authority_path(

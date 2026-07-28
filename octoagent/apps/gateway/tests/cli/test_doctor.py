@@ -5,16 +5,21 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from octoagent.gateway.cli.cli import main
 from octoagent.gateway.cli.console_output import format_report
 from octoagent.gateway.services.config.config_schema import (
+    AuthApiKey,
     ChannelsConfig,
+    ModelAlias,
     OctoAgentConfig,
+    ProviderEntry,
     TelegramChannelConfig,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
@@ -410,6 +415,70 @@ class TestDoctorOverall:
         assert model_live.level == CheckLevel.REQUIRED
         assert "重新授权" in model_live.fix_hint
         assert report.overall_status == CheckStatus.FAIL
+
+    async def test_model_live_uses_instance_dotenv_and_prefers_main(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        save_config(
+            OctoAgentConfig(
+                updated_at="2026-07-28",
+                providers=[
+                    ProviderEntry(
+                        id="doctor-provider",
+                        name="Doctor Provider",
+                        transport="openai_chat",
+                        api_base="https://provider.example.test/v1",
+                        auth=AuthApiKey(env="DOCTOR_TEST_API_KEY"),
+                    )
+                ],
+                model_aliases={
+                    "main": ModelAlias(
+                        provider="doctor-provider",
+                        model="doctor-main",
+                    ),
+                    "cheap": ModelAlias(
+                        provider="doctor-provider",
+                        model="doctor-cheap",
+                    ),
+                },
+            ),
+            tmp_path,
+        )
+        (tmp_path / ".env").write_text(
+            "DOCTOR_TEST_API_KEY=instance-secret\n",
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("DOCTOR_TEST_API_KEY", raising=False)
+        observed_aliases: list[str] = []
+
+        async def fake_complete(
+            _adapter: object,
+            *,
+            messages: list[dict[str, str]],
+            model_alias: str,
+        ) -> SimpleNamespace:
+            assert messages
+            assert os.environ["DOCTOR_TEST_API_KEY"] == "instance-secret"
+            observed_aliases.append(model_alias)
+            return SimpleNamespace(
+                content="OCTOAGENT_DOCTOR_OK",
+                provider="doctor-provider",
+                model_name="doctor-main",
+            )
+
+        monkeypatch.setattr(
+            "octoagent.provider.ProviderRouterMessageAdapter.complete",
+            fake_complete,
+        )
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_model_live()
+
+        assert result.status == CheckStatus.PASS
+        assert observed_aliases == ["main"]
+        assert "alias=main" in result.message
 
     async def test_run_all_checks_does_not_crash_on_invalid_telegram_config(
         self,

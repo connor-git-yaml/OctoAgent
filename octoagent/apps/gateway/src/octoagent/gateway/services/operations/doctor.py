@@ -158,14 +158,16 @@ class DoctorRunner:
     async def _probe_live_model(self, project_root: Path) -> tuple[str, str, str]:
         """通过生产 ProviderRouter 做一次真实、无 Echo fallback 的模型调用。"""
         from octoagent.gateway.services.config.config_wizard import load_config
+        from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
         from octoagent.gateway.services.config.provider_route_resolver import (
             resolve_provider_route,
         )
 
+        load_project_dotenv(project_root=project_root, override=False)
         config = load_config(project_root)
         if config is None:
             raise RuntimeError("octoagent.yaml 不存在")
-        alias = "cheap" if "cheap" in config.model_aliases else "main"
+        alias = "main" if "main" in config.model_aliases else "cheap"
         if alias not in config.model_aliases:
             raise RuntimeError("缺少可用于 live probe 的 main/cheap model alias")
 
