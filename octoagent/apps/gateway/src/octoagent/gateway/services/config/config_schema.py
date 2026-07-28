@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import ipaddress
 import warnings
+from pathlib import PurePosixPath
 from typing import Annotated, Any, Literal
 
 import yaml
@@ -414,6 +415,38 @@ class FrontDoorConfig(BaseModel):
         return self
 
 
+class MobileDeviceAccessConfig(BaseModel):
+    """原生 iOS dedicated hostname 的显式、可移植部署配置。"""
+
+    enabled: bool = Field(
+        default=False,
+        description="是否启用原生 iOS device-trust 入口",
+    )
+    manifest_path: str = Field(
+        default="",
+        description="相对项目根目录的mobile device access manifest路径",
+    )
+
+    @field_validator("manifest_path")
+    @classmethod
+    def validate_manifest_path(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            return ""
+        if "\\" in normalized:
+            raise ValueError("mobile manifest路径必须使用项目内POSIX相对路径")
+        path = PurePosixPath(normalized)
+        if path.is_absolute() or ".." in path.parts or "." in path.parts:
+            raise ValueError("mobile manifest路径必须位于项目根目录内")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_enabled_manifest(self) -> MobileDeviceAccessConfig:
+        if self.enabled and not self.manifest_path:
+            raise ValueError("mobile_device_access.enabled=true时必须提供manifest_path")
+        return self
+
+
 # ---------------------------------------------------------------------------
 # TelegramChannelConfig / ChannelsConfig — 渠道配置
 # ---------------------------------------------------------------------------
@@ -688,6 +721,10 @@ class OctoAgentConfig(BaseModel):
     front_door: FrontDoorConfig = Field(
         default_factory=FrontDoorConfig,
         description="owner-facing API 对外入口边界配置",
+    )
+    mobile_device_access: MobileDeviceAccessConfig = Field(
+        default_factory=MobileDeviceAccessConfig,
+        description="原生 iOS dedicated hostname 与device-trust配置",
     )
     channels: ChannelsConfig = Field(
         default_factory=ChannelsConfig,

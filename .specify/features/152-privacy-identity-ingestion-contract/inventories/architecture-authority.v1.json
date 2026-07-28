@@ -1,0 +1,107 @@
+{
+  "version": 1,
+  "feature_id": "F152",
+  "authority_status": "DESIGN_TASKS_APPROVED_IMPLEMENT_OPEN_T001_COMPLETE",
+  "approval_date": "2026-07-28",
+  "architecture_checker": "repo-scripts/check-runtime-architecture.py",
+  "production_paths": [
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/models/privacy_ingestion.py",
+      "state": "declared_new",
+      "owner": "core",
+      "role": "domain_models_and_canonical_hashing"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/models/__init__.py",
+      "state": "existing",
+      "owner": "core",
+      "role": "domain_model_exports"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/privacy_ingestion.py",
+      "state": "declared_new",
+      "owner": "core",
+      "role": "pure_state_machine_and_deletion_plan"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/store/privacy_ingestion_store.py",
+      "state": "declared_new",
+      "owner": "core",
+      "role": "single_durable_store"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/store/sqlite_init.py",
+      "state": "existing",
+      "owner": "core",
+      "role": "single_schema_migration_owner"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/store/__init__.py",
+      "state": "existing",
+      "owner": "core",
+      "role": "single_store_group_composition"
+    },
+    {
+      "path": "octoagent/packages/policy/src/octoagent/policy/privacy_ingestion_policy.py",
+      "state": "declared_new",
+      "owner": "policy",
+      "role": "capability_consent_and_memory_candidate_decisions"
+    },
+    {
+      "path": "octoagent/packages/policy/src/octoagent/policy/__init__.py",
+      "state": "existing",
+      "owner": "policy",
+      "role": "policy_exports"
+    },
+    {
+      "path": "octoagent/packages/protocol/src/octoagent/protocol/privacy_ingestion.py",
+      "state": "declared_new",
+      "owner": "protocol",
+      "role": "cross_end_projection_and_exact_schema"
+    },
+    {
+      "path": "octoagent/packages/protocol/src/octoagent/protocol/__init__.py",
+      "state": "existing",
+      "owner": "protocol",
+      "role": "protocol_exports"
+    }
+  ],
+  "test_paths": [
+    "octoagent/packages/core/tests/test_privacy_ingestion_models.py",
+    "octoagent/packages/core/tests/test_privacy_ingestion_state_machine.py",
+    "octoagent/packages/core/tests/test_privacy_ingestion_store.py",
+    "octoagent/packages/policy/tests/test_privacy_ingestion_policy.py",
+    "octoagent/packages/protocol/tests/test_privacy_ingestion_contract.py",
+    "octoagent/tests/gate/test_f152_architecture_authority.py",
+    "octoagent/tests/integration/test_f152_privacy_ingestion_flow.py"
+  ],
+  "artifact_paths": [
+    ".specify/features/152-privacy-identity-ingestion-contract/spec.md",
+    ".specify/features/152-privacy-identity-ingestion-contract/plan.md",
+    ".specify/features/152-privacy-identity-ingestion-contract/tasks.md",
+    ".specify/features/152-privacy-identity-ingestion-contract/research.md",
+    ".specify/features/152-privacy-identity-ingestion-contract/threat-model.md",
+    ".specify/features/152-privacy-identity-ingestion-contract/data-model.md",
+    ".specify/features/152-privacy-identity-ingestion-contract/contracts/privacy-ingestion-contract.md",
+    ".specify/features/152-privacy-identity-ingestion-contract/checklists/requirements.md",
+    ".specify/features/152-privacy-identity-ingestion-contract/inventories/architecture-authority.v1.json",
+    ".specify/features/152-privacy-identity-ingestion-contract/verification/verification-report.md"
+  ],
+  "forbidden_prefixes": [
+    "octoagent/ios/",
+    "octoagent/apps/gateway/src/octoagent/gateway/routes/",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/device",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/health",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/calendar",
+    "octoagent/packages/core/src/octoagent/core/store/device",
+    "octoagent/packages/core/src/octoagent/core/store/session"
+  ],
+  "forbidden_terms": [
+    "HealthKit",
+    "EventKit",
+    "Cloudflare service token",
+    "Web Access Cookie",
+    "device private key"
+  ],
+  "approved_scope_sha256": "0ff8d7a0aefca5161f7aa08ced9358b95395353c7ab52d0efaed3388192d4c6f"
+}

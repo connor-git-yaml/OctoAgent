@@ -10,15 +10,17 @@ from pathlib import Path
 import aiosqlite
 
 from .a2a_store import SqliteA2AStore
-from .connection import apply_write_connection_pragmas
 from .agent_context_store import SqliteAgentContextStore
 from .artifact_store import SqliteArtifactStore
 from .behavior_compact_store import SqliteBehaviorCompactStore
 from .behavior_version_store import SqliteBehaviorVersionStore
 from .checkpoint_store import SqliteCheckpointStore
+from .connection import apply_write_connection_pragmas
 from .conversation_binding_store import SqliteConversationBindingStore
+from .device_trust_store import SqliteDeviceTrustStore
 from .event_store import SqliteEventStore
 from .notification_store import SqliteNotificationStore
+from .privacy_ingestion_store import SqlitePrivacyIngestionStore
 from .project_store import SqliteProjectStore
 from .side_effect_ledger_store import SqliteSideEffectLedgerStore
 from .sqlite_init import init_db
@@ -89,6 +91,10 @@ class StoreGroup:
         self.conversation_binding_store = SqliteConversationBindingStore(conn)
         # F131：Telegram 出站补偿 spool（send 失败入队 + 跨重启 drain 重试）
         self.telegram_outbound_spool_store = SqliteTelegramOutboundSpoolStore(conn)
+        # F152：唯一 privacy ingestion durable audit/store owner。
+        self.privacy_ingestion_store = SqlitePrivacyIngestionStore(conn)
+        # F153：唯一原生设备 challenge/token hash/replay/revoke durable owner。
+        self.device_trust_store = SqliteDeviceTrustStore(conn)
 
     async def close(self) -> None:
         """关闭主连接 + versionable 独立写连接（幂等，suppress 已关闭异常）。
@@ -153,6 +159,8 @@ __all__ = [
     "SqliteTaskJobStore",
     "SqliteEventStore",
     "SqliteNotificationStore",
+    "SqlitePrivacyIngestionStore",
+    "SqliteDeviceTrustStore",
     "SqliteConversationBindingStore",
     "SqliteTelegramOutboundSpoolStore",
     "OutboundSpoolItem",

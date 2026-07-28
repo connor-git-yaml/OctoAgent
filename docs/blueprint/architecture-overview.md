@@ -151,4 +151,50 @@ flowchart TB
   - Skill Pipeline（Graph）内崩溃：从最后 checkpoint 继续（确定性恢复）
   - Worker Free Loop 内崩溃：重启 Free Loop，将之前的 Event 历史注入为上下文，由 LLM 自主判断从哪里继续（可配置为"需要人工确认"）
 
+#### 6.3.4 原生设备敏感数据 → 单次分析（F152）
+
+F152 冻结跨端语义，但不实现 F153 的 iOS transport 或签名：
+
+1. `RawSample` 与 `NormalizedFact` 默认只存在于原生设备，按 session/24 小时 TTL
+   删除；Protocol 不发布这两个 local stage。
+2. 用户先看到 `ReviewBundle`，再对 canonical bundle/packet hash、purpose、
+   owner/device 作一次性 `ConsentGrant`；批准窗口最长 15 分钟。
+3. 只有 `ApprovedAnalysisPacket` 可进入后续分析。服务端以阶段专表保存
+   review/packet/result/candidate，不使用通用 blob 或第二 store。
+4. `AnalysisResult` 永不自动写 Memory。用户明确选择文本后只能生成
+   `OptionalMemoryCandidate(pending)`，还需独立、精确绑定的第二次确认并进入既有
+   Memory review owner。
+5. durable audit 只保存 hash/count/type/decision/reason/UTC，不保存正文、token、
+   signature、nonce、owner email 或 Apple raw identifier。
+6. 删除沿 provenance graph 在单一 SQLite transaction 中执行，正文级联删除后只保留
+   `DeletionReceipt` 与 audit hash；部分失败回滚正文并允许同 request 恢复。
+7. capability exact match、device owner/id/key thumbprint、request method/path/body/
+   timestamp/nonce/token-id 全绑定；revoked device 优先于 expired token，未知 capability
+   或 replay 必须 fail closed。
+
+F153 只能消费 Protocol 发布的 `DeviceIdentity`、`CapabilityGrant` 与
+`RequestProofPayload` exact schema；F154/F155 只能消费 review→deletion 七项 schema。
+Web Access cookie/service token 不得转换成原生设备身份，F154/F155 也不得提前新增
+health/calendar capability。
+
+#### 6.3.5 原生 iOS 设备注册 → 短期设备访问（F153）
+
+1. 已通过 F150 Access 的电脑 Web owner 创建 2 分钟、single-use registration
+   challenge；Gateway 只持久化 secret hash 与不可逆 owner id。
+2. 原生 SwiftUI App 在 Secure Enclave 生成 P-256 key，Keychain 使用
+   `AfterFirstUnlockThisDeviceOnly`；私钥不导出，App 不保存 Web Cookie、
+   Cloudflare service token 或部署者凭证。
+3. iOS 通过唯一 `DeviceTrustClient`/ephemeral `URLSession` 提交签名 enrollment；
+   owner 核对设备后显式 approve/reject。未批准设备不能取得 token。
+4. active device 以新的 single-use challenge 换取最长 15 分钟的
+   capability-scoped opaque token；服务端只保存 token SHA-256。
+5. 每个 protected request 同时绑定 token、device key、method/path/body hash、
+   timestamp 与 nonce；P-256 验签、F152 policy 和 durable replay consume 全部通过后
+   才进入 `/api/mobile/v1/ready` 或 device-profile workload。
+6. mobile hostname 与 Web hostname 共用同一 named tunnel，但 Host/path 与认证模型
+   分离；mobile 其它 API/SPA/docs/health 为 404，Web Access session 不能冒充设备。
+7. 当前 branch 已通过 iPhoneOS target build、focused Gateway regression 与
+   source/bundle secret scan；Simulator、真机与 Cloudflare live 证据仍是 F153
+   Verify 硬门，不能由编译或静态扫描替代。
+
 ---

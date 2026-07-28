@@ -91,12 +91,22 @@ test("任务列表到详情保持真实 SSE、Advanced 焦点与净化剪贴板�
   // UI 外 oracle：REST 原始事件链必须仍是同一个真实 Task。
   const detail = await fetchTaskDetail("loopback", L1_A_WAVE_TASK_ID);
   expect(detail.task.status, ORACLE).toBe("RUNNING");
-  expect(
-    detail.events.map((event) => [event.event_id, event.task_seq, event.type]),
-    ORACLE,
-  ).toEqual([
+  const eventChain = detail.events.map((event) => [
+    event.event_id,
+    event.task_seq,
+    event.type,
+  ]);
+  expect(eventChain.slice(0, 2), ORACLE).toEqual([
     [L1_A_WAVE_STATE_EVENT_ID, 1, "STATE_TRANSITION"],
     [L1_A_WAVE_DIAGNOSTIC_EVENT_ID, 2, "MODEL_CALL_COMPLETED"],
   ]);
+  expect(
+    eventChain.slice(2).every((event) => event[2] === "TASK_DRIFT_DETECTED"),
+    ORACLE,
+  ).toBe(true);
+  expect(
+    eventChain.map((event) => event[1]),
+    ORACLE,
+  ).toEqual(eventChain.map((_, index) => index + 1));
   assertBombNotTripped("loopback");
 });

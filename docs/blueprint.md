@@ -11,8 +11,10 @@
 - 项目名称：**OctoAgent**
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
-- 版本：v0.1（Roadmap 已增量同步至 M12；F151 已完成运行边界与架构真值收敛）
-- 状态：M0-M11 Delivered；M10 的独立物理启动验收仍待闭环；M12 Planned（privacy/identity gate first）
+- 版本：v0.1（Roadmap 已增量同步至 M12；F152 已 Verify，F153 本地实现进行中）
+- 状态：M0-M11 Delivered；M10 的独立物理启动验收仍待闭环；M12 In Progress
+  （F152 T001-T014 已验证；F153 Gateway/device trust/原生 App 已实现到 T011，
+  T012 局部验证通过，Simulator/真机/Cloudflare live 仍未完成）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - M5 完成日期：2026-05-25（F102 commit `9185862` + F103 同步）
 - M9 完成日期：2026-07-13
@@ -322,6 +324,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 |------|------|
 | packages/core | Domain Models + Event Store + SQLite |
 | apps/gateway | 渠道适配 + SSE 转发 + 出站发送 |
+| apps/ios | 原生 SwiftUI App + Secure Enclave/Keychain + 单一 DeviceTrustClient |
 | packages/protocol | A2A-Lite envelope + NormalizedMessage |
 | packages/tooling | Schema 反射 + ToolBroker + Permission |
 | packages/memory | SoR/Fragments/Vault + 仲裁 |
@@ -386,7 +389,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 | **M9 质量保证体系** | ✅ | L1-L4、LLM 网络硬闸、scripted harness、wire replay、三模式 lane、attestation |
 | **M10 部署完成度收尾** | ✅ 功能 | F145/F134/F146/F147 全完成；ATT-129-BOOT 作为独立物理验收保留 |
 | **M11 运行边界收口 + Cloudflare 远程访问 + Web v2** | ✅ | F148/F151/F150/F149 全部完成；电脑保留 Web，手机产品只走 M12 原生 iOS，不以手机浏览器交付 |
-| **M12 原生 iOS + 健康/日程感知** | 📋 | F152-F156 编号预留；privacy/identity/ingestion → 真机 transport/device proof → HealthKit → EventKit OS full-access 决策门 → native UX |
+| **M12 原生 iOS + 健康/日程感知** | 🚧 | F152 已 Verify；F153 Gateway/device trust 与原生 registration App 已在分支实现，iPhoneOS target build/42 项 focused regression/架构与 bundle scan 通过；Simulator、真机、Cloudflare live 仍是硬门 |
 
 ### 待办汇总
 
@@ -394,10 +397,16 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 > 历史短板 1-5 ✅ | 旧架构 A1-A7 曾关闭，但 2026-07-20 复审确认 A2 反向依赖再次存在并纳入 F151 | Worker W1-W5 历史状态见审计
 > **M5 增补审计** §14.9-14.13：F084-F088 ✅ / F090-F092 ✅ / F093-F096 ✅ / F097-F100 ✅ / F101-F102 ✅
 
-**当前 P0（2026-07-26）**：M11 已完成。下一波从 M12 F152 privacy/identity/ingestion
-contract 开始；在该 Gate 与 F153 真机 transport/device-proof 通过前，不启动原生 iOS
-生产实现。手机端不交付 Safari/WebView；Web 与 iOS 均以 Claude Design 初稿为视觉/
-交互基线，实现适配设计而不是反向迁就旧 Web 外观。ATT-129-BOOT 继续作为独立物理
+**当前 P0（2026-07-28）**：M11 已完成。M12 F152 已实现 raw→review→approved
+packet→result→optional Memory candidate 的分层模型、短期 capability/request proof、
+逐次 consent、非敏感 audit、删除级联与跨端 exact schema 已完成 Verify。F153 已实现
+owner/mobile routes、P-256 proof、durable replay/revoke、Secure Enclave/Keychain、
+单 URLSession client 与原生 registration states；iPhoneOS target build、42 项
+focused regression、架构与 bundle secret scan 通过。由于本机缺 iOS platform/runtime
+且安装需要管理员授权，Swift XCTest、Simulator 启动/视觉/a11y、Cloudflare live 与
+真机 Secure Enclave/网络生命周期仍未完成；在这些门通过前，不启动 HealthKit
+production 实现。手机端不交付 Safari/WebView；Web 与 iOS 均以 Claude Design 初稿为
+视觉/交互基线，实现适配设计而不是反向迁就旧 Web 外观。ATT-129-BOOT 继续作为独立物理
 验收项保留。准确顺序、Web/iOS trust 边界和 Apple 权限门禁见
 [blueprint/milestones.md](blueprint/milestones.md) §M10-M12。
 

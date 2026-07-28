@@ -9,6 +9,22 @@ from .adapters import (
     build_update_message,
     dispatch_envelope_from_task_message,
 )
+from .device_trust import (
+    DeviceEnrollmentRequest,
+    DeviceEnrollmentStatus,
+    DeviceEnrollmentStatusResponse,
+    DeviceProofHeaders,
+    DeviceTokenChallengeResponse,
+    DeviceTokenRequest,
+    DeviceTokenResponse,
+    DeviceTrustErrorResponse,
+    MobileDeviceProfileResponse,
+    MobileReadyResponse,
+    OwnerDeviceProjection,
+    OwnerRegistrationChallengeResponse,
+    enrollment_signature_bytes,
+    token_challenge_signature_bytes,
+)
 from .mappers import A2AArtifactMapper, A2AStateMapper
 from .models import (
     SUPPORTED_SCHEMA_VERSIONS,
@@ -27,6 +43,12 @@ from .models import (
     A2ATextPart,
     A2ATraceContext,
     A2AUpdatePayload,
+)
+from .privacy_ingestion import (
+    PrivacyConsumer,
+    PrivacyContractName,
+    privacy_contract_bundle,
+    validate_consumer_payload,
 )
 from .replay import A2AReplayDecision, A2AReplayProtector, A2AReplayVerdict
 
@@ -52,6 +74,20 @@ __all__ = [
     "A2ATextPart",
     "A2ATraceContext",
     "A2AUpdatePayload",
+    "DeviceEnrollmentRequest",
+    "DeviceEnrollmentStatus",
+    "DeviceEnrollmentStatusResponse",
+    "DeviceProofHeaders",
+    "DeviceTokenChallengeResponse",
+    "DeviceTokenRequest",
+    "DeviceTokenResponse",
+    "DeviceTrustErrorResponse",
+    "MobileDeviceProfileResponse",
+    "MobileReadyResponse",
+    "OwnerDeviceProjection",
+    "OwnerRegistrationChallengeResponse",
+    "PrivacyConsumer",
+    "PrivacyContractName",
     "build_cancel_message",
     "build_error_message",
     "build_heartbeat_message",
@@ -59,4 +95,8 @@ __all__ = [
     "build_task_message",
     "build_update_message",
     "dispatch_envelope_from_task_message",
+    "enrollment_signature_bytes",
+    "privacy_contract_bundle",
+    "token_challenge_signature_bytes",
+    "validate_consumer_payload",
 ]

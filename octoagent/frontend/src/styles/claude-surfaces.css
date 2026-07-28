@@ -1,0 +1,353 @@
+/*
+ * F158：F149 业务页回归 Claude Design 早期紧凑工作台。
+ *
+ * 早期画布的桌面页头使用约 27px 标题、21px × 24px 内边距和连续的
+ * 低亮度卡片；后期实现一度膨胀到 72–78px 标题与 250–324px hero，
+ * 已经变成海报式落地页。这里仅调整视觉表达，不改变页面能力或状态机。
+ */
+@media (min-width: 721px) {
+  .wb-main > :is(
+      .f149-approval-page,
+      .f149-task-page,
+      .f149-automation-page,
+      .f149-settings-page,
+      .f149-agent-page,
+      .f149-memory-page,
+      .f149-files-page,
+      .f149-skills-page,
+      .f149-mcp-page
+    ) {
+    gap: 14px;
+  }
+
+  .wb-main > .f149-approval-page,
+  .wb-main > .f149-mcp-page {
+    width: 100%;
+    margin: 0;
+    padding: 0;
+  }
+
+  .wb-main :is(
+      .f149-approval-hero,
+      .f149-task-hero,
+      .f149-automation-hero,
+      .f149-settings-hero,
+      .f149-agent-hero,
+      .wb-hero-memory,
+      .f149-files-hero,
+      .f149-skills-hero,
+      .f149-mcp-hero
+    ) {
+    min-height: 0;
+    align-items: center;
+    gap: 18px;
+    padding: 21px 24px;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 14px;
+    background:
+      linear-gradient(180deg, rgba(18, 23, 18, 0.96), rgba(13, 18, 13, 0.96)),
+      #111315;
+    box-shadow: none;
+  }
+
+  .wb-main :is(
+      .f149-approval-hero,
+      .f149-task-hero,
+      .f149-automation-hero,
+      .f149-agent-hero,
+      .wb-hero-memory,
+      .f149-files-hero,
+      .f149-skills-hero,
+      .f149-mcp-hero
+    )
+    h1 {
+    max-width: none;
+    font-size: 1.72rem;
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+  }
+
+  .wb-main .f149-settings-hero h1 {
+    font-size: 1.72rem;
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+  }
+
+  .wb-main :is(
+      .f149-approval-eyebrow,
+      .f149-automation-kicker,
+      .f149-agent-kicker,
+      .f149-memory-page .wb-kicker,
+      .f149-files-kicker,
+      .f149-skills-kicker,
+      .f149-mcp-kicker
+    ) {
+    margin: 0 0 6px;
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+  }
+
+  .wb-main :is(
+      .f149-approval-hero-copy,
+      .f149-automation-hero-copy,
+      .f149-files-hero-copy
+    ) {
+    gap: 3px;
+  }
+
+  .wb-main :is(
+      .f149-approval-hero-copy,
+      .f149-automation-hero-copy,
+      .f149-agent-hero,
+      .f149-memory-page .wb-hero-copy,
+      .f149-files-hero-copy,
+      .f149-skills-hero,
+      .f149-mcp-hero
+    )
+    p:last-child {
+    max-width: 68ch;
+    margin: 4px 0 0;
+    color: #8b909b;
+    font-size: 0.78rem;
+    line-height: 1.55;
+  }
+
+  .wb-main .f149-approval-hero {
+    gap: 14px;
+  }
+
+  .wb-main .f149-approval-hero::after {
+    display: none;
+  }
+
+  .wb-main .f149-approval-overview {
+    gap: 7px;
+  }
+
+  .wb-main .f149-approval-overview li {
+    min-height: 30px;
+    padding: 0 12px;
+    font-size: 0.72rem;
+  }
+
+  .wb-main .f149-approval-state {
+    min-height: 78px;
+    padding: 14px 16px;
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 10px;
+    background: #101217;
+    text-align: left;
+  }
+
+  .wb-main .f149-task-pending summary {
+    min-height: 56px;
+    padding: 8px 16px;
+  }
+
+  .wb-main .f149-task-pending-mark {
+    width: 26px;
+    height: 26px;
+  }
+
+  .wb-main .f149-task-hero {
+    padding: 17px 20px;
+  }
+
+  .wb-main .f149-task-card {
+    gap: 12px;
+    padding: 14px 18px;
+    border-radius: 11px;
+    background: #111315;
+  }
+
+  .wb-main .f149-automation-hero-count {
+    min-width: 70px;
+  }
+
+  .wb-main .f149-automation-hero-count strong,
+  .wb-main .f149-agent-hero-actions > span strong {
+    font-size: 2rem;
+  }
+
+  .wb-main .f149-automation-grid {
+    gap: 14px;
+  }
+
+  .wb-main .f149-automation-card {
+    gap: 14px;
+    padding: 18px;
+    border-radius: 12px;
+    background: #111315;
+  }
+
+  .wb-main .f149-settings-hero {
+    padding: 19px 22px;
+  }
+
+  .wb-main .f149-settings-panel,
+  .wb-main .f149-settings-card,
+  .wb-main .f149-settings-provider-card {
+    border-radius: 12px;
+    box-shadow: none;
+  }
+
+  .wb-main .f149-agent-state {
+    min-height: 154px;
+    padding: 24px;
+    border-radius: 12px;
+    background: #111315;
+  }
+
+  .wb-main .f149-agent-card,
+  .wb-main .f149-agent-side-panel,
+  .wb-main .f149-agent-history {
+    border-radius: 12px;
+    background: #111315;
+    box-shadow: none;
+  }
+
+  .wb-main .f149-memory-page .wb-hero-copy > p:not(.wb-kicker) {
+    margin-top: 4px;
+    font-size: 0.78rem;
+    line-height: 1.55;
+  }
+
+  .wb-main .f149-memory-page .wb-hero-memory {
+    min-height: 0;
+    align-items: center;
+    gap: 18px;
+    padding: 20px 24px;
+    border-radius: 14px;
+    background:
+      linear-gradient(180deg, rgba(18, 23, 18, 0.96), rgba(13, 18, 13, 0.96)),
+      #111315;
+    box-shadow: none;
+  }
+
+  .wb-main .f149-memory-page .wb-hero-copy h1 {
+    font-size: 1.72rem;
+    line-height: 1.08;
+    letter-spacing: -0.035em;
+  }
+
+  .wb-main .f149-memory-page .wb-chip-row {
+    margin-top: 10px;
+  }
+
+  .wb-main .f149-memory-page .wb-hero-insights {
+    min-width: min(300px, 100%);
+    gap: 7px;
+  }
+
+  .wb-main .f149-memory-page .wb-hero-metric {
+    padding: 12px 14px;
+    border-radius: 10px;
+  }
+
+  .wb-main .f149-memory-page .wb-hero-metric strong {
+    font-size: 1.18rem;
+  }
+
+  .wb-main .f149-memory-page > .wb-panel,
+  .wb-main .f149-memory-page > .wb-card,
+  .wb-main .f149-memory-advanced {
+    padding: 18px;
+    border-radius: 12px;
+    background: #111315;
+    box-shadow: none;
+  }
+
+  .wb-main .f149-files-artifacts,
+  .wb-main .f149-workspace {
+    gap: 14px;
+    padding: 18px;
+    border-radius: 12px;
+    background: #111315;
+    box-shadow: none;
+  }
+
+  .wb-main .f149-files-state {
+    min-height: 108px;
+    padding: 18px;
+    border-style: solid;
+  }
+
+  .wb-main .f149-files-task-card,
+  .wb-main .f149-files-card {
+    min-height: 112px;
+    padding: 18px;
+    background: #0f1114;
+  }
+
+  .wb-main .f149-skills-hero {
+    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .wb-main .f149-skills-library {
+    gap: 18px;
+    padding: 20px;
+    border-radius: 12px;
+    background: #111315;
+    box-shadow: none;
+  }
+
+  .wb-main .f149-skills-library-head h2 {
+    font-size: 1.65rem;
+  }
+
+  .wb-main .f149-skills-grid {
+    gap: 14px;
+  }
+
+  .wb-main .f149-skills-card {
+    min-height: 220px;
+    gap: 14px;
+    padding: 18px;
+    border-radius: 12px;
+    background: #0f1114;
+  }
+
+  .wb-main .f149-skills-card:hover,
+  .wb-main .f149-files-task-card:hover,
+  .wb-main .f149-files-card:hover {
+    transform: none;
+  }
+
+  .wb-main .f149-mcp-hero {
+    padding: 21px 24px;
+  }
+
+  .wb-main .f149-mcp-hero h1 {
+    font-size: 1.72rem;
+    line-height: 1.08;
+  }
+
+  .wb-main .f149-mcp-hero dl div {
+    padding: 2px 14px;
+  }
+
+  .wb-main .f149-mcp-hero dd {
+    font-size: 1.2rem;
+  }
+
+  .wb-main .f149-mcp-actions {
+    gap: 8px;
+  }
+
+  .wb-main .f149-mcp-state {
+    min-height: 154px;
+    padding: 24px;
+    border-radius: 12px;
+    background: #111315;
+  }
+
+  .wb-main .f149-mcp-card {
+    gap: 14px;
+    padding: 18px;
+    border-radius: 12px;
+    background: #111315;
+    box-shadow: none;
+  }
+}

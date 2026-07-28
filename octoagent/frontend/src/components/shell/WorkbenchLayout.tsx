@@ -584,14 +584,14 @@ export default function WorkbenchLayout() {
               newSessionBusy={newSessionBusy}
             />
             {[
-              { to: "/agents", label: "智能体" },
-              { to: "/skills", label: "技能" },
-              { to: "/mcp", label: "MCP" },
-              { to: "/files", label: "文件" },
-              { to: "/memory", label: "记忆" },
-              { to: "/approvals", label: "审批" },
-              { to: "/automation", label: "定时任务" },
-              { to: "/settings", label: "设置" },
+              { to: "/agents", label: "智能体", icon: "ri-robot-2-line" },
+              { to: "/skills", label: "技能", icon: "ri-sparkling-2-line" },
+              { to: "/mcp", label: "MCP", icon: "ri-plug-2-line" },
+              { to: "/files", label: "文件", icon: "ri-file-list-3-line" },
+              { to: "/memory", label: "记忆", icon: "ri-brain-line" },
+              { to: "/approvals", label: "审批", icon: "ri-checkbox-multiple-line" },
+              { to: "/automation", label: "定时任务", icon: "ri-time-line" },
+              { to: "/settings", label: "设置", icon: "ri-settings-3-line" },
             ].map((item) => (
               <NavLink
                 key={item.to}
@@ -602,6 +602,7 @@ export default function WorkbenchLayout() {
                 }
                 onClick={() => setNavOpen(false)}
               >
+                <i className={`wb-nav-icon ${item.icon}`} aria-hidden="true" />
                 <strong>
                   {item.label}
                   {item.to === "/approvals" && approvalCenterCount > 0 && (

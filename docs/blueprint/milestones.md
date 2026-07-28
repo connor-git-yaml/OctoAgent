@@ -701,7 +701,7 @@ Access、F148主工作台和F149其余十页全部完成。桌面Web保留；手
 没有用旧Web外观反向改造设计。M12可按隐私→设备信任→HealthKit/EventKit→SwiftUI体验的
 严格顺序启动。
 
-### M12（原生 iOS + 健康/日程感知）📋 设计门禁先行（2026-07-20 重排）
+### M12（原生 iOS + 健康/日程感知）🚧 In Progress（2026-07-28）
 
 > **为何独立**：HealthKit/EventKit 是新的高敏感数据入口与 Agent 能力域，不是 Web UI 的原生外壳。M12 必须先回答“设备如何可信连接、数据如何最小化、什么能进 LLM、如何撤销/删除/审计”，再做 SwiftUI 页面。
 > **安全翻转**：旧 F150 handoff 提议在 iOS App 使用 `CF-Access-Client-Id/Secret`，现已否决。静态 service secret 一旦进入 App 包就不是可信 secret。F152/F153 必须从交互式 Access 或设备注册换短期凭证中完成设计，并支持撤销、轮换和单设备审计。
@@ -712,8 +712,8 @@ Access、F148主工作台和F149其余十页全部完成。桌面Web保留；手
 
 | Feature | 规模 | 目标 | 顺序 |
 |---------|------|------|------|
-| **F152 Privacy, Identity & Ingestion Contract** 📋 编号预留、待立项 | L | threat model + 数据分类：raw sample / normalized fact / retrieval snapshot / transcript/LLM context / Memory；定义 provenance、consent、撤销、删除、审计、TTL 与 device capability。明确 Memory 是不可信证据、哪些数据永不进模型、哪些每次需批准 | ① 严格前置 |
-| **F153 iOS Device Trust & Secure Transport** 📋 编号预留、待立项 | L-XL | 先做真机 transport spike，再冻结方案；设备生成密钥，browser/owner 辅助 challenge 注册，短期 capability-scoped token，Keychain 保存、proof-of-possession、单设备撤销/轮换。复用同一 tunnel 但不内置 Cloudflare service secret；只打通 `/ready` + 最小 API，不接 HealthKit | ② |
+| **F152 Privacy, Identity & Ingestion Contract** ✅ Verify（2026-07-28） | L | 六阶段 exact Pydantic model、canonical hash/TTL、device identity/capability/request proof、一次性 consent、单向 ingestion、独立 Memory 二次确认、非敏感 append-only audit、durable deletion cascade 和 F153/F154/F155 Protocol schema均已实现；focused `714 passed`、全 Gate `208 passed`、secret scan 与 architecture ratchet 通过。报告见 `.specify/features/152-privacy-identity-ingestion-contract/verification/verification-report.md` | ① 严格前置 |
+| **F153 iOS Device Trust & Secure Transport** 🚧 本地实现进行中（T001-T011、T016 完成） | L-XL | Gateway 已实现 owner-assisted challenge、P-256 enrollment/token/request proof、Host/path 隔离、durable replay/revoke/audit；原生 SwiftUI App 已实现 Secure Enclave、ThisDeviceOnly Keychain、单 URLSession client 与 registration/connected/revoked/offline states。iPhoneOS target build、42 项 focused regression、architecture/bundle scan 通过；scheme generic build、Swift XCTest、Simulator 视觉/a11y、Cloudflare live 与真 iPhone 仍未完成，不解锁 F154 | ② |
 | **F154 HealthKit Read-Only Vertical Slice** 📋 编号预留、待立项 | L-XL | 按最小数据类型授权 → 只读样本 → 本地归一化 → 用户预览/批准 → 单次 Agent 分析 → 审计。UI 必须把“无可读数据/权限受限”作为诚实状态；v0.1 不后台全量同步、不自动写 Memory | ③ |
 | **F155 EventKit App-Read-Only Vertical Slice（OS Full-Access Gate）** 📋 编号预留、待立项 | L | 启动前由用户明确接受“系统要求 full access、Octo 实现层不写日历”。写路径在代码和 capability 中物理缺席；只读限定时间范围、预览批准和单次分析，正文默认不进长期记忆。若不能接受该权限，F152 review 时将本 Feature 移出 M12，而不是伪装成系统 read-only | ④ 决策门 |
 | **F156 Native Companion Experience** 📋 编号预留、待立项 | XL | SwiftUI 对话、任务、审批、记忆候选、连接状态与通知；只消费 F152-F155 已证明的认证/数据能力，不复制 Web 三栏或另造状态词表。以 Claude Design 最初移动方案为视觉/交互基线，非功能、可用性或无障碍所必需不得重排；APNs、后台刷新和上架准备在能力链通过后进入 | ⑤ |

@@ -130,6 +130,7 @@ class DoctorRunner:
 
         # front-door host↔mode 暴露面
         checks.append(await self.check_front_door_exposure())
+        checks.append(await self.check_mobile_device_access())
 
         # --live 检查
         if live:
@@ -748,6 +749,59 @@ class DoctorRunner:
             level=CheckLevel.RECOMMENDED,
             message=f"{status.state}: {status.reason_code}",
             fix_hint=fix_hint,
+        )
+
+    async def check_mobile_device_access(self) -> CheckResult:
+        """使用运行时同一config/manifest边界诊断原生iOS入口。"""
+
+        name = "mobile_device_access"
+        try:
+            config, skip = self._load_config_safe(name)
+        except Exception as exc:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.FAIL,
+                level=CheckLevel.RECOMMENDED,
+                message=f"mobile device access配置无效：{type(exc).__name__}",
+                fix_hint="修复octoagent.yaml中的mobile_device_access配置",
+            )
+        if skip is not None:
+            return skip
+        mobile_config = getattr(config, "mobile_device_access", None)
+        if mobile_config is None or not mobile_config.enabled:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="原生iOS远程入口未启用",
+            )
+        try:
+            from octoagent.gateway.services.mobile_device_access import (
+                load_mobile_device_access_manifest,
+                masked_hostname,
+            )
+
+            manifest = load_mobile_device_access_manifest(
+                self._root,
+                Path(mobile_config.manifest_path),
+            )
+        except Exception as exc:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.FAIL,
+                level=CheckLevel.RECOMMENDED,
+                message=f"mobile device access manifest无效：{type(exc).__name__}",
+                fix_hint="修复项目内mobile device access manifest后重试",
+            )
+        return CheckResult(
+            name=name,
+            status=CheckStatus.PASS,
+            level=CheckLevel.RECOMMENDED,
+            message=(
+                "原生iOS入口manifest有效："
+                f"web={masked_hostname(manifest.web_hostname)}，"
+                f"mobile={masked_hostname(manifest.mobile_hostname)}"
+            ),
         )
 
     async def check_front_door_exposure(self) -> CheckResult:

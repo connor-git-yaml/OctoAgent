@@ -183,6 +183,221 @@ _MEMORY_EXTRACTION_LEDGER_INDEXES = [
     ),
 ]
 
+# F152：隐私采集 audit 只持久化 hash/count/type/capability/reason/UTC。
+# 表中故意没有 payload/body/token/signature/nonce/owner email/system identifier 列。
+_PRIVACY_INGESTION_AUDIT_DDL = """
+CREATE TABLE IF NOT EXISTS privacy_ingestion_audit (
+    event_id       TEXT PRIMARY KEY,
+    event_type     TEXT NOT NULL,
+    schema_version INTEGER NOT NULL DEFAULT 1,
+    owner_hash     TEXT NOT NULL,
+    device_hash    TEXT NOT NULL,
+    object_hash    TEXT NOT NULL,
+    count          INTEGER NOT NULL DEFAULT 0,
+    data_types     TEXT NOT NULL DEFAULT '[]',
+    capabilities   TEXT NOT NULL DEFAULT '[]',
+    decision       TEXT NOT NULL,
+    result         TEXT NOT NULL,
+    reason_code    TEXT NOT NULL,
+    occurred_at    TEXT NOT NULL
+);
+"""
+
+_PRIVACY_INGESTION_AUDIT_INDEXES = [
+    (
+        "CREATE INDEX IF NOT EXISTS idx_privacy_ingestion_audit_owner_time "
+        "ON privacy_ingestion_audit(owner_hash, occurred_at ASC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_privacy_ingestion_audit_device_time "
+        "ON privacy_ingestion_audit(device_hash, occurred_at ASC);"
+    ),
+]
+
+# F152：服务端只持久化 review 之后的四个阶段，且物理分表；raw/normalized 没有表。
+_PRIVACY_REVIEW_BUNDLES_DDL = """
+CREATE TABLE IF NOT EXISTS privacy_review_bundles (
+    object_hash TEXT PRIMARY KEY,
+    owner_id    TEXT NOT NULL,
+    device_id   TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    expires_at  TEXT NOT NULL
+);
+"""
+
+_PRIVACY_APPROVED_PACKETS_DDL = """
+CREATE TABLE IF NOT EXISTS privacy_approved_packets (
+    object_hash TEXT PRIMARY KEY,
+    source_hash TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    expires_at  TEXT NOT NULL
+);
+"""
+
+_PRIVACY_ANALYSIS_RESULTS_DDL = """
+CREATE TABLE IF NOT EXISTS privacy_analysis_results (
+    object_hash TEXT PRIMARY KEY,
+    packet_hash TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+"""
+
+_PRIVACY_MEMORY_CANDIDATES_DDL = """
+CREATE TABLE IF NOT EXISTS privacy_memory_candidates (
+    object_hash TEXT PRIMARY KEY,
+    result_hash TEXT NOT NULL,
+    content     TEXT NOT NULL
+);
+"""
+
+_PRIVACY_DELETION_RECEIPTS_DDL = """
+CREATE TABLE IF NOT EXISTS privacy_deletion_receipts (
+    request_id              TEXT PRIMARY KEY,
+    source_hash             TEXT NOT NULL,
+    deleted_object_hashes   TEXT NOT NULL DEFAULT '[]',
+    retained_audit_hashes   TEXT NOT NULL DEFAULT '[]',
+    status                  TEXT NOT NULL,
+    started_at              TEXT NOT NULL,
+    finished_at             TEXT,
+    failure_reason          TEXT NOT NULL DEFAULT ''
+);
+"""
+
+_PRIVACY_INGESTION_STAGE_INDEXES = [
+    (
+        "CREATE INDEX IF NOT EXISTS idx_privacy_packets_source "
+        "ON privacy_approved_packets(source_hash);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_privacy_results_packet "
+        "ON privacy_analysis_results(packet_hash);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_privacy_candidates_result "
+        "ON privacy_memory_candidates(result_hash);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_privacy_deletion_source "
+        "ON privacy_deletion_receipts(source_hash, started_at);"
+    ),
+]
+
+# F153：原生设备信任只持久化 hash、公钥、有限 capability 与生命周期事实。
+# challenge secret、opaque token、signature、attestation object、owner email 和 request
+# body 均不存在对应列；设备私钥只存在 iOS Secure Enclave。
+_DEVICE_REGISTRATION_CHALLENGES_DDL = """
+CREATE TABLE IF NOT EXISTS device_registration_challenges (
+    challenge_id       TEXT PRIMARY KEY,
+    owner_id           TEXT NOT NULL,
+    secret_sha256      TEXT NOT NULL,
+    mobile_origin      TEXT NOT NULL,
+    state              TEXT NOT NULL DEFAULT 'open',
+    pending_device_id  TEXT,
+    created_at         TEXT NOT NULL,
+    expires_at         TEXT NOT NULL,
+    decided_at         TEXT
+);
+"""
+
+_MOBILE_DEVICES_DDL = """
+CREATE TABLE IF NOT EXISTS mobile_devices (
+    device_id                TEXT PRIMARY KEY,
+    owner_id                 TEXT NOT NULL,
+    display_name             TEXT NOT NULL,
+    current_key_thumbprint    TEXT NOT NULL,
+    attestation_state        TEXT NOT NULL,
+    status                   TEXT NOT NULL DEFAULT 'pending',
+    created_at               TEXT NOT NULL,
+    last_seen_at             TEXT NOT NULL,
+    revoked_at               TEXT
+);
+"""
+
+_MOBILE_DEVICE_KEYS_DDL = """
+CREATE TABLE IF NOT EXISTS mobile_device_keys (
+    device_key_thumbprint  TEXT PRIMARY KEY,
+    device_id              TEXT NOT NULL,
+    public_key_x963        TEXT NOT NULL,
+    state                  TEXT NOT NULL DEFAULT 'current',
+    valid_from             TEXT NOT NULL,
+    valid_until            TEXT,
+
+    FOREIGN KEY (device_id) REFERENCES mobile_devices(device_id)
+);
+"""
+
+_DEVICE_TOKEN_CHALLENGES_DDL = """
+CREATE TABLE IF NOT EXISTS device_token_challenges (
+    token_challenge_id  TEXT PRIMARY KEY,
+    device_id           TEXT NOT NULL,
+    challenge_sha256    TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    expires_at          TEXT NOT NULL,
+    used_at             TEXT,
+
+    FOREIGN KEY (device_id) REFERENCES mobile_devices(device_id)
+);
+"""
+
+_DEVICE_CAPABILITY_GRANTS_DDL = """
+CREATE TABLE IF NOT EXISTS device_capability_grants (
+    token_id                   TEXT PRIMARY KEY,
+    token_sha256               TEXT NOT NULL UNIQUE,
+    grant_id                   TEXT NOT NULL UNIQUE,
+    owner_id                   TEXT NOT NULL,
+    device_id                  TEXT NOT NULL,
+    device_key_thumbprint      TEXT NOT NULL,
+    capabilities               TEXT NOT NULL,
+    audience                   TEXT NOT NULL,
+    issued_at                  TEXT NOT NULL,
+    expires_at                 TEXT NOT NULL,
+    created_from_challenge_id  TEXT NOT NULL,
+    revoked_at                 TEXT,
+
+    FOREIGN KEY (device_id) REFERENCES mobile_devices(device_id)
+);
+"""
+
+_DEVICE_REQUEST_REPLAYS_DDL = """
+CREATE TABLE IF NOT EXISTS device_request_replays (
+    replay_key   TEXT PRIMARY KEY,
+    device_id    TEXT NOT NULL,
+    token_id     TEXT NOT NULL,
+    expires_at   TEXT NOT NULL,
+    consumed_at  TEXT NOT NULL,
+
+    FOREIGN KEY (device_id) REFERENCES mobile_devices(device_id)
+);
+"""
+
+_DEVICE_TRUST_INDEXES = [
+    (
+        "CREATE INDEX IF NOT EXISTS idx_device_registration_owner_state "
+        "ON device_registration_challenges(owner_id, state, created_at DESC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_mobile_devices_owner_status "
+        "ON mobile_devices(owner_id, status, created_at ASC);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_mobile_device_keys_device_state "
+        "ON mobile_device_keys(device_id, state, valid_until);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_device_token_challenges_device_expiry "
+        "ON device_token_challenges(device_id, expires_at);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_device_grants_device_expiry "
+        "ON device_capability_grants(device_id, expires_at);"
+    ),
+    (
+        "CREATE INDEX IF NOT EXISTS idx_device_request_replays_expiry "
+        "ON device_request_replays(expires_at);"
+    ),
+]
+
 # Feature 116: 通知 dismiss / active 跨重启持久化。
 # 两表无 task FK——通知是 UI 状态，notification_id 为 sha256 派生，不绑 task 生命周期
 # （对齐 memory_extraction_ledger 无 FK 设计）。CREATE ... IF NOT EXISTS 对老库幂等补表。
@@ -484,12 +699,12 @@ _ARTIFACT_VERSIONS_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_artifact_versions_logical "
     "ON artifact_versions(task_id, logical_file_id, version_no DESC);",
     # 按 task 聚合逻辑文件清单（FR-008）+ 级联删除（CL-3）
-    "CREATE INDEX IF NOT EXISTS idx_artifact_versions_task "
-    "ON artifact_versions(task_id);",
+    "CREATE INDEX IF NOT EXISTS idx_artifact_versions_task ON artifact_versions(task_id);",
 ]
 
 # F107 文件工作台 v0.2 W1：behavior 文件版本历史表（append-only，record-after + 首版 baseline）。
-# 与 artifact_versions 同存储/隔离模式但 key 不同（scope 维度，非 task）；behavior 恒小 md → 恒 inline。
+# 与 artifact_versions 同存储/隔离模式但 key 不同（scope 维度，非 task）；
+# behavior 恒小 md → 恒 inline。
 _BEHAVIOR_VERSIONS_DDL = """
 CREATE TABLE IF NOT EXISTS behavior_versions (
     version_id        TEXT PRIMARY KEY,
@@ -920,7 +1135,10 @@ CREATE TABLE IF NOT EXISTS observation_candidates (
 
 _OBSERVATION_CANDIDATES_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_obs_candidates_status ON observation_candidates(status);",
-    "CREATE INDEX IF NOT EXISTS idx_obs_candidates_expires_at ON observation_candidates(expires_at);",
+    (
+        "CREATE INDEX IF NOT EXISTS idx_obs_candidates_expires_at "
+        "ON observation_candidates(expires_at);"
+    ),
     (
         "CREATE INDEX IF NOT EXISTS idx_obs_dedup "
         "ON observation_candidates(source_turn_id, fact_content_hash);"
@@ -942,15 +1160,9 @@ CREATE TABLE IF NOT EXISTS approval_overrides (
 
 _APPROVAL_OVERRIDES_INDEXES = [
     # 按 Agent 实例查询索引
-    (
-        "CREATE INDEX IF NOT EXISTS idx_overrides_agent "
-        "ON approval_overrides(agent_runtime_id);"
-    ),
+    ("CREATE INDEX IF NOT EXISTS idx_overrides_agent ON approval_overrides(agent_runtime_id);"),
     # 按工具名查询索引（管理界面用）
-    (
-        "CREATE INDEX IF NOT EXISTS idx_overrides_tool "
-        "ON approval_overrides(tool_name);"
-    ),
+    ("CREATE INDEX IF NOT EXISTS idx_overrides_tool ON approval_overrides(tool_name);"),
 ]
 
 _PROJECT_INDEXES = [
@@ -1219,9 +1431,7 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
             await conn.execute(f"ALTER TABLE works DROP COLUMN {_old_col}")
         work_columns = await _table_columns(conn, "works")
     if work_columns and "agent_profile_id" not in work_columns:
-        await conn.execute(
-            "ALTER TABLE works ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''"
-        )
+        await conn.execute("ALTER TABLE works ADD COLUMN agent_profile_id TEXT NOT NULL DEFAULT ''")
     if work_columns and "session_owner_profile_id" not in work_columns:
         await conn.execute(
             "ALTER TABLE works ADD COLUMN session_owner_profile_id TEXT NOT NULL DEFAULT ''"
@@ -1253,16 +1463,12 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
             "ALTER TABLE works ADD COLUMN effective_profile_snapshot_id TEXT NOT NULL DEFAULT ''"
         )
     if work_columns and "context_frame_id" not in work_columns:
-        await conn.execute(
-            "ALTER TABLE works ADD COLUMN context_frame_id TEXT NOT NULL DEFAULT ''"
-        )
+        await conn.execute("ALTER TABLE works ADD COLUMN context_frame_id TEXT NOT NULL DEFAULT ''")
 
     # Feature 082 P0：owner_profiles 加 last_synced_from_profile_at 列（P2 用）
     owner_profile_columns = await _table_columns(conn, "owner_profiles")
     if owner_profile_columns and "last_synced_from_profile_at" not in owner_profile_columns:
-        await conn.execute(
-            "ALTER TABLE owner_profiles ADD COLUMN last_synced_from_profile_at TEXT"
-        )
+        await conn.execute("ALTER TABLE owner_profiles ADD COLUMN last_synced_from_profile_at TEXT")
 
     # Feature 090 D2：agent_profiles 加 kind 列（main/worker/subagent，显式标记 Agent 类型）
     agent_profile_columns = await _table_columns(conn, "agent_profiles")
@@ -1291,19 +1497,14 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     agent_session_columns = await _table_columns(conn, "agent_sessions")
     if agent_session_columns and "recent_transcript" not in agent_session_columns:
         await conn.execute(
-            "ALTER TABLE agent_sessions "
-            "ADD COLUMN recent_transcript TEXT NOT NULL DEFAULT '[]'"
+            "ALTER TABLE agent_sessions ADD COLUMN recent_transcript TEXT NOT NULL DEFAULT '[]'"
         )
     if agent_session_columns and "rolling_summary" not in agent_session_columns:
         await conn.execute(
-            "ALTER TABLE agent_sessions "
-            "ADD COLUMN rolling_summary TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE agent_sessions ADD COLUMN rolling_summary TEXT NOT NULL DEFAULT ''"
         )
     if agent_session_columns and "alias" not in agent_session_columns:
-        await conn.execute(
-            "ALTER TABLE agent_sessions "
-            "ADD COLUMN alias TEXT NOT NULL DEFAULT ''"
-        )
+        await conn.execute("ALTER TABLE agent_sessions ADD COLUMN alias TEXT NOT NULL DEFAULT ''")
     if agent_session_columns and "parent_worker_runtime_id" not in agent_session_columns:
         await conn.execute(
             "ALTER TABLE agent_sessions "
@@ -1312,8 +1513,7 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     # Feature 067: 记忆提取游标
     if agent_session_columns and "memory_cursor_seq" not in agent_session_columns:
         await conn.execute(
-            "ALTER TABLE agent_sessions "
-            "ADD COLUMN memory_cursor_seq INTEGER NOT NULL DEFAULT 0"
+            "ALTER TABLE agent_sessions ADD COLUMN memory_cursor_seq INTEGER NOT NULL DEFAULT 0"
         )
 
     agent_session_turn_columns = await _table_columns(conn, "agent_session_turns")
@@ -1330,13 +1530,10 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
             "ALTER TABLE context_frames ADD COLUMN agent_session_id TEXT NOT NULL DEFAULT ''"
         )
     if context_frame_columns and "recall_frame_id" not in context_frame_columns:
-        await conn.execute(
-            "ALTER TABLE context_frames ADD COLUMN recall_frame_id TEXT"
-        )
+        await conn.execute("ALTER TABLE context_frames ADD COLUMN recall_frame_id TEXT")
     if context_frame_columns and "memory_namespace_ids" not in context_frame_columns:
         await conn.execute(
-            "ALTER TABLE context_frames "
-            "ADD COLUMN memory_namespace_ids TEXT NOT NULL DEFAULT '[]'"
+            "ALTER TABLE context_frames ADD COLUMN memory_namespace_ids TEXT NOT NULL DEFAULT '[]'"
         )
 
     # Feature 062: 资源限制字段迁移
@@ -1371,22 +1568,18 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
     agent_runtime_columns = await _table_columns(conn, "agent_runtimes")
     if agent_runtime_columns and "permission_preset" not in agent_runtime_columns:
         await conn.execute(
-            "ALTER TABLE agent_runtimes "
-            "ADD COLUMN permission_preset TEXT NOT NULL DEFAULT 'normal'"
+            "ALTER TABLE agent_runtimes ADD COLUMN permission_preset TEXT NOT NULL DEFAULT 'normal'"
         )
     if agent_runtime_columns and "role_card" not in agent_runtime_columns:
         await conn.execute(
-            "ALTER TABLE agent_runtimes "
-            "ADD COLUMN role_card TEXT NOT NULL DEFAULT ''"
+            "ALTER TABLE agent_runtimes ADD COLUMN role_card TEXT NOT NULL DEFAULT ''"
         )
 
     # 修正 agent_sessions 的 UNIQUE 索引：只对 main_bootstrap 生效，
     # worker_internal / subagent_internal sessions 不受一个 project 一个 session 的限制。
     if agent_session_columns:
         try:
-            await conn.execute(
-                "DROP INDEX IF EXISTS idx_agent_sessions_project_active"
-            )
+            await conn.execute("DROP INDEX IF EXISTS idx_agent_sessions_project_active")
             await conn.execute(
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_sessions_project_active "
                 "ON agent_sessions(project_id) "
@@ -1419,8 +1612,7 @@ async def _migrate_legacy_tables(conn: aiosqlite.Connection) -> None:
         )
     if recall_columns and "hit_namespace_kinds" not in recall_columns:
         await conn.execute(
-            "ALTER TABLE recall_frames "
-            "ADD COLUMN hit_namespace_kinds TEXT NOT NULL DEFAULT '[]'"
+            "ALTER TABLE recall_frames ADD COLUMN hit_namespace_kinds TEXT NOT NULL DEFAULT '[]'"
         )
 
     # F084 Phase 4 T068：DROP bootstrap_sessions 表（bootstrap_session 状态机已退役）
@@ -1471,7 +1663,8 @@ async def _merge_composite_agent_identity_rows(conn: aiosqlite.Connection) -> No
     执行流程（整体在 FK 临时关闭 + 单事务下完成）：
     1. 扫 composite runtime（`agent_runtime_id LIKE 'role:%'`）。
     2. 按 (project_id, role, agent_profile_id) 找 canonical ULID（F117 W4-5：worker 与
-       非 worker 统一按 agent_profile_id 匹配，worker 的 agent_profile_id==旧 worker_profile_id bare）。
+       非 worker 统一按 agent_profile_id 匹配，worker 的 agent_profile_id ==
+       旧 worker_profile_id bare）。
        - 有 canonical：把所有外键列从 composite 改指向 canonical，删 composite。
        - 无 canonical：就地 rename 到 `runtime-{ULID}`（同步 UPDATE 所有外键列）。
     3. 对 agent_sessions 同样处理（`agent_session_id LIKE 'runtime:%'`），
@@ -1559,14 +1752,16 @@ async def _archive_duplicate_memory_namespaces(conn: aiosqlite.Connection) -> No
 
 
 async def _backfill_worker_runtime_agent_profile_id(conn: aiosqlite.Connection) -> None:
-    """F117 W4-5 过渡桥接：存量实例在 migration_117 跑之前，agent_runtimes 仍有 worker_profile_id 列。
+    """F117 W4-5 过渡桥接。
 
+    存量实例在 migration_117 跑之前，agent_runtimes 仍有 worker_profile_id 列。
     W4-5 起 worker runtime 只按 agent_profile_id 标识，但存量"孤儿"worker 行可能
     agent_profile_id='' + worker_profile_id 非空——对新的 find_active_runtime / dedup /
     readers / _merge_composite_runtimes 不可见，会在"已部署新代码但 migration 未跑"的窗口里
     产生重复 active runtime（并使 migration 建 agent_profile_id 唯一索引时撞重失败）。
     本步在启动 dedup/merge **之前**把这些行的 agent_profile_id 从 worker_profile_id 回填
-    （与 migration step 5 孤儿 backfill 同规则；W4-1 后 worker 的 agent_profile_id==worker_profile_id），
+    （与 migration step 5 孤儿 backfill 同规则；W4-1 后 worker 的
+    agent_profile_id == worker_profile_id），
     让后续 merge/dedup/readers 立即按 agent_profile_id 正确生效。
     migration DROP worker_profile_id 列后本步是 no-op（列不存在直接返回）；fresh DB 同理无此列。
     """
@@ -1668,9 +1863,7 @@ async def _fetchall(conn: aiosqlite.Connection, sql: str, args: tuple = ()) -> l
 async def _update_runtime_id_references(
     conn: aiosqlite.Connection, *, old_id: str, new_id: str
 ) -> None:
-    existing_tables = await _fetchall(
-        conn, "SELECT name FROM sqlite_master WHERE type='table'"
-    )
+    existing_tables = await _fetchall(conn, "SELECT name FROM sqlite_master WHERE type='table'")
     table_names = {str(r[0]) for r in existing_tables}
     for table, column in _RUNTIME_FOREIGN_COLUMNS:
         if table not in table_names:
@@ -1702,9 +1895,7 @@ async def _update_runtime_id_references(
 async def _update_session_id_references(
     conn: aiosqlite.Connection, *, old_id: str, new_id: str
 ) -> None:
-    existing_tables = await _fetchall(
-        conn, "SELECT name FROM sqlite_master WHERE type='table'"
-    )
+    existing_tables = await _fetchall(conn, "SELECT name FROM sqlite_master WHERE type='table'")
     table_names = {str(r[0]) for r in existing_tables}
     for table, column in _SESSION_FOREIGN_COLUMNS:
         if table not in table_names:
@@ -1773,18 +1964,14 @@ async def _merge_composite_runtimes(conn: aiosqlite.Connection) -> None:
             )
         if canonical_row:
             canonical_id = str(canonical_row[0][0])
-            await _update_runtime_id_references(
-                conn, old_id=composite_id, new_id=canonical_id
-            )
+            await _update_runtime_id_references(conn, old_id=composite_id, new_id=canonical_id)
             await conn.execute(
                 "DELETE FROM agent_runtimes WHERE agent_runtime_id = ?",
                 (composite_id,),
             )
         else:
             new_id = f"runtime-{ULID()}"
-            await _update_runtime_id_references(
-                conn, old_id=composite_id, new_id=new_id
-            )
+            await _update_runtime_id_references(conn, old_id=composite_id, new_id=new_id)
             await conn.execute(
                 "UPDATE agent_runtimes SET agent_runtime_id = ? WHERE agent_runtime_id = ?",
                 (new_id, composite_id),
@@ -1851,18 +2038,14 @@ async def _merge_composite_sessions(conn: aiosqlite.Connection) -> None:
             )
         if canonical_row:
             canonical_id = str(canonical_row[0][0])
-            await _update_session_id_references(
-                conn, old_id=composite_id, new_id=canonical_id
-            )
+            await _update_session_id_references(conn, old_id=composite_id, new_id=canonical_id)
             await conn.execute(
                 "DELETE FROM agent_sessions WHERE agent_session_id = ?",
                 (composite_id,),
             )
         else:
             new_id = f"session-{ULID()}"
-            await _update_session_id_references(
-                conn, old_id=composite_id, new_id=new_id
-            )
+            await _update_session_id_references(conn, old_id=composite_id, new_id=new_id)
             await conn.execute(
                 "UPDATE agent_sessions SET agent_session_id = ? WHERE agent_session_id = ?",
                 (new_id, composite_id),
@@ -1885,6 +2068,7 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     # 且不跑迁移，FK 真正生效 → versionable 写绕不过 task 外键（修复 1 的安全目标落在该连接）。
     await conn.execute("PRAGMA journal_mode = WAL;")
     await apply_write_connection_pragmas(conn)
+    await conn.execute("PRAGMA secure_delete = ON;")
 
     # 创建表
     await conn.execute(_TASKS_DDL)
@@ -1907,7 +2091,8 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_WORKSPACE_ROLLBACK_REQUESTS_DDL)
     await conn.execute(_OWNER_PROFILES_DDL)
     await conn.execute(_OWNER_PROFILE_OVERLAYS_DDL)
-    # F084 Phase 4 T068：不再 CREATE bootstrap_sessions（已退役，_migrate_legacy_tables 会 DROP 旧表）
+    # F084 Phase 4 T068：不再 CREATE bootstrap_sessions；
+    # 已退役表由 _migrate_legacy_tables DROP。
     await conn.execute(_AGENT_RUNTIMES_DDL)
     await conn.execute(_AGENT_SESSIONS_DDL)
     await conn.execute(_AGENT_SESSION_TURNS_DDL)
@@ -1924,6 +2109,18 @@ async def init_db(conn: aiosqlite.Connection) -> None:
     await conn.execute(_SNAPSHOT_RECORDS_DDL)
     await conn.execute(_OBSERVATION_CANDIDATES_DDL)
     await conn.execute(_MEMORY_EXTRACTION_LEDGER_DDL)
+    await conn.execute(_PRIVACY_INGESTION_AUDIT_DDL)
+    await conn.execute(_PRIVACY_REVIEW_BUNDLES_DDL)
+    await conn.execute(_PRIVACY_APPROVED_PACKETS_DDL)
+    await conn.execute(_PRIVACY_ANALYSIS_RESULTS_DDL)
+    await conn.execute(_PRIVACY_MEMORY_CANDIDATES_DDL)
+    await conn.execute(_PRIVACY_DELETION_RECEIPTS_DDL)
+    await conn.execute(_DEVICE_REGISTRATION_CHALLENGES_DDL)
+    await conn.execute(_MOBILE_DEVICES_DDL)
+    await conn.execute(_MOBILE_DEVICE_KEYS_DDL)
+    await conn.execute(_DEVICE_TOKEN_CHALLENGES_DDL)
+    await conn.execute(_DEVICE_CAPABILITY_GRANTS_DDL)
+    await conn.execute(_DEVICE_REQUEST_REPLAYS_DDL)
     await conn.execute(_NOTIFICATION_DISMISSALS_DDL)
     await conn.execute(_NOTIFICATION_ACTIVE_DDL)
     await conn.execute(_CONVERSATION_BINDINGS_DDL)
@@ -1949,6 +2146,9 @@ async def init_db(conn: aiosqlite.Connection) -> None:
         + _SNAPSHOT_RECORDS_INDEXES
         + _OBSERVATION_CANDIDATES_INDEXES
         + _MEMORY_EXTRACTION_LEDGER_INDEXES
+        + _PRIVACY_INGESTION_AUDIT_INDEXES
+        + _PRIVACY_INGESTION_STAGE_INDEXES
+        + _DEVICE_TRUST_INDEXES
         + _NOTIFICATION_ACTIVE_INDEXES
         + _CONVERSATION_BINDINGS_INDEXES
         + _TELEGRAM_OUTBOUND_SPOOL_INDEXES

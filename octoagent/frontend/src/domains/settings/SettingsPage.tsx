@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
 import { categoryForHint, getValueAtPath } from "../../workbench/utils";
@@ -58,7 +58,11 @@ const EMPTY_REVIEW: SetupReviewSummary = {
   secret_binding_risks: [],
 };
 
-export default function SettingsPage() {
+interface SettingsPageProps {
+  remoteAccess?: ReactNode;
+}
+
+export default function SettingsPage({ remoteAccess }: SettingsPageProps = {}) {
   const { snapshot, submitAction, busyActionId, error: workbenchError } =
     useWorkbench();
   const location = useLocation();
@@ -754,6 +758,8 @@ export default function SettingsPage() {
         connectBusy={connectBusy}
         onScrollToSection={scrollToSection}
       />
+
+      {remoteAccess}
 
       <SettingsProviderSection
         providerDrafts={providerDrafts}

@@ -10,7 +10,7 @@
  * - 零真 LLM 自证（AC-3）：回复文本 == 脚本常量（若任何环节落 Echo/真
  *   provider，文本不可能是脚本值；服务器侧另有 gate=deny + 空凭证 + bomb）
  */
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 import { L1_TESTIDS } from "./selectors";
 import {
   L1_WRITE_FILE_CONTENT,
@@ -19,6 +19,7 @@ import {
   L1_WRITE_REPLY,
   assertBombNotTripped,
   eventsOfType,
+  fetchTaskDetail,
   l1ServerUrl,
   pollTaskSucceeded,
   readInstanceFile,
@@ -26,13 +27,36 @@ import {
   withFailureMarkerScan,
 } from "./support";
 
+async function currentTaskBaseline(page: Page, origin: string) {
+  const response = await page.request.get(`${origin}/api/control/resources/sessions`);
+  expect(response.ok()).toBe(true);
+  const projection = (await response.json()) as {
+    focused_session_id?: string;
+    sessions: Array<{ session_id: string; task_id: string }>;
+  };
+  const taskId =
+    projection.sessions.find(
+      (session) => session.session_id === projection.focused_session_id
+    )?.task_id ?? "";
+  const eventCount = taskId
+    ? (await fetchTaskDetail("loopback", taskId)).events.length
+    : 0;
+  return { taskId, eventCount };
+}
+
 test("chat 输入驱动脚本决策环：真工具写盘 + 事件链外部断言", async ({ page }) => {
-  await page.goto(l1ServerUrl("loopback"));
+  const origin = l1ServerUrl("loopback");
+  await page.goto(origin);
 
   // --- UI 薄输入 ---
   const input = page.getByTestId(L1_TESTIDS.chatInput);
   await expect(input).toBeVisible();
   await input.fill(`请把这条笔记写进文件 ${L1_WRITE_MARKER}`);
+  const assistantReplies = page
+    .getByTestId(L1_TESTIDS.chatMessageAssistant)
+    .filter({ hasText: L1_WRITE_REPLY });
+  const assistantReplyCountBefore = await assistantReplies.count();
+  const taskBaseline = await currentTaskBaseline(page, origin);
 
   const sendResponsePromise = page.waitForResponse(
     (resp) => resp.url().includes("/api/chat/send") && resp.request().method() === "POST"
@@ -47,36 +71,41 @@ test("chat 输入驱动脚本决策环：真工具写盘 + 事件链外部断言
 
   // --- 稳定信号：assistant 气泡出现脚本回复（真 SSE 渲染路径） ---
   await withFailureMarkerScan(page, async () => {
-    await expect(
-      page
-        .getByTestId(L1_TESTIDS.chatMessageAssistant)
-        .filter({ hasText: L1_WRITE_REPLY })
-    ).toBeVisible({ timeout: 30_000 });
+    await expect(assistantReplies).toHaveCount(assistantReplyCountBefore + 1, {
+      timeout: 30_000,
+    });
+    await expect(assistantReplies.last()).toBeVisible();
   });
 
   // ==== 以下断言全部在 UI 外（node 上下文） ====
 
   // 1) REST 事件链
   const detail = await pollTaskSucceeded("loopback", taskId);
+  const currentDetail = {
+    ...detail,
+    events: detail.events.slice(
+      taskBaseline.taskId === taskId ? taskBaseline.eventCount : 0
+    ),
+  };
   expect(
-    toolCallEvents(detail, "TOOL_CALL_STARTED", "filesystem.write_text"),
+    toolCallEvents(currentDetail, "TOOL_CALL_STARTED", "filesystem.write_text"),
     "决策环前半段：脚本 LLM 决策必须真驱动 broker 派发"
   ).toHaveLength(1);
   expect(
-    toolCallEvents(detail, "TOOL_CALL_COMPLETED", "filesystem.write_text"),
+    toolCallEvents(currentDetail, "TOOL_CALL_COMPLETED", "filesystem.write_text"),
     "工具执行必须完成"
   ).toHaveLength(1);
   expect(
-    toolCallEvents(detail, "TOOL_CALL_FAILED", "filesystem.write_text"),
+    toolCallEvents(currentDetail, "TOOL_CALL_FAILED", "filesystem.write_text"),
     "工具不得失败"
   ).toHaveLength(0);
   // 决策环真跑 2 轮（第 1 轮吐 tool_call，第 2 轮消费 feedback 后 complete）
   expect(
-    eventsOfType(detail, "MODEL_CALL_STARTED").length,
+    eventsOfType(currentDetail, "MODEL_CALL_STARTED").length,
     "MODEL_CALL_STARTED 应 ≥2（决策环 2 轮）"
   ).toBeGreaterThanOrEqual(2);
   expect(
-    eventsOfType(detail, "MODEL_CALL_COMPLETED").length,
+    eventsOfType(currentDetail, "MODEL_CALL_COMPLETED").length,
     "MODEL_CALL_COMPLETED 应 ≥2"
   ).toBeGreaterThanOrEqual(2);
 

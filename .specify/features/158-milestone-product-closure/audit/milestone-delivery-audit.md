@@ -1,0 +1,170 @@
+# F158 Milestone 交付审计
+
+## 审计基线
+
+- 审计日期：2026-07-28
+- `origin/master`：`db3214fff722c6f969baf99528a76fc03a1e21a1`
+- F149 design export：
+  `a2db08ea0eb39278558e61e87a355b042c98ad24273b201940925f310271d98a`
+- Claude Design project：`851e3fb2-2b5b-4251-a095-8a678b1b7fec`
+
+## 初始结论
+
+| 要求 | 当前证据 | 判定 | 缺口 | owner |
+|---|---|---|---|---|
+| M11 Web 视觉保持早期 Claude Design | 早期 frame、恢复后 1440 截图、14 个 pixel snapshot、逐 surface 结构合同、云端最终导出 | PROVEN_IN_BRANCH | 待提交/CI 与个人部署复验 | F158 / F149 |
+| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1 与真实截图 | PROVEN_IN_BRANCH | 待提交、CI 与个人部署复验 | F158 / F150 |
+| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery | PARTIAL | origin/DNS/Access/4 条 connector 已恢复；登录后 SPA/API/SSE 与最终 commit/CI 仍待验证 | F158 / F150 |
+| Web 功能 E2E | 11 个 Playwright spec / 39 nodes + fresh approval rerun | PROVEN_IN_BRANCH | 完整 38 pass/1 once-only skip；fresh approval 1/1 pass；待 CI/部署 | F158 |
+| Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_IN_BRANCH | 主框架与 9 surface + 真实任务详情均进入像素门；待 CI/部署 | F158 |
+| 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
+| 原生 iOS 可启动 | 原生 Xcode/SwiftUI project、iPhoneOS target build | PARTIAL | App/XCTest bundle 已编译；本机缺 iOS platform/runtime，尚无真实启动 | F153 |
+| iOS 功能 E2E | Gateway focused 42 pass、Swift XCTest target compile | PARTIAL | Swift XCTest 未执行；Simulator 与真机场景=0 | F153-F156 |
+| iOS 视觉回归 | Claude Design 共同语言声明 | MISSING | snapshot/真机视觉证据=0 | F156 / F158 |
+| Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_IN_BRANCH | 待提交/CI 与最终交付审计 | F158 |
+| F151 runtime/architecture | verification report + CI | PROVISIONAL PASS | 仍需纳入最终干净检出回归 | F151 / F158 |
+| F157 CI 回归修复 | master CI 已绿 | DOC DRIFT | F157 tasks T013 仍未勾选 | F157 / F158 |
+| M10 物理启动验收 | Blueprint 明示独立待闭环 | INCOMPLETE | ATT-129-BOOT 仍无完成证据 | 原 owner / F158 audit |
+
+## M0-M12 全量真值矩阵
+
+| Milestone | Blueprint 声明 | 当前复核 | F158 判定 | 进入最终闭环前要求 |
+|---|---|---|---|---|
+| M0 | 完成 | Task/Event/Artifact/SSE/ready 代码与历史 Feature 仍在 | PROVISIONAL | 干净检出核心回归 + Web 主链复验 |
+| M1 | 完成 | 当前 ProviderRouter/ToolBroker/Policy 已取代部分历史 LiteLLM 路径 | PROVISIONAL | 以当前架构运行模型/工具/审批/secret 回归，禁止用退役 Proxy 证据 |
+| M1.5 | 完成 | Orchestrator/Worker/Checkpoint/Watchdog 当前实现存在 | PROVISIONAL | 当前 runtime 下恢复、幂等、watchdog 与 trace 回归 |
+| M2 | 完成 | Telegram/A2A/Memory/backup 等 owner 存在；历史 Docker backend 已明确不交付 | PROVISIONAL | 以当前边界复验 channel/action/memory/restore；不恢复 Docker 叙述 |
+| M3 | 完成 | control plane、projects、memory、setup 与工作台代码存在 | PROVISIONAL | 用户场景与 current contract 回归；清理文档中的历史兼容措辞 |
+| M4 | 完成 | guided workbench、setup governance、runtime safety、supervisor owner 存在 | PROVISIONAL | 当前 UI/API/决策环组合回归 |
+| M5 | 完成 | F084-F103 架构/Agent 对等系列有 completion 记录 | PROVISIONAL | F151 架构门 + 当前 deterministic 全量回归 |
+| M6 | 完成 | F104-F122 surface/地基代码与完成记录存在 | PROVISIONAL | 当前全量门与相关 surface E2E |
+| M7 | 完成 | memory/learning owner 与 defer 条件有记录 | PROVISIONAL | 当前 memory/learning 行为和 defer 条件复验 |
+| M8 | 功能完成 | service/Telegram/cron/voice owner 存在 | PROVISIONAL | 常驻服务与个人部署复验 |
+| M9 | 完成 | 四层测试门与 F151/F157 后续修复存在 | PROVISIONAL | 当前主线 authoritative CI；修正文档未勾选状态 |
+| M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
+| M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 9 surface/任务详情视觉及功能 E2E 通过；Claude 云端谱系已清理并导出 | PROVEN_IN_BRANCH | 当前提交 CI 与个人部署复验 |
+| M12 | In Progress | F152 Verify；F153 T001-T011/T016 已实现，T012 局部通过 | PARTIAL | iOS runtime 安装、Swift XCTest、Simulator/真机/Cloudflare live、F154-F156 |
+
+该矩阵的 `PROVISIONAL` 不是重新否定历史交付，而是区分“历史报告存在”与“当前
+Milestone Goal 已在同一 commit/环境复验”。最终 completion audit 只允许将取得当前
+直接证据的行提升为 `PROVEN`。
+
+## 2026-07-28 直接视觉对照
+
+本轮从同一 `origin/master=db3214ff` 工作树实际完成前端 production build，并以
+hermetic L1 Gateway 启动当前 Web；同时直接渲染 F149 不可变设计导出中的
+`#1a 对话工作台（主视图）`。两份浏览器截图保存在：
+
+- `evidence/visual-baseline/2026-07-28/claude-design-early-1a-browser.jpg`
+  - SHA-256：
+    `7262ef63a1fea81caf97371071527ba22f843f5f01efeb8b1821179aefb01cbf`
+- `evidence/visual-baseline/2026-07-28/current-web-browser.jpg`
+  - SHA-256：
+    `f9f77e9d8ff75cbcc38688b49c0561baa65c4b7266192f5d4e21c0b5b72a149a`
+
+当前 Web 可真实启动，但主工作台视觉与早期基线存在产品级差异：
+
+1. 左栏被放大的品牌卡和稀疏导航占据，早期稿的项目/会话密度、选中态和运行提示弱化。
+2. 中栏由真实对话、委派卡、工件卡与运行提示组成的主舞台，退化为大面积空状态和大输入框。
+3. 早期稿蓝黑标题层、实时快照、全局任务状态胶囊与消息层级未保留。
+4. 右栏早期稿的任务进度、事件流、工作文件三层卡片，在当前空态中缺少相同的信息架构与视觉节奏。
+5. 当前使用大圆角、大留白、低密度卡片；早期稿为更紧凑的工作台密度。该差异不能由
+   “深色 + 绿色强调 + 三栏”视为等价。
+
+初始截图因此将 M11 视觉交付判为 `CONTRADICTED`。F158 随后完成主工作台第一轮
+恢复：左栏收敛为 256px 的项目/会话与产品导航，中央恢复蓝黑标题层、紧凑消息层与
+底部胶囊输入，右栏恢复连续运行状态 rail。当前真实浏览器证据：
+
+- `evidence/visual-baseline/2026-07-28/web-claude-restored-final-1440x900.png`
+  - SHA-256：
+    `9363b49495fa52bfd57fe52b4f2d8707c2c1e3b45a889ac25c44232df3acd9e8`
+- `evidence/visual-baseline/2026-07-28/web-claude-restored-final-1124x900.jpg`
+  - SHA-256：
+    `0b1f6b59c44b748d2276f7e88d51a3d4378d40e83d486094c7d13803c00fe4c2`
+
+Playwright 新增固定 1440×900/dark 的结构合同与四个真实 pixel snapshot：
+
+- sidebar brand：
+  `24c36c726256ddc1fedd8f35e14391a5596b1852774fc1af424465491acec8bc`
+- navigation row：
+  `4bfc0ffdb0a9fd3d9889ca05f152f6a9fec12bfa4e6d4be50f1b965985c56679`
+- composer：
+  `382a1b13f2de7fbdf3858a7a901a99fbb453252627e41a0f1817443c11cae2cb`
+- run-panel head：
+  `cc510fc04ab9a731a92fa47afa8cc47ac6b4d3d584b17e4de26ab2bb5c88ff24`
+
+视觉合同先因 snapshot 不存在真实失败，建立经人工查看的基线后同一 selector 通过。
+本轮继续补齐 9 个业务 surface 与真实任务详情 pixel baselines，并在当前字节下完成
+完整 Browser L1、390px Web robustness 和 deterministic L4 state matrix。M11 因此从
+`CONTRADICTED` 提升为 `PROVEN_IN_BRANCH`。Claude Design 云端 lineage 随后完成：
+最终导出 SHA
+`1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`，
+`4a`–`4o`、20 行验收表与 10×7 状态矩阵机械闭合，后期 radial glow、大 Hero 与
+卡片墙原位改回早期视觉。当前只剩提交/CI 和个人部署复验，完成前仍不能提升为最终
+`PROVEN`。
+
+## 机械事实
+
+1. `SettingsCenter` 现在将唯一 `RemoteAccessSettings` 作为 `SettingsPage`
+   composition slot 传入；adapter/view-model 没有复制。
+2. `.remote-access-settings*` 与早期视觉语言样式位于独立 production stylesheet。
+3. `octoagent/frontend/e2e/visual-claude-baseline.spec.ts` 已使用
+   `toHaveScreenshot`，并同时验证三栏 geometry 与计算后颜色/边框。
+4. 仓库已存在唯一 `octoagent/apps/ios/OctoAgent.xcodeproj`、6 个 production Swift
+   files 与 1 个 XCTest file；原生 App/XCTest target 在 iPhoneOS arm64 编译链接成功。
+5. F153 canonical root 是
+   `.specify/features/153-ios-device-trust-secure-transport/`；不存在第二
+   `153-native-ios-remote-access` Feature。
+6. F149 `review/design-fidelity.md` 以人工层级描述、无 overflow、单 `<main>` 和
+   390px 合同判 PASS，不能证明视觉一致。
+7. `ui-ux-pro-max` 的通用搜索建议“单栏极简”，与用户指定早期三栏工作台冲突；
+   本 Feature 明确拒绝其布局建议，只采用可访问性、焦点、动态内容语义与 SwiftUI
+   生命周期建议。
+8. `npm ci` 与 `npm run build` 在 F158 工作树成功；真实 Gateway 以 loopback L1
+   fixture 启动在 `127.0.0.1:8151`，当前主工作台可在浏览器渲染。
+9. 初始 Web Playwright 的 `f149-a-wave.spec.ts` 曾因把追加的
+   `TASK_DRIFT_DETECTED` 错算进固定前缀而失败；修正为“前两条固定 + 追加 drift”
+   后，早期全量结果为 `19 passed / 1 conditional skip / 0 failed / retries=0`。
+10. 全前端单元结果为 `70 files / 598 tests passed`；production build 与 frontend
+    complexity gate 均通过。该结果证明当前变更未破坏既有 Web 功能，但不替代尚未
+    完成的逐 surface/state 视觉矩阵。
+11. F153 focused Protocol/Core/Gateway/authority 回归为 `42 passed`；Release iPhoneOS
+    App 与 Debug XCTest target build 通过。Release `.app` 恰含 3 个文件、772 KiB，
+    executable SHA-256 为
+    `166122a2d6552e3f4f125b97edc8969c45f63c632cc2d6dbf43759e9ec0d8986`；
+    source/bundle 对个人域名、邮箱、Cloudflare secret/Web Cookie、private key 与真实
+    device token 扫描为 0。
+12. scheme-level generic build 以 exit 70 fail closed；CoreSimulator
+    `1051.54.0 < 1051.55.0` 且 iOS runtime=0，自动安装需要 macOS 管理员授权。
+    所以当前没有 Swift XCTest、Simulator screenshot/visual/a11y 或真机证据。
+13. Web surface 补齐后的当前字节结果为 production build PASS、complexity PASS、
+    Vitest `70 files / 598 passed`、Playwright `38 passed / 1 once-only conditional
+    skip / 0 failed`；fresh L1 fixture 的 approval accept/真实落盘为 `1 passed`。
+14. `visual-claude-surfaces.spec.ts` 的 10 个 PNG 经 generation 与 no-update 两轮
+    各 `10 passed`；动态时间使用 test-only visibility 归一化，最终基线不存在
+    Playwright 默认洋红 mask。完整 SHA 与场景矩阵见
+    `evidence/web/2026-07-28/verification-report.md`。
+
+## F153 当前设计映射与偏离记录
+
+- 保留 Claude 初稿的近黑底、低亮度紧凑卡片、细边框、单一绿色强调、紧凑层级与
+  信息密度；没有引入后期大面积空白、泛化大圆角或第二主题。
+- iPhone 不复制 Web 三栏，因为这会破坏原生小屏导航与可访问性；改用
+  `NavigationStack`、单列卡片、52pt action、Dynamic Type、VoiceOver 与
+  Reduce Motion。这是平台/可用性偏离，不是为了迁就现有 Web 实现。
+- F153 只交付设备连接状态，不提前实现 F156 的聊天/任务/审批/Memory UI；因此当前
+  App 不能作为最终 companion 视觉完成证据。
+- 上述判断已有 source/compile 证据但尚无 Simulator/真机截图，视觉还原保持
+  `PARTIAL`，不能提升为 `PROVEN`。
+
+## 证据等级
+
+- `PROVEN`：当前字节、真实运行与对应范围的可复现测试共同证明。
+- `PROVISIONAL`：有直接证据，但未在 F158 最终环境复验。
+- `PARTIAL`：只覆盖要求的一部分。
+- `INCOMPLETE`：实现或证据明确缺失。
+- `CONTRADICTED`：真实状态与完成声明冲突。
+- `MISSING`：没有可用证据。
+- `UNPROVEN`：只有说明或间接证据。
+
+任何非 `PROVEN` 项都不能进入最终完成声明。

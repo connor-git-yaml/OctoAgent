@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "feature_id": "F158",
+  "authority_status": "GOAL_ACTIVE_IMPLEMENT_OPEN_WEB_VERIFIED",
+  "approval_date": "2026-07-28",
+  "architecture_checker": "repo-scripts/check-runtime-architecture.py",
+  "production_paths": [
+    {
+      "path": "octoagent/frontend/src/components/shell/WorkbenchLayout.tsx",
+      "state": "existing",
+      "owner": "frontend",
+      "role": "claude_design_workbench_shell"
+    },
+    {
+      "path": "octoagent/frontend/src/domains/settings/RemoteAccessSettings.tsx",
+      "state": "existing",
+      "owner": "frontend",
+      "role": "remote_access_user_surface"
+    },
+    {
+      "path": "octoagent/frontend/src/domains/settings/SettingsCenter.tsx",
+      "state": "existing",
+      "owner": "frontend",
+      "role": "settings_surface_composition"
+    },
+    {
+      "path": "octoagent/frontend/src/domains/settings/SettingsPage.tsx",
+      "state": "existing",
+      "owner": "frontend",
+      "role": "settings_route_composition"
+    },
+    {
+      "path": "octoagent/frontend/src/main.tsx",
+      "state": "existing",
+      "owner": "frontend",
+      "role": "single_visual_stylesheet_composition"
+    },
+    {
+      "path": "octoagent/frontend/src/domains/settings/RemoteAccessSettings.css",
+      "state": "declared_new",
+      "owner": "frontend",
+      "role": "remote_access_claude_visual_projection"
+    },
+    {
+      "path": "octoagent/frontend/src/styles/claude-surfaces.css",
+      "state": "declared_new",
+      "owner": "frontend",
+      "role": "claude_design_surface_projection"
+    },
+    {
+      "path": "octoagent/frontend/src/styles/claude-workbench.css",
+      "state": "declared_new",
+      "owner": "frontend",
+      "role": "claude_design_workbench_projection"
+    }
+  ],
+  "test_paths": [
+    "octoagent/frontend/src/domains/settings/SettingsCenter.remote-access.test.tsx",
+    "octoagent/frontend/e2e/chat-scripted-loop.spec.ts",
+    "octoagent/frontend/e2e/f149-a-wave.spec.ts",
+    "octoagent/frontend/e2e/f158-surface-scenarios.spec.ts",
+    "octoagent/frontend/e2e/remote-access-web.spec.ts",
+    "octoagent/frontend/e2e/visual-claude-baseline.spec.ts",
+    "octoagent/frontend/e2e/visual-claude-surfaces.spec.ts",
+    "octoagent/tests/gate/test_f158_architecture_authority.py"
+  ],
+  "artifact_paths": [
+    ".specify/features/158-milestone-product-closure/spec.md",
+    ".specify/features/158-milestone-product-closure/plan.md",
+    ".specify/features/158-milestone-product-closure/tasks.md",
+    ".specify/features/158-milestone-product-closure/trace.md",
+    ".specify/features/158-milestone-product-closure/contracts/visual-product-contract.md",
+    ".specify/features/158-milestone-product-closure/checklists/requirements.md",
+    ".specify/features/158-milestone-product-closure/inventories/e2e-visual-matrix.md",
+    ".specify/features/158-milestone-product-closure/inventories/architecture-authority.v1.json",
+    ".specify/features/158-milestone-product-closure/audit/milestone-delivery-audit.md",
+    ".specify/features/158-milestone-product-closure/evidence/web/2026-07-28/verification-report.md"
+  ],
+  "forbidden_prefixes": [
+    "octoagent/apps/gateway/",
+    "octoagent/apps/ios/",
+    "octoagent/packages/"
+  ],
+  "forbidden_terms": [
+    "WKWebView",
+    "SFSafariViewController",
+    "Spotify Design System",
+    "current Web visual baseline",
+    "maojiwang.work"
+  ],
+  "approved_scope_sha256": "8c6c15ad44923f0b93dc8639a184f5742374932ff50b0ff50ef3c0a265a77b44"
+}

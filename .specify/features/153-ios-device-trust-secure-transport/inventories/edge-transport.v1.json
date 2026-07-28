@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "feature_id": "F153",
+  "network_foundation": "same-cloudflare-named-tunnel",
+  "desktop_web": {
+    "client": "desktop-browser",
+    "edge_auth": "cloudflare-access-user-session",
+    "origin_auth": "validated-cf-access-jwt-owner"
+  },
+  "native_ios": {
+    "client": "native-swiftui-urlsession",
+    "hostname": "per-deployment-no-default",
+    "path_prefix": "/api/mobile/v1/",
+    "edge_policy": "access-bypass-origin-device-proof",
+    "origin_auth": "secure-enclave-device-proof",
+    "token_ttl_seconds_max": 900,
+    "request_window_seconds_max": 300,
+    "registration_challenge_ttl_seconds_max": 120,
+    "token_challenge_ttl_seconds_max": 120
+  },
+  "forbidden": [
+    "mobile-browser-product",
+    "webview",
+    "cloudflare-service-token-in-app",
+    "web-access-cookie-as-device-proof",
+    "second-tunnel",
+    "cloudflare-worker-verifier",
+    "warp-or-cloudflare-one-client-required",
+    "hard-coded-maojiwang.work"
+  ],
+  "external_live_task": "T014"
+}

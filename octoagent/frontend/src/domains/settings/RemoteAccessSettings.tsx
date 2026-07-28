@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { readRemoteAccessStatus } from "../../api/remote-access";
+import "./RemoteAccessSettings.css";
 
 type RemoteAccessStatus = Awaited<ReturnType<typeof readRemoteAccessStatus>>;
 
@@ -103,7 +104,7 @@ export function RemoteAccessSettings({
 
   return (
     <section
-      className="remote-access-settings"
+      className="remote-access-settings f149-settings-panel"
       aria-labelledby="remote-access-settings-title"
       data-visual-baseline="claude-design-original"
       data-composition="status-card-actions-advanced"

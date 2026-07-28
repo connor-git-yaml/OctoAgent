@@ -1,0 +1,152 @@
+.remote-access-settings {
+  display: grid;
+  gap: var(--cp-space-3);
+  background:
+    linear-gradient(135deg, rgba(12, 22, 42, 0.88), rgba(16, 20, 16, 0.96) 58%),
+    var(--cp-card);
+}
+
+.remote-access-settings__header {
+  display: grid;
+  gap: var(--cp-space-1);
+}
+
+.remote-access-settings__header h2,
+.remote-access-settings__header p {
+  margin: 0;
+}
+
+.remote-access-settings__header h2 {
+  color: var(--cp-ink);
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+}
+
+.remote-access-settings__header > p:last-child {
+  color: var(--cp-muted);
+  font-size: 0.86rem;
+}
+
+.remote-access-settings__eyebrow {
+  color: var(--cp-primary);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.remote-access-settings__status-card {
+  display: grid;
+  gap: var(--cp-space-3);
+  padding: var(--cp-space-4);
+  border: 1px solid var(--cp-border);
+  border-radius: var(--cp-radius-md);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.remote-access-settings__status-copy {
+  display: grid;
+  gap: var(--cp-space-1);
+}
+
+.remote-access-settings__status-copy h3,
+.remote-access-settings__status-copy p {
+  margin: 0;
+}
+
+.remote-access-settings__status-copy h3 {
+  font-size: 0.98rem;
+}
+
+.remote-access-settings__status-copy p,
+.remote-access-settings__recovery {
+  color: var(--cp-muted);
+  font-size: 0.82rem;
+}
+
+.remote-access-settings__facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--cp-space-1) var(--cp-space-3);
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.remote-access-settings__facts dt {
+  color: var(--cp-muted);
+}
+
+.remote-access-settings__facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.remote-access-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--cp-space-2);
+}
+
+.remote-access-settings__actions a,
+.remote-access-settings__status-card button {
+  min-height: 36px;
+  padding: 8px 13px;
+  border: 1px solid var(--cp-border);
+  border-radius: 999px;
+  color: var(--cp-ink);
+  background: rgba(255, 255, 255, 0.06);
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.remote-access-settings__actions a:first-child {
+  border-color: rgba(30, 215, 96, 0.34);
+  color: #08130c;
+  background: var(--cp-primary);
+}
+
+.remote-access-settings__advanced {
+  border-top: 1px solid var(--cp-border);
+  padding-top: var(--cp-space-3);
+  color: var(--cp-muted);
+  font-size: 0.8rem;
+}
+
+.remote-access-settings__advanced summary {
+  color: var(--cp-ink);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.remote-access-settings__advanced dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--cp-space-1) var(--cp-space-3);
+  margin: var(--cp-space-2) 0 0;
+}
+
+.remote-access-settings__advanced dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .remote-access-settings__facts,
+  .remote-access-settings__advanced dl {
+    grid-template-columns: 1fr;
+  }
+
+  .remote-access-settings__facts dd,
+  .remote-access-settings__advanced dd {
+    margin-bottom: var(--cp-space-2);
+  }
+
+  .remote-access-settings__actions a,
+  .remote-access-settings__status-card button {
+    min-height: 44px;
+  }
+}
