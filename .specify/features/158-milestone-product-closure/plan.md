@@ -58,6 +58,8 @@ Milestone 已交付。
 2. 按场景矩阵执行功能 E2E、异常态、认证、断网、恢复和撤销。
 3. 执行 Web/iOS 视觉回归、无障碍与性能底线。
 4. 真机专属能力只接受真机证据。
+5. M10 常驻服务只接受一次明确物理重启后的登录自启动、`octo service status` 与
+   `/ready` 联合证据；部署后的手工 `kickstart` 不能替代 `ATT-129-BOOT`。
 
 ### Phase 5：Claude Design 与最终交付
 
@@ -83,6 +85,10 @@ CI 五个 job 全绿，真机、F154-F156、主线合并与总 completion audit 
    `FAILED`、worker `retryable=false`，同时保持非认证故障的既有 fallback。
 5. 用户完成一次重新授权后，执行真实 `doctor --live` 与真实模型任务，保存当前
    alias/provider/model、终态、事件链和无 Echo 证据。
+
+2026-07-29 对当前个人部署再次执行真实 `octo doctor --live`，命令在
+`CredentialExpiredError` / `refresh_token_reused` 上稳定非零退出，并明确记录
+`auth_failure=True`；该结果证明 fail-closed 已进入部署，但不等于真实模型可用。
 
 ## 架构边界
 

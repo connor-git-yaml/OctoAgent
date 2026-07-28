@@ -212,3 +212,20 @@
   scripted gate `18 passed`，changed-lines coverage 提升为 38/42=90.5% PASS。
   修复提交 `ebe8cd29` 已推送，权威 run `30378276329` 的四个前端/架构 job 已通过，
   随后 backend deterministic 也通过；该 run 最终五个 job 全绿。
+- 2026-07-29：对当前个人部署重新执行真实
+  `~/.octoagent/bin/octo doctor --live`。命令约两秒后 `exit=1`，
+  `model_live=FAIL`，远端返回 HTTP 401 `refresh_token_reused`；日志明确
+  `CredentialExpiredError`、`doctor_model_live_failed auth_failure=True`，没有
+  Echo fallback 或总体 PASS。部署代码的 fail-closed 已实证，T045 仍等待一次新的
+  OpenAI Codex OAuth 授权。
+- 2026-07-29：同一 doctor 输出同时显示离线 `credential_expiry=PASS / 所有凭证均有效`
+  与远端 `model_live=FAIL`，会误导用户把本地时间戳视为远端授权有效。单缺陷测试先
+  稳定见红，文案草稿的 focused/doctor 回归也通过；提交前 F151 architecture gate
+  正确阻断了对 F150/F158 共享 doctor 的未授权语义扩张。生产与测试草稿已撤回，
+  新增 T047，后续必须先建立明确 authority，不能为一句文案绕过现有 Gate。
+- 2026-07-29：M10 只读物理审计确认 LaunchAgent plist 早于当前
+  `2026-07-20 10:43:48 +0800` boot，launchd 当前 loaded/running/runatload，
+  `octo service status` 与 loopback ready=200；但本轮部署执行过手工
+  `kickstart -k`，当前 pid 不能作为登录自启动证据。新增 T046，只有一次用户明确
+  允许的物理重启后复核才能签署 `ATT-129-BOOT`。同日
+  `xcrun devicectl list devices` 仍为 `No devices found`，F153 T015 保持未完成。

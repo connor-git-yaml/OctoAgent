@@ -7,7 +7,8 @@
 - `GATE_VERIFY=false`
 - 当前分支：`codex/f158-milestone-product-closure`
 - 基线：`origin/master=db3214fff722c6f969baf99528a76fc03a1e21a1`
-- 当前已推送提交：`ebe8cd29f4c4c3b46e79edfed93a726cde537af6`
+- 本轮核验起点提交：`0a377b0bed74e2940384098889d8e511f83bc67e`
+- 当前通过完整 CI 的代码提交：`ebe8cd29f4c4c3b46e79edfed93a726cde537af6`
 - 当前个人部署提交：`35d7aa14f6f146a47084e4725e11df83cf034152`
 
 F158 已完成 Milestone/Blueprint/Feature 真值审计、F150 Settings 用户入口、桌面 Web
@@ -87,9 +88,19 @@ fallback 的受控调用；`CredentialError`、`AuthenticationError` 与 HTTP 40
 doctor、TaskService、WorkerRuntime 四文件回归为 `66 passed`。普通瞬时 Provider
 故障仍保持既有 fallback 与 retry 语义。
 
-这只证明代码与确定性合同闭环。当前个人 OAuth profile 仍需用户重新授权，所以
-真实 `doctor --live`、真实对话与部署事件链复验继续保持 MISSING，不以 mock/probe
-注入结果替代。
+这只证明代码与确定性合同闭环。2026-07-29 00:53 再次对当前个人部署执行
+`~/.octoagent/bin/octo doctor --live`，命令在约两秒内 `exit=1`，表格明确返回
+`model_live=FAIL`，日志为 `CredentialExpiredError`、HTTP 401
+`refresh_token_reused`、`doctor_model_live_failed auth_failure=True`。没有出现 Echo
+成功或整体 PASS。这证明部署字节已经 fail closed，但当前 OAuth profile 仍需用户
+重新授权；真实对话与部署事件链复验继续保持 MISSING，不以 mock/probe 注入结果
+替代。
+
+同一次真实输出还暴露了离线 `credential_expiry` 把“未达到本地过期时间”描述为
+“所有凭证均有效”的误导。单缺陷测试已证明旧文案与远端失败矛盾，但提交门进一步
+确认该方法属于 F150/F158 共享 doctor 的受保护语义，不允许为一句文案绕过 authority。
+测试和生产草稿均已撤回，登记为 T047；当前仍以 `model_live=FAIL` 作为远端可用性的
+唯一权威判定。
 
 ### iOS 当前可证明范围
 
@@ -140,6 +151,20 @@ Gateway 日志同时显示 OpenAI Codex refresh token 已被复用并在刷新�
 只证明 provider route 配置存在，不证明真实模型对话可用；重新登录 provider 与真实
 对话复验是独立未完成项。
 
+### M10 常驻服务物理边界
+
+- 当前 Mac boot time：`2026-07-20 10:43:48 +0800`
+- LaunchAgent plist birth/modified：
+  `2026-07-04 16:19:24 +0800` / `2026-07-05 20:27:22 +0800`
+- `launchctl`：`com.octoagent.gateway` loaded/running，`runatload`，pid=`9258`
+- `octo service status`：installed/loaded/running/ready 均为是
+- loopback `/ready?profile=core`：`200`
+
+plist 早于本次系统 boot，证明描述符当时已经存在；但当前进程在本轮部署中执行过
+手工 `kickstart -k`，所以现状不能证明它就是登录后自动启动并一直存活的原进程。
+`ATT-129-BOOT` 仍必须由一次用户明确允许的物理重启及重启后复核完成，不以文件时间、
+当前 pid 或手工重启冒充。
+
 ## 未通过与外部阻断
 
 ### iOS 剩余产品与外部边界
@@ -179,6 +204,7 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | personal deployment | PASS（运行提交 `35d7aa14`；登录后旅程仍缺） |
 | authenticated personal SPA/API/SSE | MISSING |
 | personal real-model conversation | BLOCKED（provider refresh token 401） |
+| M10 physical boot attestation | MISSING（等待明确物理重启） |
 | F153 iOS Simulator functional/visual E2E | PASS |
 | F154-F156 complete iOS product E2E | MISSING |
 | real-device security/lifecycle | BLOCKED |

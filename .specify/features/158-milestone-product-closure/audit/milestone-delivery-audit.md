@@ -2,7 +2,7 @@
 
 ## 审计基线
 
-- 审计日期：2026-07-28
+- 审计日期：2026-07-29
 - `origin/master`：`db3214fff722c6f969baf99528a76fc03a1e21a1`
 - F149 最终 design export：
   `1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`
@@ -26,7 +26,7 @@
 | Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_BRANCH_CI_DEPLOYED | 最终总 completion audit 尚未完成 | F158 |
 | F151 runtime/architecture | verification report + CI | PROVISIONAL PASS | 仍需纳入最终干净检出回归 | F151 / F158 |
 | F157 CI 回归修复 | master CI 已绿 | DOC DRIFT | F157 tasks T013 仍未勾选 | F157 / F158 |
-| M10 物理启动验收 | Blueprint 明示独立待闭环 | INCOMPLETE | ATT-129-BOOT 仍无完成证据 | 原 owner / F158 audit |
+| M10 物理启动验收 | plist 早于当前 boot；launchd/service/ready 当前均健康 | INCOMPLETE | 本轮部署曾手工 kickstart，仍缺一次明确物理重启后的 ATT-129-BOOT | 原 owner / F158 audit |
 
 ## M0-M12 全量真值矩阵
 
@@ -161,6 +161,21 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
 - F153 registration 范围已有 source、真实 Simulator、六张 baseline 与 AXXXL 截图，
   可提升为该范围的 `PROVEN_IN_BRANCH`；由于 F156 完整 companion 与真机截图仍缺，
   整体 iOS 视觉还原继续保持 `PARTIAL`。
+
+## M10 物理自启动直接审计
+
+2026-07-29 的只读审计确认：
+
+- 当前系统自 `2026-07-20 10:43:48 +0800` 启动；
+- `~/Library/LaunchAgents/com.octoagent.gateway.plist` 的 birth/modified 分别为
+  `2026-07-04 16:19:24 +0800` 与 `2026-07-05 20:27:22 +0800`；
+- launchd 报告 `runatload`、loaded/running、pid `9258`，`octo service status`
+  报告 installed/loaded/running/ready 均通过，loopback ready 为 `200`。
+
+这些事实证明服务描述符在当前 boot 前已安装、当前服务健康，但本轮产品部署执行过
+手工 `kickstart -k`。因此无法从当前 pid 反推“登录时自动启动成功”，也不能签署
+`ATT-129-BOOT`。唯一诚实闭环是用户允许一次物理重启，登录后立即复核 launchd、
+service status 与 ready；该动作具有中断性，F158 不会自行执行。
 
 ## 证据等级
 

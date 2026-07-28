@@ -38,6 +38,7 @@
 - [x] F150 verification report 完成
 - [x] 当前 iOS 提交已推送并在 detached clean-checkout 完整 scheme 12/12 通过
 - [x] 个人 managed checkout 已部署当前运行提交，loopback/Access/CSS 字节通过
+- [ ] M10 `ATT-129-BOOT` 已由一次明确物理重启后的登录自启动与 `/ready` 证明
 - [ ] Blueprint/Milestone/Feature 状态无漂移
 - [ ] 干净检出、CI、个人部署和 completion audit 全部通过
 
