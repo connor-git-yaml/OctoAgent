@@ -48,9 +48,11 @@ test("桌面工作台保持 Claude Design 早期紧凑三栏视觉语言", async
     "claude-early-run-panel-head.png",
     {
       // 中文 fallback 字体在 macOS 与 Linux 的抗锯齿不同；419 个差异像素都落在
-      // 同一行字形边缘。只给这个 280×32 标题快照留 450 像素上限，结构、颜色、
-      // 文案与其余 13 个视觉快照继续使用严格门。
+      // 同一行字形边缘。Playwright 会取 pixels 与 ratio 两者中更严格的上限，
+      // 因此这个 280×32 标题同时声明 450 pixels / 5%；结构、颜色、文案与其余
+      // 13 个视觉快照继续使用全局 2% 严格门。
       maxDiffPixels: 450,
+      maxDiffPixelRatio: 0.05,
     },
   );
 
