@@ -72,6 +72,17 @@ manifest 已不可变回存。当前交付提交已推送、权威 CI 五个 job
 managed checkout 已更新并通过 loopback/Access 边界复验；登录后个人产品旅程、
 iOS Simulator/真机、F154-F156、主线合并与总 completion audit 仍未完成。
 
+### Phase 6：真实模型运行真值
+
+1. 用确定性 RED 证明 `octo doctor --live` 当前没有发起模型调用。
+2. 用确定性 RED 证明 preemptive OAuth refresh 失败会被 Echo fallback 掩盖。
+3. 复用唯一 ProviderRouter/config/credential store 实现 doctor live probe；不得创建
+   第二 provider client 或健康状态 registry。
+4. 将 `CredentialError` 与 401/403 统一归入 auth-fatal 边界，使任务进入
+   `FAILED`、worker `retryable=false`，同时保持非认证故障的既有 fallback。
+5. 用户完成一次重新授权后，执行真实 `doctor --live` 与真实模型任务，保存当前
+   alias/provider/model、终态、事件链和无 Echo 证据。
+
 ## 架构边界
 
 - Web：现有 `api/client → platform query/action → pure projection → UI`。

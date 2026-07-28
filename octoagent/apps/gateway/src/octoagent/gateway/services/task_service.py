@@ -79,7 +79,7 @@ from octoagent.memory import (
     MemoryPartition,
     init_memory_db,
 )
-from octoagent.provider import ProviderLLMCallError
+from octoagent.provider import is_provider_auth_error
 from octoagent.provider.models import ModelCallResult
 from octoagent.skills import SkillAuthError
 from ulid import ULID
@@ -2791,14 +2791,9 @@ class TaskService:
         # 保留错误类型和消息（供内部 freshness/orchestrator 判断），
         # 但脱敏可能泄露的凭证（api_key、token 等）。
         error_message = _sanitize_error_message(str(error))
-        # 结构化失败分类：凭证失效有两条到达路径——skill 路径抛 SkillAuthError、
-        # 直连路径（无 tool_selection → FallbackManager re-raise）抛
-        # LLMCallError(401/403)。统一标注 error_category，供 worker_runtime
-        # 判定 retryable（按 error_type 类名匹配会漏掉直连路径，Codex
-        # re-review MEDIUM）。
-        is_auth_failure = isinstance(error, SkillAuthError) or (
-            isinstance(error, ProviderLLMCallError) and error.status_code in (401, 403)
-        )
+        # 结构化失败分类：skill 认证失败、HTTP 前的凭证读取/刷新失败和
+        # Provider HTTP 401/403 都必须统一进入不可重试的 auth_error。
+        is_auth_failure = isinstance(error, SkillAuthError) or is_provider_auth_error(error)
         error_category = "auth_error" if is_auth_failure else ""
         try:
             failed_event = await self._append_event_only_with_retry(

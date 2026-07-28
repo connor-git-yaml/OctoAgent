@@ -1,4 +1,4 @@
-"""F158 Milestone closure 的精确 Web 生产权限合同。"""
+"""F158 Milestone closure 的精确 Web 与运行真值生产权限合同。"""
 
 from __future__ import annotations
 
@@ -103,6 +103,8 @@ def test_f158_exact_web_architecture_authority_is_fail_closed(tmp_path: Path) ->
     assert validator(REPO_ROOT, "F158") == [], f"{ORACLE}: canonical authority rejected"
     production = {record["path"] for record in inventory["production_paths"]}
     assert production == {
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py",
         "octoagent/frontend/src/components/shell/WorkbenchLayout.tsx",
         "octoagent/frontend/src/domains/settings/RemoteAccessSettings.css",
         "octoagent/frontend/src/domains/settings/RemoteAccessSettings.tsx",
@@ -111,7 +113,26 @@ def test_f158_exact_web_architecture_authority_is_fail_closed(tmp_path: Path) ->
         "octoagent/frontend/src/main.tsx",
         "octoagent/frontend/src/styles/claude-surfaces.css",
         "octoagent/frontend/src/styles/claude-workbench.css",
+        "octoagent/packages/provider/src/octoagent/provider/__init__.py",
+        "octoagent/packages/provider/src/octoagent/provider/exceptions.py",
+        "octoagent/packages/provider/src/octoagent/provider/fallback.py",
     }
+    checker = _load_checker()
+    checker.validate_f150_implementation_scope(REPO_ROOT, "origin/master")
+    doctor_path = "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py"
+    doctor_source = (REPO_ROOT / doctor_path).read_text(encoding="utf-8")
+    stripped = checker._strip_f158_f150_overlay(doctor_path, doctor_source)
+    assert "check_model_live" not in stripped
+    mutated_doctor = doctor_source.replace(
+        "模型返回空响应",
+        "模型返回空响应 drift",
+        1,
+    )
+    with pytest.raises(
+        checker.GateFailure,
+        match="F158_F150_AUTHORITY_OVERLAP_INVALID",
+    ):
+        checker._strip_f158_f150_overlay(doctor_path, mutated_doctor)
 
     cases: tuple[Callable[[dict[str, Any]], None], ...] = (
         lambda item: item.update(feature_id="F159"),

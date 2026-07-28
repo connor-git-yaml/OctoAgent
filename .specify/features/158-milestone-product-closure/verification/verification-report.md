@@ -65,6 +65,27 @@ runtime，也没有连接真 iPhone；F154-F156 因 F153 Verify fail-closed 尚�
 纳入完整回归后遇到宿主 OAuth refresh token 已复用；该外部状态失败没有计作回归
 通过，也没有通过重试掩盖。
 
+### 真实模型就绪与认证失败终态
+
+个人部署探针先暴露两项假绿：`octo doctor --live` 没有真实模型调用；OAuth refresh
+在 HTTP 前抛出 `CredentialExpiredError` 后进入 Echo fallback，使 task 长时间停留在
+`RUNNING`。F158 因此新增 FR-009，并取得以下确定性 RED：
+
+- preflight credential expired/missing 错误进入 Echo：2 failed
+- doctor live probe seam 缺失：2 failed
+- Task 未写 `error_category=auth_error`：1 failed
+- Worker 仍返回 `retryable=true`：1 failed
+
+实现后，doctor 复用生产 config、credential store 与 `ProviderRouter` 做一次无 Echo
+fallback 的受控调用；`CredentialError`、`AuthenticationError` 与 HTTP 401/403 由
+单一分类 seam 统一为 auth-fatal。相同选择器结果为 `6 passed`，相关 fallback、
+doctor、TaskService、WorkerRuntime 四文件回归为 `66 passed`。普通瞬时 Provider
+故障仍保持既有 fallback 与 retry 语义。
+
+这只证明代码与确定性合同闭环。当前个人 OAuth profile 仍需用户重新授权，所以
+真实 `doctor --live`、真实对话与部署事件链复验继续保持 MISSING，不以 mock/probe
+注入结果替代。
+
 ### iOS 当前可证明范围
 
 - F153 Python/Gateway behavior：PASS

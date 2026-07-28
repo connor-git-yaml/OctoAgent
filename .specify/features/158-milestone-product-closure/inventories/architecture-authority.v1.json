@@ -1,7 +1,7 @@
 {
   "version": 1,
   "feature_id": "F158",
-  "authority_status": "GOAL_ACTIVE_IMPLEMENT_OPEN_WEB_VERIFIED",
+  "authority_status": "GOAL_ACTIVE_IMPLEMENT_OPEN_WEB_VERIFIED_MODEL_TRUTH",
   "approval_date": "2026-07-28",
   "architecture_checker": "repo-scripts/check-runtime-architecture.py",
   "production_paths": [
@@ -52,6 +52,36 @@
       "state": "declared_new",
       "owner": "frontend",
       "role": "claude_design_workbench_projection"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+      "state": "existing",
+      "owner": "gateway",
+      "role": "provider_router_live_readiness_probe"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py",
+      "state": "existing",
+      "owner": "gateway",
+      "role": "authentication_failure_terminalization"
+    },
+    {
+      "path": "octoagent/packages/provider/src/octoagent/provider/exceptions.py",
+      "state": "existing",
+      "owner": "provider",
+      "role": "single_provider_auth_failure_classifier"
+    },
+    {
+      "path": "octoagent/packages/provider/src/octoagent/provider/fallback.py",
+      "state": "existing",
+      "owner": "provider",
+      "role": "credential_failure_echo_rejection"
+    },
+    {
+      "path": "octoagent/packages/provider/src/octoagent/provider/__init__.py",
+      "state": "existing",
+      "owner": "provider",
+      "role": "auth_failure_classifier_public_export"
     }
   ],
   "test_paths": [
@@ -62,6 +92,10 @@
     "octoagent/frontend/e2e/remote-access-web.spec.ts",
     "octoagent/frontend/e2e/visual-claude-baseline.spec.ts",
     "octoagent/frontend/e2e/visual-claude-surfaces.spec.ts",
+    "octoagent/apps/gateway/tests/cli/test_doctor.py",
+    "octoagent/apps/gateway/tests/test_task_service_hardening.py",
+    "octoagent/apps/gateway/tests/test_worker_runtime.py",
+    "octoagent/packages/provider/tests/test_fallback.py",
     "octoagent/tests/gate/test_f158_architecture_authority.py"
   ],
   "artifact_paths": [
@@ -74,12 +108,11 @@
     ".specify/features/158-milestone-product-closure/inventories/e2e-visual-matrix.md",
     ".specify/features/158-milestone-product-closure/inventories/architecture-authority.v1.json",
     ".specify/features/158-milestone-product-closure/audit/milestone-delivery-audit.md",
-    ".specify/features/158-milestone-product-closure/evidence/web/2026-07-28/verification-report.md"
+    ".specify/features/158-milestone-product-closure/evidence/web/2026-07-28/verification-report.md",
+    ".specify/features/158-milestone-product-closure/verification/verification-report.md"
   ],
   "forbidden_prefixes": [
-    "octoagent/apps/gateway/",
-    "octoagent/apps/ios/",
-    "octoagent/packages/"
+    "octoagent/apps/ios/"
   ],
   "forbidden_terms": [
     "WKWebView",
@@ -88,5 +121,5 @@
     "current Web visual baseline",
     "maojiwang.work"
   ],
-  "approved_scope_sha256": "8c6c15ad44923f0b93dc8639a184f5742374932ff50b0ff50ef3c0a265a77b44"
+  "approved_scope_sha256": "64d93ad9ef4214fdb36c7a17538f35eee2acd2fef5a00695ec1340b79717afc8"
 }

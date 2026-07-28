@@ -118,6 +118,23 @@ MUST 将 F150 已有 remote-access adapter/view-model 接入 F149 Settings compo
 - main 分支提交、权威 CI、个人部署验证；
 - requirement-by-requirement completion audit。
 
+### FR-009 真实模型就绪与失败终态
+
+最终个人部署验收 MUST 使用当前配置的 ProviderRouter 发起一次受控真实模型调用。
+`octo doctor --live` MUST 包含该调用并明确报告所用 alias/provider/model；仅检查凭证
+文件存在、路由可解析、Telegram readiness 或 Gateway `/ready` 不得冒充模型可用。
+
+缺失、过期、被撤销或 refresh 失败的凭证 MUST fail closed：
+
+- 不得降级为 Echo 并显示伪成功；
+- 用户任务必须在一次失败处理内进入 `FAILED` 终态，不能留在 `RUNNING`；
+- `MODEL_CALL_FAILED.error_category` 必须为 `auth_error`；
+- worker 结果必须 `retryable=false`，并提供重新授权指引；
+- `doctor --live` 必须返回 blocking failure 和非零退出。
+
+普通瞬态 provider/transport 故障仍可按既有 fallback/retry 合同处理，不得因本要求被
+一概改成认证失败。
+
 ## 非目标与禁止项
 
 - 禁止用手机浏览器或 WebView 冒充 iOS App，因为手机产品已明确为原生 iOS。
@@ -137,3 +154,5 @@ MUST 将 F150 已有 remote-access adapter/view-model 接入 F149 Settings compo
 6. Claude Design 云端只保留通过审查的最终方向，后期不佳方案有明确 superseded 记录。
 7. Blueprint/Milestone 不再存在“文档完成但产品不可达”的状态漂移。
 8. 权威 CI 与个人部署验证通过，且正式 verification report 完整。
+9. `octo doctor --live` 与个人部署真实对话均证明真实 provider 可用；认证失败回归
+   证明任务快速进入 `FAILED` 且不会 Echo 假绿。

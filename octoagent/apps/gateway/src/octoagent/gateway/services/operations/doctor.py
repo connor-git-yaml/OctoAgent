@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,9 +38,16 @@ from octoagent.gateway.services.operations.service_manager import (
 )
 from octoagent.gateway.services.operations.sleep_probe import SleepRisk, probe_sleep_risk
 from octoagent.gateway.services.operations.telegram_verifier import TelegramOnboardingVerifier
+from octoagent.provider import (
+    ProviderRouter,
+    ProviderRouterMessageAdapter,
+    is_provider_auth_error,
+)
 from octoagent.provider.auth.store import CredentialStore
 
 log = structlog.get_logger()
+
+LiveModelProbe = Callable[[Path], Awaitable[tuple[str, str, str]]]
 
 
 @dataclass(slots=True)
@@ -64,6 +71,7 @@ class DoctorRunner:
         telegram_verifier: TelegramOnboardingVerifier | None = None,
         service_manager_factory: Callable[[Path], ServiceManager] | None = None,
         sleep_risk_probe: Callable[[], SleepRisk] | None = None,
+        live_model_probe: LiveModelProbe | None = None,
     ) -> None:
         if project_root is None:
             self._root = Path.cwd()
@@ -80,6 +88,7 @@ class DoctorRunner:
             lambda _root: build_service_manager(resolve_instance_root())
         )
         self._sleep_risk_probe = sleep_risk_probe or probe_sleep_risk
+        self._live_model_probe = live_model_probe or self._probe_live_model
 
     def _has_yaml_runtime_config(self) -> bool:
         return (self._root / "octoagent.yaml").exists()
@@ -134,6 +143,7 @@ class DoctorRunner:
 
         # --live 检查
         if live:
+            checks.append(await self.check_model_live())
             checks.append(await self.check_telegram_readiness())
 
         # 计算整体状态
@@ -143,6 +153,77 @@ class DoctorRunner:
             checks=checks,
             overall_status=overall,
             timestamp=datetime.now(tz=UTC),
+        )
+
+    async def _probe_live_model(self, project_root: Path) -> tuple[str, str, str]:
+        """通过生产 ProviderRouter 做一次真实、无 Echo fallback 的模型调用。"""
+        from octoagent.gateway.services.config.config_wizard import load_config
+        from octoagent.gateway.services.config.provider_route_resolver import (
+            resolve_provider_route,
+        )
+
+        config = load_config(project_root)
+        if config is None:
+            raise RuntimeError("octoagent.yaml 不存在")
+        alias = "cheap" if "cheap" in config.model_aliases else "main"
+        if alias not in config.model_aliases:
+            raise RuntimeError("缺少可用于 live probe 的 main/cheap model alias")
+
+        router = ProviderRouter(
+            route_resolver=lambda requested_alias: resolve_provider_route(
+                config,
+                requested_alias,
+            ),
+            credential_store=self._store,
+        )
+        try:
+            result = await ProviderRouterMessageAdapter(router).complete(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "这是 OctoAgent readiness 探针。不要调用工具。",
+                    },
+                    {
+                        "role": "user",
+                        "content": "只回复 OCTOAGENT_DOCTOR_OK",
+                    },
+                ],
+                model_alias=alias,
+            )
+        finally:
+            await router.aclose()
+        if not result.content.strip():
+            raise RuntimeError("模型返回空响应")
+        return alias, result.provider, result.model_name
+
+    async def check_model_live(self) -> CheckResult:
+        """执行真实模型调用；失败是 ``doctor --live`` 的 REQUIRED 阻断。"""
+        try:
+            alias, provider, model = await self._live_model_probe(self._root)
+        except Exception as exc:
+            auth_failure = is_provider_auth_error(exc)
+            fix_hint = (
+                "重新授权当前 Provider 凭证后，再运行 octo doctor --live"
+                if auth_failure
+                else "检查 Provider 配置与网络连通性后，再运行 octo doctor --live"
+            )
+            log.warning(
+                "doctor_model_live_failed",
+                error_type=type(exc).__name__,
+                auth_failure=auth_failure,
+            )
+            return CheckResult(
+                name="model_live",
+                status=CheckStatus.FAIL,
+                level=CheckLevel.REQUIRED,
+                message=f"真实模型调用失败（{type(exc).__name__}）",
+                fix_hint=fix_hint,
+            )
+        return CheckResult(
+            name="model_live",
+            status=CheckStatus.PASS,
+            level=CheckLevel.REQUIRED,
+            message=f"真实模型调用成功：alias={alias}, provider={provider}, model={model}",
         )
 
     async def check_python_version(self) -> CheckResult:

@@ -2,6 +2,19 @@
 
 - 2026-07-28：用户建立跨 Milestone Goal，要求重新核对交付、启动 Web/iOS、逐场景
   验收、跑通功能与视觉 E2E，并将 Claude Design 后期不佳方案改回早期方向。
+- 2026-07-28：个人部署真实 LLM smoke 暴露 OpenAI OAuth
+  `refresh_token_reused`；同一次探针中 Echo fallback 被激活且任务在 180 秒内仍为
+  `RUNNING`。随后只读复核确认 `octo doctor --live` 实际只追加 Telegram readiness，
+  没有模型调用。两项均作为 FR-009/T039-T045 真缺口进入 F158，`/ready` 与 doctor
+  exit 0 不再计作模型可用证据。
+- 2026-07-28：FR-009 先取得 6 个确定性 RED：两个 preflight credential 异常错误
+  激活 Echo、两个 doctor live seam 不存在、Task 的 `error_category` 为空、Worker
+  仍返回 `retryable=true`。GREEN 复用生产 `ProviderRouter`/config/credential store
+  做无 fallback 的受控模型探针，并以唯一 `is_provider_auth_error` 统一
+  `CredentialError`、`AuthenticationError` 与 HTTP 401/403。相同 6 节点随后
+  `6 passed`，相关四文件回归 `66 passed`；普通瞬态错误的既有 fallback/retry
+  回归保持。个人部署 T045 仍等待用户重新授权，不把 deterministic seam 当成真实
+  provider 成功。
 - 2026-07-28：确认当前活动 Goal 已建立。
 - 2026-07-28：从干净 `origin/master=db3214ff` 开始审计，未在含未跟踪截图的旧 detached
   worktree 上修改。

@@ -230,6 +230,37 @@ class TestWorkerRuntime:
 
         await store_group.close()
 
+    async def test_preflight_credential_failure_is_terminal_and_not_retryable(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        """HTTP 前 refresh 失败不得 Echo 假绿或留下 RUNNING task。"""
+        from octoagent.provider.exceptions import CredentialExpiredError
+
+        store_group, sse_hub, service, envelope = await _create_task_with_envelope(
+            tmp_path, "f-credfail-worker-preflight-001"
+        )
+
+        class PreflightAuthBrokenLLMService:
+            async def call(self, prompt_or_messages, model_alias=None, **kwargs):
+                raise CredentialExpiredError("refresh_token_reused")
+
+        runtime = WorkerRuntime(
+            store_group=store_group,
+            sse_hub=sse_hub,
+            runtime_services=runtime_service_fixture(PreflightAuthBrokenLLMService()).bundle,
+            config=WorkerRuntimeConfig(docker_mode="disabled"),
+        )
+        result = await runtime.run(envelope, worker_id="worker.test")
+
+        assert result.status == TaskStatus.FAILED
+        assert result.retryable is False
+        task = await service.get_task(envelope.task_id)
+        assert task is not None
+        assert task.status == TaskStatus.FAILED
+
+        await store_group.close()
+
     async def test_generic_failure_keeps_worker_result_retryable(self, tmp_path: Path) -> None:
         """回归护栏：非 auth 的普通失败保持 retryable=True 原语义。"""
         store_group, sse_hub, _, envelope = await _create_task_with_envelope(

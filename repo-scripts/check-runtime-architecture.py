@@ -226,10 +226,10 @@ FEATURE_AUTHORITIES = MappingProxyType(
                     "inventories/architecture-authority.v1.json"
                 ),
                 "scope_sha256": (
-                    "8c6c15ad44923f0b93dc8639a184f5742374932ff50b0ff50ef3c0a265a77b44"
+                    "64d93ad9ef4214fdb36c7a17538f35eee2acd2fef5a00695ec1340b79717afc8"
                 ),
-                "status": "GOAL_ACTIVE_IMPLEMENT_OPEN_WEB_VERIFIED",
-                "owners": frozenset(("frontend",)),
+                "status": "GOAL_ACTIVE_IMPLEMENT_OPEN_WEB_VERIFIED_MODEL_TRUTH",
+                "owners": frozenset(("frontend", "gateway", "provider")),
                 "artifact_prefix": (".specify/features/158-milestone-product-closure/"),
                 "gate_test": (
                     "octoagent/tests/gate/test_f158_architecture_authority.py"
@@ -1524,6 +1524,21 @@ F153_F150_OVERLAP_PATHS = frozenset(
         "octoagent/apps/gateway/src/octoagent/gateway/main.py",
     }
 )
+F158_F150_OVERLAP_PATHS = frozenset(
+    {
+        "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+    }
+)
+F158_DOCTOR_METHOD_AST_SHA256 = MappingProxyType(
+    {
+        "_probe_live_model": (
+            "ed99420b2f5ada3f927ed5ef1c636182ea6a13c26b56074ec095e030e396a9e3"
+        ),
+        "check_model_live": (
+            "4dc3c71bf3e6fd56b9ca1be6bc4186887bcc7b619ba84d3e3135dcf889609f85"
+        ),
+    }
+)
 F149_T010_WEB_CONTRACT_PATH = (
     "octoagent/apps/gateway/src/octoagent/gateway/routes/f149_web_contract.py"
 )
@@ -2583,6 +2598,7 @@ def _f153_remove_import_alias(
     level: int,
     name: str,
     detail: str,
+    error_code: str = "F153_F150_AUTHORITY_OVERLAP_INVALID",
 ) -> None:
     matches = [
         (statement_index, alias_index)
@@ -2595,7 +2611,7 @@ def _f153_remove_import_alias(
     ]
     require(
         len(matches) == 1,
-        "F153_F150_AUTHORITY_OVERLAP_INVALID",
+        error_code,
         detail,
     )
     statement_index, alias_index = matches[0]
@@ -2610,11 +2626,13 @@ def _f153_remove_exact_statement(
     body: list[ast.stmt],
     source: str,
     detail: str,
+    *,
+    error_code: str = "F153_F150_AUTHORITY_OVERLAP_INVALID",
 ) -> None:
     expected = ast.parse(source).body
     require(
         len(expected) == 1,
-        "F153_F150_AUTHORITY_OVERLAP_INVALID",
+        error_code,
         detail,
     )
     expected_dump = ast.dump(expected[0], include_attributes=False)
@@ -2625,7 +2643,7 @@ def _f153_remove_exact_statement(
     ]
     require(
         len(matches) == 1,
-        "F153_F150_AUTHORITY_OVERLAP_INVALID",
+        error_code,
         detail,
     )
     body.pop(matches[0])
@@ -2635,6 +2653,8 @@ def _f153_class_method(
     tree: ast.Module,
     class_name: str,
     method_name: str,
+    *,
+    error_code: str = "F153_F150_AUTHORITY_OVERLAP_INVALID",
 ) -> ast.FunctionDef | ast.AsyncFunctionDef:
     classes = [
         node
@@ -2643,7 +2663,7 @@ def _f153_class_method(
     ]
     require(
         len(classes) == 1,
-        "F153_F150_AUTHORITY_OVERLAP_INVALID",
+        error_code,
         class_name,
     )
     methods = [
@@ -2654,7 +2674,7 @@ def _f153_class_method(
     ]
     require(
         len(methods) == 1,
-        "F153_F150_AUTHORITY_OVERLAP_INVALID",
+        error_code,
         f"{class_name}.{method_name}",
     )
     return methods[0]
@@ -2664,6 +2684,8 @@ def _f153_require_no_overlay_refs(
     tree: ast.Module,
     names: frozenset[str],
     detail: str,
+    *,
+    error_code: str = "F153_F150_AUTHORITY_OVERLAP_INVALID",
 ) -> None:
     references = [
         node
@@ -2677,7 +2699,7 @@ def _f153_require_no_overlay_refs(
     ]
     require(
         not references,
-        "F153_F150_AUTHORITY_OVERLAP_INVALID",
+        error_code,
         detail,
     )
 
@@ -2892,6 +2914,163 @@ def _strip_f153_f150_overlay(relative: str, current: str) -> str:
     return ast.unparse(tree)
 
 
+def _f158_remove_init_overlay(tree: ast.Module) -> None:
+    error_code = "F158_F150_AUTHORITY_OVERLAP_INVALID"
+    init = _f153_class_method(
+        tree,
+        "DoctorRunner",
+        "__init__",
+        error_code=error_code,
+    )
+    expected = ast.parse(
+        "def f(*, live_model_probe: LiveModelProbe | None = None): pass"
+    ).body[0]
+    assert isinstance(expected, ast.FunctionDef)
+    matches = [
+        index
+        for index, argument in enumerate(init.args.kwonlyargs)
+        if ast.dump(argument, include_attributes=False)
+        == ast.dump(expected.args.kwonlyargs[0], include_attributes=False)
+        and ast.dump(init.args.kw_defaults[index], include_attributes=False)
+        == ast.dump(expected.args.kw_defaults[0], include_attributes=False)
+    ]
+    require(len(matches) == 1, error_code, "DoctorRunner live_model_probe argument")
+    index = matches[0]
+    init.args.kwonlyargs.pop(index)
+    init.args.kw_defaults.pop(index)
+    _f153_remove_exact_statement(
+        init.body,
+        "self._live_model_probe = live_model_probe or self._probe_live_model",
+        "DoctorRunner live model probe composition",
+        error_code=error_code,
+    )
+
+
+def _f158_remove_doctor_method(tree: ast.Module, method_name: str) -> None:
+    error_code = "F158_F150_AUTHORITY_OVERLAP_INVALID"
+    method = _f153_class_method(
+        tree,
+        "DoctorRunner",
+        method_name,
+        error_code=error_code,
+    )
+    digest = hashlib.sha256(ast.unparse(method).encode("utf-8")).hexdigest()
+    require(
+        digest == F158_DOCTOR_METHOD_AST_SHA256[method_name],
+        error_code,
+        f"DoctorRunner.{method_name} semantic drift: {digest}",
+    )
+    doctor = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "DoctorRunner"
+    )
+    doctor.body.remove(method)
+
+
+def _strip_f158_doctor_overlay(tree: ast.Module) -> None:
+    error_code = "F158_F150_AUTHORITY_OVERLAP_INVALID"
+    for module, name in (
+        ("collections.abc", "Awaitable"),
+        ("octoagent.provider", "ProviderRouter"),
+        ("octoagent.provider", "ProviderRouterMessageAdapter"),
+        ("octoagent.provider", "is_provider_auth_error"),
+    ):
+        _f153_remove_import_alias(
+            tree.body,
+            module=module,
+            level=0,
+            name=name,
+            detail=f"DoctorRunner {name} import",
+            error_code=error_code,
+        )
+    _f153_remove_exact_statement(
+        tree.body,
+        "LiveModelProbe = Callable[[Path], Awaitable[tuple[str, str, str]]]",
+        "DoctorRunner LiveModelProbe type",
+        error_code=error_code,
+    )
+    _f158_remove_init_overlay(tree)
+    run = _f153_class_method(
+        tree,
+        "DoctorRunner",
+        "run_all_checks",
+        error_code=error_code,
+    )
+    live_branches = [
+        statement
+        for statement in run.body
+        if isinstance(statement, ast.If)
+        and isinstance(statement.test, ast.Name)
+        and statement.test.id == "live"
+    ]
+    require(
+        len(live_branches) == 1,
+        error_code,
+        "DoctorRunner live branch",
+    )
+    _f153_remove_exact_statement(
+        live_branches[0].body,
+        "checks.append(await self.check_model_live())",
+        "DoctorRunner model live invocation",
+        error_code=error_code,
+    )
+    for method_name in F158_DOCTOR_METHOD_AST_SHA256:
+        _f158_remove_doctor_method(tree, method_name)
+    _f153_require_no_overlay_refs(
+        tree,
+        frozenset(
+            {
+                "Awaitable",
+                "LiveModelProbe",
+                "ProviderRouter",
+                "ProviderRouterMessageAdapter",
+                "_live_model_probe",
+                "_probe_live_model",
+                "check_model_live",
+                "is_provider_auth_error",
+                "live_model_probe",
+            }
+        ),
+        "DoctorRunner F158 overlay residue",
+        error_code=error_code,
+    )
+
+
+def _strip_f158_f150_overlay(relative: str, current: str) -> str:
+    require(
+        relative in F158_F150_OVERLAP_PATHS,
+        "F158_F150_AUTHORITY_OVERLAP_INVALID",
+        relative,
+    )
+    try:
+        tree = ast.parse(current)
+    except SyntaxError as exc:
+        fail("F158_F150_AUTHORITY_OVERLAP_INVALID", str(exc))
+    _strip_f158_doctor_overlay(tree)
+    return ast.unparse(tree)
+
+
+def _f153_overlay_in_baseline(relative: str, baseline: str) -> bool:
+    markers = {
+        "config_schema.py": "MobileDeviceAccessConfig",
+        "octo_harness.py": "mobile_device_access_manifest",
+        "doctor.py": "check_mobile_device_access",
+        "main.py": "MobileDeviceAccessMiddleware",
+    }
+    marker = next(
+        (value for suffix, value in markers.items() if relative.endswith(suffix)),
+        "",
+    )
+    return bool(marker and marker in baseline)
+
+
+def _f158_overlay_in_baseline(relative: str, baseline: str) -> bool:
+    return relative.endswith("/services/operations/doctor.py") and (
+        "check_model_live" in baseline
+    )
+
+
 def _validate_f150_authority_path(
     repo: Path,
     base_ref: str,
@@ -2899,6 +3078,7 @@ def _validate_f150_authority_path(
     contract: tuple[Any, ...],
     *,
     allow_f153_overlay: bool = False,
+    allow_f158_overlay: bool = False,
 ) -> None:
     kind, name, allowed = contract
     baseline = _f150_source_at_ref(repo, base_ref, relative)
@@ -2909,9 +3089,11 @@ def _validate_f150_authority_path(
         validate_f153_security_surface(relative, current, baseline)
     else:
         validate_f150_security_surface(relative, current, baseline)
-    structural_current = (
-        _strip_f153_f150_overlay(relative, current) if allow_f153_overlay else current
-    )
+    structural_current = current
+    if allow_f153_overlay and not _f153_overlay_in_baseline(relative, baseline):
+        structural_current = _strip_f153_f150_overlay(relative, structural_current)
+    if allow_f158_overlay and not _f158_overlay_in_baseline(relative, baseline):
+        structural_current = _strip_f158_f150_overlay(relative, structural_current)
     if kind == "class":
         _validate_f150_class(baseline, structural_current, str(name), allowed)
     elif kind in {"module", "new-module"}:
@@ -2923,6 +3105,66 @@ def _validate_f150_authority_path(
         )
     else:
         _validate_f150_typescript(baseline, structural_current, allowed)
+
+
+def _validate_f149_early_authority_path(
+    repo: Path,
+    base_ref: str,
+    relative: str,
+    *,
+    t010_active: bool,
+    t011_active: bool,
+) -> bool:
+    if t010_active and relative in F149_T010_AUTHORITY_PATHS:
+        _validate_f149_t010_authority_path(repo, base_ref, relative)
+        return True
+    if t011_active and relative in F149_T011_AUTHORITY_PATHS:
+        _validate_f149_t011_authority_path(repo, base_ref, relative)
+        return True
+    if relative not in F149_T015_GENERATED_CONTRACT_PATHS:
+        return False
+    path = repo / relative
+    require(path.is_file(), "F150_PROTECTED_SEMANTIC_DRIFT", relative)
+    _validate_f149_t015_generated_contract(
+        relative,
+        _f150_source_at_ref(repo, base_ref, relative),
+        path.read_text(encoding="utf-8"),
+    )
+    return True
+
+
+def _validate_f149_frontend_authority_path(
+    repo: Path,
+    base_ref: str,
+    relative: str,
+) -> bool:
+    path = repo / relative
+    allowed = F149_T020_FRONTEND_AUTHORITY_PATHS.get(
+        relative
+    ) or F149_T021_FRONTEND_AUTHORITY_PATHS.get(relative)
+    if allowed is not None:
+        require(path.is_file(), "F150_PROTECTED_SEMANTIC_DRIFT", relative)
+        baseline = _f150_source_at_ref(repo, base_ref, relative)
+        current = path.read_text(encoding="utf-8")
+        validate_f150_security_surface(relative, current, baseline)
+        _validate_f150_typescript(baseline, current, allowed)
+        return True
+    specialized = (
+        (F149_T022_FRONTEND_AUTHORITY_PATHS, _validate_f149_t022_frontend_path),
+        (F149_T023_FRONTEND_AUTHORITY_PATHS, _validate_f149_t023_frontend_path),
+    )
+    for mapping, validator in specialized:
+        allowed = mapping.get(relative)
+        if allowed is not None:
+            require(path.is_file(), "F150_PROTECTED_SEMANTIC_DRIFT", relative)
+            validator(
+                relative,
+                _f150_source_at_ref(repo, base_ref, relative),
+                path.read_text(encoding="utf-8"),
+                allowed,
+            )
+            return True
+    return False
 
 
 def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
@@ -2944,80 +3186,15 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
         ) or relative.startswith("octoagent/frontend/src/")
         if not production:
             continue
-        if f149_t010_active and relative in F149_T010_AUTHORITY_PATHS:
-            _validate_f149_t010_authority_path(repo, base_ref, relative)
+        if _validate_f149_early_authority_path(
+            repo,
+            base_ref,
+            relative,
+            t010_active=f149_t010_active,
+            t011_active=f149_t011_active,
+        ):
             continue
-        if f149_t011_active and relative in F149_T011_AUTHORITY_PATHS:
-            _validate_f149_t011_authority_path(repo, base_ref, relative)
-            continue
-        if relative in F149_T015_GENERATED_CONTRACT_PATHS:
-            path = repo / relative
-            require(
-                path.is_file(),
-                "F150_PROTECTED_SEMANTIC_DRIFT",
-                relative,
-            )
-            _validate_f149_t015_generated_contract(
-                relative,
-                _f150_source_at_ref(repo, base_ref, relative),
-                path.read_text(encoding="utf-8"),
-            )
-            continue
-        f149_t020_allowed = F149_T020_FRONTEND_AUTHORITY_PATHS.get(relative)
-        if f149_t020_allowed is not None:
-            path = repo / relative
-            require(
-                path.is_file(),
-                "F150_PROTECTED_SEMANTIC_DRIFT",
-                relative,
-            )
-            baseline = _f150_source_at_ref(repo, base_ref, relative)
-            current = path.read_text(encoding="utf-8")
-            validate_f150_security_surface(relative, current, baseline)
-            _validate_f150_typescript(baseline, current, f149_t020_allowed)
-            continue
-        f149_t021_allowed = F149_T021_FRONTEND_AUTHORITY_PATHS.get(relative)
-        if f149_t021_allowed is not None:
-            path = repo / relative
-            require(
-                path.is_file(),
-                "F150_PROTECTED_SEMANTIC_DRIFT",
-                relative,
-            )
-            baseline = _f150_source_at_ref(repo, base_ref, relative)
-            current = path.read_text(encoding="utf-8")
-            validate_f150_security_surface(relative, current, baseline)
-            _validate_f150_typescript(baseline, current, f149_t021_allowed)
-            continue
-        f149_t022_allowed = F149_T022_FRONTEND_AUTHORITY_PATHS.get(relative)
-        if f149_t022_allowed is not None:
-            path = repo / relative
-            require(
-                path.is_file(),
-                "F150_PROTECTED_SEMANTIC_DRIFT",
-                relative,
-            )
-            _validate_f149_t022_frontend_path(
-                relative,
-                _f150_source_at_ref(repo, base_ref, relative),
-                path.read_text(encoding="utf-8"),
-                f149_t022_allowed,
-            )
-            continue
-        f149_t023_allowed = F149_T023_FRONTEND_AUTHORITY_PATHS.get(relative)
-        if f149_t023_allowed is not None:
-            path = repo / relative
-            require(
-                path.is_file(),
-                "F150_PROTECTED_SEMANTIC_DRIFT",
-                relative,
-            )
-            _validate_f149_t023_frontend_path(
-                relative,
-                _f150_source_at_ref(repo, base_ref, relative),
-                path.read_text(encoding="utf-8"),
-                f149_t023_allowed,
-            )
+        if _validate_f149_frontend_authority_path(repo, base_ref, relative):
             continue
         contract = F150_AUTHORITY_PATHS.get(relative)
         path = repo / relative
@@ -3054,8 +3231,11 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
                 relative,
             )
             continue
-        allow_f153_overlay = (
-            relative in f153_paths and relative in F153_F150_OVERLAP_PATHS
+        allow_f153_overlay = relative in f153_paths.intersection(
+            F153_F150_OVERLAP_PATHS
+        )
+        allow_f158_overlay = relative in f158_paths.intersection(
+            F158_F150_OVERLAP_PATHS
         )
         _validate_f150_authority_path(
             repo,
@@ -3063,6 +3243,7 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
             relative,
             contract,
             allow_f153_overlay=allow_f153_overlay,
+            allow_f158_overlay=allow_f158_overlay,
         )
 
 

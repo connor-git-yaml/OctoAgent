@@ -131,6 +131,18 @@ class TrackingTelegramVerifier:
         )()
 
 
+class TrackingLiveModelProbe:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.calls: list[Path] = []
+        self.error = error
+
+    async def __call__(self, project_root: Path) -> tuple[str, str, str]:
+        self.calls.append(project_root)
+        if self.error is not None:
+            raise self.error
+        return ("cheap", "openai-codex", "gpt-5.5")
+
+
 class TestDoctorChecks:
     """个别检查项测试"""
 
@@ -360,6 +372,44 @@ class TestDoctorOverall:
         assert verifier.readiness_calls == 1
         readiness = next(check for check in report.checks if check.name == "telegram_readiness")
         assert readiness.status == CheckStatus.PASS
+
+    async def test_run_all_checks_live_executes_real_model_probe(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        probe = TrackingLiveModelProbe()
+        runner = DoctorRunner(project_root=tmp_path, live_model_probe=probe)
+
+        offline_report = await runner.run_all_checks(live=False)
+        live_report = await runner.run_all_checks(live=True)
+
+        assert probe.calls == [tmp_path]
+        assert all(check.name != "model_live" for check in offline_report.checks)
+        model_live = next(check for check in live_report.checks if check.name == "model_live")
+        assert model_live.status == CheckStatus.PASS
+        assert model_live.level == CheckLevel.REQUIRED
+        assert "cheap" in model_live.message
+        assert "openai-codex" in model_live.message
+        assert "gpt-5.5" in model_live.message
+
+    async def test_model_live_credential_failure_is_blocking(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from octoagent.provider.exceptions import CredentialExpiredError
+
+        probe = TrackingLiveModelProbe(
+            error=CredentialExpiredError("refresh_token_reused"),
+        )
+        runner = DoctorRunner(project_root=tmp_path, live_model_probe=probe)
+
+        report = await runner.run_all_checks(live=True)
+
+        model_live = next(check for check in report.checks if check.name == "model_live")
+        assert model_live.status == CheckStatus.FAIL
+        assert model_live.level == CheckLevel.REQUIRED
+        assert "重新授权" in model_live.fix_hint
+        assert report.overall_status == CheckStatus.FAIL
 
     async def test_run_all_checks_does_not_crash_on_invalid_telegram_config(
         self,

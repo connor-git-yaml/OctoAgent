@@ -38,3 +38,14 @@
 - [x] F150 verification report 完成
 - [ ] Blueprint/Milestone/Feature 状态无漂移
 - [ ] 干净检出、CI、个人部署和 completion audit 全部通过
+
+## 真实模型运行真值
+
+- [x] `octo doctor --live` 真实发起 ProviderRouter 模型调用
+- [x] doctor live 成功报告 alias/provider/model，失败为 blocking 非零退出
+- [x] credential/refresh 失败不进入 Echo fallback
+- [x] 认证失败 Task 在同一处理链进入 `FAILED`
+- [x] 认证失败 `MODEL_CALL_FAILED.error_category=auth_error`
+- [x] 认证失败 Worker `retryable=false`
+- [x] 非认证瞬态错误仍保持既有 fallback/retry 语义
+- [ ] 个人部署重新授权后的 doctor 与真实模型任务通过

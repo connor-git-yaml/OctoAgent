@@ -59,3 +59,13 @@
 - [ ] **T037** 干净检出、权威 CI、个人部署复验（提交/CI/当前 managed checkout
   已通过；登录后 SPA/API/SSE 与真实模型对话仍缺）
 - [ ] **T038** 提交、推送、合并并确认主线真实交付
+
+## Phase 5：真实模型运行真值
+
+- [x] **T039 [RED]** `doctor --live` 必须真实调用 ProviderRouter；认证失败必须 blocking
+- [x] **T040 [RED]** preemptive OAuth/credential failure 不得进入 Echo fallback
+- [x] **T041 [RED]** credential failure 必须把 Task/Worker 推进 FAILED 且不可重试
+- [x] **T042 [GREEN]** 复用现有 config/router/store 实现 doctor live model probe
+- [x] **T043 [GREEN]** 统一 credential/401/403 auth-fatal 分类与任务终态
+- [x] **T044 [REFACTOR]** 收敛 auth 分类与 probe seams，不新增第二 provider 路径
+- [ ] **T045 [LIVE VERIFY]** 重新授权后运行真实 doctor、真实对话与终态/事件链审计
