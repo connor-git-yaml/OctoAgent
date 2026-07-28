@@ -42,12 +42,14 @@
 
 - [x] **T026** 创建并通过 F152 Privacy/Identity/Ingestion Feature Gate；production
   Implement 仍等待 F152 T001 authority，F153 仍关闭
-- [ ] **T027** 创建并通过 F153 真机 transport/device-proof Feature（T001-T011/T016
-  已完成；T012 局部通过，Simulator/Cloudflare live/真机仍阻断）
+- [ ] **T027** 创建并通过 F153 真机 transport/device-proof Feature
+  （T001-T013/T016/T017 已完成；Simulator registration 功能/视觉已通过，
+  Cloudflare live/真机/Verify 仍阻断）
 - [ ] **T028** 创建并通过 F154 HealthKit Feature
 - [ ] **T029** 创建并通过 F155 EventKit 决策门与 Feature
 - [ ] **T030** 创建并通过 F156 SwiftUI Native Companion Feature
-- [ ] **T031 [SIMULATOR]** 原生 iOS 冷启动、导航、状态与视觉回归
+- [ ] **T031 [SIMULATOR]** 原生 iOS 冷启动、导航、状态与视觉回归（F153 registration
+  六态、a11y、AXXXL、Reduce Motion 与视觉基线已通过；F154-F156 完整产品仍缺）
 - [ ] **T032 [DEVICE]** 注册、Keychain、轮换、撤销、断网恢复和 Apple 权限真机验收
 
 ## Phase 4：设计云端与交付
@@ -56,8 +58,8 @@
 - [x] **T034** 导出最终不可变 `.dc.html`、frame 与 superseded manifest
 - [ ] **T035** 双端场景、功能、视觉、无障碍与安全 completion audit
 - [ ] **T036** 同步 Blueprint、Milestone 与所有 Feature verification reports
-- [ ] **T037** 干净检出、权威 CI、个人部署复验（提交/CI/当前 managed checkout
-  已通过；登录后 SPA/API/SSE 与真实模型对话仍缺）
+- [ ] **T037** 干净检出、权威 CI、个人部署复验（上一批 Web 提交/CI/managed
+  checkout 已通过；当前 iOS 提交/CI、登录后 SPA/API/SSE 与真实模型对话仍缺）
 - [ ] **T038** 提交、推送、合并并确认主线真实交付
 
 ## Phase 5：真实模型运行真值

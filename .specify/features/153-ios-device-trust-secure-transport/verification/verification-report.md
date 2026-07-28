@@ -5,115 +5,80 @@
 - 日期：2026-07-28
 - 状态：`PARTIAL`
 - `GATE_VERIFY=false`
-- T001-T011、T016、T017 已完成；
-- T012 的 Python/Gateway focused regression、iPhoneOS App/XCTest target build 与
-  source/bundle secret scan 已通过；
-- T012 的 Swift XCTest 行为执行、T013 Simulator、T014 Cloudflare mobile live、
-  T015 真机验收与 T018 最终 Verify 未完成；
-- F154 HealthKit production 保持关闭。
+- T001-T013、T016、T017 已完成；
+- Swift unit、Simulator 冷启动、注册六态、视觉 snapshot、Dynamic Type、
+  accessibility tree 与 Reduce Motion 已取得真实运行证据；
+- T014 Cloudflare mobile live、T015 真 iPhone 与 T018 最终 Verify 未完成；
+- F154 HealthKit production 继续 fail closed。
 
-本报告明确区分“iPhoneOS 编译成功”和“App 已在 iPhone/Simulator 启动”。当前没有
-任何 App 冷启动、Swift XCTest 执行、原生 UI 交互或 iOS 视觉回归证据。
+本报告只把 F153 registration/device-trust 范围提升为 Simulator `PROVEN`。它不把
+Simulator 当成 Secure Enclave/ThisDeviceOnly Keychain 真机证据，也不把 F153 的
+注册页冒充 F156 最终 companion 产品。
 
 ## 当前环境
 
 - Xcode：`26.6 (17F113)`；
-- iPhoneOS SDK：`26.5`；
-- CoreSimulator：`1051.54.0`；
-- Xcode 所需 CoreSimulator build：`1051.55.0`；
-- 已安装 Simulator runtime：`0`；
-- 已连接 iPhone：`0`；
-- runtime 安装会触发 macOS 管理员授权，本轮未获得授权。
+- iPhoneOS/Simulator SDK：`26.5`；
+- 已安装 runtime：iOS 26.5（23F77）；
+- Simulator：iPhone 17 Pro；
+- device id：`3820A0E1-806E-4923-AC06-BA3A746F01DB`；
+- 已连接真 iPhone：`0`。
 
 ## 已通过
 
-### Python / Gateway focused regression
+### Python / Gateway / Architecture
 
-所有命令均使用仓库锁定的 pre-SDK `PYTHONPATH`、
-`PYTHONNOUSERSITE=1`、`LITELLM_LOCAL_MODEL_COST_MAP=True` 与
+所有命令使用仓库锁定的 pre-SDK `PYTHONPATH`、`PYTHONNOUSERSITE=1`、
+`LITELLM_LOCAL_MODEL_COST_MAP=True` 与
 `uv run --project octoagent --no-sync`。
 
-F153 Protocol、Core、Gateway 与 F153 architecture authority：
+当前字节的 F153 Protocol/Core/Gateway 与 F152/F153 authority：
 
 ```text
-40 passed, 1 existing warning in 1.55s
+42 passed / 0 failed / 1 existing warning
 ```
 
-F152 architecture authority 前置：
+唯一 warning 是既有 `ToolEntry.schema` 遮蔽 Pydantic `BaseModel` 属性。
+repository architecture gate 同时 exit 0。
+
+F158 较早的当前分支全量确定性回归仍为：
 
 ```text
-2 passed in 0.08s
+5709 passed / 9 skipped / 1 xfailed / 1 xpassed
 ```
 
-合计 `42 passed`。唯一 warning 是既有 `ToolEntry.schema` 遮蔽 Pydantic
-`BaseModel` 属性，不是 F153 新增回归。
+这些结果证明 backend/store/policy/Protocol/authority 没有回归，但不替代外部 live
+或真机证据。
 
-在 F158 最终架构收口中，七个新增的多参数函数已改为 typed request/options/context
-对象，没有使用 `noqa` 或放宽复杂度门。随后执行 F152/F153/F158 focused 回归：
+### Generic iPhoneOS Release build
 
-```text
-77 passed, 1 existing warning in 1.31s
-```
-
-并执行完整确定性后端回归（显式排除需要真实 OpenAI OAuth 的
-`apps/gateway/tests/e2e_live`）：
-
-```text
-5709 passed, 9 skipped, 1 xfailed, 1 xpassed in 485.93s
-```
-
-完整 repository architecture gate 同时返回 `0`。这三项证明当前 F153 Python、
-Gateway、store、policy、Protocol 与 architecture authority 没有回归；它们仍不能
-替代 Simulator 或真机证据。
-
-### iPhoneOS target build
-
-Release App：
+当前字节使用标准 scheme 与 generic destination：
 
 ```bash
 xcodebuild \
   -project octoagent/apps/ios/OctoAgent.xcodeproj \
-  -target OctoAgent \
+  -scheme OctoAgent \
   -configuration Release \
-  -sdk iphoneos \
+  -destination 'generic/platform=iOS' \
   CODE_SIGNING_ALLOWED=NO \
   build
 ```
 
 结果：`BUILD SUCCEEDED`。
-
-Debug XCTest bundle：
-
-```bash
-xcodebuild \
-  -project octoagent/apps/ios/OctoAgent.xcodeproj \
-  -target OctoAgentTests \
-  -configuration Debug \
-  -sdk iphoneos \
-  CODE_SIGNING_ALLOWED=NO \
-  build
-```
-
-结果：`BUILD SUCCEEDED`。
-
-两个 target build 都先报告 CoreSimulator 版本不匹配，但 iPhoneOS arm64 编译和链接
-仍成功。该 warning 不能证明 Simulator 可用。
-
-### Release bundle 与 secret scan
 
 Release `.app` 恰有三个文件：
 
 | 文件 | bytes |
 |---|---:|
-| `Info.plist` | 773 |
-| `OctoAgent` | 781464 |
+| `Info.plist` | 817 |
+| `OctoAgent` | 979064 |
 | `PkgInfo` | 8 |
 
 可执行文件 SHA-256：
 
-`431e03e36616a7c9fa1a18c67064f6da1b651a223b9fceacd858140d654a3cbe`
+`1d41c70fa031c770b833af451e9d7adb2d5f720318fcdf9ff91c68d5855147e2`
 
-Swift source 与 Release bundle 对以下敏感材料扫描结果均为 `0`：
+Swift source 与 Release bundle 对以下材料扫描结果均为 `0`：
 
 - 个人邮箱；
 - 个人部署域名；
@@ -121,45 +86,94 @@ Swift source 与 Release bundle 对以下敏感材料扫描结果均为 `0`：
 - PEM/OpenSSH private key；
 - 真实 `octo_dt1_...` token。
 
-该扫描只证明静态 source/bundle 没有这些材料，不证明运行时 Keychain dump 或日志。
+### Swift unit 与 Simulator UI
+
+同一 iPhone 17 Pro Simulator 上执行完整 scheme，关闭 parallel testing：
+
+```text
+12 tests / 12 passed / 0 failed / 0 skipped
+```
+
+分布：
+
+- `DeviceTrustTests`：9/9；
+- `RegistrationFlowUITests`：3/3。
+
+真实 UI 覆盖：
+
+- disconnected、connecting、awaiting-approval、connected、revoked、offline；
+- 未连接表单的禁用态、输入与普通语言错误；
+- accessibility 合并页头、状态、按钮名称与 44pt 最小操作区；
+- Debug UI fixture 不读取生产 Keychain 恢复，不让宿主旧凭证污染固定状态。
+
+完整 result bundle：
+
+```text
+/tmp/f158-ios-final-current/final-current.xcresult
+```
+
+### iOS 视觉 RED→GREEN
+
+视觉 selector 首次运行真实生成六张 attachment，并仅因 baseline 缺失失败。逐张人工
+确认它们符合 Claude 最初方案的近黑底、单一荧光绿、细描边、紧凑卡片、克制留白与
+高对比层级后，六张 baseline 纳入
+`OctoAgentUITests/__Snapshots__/`。同一 selector 在禁止更新 baseline 的模式下
+6/6 通过。
+
+像素合同：
+
+- 尺寸必须完全相等；
+- 任一 RGBA 通道差值大于 12 的像素占比不得超过 2%；
+- snapshot 变化必须重新人工审查，不能自动接受。
+
+### Dynamic Type、VoiceOver 语义、Reduce Motion
+
+Simulator `content_size` 显式设置并读回
+`accessibility-extra-extra-extra-large`。首次截图发现 `OctoAgent` 被挤成半词，
+随后改成 accessibility size 下的垂直自适应页头；复测 1/1 PASS，人工截图确认标题
+完整，单列内容可继续滚动。
+
+AXXXL 截图：
+
+`evidence/simulator/2026-07-28/registration-awaiting-approval-accessibility-xxxl.png`
+
+SHA-256：
+
+`316589a0497606fc38541229e1badec9db4b8629a6b5a7eb084bfefc89ff96ca`
+
+XCUI 通过真实 accessibility tree 查询页头、状态、输入与操作名称，作为 VoiceOver
+语义证据。Simulator `ReduceMotionEnabled` 设置为 `1` 并读回后，UI accessibility
+test 1/1 PASS；实现通过 `@Environment(\.accessibilityReduceMotion)` 移除状态动画。
+验证完成后系统设置恢复为 `0`。
+
+完整命令、result bundle 与六张 baseline SHA 见：
+
+`evidence/simulator/2026-07-28/verification-report.md`
 
 ## 未通过与阻断
 
-### Swift XCTest / Simulator
-
-当前 `simctl` runtime 列表为空。Xcode 报告：
-
-```text
-CoreSimulator is out of date.
-Current version (1051.54.0) is older than build version (1051.55.0).
-```
-
-自动安装要求 macOS 管理员授权。因此以下证据均为 `0`：
-
-- Swift XCTest 行为执行；
-- Simulator 冷启动；
-- registration 六态导航；
-- Dynamic Type、VoiceOver、Reduce Motion；
-- Claude Design 早期视觉语言 snapshot；
-- offline/revoked/expired UI 场景。
-
 ### Cloudflare mobile live
 
-F150 的个人部署 Web connector 已恢复 active connection，但 F153 独立 mobile
-hostname、精确 `/api/mobile/v1/*` Bypass 与 Web/mobile 正负路径尚未配置和验证。
-Web Access 的登录重定向不能证明 mobile device-proof route 已通过。
+F150 个人部署 Web edge 已从 502 恢复为 Access 302，但 F153 独立 mobile hostname、
+精确 `/api/mobile/v1/*` Bypass 与 Web/mobile 正负 live probe 尚未配置和验证。
+Web Access 登录重定向不能证明 mobile device-proof route 已通过。
 
 ### 真 iPhone
 
-当前没有连接的 iPhone。以下证据均为 `0`：
+当前没有连接的 iPhone，以下仍为 `MISSING`：
 
 - Secure Enclave 私钥不可导出；
 - `AfterFirstUnlockThisDeviceOnly` Keychain；
 - owner approve/reject；
 - token expiry、revoke、rotation；
-- Wi-Fi 与蜂窝切换；
+- Wi-Fi/蜂窝切换；
 - 前后台恢复；
 - Apple 权限与真机 UI。
+
+### 完整 iOS 产品
+
+F153 只拥有设备注册和 transport。对话、任务、审批、Memory、HealthKit、EventKit、
+通知和 deep-link 的完整原生产品场景分别属于 F154-F156，不能由本报告提前宣称。
 
 ## Gate 判定
 
@@ -169,14 +183,13 @@ Web Access 的登录重定向不能证明 mobile device-proof route 已通过。
 | F152/F153 architecture authority | PASS |
 | repository architecture gate | PASS |
 | deterministic backend regression | PASS |
-| iPhoneOS App target compile | PASS |
-| iPhoneOS XCTest target compile | PASS |
+| generic iPhoneOS Release build | PASS |
 | static source/bundle secret scan | PASS |
-| Swift XCTest execution | MISSING |
-| Simulator functional E2E | MISSING |
-| Simulator visual/a11y E2E | MISSING |
+| Swift XCTest execution | PASS |
+| Simulator functional E2E | PASS |
+| Simulator visual/a11y E2E | PASS |
 | Cloudflare mobile live | MISSING |
 | real-device security/lifecycle | MISSING |
 | F153 Verify / unlock F154 | FAIL CLOSED |
 
-因此 F153 不能标记完成，F154-F156 production 不能启动。
+因此 T012/T013 完成，但 F153 整体仍不能标记完成；F154-F156 production 继续关闭。

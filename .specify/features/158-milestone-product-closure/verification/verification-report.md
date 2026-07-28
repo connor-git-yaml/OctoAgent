@@ -7,17 +7,17 @@
 - `GATE_VERIFY=false`
 - 当前分支：`codex/f158-milestone-product-closure`
 - 基线：`origin/master=db3214fff722c6f969baf99528a76fc03a1e21a1`
-- 当前交付提交：`e84ffd435f742ba2784b85c074346ab63ecedbc1`
+- 当前已提交父节点：`61032e141f86636abaf08646207164ad1d9f8fda`
 
 F158 已完成 Milestone/Blueprint/Feature 真值审计、F150 Settings 用户入口、桌面 Web
 逐 route/state 功能 E2E、Claude 早期设计视觉恢复、视觉 regression、F152 privacy
-authority 与 F153 device-trust/iOS target 代码闭环。确定性前端、后端和 repository
-architecture gate 均通过。
+authority 与 F153 device-trust/registration Simulator 闭环。确定性前端、后端和
+repository architecture gate 均通过。
 
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
-个人实例的 OpenAI Codex refresh token 也已失效；本机没有可用 iOS Simulator
-runtime，也没有连接真 iPhone；F154-F156 因 F153 Verify fail-closed 尚未开始；
-主线确认仍未完成。
+个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
+真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154-F156 尚未开始；
+当前 iOS 变更尚待提交/CI，主线确认仍未完成。
 
 ## 已通过
 
@@ -88,14 +88,23 @@ doctor、TaskService、WorkerRuntime 四文件回归为 `66 passed`。普通瞬�
 
 ### iOS 当前可证明范围
 
-- F153 Python/Gateway behavior：PASS
-- iPhoneOS Release App target build：PASS
-- iPhoneOS Debug XCTest target build：PASS
-- source/release bundle secret scan：PASS
+- F153 Python/Gateway behavior：42/42 PASS
+- generic iPhoneOS Release build：PASS
 - Release executable SHA-256：
-  `431e03e36616a7c9fa1a18c67064f6da1b651a223b9fceacd858140d654a3cbe`
+  `1d41c70fa031c770b833af451e9d7adb2d5f720318fcdf9ff91c68d5855147e2`
+- source/release bundle secret scan：六类 0 命中
+- iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme：12/12 PASS
+- Swift unit：9/9 PASS
+- UI：3/3 PASS
+- registration 六态 pixel baseline：6/6 PASS
+- AXXXL Dynamic Type、accessibility tree、Reduce Motion：PASS
 
-这些证据只证明 target 可编译，不证明 App 已启动或真机安全属性成立。
+普通字号六张 baseline 位于
+`octoagent/apps/ios/OctoAgentUITests/__Snapshots__/`；AXXXL 证据和完整运行说明位于
+`../153-ios-device-trust-secure-transport/evidence/simulator/2026-07-28/`。
+
+这些证据把 F153 registration/device-trust 的 Simulator 范围提升为
+`PROVEN_IN_BRANCH`，仍不证明真机 Secure Enclave/Keychain 或 F156 完整 companion。
 
 ## 个人部署现状
 
@@ -104,7 +113,8 @@ doctor、TaskService、WorkerRuntime 四文件回归为 `66 passed`。普通瞬�
 - Cloudflare named tunnel：`4` 条 active connection，request error=`0`
 - 本轮没有修改 Cloudflare 账户、DNS、Access application、tunnel 或凭证
 
-仓库正式 managed-checkout installer 已把 `~/.octoagent/app` 更新为
+仓库正式 managed-checkout installer 已把 `~/.octoagent/app` 更新为上一批 Web
+交付提交
 `e84ffd435f742ba2784b85c074346ab63ecedbc1`，完成依赖同步和 production build；
 checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均为 `200`，
 个人域名返回预期 Access `302`，tunnel LaunchAgent running。部署 checkout 的
@@ -121,16 +131,14 @@ Gateway 日志同时显示 OpenAI Codex refresh token 已被复用并在刷新�
 
 ## 未通过与外部阻断
 
-### iOS Simulator
+### iOS 剩余产品与外部边界
 
 - Xcode：`26.6 (17F113)`
-- iPhoneOS SDK：`26.5`
-- CoreSimulator：`1051.54.0`
-- Xcode 要求：`1051.55.0`
-- 已安装 Simulator runtime：`0`
-
-runtime 安装需要 macOS 管理员授权。当前没有 Swift XCTest 行为执行、Simulator
-冷启动、导航、状态、Dynamic Type、VoiceOver、Reduce Motion 或视觉 snapshot 证据。
+- iOS runtime：`26.5 (23F77)`
+- F153 Simulator registration：PASS
+- Cloudflare mobile hostname/Bypass/live probe：MISSING
+- connected iPhone：`0`
+- F154 HealthKit、F155 EventKit、F156 完整 companion：未实施
 
 ### 真 iPhone
 
@@ -139,8 +147,9 @@ runtime 安装需要 macOS 管理员授权。当前没有 Swift XCTest 行为执
 
 ### 后续 Feature
 
-F154 HealthKit、F155 EventKit 与 F156 SwiftUI Companion 必须等待 F153 Simulator/
-真机 Verify 通过，不允许用 target build 或 Web E2E 替代。
+F154 HealthKit、F155 EventKit 与 F156 SwiftUI Companion 必须等待 F153
+Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、target build
+或 Web E2E 替代。
 
 ## Gate 判定
 
@@ -154,16 +163,17 @@ F154 HealthKit、F155 EventKit 与 F156 SwiftUI Companion 必须等待 F153 Simu
 | deterministic backend regression | PASS |
 | repository architecture gate | PASS |
 | iPhoneOS target compilation | PASS |
-| GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS |
-| GitHub Actions backend deterministic | PASS |
-| personal deployment on current branch | PASS |
+| GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（上一批 Web 提交） |
+| GitHub Actions backend deterministic | PASS（上一批 Web 提交） |
+| personal deployment | PASS（上一批 Web 提交；登录后旅程仍缺） |
 | authenticated personal SPA/API/SSE | MISSING |
 | personal real-model conversation | BLOCKED（provider refresh token 401） |
-| iOS Simulator functional/visual E2E | BLOCKED |
+| F153 iOS Simulator functional/visual E2E | PASS |
+| F154-F156 complete iOS product E2E | MISSING |
 | real-device security/lifecycle | BLOCKED |
 | F154-F156 product implementation | CLOSED |
-| commit / push | PASS |
-| complete CI | PASS |
+| current iOS commit / push | MISSING |
+| current iOS complete CI | MISSING |
 | mainline confirmation | MISSING |
 
 因此当前不能把 F158 或跨 Milestone Goal 标记完成。

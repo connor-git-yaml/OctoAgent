@@ -128,3 +128,19 @@
   与单绿色强调；iPhone 改用 `NavigationStack`、单列、Dynamic Type、VoiceOver 和
   Reduce Motion 是原生平台/可用性偏离，不是迁就旧 Web，也不把 F153 registration
   UI 冒充 F156 最终 companion。
+- 2026-07-28：安装官方 iOS 26.5（23F77）Simulator runtime，并在唯一
+  `OctoAgent F158 iPhone 17 Pro` 上完成 T012/T013。完整 scheme 为
+  `12 passed / 0 failed / 0 skipped`，其中 Swift unit 9/9、UI 3/3；六个
+  registration 状态逐一真实冷启动。视觉测试先因六张 baseline 缺失取得稳定 RED，
+  人工逐图复审后建立 baseline，同一 selector 禁止更新复跑为 6/6 GREEN。
+- 2026-07-28：真实 AXXXL Dynamic Type 截图暴露页头将 `OctoAgent` 拆成半词，
+  随即按原生 accessibility size 改为垂直自适应页头；AXXXL accessibility test
+  1/1 PASS，标题完整且内容保持可滚动。Simulator `ReduceMotionEnabled=1` 读回后
+  UI test 1/1 PASS，再恢复为 0。XCUI accessibility tree 直接查询合并页头标签、
+  普通语言状态和 44pt action。
+- 2026-07-28：当前字节重跑 generic iPhoneOS Release build、F153 focused
+  regression `42 passed`、repository architecture gate 与 source/bundle secret
+  scan。Release executable SHA-256 为
+  `1d41c70fa031c770b833af451e9d7adb2d5f720318fcdf9ff91c68d5855147e2`；
+  六类敏感材料均为 0。T012/T013 因而完成；T014 Cloudflare live、T015 真机与
+  T018 最终 Verify 仍保持关闭。

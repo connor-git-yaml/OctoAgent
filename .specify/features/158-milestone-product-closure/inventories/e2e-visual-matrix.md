@@ -41,6 +41,12 @@ early frame canvas and one 390px Web robustness viewport.
 真机项不能由 simulator 或静态 mock 代替。F152→F153→F154→F155→F156 默认串行；
 只有不接生产 transport/data 的视觉探索可并行。
 
+当前直接证据：F153 registration/device-trust 的 Swift unit 为 9/9，Simulator UI
+为 3/3，六个注册状态视觉 baseline 在禁止更新模式下通过；AXXXL Dynamic Type、
+accessibility tree 与 Reduce Motion 已实测。conversation/tasks/approvals/memory、
+HealthKit、EventKit、notification/deep-link 仍分别等待 F154-F156，真机列仍全部不能
+由上述 Simulator 结果替代。
+
 ## 证据格式
 
 每条场景记录：

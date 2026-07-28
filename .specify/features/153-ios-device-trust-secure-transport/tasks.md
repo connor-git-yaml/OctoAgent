@@ -28,9 +28,9 @@
   typed edge/offline/revoked errors 与 bounded retry
 - [x] **T011 [SWIFTUI][RED→GREEN→REFACTOR]** connection registration UI；
   Claude 初稿视觉语言 + Dynamic Type/VoiceOver/Reduce Motion
-- [ ] **T012 [BUILD]** generic iOS device build、Swift unit、Python/Gateway focused
+- [x] **T012 [BUILD]** generic iOS device build、Swift unit、Python/Gateway focused
   regression、secret scan
-- [ ] **T013 [SIMULATOR]** 安装获准 runtime 后冷启动、registration states、visual
+- [x] **T013 [SIMULATOR]** 安装获准 runtime 后冷启动、registration states、visual
   snapshot、a11y；没有 runtime 时保持 blocked
 - [ ] **T014 [LIVE EXTERNAL]** 经单次授权配置 per-deployment mobile hostname、same
   tunnel ingress 与 exact Access Bypass application；Web/mobile正负live probe

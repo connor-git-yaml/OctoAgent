@@ -86,7 +86,7 @@ struct RegistrationPresentation: Equatable {
 
 @MainActor
 final class RegistrationViewModel: ObservableObject {
-    @Published var phase: RegistrationPhase = .disconnected
+    @Published var phase: RegistrationPhase
     @Published var linkText = ""
     @Published var deviceName = "我的 iPhone"
     @Published private(set) var notice = ""
@@ -96,8 +96,12 @@ final class RegistrationViewModel: ObservableObject {
     private var pendingDeviceID: String?
     private var restored = false
 
-    init(keyStore: DeviceKeyStore = DeviceKeyStore()) {
+    init(
+        keyStore: DeviceKeyStore = DeviceKeyStore(),
+        initialPhase: RegistrationPhase = .disconnected
+    ) {
         self.keyStore = keyStore
+        phase = initialPhase
     }
 
     func restore() async {
@@ -262,13 +266,20 @@ final class RegistrationViewModel: ObservableObject {
 struct RegistrationView: View {
     @StateObject private var viewModel: RegistrationViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    private let restoresStoredConnection: Bool
 
     init() {
         _viewModel = StateObject(wrappedValue: RegistrationViewModel())
+        restoresStoredConnection = true
     }
 
-    init(viewModel: RegistrationViewModel) {
+    init(
+        viewModel: RegistrationViewModel,
+        restoresStoredConnection: Bool = true
+    ) {
         _viewModel = StateObject(wrappedValue: viewModel)
+        self.restoresStoredConnection = restoresStoredConnection
     }
 
     var body: some View {
@@ -293,7 +304,9 @@ struct RegistrationView: View {
         }
         .preferredColorScheme(.dark)
         .task {
-            await viewModel.restore()
+            if restoresStoredConnection {
+                await viewModel.restore()
+            }
         }
         .animation(
             reduceMotion ? nil : .easeOut(duration: 0.2),
@@ -302,32 +315,57 @@ struct RegistrationView: View {
     }
 
     private var brandHeader: some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(OctoPalette.accent.opacity(0.16))
-                    .frame(width: 42, height: 42)
-                Image(systemName: "circle.hexagongrid.fill")
-                    .foregroundStyle(OctoPalette.accent)
-                    .font(.title3)
+        Group {
+            if dynamicTypeSize.isAccessibilitySize {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        brandMark
+                        Spacer()
+                        statusIndicator
+                    }
+                    brandTitle
+                }
+            } else {
+                HStack(spacing: 12) {
+                    brandMark
+                    brandTitle
+                    Spacer()
+                    statusIndicator
+                }
             }
-            VStack(alignment: .leading, spacing: 2) {
-                Text("OctoAgent")
-                    .font(.headline.weight(.semibold))
-                Text("原生设备连接")
-                    .font(.caption)
-                    .foregroundStyle(OctoPalette.muted)
-            }
-            Spacer()
-            Circle()
-                .fill(statusColor)
-                .frame(width: 9, height: 9)
-                .accessibilityHidden(true)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "OctoAgent，\(RegistrationPresentation(phase: viewModel.phase).statusLabel)"
         )
+    }
+
+    private var brandMark: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(OctoPalette.accent.opacity(0.16))
+                .frame(width: 42, height: 42)
+            Image(systemName: "circle.hexagongrid.fill")
+                .foregroundStyle(OctoPalette.accent)
+                .font(.title3)
+        }
+    }
+
+    private var brandTitle: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("OctoAgent")
+                .font(.headline.weight(.semibold))
+            Text("原生设备连接")
+                .font(.caption)
+                .foregroundStyle(OctoPalette.muted)
+        }
+    }
+
+    private var statusIndicator: some View {
+        Circle()
+            .fill(statusColor)
+            .frame(width: 9, height: 9)
+            .accessibilityHidden(true)
     }
 
     private var connectionCard: some View {

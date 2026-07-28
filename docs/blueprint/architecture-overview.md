@@ -193,8 +193,9 @@ health/calendar capability。
    才进入 `/api/mobile/v1/ready` 或 device-profile workload。
 6. mobile hostname 与 Web hostname 共用同一 named tunnel，但 Host/path 与认证模型
    分离；mobile 其它 API/SPA/docs/health 为 404，Web Access session 不能冒充设备。
-7. 当前 branch 已通过 iPhoneOS target build、focused Gateway regression 与
-   source/bundle secret scan；Simulator、真机与 Cloudflare live 证据仍是 F153
-   Verify 硬门，不能由编译或静态扫描替代。
+7. 当前 branch 已通过 iOS 26.5 Simulator cold start、六状态功能/视觉回归、
+   Dynamic Type、Reduce Motion、12 项 scheme tests、generic iPhoneOS Release
+   build、focused Gateway regression 与 source/bundle secret scan；真 iPhone 与
+   Cloudflare live 证据仍是 F153 Verify 硬门，不能由 Simulator、编译或静态扫描替代。
 
 ---

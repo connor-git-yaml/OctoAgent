@@ -38,10 +38,11 @@
 - [x] T010 single URLSession/canonical proof/typed error/bounded retry compile contract
 - [x] T011 native registration states/Claude visual language/a11y compile contract
 - [x] T012 focused Python/Gateway regression、iPhoneOS target build 与 bundle secret scan
-- [ ] T012 scheme-level generic build 与 Swift XCTest（缺 iOS platform/runtime）
-- [ ] T013 Simulator cold start、state/visual/a11y E2E（需管理员安装 runtime）
+- [x] T012 scheme-level generic build 与 Swift XCTest（iOS 26.5 Simulator，12/12）
+- [x] T013 Simulator cold start、state/visual/a11y E2E（六状态视觉回归 + Dynamic Type + Reduce Motion）
 - [x] T016 single client/store/auth、complexity、audit/source/bundle ratchet
 - [x] T017 Blueprint/F150/F158 truth sync 与 iOS 设计偏离记录
-- [ ] T012-T016 Implement/Verify prerequisites
+- [x] T012-T013/T016 本地 Implement prerequisites
+- [ ] T014 Cloudflare live 与 T015 真机
 - [ ] T018 Verify
 - [ ] F154 解锁

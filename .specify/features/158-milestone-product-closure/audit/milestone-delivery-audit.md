@@ -18,9 +18,9 @@
 | Web 功能 E2E | 11 个 Playwright spec / 39 nodes + fresh approval rerun | PROVEN_IN_BRANCH | 完整 38 pass/1 once-only skip；fresh approval 1/1 pass；待 CI/部署 | F158 |
 | Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_IN_BRANCH | 主框架与 9 surface + 真实任务详情均进入像素门；待 CI/部署 | F158 |
 | 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
-| 原生 iOS 可启动 | 原生 Xcode/SwiftUI project、iPhoneOS target build | PARTIAL | App/XCTest bundle 已编译；本机缺 iOS platform/runtime，尚无真实启动 | F153 |
-| iOS 功能 E2E | Gateway focused 42 pass、Swift XCTest target compile | PARTIAL | Swift XCTest 未执行；Simulator 与真机场景=0 | F153-F156 |
-| iOS 视觉回归 | Claude Design 共同语言声明 | MISSING | snapshot/真机视觉证据=0 | F156 / F158 |
+| 原生 iOS 可启动 | iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 12/12 | PROVEN_IN_BRANCH（F153 scope） | F153 registration 已真实启动；F154-F156 完整 companion 与真机仍缺 | F153-F156 |
+| iOS 功能 E2E | Swift unit 9/9、Simulator UI 3/3、六态冷启动 | PARTIAL | F153 registration 已证；Cloudflare mobile live、真机及 F154-F156 场景仍缺 | F153-F156 |
+| iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
 | Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_IN_BRANCH | 待提交/CI 与最终交付审计 | F158 |
 | F151 runtime/architecture | verification report + CI | PROVISIONAL PASS | 仍需纳入最终干净检出回归 | F151 / F158 |
 | F157 CI 回归修复 | master CI 已绿 | DOC DRIFT | F157 tasks T013 仍未勾选 | F157 / F158 |
@@ -43,7 +43,7 @@
 | M9 | 完成 | 四层测试门与 F151/F157 后续修复存在 | PROVISIONAL | 当前主线 authoritative CI；修正文档未勾选状态 |
 | M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
 | M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 9 surface/任务详情视觉及功能 E2E 通过；Claude 云端谱系已清理并导出 | PROVEN_IN_BRANCH | 当前提交 CI 与个人部署复验 |
-| M12 | In Progress | F152 Verify；F153 T001-T011/T016 已实现，T012 局部通过 | PARTIAL | iOS runtime 安装、Swift XCTest、Simulator/真机/Cloudflare live、F154-F156 |
+| M12 | In Progress | F152 Verify；F153 T001-T013/T016 已实现，Simulator registration 功能/视觉通过 | PARTIAL | Cloudflare mobile live、真机、F153 Verify、F154-F156 |
 
 该矩阵的 `PROVISIONAL` 不是重新否定历史交付，而是区分“历史报告存在”与“当前
 Milestone Goal 已在同一 commit/环境复验”。最终 completion audit 只允许将取得当前
@@ -128,15 +128,16 @@ Playwright 新增固定 1440×900/dark 的结构合同与四个真实 pixel snap
 10. 全前端单元结果为 `70 files / 598 tests passed`；production build 与 frontend
     complexity gate 均通过。该结果证明当前变更未破坏既有 Web 功能，但不替代尚未
     完成的逐 surface/state 视觉矩阵。
-11. F153 focused Protocol/Core/Gateway/authority 回归为 `42 passed`；Release iPhoneOS
-    App 与 Debug XCTest target build 通过。Release `.app` 恰含 3 个文件、772 KiB，
-    executable SHA-256 为
-    `166122a2d6552e3f4f125b97edc8969c45f63c632cc2d6dbf43759e9ec0d8986`；
+11. F153 focused Protocol/Core/Gateway/authority 回归为 `42 passed`；generic
+    iPhoneOS Release build 通过。Release `.app` 恰含 3 个文件，executable
+    SHA-256 为
+    `1d41c70fa031c770b833af451e9d7adb2d5f720318fcdf9ff91c68d5855147e2`；
     source/bundle 对个人域名、邮箱、Cloudflare secret/Web Cookie、private key 与真实
     device token 扫描为 0。
-12. scheme-level generic build 以 exit 70 fail closed；CoreSimulator
-    `1051.54.0 < 1051.55.0` 且 iOS runtime=0，自动安装需要 macOS 管理员授权。
-    所以当前没有 Swift XCTest、Simulator screenshot/visual/a11y 或真机证据。
+12. 官方 iOS 26.5 runtime 已安装，唯一 iPhone 17 Pro Simulator 完整 scheme 为
+    `12 passed`（Swift unit 9/9、UI 3/3）。六个 registration 状态视觉先取得
+    baseline-missing RED，经人工复审后同一 selector 6/6 通过；AXXXL Dynamic Type
+    与 Reduce Motion setting=1 下的 accessibility UI 复验均通过。
 13. Web surface 补齐后的当前字节结果为 production build PASS、complexity PASS、
     Vitest `70 files / 598 passed`、Playwright `38 passed / 1 once-only conditional
     skip / 0 failed`；fresh L1 fixture 的 approval accept/真实落盘为 `1 passed`。
@@ -154,8 +155,9 @@ Playwright 新增固定 1440×900/dark 的结构合同与四个真实 pixel snap
   Reduce Motion。这是平台/可用性偏离，不是为了迁就现有 Web 实现。
 - F153 只交付设备连接状态，不提前实现 F156 的聊天/任务/审批/Memory UI；因此当前
   App 不能作为最终 companion 视觉完成证据。
-- 上述判断已有 source/compile 证据但尚无 Simulator/真机截图，视觉还原保持
-  `PARTIAL`，不能提升为 `PROVEN`。
+- F153 registration 范围已有 source、真实 Simulator、六张 baseline 与 AXXXL 截图，
+  可提升为该范围的 `PROVEN_IN_BRANCH`；由于 F156 完整 companion 与真机截图仍缺，
+  整体 iOS 视觉还原继续保持 `PARTIAL`。
 
 ## 证据等级
 

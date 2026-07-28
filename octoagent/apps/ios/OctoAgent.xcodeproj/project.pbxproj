@@ -14,10 +14,19 @@
 		100000000000000000000005 /* RequestProofSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* RequestProofSigner.swift */; };
 		100000000000000000000006 /* DeviceTrustClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* DeviceTrustClient.swift */; };
 		100000000000000000000007 /* RegistrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* RegistrationView.swift */; };
+		100000000000000000000008 /* RegistrationFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* RegistrationFlowUITests.swift */; };
+		100000000000000000000009 /* __Snapshots__ in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* __Snapshots__ */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
 		300000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 400000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000001;
+			remoteInfo = OctoAgent;
+		};
+		300000000000000000000003 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 400000000000000000000001 /* Project object */;
 			proxyType = 1;
@@ -36,6 +45,9 @@
 		200000000000000000000007 /* RequestProofSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestProofSigner.swift; sourceTree = "<group>"; };
 		200000000000000000000008 /* DeviceTrustClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceTrustClient.swift; sourceTree = "<group>"; };
 		200000000000000000000009 /* RegistrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegistrationView.swift; sourceTree = "<group>"; };
+		200000000000000000000010 /* RegistrationFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegistrationFlowUITests.swift; sourceTree = "<group>"; };
+		200000000000000000000011 /* OctoAgentUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OctoAgentUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000012 /* __Snapshots__ */ = {isa = PBXFileReference; lastKnownFileType = folder; path = __Snapshots__; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -53,6 +65,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		600000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -61,6 +80,7 @@
 			children = (
 				700000000000000000000002 /* OctoAgent */,
 				700000000000000000000003 /* OctoAgentTests */,
+				700000000000000000000007 /* OctoAgentUITests */,
 				700000000000000000000004 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -87,6 +107,7 @@
 			children = (
 				200000000000000000000003 /* OctoAgent.app */,
 				200000000000000000000004 /* OctoAgentTests.xctest */,
+				200000000000000000000011 /* OctoAgentUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -109,6 +130,15 @@
 				200000000000000000000008 /* DeviceTrustClient.swift */,
 			);
 			path = DeviceTrust;
+			sourceTree = "<group>";
+		};
+		700000000000000000000007 /* OctoAgentUITests */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000010 /* RegistrationFlowUITests.swift */,
+				200000000000000000000012 /* __Snapshots__ */,
+			);
+			path = OctoAgentUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -149,6 +179,24 @@
 			productReference = 200000000000000000000004 /* OctoAgentTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		500000000000000000000003 /* OctoAgentUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000004 /* Build configuration list for PBXNativeTarget "OctoAgentUITests" */;
+			buildPhases = (
+				600000000000000000000003 /* Frameworks */,
+				900000000000000000000005 /* Sources */,
+				900000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				300000000000000000000004 /* PBXTargetDependency */,
+			);
+			name = OctoAgentUITests;
+			productName = OctoAgentUITests;
+			productReference = 200000000000000000000011 /* OctoAgentUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -163,6 +211,10 @@
 						CreatedOnToolsVersion = 26.6;
 					};
 					500000000000000000000002 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 500000000000000000000001;
+					};
+					500000000000000000000003 = {
 						CreatedOnToolsVersion = 26.6;
 						TestTargetID = 500000000000000000000001;
 					};
@@ -185,6 +237,7 @@
 			targets = (
 				500000000000000000000001 /* OctoAgent */,
 				500000000000000000000002 /* OctoAgentTests */,
+				500000000000000000000003 /* OctoAgentUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -201,6 +254,14 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000009 /* __Snapshots__ in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -228,6 +289,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		900000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000008 /* RegistrationFlowUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -235,6 +304,11 @@
 			isa = PBXTargetDependency;
 			target = 500000000000000000000001 /* OctoAgent */;
 			targetProxy = 300000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		300000000000000000000004 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000001 /* OctoAgent */;
+			targetProxy = 300000000000000000000003 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -287,6 +361,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = OctoAgent;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.octoagent.app;
@@ -305,6 +380,7 @@
 				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = OctoAgent;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.octoagent.app;
@@ -346,6 +422,34 @@
 			};
 			name = Release;
 		};
+		A00000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.octoagent.app.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = OctoAgent;
+			};
+			name = Debug;
+		};
+		A00000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.octoagent.app.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = OctoAgent;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -372,6 +476,15 @@
 			buildConfigurations = (
 				A00000000000000000000001 /* Debug */,
 				A00000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		800000000000000000000004 /* Build configuration list for PBXNativeTarget "OctoAgentUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000007 /* Debug */,
+				A00000000000000000000008 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
