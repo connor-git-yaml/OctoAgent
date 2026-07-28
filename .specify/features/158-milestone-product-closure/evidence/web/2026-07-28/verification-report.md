@@ -6,8 +6,7 @@
 
 - production build 与前端复杂度门通过；
 - 70 个 Vitest 文件、598 条测试全部通过；
-- 真实 hermetic Gateway 下完整 Playwright 结果为 38 条通过、1 条因一次性候选已消费
-  条件跳过、0 条失败；重建 fresh L1 fixture 后，该审批接受/落盘旅程独立 1/1 通过；
+- 真实 hermetic Gateway 下完整 Playwright 结果为 39 条通过、0 条失败、0 次重试；
 - 主工作台 4 个像素基线和 9 个业务 surface + 真实任务详情 10 个像素基线均通过；
 - 390px Web 窄窗口对 10 个 surface 完成 overflow、键盘焦点、accessible name 和
   reduced-motion sweep；
@@ -15,8 +14,9 @@
   大面积低信息密度卡片。
 
 这证明当前分支的 Web 功能和 Claude Design 早期视觉恢复已形成直接证据，但不等于
-整个 F158 Goal 完成。iOS 真实启动、Claude Design 云端 lineage 清理、Cloudflare
-live、最终提交/CI/个人部署仍在后续门内。
+整个 F158 Goal 完成。Claude Design 云端 lineage 已完成清理并导出不可变制品，
+  当前提交也已通过 GitHub Actions 全部五个 job 并部署到个人 managed checkout；
+  iOS 真实启动、个人域名登录后旅程与主线合并仍在后续门内。
 
 ## Exact commands
 
@@ -40,8 +40,7 @@ npx playwright test e2e/visual-claude-surfaces.spec.ts
 | `npm test -- --run` | 70 files / 598 passed / 0 failed |
 | `npm run build` | 199 modules transformed / production build PASS |
 | `npm run check:complexity` | PASS |
-| `npx playwright test` | 38 passed / 1 conditional skip / 0 failed / retries=0 |
-| fresh `approval-center.spec.ts` | 1 passed / 0 skipped / 0 failed |
+| `npx playwright test` | 39 passed / 0 failed / retries=0 |
 | visual surface snapshot generation | 10 passed |
 | visual surface no-update rerun | 10 passed |
 
@@ -90,7 +89,7 @@ Browser L1 验收正常路径和代表性认证/断线边界；每个 surface �
 Production styles：
 
 - `octoagent/frontend/src/styles/claude-workbench.css`
-  - SHA-256 `d64d79715de805b8d37756e1c9521fc5ae63da264987b52b281cb04ab515744a`
+  - SHA-256 `c550467990e6cf04f9822d15da142a3758b422aea464fb2d2ab0f5612618a325`
 - `octoagent/frontend/src/styles/claude-surfaces.css`
   - SHA-256 `3fca66a813486497f8f2362a6ef3f93f8f548efe464d3a0bef7153600c655d87`
 
@@ -132,11 +131,28 @@ Production styles：
 - `octoagent/frontend/e2e/__snapshots__/visual-claude-baseline.spec.ts/`
 - `octoagent/frontend/e2e/__snapshots__/visual-claude-surfaces.spec.ts/`
 
+### 跨平台视觉门
+
+GitHub Actions Ubuntu/Chromium 首轮只在 280×32 中文标题文字的 glyph 边缘产生
+`419/8960` 像素差异；diff 图没有背景、边框、位置或尺寸漂移。为避免把跨平台字形
+rasterization 冒充布局回归，仅该标题断言同时设置 `maxDiffPixels=450` 与
+`maxDiffPixelRatio=0.05`；其余 13 个 snapshot 继续使用全局 2% 门，PNG 基线没有
+重生成。提交 `e84ffd435f742ba2784b85c074346ab63ecedbc1` 的 GitHub Actions
+`l1-playwright` job 已通过。
+
 ## 未完成边界
 
-- Claude Design 云端后期不佳 frame/variant 尚未完成最终 lineage 清理与不可变导出；
+- Claude Design 云端后期不佳视觉已在原必需 frame 上改回早期语言，最终导出
+  SHA-256 为
+  `1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`；
 - iOS 本机缺可用 Simulator runtime，App 尚未真实启动，视觉 E2E 为 0；
-- `maojiwang.work` 只属于个人部署，Cloudflare live 尚未完成；
-- 当前分支尚未提交、CI、个人部署或合并；
+- `maojiwang.work` 只属于个人部署；managed checkout 已更新到 `e84ffd43`，Gateway
+  与首页返回 200、Access 边界返回 302，但登录后 SPA/API/SSE 尚未取得浏览器证据；
+- 当前分支已提交并推送；权威 CI run
+  [`30364899065`](https://github.com/connor-git-yaml/OctoAgent/actions/runs/30364899065)
+  的 backend deterministic、L1、frontend、architecture、benchmark 全部通过，
+  分支尚未合并；
+- 个人实例的 OpenAI Codex refresh token 已复用并返回 401；真实模型对话不能因
+  `/ready` 为 200 而判定通过，必须重新登录后复验；
 - error/403/409 已由 deterministic L4 UI 合同覆盖，后续 completion audit 仍需决定
   是否为选定的高风险状态增加独立 pixel baselines，不能把正常态 PNG 冒充所有状态。

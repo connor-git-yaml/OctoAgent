@@ -4,8 +4,8 @@
 **复核日期**：2026-07-28
 **复核分支**：`codex/f158-milestone-product-closure`
 **基线提交**：`db3214fff722c6f969baf99528a76fc03a1e21a1`
-**状态**：本地产品闭环通过；个人部署 connector 已恢复，等待真实登录态复验、F158
-提交与权威 CI
+**状态**：本地产品闭环、当前分支个人部署与权威 CI 通过；connector 已恢复，等待
+真实登录态复验与主线合并
 
 ## 复核背景
 
@@ -56,8 +56,8 @@ npm run build
 npm run check:complexity
 ```
 
-结果：均通过。production build 转换 `198 modules`；新增
-`src/styles/claude-workbench.css` 为 `648/700` 行，所有既有前端复杂度上限保持通过。
+结果：均通过。production build 转换 `199 modules`；
+`src/styles/claude-workbench.css` 为 `657/700` 行，所有既有前端复杂度上限保持通过。
 
 ### 浏览器 E2E
 
@@ -66,7 +66,9 @@ cd octoagent/frontend
 npm run test:e2e
 ```
 
-结果：`19 passed / 1 skipped / 0 failed / retries=0`。
+结果：F158 最终完整 Web suite 为 `39 passed / 0 failed / retries=0`；提交
+`e84ffd435f742ba2784b85c074346ab63ecedbc1` 的 GitHub Actions
+`l1-playwright` job 同样通过。
 
 F150 场景：
 
@@ -114,6 +116,27 @@ connector 为 `0` 条 active connection。日志证明本机代理/TUN 曾把 Cl
 登录重定向冒充登录后产品通过。登录后的 SPA、API、SSE、刷新、过期、重新认证、登出
 及 Settings 入口仍需真实浏览器认证态复验。
 
+## 2026-07-28 当前分支个人部署
+
+仓库正式 `repo-scripts/install-octo-user.sh` 路径已把
+`~/.octoagent/app` 更新为提交
+`e84ffd435f742ba2784b85c074346ab63ecedbc1`，完成 `uv sync`、前端依赖安装和
+production build；managed checkout clean。重启 `com.octoagent.gateway` 后：
+
+- loopback `/ready?profile=core`：`200`；
+- loopback `/`：`200`；
+- `octo.maojiwang.work`：`302` 到 Cloudflare Access 登录页；
+- named tunnel LaunchAgent：running。
+
+源码视觉样式 SHA 与部署 checkout 均为
+`c550467990e6cf04f9822d15da142a3758b422aea464fb2d2ab0f5612618a325`。
+Chrome 能枚举已有 Access 登录页，但接管该页超时，因此没有把登录页存在当作登录后
+产品证据，也没有读取 cookie/local storage 绕过认证。
+
+Gateway 启动日志还证明个人实例的 OpenAI Codex refresh token 已复用并返回 401。
+这不是 Cloudflare Access 或 tunnel 的 502，但会阻断真实模型对话；需要重新登录
+provider 后另行复验。
+
 ## 架构与安全复核
 
 - production consumer 只有 Settings composition；
@@ -127,9 +150,8 @@ connector 为 `0` 条 active connection。日志证明本机代理/TUN 曾把 Cl
 
 本地行为与产品入口已经闭合，但 F150 的最终主线状态仍依赖 F158：
 
-1. 将本轮修正提交到分支；
-2. 权威 CI 在提交字节上通过；
-3. 在已恢复 connector 的个人部署域名完成登录后 SPA、API、SSE 与 Settings 入口复验；
-4. 合并主线后校正 Blueprint/Milestone completion audit。
+1. 在已恢复 connector 的个人部署域名完成登录后 SPA、API、SSE 与 Settings 入口复验；
+2. 重新登录 OpenAI Codex provider 并验证真实模型对话；
+3. 合并主线后校正 Blueprint/Milestone completion audit。
 
 在这四项完成前，本报告不得被解释为 F158 整体 Goal 已完成。

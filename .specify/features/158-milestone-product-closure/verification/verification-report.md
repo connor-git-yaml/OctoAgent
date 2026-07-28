@@ -7,15 +7,17 @@
 - `GATE_VERIFY=false`
 - 当前分支：`codex/f158-milestone-product-closure`
 - 基线：`origin/master=db3214fff722c6f969baf99528a76fc03a1e21a1`
+- 当前交付提交：`e84ffd435f742ba2784b85c074346ab63ecedbc1`
 
 F158 已完成 Milestone/Blueprint/Feature 真值审计、F150 Settings 用户入口、桌面 Web
 逐 route/state 功能 E2E、Claude 早期设计视觉恢复、视觉 regression、F152 privacy
 authority 与 F153 device-trust/iOS target 代码闭环。确定性前端、后端和 repository
 architecture gate 均通过。
 
-整体 Goal 尚未完成：个人部署仍运行旧 managed checkout，登录态 SPA/API/SSE 尚未在
-本分支字节上复验；本机没有可用 iOS Simulator runtime，也没有连接真 iPhone；F154-
-F156 因 F153 Verify fail-closed 尚未开始；提交、CI、部署与主线确认仍未完成。
+整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
+个人实例的 OpenAI Codex refresh token 也已失效；本机没有可用 iOS Simulator
+runtime，也没有连接真 iPhone；F154-F156 因 F153 Verify fail-closed 尚未开始；
+主线确认仍未完成。
 
 ## 已通过
 
@@ -81,10 +83,20 @@ F156 因 F153 Verify fail-closed 尚未开始；提交、CI、部署与主线确
 - Cloudflare named tunnel：`4` 条 active connection，request error=`0`
 - 本轮没有修改 Cloudflare 账户、DNS、Access application、tunnel 或凭证
 
-当前 launchd 仍执行 `~/.octoagent/app` 中 2026-07-25 的旧 managed checkout，而不是
-本分支。因此个人域名上的旧页面不能作为本轮 UI/功能交付证据。必须先提交当前字节，
-再通过仓库正式 managed-checkout installer/update 路径更新实例并复验登录后的
-SPA、API、SSE、刷新、过期、重新认证、登出和 Settings remote-access。
+仓库正式 managed-checkout installer 已把 `~/.octoagent/app` 更新为
+`e84ffd435f742ba2784b85c074346ab63ecedbc1`，完成依赖同步和 production build；
+checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均为 `200`，
+个人域名返回预期 Access `302`，tunnel LaunchAgent running。部署 checkout 的
+`claude-workbench.css` SHA 与分支均为
+`c550467990e6cf04f9822d15da142a3758b422aea464fb2d2ab0f5612618a325`。
+
+Chrome 能枚举已有 Access 登录页，但接管页面超时；本轮没有读取浏览器 cookie 或
+local storage 绕过认证。因此登录后的 SPA、API、SSE、刷新、过期、重新认证、登出和
+Settings remote-access 仍保持 MISSING。
+
+Gateway 日志同时显示 OpenAI Codex refresh token 已被复用并在刷新时返回 401。ready
+只证明 provider route 配置存在，不证明真实模型对话可用；重新登录 provider 与真实
+对话复验是独立未完成项。
 
 ## 未通过与外部阻断
 
@@ -121,11 +133,16 @@ F154 HealthKit、F155 EventKit 与 F156 SwiftUI Companion 必须等待 F153 Simu
 | deterministic backend regression | PASS |
 | repository architecture gate | PASS |
 | iPhoneOS target compilation | PASS |
-| personal deployment on current branch | MISSING |
+| GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS |
+| GitHub Actions backend deterministic | PASS |
+| personal deployment on current branch | PASS |
 | authenticated personal SPA/API/SSE | MISSING |
+| personal real-model conversation | BLOCKED（provider refresh token 401） |
 | iOS Simulator functional/visual E2E | BLOCKED |
 | real-device security/lifecycle | BLOCKED |
 | F154-F156 product implementation | CLOSED |
-| commit / CI / mainline confirmation | MISSING |
+| commit / push | PASS |
+| complete CI | PASS |
+| mainline confirmation | MISSING |
 
 因此当前不能把 F158 或跨 Milestone Goal 标记完成。

@@ -56,5 +56,6 @@
 - [x] **T034** 导出最终不可变 `.dc.html`、frame 与 superseded manifest
 - [ ] **T035** 双端场景、功能、视觉、无障碍与安全 completion audit
 - [ ] **T036** 同步 Blueprint、Milestone 与所有 Feature verification reports
-- [ ] **T037** 干净检出、权威 CI、个人部署复验
+- [ ] **T037** 干净检出、权威 CI、个人部署复验（提交/CI/当前 managed checkout
+  已通过；登录后 SPA/API/SSE 与真实模型对话仍缺）
 - [ ] **T038** 提交、推送、合并并确认主线真实交付

@@ -162,3 +162,22 @@
   恢复，但 launchd 仍指向 `~/.octoagent/app` 的 2026-07-25 旧 managed checkout。
   当前域名页面因此不是本分支字节。后续必须先提交，再使用仓库正式 managed checkout
   安装/更新路径部署，随后完成登录态 SPA/API/SSE 与 Settings 复验。
+- 2026-07-28：提交并推送 Web/iOS/F150/F158 第一批真实交付
+  `7f72e23ab7168f07e602bbdd19a9776d39a16c28`。GitHub Actions 首轮仅在 Ubuntu
+  Chromium 的 280×32 中文标题 glyph 边缘出现 419 像素差异；diff 没有布局、背景、
+  边框或尺寸漂移。
+- 2026-07-28：提交 `d440413c85a59cba9e868f51b002d135dbb45735` 收敛空 composer
+  的状态顺序，并使视觉样式断言不依赖前序聊天内容；提交
+  `e84ffd435f742ba2784b85c074346ab63ecedbc1` 同时设置该唯一标题断言的 pixel/ratio
+  上限，避免 Playwright 取两阈值较小值继续误报。14 个 snapshot 均未重生成；
+  authoritative CI 的 frontend、architecture、benchmark 与 L1 Playwright 已通过。
+- 2026-07-28：通过仓库正式 `install-octo-user.sh` 更新个人 managed checkout 到
+  `e84ffd43`，完成 `uv sync`、前端 build 并重启 Gateway。loopback ready/home=200，
+  个人域名=Access 302，tunnel running，部署源码 SHA 与分支一致。
+- 2026-07-28：Chrome 可枚举既有 Access 登录页，但接管页面持续超时；没有读取
+  cookie/local storage 绕过认证，登录后个人 SPA/API/SSE 保持未验证。Gateway 启动
+  日志另行暴露 OpenAI Codex refresh token reused/401，真实模型对话保持阻断。
+- 2026-07-28：提交 `e84ffd43` 的权威 GitHub Actions run
+  `30364899065` 最终 success：backend deterministic、frontend、architecture、
+  benchmark、L1 Playwright 五个 job 全部通过。L1 在 Linux/Chromium 上证明功能和
+  视觉基线可复现；Node 20 action deprecation 仅为上游 action annotation，不是失败。
