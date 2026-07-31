@@ -62,6 +62,15 @@ live matrix 与回滚顺序已冻结在 F153
 focused selector，结果为 `39 passed / 1 existing warning`。这只证明 origin
 合同在写入前仍稳定，不是 Cloudflare live、真机或 T014 evidence。
 
+当前提交还重新审计 F151：正确 `uv` 环境下，当前
+`architecture all --base-ref origin/master --scope-mode repository` 为 exit0；
+canonical v2 的 269 条 record hash/previous chain 独立重算为 0 错误。但 committed
+evidence verify 使用当前 `origin/master` 时因主线前移报
+`EVIDENCE_BASE_REF_INVALID`，使用冻结 base SHA 时又因 `evidence/local` 被忽略且
+已不存在报 `EVIDENCE_ARTIFACT_MISSING`。因此当前 F151 产品架构合同可证明，历史
+TDD raw archive 不可在干净检出复验。证据见
+`evidence/f151/2026-07-31/verification-report.md`，两者不得混为一个 PASS。
+
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
 个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
 真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154 只完成 Research/Design/Tasks
@@ -277,6 +286,7 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | F150 local product entry | PASS |
 | deterministic backend regression | PASS |
 | repository architecture gate | PASS（含当前 T047 exact overlay） |
+| F151 canonical TDD raw archive | FAIL（metadata chain intact，raw artifacts missing） |
 | iPhoneOS target compilation | PASS |
 | GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（当前提交 `dc8b1b41`） |
 | GitHub Actions backend deterministic | PASS（run `30602259193`） |

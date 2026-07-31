@@ -24,7 +24,8 @@
 | iOS 功能 E2E | Swift unit 9/9、Simulator UI 3/3、六态冷启动；F153 live 写前 focused 39 pass | PARTIAL | F153 registration 已证，mobile live 写入/回滚矩阵已冻结但未执行；F154 exact HealthKit 场景与测试矩阵已冻结但未执行；F155/F156 已有设计合同但行为 E2E=0；真机及 F154-F156 行为仍缺 | F153-F156 |
 | iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；F154 已冻结 Claude early + SwiftUI native visual contract，但完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
 | Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_BRANCH_CI_DEPLOYED | 最终总 completion audit 尚未完成 | F158 |
-| F151 runtime/architecture | verification report + CI | PROVISIONAL PASS | 仍需纳入最终干净检出回归 | F151 / F158 |
+| F151 当前 runtime/architecture | 当前 `architecture all`、verification report metadata、CI architecture/backend | PROVEN_CURRENT | 当前提交相对当前主线 architecture all exit0；产品架构合同可继续作为当前交付依据 | F151 / F158 |
+| F151 历史 TDD evidence 可复验性 | canonical v2 269-record hash chain、干净检出 verify | CONTRADICTED | `origin/master` 已前移；immutable base 下又因 ignored `evidence/local` 缺失而失败，旧 raw 未找到；不得伪造或用当前 GREEN 重跑替代 | F151 / F158 |
 | F157 CI 回归修复 | `master=db3214ff`；CI run `30198514576` 五个 job 全绿；T001-T013 全完成 | PROVEN | 无 | F157 / F158 |
 | M10 物理启动验收 | plist 早于当前 boot；launchd/service/ready 当前均健康 | INCOMPLETE | 本轮部署曾手工 kickstart，仍缺一次明确物理重启后的 ATT-129-BOOT | 原 owner / F158 audit |
 
@@ -169,6 +170,12 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     仍超时。当前 Provider 正式恢复入口是
     `~/.octoagent/bin/octo setup --provider openai-codex`，成功路径会自动执行
     `octo doctor --live`。两项均仍需要用户参与，未被静态诊断提升为产品 PASS。
+19. 当前提交再次运行 `check-runtime-architecture.py all --base-ref origin/master
+    --scope-mode repository` 为 exit0；但 F151 canonical evidence 的 committed verify
+    使用当前 `origin/master` 时以 `EVIDENCE_BASE_REF_INVALID` 失败，使用 immutable
+    `9d5e1e48…` 时又以 `EVIDENCE_ARTIFACT_MISSING` 失败。独立重算 269 条 record hash
+    与 chain 为 0 错误，说明 index metadata 完整、raw archive 不自包含。完整记录见
+    `evidence/f151/2026-07-31/verification-report.md`。
 
 ## F153 当前设计映射与偏离记录
 
