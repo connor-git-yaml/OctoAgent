@@ -34,9 +34,9 @@ OctoAgent 当前同时存在两套“结构视角”：
 
 - 历史规划曾把协调内核描述为独立应用；当前不存在该物理模块
 - 历史规划曾把 Worker 描述为独立源码树；当前仅保留同一 Gateway runtime 内的逻辑角色
-- `packages/plugins` / `packages/observability` 已经像 blueprint 那样拆好
+- `packages/plugins` / `packages/observability` 已经像历史 blueprint 那样拆好
 
-但当前真实实现并不是这样。当前主线实现的很多职责仍然收敛在 `apps/gateway/services/*`，并通过 `packages/core / provider / tooling / skills / policy / memory / protocol` 与 `frontend` 共同构成系统主链。
+以上三项都是容易产生的误读，当前真实实现并不是这样。当前主线实现的很多职责仍然收敛在 `apps/gateway/services/*`，并通过 `packages/core / provider / tooling / skills / policy / memory / protocol` 与 `frontend` 共同构成系统主链。
 
 ## 2. 当前真实实现的大模块分类
 
@@ -137,7 +137,8 @@ Web / Telegram 输入
 ### 5.2 `octoagent.yaml` 已经是配置事实源
 
 当前 Provider、alias、runtime、memory、front-door、channels 等主配置已经收敛到 `octoagent.yaml`。  
-`litellm-config.yaml` 是衍生文件，不是应该被人手工维护的主配置。
+历史 `litellm-config.yaml` 已随 LiteLLM runtime 退役；ProviderRouter 直接消费
+`octoagent.yaml` 与独立凭证存储，不再生成或读取 LiteLLM 衍生配置。
 
 这一块的专题细节可继续看 [LLM Provider 配置到调用架构专题](../design/llm-provider-config-architecture.md)。
 

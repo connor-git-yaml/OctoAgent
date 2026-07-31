@@ -194,6 +194,17 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     代码 stable”与“当前个人实例 verification pending”。M12 原生 edge 也已由
     “等待三选一 spike”改为已选 path-specific mobile bypass + origin device proof，
     同时保留 live/真机未完成事实。
+23. Blueprint 子文档与实现级架构导览进一步按当前源码逐项复核：AgentRuntime、
+    AgentSession、MemoryNamespace、RecallFrame 与 A2AConversation 示例已对齐当前
+    Pydantic 字段；Gateway 根装配改为 `main.py → OctoHarness → ProviderRouter`；
+    Orchestrator 方法名、进程内 RuntimeBackend、User Plugin Loader 与 observability
+    物理位置均改为当前事实。历史 docker-compose 继续仅作审计背景，不再写成等待用户
+    手工同步的部署模板。
+24. 部署蓝图遗留的“容器升级、Docker 日志驱动”也已从 active 运维步骤降为历史；
+    当前升级明确走同一 `UpdateService` 的
+    `PREFLIGHT → MIGRATE → RESTART → VERIFY` durable attempt，重启走
+    launchd/systemd user service，当前日志事实以进程内 RotatingFileHandler 与
+    service fd 重定向为准。
 
 ## F153 当前设计映射与偏离记录
 

@@ -107,94 +107,95 @@ Part 类型说明（对齐 A2A Part 规范）：
 
 ```yaml
 AgentRuntime:
-  agent_id: "agent://butler.main" | "agent://worker.research/default"
-  agent_kind: butler|worker
-  role: supervisor|research|dev|ops|custom
+  agent_runtime_id: "agent-runtime-uuid"
   project_id: "project_id"
-  workspace_id: "optional workspace_id"
-  agent_profile_id: "optional root/default agent profile id"
-  worker_profile_id: "optional worker owner profile id"
-  persona_refs:
-    - "artifact://persona.md"
-  instruction_refs:
-    - "artifact://project-instructions.md"
+  agent_profile_id: "optional unified agent profile id"
+  role: main|worker|automation|user_channel
+  name: "display name"
+  persona_summary: "optional summary"
+  status: active|archived
   permission_preset: minimal|normal|full
-  auth_profile: "optional"
-  policy_profile: "optional"
-  memory_namespace_ids:
-    - "memory://project/<project_id>/shared"
-    - "memory://agent/<agent_id>/private"
-  default_session_kind: butler_user|worker_a2a|worker_direct
+  role_card: "optional role card"
+  metadata: {}
 ```
 
 ```yaml
 AgentSession:
-  session_id: "uuid"
-  agent_id: "agent://..."
-  session_kind: butler_user|worker_a2a|worker_direct
+  agent_session_id: "uuid"
+  agent_runtime_id: "agent-runtime-uuid"
+  kind: main_bootstrap|worker_internal|direct_worker|subagent_internal|automation_internal|user_channel
+  status: active|closed
   project_id: "project_id"
-  workspace_id: "optional workspace_id"
-  channel_thread_id: "optional stable_thread_key"
-  session_owner_profile_id: "用户当前默认在和谁对话"
-  turn_executor_kind: self|worker|subagent
-  delegation_target_profile_id: "仅在本轮显式委派时存在"
-  inherited_context_owner_profile_id: "可选，连续性/记忆来源 owner"
-  parent_session_id: "optional uuid"
+  surface: "chat"
+  thread_id: "optional stable_thread_key"
+  parent_agent_session_id: "optional uuid"
+  parent_worker_runtime_id: "subagent-only parent runtime"
+  work_id: "optional work id"
   a2a_conversation_id: "optional uuid"
-  effective_config_snapshot_ref: "artifact://..."
-  recent_turn_refs:
-    - "task_id or artifact_id"
-  rolling_summary_ref: "artifact://..."
-  compaction_state:
-    enabled: true
-    last_compacted_at: "optional"
+  last_context_frame_id: "optional context frame"
+  last_recall_frame_id: "optional recall frame"
+  recent_transcript: []
+  rolling_summary: ""
+  memory_cursor_seq: 0
+  metadata: {}
 ```
 
 ```yaml
 MemoryNamespace:
-  namespace_id: "memory://project/<project_id>/shared" | "memory://agent/<agent_id>/private"
-  owner_kind: project|agent
-  owner_id: "project_id or agent_id"
-  visibility: shared|private
-  partitions:
-    - profile
-    - work
-    - chat:web:thread_id
-  backend: sqlite|lancedb|hybrid
+  namespace_id: "memory://project/<project_id>/shared" | "memory://agent/<agent_runtime_id>/private"
+  project_id: "project_id"
+  agent_runtime_id: "empty for project_shared"
+  kind: project_shared|agent_private|worker_private
+  name: "display name"
+  description: "optional"
+  memory_scope_ids: []
+  metadata: {}
 ```
 
 ```yaml
 RecallFrame:
   recall_frame_id: "uuid"
-  agent_id: "agent://..."
-  session_id: "session://..."
-  trigger_task_id: "task_id"
+  agent_runtime_id: "agent-runtime-uuid"
+  agent_session_id: "agent-session-uuid"
+  context_frame_id: "context-frame-uuid"
+  task_id: "task_id"
+  project_id: "project_id"
   query: "当前问题 / A2A payload / task goal"
-  sources:
-    session_recency: ["turn_ref"]
-    agent_private_memory: ["memory_ref"]
-    project_shared_memory: ["memory_ref"]
-    work_evidence: ["artifact_ref"]
-  provenance_ref: "artifact://..."
+  memory_namespace_ids: []
+  memory_hits: []
+  source_refs: []
+  queried_namespace_kinds: []
+  hit_namespace_kinds: []
+  budget: {}
+  degraded_reason: ""
 ```
 
 ```yaml
 A2AConversation:
-  conversation_id: "uuid"
-  source_agent_id: "agent://butler.main"
-  target_agent_id: "agent://worker.research/default"
-  source_session_id: "session://butler-user/..."
-  target_session_id: "session://worker-a2a/..."
+  a2a_conversation_id: "uuid"
+  task_id: "task_id"
   work_id: "work_id"
-  status: active|completed|failed|cancelled
-  last_message_id: "optional uuid"
+  project_id: "project_id"
+  workspace_id: "optional workspace_id"
+  source_agent_runtime_id: "agent-runtime-uuid"
+  source_agent_session_id: "agent-session-uuid"
+  target_agent_runtime_id: "agent-runtime-uuid"
+  target_agent_session_id: "agent-session-uuid"
+  context_frame_id: "context-frame-uuid"
+  request_message_id: "optional uuid"
+  latest_message_id: "optional uuid"
+  latest_message_type: "optional message type"
+  status: active|waiting_input|completed|failed|cancelled
+  message_count: 0
+  trace_id: "trace id"
+  metadata: {}
 ```
 
 关系约束：
 - `Project` 提供共享 instructions / knowledge / shared memory / secrets / channel bindings。
-- `Butler` 与每个 `Worker` 都是独立 `AgentRuntime`，各自拥有 session、memory、recall、compaction。
+- 主 Agent 与每个 `Worker` 都是独立 `AgentRuntime`，各自拥有 session、memory、recall、compaction。
 - `Work` 是执行与委派单元，不再兼职承载"Agent 私有会话"语义。
-- `A2AConversation` 是 Butler 与 Worker 之间的 durable carrier；没有 durable A2A conversation，就不算完成多 Agent 主链。
+- `A2AConversation` 是主 Agent 与 Worker 之间的 durable carrier；没有 durable A2A conversation，就不算完成多 Agent 主链。
 
 ---
 
@@ -269,7 +270,7 @@ Worker 在 Free Loop 中自主决策。满足任一条件时，倾向于使用 S
 - retry 策略：
   - 同模型重试
   - 升级模型（cheap → main）
-  - 切换 provider（由 LiteLLM 处理）
+  - 切换 provider（由 ProviderRouter 的 alias / fallback 路由处理）
 - interrupt（HITL）— pydantic-graph 内置 iter/resume：
   - WAITING_APPROVAL
   - WAITING_INPUT
@@ -299,7 +300,7 @@ SkillSpec:
   permission_mode: inherit|restrict
   tools_allowed:
     - tool_id                 # 可选收窄器；只有 restrict 模式强制生效
-  model_alias: "planner"          # LiteLLM alias（见 §8.9.1）
+  model_alias: "planner"          # ProviderRouter 语义 alias（见 §8.9.1）
   timeout_s: 300                  # Skill 级超时
   tool_policy: sequential|parallel|mixed
   tool_profile: standard          # trusted local 默认基线；实际执行仍受 policy 上限控制
@@ -314,7 +315,7 @@ SkillSpec:
 #### 8.4.2 Skill 运行语义（必须一致）
 
 1. 校验输入（InputModel）
-2. 调用模型（通过 LiteLLM alias）
+2. 调用模型（通过 ProviderRouter 语义 alias）
 3. 解析并校验输出（OutputModel）
 4. 若输出包含 tool_calls：
    - 校验工具参数 schema
@@ -400,7 +401,7 @@ ToolMeta:
 | NORMAL | ALLOW | ALLOW | ASK |
 | FULL | ALLOW | ALLOW | ALLOW |
 
-- Butler 默认 FULL，Worker 默认 NORMAL，Subagent 继承 Worker
+- 主 Agent 默认 FULL，Worker 默认 NORMAL，Subagent 继承 Worker
 - 没有硬 DENY——所有 ASK 场景都可通过用户审批临时提升（Constitution 原则 7）
 - 权限检查由 `tooling.permission.check_permission()` 单函数内联执行，不使用 Hook Chain
 - 路径访问由 `tooling.path_policy.PathAccessPolicy` 白名单/黑名单/灰名单强制拦截
@@ -803,9 +804,9 @@ WriteProposal:
 2026-03-13 运行时上下文纠偏（参考 Agent Zero Projects / OpenClaw session-key + compaction）：
 - `Memory` 与 `Recall` 必须分离建模：Memory 回答"长期保留了什么"，Recall 回答"当前问题该取回什么"
 - 每个 Agent 必须拥有自己的私有 `MemoryNamespace` 与 `AgentSession`；`Project` 只提供共享上下文与共享记忆，不替代 Agent 私有上下文
-- Butler 默认只读取 `ButlerSession + ButlerMemory + ProjectMemory + child result summary`
+- 主 Agent 默认只读取 `MainAgentSession + MainAgentMemory + ProjectMemory + child result summary`
 - Worker 默认只读取 `WorkerSession + WorkerMemory + 被授权的 ProjectMemory + 当前 Work evidence`
-- Worker 默认**不得直接读取完整用户主聊天历史**；Butler 必须通过 A2A payload / context capsule 选择性转述
+- Worker 默认**不得直接读取完整用户主聊天历史**；主 Agent 必须通过 A2A payload / context capsule 选择性转述
 - 高级 Memory backend 的索引维度必须至少覆盖 `namespace_id + agent_id + session_id + partition + scope_id`，不能只按 project/thread 粗暴混用
 - Recall pipeline 必须显式可观测，默认顺序为：`session recency -> agent private memory -> project shared memory -> work evidence -> explicit knowledge`
 

@@ -112,14 +112,10 @@ volumes:
   → ProviderClient 按 transport 派发到对应 HTTP endpoint
 ```
 
-**docker-compose.yml 应做的同步改动**（§12.2 参考配置目前仍含 `litellm-proxy` 服务条目，待用户部署时手动同步删除）：
-
-- 删除 `services.litellm-proxy` 整块
-- 删除 §12.1.2 服务清单中的 `litellm-proxy` 行
-- 删除依赖 `litellm-proxy` 的 `depends_on` 引用
-- 部署生产环境时确认 `~/.octoagent/auth-profiles.json` 已通过 `octo config migrate-080` 迁移到位
-
-> **运维 follow-up**：当前 `docs/blueprint/deployment-and-ops.md` §12.2 + §12.1.2 仍保留 LiteLLM Proxy 段落作为历史参考，建议在 M6 F104（文件工作台 v0.1）期间或运维侧首次重部署时同步清理。
+§12.2 的 docker-compose 只保留为历史审计背景，不是等待用户手工同步的部署模板。
+当前部署不得据此创建 `litellm-proxy`、独立 kernel/worker 容器或 Caddy 公网入口；
+老实例只通过 `octo config migrate-080` 把凭证迁入当前 schema，再由正式 installer
+与 OS user service 重部署。
 
 #### 12.1.5 容器交付评估结论（M10 F147，2026-07-19）——**不做容器**
 
@@ -599,28 +595,29 @@ F094 引入 `octo memory migrate-094` CLI 命令组（dry-run / apply / rollback
 - 新版本必须兼容上一版本配置（或提供自动迁移）
 - 配置变更生成 CONFIG_CHANGED 事件（对齐 FR-OPS-1），支持回滚
 
-#### 12.6.3 容器升级流程
+#### 12.6.3 当前 managed update 流程
 
-- **MVP（停机升级）**：`docker compose down && docker compose pull && docker compose up -d`
-- **M2+（最小停机）**：
-  - 先升级无状态服务（gateway）
-  - 再升级有状态服务（kernel），利用优雅关闭保证数据完整
-  - 升级前自动触发备份
+- `octo update --dry-run` 先执行 managed descriptor、工作树与环境 preflight，不写运行实例；
+- `octo update` 创建 durable update attempt，依次执行
+  `PREFLIGHT → MIGRATE → RESTART → VERIFY`；
+- `RESTART` 由 launchd/systemd user service 执行，不存在无状态 Gateway 与有状态
+  Kernel 的容器升级次序；
+- 任一阶段失败都保留 failure report、最后成功阶段与恢复建议，不得继续报告升级成功；
+- Web/CLI/Telegram 共用同一 UpdateService 与 attempt 事实，不另造第二套 updater。
 
 ### 12.7 日志管理
 
-#### 12.7.1 日志策略（对齐 §9.10 packages/observability）
+#### 12.7.1 历史容器日志策略（非当前交付）
 
 - **开发环境**：`structlog` pretty 格式，输出到 stdout
-- **生产环境**：`structlog` JSON 格式，输出到 stdout（由 Docker 日志驱动收集）
+- **历史容器设想**：`structlog` JSON 格式输出到 stdout 后由 Docker 日志驱动收集
 - 所有日志携带 `task_id` / `trace_id`（贯穿事件与日志）
 
-#### 12.7.2 日志轮转与持久化
+#### 12.7.2 历史容器轮转与持久化（非当前交付）
 
-- Docker 日志驱动配置（已包含在 docker-compose 的 `x-common` 中）：
+- 历史 docker-compose 的 `x-common` 曾设：
   - `max-size: 10m`，`max-file: 3`（每个容器最多 30MB 日志）
-- 长期日志归档：定期 `docker compose logs > archive.log` 到 NAS（可选）
-- Logfire 自动采集 Pydantic AI / FastAPI 的 traces 和 spans（§9.10），无需额外配置
+- 该方案不属于当前 managed instance；真实日志与轮转以 §12.7.3 为准。
 
 #### 12.7.3 进程内落盘 + 脱敏（F129，`~/.octoagent` 托管实例 reality）
 

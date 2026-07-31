@@ -8,7 +8,7 @@
 
 OctoAgent 采用"**三层 Agent + Skill Pipeline**"的统一架构：
 
-- **主 Agent（Butler / 主执行者 + 监督者）**
+- **主 Agent（主执行者 + 监督者）**
   永远以 Free Loop 运行。既是主要执行者（直接处理用户请求），又负责 Worker 创建与派发、全局监督与门禁。
   类似 Agent Zero 的 Agent0，但额外拥有创建和管理 Worker 的能力。
   每个主 Agent 绑定一个 Project，是该 Project 的所有者之一。
@@ -87,10 +87,10 @@ flowchart TB
       TOOLS["Tool Broker<br/><small>schema 反射 + 执行</small>"]
     end
 
-    JR["JobRunner<br/><small>docker / ssh / remote</small>"]
+    RB["RuntimeBackend<br/><small>Inline / Graph（进程内）</small>"]
 
     Workers -->|"自主决策"| Capabilities
-    Capabilities -->|job spec| JR
+    Capabilities -->|"受治理执行"| RB
   end
 
   subgraph Provider["☁️ Provider Plane"]
@@ -119,7 +119,7 @@ flowchart TB
   class IN,OUT,STRM gateway
   class ROUTER,POLICY kernel
   class TASKS,ART,MEM store
-  class W1,W2,W3,JR worker
+  class W1,W2,W3,RB worker
   class SKILLS,GRAPH,TOOLS capability
   class ROUTE,LLM provider
 ```

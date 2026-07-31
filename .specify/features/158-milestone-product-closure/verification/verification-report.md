@@ -80,6 +80,16 @@ raw archive 不自包含、F150 产品代码 stable 但当前实例 projection p
 origin P-256 device proof，而不是仍等待方案三选一。该同步只纠正文档真值，不会把
 未执行的 Cloudflare live、OAuth、真机或物理重启提升为 PASS。
 
+随后继续把 Blueprint 子文档和实现级导览与当前源码做字段级对账：运行体/会话/
+记忆/A2A 示例改为当前 Pydantic schema，Gateway 装配改为
+`main.py → OctoHarness → ProviderRouter`，Orchestrator 的现行方法名、Inline/Graph
+RuntimeBackend、实例级 User Plugin Loader 与 Gateway/Event Store observability
+均按真实物理位置记录。§12.2 docker-compose 仍保留历史审计价值，但不再形成待用户
+手工执行的部署动作；active update 已改为同一 UpdateService 的 durable 四阶段，
+日志以当前进程内轮转与 OS service fd 重定向为准。该批修改完成后
+`check-runtime-architecture.py all --base-ref origin/master --scope-mode repository`
+再次为 exit0；它不改变任何产品运行、Cloudflare、OAuth、设备或 evidence 状态。
+
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
 个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
 真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154 只完成 Research/Design/Tasks
@@ -295,7 +305,7 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | F150 local product entry | PASS |
 | deterministic backend regression | PASS |
 | repository architecture gate | PASS（含当前 T047 exact overlay） |
-| Blueprint/Milestone active architecture truth | PASS（external/live 状态仍按实际保持 pending） |
+| Blueprint/Milestone/implementation-guide active architecture truth | PASS（external/live 状态仍按实际保持 pending） |
 | F151 canonical TDD raw archive | FAIL（metadata chain intact，raw artifacts missing） |
 | deployment / remote-access architecture truth sync | PASS（live 状态仍 MISSING） |
 | iPhoneOS target compilation | PASS |
