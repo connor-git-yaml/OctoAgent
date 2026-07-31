@@ -34,6 +34,13 @@ Playwright 为 `39/39 passed / retries=0`；14 个 `claude-early-*` 像素基线
 Gateway/cloudflared running、Web Access `302`，也确认现有 ingress 仍只有 Web
 hostname，不能把本次 Simulator PASS 提升为 mobile live 或真机 PASS。
 
+同日又在提交 `2d2a40a0d9396713723a1a84d98b09383819b807` 执行当前 Web
+完整命令链：Vitest `70 files / 598 tests` 全通过、production build 与 frontend
+complexity 通过、Playwright `39/39` 通过且 retry=0。十四张 `claude-early-*`
+视觉基线全部按 committed 字节通过，没有更新快照。逐基线 SHA 与命令记录位于
+`../evidence/web/2026-07-31/verification-report.md`。该结果证明当前本地
+Gateway-backed Web 的功能和视觉合同，不替代个人部署登录态 SPA/API/SSE 复验。
+
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
 个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
 真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154 只完成 Research/Design/Tasks
