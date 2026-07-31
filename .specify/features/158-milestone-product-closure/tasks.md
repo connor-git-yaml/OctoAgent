@@ -21,8 +21,12 @@
 - [x] **T011 [GREEN]** 复用现有 adapter/view-model 接入 Settings composition
 - [x] **T012 [REFACTOR]** 收敛视觉、无障碍与状态职责，不增加第二 transport/state
 - [x] **T013 [L3]** 真实 Gateway/API/Settings 联调
-- [x] **T014 [L1]** Access 登录、过期、登出、恢复与 Settings 远程访问旅程
-- [x] **T015 [VERIFY]** 生成 F150 正式 verification report 并纠正文档完成状态
+- [ ] **T014 [L1]** 在当前个人部署完成真实 Access 登录、过期、登出、恢复、
+  SPA/API/SSE 与 Settings 远程访问旅程（确定性 Playwright 合同已通过；当前
+  浏览器控制会话仍停在登录边界，不能用历史 T015 attestation 或 Access `302`
+  冒充本次登录后证据）
+- [x] **T015 [ARTIFACT]** 生成 F150 verification report 并按真实状态纠正文档；
+  报告当前结论仍为 `PARTIAL`，不等于 T014 或 F158 Verify 已通过
 
 ## Phase 2：Web 早期 Claude Design 视觉恢复
 

@@ -210,6 +210,12 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     改为当前 `AgentProfile(kind=worker) + AgentRuntime + AgentSession(kind=...)`
     单一模型；历史 Feature 名与迁移记录保留为时间线，不再作为后续产品/companion
     设计输入。
+26. F158 Tasks 曾把当前个人部署的 Access 登录后旅程误勾为完成，但同一日期的
+    F150/F158 verification report 都明确记录受控浏览器仍停在登录边界、projection
+    为 `pending_verification`。T014 已恢复为 unchecked；历史 F150 T015 live
+    attestation、确定性 Playwright 与 Access `302` 都不能替代当前部署的
+    SPA/API/SSE/Settings 登录后证据。T015 只表示报告制品已生成并如实标记
+    `PARTIAL`。
 
 ## F153 当前设计映射与偏离记录
 

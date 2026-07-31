@@ -101,6 +101,11 @@ production 和产品 E2E 均为 0；iOS
 变更已提交、推送并在干净 detached worktree 复验；权威 GitHub Actions run
 `30602259193` 五个 job 全绿，当前提交也已进入个人部署；主线确认仍未完成。
 
+F158 Tasks 的当前真值也已同步：真实个人部署的 Access 登录后旅程 T014 保持
+unchecked；已经通过的 deterministic Playwright、历史 F150 T015 live attestation
+和 Access `302` 只作为前置证据。T015 仅表示本报告制品已生成并诚实维持
+`PARTIAL`，不表示远程登录后产品验收完成。
+
 ## 已通过
 
 ### Web 功能与视觉
