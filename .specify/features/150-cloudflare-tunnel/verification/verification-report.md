@@ -5,9 +5,12 @@
 **复核分支**：`codex/f158-milestone-product-closure`
 **初始基线提交**：`db3214fff722c6f969baf99528a76fc03a1e21a1`
 **本轮复验基线提交**：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
+**当前通过完整 CI 的代码/架构提交**：
+`a2dca2badba40f87cec922946d65d21396e1b709`（run `30604533484`）
 **当前个人部署提交**：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
-**状态**：本地产品闭环、当前分支个人部署与权威 CI 通过；connector 已恢复，等待
-真实登录态复验与主线合并
+**状态**：F150 产品字节、本地合同、个人部署与当前分支权威 CI 通过；当前分支在
+`dc8b1b41` 之后没有 F150/production 字节变化，但部署 Git 身份仍是 `dc8b1b41`；
+connector 已恢复，等待真实登录态复验与主线合并
 
 ## 复核背景
 
@@ -157,18 +160,19 @@ Gateway 配置或用户凭证；在权威 CI 通过后，另以正式 installer 
 同日当前分支 Web 全量复验为 Vitest `70 files / 598 tests`、build 与 complexity
 PASS、Playwright `39/39`、Claude 早期视觉基线 `14/14`，均未更新快照；证据见
 `../158-milestone-product-closure/evidence/web/2026-07-31/verification-report.md`。
-当前提交的权威 GitHub Actions run `30602259193` 五个 job 也全部通过。这些本地与
-CI 结果不把 Access `302` 或 `pending_verification` 提升为登录态 PASS。
+该部署提交的权威 GitHub Actions run `30602259193` 五个 job 全部通过；后续
+Blueprint/Milestone active schema 真值提交
+`a2dca2badba40f87cec922946d65d21396e1b709` 的 run `30604533484` 也由
+backend-deterministic、frontend、architecture、benchmark 与 l1-playwright 五个
+success job 闭合。两次 run 都不能把 Access `302` 或 `pending_verification` 提升为
+登录态 PASS。
 
-Chrome 最后可枚举的相关页面仍是 Cloudflare Access 登录入口；浏览器控制连接在读取
-页面前断开。因此没有读取 Cookie/local storage，也没有用旧页面标题或历史会话冒充
-当前 SPA/API/SSE 证据。
-
-同日进一步执行浏览器接管前机械诊断：Chrome 进程、已启用扩展与 native host 均为
-PASS；随后 Chrome 与内置 Browser 的受控导航/DOM 读取仍超时。该结果把问题缩小为
-当前浏览器控制会话，而不是 Gateway、Access 登录页或插件安装缺失。下一次复验必须
-先取得用户对打开全新 Chrome `connor` profile 窗口的单次授权，再由用户在该窗口
-完成 Access 登录；仍禁止读取 Cookie/local storage 绕过认证。
+Chrome `connor` profile 的最新只读复核已能读取现有相关标签的标题和 URL：标签仍为
+`Sign in ・ Cloudflare Access`，目标是 `octo.maojiwang.work` 的 Access 登录边界，
+不是已认证 OctoAgent 产品页。目标标签已原样保留给用户；没有读取 Cookie/
+local storage、代填账号或触发登录。下一次复验应由用户直接在该标签完成 Access
+登录，再从同一 profile 验证 SPA/API/SSE/Settings、刷新、过期、重新认证和登出；
+仍禁止读取 Cookie/local storage 绕过认证。
 
 Provider 的正式恢复入口也已从当前部署 CLI 只读确认：
 `~/.octoagent/bin/octo setup --provider openai-codex`。该流程会启动 PKCE 浏览器授权、
