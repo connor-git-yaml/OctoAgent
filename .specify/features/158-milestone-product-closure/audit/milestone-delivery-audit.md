@@ -205,6 +205,11 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     `PREFLIGHT → MIGRATE → RESTART → VERIFY` durable attempt，重启走
     launchd/systemd user service，当前日志事实以进程内 RotatingFileHandler 与
     service fd 重定向为准。
+25. Milestone M3/M4 的 active 对象关系已从 F117 前的
+    `WorkerProfile + ButlerSession + WorkerSession + DirectWorkerSession` 平行实体
+    改为当前 `AgentProfile(kind=worker) + AgentRuntime + AgentSession(kind=...)`
+    单一模型；历史 Feature 名与迁移记录保留为时间线，不再作为后续产品/companion
+    设计输入。
 
 ## F153 当前设计映射与偏离记录
 

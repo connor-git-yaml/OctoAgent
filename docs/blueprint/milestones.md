@@ -162,7 +162,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [x] 一键安装 / 一键升级 / 迁移修复（installer + updater + doctor/migrate）
 - [x] 统一配置与 Secret Store（Provider / Channel / Model / Gateway 一体化向导，环境变量退居高级路径）
 - [x] Project / Workspace 一等公民（project = instructions + memory + secrets + files + channel/A2A bindings 的统一隔离单位）
-- [~] WorkerProfile / capability pack 与主 Agent Profile + Context Continuity 主链已具备骨架；Butler/Worker 的全 Agent session/memory/recall parity 仍待补齐
+- [x] 统一 AgentProfile / capability pack 与主 Agent Context Continuity 主链已落地；F093-F096 已关闭主 Agent/Worker 的 session/memory/recall parity，F117 已把 WorkerProfile 合并进 `AgentProfile(kind=worker)`
 - [x] Telegram / Web 控制命令面（`approve` / model 切换 / skill 调用 / subagent 控制 / status）
 - [x] 用户友好的 Web 管理台（dashboard / agents / memory / permissions / secrets / runtime status）
 - [x] Session / Chat Lifecycle Center（history / export / queue / focus / reset / interrupt / resume）
@@ -177,7 +177,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [x] ToolIndex（向量检索）+ 动态工具注入
 - [x] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
 - [x] Feature 031：M3 User-Ready E2E Acceptance（正式 release gates、迁移演练、最终验收报告）
-- [~] Feature 033：Agent Profile + Bootstrap + Context Continuity（Butler 主链已接入 profile / context frame / recent context / memory retrieval；Worker runtime continuity 与独立 session 仍待补齐）
+- [x] Feature 033：Agent Profile + Bootstrap + Context Continuity（主 Agent 主链已接入 profile / context frame / recent context / memory retrieval；Worker continuity 与独立 session 已由 F093-F096 闭环）
 - [~] Feature 038：Agent Memory Recall Optimization（project-scoped recall 主链、agent-private namespace、worker hint-first recall runtime 已打通；仍待更细粒度 user-facing evidence）
 - [ ] 多端远程节点 / companion surfaces（按需引入，留给 M4）
 
@@ -196,14 +196,14 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - 2026-03-14 产品化纠偏：`/memory` 必须先经过用户态 display model，再展示 current memory / vault refs / derived 结果；不得把 raw projection、技术写回或占位摘要直接暴露给用户。
 - 2026-03-14 配置纠偏：Memory 设置原要求显式支持三条路径（已于 2026-03-17 简化为 `local_only` 单一模式，MemU bridge 实现已整体移除）。
 - 2026-03-10 M4 升级波次已启动：Feature 035 已落地 guided workbench shell 与五个主页面骨架；Feature 036 已落地 setup-governance 资源与 review/profile/policy 主链；Feature 037 已完成 runtime lineage hardening；Feature 039 已完成 supervisor-only 主 Agent、worker review/apply 与 message-native A2A 主链。
-- 2026-03-12 起持续补齐的 Feature 041 已把 ambient current time、Butler-owned freshness delegation、worker governed web/tool readiness、worker private recall、缺城市追问、backend unavailable 降级与 runtime truth/workbench 可视化收口到同一主链；041 现已完成签收。
+- 2026-03-12 起持续补齐的 Feature 041 已把 ambient current time、主 Agent-owned freshness delegation、worker governed web/tool readiness、worker private recall、缺城市追问、backend unavailable 降级与 runtime truth/workbench 可视化收口到同一主链；041 现已完成签收。
 - front-door `loopback` 模式已补充对常见代理转发 header 的 fail-closed 拒绝，降低"本机反向代理误暴露 = owner-facing API 被放行"的风险。
 
 2026-03-13 架构复核纠偏（基于 live usage + Agent Zero + OpenClaw 对标）：
 
 - 当前实现已具备 `project / profile / work graph / dispatch envelope / memory recall` 的骨架，但运行语义仍偏向"单主 Agent + preflight 路由 + worker 直调"
-- 这与目标中的"Butler 拥有自己的 session/memory/recall，并通过 message-native A2A 与拥有独立 session/memory/recall 的 Worker 通信"仍有语义差距
-- 自本次复核起，Feature 033 / 038 / 039 / 041 的后续验收以"每个 Agent 都有完整上下文系统 + Butler ↔ Worker 真 A2A roundtrip + Worker 默认不直读用户主会话"为准
+- 当时这与目标中的“主 Agent 拥有自己的 session/memory/recall，并通过 message-native A2A 与拥有独立 session/memory/recall 的 Worker 通信”仍有语义差距；该差距后来由 F093-F096 关闭
+- 自本次复核起，Feature 033 / 038 / 039 / 041 的后续验收以“每个 Agent 都有完整上下文系统 + 主 Agent ↔ Worker 真 A2A roundtrip + Worker 默认不直读用户主会话”为准
 - Agent Zero 的 `project = instructions + memory + secrets + subagent settings + workspace` 设计被明确吸收为 `Project` 根隔离单位
 - OpenClaw 的 `agentId + sessionKey` 维度、按 session 的 compaction / usage / metadata 管理被明确吸收为 `AgentSession` 设计基线
 
@@ -212,14 +212,14 @@ M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
 - 安装、配置、首聊、管理台打开必须是一条连续路径；不能要求用户手工拼装多份 `.env`、Docker 命令和 channel token
 - secret 默认应集中收敛到统一 store，并提供 audit / reload / rotate / apply；环境变量只保留给 CI、容器编排和高级用户
 - `project/workspace` 必须成为 M3 的一等公民；instructions、memory、secrets、knowledge、files、A2A target 与 channel bindings 都应优先挂在 project 上，而不是散落为独立配置块
-- `AgentProfile` / `WorkerProfile` 必须是正式产品对象；session、automation、work delegation 必须引用 profile id 与 effective config snapshot，而不是把 prompt、模型、工具包、策略散落在多处
-- `AgentProfile` / owner basics / bootstrap / recent summary / memory retrieval 必须进入 Butler 与 Worker 的真实运行链；不能只在控制台、文档或 worker preflight 中存在
+- `AgentProfile` 必须是正式产品对象；Worker 配置由 `AgentProfile(kind=worker)` 承载，session、automation、work delegation 必须引用 profile id 与 effective config snapshot，而不是把 prompt、模型、工具包、策略散落在多处
+- `AgentProfile` / owner basics / bootstrap / recent summary / memory retrieval 必须进入主 Agent 与 Worker 的真实运行链；不能只在控制台、文档或 worker preflight 中存在
 - CLI / Web 共享同一 wizard session 与 config schema，避免出现"CLI 能做、Web 不能做"或两边语义不一致
 - Telegram / Web 必须共用同一命令/动作语义，不能出现"Web 能 approve，Telegram 只能看不能控"的半控制面
 - 用户与 Agent 的"会话"必须成为可管理对象，而不是仅把一切折叠成 task；history/export/focus/queue/reset/intervene 等生命周期操作要进入正式产品面
 - `AgentRuntime -> AgentSession -> Work/A2AConversation` 必须成为正式运行链；不得继续把 Worker 私有上下文压扁为 task metadata 或 runtime 临时对象
 - 每个 Agent 都必须拥有完整上下文栈：persona / project markdown / session recency / memory namespaces / recall frame / capability / scratchpad
-- Butler 当前必须是唯一 user-facing speaker；后续若开放 DirectWorkerSession，必须在产品面和数据模型中显式建模
+- 主 Agent 当前必须是唯一 user-facing speaker；后续若开放 direct-worker surface，必须使用显式 `AgentSession(kind=direct_worker)`，不得另造平行 Session 实体
 - automation / scheduler 必须是用户可理解、可操作、可回放的产品能力，而不是只在底层放一个 APScheduler job
 - 必须明确 `project -> agent runtime -> agent session -> work` 与 `project -> automation -> work` 两条继承链：project 提供默认 bindings，agent runtime 选择 profile 与 context policy，session/automation 决定交互边界，work 继承 effective config 并允许显式覆盖少数字段
 - 管理台优先复用成熟开源 UI primitives，而不是手写整套控件体系；配置中心、审批、恢复、Memory 浏览应统一在同一控制台
@@ -236,20 +236,16 @@ M3 核心对象关系（2026-03-08 补充）：
 | 对象 | 归属 / 作用域 | 主要承载 | 默认继承来源 | 说明 |
 |------|---------------|----------|--------------|------|
 | `Project` | 主 Agent / Worker 共同拥有的一级产品对象 | instructions、memory bindings、secret bindings、asset bindings、channel/A2A routing、`primary_agent_id`（主负责人） | system defaults | M3 的根隔离单位；每个 Project 同时只有一个活跃 Session（Project ↔ Session 一一对应）；Worker 无合适 Project 时可动态创建 |
-| `BehaviorWorkspace` | `system_shared / agent_private / project_shared / project_agent` 四层作用域 | `AGENTS.md / USER.md / TOOLS.md / BOOTSTRAP.md` 等共享规则文件、`IDENTITY.md / SOUL.md / HEARTBEAT.md` 等 Agent 私有文件、`PROJECT.md / KNOWLEDGE.md / instructions/*` 等项目行为文件、可见性、版本、effective source chain | system defaults + agent defaults + project overrides + project-agent overrides | 任意 Agent 的正式行为文件入口，不再围绕 Butler 特殊化 |
+| `BehaviorWorkspace` | `system_shared / agent_private / project_shared / project_agent` 四层作用域 | `AGENTS.md / USER.md / TOOLS.md / BOOTSTRAP.md` 等共享规则文件、`IDENTITY.md / SOUL.md / HEARTBEAT.md` 等 Agent 私有文件、`PROJECT.md / KNOWLEDGE.md / instructions/*` 等项目行为文件、可见性、版本、effective source chain | system defaults + agent defaults + project overrides + project-agent overrides | 任意 Agent 的正式行为文件入口，不围绕主 Agent 特殊化 |
 | `AgentProfile` | system 或 project 作用域的可复用模板 | persona、instruction overlays、model route、tool profile、capability refs、policy refs、budget defaults | project | 主 Agent / Worker runtime 的静态模板 |
-| `WorkerProfile` | project 作用域的可复用模板 | worker role、bootstrap、工具集合、权限集合、能力集合 | project + AgentProfile | WorkerRuntime 的静态模板；Worker 是持久化角色，类似 Agent Zero 的 Agent0 |
 | `AgentRuntime` | 严格隶属于一个 project | agent identity、effective config、persona、capability、memory namespace bindings | project + selected profile | 主 Agent 或 Worker 的长期运行实体 |
-| `ButlerSession` | 严格隶属于一个 ButlerRuntime | 用户 ↔ Butler 对话、history、queue、focus、rolling summary | project + ButlerRuntime | 当前阶段唯一 user-facing session；与 Project 一一对应 |
-| `WorkerSession` | 严格隶属于一个 WorkerRuntime | Butler ↔ Worker 内部对话、worker recency、tool/evidence summary、compaction | project + WorkerRuntime + A2AConversation | 默认 internal-only，不直接面向用户 |
-| `DirectWorkerSession` | 严格隶属于一个 WorkerRuntime | 用户 ↔ Worker 直接对话 | project + WorkerRuntime | 后续扩展能力；当前不默认开放 |
-| `SubagentSession` | 严格隶属于一个 WorkerSession | Worker ↔ Subagent 临时对话 | Worker 的 Project + WorkerRuntime | Subagent 不拥有 Project，共享 Worker 的 Project 上下文；任务完成后整个 session 可回收 |
+| `AgentSession` | 严格隶属于一个 AgentRuntime | `main_bootstrap / worker_internal / direct_worker / subagent_internal / automation_internal / user_channel` 会话、history、focus、rolling summary 与 memory cursor | project + AgentRuntime + 可选 A2AConversation/Work | 单一正式 Session 模型；main 是当前 user-facing 主链，worker/subagent 默认 internal-only |
 | `Automation` | 严格隶属于一个 project | schedule、trigger、target、run history、effective config snapshot | project + selected runtime/profile | 可创建 session 或直接派生 work |
-| `Work` | 隶属于一个 ButlerSession / WorkerSession / Automation | delegation graph、owner、children、artifacts、budget、state | session 或 automation | 执行与委派单元，不再兼职承载 Agent 私有会话 |
-| `A2AConversation` | 隶属于一个 Work | Butler ↔ Worker / Worker ↔ Subagent 消息往返、context capsule、message lineage | Work + source/target sessions | 多 Agent 运行链的一等对象；Subagent 的 A2AConversation 在任务完成后可归档或删除 |
+| `Work` | 隶属于一个 AgentSession / Automation | delegation graph、owner、children、artifacts、budget、state | session 或 automation | 执行与委派单元，不再兼职承载 Agent 私有会话 |
+| `A2AConversation` | 隶属于一个 Work | 主 Agent ↔ Worker / Worker ↔ Subagent 消息往返、context capsule、message lineage | Work + source/target AgentSession | 多 Agent 运行链的一等对象；Subagent 的 A2AConversation 在任务完成后可归档或删除 |
 | `MemoryNamespace` | project 或 agent 作用域 | shared memory / private memory / partition bindings | project 或 agent runtime | 支撑 SoR / Fragments / Vault |
 | `RecallFrame` | 单次响应或单次 A2A 交互 | session recency、memory hits、artifact evidence、provenance | AgentSession + MemoryNamespace + Work | "当前问题真正取回了什么"的 durable 证明 |
-| `RuntimeHintBundle` | 单次 Butler/Worker/Subagent 响应 | 当前时间、surface、tool availability、confirmed facts、user defaults、最近失败限制、RecentConversation 摘要 | session + project + runtime | 供 Agent 进行 `direct / ask / delegate / best-effort` 判断，而不是让代码写场景树 |
+| `RuntimeHintBundle` | 单次主 Agent/Worker/Subagent 响应 | 当前时间、surface、tool availability、confirmed facts、user defaults、最近失败限制、RecentConversation 摘要 | session + project + runtime | 供 Agent 进行 `direct / ask / delegate / best-effort` 判断，而不是让代码写场景树 |
 
 BehaviorWorkspace 设计补充（2026-03-15，2026-03-21 更新）：
 
@@ -315,20 +311,20 @@ $PROJECT_ROOT (~/.octoagent)/
 - 新机器从安装脚本或 App 入口开始，在 10 分钟内完成安装、统一向导配置、dashboard 打开和首条消息验证；过程中不要求用户手工维护多处环境变量
 - 升级路径支持 doctor/migrate/preflight，失败时可给出回滚或恢复建议；用户可从 CLI 或 Web 发起一键升级
 - 用户可以创建 / 选择 / 切换 project，并让 project 统一承载 instructions、memory mode、secrets bindings、knowledge/files、channel/A2A routing
-- 用户可以为 project 选择默认 `AgentProfile` / `WorkerProfile`，并让 runtime / session / automation / work 展示继承后的 effective config；跨 project 切换时不得串用 secrets、memory 或 profile
-- Butler 与 Worker 的每次实际响应都必须消费各自的 profile/bootstrap/recent summary/memory retrieval 形成的 context frame，而不是只基于当前一句话
+- 用户可以为 project 选择默认 `AgentProfile`（含 `kind=worker`），并让 runtime / session / automation / work 展示继承后的 effective config；跨 project 切换时不得串用 secrets、memory 或 profile
+- 主 Agent 与 Worker 的每次实际响应都必须消费各自的 profile/bootstrap/recent summary/memory retrieval 形成的 context frame，而不是只基于当前一句话
 - 用户可以在 Web 或 CLI 中查看并编辑当前 project 的核心 behavior files（至少 `AGENTS.md / USER.md / PROJECT.md / TOOLS.md`），并看到每次运行的 effective behavior source
 - 当前阶段 Web 已把行为文件管理入口收口到 `Agents` 页的 `Behavior Center`；CLI 提供 `octo behavior ls/show/init/edit/diff/apply --agent ...` 作为 canonical 管理入口
 - Telegram 与 Web 都可以完成最基本的控制命令：approve、model 切换、skill 调用、subagent/work 控制、状态查询
 - Web 管理台可以完成 provider/channel 配置、device pairing、agents / memory / permissions / secrets 管理、任务查看、backup/restore dry-run、memory 浏览与证据追溯，不再依赖终端作为唯一操作面
-- 用户可以在正式的 session/chat center 中完成 ButlerSession / WorkerSession 的 history/export、queue、focus/unfocus、reset/new、interrupt/resume 等日常会话操作
+- 用户可以在正式的 session/chat center 中完成各类 `AgentSession` 的 history/export、queue、focus/unfocus、reset/new、interrupt/resume 等日常会话操作
 - 用户可以创建 recurring automation / scheduler job，查看 run history，并把任务明确绑定到某个 project / channel / target
 - Project 至少提供 asset manifest 的 upload / list / inspect / bind 路径，使 knowledge/files/artifacts 能稳定挂载到 project，而不是只停留在目录约定
 - runtime diagnostics console 可以查看 health、logs、event stream、provider/model 状态、usage/cost、worker/subagent/work graph 执行态与最近失败原因
 - Vault 分区默认不可检索，授权后可查且带证据链
 - 多模态记忆、Category、ToM 等高级能力通过 Memory backend 提供，其输出必须可追溯、可审核，并通过 SoR/WriteProposal 治理落盘
-- Butler 能创建/管理/合并 Work，能把 Work 派发给 Worker / Subagent / ACP-like runtime / Graph Agent，且整条委派链可审计、可中断、可降级
-- Butler ↔ Worker 的委派链必须能在控制台中看到 `A2AConversation + A2AMessage + WorkerSession + RecallFrame`，而不是只有 `WORKER_DISPATCHED`
+- 主 Agent 能创建/管理/合并 Work，能把 Work 派发给 Worker / Subagent / ACP-like runtime / Graph Agent，且整条委派链可审计、可中断、可降级
+- 主 Agent ↔ Worker 的委派链必须能在控制台中看到 `A2AConversation + A2AMessage + AgentSession + RecallFrame`，而不是只有 `WORKER_DISPATCHED`
 - 默认行为判断必须由 `behavior files + runtime hints + agent decision` 形成主路径；代码只保留治理、权限和审计护栏，不得继续把天气/推荐/排期等场景扩张为硬编码分类树
 - automation 触发的 work 必须保留其继承来源（project / agent profile / budget / target），并能在控制台与事件链中解释"为什么使用这套配置"
 - ToolIndex 向量检索精度满足 top-5 命中率 > 80%，Skill Pipeline 可 checkpoint + 可回放 + 可中断（HITL），多 Worker 派发策略可解释且失败可降级回单 Worker 路径
@@ -336,7 +332,7 @@ $PROJECT_ROOT (~/.octoagent)/
 
 ### M3 Carry-Forward（Feature 033）：Agent Profile + Bootstrap + Context Continuity ✅ 已完成（M5 阶段 1 关闭）
 
-- 目标：把 `AgentProfile`、owner basics、bootstrap、recent session summary 和 long-term memory retrieval 真正接进 Butler 与 Worker 的运行链
+- 目标：把 `AgentProfile`、owner basics、bootstrap、recent session summary 和 long-term memory retrieval 真正接进主 Agent 与 Worker 的运行链
 - 这不是 M4 体验增强，而是当前多 Agent 系统"是否像长期助手组织而不是 stateless router + tools shell" 的基础门槛
 - **2026-05-25 关闭状态**：F093-F096 Worker 完整对等 4 维（Session / Memory / Behavior / Recall Audit）全部交付，Worker 侧的 session continuity / private memory / recall parity 已与主 Agent 对等
 - `GATE-M3-CONTEXT-CONTINUITY` ✅ 全 Agent 路径关闭（M5 阶段 1）
@@ -404,7 +400,7 @@ M4 约束：
 - 若系统已具备 delegated `web.search / web.fetch / browser.*` 路径，主 Agent/Worker 必须把"实时/外部事实问题"优先解释为可治理 delegation，而非退回"没有实时能力"
 - 默认行为主路径来自 `BehaviorWorkspace` 与 `RuntimeHintBundle`，由主 Agent 产出结构化决策；不得继续扩张硬编码分类树
 - 兼容路径必须显式标记为 compatibility fallback，在 work/request metadata 中暴露 provenance
-- live dispatch 必须经过 `MainAgentSession -> A2AConversation -> WorkerSession` 的 message-native 主链，保留 runtime context / work lineage
+- live dispatch 必须经过 `AgentSession(main_bootstrap) -> A2AConversation -> AgentSession(worker_internal|direct_worker)` 的 message-native 主链，保留 runtime context / work lineage
 - 每个 Agent 必须拥有完整上下文管理：session、Memory namespaces、recall、persona、project markdown、policy/tool/auth context 与 scratchpad
 - UX 收尾（074-076）以用户可感知的体验改进为目标，不引入新的后端架构变更
 - 本轮执行顺序与升级波次事实源，见 `docs/milestone/m4-feature-split.md`
@@ -491,7 +487,7 @@ M5 acceptance gate 全部关闭：
 
 #### M5 carry-forward gate 关闭
 
-- `GATE-M3-CONTEXT-CONTINUITY` ✅：Butler 主链 + Worker session continuity（F093）+ Worker memory parity（F094）+ Worker recall audit（F096）全部闭环
+- `GATE-M3-CONTEXT-CONTINUITY` ✅：主 Agent 主链 + Worker session continuity（F093）+ Worker memory parity（F094）+ Worker recall audit（F096）全部闭环
 - `GATE-M4-AGENT-RUNTIME-CONTINUITY` ✅：F093-F096 Worker 完整对等 4 维全部实现，主 Agent 与 Worker 上下文栈对等
 
 ---

@@ -86,7 +86,9 @@ origin P-256 device proof，而不是仍等待方案三选一。该同步只纠�
 RuntimeBackend、实例级 User Plugin Loader 与 Gateway/Event Store observability
 均按真实物理位置记录。§12.2 docker-compose 仍保留历史审计价值，但不再形成待用户
 手工执行的部署动作；active update 已改为同一 UpdateService 的 durable 四阶段，
-日志以当前进程内轮转与 OS service fd 重定向为准。该批修改完成后
+日志以当前进程内轮转与 OS service fd 重定向为准。Milestone 的 active M3/M4
+对象关系也已改为统一 `AgentProfile + AgentRuntime + AgentSession`，不再把
+F117 前的 WorkerProfile/多 Session 类当作当前 schema。该批修改完成后
 `check-runtime-architecture.py all --base-ref origin/master --scope-mode repository`
 再次为 exit0；它不改变任何产品运行、Cloudflare、OAuth、设备或 evidence 状态。
 
