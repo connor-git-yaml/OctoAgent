@@ -40,6 +40,7 @@
 - [x] T012 focused Python/Gateway regression、iPhoneOS target build 与 bundle secret scan
 - [x] T012 scheme-level generic build 与 Swift XCTest（iOS 26.5 Simulator，12/12）
 - [x] T013 Simulator cold start、state/visual/a11y E2E（六状态视觉回归 + Dynamic Type + Reduce Motion）
+- [x] 2026-07-31 当前提交完整 scheme 复验（12/12，六态 baseline 未更新）
 - [x] T016 single client/store/auth、complexity、audit/source/bundle ratchet
 - [x] T017 Blueprint/F150/F158 truth sync 与 iOS 设计偏离记录
 - [x] T012-T013/T016 本地 Implement prerequisites

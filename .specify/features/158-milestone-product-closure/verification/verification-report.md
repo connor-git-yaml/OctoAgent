@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-- 日期：2026-07-29
+- 日期：2026-07-31
 - 状态：`PARTIAL`
 - `GATE_VERIFY=false`
 - 当前分支：`codex/f158-milestone-product-closure`
@@ -25,6 +25,14 @@ Playwright 为 `39/39 passed / retries=0`；14 个 `claude-early-*` 像素基线
 同一已启动的 iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 再次为
 `12/12 passed`，本次 result bundle 位于
 `/tmp/f158-ios-rerun.iZzEea/current.xcresult`。这些复验不改变真机与远程认证边界。
+
+2026-07-31 在当前提交 `2ef6cc9e937a29e782afdc8645a1968a38c0812e` 上又执行一次
+完整 scheme，仍为 `12 passed / 0 failed / 0 skipped`。六个 registration 状态逐一
+实际启动并通过 committed Claude 早期像素基线，未更新 baseline；result bundle 为
+`/tmp/f158-ios-current.2jqWRm/current.xcresult`，持久化摘要见 F153
+`evidence/simulator/2026-07-31/verification-report.md`。同日只读部署审计确认
+Gateway/cloudflared running、Web Access `302`，也确认现有 ingress 仍只有 Web
+hostname，不能把本次 Simulator PASS 提升为 mobile live 或真机 PASS。
 
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
 个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
@@ -136,7 +144,8 @@ baseline；未知第三种仍 fail closed。最终
 
 普通字号六张 baseline 位于
 `octoagent/apps/ios/OctoAgentUITests/__Snapshots__/`；AXXXL 证据和完整运行说明位于
-`../153-ios-device-trust-secure-transport/evidence/simulator/2026-07-28/`。
+`../153-ios-device-trust-secure-transport/evidence/simulator/2026-07-28/`；当前提交复验
+位于 `../153-ios-device-trust-secure-transport/evidence/simulator/2026-07-31/`。
 
 同一推送提交在独立 detached worktree
 `/tmp/f158-ios-clean-worktree.YDqxgp/repo` 中再次执行完整 scheme，结果仍为
@@ -151,6 +160,8 @@ baseline；未知第三种仍 fail closed。最终
 - `octo.maojiwang.work` DNS/Access：登录重定向正常
 - Cloudflare named tunnel：`4` 条 active connection，request error=`0`
 - 本轮没有修改 Cloudflare 账户、DNS、Access application、tunnel 或凭证
+- 2026-07-31 只读复核：Gateway/cloudflared 均 running，当前 ingress 仍只有 Web
+  hostname；独立 mobile hostname/exact Bypass 仍未配置
 
 仓库正式 managed-checkout installer 已把 `~/.octoagent/app` 更新到包含 Web、F150、
 F153 Simulator 与真实模型终态修复的运行提交

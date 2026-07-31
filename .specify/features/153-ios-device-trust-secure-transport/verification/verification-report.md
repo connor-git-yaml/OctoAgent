@@ -2,7 +2,7 @@
 
 ## 结论
 
-- 日期：2026-07-28
+- 日期：2026-07-31（当前分支复验）
 - 状态：`PARTIAL`
 - `GATE_VERIFY=false`
 - T001-T013、T016、T017 已完成；
@@ -14,6 +14,13 @@
 本报告只把 F153 registration/device-trust 范围提升为 Simulator `PROVEN`。它不把
 Simulator 当成 Secure Enclave/ThisDeviceOnly Keychain 真机证据，也不把 F153 的
 注册页冒充 F156 最终 companion 产品。
+
+2026-07-31 在提交 `2ef6cc9e937a29e782afdc8645a1968a38c0812e` 上再次执行完整
+scheme，机器摘要仍为 `12 passed / 0 failed / 0 skipped`。六个 registration 状态均
+实际启动并通过 committed Claude 早期视觉基线像素比较；未更新 baseline。当前证据见
+`evidence/simulator/2026-07-31/verification-report.md`。同日部署只读审计确认 Web
+Access `302`、Gateway/cloudflared running，但现有 ingress 仍只有 Web hostname，
+mobile hostname 与 exact Bypass 不存在，因此 T014/T015/T018 判定不变。
 
 ## 当前环境
 
@@ -149,6 +156,10 @@ test 1/1 PASS；实现通过 `@Environment(\.accessibilityReduceMotion)` 移除�
 完整命令、result bundle 与六张 baseline SHA 见：
 
 `evidence/simulator/2026-07-28/verification-report.md`
+
+当前分支复验见：
+
+`evidence/simulator/2026-07-31/verification-report.md`
 
 ## 未通过与阻断
 

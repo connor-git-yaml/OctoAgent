@@ -144,3 +144,9 @@
   `1d41c70fa031c770b833af451e9d7adb2d5f720318fcdf9ff91c68d5855147e2`；
   六类敏感材料均为 0。T012/T013 因而完成；T014 Cloudflare live、T015 真机与
   T018 最终 Verify 仍保持关闭。
+- 2026-07-31：在当前提交 `2ef6cc9e937a29e782afdc8645a1968a38c0812e` 上重新执行
+  iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme：`12 passed / 0 failed / 0 skipped`。
+  9 个 Swift 单元和 3 个 XCUI 场景均真实运行；六个 registration 状态再次启动并
+  通过 committed Claude 早期视觉基线像素比较，baseline 未更新。同期只读部署审计
+  确认 Web Access `302`、Gateway/cloudflared running，但 ingress 仍只有 Web hostname，
+  mobile hostname/exact Bypass 和真 iPhone 仍不存在，故 T014/T015/T018 不变。
