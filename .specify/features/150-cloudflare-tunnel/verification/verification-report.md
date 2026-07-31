@@ -1,9 +1,11 @@
 # Verification Report：F150 Cloudflare Tunnel 远程访问
 
 **Feature ID**：`150`
-**复核日期**：2026-07-28
+**复核日期**：2026-07-31
 **复核分支**：`codex/f158-milestone-product-closure`
-**基线提交**：`db3214fff722c6f969baf99528a76fc03a1e21a1`
+**初始基线提交**：`db3214fff722c6f969baf99528a76fc03a1e21a1`
+**本轮只读复验基线提交**：`8a198febb82fdd4d0ad5e9882b25c37e7bbd439c`
+**当前个人部署提交**：`35d7aa14f6f146a47084e4725e11df83cf034152`
 **状态**：本地产品闭环、当前分支个人部署与权威 CI 通过；connector 已恢复，等待
 真实登录态复验与主线合并
 
@@ -137,6 +139,29 @@ Gateway 启动日志还证明个人实例的 OpenAI Codex refresh token 已复�
 这不是 Cloudflare Access 或 tunnel 的 502，但会阻断真实模型对话；需要重新登录
 provider 后另行复验。
 
+## 2026-07-31 当前个人部署只读复验
+
+本轮重新从磁盘、进程与 HTTP 事实复算，未修改 Cloudflare、LaunchAgent、DNS、
+Gateway 配置或用户凭证：
+
+- managed checkout 为 `35d7aa14f6f146a47084e4725e11df83cf034152` 且 worktree clean；
+- `com.octoagent.gateway` 与 `work.maojiwang.octoagent-cloudflared` 均为 running；
+- loopback `/health` 返回 `200`；
+- `https://octo.maojiwang.work/` 仍返回 Access `302`；
+- cloudflared ingress 仍只有 `octo.maojiwang.work`，没有 mobile hostname；
+- loopback `GET /api/control/resources/remote-access` 返回
+  `state=pending_verification`、`reason_code=REMOTE_ACCESS_VERIFICATION_PENDING`、
+  `last_verified_at=null`，与 Settings 应展示的当前状态一致。
+
+同日当前分支 Web 全量复验为 Vitest `70 files / 598 tests`、build 与 complexity
+PASS、Playwright `39/39`、Claude 早期视觉基线 `14/14`，均未更新快照；证据见
+`../158-milestone-product-closure/evidence/web/2026-07-31/verification-report.md`。
+这些本地结果不把 Access `302` 或 `pending_verification` 提升为登录态 PASS。
+
+Chrome 最后可枚举的相关页面仍是 Cloudflare Access 登录入口；浏览器控制连接在读取
+页面前断开。因此没有读取 Cookie/local storage，也没有用旧页面标题或历史会话冒充
+当前 SPA/API/SSE 证据。
+
 ## 架构与安全复核
 
 - production consumer 只有 Settings composition；
@@ -154,4 +179,4 @@ provider 后另行复验。
 2. 重新登录 OpenAI Codex provider 并验证真实模型对话；
 3. 合并主线后校正 Blueprint/Milestone completion audit。
 
-在这四项完成前，本报告不得被解释为 F158 整体 Goal 已完成。
+在这三项完成前，本报告不得被解释为 F158 整体 Goal 已完成。

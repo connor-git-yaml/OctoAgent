@@ -2,7 +2,7 @@
 
 ## 审计基线
 
-- 审计日期：2026-07-29
+- 审计日期：2026-07-31
 - `origin/master`：`db3214fff722c6f969baf99528a76fc03a1e21a1`
 - F149 最终 design export：
   `1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`
@@ -16,11 +16,11 @@
 |---|---|---|---|---|
 | M11 Web 视觉保持早期 Claude Design | 早期 frame、恢复后 1440 截图、14 个 pixel snapshot、逐 surface 结构合同、云端最终导出、当前个人部署 CSS | PROVEN_BRANCH_CI_DEPLOYED | 当前运行提交已部署；登录后旅程与总 completion audit 仍缺 | F158 / F149 |
 | F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access 前边界通过；登录后 Settings 仍受浏览器接管超时阻断 | F158 / F150 |
-| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery | PARTIAL | origin/DNS/Access/4 条 connector 与当前 runtime 已恢复；登录后 SPA/API/SSE 仍待验证 | F158 / F150 |
-| Web 功能 E2E | 11 个 Playwright spec / 39 nodes + fresh approval rerun | PROVEN_BRANCH_CI_DEPLOYED | 完整 38 pass/1 once-only skip；fresh approval 1/1 pass；当前 runtime 已部署 | F158 |
+| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery 与 2026-07-31 只读复验 | PARTIAL | Gateway/cloudflared running、loopback health 200、Access 302、Settings projection `pending_verification`；登录后 SPA/API/SSE 仍待验证 | F158 / F150 |
+| Web 功能 E2E | 11 个 Playwright spec / 39 nodes | PROVEN_BRANCH_CI_DEPLOYED | 2026-07-31 当前分支完整 `39/39`、retries=0；当前 runtime 已部署 | F158 |
 | Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_BRANCH_CI_DEPLOYED | 主框架与 9 surface + 真实任务详情进入像素门；部署 CSS map 与分支一致 | F158 |
 | 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
-| 原生 iOS 可启动 | iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 12/12 + detached clean-checkout 12/12 | PROVEN_PUSHED（F153 scope） | F153 registration 已真实启动；F154 Research/Design/Tasks Gate 已通过但 production=0；F155 只完成 Research/决策档案；F156 只完成草案与 40 场景矩阵；完整 companion 与真机仍缺 | F153-F156 |
+| 原生 iOS 可启动 | iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 12/12 + detached clean-checkout 12/12 | PROVEN_PUSHED（F153 scope） | F153 T001-T013/T016/T017 registration 已真实启动并复验；F154 Research/Design/Tasks Gate 已通过但 production=0；F155 只完成 Research/决策档案；F156 只完成草案、40 场景矩阵与 API recon；完整 companion 与真机仍缺 | F153-F156 |
 | iOS 功能 E2E | Swift unit 9/9、Simulator UI 3/3、六态冷启动 | PARTIAL | F153 registration 已证；F154 exact HealthKit 场景与测试矩阵已冻结但未执行；F155/F156 已有设计合同但行为 E2E=0；Cloudflare mobile live、真机及 F154-F156 行为仍缺 | F153-F156 |
 | iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；F154 已冻结 Claude early + SwiftUI native visual contract，但完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
 | Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_BRANCH_CI_DEPLOYED | 最终总 completion audit 尚未完成 | F158 |
@@ -44,8 +44,8 @@
 | M8 | 功能完成 | service/Telegram/cron/voice owner 存在 | PROVISIONAL | 常驻服务与个人部署复验 |
 | M9 | 完成 | 四层测试门、F151/F157 corrective 与 exact master CI 已闭环 | PROVEN | 最终总审计继续复用 run `30198514576` 与当前 F158 branch CI |
 | M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
-| M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 9 surface/任务详情视觉及功能 E2E 通过；Claude 云端谱系已清理并导出；当前 runtime 已部署 | PROVEN_BRANCH_CI_DEPLOYED | 登录后个人旅程与最终 completion audit |
-| M12 | In Progress | F152 Verify；F153 T001-T013/T016 已实现，Simulator registration 功能/视觉通过；F154 Research/Design/Tasks Gate 已通过；F155 Research/决策档案和 F156 40 场景 Design/Tasks 草案已建立 | PARTIAL | Cloudflare mobile live、真机、F153 Verify、F155 A/B 决定、F154-F156 Implement/Verify 与完整 iOS E2E |
+| M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 10 个业务 surface（含任务详情）视觉及功能 E2E 通过；Claude 云端谱系已清理并导出；当前 runtime 已部署 | PROVEN_BRANCH_CI_DEPLOYED | 登录后个人旅程与最终 completion audit |
+| M12 | In Progress | F152 Verify；F153 T001-T013/T016/T017 已实现，Simulator registration 功能/视觉通过；F154 Research/Design/Tasks Gate 已通过；F155 Research/决策档案和 F156 40 场景 Design/Tasks 草案/API recon 已建立 | PARTIAL | Cloudflare mobile live、真机、F153 Verify、F155 A/B 决定、F154-F156 Implement/Verify 与完整 iOS E2E |
 
 该矩阵的 `PROVISIONAL` 不是重新否定历史交付，而是区分“历史报告存在”与“当前
 Milestone Goal 已在同一 commit/环境复验”。最终 completion audit 只允许将取得当前
@@ -129,8 +129,8 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
    `TASK_DRIFT_DETECTED` 错算进固定前缀而失败；修正为“前两条固定 + 追加 drift”
    后，早期全量结果为 `19 passed / 1 conditional skip / 0 failed / retries=0`。
 10. 全前端单元结果为 `70 files / 598 tests passed`；production build 与 frontend
-    complexity gate 均通过。该结果证明当前变更未破坏既有 Web 功能，但不替代尚未
-    完成的逐 surface/state 视觉矩阵。
+    complexity gate 均通过。该结果只证明单元/构建边界；逐 surface/state 的完成证据
+    由下面第 13、14 项的 Playwright 与像素基线单独提供。
 11. F153 focused Protocol/Core/Gateway/authority 回归为 `42 passed`；generic
     iPhoneOS Release build 通过。Release `.app` 恰含 3 个文件，executable
     SHA-256 为
@@ -141,13 +141,18 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     `12 passed`（Swift unit 9/9、UI 3/3）。六个 registration 状态视觉先取得
     baseline-missing RED，经人工复审后同一 selector 6/6 通过；AXXXL Dynamic Type
     与 Reduce Motion setting=1 下的 accessibility UI 复验均通过。
-13. Web surface 补齐后的当前字节结果为 production build PASS、complexity PASS、
-    Vitest `70 files / 598 passed`、Playwright `38 passed / 1 once-only conditional
-    skip / 0 failed`；fresh L1 fixture 的 approval accept/真实落盘为 `1 passed`。
+13. 2026-07-31 当前字节结果为 production build PASS、complexity PASS、Vitest
+    `70 files / 598 passed`、Playwright `39 passed / retries=0`；没有执行 snapshot
+    update。逐命令与当前基线 SHA 见
+    `evidence/web/2026-07-31/verification-report.md`。
 14. `visual-claude-surfaces.spec.ts` 的 10 个 PNG 经 generation 与 no-update 两轮
     各 `10 passed`；动态时间使用 test-only visibility 归一化，最终基线不存在
     Playwright 默认洋红 mask。完整 SHA 与场景矩阵见
     `evidence/web/2026-07-28/verification-report.md`。
+15. 2026-07-31 F153 当前分支完整 scheme 再次为
+    `12 passed / 0 failed / 0 skipped`，其中 unit 9、UI 3；六个 registration 状态
+    实际启动并通过 committed Claude 早期像素基线，未更新 baseline。持久化摘要见
+    `../153-ios-device-trust-secure-transport/evidence/simulator/2026-07-31/verification-report.md`。
 
 ## F153 当前设计映射与偏离记录
 
