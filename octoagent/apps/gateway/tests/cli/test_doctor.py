@@ -258,6 +258,37 @@ class TestDoctorChecks:
         result = await runner.check_credential_expiry()
         assert result.status == CheckStatus.WARN
 
+    async def test_credential_expiry_reports_local_timestamp_semantics(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = CredentialStore(store_path=tmp_path / "auth.json")
+        now = datetime.now(tz=UTC)
+        store.set_profile(
+            ProviderProfile(
+                name="future-token",
+                provider="anthropic",
+                auth_mode="token",
+                credential=TokenCredential(
+                    provider="anthropic",
+                    token=SecretStr("sk-ant-oat01-test"),
+                    acquired_at=now,
+                    expires_at=now + timedelta(hours=24),
+                ),
+                created_at=now,
+                updated_at=now,
+            ),
+        )
+        runner = DoctorRunner(project_root=tmp_path)
+        runner._store = store
+
+        result = await runner.check_credential_expiry()
+
+        assert result.status == CheckStatus.PASS
+        assert "本地过期时间" in result.message
+        assert "不代表远端授权可用" in result.message
+        assert "所有凭证均有效" not in result.message
+
     async def test_telegram_config_skip_when_disabled(self, tmp_path: Path) -> None:
         _write_telegram_config(tmp_path, enabled=False)
         runner = DoctorRunner(project_root=tmp_path)
@@ -414,6 +445,46 @@ class TestDoctorOverall:
         assert model_live.status == CheckStatus.FAIL
         assert model_live.level == CheckLevel.REQUIRED
         assert "重新授权" in model_live.fix_hint
+        assert report.overall_status == CheckStatus.FAIL
+
+    async def test_local_expiry_pass_does_not_claim_remote_authorization(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from octoagent.provider.exceptions import CredentialExpiredError
+
+        store = CredentialStore(store_path=tmp_path / "auth.json")
+        now = datetime.now(tz=UTC)
+        store.set_profile(
+            ProviderProfile(
+                name="future-token",
+                provider="anthropic",
+                auth_mode="token",
+                credential=TokenCredential(
+                    provider="anthropic",
+                    token=SecretStr("sk-ant-oat01-test"),
+                    acquired_at=now,
+                    expires_at=now + timedelta(hours=24),
+                ),
+                created_at=now,
+                updated_at=now,
+            ),
+        )
+        probe = TrackingLiveModelProbe(
+            error=CredentialExpiredError("refresh_token_reused"),
+        )
+        runner = DoctorRunner(project_root=tmp_path, live_model_probe=probe)
+        runner._store = store
+
+        report = await runner.run_all_checks(live=True)
+
+        expiry = next(check for check in report.checks if check.name == "credential_expiry")
+        model_live = next(check for check in report.checks if check.name == "model_live")
+        assert expiry.status == CheckStatus.PASS
+        assert "本地过期时间" in expiry.message
+        assert "不代表远端授权可用" in expiry.message
+        assert "所有凭证均有效" not in expiry.message
+        assert model_live.status == CheckStatus.FAIL
         assert report.overall_status == CheckStatus.FAIL
 
     async def test_model_live_missing_config_is_blocking(

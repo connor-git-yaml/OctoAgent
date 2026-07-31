@@ -47,6 +47,7 @@
 
 - [x] `octo doctor --live` 真实发起 ProviderRouter 模型调用
 - [x] doctor live 成功报告 alias/provider/model，失败为 blocking 非零退出
+- [x] 本地 credential 过期时间检查不再声称远端授权有效
 - [x] credential/refresh 失败不进入 Echo fallback
 - [x] 认证失败 Task 在同一处理链进入 `FAILED`
 - [x] 认证失败 `MODEL_CALL_FAILED.error_category=auth_error`

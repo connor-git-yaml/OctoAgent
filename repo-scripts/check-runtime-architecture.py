@@ -226,7 +226,7 @@ FEATURE_AUTHORITIES = MappingProxyType(
                     "inventories/architecture-authority.v1.json"
                 ),
                 "scope_sha256": (
-                    "64d93ad9ef4214fdb36c7a17538f35eee2acd2fef5a00695ec1340b79717afc8"
+                    "14480527eb27aac71b51f338cd7a24e43abbf2679e912f0f94633ec95fe6397c"
                 ),
                 "status": "GOAL_ACTIVE_IMPLEMENT_OPEN_WEB_VERIFIED_MODEL_TRUTH",
                 "owners": frozenset(("frontend", "gateway", "provider")),
@@ -1546,6 +1546,20 @@ F158_DOCTOR_PREVIOUS_METHOD_AST_SHA256 = MappingProxyType(
         ),
         "check_model_live": (
             "4dc3c71bf3e6fd56b9ca1be6bc4186887bcc7b619ba84d3e3135dcf889609f85"
+        ),
+    }
+)
+F158_DOCTOR_MODIFIED_METHOD_AST_SHA256 = MappingProxyType(
+    {
+        "check_credential_expiry": (
+            "ca1112e471d581d3f462a60c6f1b3ddb2e3d975d5419fd9b142bc9108e2dc4fb"
+        ),
+    }
+)
+F158_DOCTOR_PREVIOUS_MODIFIED_METHOD_AST_SHA256 = MappingProxyType(
+    {
+        "check_credential_expiry": (
+            "c51beeaa5f42108a29d2785d2d9d60e5bc89dece609e6b9f8e49d6a77110f08c"
         ),
     }
 )
@@ -3065,6 +3079,9 @@ def _strip_f158_f150_overlay(
     current: str,
     *,
     expected_hashes: MappingProxyType[str, str] = F158_DOCTOR_METHOD_AST_SHA256,
+    modified_expected_hashes: MappingProxyType[
+        str, str
+    ] = F158_DOCTOR_MODIFIED_METHOD_AST_SHA256,
 ) -> str:
     require(
         relative in F158_F150_OVERLAP_PATHS,
@@ -3076,7 +3093,62 @@ def _strip_f158_f150_overlay(
     except SyntaxError as exc:
         fail("F158_F150_AUTHORITY_OVERLAP_INVALID", str(exc))
     _strip_f158_doctor_overlay(tree, expected_hashes=expected_hashes)
+    for method_name in modified_expected_hashes:
+        _f158_remove_doctor_method(
+            tree,
+            method_name,
+            expected_hashes=modified_expected_hashes,
+        )
     return ast.unparse(tree)
+
+
+def _strip_f158_modified_doctor_overlay(
+    relative: str,
+    source: str,
+    expected_hashes: MappingProxyType[str, str],
+) -> str:
+    require(
+        relative in F158_F150_OVERLAP_PATHS,
+        "F158_F150_AUTHORITY_OVERLAP_INVALID",
+        relative,
+    )
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        fail("F158_F150_AUTHORITY_OVERLAP_INVALID", str(exc))
+    for method_name in expected_hashes:
+        _f158_remove_doctor_method(
+            tree,
+            method_name,
+            expected_hashes=expected_hashes,
+        )
+    return ast.unparse(tree)
+
+
+def _select_f158_doctor_hashes(
+    source: str,
+    candidates: tuple[MappingProxyType[str, str], ...],
+) -> MappingProxyType[str, str]:
+    error_code = "F158_F150_AUTHORITY_OVERLAP_INVALID"
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        fail(error_code, str(exc))
+    actual: dict[str, str] = {}
+    for method_name in candidates[0]:
+        method = _f153_class_method(
+            tree,
+            "DoctorRunner",
+            method_name,
+            error_code=error_code,
+        )
+        actual[method_name] = hashlib.sha256(
+            ast.unparse(method).encode("utf-8")
+        ).hexdigest()
+    for candidate in candidates:
+        if actual == dict(candidate):
+            return candidate
+    fail(error_code, f"DoctorRunner baseline semantic drift: {canonical_sha(actual)}")
 
 
 def _f153_overlay_in_baseline(relative: str, baseline: str) -> bool:
@@ -3121,13 +3193,34 @@ def _validate_f150_authority_path(
     structural_current = current
     if allow_f153_overlay and not _f153_overlay_in_baseline(relative, baseline):
         structural_current = _strip_f153_f150_overlay(relative, structural_current)
-    if allow_f158_overlay and _f158_overlay_in_baseline(relative, baseline):
-        structural_baseline = _strip_f158_f150_overlay(
-            relative,
-            structural_baseline,
-            expected_hashes=F158_DOCTOR_PREVIOUS_METHOD_AST_SHA256,
-        )
     if allow_f158_overlay:
+        baseline_modified_hashes = _select_f158_doctor_hashes(
+            structural_baseline,
+            (
+                F158_DOCTOR_PREVIOUS_MODIFIED_METHOD_AST_SHA256,
+                F158_DOCTOR_MODIFIED_METHOD_AST_SHA256,
+            ),
+        )
+        if _f158_overlay_in_baseline(relative, baseline):
+            baseline_method_hashes = _select_f158_doctor_hashes(
+                structural_baseline,
+                (
+                    F158_DOCTOR_PREVIOUS_METHOD_AST_SHA256,
+                    F158_DOCTOR_METHOD_AST_SHA256,
+                ),
+            )
+            structural_baseline = _strip_f158_f150_overlay(
+                relative,
+                structural_baseline,
+                expected_hashes=baseline_method_hashes,
+                modified_expected_hashes=baseline_modified_hashes,
+            )
+        else:
+            structural_baseline = _strip_f158_modified_doctor_overlay(
+                relative,
+                structural_baseline,
+                baseline_modified_hashes,
+            )
         structural_current = _strip_f158_f150_overlay(relative, structural_current)
     if kind == "class":
         _validate_f150_class(

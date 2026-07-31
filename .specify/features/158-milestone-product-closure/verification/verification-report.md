@@ -109,10 +109,16 @@ doctor、TaskService、WorkerRuntime 四文件回归为 `66 passed`。普通瞬�
 替代。
 
 同一次真实输出还暴露了离线 `credential_expiry` 把“未达到本地过期时间”描述为
-“所有凭证均有效”的误导。单缺陷测试已证明旧文案与远端失败矛盾，但提交门进一步
-确认该方法属于 F150/F158 共享 doctor 的受保护语义，不允许为一句文案绕过 authority。
-测试和生产草稿均已撤回，登记为 T047；当前仍以 `model_live=FAIL` 作为远端可用性的
-唯一权威判定。
+“所有凭证均有效”的误导。T047 的两个单缺陷测试先稳定见红，随后把该检查改为只声明
+本地 `expires_at` 事实，并明确“本地过期时间检查通过不代表远端授权可用；运行
+`octo doctor --live` 验证”。Doctor 全文件回归 `33 passed`，F158 精确 authority
+gate `1 passed`；当前/旧版方法 AST 均被独立哈希锚定，篡改提示语会 fail closed，
+没有绕过 F150 保护面。`model_live` 继续是远端可用性的唯一权威判定。
+
+提交门还发现暂存态 `HEAD` baseline 可能已经包含当前 F158 live probe，而旧 checker
+只接受更早一版 probe 哈希。该路径现只接受“冻结旧版”或“冻结当前版”两种 exact
+baseline；未知第三种仍 fail closed。最终
+`architecture all --base-ref origin/master --scope-mode repository` PASS。
 
 ### iOS 当前可证明范围
 
@@ -217,7 +223,7 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | Claude early-design lineage cleanup | PASS |
 | F150 local product entry | PASS |
 | deterministic backend regression | PASS |
-| repository architecture gate | PASS |
+| repository architecture gate | PASS（含当前 T047 exact overlay） |
 | iPhoneOS target compilation | PASS |
 | GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（当前提交 `ebe8cd29`） |
 | GitHub Actions backend deterministic | PASS（run `30378276329`） |

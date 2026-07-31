@@ -81,6 +81,7 @@
 - [ ] **T046 [PHYSICAL VERIFY]** 在用户明确确认可重启后执行一次真实 Mac 重启；登录后
   以 `launchctl`、`octo service status` 与 `/ready` 共同完成
   `ATT-129-BOOT`，禁止用本轮部署后的手工 `kickstart` 冒充开机自启动
-- [ ] **T047 [UX/ARCHITECTURE]** 在不绕过 F150/F158 authority 的前提下，把
+- [x] **T047 [UX/ARCHITECTURE]** 在不绕过 F150/F158 authority 的前提下，把
   `credential_expiry` 的本地时间戳语义与 `doctor --live` 远端可用性语义明确区分，
-  避免同一报告出现“所有凭证均有效”与 `model_live=FAIL`
+  避免同一报告出现“所有凭证均有效”与 `model_live=FAIL`；Doctor 回归 `33 passed`，
+  F158 精确 authority gate `1 passed`，repository architecture gate PASS

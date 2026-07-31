@@ -258,6 +258,14 @@
 - 2026-07-31：使用 `spec-driver-resume` 恢复 M12 断点。仓库声明的
   `plugins/spec-driver/scripts/*` 仍不存在，因此按 Skill 采用制品存在性的人工
   fallback，没有伪造 execution-state 或 workflow run。
+- 2026-07-31：完成 T047。两个单缺陷测试先证明旧 `credential_expiry=PASS / 所有凭证均有效`
+  会与同份报告中的 `model_live=FAIL` 形成误导，再把该检查收敛为“仅验证本地
+  `expires_at`，不代表远端授权可用”，并明确提示运行 `octo doctor --live`。Doctor
+  全文件回归 `33 passed`。F158 authority 以当前/旧版方法 AST 双哈希只放行
+  `check_credential_expiry` 的这一处语义变化，篡改新提示语会 fail closed；精确 gate
+  `1 passed`。首次提交门还暴露 checker 把暂存态 `HEAD` baseline 固定解释为旧
+  `_probe_live_model` 哈希；修复后只接受已冻结旧版或已冻结当前版两种 exact baseline，
+  未知第三种继续 fail closed。最终 repository `architecture all` PASS。
 - 2026-07-31：建立 F155 EventKit Research/产品决策档案。Apple 官方事实确认
   读取日历需要 OS full access，没有系统级 read-only 权限。提案已冻结为
   未来 24h/3d/7d、raw local-only、title 默认不上传、敏感字段和所有写路径物理

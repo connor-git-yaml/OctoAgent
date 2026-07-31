@@ -119,10 +119,12 @@ def test_f158_exact_web_architecture_authority_is_fail_closed(tmp_path: Path) ->
     }
     checker = _load_checker()
     checker.validate_f150_implementation_scope(REPO_ROOT, "origin/master")
+    checker.validate_f150_implementation_scope(REPO_ROOT, "HEAD")
     doctor_path = "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py"
     doctor_source = (REPO_ROOT / doctor_path).read_text(encoding="utf-8")
     stripped = checker._strip_f158_f150_overlay(doctor_path, doctor_source)
     assert "check_model_live" not in stripped
+    assert "async def check_credential_expiry" not in stripped
     mutated_doctor = doctor_source.replace(
         "模型返回空响应",
         "模型返回空响应 drift",
@@ -133,6 +135,16 @@ def test_f158_exact_web_architecture_authority_is_fail_closed(tmp_path: Path) ->
         match="F158_F150_AUTHORITY_OVERLAP_INVALID",
     ):
         checker._strip_f158_f150_overlay(doctor_path, mutated_doctor)
+    mutated_expiry = doctor_source.replace(
+        "不代表远端授权可用",
+        "远端授权可用",
+        1,
+    )
+    with pytest.raises(
+        checker.GateFailure,
+        match="F158_F150_AUTHORITY_OVERLAP_INVALID",
+    ):
+        checker._strip_f158_f150_overlay(doctor_path, mutated_expiry)
 
     cases: tuple[Callable[[dict[str, Any]], None], ...] = (
         lambda item: item.update(feature_id="F159"),

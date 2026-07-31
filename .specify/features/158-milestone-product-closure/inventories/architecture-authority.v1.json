@@ -57,7 +57,7 @@
       "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
       "state": "existing",
       "owner": "gateway",
-      "role": "provider_router_live_readiness_probe"
+      "role": "provider_router_live_readiness_and_local_expiry_semantics"
     },
     {
       "path": "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py",
@@ -121,5 +121,5 @@
     "current Web visual baseline",
     "maojiwang.work"
   ],
-  "approved_scope_sha256": "64d93ad9ef4214fdb36c7a17538f35eee2acd2fef5a00695ec1340b79717afc8"
+  "approved_scope_sha256": "14480527eb27aac71b51f338cd7a24e43abbf2679e912f0f94633ec95fe6397c"
 }

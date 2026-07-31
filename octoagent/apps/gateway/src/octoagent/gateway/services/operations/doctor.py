@@ -355,7 +355,7 @@ class DoctorRunner:
         )
 
     async def check_credential_expiry(self) -> CheckResult:
-        """Token 类凭证未过期"""
+        """仅检查 Token 的本地 ``expires_at``，不推断远端授权状态。"""
         profiles = self._store.list_profiles()
         for profile in profiles:
             if profile.auth_mode == "token":
@@ -367,15 +367,18 @@ class DoctorRunner:
                             name="credential_expiry",
                             status=CheckStatus.WARN,
                             level=CheckLevel.RECOMMENDED,
-                            message=f"Token 已过期: {profile.name}",
-                            fix_hint="重新获取 Token 或切换到 API Key 模式",
+                            message=f"本地 Token 过期时间已到: {profile.name}",
+                            fix_hint=(
+                                "重新获取 Token 或切换到 API Key 模式；"
+                                "随后运行 octo doctor --live 验证远端授权"
+                            ),
                         )
 
         return CheckResult(
             name="credential_expiry",
             status=CheckStatus.PASS,
             level=CheckLevel.RECOMMENDED,
-            message="所有凭证均有效",
+            message=("本地过期时间检查通过（不代表远端授权可用；运行 octo doctor --live 验证）"),
         )
 
     # F081 cleanup：删除 check_live_ping —— LiteLLM Proxy 时代的端到端 ping，
