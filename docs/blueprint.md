@@ -41,9 +41,9 @@
 | [architecture-overview.md](blueprint/architecture-overview.md) | §6 | 分层架构 + Mermaid 图 + 关键路径 |
 | [core-design.md](blueprint/core-design.md) | §8 | 9 个子系统核心设计（最大章节） |
 | [module-design.md](blueprint/module-design.md) | §9 | Monorepo 结构 + 12 个模块职责 |
-| [api-and-protocol.md](blueprint/api-and-protocol.md) | §10 | Gateway-Kernel / A2A / Tool Call 协议 |
+| [api-and-protocol.md](blueprint/api-and-protocol.md) | §10 | Gateway public API / Agent runtime / A2A / Tool Call 协议 |
 | [architecture-tradeoffs.md](blueprint/architecture-tradeoffs.md) | §11 | 14 个架构权衡点与收敛方案 |
-| [deployment-and-ops.md](blueprint/deployment-and-ops.md) | §12 | 部署拓扑 / Docker / 备份 / 故障策略 / DX |
+| [deployment-and-ops.md](blueprint/deployment-and-ops.md) | §12 | 单 Gateway host / OS service / named tunnel / 备份 / 故障策略 / DX |
 | [testing-strategy.md](blueprint/testing-strategy.md) | §13 | 10 个测试类别 + 覆盖矩阵 |
 | [milestones.md](blueprint/milestones.md) | §14 | M0-M12 里程碑、Feature 状态、实施波次与完成门禁 |
 | [architecture-audit.md](blueprint/architecture-audit.md) | §14.5-14.14 | 短板 / 架构问题 / Worker 审计 / 代码审计 / F084-F102 完成审计 / M11 前全仓与竞品复审 |
@@ -248,7 +248,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 
 ### 7.2 Web / API
 
-- FastAPI + Uvicorn（Gateway + Kernel API）
+- FastAPI + Uvicorn（单一 Gateway application host 的 public API）
 - SSE（任务流式事件）优先；WS 可选
 
 理由：
@@ -316,7 +316,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 | 8.6 Policy Engine | PermissionPreset × SideEffectLevel + Two-Phase Approval | ✅ |
 | 8.7 Memory | SoR/Fragments/Vault + Facade + fast_commit + 并行 recall | ✅ |
 | 8.8 Execution Plane | Gateway 内逻辑 Worker + Inline/Graph RuntimeBackend；Docker sandbox 未实现 | ✅ |
-| 8.9 Provider Plane | LiteLLM alias + fallback + Auth Adapter + PKCE | ✅ |
+| 8.9 Provider Plane | ProviderRouter direct transport + alias/fallback + credential adapter + PKCE | ✅ |
 
 ---
 
@@ -333,7 +333,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 | packages/protocol | A2A-Lite envelope + NormalizedMessage |
 | packages/tooling | Schema 反射 + ToolBroker + Permission |
 | packages/memory | SoR/Fragments/Vault + 仲裁 |
-| packages/provider | LiteLLM client + alias + cost |
+| packages/provider | ProviderRouter + RouteResolver + direct clients + OAuth/credentials + cost |
 | packages/observability | Logfire + structlog |
 | frontend/ | React + Vite Web UI |
 
@@ -343,8 +343,8 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 
 > 详见 [blueprint/api-and-protocol.md](blueprint/api-and-protocol.md)
 
-- **Gateway ↔ Kernel**：HTTP（ingest_message / tasks / stream / approvals）
-- **Kernel ↔ Worker**：A2A-Lite Envelope（TASK/UPDATE/CANCEL/RESULT/ERROR/HEARTBEAT）
+- **外部客户端 ↔ Gateway**：HTTP/SSE（message / tasks / stream / approvals / control plane）
+- **Gateway 内 Agent runtime ↔ Worker runtime**：message-native A2A contract + `DispatchEnvelope`；这是单一 application host 内的逻辑边界，不是第二个 Kernel/Worker 服务
 - **A2A 状态映射**：内部超集 ↔ 标准 A2A TaskState 双向映射
 - **Tool Call 协议**：tool_calls JSON → ToolBroker 执行 → ToolResult 回��
 
@@ -362,7 +362,10 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 
 > 详见 [blueprint/deployment-and-ops.md](blueprint/deployment-and-ops.md)
 
-覆盖：部署拓扑（开发/生产）、Docker Compose、健康检查、备份与恢复、故障策略、优雅关闭、升级迁移、日志管理、SSL/TLS、DX 工具（octo config / doctor / onboard / start）。
+覆盖：单 Gateway host、launchd/systemd user service、loopback 回源、Cloudflare named
+tunnel、健康检查、备份与恢复、故障策略、优雅关闭、升级迁移、日志管理、
+TLS 边界与 DX 工具（octo config / doctor / onboard / start）。Docker 只保留为历史
+设计与未来独立隔离能力的参考，不是当前生产部署或执行 backend。
 
 ---
 
@@ -424,6 +427,15 @@ Safari/WebView；Web 与 iOS 均以 Claude Design 初稿为视觉/交互基线�
 Web/iOS trust 边界和 Apple 权限门禁见
 [blueprint/milestones.md](blueprint/milestones.md) §M10-M12。
 
+**当前证据边界（F158，2026-07-31）**：F151 当前仓库架构门 `all` 仍通过，
+证明现有运行/打包边界没有回退；但其 historical v2 index 引用的
+`evidence/local` raw archive 被 `.gitignore` 排除且当前仓库、其他 worktree 与
+本机 `/tmp` 均不可恢复，因此历史 R/G/R archive 不能宣称 clean-checkout
+self-contained。F150 产品代码与 Web Access 架构保持 stable，但当前实例的
+verification projection 仍是 `pending_verification`，owner/last_verified 为空；
+当前 OAuth live、个人实例 mobile hostname/path 和真机验证必须重新取得实时证据，
+不能沿用历史 stable 标签代替。
+
 ### 三条设计哲学（M5 引入）
 
 详见 [blueprint/agent-collaboration-philosophy.md](blueprint/agent-collaboration-philosophy.md)：
@@ -438,14 +450,17 @@ Web/iOS trust 边界和 Apple 权限门禁见
 
 > 每条风险附带检测指标与触发阈值，确保可操作化。
 
-1) **Provider/订阅认证不稳定** — LiteLLM alias + fallback；连续 3 次失败自动切换
+1) **Provider/订阅认证不稳定** — ProviderRouter route/fallback + auth-fatal
+   fail-closed；`octo doctor --live` 验证当前凭证，禁止退 Echo 冒充成功
 2) **Tool/插件供应链风险** — manifest + health gate；未注册工具调用直接 deny
 3) **记忆污染** — WriteProposal + 仲裁；confidence < 0.5 → 不写入
 4) **长任务失控与成本爆炸** — 预算三级阈值（80%/100%/150%）+ watchdog
 5) **SQLite 扩展瓶颈** — WAL > 100MB 或跨机 Worker 时升级 Postgres
 6) **LLM 幻觉** — OutputModel 强校验 + guardrails；校验失败率 > 30% 升级模型
 7) **上下文窗口溢出** — 工具输出压缩 + Context GC；> 80% 窗口触发
-8) **安全攻击面** — Docker 隔离 + secrets 不进 LLM 上下文 + 输入消毒
+8) **安全攻击面** — ToolBroker/Policy/Approval、device proof、secret redaction、
+   untrusted-evidence rendering 与 Host/Origin/CSRF 边界共同 fail-closed；当前没有
+   可依赖的 Docker sandbox，不得把未实现隔离写成安全保证
 
 ---
 
@@ -461,7 +476,8 @@ Web/iOS trust 边界和 Apple 权限门禁见
 
 ### 16.2 准备类（工程环境就绪，开工前完成）
 
-- [x] 开发环境确认：Python 3.12 + uv + Docker Desktop + Node.js（Web UI）— M0 已验证
+- [x] 开发环境确认：Python 3.12 + uv + Node.js（Web UI）— M0 已验证；Docker
+  Desktop 仅为历史开发环境事实，不是当前运行前提
 - [x] ProviderRouter 就绪：Provider alias + main/fallback 路由已由 F081 交付
 - [x] SQLite schema 初始化脚本准备 — M0 已交付（lifespan 自动建表）
 - [x] CI/测试基础设施：pytest + pytest-asyncio + ruff — M0 已交付（105 tests）

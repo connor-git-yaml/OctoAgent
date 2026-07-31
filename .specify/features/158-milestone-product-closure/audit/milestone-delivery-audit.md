@@ -186,6 +186,14 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     sqlite/artifacts/disk/ProviderRoute 本地结构检查，真实联网由
     `octo doctor --live`/真实任务验证；runtime 与 Watchdog 均位于单 Gateway host，
     公网只走 named tunnel。修改后 repository `architecture all` 继续 exit0。
+22. Blueprint 索引与 Milestone 总表已把 active Provider Plane、模块职责、API
+    边界、部署入口与安全风险同步为当前实现：ProviderRouter direct、单 Gateway
+    application host、message-native A2A、OS user service + named tunnel，且不再把
+    LiteLLM、物理 Kernel/Worker 或 Docker sandbox 当作当前保证。F151 行区分“当前
+    architecture proven”与“historical raw archive 不自包含”；F150 行区分“产品
+    代码 stable”与“当前个人实例 verification pending”。M12 原生 edge 也已由
+    “等待三选一 spike”改为已选 path-specific mobile bypass + origin device proof，
+    同时保留 live/真机未完成事实。
 
 ## F153 当前设计映射与偏离记录
 

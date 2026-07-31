@@ -13,6 +13,8 @@
 ## Runtime architecture evidence
 
 - [x] 当前提交相对当前 `origin/master` 的 repository `architecture all` 通过
+- [x] Blueprint active Provider/API/deployment/security 与当前单 Gateway /
+  ProviderRouter / named-tunnel 架构一致
 - [x] F151 canonical v2 的 269 条 record hash/previous chain 独立重算无错误
 - [ ] F151 canonical raw evidence 可从干净检出独立复验
   （当前 `evidence/local` 被忽略且已不存在；禁止伪造历史 R/G/R）

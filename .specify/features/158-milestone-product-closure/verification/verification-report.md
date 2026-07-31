@@ -71,6 +71,15 @@ evidence verify 使用当前 `origin/master` 时因主线前移报
 TDD raw archive 不可在干净检出复验。证据见
 `evidence/f151/2026-07-31/verification-report.md`，两者不得混为一个 PASS。
 
+Blueprint 索引与 Milestone 总表随后完成 active truth sync：Provider Plane 改为
+ProviderRouter direct，API 改为单 Gateway application host 的 public boundary 与
+进程内 message-native A2A，部署改为 OS user service + loopback + named tunnel，
+安全风险不再引用未实现的 Docker sandbox。M11 行同时明确 F151 当前架构通过但历史
+raw archive 不自包含、F150 产品代码 stable 但当前实例 projection pending；M12
+原生 edge 改为已经选定的 deployment-specific mobile hostname + exact path bypass +
+origin P-256 device proof，而不是仍等待方案三选一。该同步只纠正文档真值，不会把
+未执行的 Cloudflare live、OAuth、真机或物理重启提升为 PASS。
+
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
 个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
 真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154 只完成 Research/Design/Tasks
@@ -286,6 +295,7 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | F150 local product entry | PASS |
 | deterministic backend regression | PASS |
 | repository architecture gate | PASS（含当前 T047 exact overlay） |
+| Blueprint/Milestone active architecture truth | PASS（external/live 状态仍按实际保持 pending） |
 | F151 canonical TDD raw archive | FAIL（metadata chain intact，raw artifacts missing） |
 | deployment / remote-access architecture truth sync | PASS（live 状态仍 MISSING） |
 | iPhoneOS target compilation | PASS |
