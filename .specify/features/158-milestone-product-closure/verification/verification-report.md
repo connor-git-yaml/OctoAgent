@@ -287,6 +287,7 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | deterministic backend regression | PASS |
 | repository architecture gate | PASS（含当前 T047 exact overlay） |
 | F151 canonical TDD raw archive | FAIL（metadata chain intact，raw artifacts missing） |
+| deployment / remote-access architecture truth sync | PASS（live 状态仍 MISSING） |
 | iPhoneOS target compilation | PASS |
 | GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（当前提交 `dc8b1b41`） |
 | GitHub Actions backend deterministic | PASS（run `30602259193`） |

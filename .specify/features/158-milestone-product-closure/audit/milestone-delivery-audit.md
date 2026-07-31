@@ -176,6 +176,11 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     `9d5e1e48…` 时又以 `EVIDENCE_ARTIFACT_MISSING` 失败。独立重算 269 条 record hash
     与 chain 为 0 错误，说明 index metadata 完整、raw archive 不自包含。完整记录见
     `evidence/f151/2026-07-31/verification-report.md`。
+20. `docs/blueprint/deployment-and-ops.md` 与
+    `docs/codebase-architecture/remote-access.md` 已从“等待真机 spike 选择 edge
+    方案”同步为 F153 已选架构：同一 named tunnel/loopback、部署专属 mobile
+    hostname、仅 `/api/mobile/v1/*` 的 path-specific Bypass 与 origin P-256 device
+    proof；同时继续明确 Cloudflare live/真机未完成，未把设计选择冒充部署事实。
 
 ## F153 当前设计映射与偏离记录
 

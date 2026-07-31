@@ -488,8 +488,8 @@ Watchdog 作为 kernel 内部组件，监控 Task 执行健康度：
 
 > Cloudflare named tunnel 是唯一远程网络基础设施。F150 以 Access 提供电脑 Web
 > 入口；手机产品只走 F153+ 原生 iOS App。当前代码已具备本机 loopback、Web
-> Access 安全合同与只读部署诊断；production live 与提交前验证均已通过，尚待
-> stable commit。详见
+> Access 安全合同与只读部署诊断；历史 production live 与 stable commit 已通过。
+> F158 当前个人部署已恢复为 Access `302`，登录后 SPA/API/SSE 复验仍未完成。详见
 > `docs/codebase-architecture/remote-access.md`。
 
 **F150 电脑 Web 目标部署形态**：
@@ -528,9 +528,21 @@ ingress:
 - 禁止 quick tunnel、临时前台进程和匿名公开链接。
 - 电脑 Web 不保存 bearer token 或 Cloudflare service token。
 - F150 不新增 Web 配对码、remote session 或 browser device 数据表；该约束不适用于原生 iOS device identity。
-- 手机 Safari/WebView 不作为产品入口。原生 iOS 必须复用同一 named tunnel 基础设施，但其 edge route 与设备身份由 F153 真机 spike 决定。
+- 手机 Safari/WebView 不作为产品入口。原生 iOS 复用同一 named tunnel 和同一
+  loopback Gateway，但使用部署者自有的独立 mobile hostname；产品代码不得硬编码
+  `maojiwang.work` 或任何单次部署域名。
+- mobile edge 只允许一个更具体的 self-hosted Access application 覆盖
+  `/api/mobile/v1/*`，action 为 `Bypass / Everyone`；其它 path、Web hostname 与既有
+  Web Access application 不得继承或复用该 Bypass。Bypass 只移除 Access browser
+  session 门，不是原生设备身份。
 - iOS App 禁止内置 Cloudflare service token；F153 必须支持设备密钥、短期凭证、轮换和单设备撤销。
-- F153 方案通过前不得启用 mobile route 或 Access Bypass，也不得把 Web Cookie 解释成设备 proof。
+- Gateway origin 对 mobile hostname/path 继续执行 Secure Enclave P-256 device
+  proof、短期 opaque capability token、timestamp/nonce/signature、durable replay
+  consume 与 revoke fail closed；Web Cookie、Access JWT 与 service-token header
+  均不得解释成 device proof。
+- F153 Cloudflare live/真机 Verify 完成前，不得把上述已选架构描述成已部署；启用
+  mobile ingress/Bypass 必须按 F153 preflight 的写前快照、正负 live matrix 与回滚
+  顺序执行。
 - Cloudflare 在边缘终止 TLS，产品文案不得宣称设备间端到端加密。
 - 配置失败保持本地 loopback 可恢复，不降低认证强度。
 
