@@ -181,6 +181,11 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     方案”同步为 F153 已选架构：同一 named tunnel/loopback、部署专属 mobile
     hostname、仅 `/api/mobile/v1/*` 的 path-specific Bypass 与 origin P-256 device
     proof；同时继续明确 Cloudflare live/真机未完成，未把设计选择冒充部署事实。
+21. 同一部署蓝图的 active 运维段已移除退役 LiteLLM readiness/fallback、物理
+    kernel/worker pool 与 Caddy/Docker 公网入口叙述：当前 `/ready` 只做
+    sqlite/artifacts/disk/ProviderRoute 本地结构检查，真实联网由
+    `octo doctor --live`/真实任务验证；runtime 与 Watchdog 均位于单 Gateway host，
+    公网只走 named tunnel。修改后 repository `architecture all` 继续 exit0。
 
 ## F153 当前设计映射与偏离记录
 

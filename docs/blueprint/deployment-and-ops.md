@@ -293,23 +293,35 @@ Worker 进程的启动策略：
 | `GET /health` | Liveness — 进程是否存活 | `200 {"status": "ok"}` |
 | `GET /ready` | Readiness — 能否接受请求（依赖就绪） | `200 {"status": "ready", "checks": {...}}` |
 
-Readiness 检查内容（分级 level；响应字段为兼容沿用 `profile`）：
+当前 Readiness 不再按 level/profile 分流。`profile` query 只作为历史调用兼容输入，
+不改变响应合同，也不返回 `profile` 字段。硬检查为：
 
-- `core`（默认，M0 必须）：`sqlite`、`artifacts_dir`、`disk_space_mb`
-- `llm`（M1）：`core` + `litellm_proxy`
-- `full`（M2+）：`llm` + memory/plugins 等扩展依赖
-- 未启用组件返回 `skipped`，不应导致 profile 失败
+- `sqlite`
+- `artifacts_dir`
+- `disk_space_mb`
+- `provider_route`：只在本地解析 canonical `main` alias 到 ProviderRoute，不访问网络
+
+`subsystems` 另报告 orchestrator、worker runtime、checkpoint、watchdog、tool registry
+与 recovery 的 `ok/degraded/unavailable` 摘要；这些诊断不替代上面的 readiness
+硬检查。真实 Provider 网络与授权必须由 `octo doctor --live` 或真实任务验证。
 
 ```json
 // GET /ready 响应示例
 {
   "status": "ready",
-  "profile": "core",
   "checks": {
     "sqlite": "ok",
-    "litellm_proxy": "skipped",
     "disk_space_mb": 2048,
-    "artifacts_dir": "ok"
+    "artifacts_dir": "ok",
+    "provider_route": "ok"
+  },
+  "subsystems": {},
+  "diagnostics": {
+    "provider_route": {
+      "alias": "<canonical-main>",
+      "provider": "<provider-id>",
+      "model": "<model-name>"
+    }
   }
 }
 ```
@@ -403,14 +415,17 @@ OpsEventTypes:
 |------|---------|---------|
 | 磁盘空间不足 | `/ready` 检查 `disk_space_mb` | warn 告警 → 暂停新 task 创建 → critical 时拒绝写入 |
 | OOM（内存溢出） | OS service 与进程日志 | 限制任务预算；进程异常后由 launchd/systemd user unit 重启 |
-| 网络断开 | litellm 健康检查失败 | 进入降级模式：已有 task 暂停；新 task 排队；HEALTH_DEGRADED 事件 |
+| Provider 网络或授权失败 | 真实任务或 `octo doctor --live` | ProviderRouter 按错误分类执行允许的 fallback；认证失败 fail closed 且 Task 进入 FAILED |
 | 宿主机重启 | launchd/systemd user unit 状态 | Gateway application host 启动并执行恢复扫描 |
 | SQLite 损坏 | 启动时 `PRAGMA integrity_check` | 自动切换到最近备份；CRITICAL 告警通知 Owner |
 
 #### 12.5.3 应用级故障
 
-- **Provider 失败**：LiteLLM 内置 fallback + 冷却机制；事件记录失败原因与 fallback 路径
-- **Worker 失败**：标记 worker unhealthy；task 根据策略进入 WAITING_INPUT（等待人工）或重派发到其他 worker
+- **Provider 失败**：ProviderRouter/FallbackManager 只对允许的瞬态错误执行 fallback；
+  credential/authentication 与 HTTP 401/403 为 auth-fatal，不进入 Echo，事件记录
+  `error_category=auth_error` 且不可重试
+- **Worker runtime 失败**：单 Gateway host 内的逻辑 Worker 将 Task 写入明确终态或
+  `WAITING_INPUT`；当前不存在可重派发的物理 worker pool
 - **Plugin 失败**：自动 disable 并降级（对齐 C6）；记录 PLUGIN_DISABLED 事件；Owner 可手动重新启用
 - **熔断策略**：同一组件 5 分钟内连续失败 3 次 → 触发熔断（circuit open）→ 冷却 60 秒后 half-open 探测 → 成功则恢复
 
@@ -433,7 +448,8 @@ OpsEventTypes:
 
 #### 12.5.5 Watchdog 集成（对齐 FR-EXEC-3）
 
-Watchdog 作为 kernel 内部组件，监控 Task 执行健康度：
+Watchdog 是单 Gateway application runtime 中 TaskRunner 的内部监控组件，不是独立
+kernel/worker 进程：
 
 - **无进展检测**：Task 在 RUNNING 状态超过配置时间未产生新事件 → 触发告警
 - **策略可配**（per-task / per-worker）：
@@ -636,12 +652,15 @@ F094 引入 `octo memory migrate-094` CLI 命令组（dry-run / apply / rollback
   （启动期崩溃场景）。结构化查询仍由 Event Store 承担（#2），文件日志只服务
   人肉 triage。
 
-### 12.8 SSL/TLS 与外部访问
+### 12.8 TLS 与外部访问
 
-- Telegram webhook **要求 HTTPS**，因此生产部署必须配置 TLS
-- 使用 Caddy 自动 HTTPS（内置 ACME / Let's Encrypt），零配置获取证书
-- 内部服务间通信走 `octo-internal` 网络，**不加密**（Docker bridge 隔离足够）
-- 外部仅暴露 reverse-proxy 的 443/80 端口，其余服务无外部端口
+- Gateway 只监听 loopback，不开放宿主 80/443，也不依赖 Docker/Caddy 网络。
+- 电脑 Web 外部访问由 F150 Cloudflare named tunnel 提供；Cloudflare edge 终止 TLS，
+  Access 保护 Web hostname，cloudflared 只回源 loopback。
+- 原生 iOS 复用同一 tunnel，但只允许 F153 选定的 deployment-specific mobile
+  hostname 与 `/api/mobile/v1/*` path-specific policy；origin device proof 仍是安全边界。
+- Telegram 若使用需要 HTTPS 的 webhook，也必须通过受信外部边界；不得因此让 Gateway
+  监听公网网卡。具体渠道部署模式不改变 Gateway 唯一 application host。
 
 ### 12.9 开发者体验（Developer Experience / DX）
 
@@ -650,26 +669,17 @@ F094 引入 `octo memory migrate-094` CLI 命令组（dry-run / apply / rollback
 
 #### 12.9.1 `octo config` — 统一模型配置管理（M1.5，Feature 014 已交付）
 
-当前基线以 `octoagent.yaml` 作为模型与 Provider 配置的**单一事实源**：
+当前 ProviderRouter 直连体系下，主路径配置只有：
 
-1. **运行模式与 Provider 配置**：
-   - 支持 `echo`（零依赖开发）或 `litellm`（真实 LLM）
-   - 支持通过 `octo config provider add/list/disable` 管理 OpenRouter / OpenAI / Anthropic / Azure / 本地 Ollama 等 Provider
-2. **模型别名管理**：
-   - 通过 `octo config alias list/set` 查看并更新 `main` / `cheap` 等 alias 到真实模型的映射
-   - 用户不需要直接理解 LiteLLM 的 `model_list` 结构
-3. **衍生配置同步**：
-   - `litellm-config.yaml` 由 `octoagent.yaml` 自动推导生成，避免三份配置漂移
-   - 保留 `octo config migrate` 兼容旧的 `.env` / `.env.litellm` / `litellm-config.yaml` 体系
-4. **兼容入口**：
-   - `octo init` 保留为历史引导入口；新流程以 `octo config` 为准
+1. `octoagent.yaml`：`providers[]` ProviderEntry v2 与 alias 绑定；
+2. `auth-profiles.json`：API key / OAuth credential。
 
-产出文件：`octoagent.yaml`（用户主配置）+ `litellm-config.yaml`（衍生文件）+ `.env`（运行时环境变量）
-
-> **Feature 081 后置更新**：`litellm-config.yaml` 衍生文件已退役（LiteLLM Proxy 完全退役）。
-> 当前 ProviderRouter 直连体系下，**主路径配置仅 2 份**：`octoagent.yaml`（含 `providers[]` ProviderEntry v2 schema）+ `auth-profiles.json`（凭证）。
-> 老 v1 yaml（含 `runtime.llm_mode` / `litellm_proxy_url` / `master_key_env`）启动时会触发 deprecation warning，引导跑 `octo config migrate-080` 升级；`octo init` 历史路径保留兼容但不再活跃。
-> 详见 §8.9 + `docs/codebase-architecture/provider-direct-routing.md`。
+`litellm-config.yaml`、`.env.litellm`、`runtime.llm_mode`、
+`litellm_proxy_url` 与 `master_key_env` 均已退役，不是运行时 fallback。老 v1 配置只能
+通过显式 migration 进入当前 schema；启动路径不得自动恢复 Proxy。新用户用
+`octo setup --provider <preset>` 建立真实模型配置，`octo doctor --live` 验证远端
+授权与模型调用。详见 §8.9 与
+`docs/codebase-architecture/provider-direct-routing.md`。
 
 #### 12.9.2 `octo doctor` — 配置诊断（M1，M2 扩展 guided remediation）
 
