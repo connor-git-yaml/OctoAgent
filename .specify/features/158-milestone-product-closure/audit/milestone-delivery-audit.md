@@ -16,12 +16,12 @@
 |---|---|---|---|---|
 | M11 Web 视觉保持早期 Claude Design | 早期 frame、恢复后 1440 截图、14 个 pixel snapshot、逐 surface 结构合同、云端最终导出、当前个人部署 CSS | PROVEN_BRANCH_CI_DEPLOYED | 当前运行提交已部署；登录后旅程与总 completion audit 仍缺 | F158 / F149 |
 | F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access 前边界通过；登录后 Settings 仍受浏览器接管超时阻断 | F158 / F150 |
-| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery 与 2026-07-31 只读复验 | PARTIAL | Gateway/cloudflared running、loopback health 200、Access 302、Settings projection `pending_verification`；登录后 SPA/API/SSE 仍待验证 | F158 / F150 |
+| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery、浏览器接管诊断与 2026-07-31 只读复验 | PARTIAL | Gateway/cloudflared running、loopback health 200、Access 302、Settings projection `pending_verification`；Chrome/扩展/native host 均健康但受控 DOM 超时，需用户允许新 profile 并完成登录 | F158 / F150 |
 | Web 功能 E2E | 11 个 Playwright spec / 39 nodes | PROVEN_BRANCH_CI_DEPLOYED | 2026-07-31 当前分支完整 `39/39`、retries=0；当前 runtime 已部署 | F158 |
 | Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_BRANCH_CI_DEPLOYED | 主框架与 9 surface + 真实任务详情进入像素门；部署 CSS map 与分支一致 | F158 |
 | 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
 | 原生 iOS 可启动 | iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 12/12 + detached clean-checkout 12/12 | PROVEN_PUSHED（F153 scope） | F153 T001-T013/T016/T017 registration 已真实启动并复验；F154 Research/Design/Tasks Gate 已通过但 production=0；F155 只完成 Research/决策档案；F156 只完成草案、40 场景矩阵与 API recon；完整 companion 与真机仍缺 | F153-F156 |
-| iOS 功能 E2E | Swift unit 9/9、Simulator UI 3/3、六态冷启动 | PARTIAL | F153 registration 已证；F154 exact HealthKit 场景与测试矩阵已冻结但未执行；F155/F156 已有设计合同但行为 E2E=0；Cloudflare mobile live、真机及 F154-F156 行为仍缺 | F153-F156 |
+| iOS 功能 E2E | Swift unit 9/9、Simulator UI 3/3、六态冷启动；F153 live 写前 focused 39 pass | PARTIAL | F153 registration 已证，mobile live 写入/回滚矩阵已冻结但未执行；F154 exact HealthKit 场景与测试矩阵已冻结但未执行；F155/F156 已有设计合同但行为 E2E=0；真机及 F154-F156 行为仍缺 | F153-F156 |
 | iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；F154 已冻结 Claude early + SwiftUI native visual contract，但完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
 | Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_BRANCH_CI_DEPLOYED | 最终总 completion audit 尚未完成 | F158 |
 | F151 runtime/architecture | verification report + CI | PROVISIONAL PASS | 仍需纳入最终干净检出回归 | F151 / F158 |
@@ -45,7 +45,7 @@
 | M9 | 完成 | 四层测试门、F151/F157 corrective 与 exact master CI 已闭环 | PROVEN | 最终总审计继续复用 run `30198514576` 与当前 F158 branch CI |
 | M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
 | M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 10 个业务 surface（含任务详情）视觉及功能 E2E 通过；Claude 云端谱系已清理并导出；当前 runtime 已部署 | PROVEN_BRANCH_CI_DEPLOYED | 登录后个人旅程与最终 completion audit |
-| M12 | In Progress | F152 Verify；F153 T001-T013/T016/T017 已实现，Simulator registration 功能/视觉通过；F154 Research/Design/Tasks Gate 已通过；F155 Research/决策档案和 F156 40 场景 Design/Tasks 草案/API recon 已建立 | PARTIAL | Cloudflare mobile live、真机、F153 Verify、F155 A/B 决定、F154-F156 Implement/Verify 与完整 iOS E2E |
+| M12 | In Progress | F152 Verify；F153 T001-T013/T016/T017 已实现，Simulator registration 功能/视觉通过；mobile live preflight 与 39 个 focused origin 合同通过但未执行外部写入；F154 Research/Design/Tasks Gate 已通过；F155 Research/决策档案和 F156 40 场景 Design/Tasks 草案/API recon 已建立 | PARTIAL | Cloudflare mobile live、真机、F153 Verify、F155 A/B 决定、F154-F156 Implement/Verify 与完整 iOS E2E |
 
 该矩阵的 `PROVISIONAL` 不是重新否定历史交付，而是区分“历史报告存在”与“当前
 Milestone Goal 已在同一 commit/环境复验”。最终 completion audit 只允许将取得当前
@@ -160,6 +160,15 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     checkout，部署后 ready/health/root 均为 `200`，公网为 Access `302`，F150
     projection 为 `pending_verification`。这些事实证明当前代码、CI 与部署身份一致，
     不证明 Access 登录后旅程、真实模型、mobile live 或真机。
+17. F153 外部写入前只读预检确认现有 tunnel 4 条 connection、仅 Web ingress、
+    mobile DNS/config 均未建立；执行与回滚清单位于
+    `../153-ios-device-trust-secure-transport/verification/live-external-preflight.md`。
+    当前 device-trust/mobile focused selector 为 `39 passed / 1 existing warning`，
+    但没有任何 Cloudflare、DNS、Access、实例或服务写入。
+18. F150 浏览器接管前机械诊断确认 Chrome、扩展与 native host 均健康；受控导航/DOM
+    仍超时。当前 Provider 正式恢复入口是
+    `~/.octoagent/bin/octo setup --provider openai-codex`，成功路径会自动执行
+    `octo doctor --live`。两项均仍需要用户参与，未被静态诊断提升为产品 PASS。
 
 ## F153 当前设计映射与偏离记录
 

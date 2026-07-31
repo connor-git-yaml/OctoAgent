@@ -54,6 +54,14 @@ managed checkout clean 且 HEAD 精确为该提交。部署后 `/ready?profile=c
 `credential_expiry` 描述为“本地过期时间检查通过，不代表远端授权可用”；唯一 WARN
 来自当前睡眠设置。该普通服务重启不计作 M10 物理开机 attestation。
 
+同日完成 F153 外部写入前只读预检：当前 named tunnel 仍有 4 条 active connection，
+ingress 仅有桌面 Web hostname；`ios.maojiwang.work` 尚无 DNS，个人实例也未启用
+`mobile_device_access`。获准后的唯一 DNS/ingress/Access/manifest 写入顺序、正负
+live matrix 与回滚顺序已冻结在 F153
+`verification/live-external-preflight.md`。同时用当前字节执行 device-trust/mobile
+focused selector，结果为 `39 passed / 1 existing warning`。这只证明 origin
+合同在写入前仍稳定，不是 Cloudflare live、真机或 T014 evidence。
+
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
 个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
 真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154 只完成 Research/Design/Tasks
@@ -197,6 +205,11 @@ checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均�
 超时；本轮没有读取浏览器 cookie 或 local storage 绕过认证。因此登录后的 SPA、
 API、SSE、刷新、过期、重新认证、登出和 Settings remote-access 仍保持 MISSING。
 
+浏览器接管前诊断已确认 Chrome 进程、扩展安装/启用和 native host 均为 PASS；Chrome
+与内置 Browser 的受控导航/DOM 仍超时。下一次必须在用户单次允许后打开新的 Chrome
+`connor` profile 窗口，由用户完成 Access 登录，再复验同一旅程。该诊断不能替代
+登录态证据。
+
 2026-07-29 的后续复核确认远程地址仍稳定返回 Cloudflare Access `302`，不再是
 `Bad Gateway`。本机实际 Web 页面和 Settings 已通过浏览器读取；Chrome 现有标签仍
 停在 Access 登录页，没有可复用的已认证 OctoAgent 页面。该事实只把“本机产品入口”
@@ -205,6 +218,12 @@ API、SSE、刷新、过期、重新认证、登出和 Settings remote-access �
 Gateway 日志同时显示 OpenAI Codex refresh token 已被复用并在刷新时返回 401。ready
 只证明 provider route 配置存在，不证明真实模型对话可用；重新登录 provider 与真实
 对话复验是独立未完成项。
+
+当前部署正式重登录入口为
+`~/.octoagent/bin/octo setup --provider openai-codex`。该流程会启动 PKCE 授权、
+写入个人 credential/config，并在成功后自动执行 `octo doctor --live`；最终验收禁止
+使用 `--skip-live-verify`。由于该动作会改变外部 OAuth 状态且需要用户确认账号，本轮
+只完成入口审计，没有执行。
 
 ### M10 常驻服务物理边界
 
@@ -228,6 +247,7 @@ plist 早于本次系统 boot，证明描述符当时已经存在；但当前进
 - iOS runtime：`26.5 (23F77)`
 - F153 Simulator registration：PASS
 - Cloudflare mobile hostname/Bypass/live probe：MISSING
+- F153 live 外部预检：READY（执行仍待单次授权）
 - connected iPhone：`0`
 - F154 HealthKit：Research/Design/Tasks Gate 通过，production/E2E=0
 - F155 EventKit：Research/产品决策档案已建立，A/B 决定未给出，production/E2E=0

@@ -164,6 +164,18 @@ Chrome 最后可枚举的相关页面仍是 Cloudflare Access 登录入口；浏
 页面前断开。因此没有读取 Cookie/local storage，也没有用旧页面标题或历史会话冒充
 当前 SPA/API/SSE 证据。
 
+同日进一步执行浏览器接管前机械诊断：Chrome 进程、已启用扩展与 native host 均为
+PASS；随后 Chrome 与内置 Browser 的受控导航/DOM 读取仍超时。该结果把问题缩小为
+当前浏览器控制会话，而不是 Gateway、Access 登录页或插件安装缺失。下一次复验必须
+先取得用户对打开全新 Chrome `connor` profile 窗口的单次授权，再由用户在该窗口
+完成 Access 登录；仍禁止读取 Cookie/local storage 绕过认证。
+
+Provider 的正式恢复入口也已从当前部署 CLI 只读确认：
+`~/.octoagent/bin/octo setup --provider openai-codex`。该流程会启动 PKCE 浏览器授权、
+写入个人 credential/config，并在成功后自动执行 `octo doctor --live`；最终验收不得
+传 `--skip-live-verify`。它会改变外部 OAuth 状态并需要用户完成账号确认，因此本轮
+没有自行执行，也没有把命令存在当成真实模型可用。
+
 ## 架构与安全复核
 
 - production consumer 只有 Settings composition；

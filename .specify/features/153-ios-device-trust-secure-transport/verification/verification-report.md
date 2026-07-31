@@ -169,6 +169,10 @@ F150 个人部署 Web edge 已从 502 恢复为 Access 302，但 F153 独立 mob
 精确 `/api/mobile/v1/*` Bypass 与 Web/mobile 正负 live probe 尚未配置和验证。
 Web Access 登录重定向不能证明 mobile device-proof route 已通过。
 
+当前 tunnel/DNS/个人实例事实、获准后的唯一写入顺序、正负 live matrix 与回滚步骤已
+冻结在 `verification/live-external-preflight.md`。该 preflight 仍是
+`READY_FOR_EXPLICIT_AUTHORIZATION`，不是 T014 evidence。
+
 ### 真 iPhone
 
 当前没有连接的 iPhone，以下仍为 `MISSING`：
