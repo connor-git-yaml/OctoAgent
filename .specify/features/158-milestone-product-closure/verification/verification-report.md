@@ -8,8 +8,8 @@
 - 当前分支：`codex/f158-milestone-product-closure`
 - 基线：`origin/master=db3214fff722c6f969baf99528a76fc03a1e21a1`
 - 本轮核验起点提交：`0a377b0bed74e2940384098889d8e511f83bc67e`
-- 当前通过完整 CI 的代码提交：`ebe8cd29f4c4c3b46e79edfed93a726cde537af6`
-- 当前个人部署提交：`35d7aa14f6f146a47084e4725e11df83cf034152`
+- 当前通过完整 CI 的代码提交：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
+- 当前个人部署提交：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
 
 F158 已完成 Milestone/Blueprint/Feature 真值审计、F150 Settings 用户入口、桌面 Web
 逐 route/state 功能 E2E、Claude 早期设计视觉恢复、视觉 regression、F152 privacy
@@ -41,6 +41,19 @@ complexity 通过、Playwright `39/39` 通过且 retry=0。十四张 `claude-ear
 `../evidence/web/2026-07-31/verification-report.md`。该结果证明当前本地
 Gateway-backed Web 的功能和视觉合同，不替代个人部署登录态 SPA/API/SSE 复验。
 
+同日将当前真值提交 `dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
+推送后，权威 GitHub Actions run `30602259193` 的
+backend-deterministic、frontend、architecture、benchmark 与 l1-playwright 五个
+job 全部通过。backend deterministic 为
+`5715 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted lane 为
+`18 passed`；L1 为 `39 passed`。随后使用仓库正式 installer 从该远程分支更新
+`~/.octoagent/app`，完成 `uv sync`、前端 production build 和普通服务重启；
+managed checkout clean 且 HEAD 精确为该提交。部署后 `/ready?profile=core`、
+`/health` 与 `/` 均为 `200`，公网仍是预期 Access `302`，F150 projection 仍诚实为
+`pending_verification`。普通 `octo doctor` 为 `exit=0 / WARN`，并明确把
+`credential_expiry` 描述为“本地过期时间检查通过，不代表远端授权可用”；唯一 WARN
+来自当前睡眠设置。该普通服务重启不计作 M10 物理开机 attestation。
+
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
 个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
 真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154 只完成 Research/Design/Tasks
@@ -48,7 +61,7 @@ Gate，F155 只完成 Research/产品决策档案，F156 完成含 40 场景矩�
 Design/Tasks 草案与 current mobile API recon（5 routes / 8 product gaps），三者
 production 和产品 E2E 均为 0；iOS
 变更已提交、推送并在干净 detached worktree 复验；权威 GitHub Actions run
-`30378276329` 五个 job 全绿，主线确认仍未完成。
+`30602259193` 五个 job 全绿，当前提交也已进入个人部署；主线确认仍未完成。
 
 ## 已通过
 
@@ -89,7 +102,7 @@ production 和产品 E2E 均为 0；iOS
 - 确定性后端完整回归（无 coverage）：
   `5716 passed / 9 skipped / 1 xfailed / 1 xpassed`
 - CI 等价 coverage 回归：
-  `5715 passed / 10 skipped / 1 xfailed / 1 xpassed`，scripted gate `18 passed`
+  `5715 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted gate `18 passed`
 - changed-lines coverage：`38/42 = 90.5%`，PASS
 - repository architecture gate：PASS
 - 七个 F153/F158 新增多参数函数已收敛为 typed request/options/context；
@@ -172,7 +185,7 @@ baseline；未知第三种仍 fail closed。最终
 
 仓库正式 managed-checkout installer 已把 `~/.octoagent/app` 更新到包含 Web、F150、
 F153 Simulator 与真实模型终态修复的运行提交
-`35d7aa14f6f146a47084e4725e11df83cf034152`，完成依赖同步和 production build；
+`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`，完成依赖同步和 production build；
 checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均为 `200`，
 个人域名返回预期 Access `302`，tunnel LaunchAgent running。部署目录的 11 个 CSS
 文件与当前分支 build 逐字节相等，canonical path→SHA map 为
@@ -245,9 +258,9 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | deterministic backend regression | PASS |
 | repository architecture gate | PASS（含当前 T047 exact overlay） |
 | iPhoneOS target compilation | PASS |
-| GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（当前提交 `ebe8cd29`） |
-| GitHub Actions backend deterministic | PASS（run `30378276329`） |
-| personal deployment | PASS（运行提交 `35d7aa14`；登录后旅程仍缺） |
+| GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（当前提交 `dc8b1b41`） |
+| GitHub Actions backend deterministic | PASS（run `30602259193`） |
+| personal deployment | PASS（运行提交 `dc8b1b41`；登录后旅程仍缺） |
 | authenticated personal SPA/API/SSE | MISSING |
 | personal real-model conversation | BLOCKED（provider refresh token 401） |
 | M10 physical boot attestation | MISSING（等待明确物理重启） |
@@ -255,9 +268,9 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | F154-F156 complete iOS product E2E | MISSING |
 | real-device security/lifecycle | BLOCKED |
 | F154-F156 product implementation | CLOSED |
-| current iOS commit / push | PASS（`35d7aa14`，后续测试提交 `ebe8cd29`） |
+| current iOS commit / push | PASS（`35d7aa14`，当前真值提交 `dc8b1b41`） |
 | current iOS clean-checkout scheme | PASS（12/12） |
-| current complete CI | PASS（run `30378276329`） |
+| current complete CI | PASS（run `30602259193`） |
 | mainline confirmation | MISSING |
 
 因此当前不能把 F158 或跨 Milestone Goal 标记完成。

@@ -153,6 +153,13 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     `12 passed / 0 failed / 0 skipped`，其中 unit 9、UI 3；六个 registration 状态
     实际启动并通过 committed Claude 早期像素基线，未更新 baseline。持久化摘要见
     `../153-ios-device-trust-secure-transport/evidence/simulator/2026-07-31/verification-report.md`。
+16. 当前真值提交 `dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4` 的权威
+    GitHub Actions run `30602259193` 五个 job 全绿；backend 为
+    `5715 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted lane `18 passed`，
+    L1 Playwright `39 passed`。同一提交已通过正式 installer 进入个人 managed
+    checkout，部署后 ready/health/root 均为 `200`，公网为 Access `302`，F150
+    projection 为 `pending_verification`。这些事实证明当前代码、CI 与部署身份一致，
+    不证明 Access 登录后旅程、真实模型、mobile live 或真机。
 
 ## F153 当前设计映射与偏离记录
 

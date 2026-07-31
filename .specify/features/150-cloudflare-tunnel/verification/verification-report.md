@@ -4,8 +4,8 @@
 **复核日期**：2026-07-31
 **复核分支**：`codex/f158-milestone-product-closure`
 **初始基线提交**：`db3214fff722c6f969baf99528a76fc03a1e21a1`
-**本轮只读复验基线提交**：`8a198febb82fdd4d0ad5e9882b25c37e7bbd439c`
-**当前个人部署提交**：`35d7aa14f6f146a47084e4725e11df83cf034152`
+**本轮复验基线提交**：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
+**当前个人部署提交**：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
 **状态**：本地产品闭环、当前分支个人部署与权威 CI 通过；connector 已恢复，等待
 真实登录态复验与主线合并
 
@@ -139,14 +139,15 @@ Gateway 启动日志还证明个人实例的 OpenAI Codex refresh token 已复�
 这不是 Cloudflare Access 或 tunnel 的 502，但会阻断真实模型对话；需要重新登录
 provider 后另行复验。
 
-## 2026-07-31 当前个人部署只读复验
+## 2026-07-31 当前个人部署复验
 
 本轮重新从磁盘、进程与 HTTP 事实复算，未修改 Cloudflare、LaunchAgent、DNS、
-Gateway 配置或用户凭证：
+Gateway 配置或用户凭证；在权威 CI 通过后，另以正式 installer 更新应用字节并执行
+一次普通 Gateway 重启：
 
-- managed checkout 为 `35d7aa14f6f146a47084e4725e11df83cf034152` 且 worktree clean；
+- managed checkout 为 `dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4` 且 worktree clean；
 - `com.octoagent.gateway` 与 `work.maojiwang.octoagent-cloudflared` 均为 running；
-- loopback `/health` 返回 `200`；
+- loopback `/ready?profile=core`、`/health` 与 `/` 均返回 `200`；
 - `https://octo.maojiwang.work/` 仍返回 Access `302`；
 - cloudflared ingress 仍只有 `octo.maojiwang.work`，没有 mobile hostname；
 - loopback `GET /api/control/resources/remote-access` 返回
@@ -156,7 +157,8 @@ Gateway 配置或用户凭证：
 同日当前分支 Web 全量复验为 Vitest `70 files / 598 tests`、build 与 complexity
 PASS、Playwright `39/39`、Claude 早期视觉基线 `14/14`，均未更新快照；证据见
 `../158-milestone-product-closure/evidence/web/2026-07-31/verification-report.md`。
-这些本地结果不把 Access `302` 或 `pending_verification` 提升为登录态 PASS。
+当前提交的权威 GitHub Actions run `30602259193` 五个 job 也全部通过。这些本地与
+CI 结果不把 Access `302` 或 `pending_verification` 提升为登录态 PASS。
 
 Chrome 最后可枚举的相关页面仍是 Cloudflare Access 登录入口；浏览器控制连接在读取
 页面前断开。因此没有读取 Cookie/local storage，也没有用旧页面标题或历史会话冒充

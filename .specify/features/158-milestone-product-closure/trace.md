@@ -283,3 +283,14 @@
   exact 只有 5 条 F153 enrollment/token/ready/profile route，Chat/Task/Approval/Memory/
   APNs 共 8 项产品合同缺口。现有 Web front-door route 在 mobile hostname 会被 exact
   allowlist 拒绝，不能由 iOS 复用；T002 完成，F156 Gate 仍被 F153/F154/F155 阻断。
+- 2026-07-31：推送当前真值提交
+  `dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`。权威 GitHub Actions run
+  `30602259193` 的 backend-deterministic、frontend、architecture、benchmark 与
+  l1-playwright 五个 job 全绿；backend 为
+  `5715 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted lane `18 passed`，
+  L1 为 `39 passed`。随后用正式 installer 从同一远程分支更新
+  `~/.octoagent/app`，完成依赖同步、production build 与普通 Gateway 重启；
+  checkout clean 且 HEAD 精确相等。部署后 ready/health/root 均为 `200`，公网为
+  Access `302`，F150 projection 仍为 `pending_verification`；普通 doctor
+  `exit=0 / WARN`，新的 credential 文案已生效。该重启不计 M10 物理开机证明，
+  Access 登录后、真实模型、mobile live 与真机边界均未提升。
