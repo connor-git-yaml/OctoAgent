@@ -255,3 +255,18 @@
   再次为 `12/12 passed`，result bundle 为
   `/tmp/f158-ios-rerun.iZzEea/current.xcresult`。这些当前证据不替代 Access 登录后
   SPA/API/SSE、真实 Provider OAuth、Cloudflare mobile live 或真 iPhone 验收。
+- 2026-07-31：使用 `spec-driver-resume` 恢复 M12 断点。仓库声明的
+  `plugins/spec-driver/scripts/*` 仍不存在，因此按 Skill 采用制品存在性的人工
+  fallback，没有伪造 execution-state 或 workflow run。
+- 2026-07-31：建立 F155 EventKit Research/产品决策档案。Apple 官方事实确认
+  读取日历需要 OS full access，没有系统级 read-only 权限。提案已冻结为
+  未来 24h/3d/7d、raw local-only、title 默认不上传、敏感字段和所有写路径物理
+  缺席。Research PASS，但用户 A/B 产品决定尚未给出，Design/Tasks/Implement
+  均保持 false，production/test behavior=0。
+- 2026-07-31：建立 F156 Native Companion Research、Design/Tasks 草案与 40 行
+  exact scenario matrix。四个原生顶层 Tab 为 `chat/tasks/inbox/settings`；
+  只复用 F153 身份与单 transport，通知只含 opaque id，后台不得执行 Health/
+  Calendar/LLM/审批/Memory/发送。视觉上游精确绑定 F149 2026-07-28 导出
+  SHA `1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`，
+  禁止后期大 Hero/radial glow/低密度卡片墙回流。F153/F154/F155 上游 Gate 和
+  mobile OpenAPI recon 未完成，故 Design/Tasks/Implement 仍为 false，production/E2E=0。

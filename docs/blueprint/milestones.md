@@ -701,7 +701,7 @@ Access、F148主工作台和F149其余十页全部完成。桌面Web保留；手
 没有用旧Web外观反向改造设计。M12可按隐私→设备信任→HealthKit/EventKit→SwiftUI体验的
 严格顺序启动。
 
-### M12（原生 iOS + 健康/日程感知）🚧 In Progress（2026-07-28）
+### M12（原生 iOS + 健康/日程感知）🚧 In Progress（2026-07-31 真值同步）
 
 > **为何独立**：HealthKit/EventKit 是新的高敏感数据入口与 Agent 能力域，不是 Web UI 的原生外壳。M12 必须先回答“设备如何可信连接、数据如何最小化、什么能进 LLM、如何撤销/删除/审计”，再做 SwiftUI 页面。
 > **安全翻转**：旧 F150 handoff 提议在 iOS App 使用 `CF-Access-Client-Id/Secret`，现已否决。静态 service secret 一旦进入 App 包就不是可信 secret。F152/F153 必须从交互式 Access 或设备注册换短期凭证中完成设计，并支持撤销、轮换和单设备审计。
@@ -715,8 +715,8 @@ Access、F148主工作台和F149其余十页全部完成。桌面Web保留；手
 | **F152 Privacy, Identity & Ingestion Contract** ✅ Verify（2026-07-28） | L | 六阶段 exact Pydantic model、canonical hash/TTL、device identity/capability/request proof、一次性 consent、单向 ingestion、独立 Memory 二次确认、非敏感 append-only audit、durable deletion cascade 和 F153/F154/F155 Protocol schema均已实现；focused `714 passed`、全 Gate `208 passed`、secret scan 与 architecture ratchet 通过。报告见 `.specify/features/152-privacy-identity-ingestion-contract/verification/verification-report.md` | ① 严格前置 |
 | **F153 iOS Device Trust & Secure Transport** 🚧 Simulator Gate 已通过（T001-T013、T016、T017 完成） | L-XL | Gateway 已实现 owner-assisted challenge、P-256 enrollment/token/request proof、Host/path 隔离、durable replay/revoke/audit；原生 SwiftUI registration App 已实现 Secure Enclave、ThisDeviceOnly Keychain、单 URLSession client 与 awaiting/connecting/connected/disconnected/offline/revoked states。iOS 26.5 Simulator 上 42 项 focused regression、12 项 scheme tests、六状态视觉回归、Dynamic Type、Reduce Motion、generic iPhoneOS Release build、architecture/bundle scan 均通过；Cloudflare live 与真 iPhone 仍未完成，F153 尚未 Verify，也不解锁 F154 | ② |
 | **F154 HealthKit Read-Only Vertical Slice** 🚧 Research/Design/Tasks Gate 已通过（2026-07-29） | L-XL | v0.1 exact 为 stepCount + sleepAnalysis、24h/3d/7d、raw local-only、本地聚合、用户预览/当次批准、单次 ProviderRouter 分析、删除与 Memory 二次确认。UI 把“无可读数据或权限受限”作为诚实状态，并延续 Claude early + SwiftUI native visual contract。F153 mobile live、真机与 Verify 未通过，故 entitlement、production route/Swift/Python 和行为 RED 均为 0 | ③，Implement locked on F153 Verify |
-| **F155 EventKit App-Read-Only Vertical Slice（OS Full-Access Gate）** 📋 编号预留、待立项 | L | 启动前由用户明确接受“系统要求 full access、Octo 实现层不写日历”。写路径在代码和 capability 中物理缺席；只读限定时间范围、预览批准和单次分析，正文默认不进长期记忆。若不能接受该权限，F152 review 时将本 Feature 移出 M12，而不是伪装成系统 read-only | ④ 决策门 |
-| **F156 Native Companion Experience** 📋 编号预留、待立项 | XL | SwiftUI 对话、任务、审批、记忆候选、连接状态与通知；只消费 F152-F155 已证明的认证/数据能力，不复制 Web 三栏或另造状态词表。以 Claude Design 最初移动方案为视觉/交互基线，非功能、可用性或无障碍所必需不得重排；APNs、后台刷新和上架准备在能力链通过后进入 | ⑤ |
+| **F155 EventKit App-Read-Only Vertical Slice（OS Full-Access Gate）** 🚧 Research PASS / 产品决策待定（2026-07-29） | L | 已建立 Apple 官方权限事实、Data/Threat Model、只读合同、Plan/Tasks 草案与 architecture authority。exact 提案为未来 24h/3d/7d events、raw local-only、本地预览、当次批准/分析/删除，title 默认不上传，notes/location/URL/attendees/organizer/identifier 物理禁止，无 create/update/delete capability。用户仍需在 A）接受 OS full access 但 Octo 代码只读，或 B）移出 M12 中明确选择；Decision/Design/Tasks/Implement Gate 仍为 false，production=0 | ④ 决策门 |
+| **F156 Native Companion Experience** 🚧 Research PASS / Design+Tasks Draft Gate Closed（2026-07-29） | XL | 已冻结 `chat / tasks / inbox / settings` 四个原生 Tab、单一 F153 identity/transport、typed approval/Memory inbox、opaque APNs、background 敏感动作禁止、Claude 最早期视觉基线，并建立 40 行启动/对话/任务/审批/记忆/通知/权限/断网/视觉/a11y 场景矩阵。草案不等于产品交付：F153 Verify、F154 状态、F155 A/B 决定与 current mobile OpenAPI recon 未齐，故 Gate/production=0 | ⑤ |
 
 **M12 波次**：F152 → F153 → F154 → F155 → F156，默认严格串行。只有视觉探索可与 F152/F153 并行，生产代码不得绕过隐私/身份 gate。
 

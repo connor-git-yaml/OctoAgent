@@ -47,8 +47,10 @@
   Cloudflare live/真机/Verify 仍阻断）
 - [ ] **T028** 完成 F154 HealthKit Feature（Research/Design/Tasks Gate 已通过；
   production Implement 与 Verify 继续被 F153 T014/T015/T018 硬门关闭）
-- [ ] **T029** 创建并通过 F155 EventKit 决策门与 Feature
-- [ ] **T030** 创建并通过 F156 SwiftUI Native Companion Feature
+- [ ] **T029** 完成 F155 EventKit 决策门与 Feature（Research/决策档案已创建；
+  用户 A/B 决定、Design/Tasks Gate 与 Implement/Verify 未完成）
+- [ ] **T030** 完成 F156 SwiftUI Native Companion Feature（Research、Design/Tasks 草案与
+  40 场景矩阵已创建；上游 Gate、production 与 E2E 未完成）
 - [ ] **T031 [SIMULATOR]** 原生 iOS 冷启动、导航、状态与视觉回归（F153 registration
   六态、a11y、AXXXL、Reduce Motion 与视觉基线已通过；F154-F156 完整产品仍缺）
 - [ ] **T032 [DEVICE]** 注册、Keychain、轮换、撤销、断网恢复和 Apple 权限真机验收

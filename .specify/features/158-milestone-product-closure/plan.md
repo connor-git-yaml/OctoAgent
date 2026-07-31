@@ -50,8 +50,12 @@ Milestone 已交付。
 3. F154：HealthKit 垂直切片。Research/Design/Tasks Gate 已于 2026-07-29 通过，
    exact 范围收敛为 stepCount + sleepAnalysis、24h/3d/7d、本地聚合、当次批准、
    单次分析与删除；production 仍由 F153 T014/T015/T018 硬门关闭。
-4. F155：EventKit OS full-access 决策门与只读实现。
-5. F156：SwiftUI 对话、任务、审批、记忆、连接与通知体验。
+4. F155：EventKit OS full-access 决策门与只读实现。Research/决策档案已建立，
+   当前等待用户在“接受 OS full access 但 Octo 代码物理只读”与
+   “将 F155 移出 M12”之间明确选择；production=0。
+5. F156：SwiftUI 对话、任务、审批、记忆、连接与通知体验。Research、
+   Design/Tasks 草案与 40 行启动/功能/视觉矩阵已建立；上游 Gate 未齐，
+   Design/Tasks/Implement 仍为 false。
 6. 每个 Feature 独立 RED→GREEN→REFACTOR 与 verification report。
 
 ### Phase 4：双端运行验收
@@ -76,7 +80,9 @@ manifest 已不可变回存。当前交付提交已推送、权威 CI 五个 job
 managed checkout 已更新并通过 loopback/Access 边界复验；登录后个人产品旅程、
 iOS F153 Simulator 与 detached clean-checkout scheme 已通过；当前修复提交的权威
 CI 五个 job 全绿。F154 Research/Design/Tasks Gate 已完成，但没有 HealthKit
-production 字节；真机、F153 Verify、F154-F156 Implement/Verify、主线合并与总
+production 字节；F155 已建立 Research/产品决策档案，F156 已建立 40 场景
+Design/Tasks 草案，但两者 production 均为 0。真机、F153 Verify、
+F154-F156 Implement/Verify、主线合并与总
 completion audit 仍未完成。
 
 ### Phase 6：真实模型运行真值
