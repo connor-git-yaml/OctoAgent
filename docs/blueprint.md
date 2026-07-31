@@ -13,12 +13,12 @@
 - 文档类型：Project Blueprint / Engineering Blueprint
 - 版本：v0.1（Roadmap 已增量同步至 M12；F152 已 Verify，F153 Simulator Gate 与
   F154 Research/Design/Tasks Gate 已通过；F155 已建立 Research/产品决策档案，
-  F156 已建立 Research/Design/Tasks 草案与 40 场景矩阵）
+  F156 已建立 Research/Design/Tasks 草案、40 场景矩阵与 current mobile API recon）
 - 状态：M0-M11 Delivered；M10 的独立物理启动验收仍待闭环；M12 In Progress
   （F152 T001-T014 已验证；F153 Gateway/device trust/原生 registration App 已完成
   T001-T013、T016、T017，Simulator 功能/视觉/a11y 已通过，真机与 Cloudflare live
   仍未完成；F154 只完成 Research/Design/Tasks Gate，production 仍关闭；
-  F155 等待用户决定是否接受 EventKit OS full access，F156 只完成草案，
+  F155 等待用户决定是否接受 EventKit OS full access，F156 完成草案与 API recon，
   两者 production 均为 0）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - M5 完成日期：2026-05-25（F102 commit `9185862` + F103 同步）
@@ -394,7 +394,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 | **M9 质量保证体系** | ✅ | L1-L4、LLM 网络硬闸、scripted harness、wire replay、三模式 lane、attestation |
 | **M10 部署完成度收尾** | ✅ 功能 | F145/F134/F146/F147 全完成；ATT-129-BOOT 作为独立物理验收保留 |
 | **M11 运行边界收口 + Cloudflare 远程访问 + Web v2** | ✅ | F148/F151/F150/F149 全部完成；电脑保留 Web，手机产品只走 M12 原生 iOS，不以手机浏览器交付 |
-| **M12 原生 iOS + 健康/日程感知** | 🚧 | F152 已 Verify；F153 Gateway/device trust 与原生 registration App 已通过 iOS 26.5 Simulator：42 项 focused regression、12 项 scheme tests、6 状态视觉回归、Dynamic Type、Reduce Motion、generic iPhoneOS Release build、架构与 bundle scan 均通过；F154 Research/Design/Tasks Gate 已通过但 production=0；F155 Research 已通过但等待 OS full-access 产品决策；F156 已有 40 场景 Design/Tasks 草案但 Gate 仍关闭；真机、Cloudflare live、F153 Verify 及 F154-F156 Implement/Verify 仍是硬门 |
+| **M12 原生 iOS + 健康/日程感知** | 🚧 | F152 已 Verify；F153 Gateway/device trust 与原生 registration App 已通过 iOS 26.5 Simulator：42 项 focused regression、12 项 scheme tests、6 状态视觉回归、Dynamic Type、Reduce Motion、generic iPhoneOS Release build、架构与 bundle scan 均通过；F154 Research/Design/Tasks Gate 已通过但 production=0；F155 Research 已通过但等待 OS full-access 产品决策；F156 已有 40 场景 Design/Tasks 草案及 current mobile API recon（5 条 F153 route / 8 项产品 gap），Gate 仍关闭；真机、Cloudflare live、F153 Verify 及 F154-F156 Implement/Verify 仍是硬门 |
 
 ### 待办汇总
 
@@ -414,7 +414,9 @@ Model、Data Model、Contract 与 Tasks 已通过 Research/Design/Tasks Gate，�
 HealthKit production/entitlement/行为证据仍为 0。F155 已建立 EventKit 官方
 事实、只读安全边界与决策档案，但用户尚未选择“接受 OS full access
 且 Octo 代码物理只读”或“将 F155 移出 M12”；F156 已建立四区原生产品结构、
-Design/Tasks 草案和 40 行启动/功能/视觉场景矩阵，但上游 Gate 未闭合，两者
+Design/Tasks 草案、40 行启动/功能/视觉场景矩阵与 current mobile API recon；recon
+确认当前 mobile edge 只有 5 条 F153 route，Chat/Task/Approval/Memory/APNs 仍有 8 项
+产品合同缺口。上游 Gate 未闭合，两者
 production 仍为 0。在 F153 Verify 通过前，不启动 HealthKit/EventKit/
 Companion production 实现。手机端不交付
 Safari/WebView；Web 与 iOS 均以 Claude Design 初稿为视觉/交互基线，实现适配设计

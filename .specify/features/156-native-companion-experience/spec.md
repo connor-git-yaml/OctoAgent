@@ -29,6 +29,11 @@ F156 production 开始前必须：
 4. F151 单一 architecture authority 批准 F156 exact paths/symbols；
 5. 当前 Gateway OpenAPI/事件/动作清单重新 recon，禁止 UI 发明后端不存在的动作。
 
+第 5 项已由 `inventories/mobile-api-recon.v1.json` 完成当前字节只读 recon：现有
+mobile hostname allowlist 只有 enrollment/token/ready/device-profile 五条 F153 路由；
+Chat、Task、Approval、Memory 与 Web Notification 路由仍是 Web front-door 专用，
+不能被 iOS 直接复用。其余四项前置门继续关闭。
+
 安全边界的权威清单见 `threat-model.md`；其中 service token/WebView 绕过、
 APNs 正文、后台敏感动作、快照泄漏与 revoked 竞争都必须在 Implement 前有对应
 test owner。

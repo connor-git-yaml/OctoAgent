@@ -6,7 +6,9 @@
 - [x] **T000 [RESEARCH/DRAFT]** Apple 官方调研、产品结构、Data Model、Contract、
   40 场景矩阵、Plan/Tasks draft
 - [ ] **T001 [UPSTREAM]** F153 Verify、F154 状态与 F155 A/B 决策完成
-- [ ] **T002 [RECON][RED→GREEN→REFACTOR]** current OpenAPI/event/action 双向 inventory
+- [x] **T002 [RECON]** current OpenAPI/event/action 双向 inventory；OpenAPI canonical
+  SHA `21e052dda301de65dea1bb192ade88039320db9460b329eeda3b78858dfdd7e3`，
+  当前 mobile routes=5、产品 contract gaps=8
 - [ ] **T003 [AUTHORITY][RED→GREEN→REFACTOR]** F151 exact paths/symbols、禁止第二
   transport/state/session/device/notification registry
 - [ ] **T004 [DESIGN GATE]** Claude early scene mapping、later-design negative set、

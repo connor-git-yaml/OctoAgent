@@ -10,7 +10,8 @@
 ## Phase 0：recon / authority
 
 1. F153 Verify、F154 状态与 F155 A/B 决定完成。
-2. 从 current OpenAPI/event/action inventory 建 exact mobile contract map。
+2. [完成] 从 current OpenAPI/event/action inventory 建 exact mobile contract map；当前
+   仅 F153 五条 mobile route 可达，产品 route gap 为 8 项。
 3. F151 checker 登记 F156 exact paths/symbols，先取得 architecture RED。
 4. 冻结 Claude early source SHA、scene mapping 和 later-design negative set。
 

@@ -29,8 +29,9 @@ Playwright 为 `39/39 passed / retries=0`；14 个 `claude-early-*` 像素基线
 整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
 个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
 真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154 只完成 Research/Design/Tasks
-Gate，F155 只完成 Research/产品决策档案，F156 只完成含 40 场景矩阵的
-Design/Tasks 草案，三者 production 和产品 E2E 均为 0；iOS
+Gate，F155 只完成 Research/产品决策档案，F156 完成含 40 场景矩阵的
+Design/Tasks 草案与 current mobile API recon（5 routes / 8 product gaps），三者
+production 和产品 E2E 均为 0；iOS
 变更已提交、推送并在干净 detached worktree 复验；权威 GitHub Actions run
 `30378276329` 五个 job 全绿，主线确认仍未完成。
 
@@ -199,7 +200,8 @@ plist 早于本次系统 boot，证明描述符当时已经存在；但当前进
 - connected iPhone：`0`
 - F154 HealthKit：Research/Design/Tasks Gate 通过，production/E2E=0
 - F155 EventKit：Research/产品决策档案已建立，A/B 决定未给出，production/E2E=0
-- F156 companion：Research/Design/Tasks 草案和 40 场景矩阵已建立，
+- F156 companion：Research/Design/Tasks 草案、40 场景矩阵和 current mobile API
+  recon 已建立；当前 5 条 mobile route 仅覆盖 F153，8 项产品合同 gap 未实现，
   Gate/production/E2E=0
 
 ### 真 iPhone

@@ -55,6 +55,7 @@
     "fixed background interval"
   ],
   "scenario_matrix": ".specify/features/156-native-companion-experience/inventories/scenario-matrix.md",
+  "api_recon": ".specify/features/156-native-companion-experience/inventories/mobile-api-recon.v1.json",
   "scenario_count": 40,
   "scope_hash_algorithm": "sha256(canonical_json(document_without_approved_scope_sha256))",
   "approved_scope_sha256": null

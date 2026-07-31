@@ -54,7 +54,8 @@ Milestone 已交付。
    当前等待用户在“接受 OS full access 但 Octo 代码物理只读”与
    “将 F155 移出 M12”之间明确选择；production=0。
 5. F156：SwiftUI 对话、任务、审批、记忆、连接与通知体验。Research、
-   Design/Tasks 草案与 40 行启动/功能/视觉矩阵已建立；上游 Gate 未齐，
+   Design/Tasks 草案、40 行启动/功能/视觉矩阵与 current mobile API recon 已建立；
+   recon 确认 5 条 F153 mobile route 与 8 项产品 contract gap。上游 Gate 未齐，
    Design/Tasks/Implement 仍为 false。
 6. 每个 Feature 独立 RED→GREEN→REFACTOR 与 verification report。
 
@@ -81,7 +82,7 @@ managed checkout 已更新并通过 loopback/Access 边界复验；登录后个�
 iOS F153 Simulator 与 detached clean-checkout scheme 已通过；当前修复提交的权威
 CI 五个 job 全绿。F154 Research/Design/Tasks Gate 已完成，但没有 HealthKit
 production 字节；F155 已建立 Research/产品决策档案，F156 已建立 40 场景
-Design/Tasks 草案，但两者 production 均为 0。真机、F153 Verify、
+Design/Tasks 草案与 API recon，但两者 production 均为 0。真机、F153 Verify、
 F154-F156 Implement/Verify、主线合并与总
 completion audit 仍未完成。
 

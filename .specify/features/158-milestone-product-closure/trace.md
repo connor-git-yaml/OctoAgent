@@ -276,5 +276,10 @@
   只复用 F153 身份与单 transport，通知只含 opaque id，后台不得执行 Health/
   Calendar/LLM/审批/Memory/发送。视觉上游精确绑定 F149 2026-07-28 导出
   SHA `1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`，
-  禁止后期大 Hero/radial glow/低密度卡片墙回流。F153/F154/F155 上游 Gate 和
-  mobile OpenAPI recon 未完成，故 Design/Tasks/Implement 仍为 false，production/E2E=0。
+  禁止后期大 Hero/radial glow/低密度卡片墙回流。该日 F153/F154/F155 上游 Gate 和
+  mobile OpenAPI recon 尚未完成，故 Design/Tasks/Implement 为 false，production/E2E=0。
+- 2026-07-31：完成 F156 current mobile API recon。FastAPI OpenAPI canonical SHA
+  `21e052dda301de65dea1bb192ade88039320db9460b329eeda3b78858dfdd7e3`；mobile edge
+  exact 只有 5 条 F153 enrollment/token/ready/profile route，Chat/Task/Approval/Memory/
+  APNs 共 8 项产品合同缺口。现有 Web front-door route 在 mobile hostname 会被 exact
+  allowlist 拒绝，不能由 iOS 复用；T002 完成，F156 Gate 仍被 F153/F154/F155 阻断。

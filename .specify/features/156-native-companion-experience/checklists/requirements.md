@@ -8,7 +8,7 @@
 - [x] Claude early 是视觉基线，现有 Web/later design 不是
 - [x] SwiftUI native navigation/a11y divergence ledger
 - [x] 40-row startup/function/visual scenario matrix
-- [ ] current Gateway actions recon
+- [x] current Gateway actions recon（5 mobile routes / 8 product gaps）
 - [ ] F155 A/B 决策
 
 ## Architecture / Privacy
