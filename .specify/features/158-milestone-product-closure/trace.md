@@ -294,3 +294,14 @@
   Access `302`，F150 projection 仍为 `pending_verification`；普通 doctor
   `exit=0 / WARN`，新的 credential 文案已生效。该重启不计 M10 物理开机证明，
   Access 登录后、真实模型、mobile live 与真机边界均未提升。
+- 2026-07-31：Blueprint/Milestone active schema 真值同步提交
+  `a2dca2badba40f87cec922946d65d21396e1b709` 的权威 GitHub Actions run
+  `30604533484` 到达终态：backend-deterministic、frontend、architecture、
+  benchmark、l1-playwright 五个 job 全部 success，L1 为 `39 passed`。后续
+  `87660ab5`、`981789f2` 仅撤回 F158 远程旅程假完成标记并显式保留外部验收缺口，
+  没有产品代码变化且未触发新 run。当前个人部署仍是 `dc8b1b41`，因此 CI 与部署
+  身份不再混写。
+- 2026-07-31：Chrome `connor` profile 的现有标签可被只读枚举，目标标签标题为
+  `Sign in ・ Cloudflare Access`，URL 属于 `octo.maojiwang.work` Access 登录边界；
+  没有已认证的 OctoAgent 产品页。该标签已原样保留给用户，没有读取 cookie/
+  localStorage、代填账号或触发登录。T014 继续 unchecked。

@@ -15,8 +15,8 @@
 | 要求 | 当前证据 | 判定 | 缺口 | owner |
 |---|---|---|---|---|
 | M11 Web 视觉保持早期 Claude Design | 早期 frame、恢复后 1440 截图、14 个 pixel snapshot、逐 surface 结构合同、云端最终导出、当前个人部署 CSS | PROVEN_BRANCH_CI_DEPLOYED | 当前运行提交已部署；登录后旅程与总 completion audit 仍缺 | F158 / F149 |
-| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access 前边界通过；登录后 Settings 仍受浏览器接管超时阻断 | F158 / F150 |
-| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery、浏览器接管诊断与 2026-07-31 只读复验 | PARTIAL | Gateway/cloudflared running、loopback health 200、Access 302、Settings projection `pending_verification`；Chrome/扩展/native host 均健康但受控 DOM 超时，需用户允许新 profile 并完成登录 | F158 / F150 |
+| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access 前边界通过；现有 Chrome 标签仍停在 Access 登录页，没有可复用的已认证 OctoAgent 页面 | F158 / F150 |
+| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery、浏览器接管诊断与 2026-07-31 只读复验 | PARTIAL | Gateway/cloudflared running、loopback health 200、Access 302、Settings projection `pending_verification`；Chrome 可读取现有标签标题/URL并确认登录边界，但登录需用户完成 | F158 / F150 |
 | Web 功能 E2E | 11 个 Playwright spec / 39 nodes | PROVEN_BRANCH_CI_DEPLOYED | 2026-07-31 当前分支完整 `39/39`、retries=0；当前 runtime 已部署 | F158 |
 | Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_BRANCH_CI_DEPLOYED | 主框架与 9 surface + 真实任务详情进入像素门；部署 CSS map 与分支一致 | F158 |
 | 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
@@ -154,12 +154,12 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     `12 passed / 0 failed / 0 skipped`，其中 unit 9、UI 3；六个 registration 状态
     实际启动并通过 committed Claude 早期像素基线，未更新 baseline。持久化摘要见
     `../153-ios-device-trust-secure-transport/evidence/simulator/2026-07-31/verification-report.md`。
-16. 当前真值提交 `dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4` 的权威
+16. 个人部署提交 `dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4` 的权威
     GitHub Actions run `30602259193` 五个 job 全绿；backend 为
     `5715 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted lane `18 passed`，
     L1 Playwright `39 passed`。同一提交已通过正式 installer 进入个人 managed
     checkout，部署后 ready/health/root 均为 `200`，公网为 Access `302`，F150
-    projection 为 `pending_verification`。这些事实证明当前代码、CI 与部署身份一致，
+    projection 为 `pending_verification`。这些事实证明该部署代码、CI 与部署身份一致，
     不证明 Access 登录后旅程、真实模型、mobile live 或真机。
 17. F153 外部写入前只读预检确认现有 tunnel 4 条 connection、仅 Web ingress、
     mobile DNS/config 均未建立；执行与回滚清单位于
@@ -216,6 +216,14 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     attestation、确定性 Playwright 与 Access `302` 都不能替代当前部署的
     SPA/API/SSE/Settings 登录后证据。T015 只表示报告制品已生成并如实标记
     `PARTIAL`。
+27. Blueprint/Milestone active schema 真值同步后的代码/架构提交
+    `a2dca2badba40f87cec922946d65d21396e1b709` 对应 GitHub Actions run
+    `30604533484`，backend-deterministic、frontend、architecture、benchmark 与
+    l1-playwright 五个 job 全部 `success`，L1 为 `39 passed`。其后的
+    `87660ab5`、`981789f2` 只纠正 F158 Tasks/Checklist 的外部验收真值，没有产品
+    代码变化且未触发新 run。该 CI 证明当前分支代码与 active 架构文档继续通过，
+    不会把仍运行 `dc8b1b41` 的个人部署、Access 登录、OAuth、mobile live 或真机
+    自动提升为 PASS。
 
 ## F153 当前设计映射与偏离记录
 

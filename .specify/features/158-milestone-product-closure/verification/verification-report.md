@@ -8,7 +8,9 @@
 - 当前分支：`codex/f158-milestone-product-closure`
 - 基线：`origin/master=db3214fff722c6f969baf99528a76fc03a1e21a1`
 - 本轮核验起点提交：`0a377b0bed74e2940384098889d8e511f83bc67e`
-- 当前通过完整 CI 的代码提交：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
+- 当前通过完整 CI 的代码/架构提交：
+  `a2dca2badba40f87cec922946d65d21396e1b709`
+- 对应权威 CI：`30604533484`
 - 当前个人部署提交：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
 
 F158 已完成 Milestone/Blueprint/Feature 真值审计、F150 Settings 用户入口、桌面 Web
@@ -92,14 +94,23 @@ F117 前的 WorkerProfile/多 Session 类当作当前 schema。该批修改完�
 `check-runtime-architecture.py all --base-ref origin/master --scope-mode repository`
 再次为 exit0；它不改变任何产品运行、Cloudflare、OAuth、设备或 evidence 状态。
 
-整体 Goal 尚未完成：个人部署已更新为当前交付提交，但登录态 SPA/API/SSE 尚未复验，
-个人实例的 OpenAI Codex refresh token 也已失效；F153 Simulator 已通过但没有连接
+上述 active schema 真值同步提交
+`a2dca2badba40f87cec922946d65d21396e1b709` 的 GitHub Actions run
+`30604533484` 已到终态：backend-deterministic、frontend、architecture、benchmark
+与 l1-playwright 五个 job 全部 success，L1 为 `39 passed`。其后的
+`87660ab5`、`981789f2` 只纠正本 Feature 的外部验收真值，没有产品代码变化且未触发
+新 run。因此当前分支代码/架构 CI 与个人部署身份必须分开记录。
+
+整体 Goal 尚未完成：个人部署仍为 `dc8b1b41`；该提交之后到 `a2dca2ba` 没有
+`octoagent/`、`repo-scripts/` 或 workflow 产品字节变化，但最新分支身份尚未部署，
+登录态 SPA/API/SSE 也未复验。个人实例的 OpenAI Codex refresh token 已失效；
+F153 Simulator 已通过但没有连接
 真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154 只完成 Research/Design/Tasks
 Gate，F155 只完成 Research/产品决策档案，F156 完成含 40 场景矩阵的
 Design/Tasks 草案与 current mobile API recon（5 routes / 8 product gaps），三者
 production 和产品 E2E 均为 0；iOS
 变更已提交、推送并在干净 detached worktree 复验；权威 GitHub Actions run
-`30602259193` 五个 job 全绿，当前提交也已进入个人部署；主线确认仍未完成。
+`30604533484` 五个 job 全绿；最新分支部署与主线确认仍未完成。
 
 F158 Tasks 的当前真值也已同步：真实个人部署的 Access 登录后旅程 T014 保持
 unchecked；已经通过的 deterministic Playwright、历史 F150 T015 live attestation
@@ -236,14 +247,15 @@ checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均�
 构建工具会为 JS chunk 生成不同文件名，因此没有把两次 build 的完整 asset
 目录误报为逐字节相同。
 
-内置浏览器与 Chrome 均能枚举或打开 Access 登录页，但在 DOM 读取/交互阶段持续
-超时；本轮没有读取浏览器 cookie 或 local storage 绕过认证。因此登录后的 SPA、
-API、SSE、刷新、过期、重新认证、登出和 Settings remote-access 仍保持 MISSING。
+内置浏览器与 Chrome 均能枚举或打开 Access 登录页；最新只读 Chrome 复核已能读取
+现有标签的标题和 URL，确认其仍是 `Sign in ・ Cloudflare Access` 登录边界，而不是
+已认证 OctoAgent 产品页。本轮没有读取浏览器 cookie/local storage、代填账号或触发
+登录。因此登录后的 SPA、API、SSE、刷新、过期、重新认证、登出和 Settings
+remote-access 仍保持 MISSING。
 
-浏览器接管前诊断已确认 Chrome 进程、扩展安装/启用和 native host 均为 PASS；Chrome
-与内置 Browser 的受控导航/DOM 仍超时。下一次必须在用户单次允许后打开新的 Chrome
-`connor` profile 窗口，由用户完成 Access 登录，再复验同一旅程。该诊断不能替代
-登录态证据。
+浏览器接管前诊断已确认 Chrome 进程、扩展安装/启用和 native host 均为 PASS；目标
+登录标签已原样保留给用户。下一步必须由用户在该标签完成 Access 登录，再复验同一
+旅程。标签可见性和登录边界本身不能替代登录态证据。
 
 2026-07-29 的后续复核确认远程地址仍稳定返回 Cloudflare Access `302`，不再是
 `Bad Gateway`。本机实际 Web 页面和 Settings 已通过浏览器读取；Chrome 现有标签仍
@@ -316,8 +328,8 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | F151 canonical TDD raw archive | FAIL（metadata chain intact，raw artifacts missing） |
 | deployment / remote-access architecture truth sync | PASS（live 状态仍 MISSING） |
 | iPhoneOS target compilation | PASS |
-| GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（当前提交 `dc8b1b41`） |
-| GitHub Actions backend deterministic | PASS（run `30602259193`） |
+| GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（代码/架构提交 `a2dca2ba`） |
+| GitHub Actions backend deterministic | PASS（run `30604533484`） |
 | personal deployment | PASS（运行提交 `dc8b1b41`；登录后旅程仍缺） |
 | authenticated personal SPA/API/SSE | MISSING |
 | personal real-model conversation | BLOCKED（provider refresh token 401） |
@@ -326,9 +338,9 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | F154-F156 complete iOS product E2E | MISSING |
 | real-device security/lifecycle | BLOCKED |
 | F154-F156 product implementation | CLOSED |
-| current iOS commit / push | PASS（`35d7aa14`，当前真值提交 `dc8b1b41`） |
+| current iOS commit / push | PASS（`35d7aa14`；当前部署提交 `dc8b1b41`） |
 | current iOS clean-checkout scheme | PASS（12/12） |
-| current complete CI | PASS（run `30602259193`） |
+| current complete CI | PASS（run `30604533484`，head `a2dca2ba`） |
 | mainline confirmation | MISSING |
 
 因此当前不能把 F158 或跨 Milestone Goal 标记完成。

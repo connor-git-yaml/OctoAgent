@@ -68,8 +68,9 @@
 - [ ] **T036** 同步 Blueprint、Milestone 与所有 Feature verification reports
 - [ ] **T037** 干净检出、权威 CI、个人部署复验（上一批 Web 提交/CI/managed
   checkout 已通过；当前 iOS 提交/推送与 detached clean-checkout 12/12 已通过，
-  当前真值提交 `dc8b1b41` 的 run `30602259193` 五个 job 全绿并已部署；
-  登录后 SPA/API/SSE 与真实模型对话仍缺）
+  当前代码/架构真值提交 `a2dca2ba` 的 run `30604533484` 五个 job 全绿；
+  其后的 `87660ab5`、`981789f2` 仅纠正 F158 制品真值且未触发 CI。个人部署仍为
+  `dc8b1b41`，登录后 SPA/API/SSE、真实模型对话与最新分支部署复验仍缺）
 - [ ] **T038** 提交、推送、合并并确认主线真实交付
 
 ## Phase 5：真实模型运行真值
