@@ -171,3 +171,13 @@
   独立证明 minimal approved prompt、approval 只消费一次、auth/timeout/provider error typed
   fail closed 且绝不回退 Echo，以及 raw/hash drift 在模型调用前拒绝。T013 真 iPhone 生命周期
   仍独立待办，不由本次无手机 live model 证据替代。
+- 2026-08-02：T016 非真机 clean-checkout 预检在已提交 HEAD `59425604` 的 detached
+  临时 worktree 完成，worktree 前后均为 clean。完整 Core/Protocol/Policy 与 Gateway
+  device-trust/health blast radius 为 772 passed、1 个既有 Pydantic field-name warning；
+  F154 repository architecture gate 单独 PASS。独立 DerivedData 下的 iOS unit 为 21 passed、
+  3 个明确 live-device case skipped，Health Simulator UI 为 3/3 PASS（冷启动/后台/重启不请求
+  权限、12 状态 Claude early visual baseline、Dynamic Type/VoiceOver/44pt），generic iPhoneOS
+  Release arm64 warnings-as-errors build PASS。UI transaction 期间 Xcode 重复输出 LLDB
+  version-store warning，但未 rerun，最终 process exit=0 且三个 testcase 均明确 PASS。该预检只
+  证明 clean checkout 与非设备回归可复现；T013 真机、最终 CI/evidence inventory、verification
+  report、Blueprint/F158 sync 仍未完成，因此 T016 与 `GATE_VERIFY` 继续保持关闭。
