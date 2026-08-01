@@ -9,6 +9,7 @@ import json
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from uuid import UUID
 
@@ -55,6 +56,19 @@ def _contracts() -> tuple[Any, Any]:
     missing |= {"get_health_ingestion_service", "router"} - set(vars(routes))
     if missing:
         pytest.fail(f"{ORACLE}: missing symbols={','.join(sorted(missing))}", pytrace=False)
+    return service, routes
+
+
+def _analysis_contracts() -> tuple[Any, Any]:
+    service, routes = _contracts()
+    missing = {
+        "HealthAnalysisAccepted",
+        "HealthAnalysisRequest",
+    } - set(vars(service))
+    missing |= {"get_provider_router"} - set(vars(routes))
+    if missing or not hasattr(service.HealthIngestionService, "submit_analysis"):
+        detail = ",".join(sorted(missing | {"submit_analysis"}))
+        pytest.fail(f"F154_HEALTH_ANALYSIS_MISSING: missing symbols={detail}", pytrace=False)
     return service, routes
 
 
@@ -294,6 +308,205 @@ async def _review_rows(group: Any) -> list[Any]:
     return list(await cursor.fetchall())
 
 
+class _AnalysisClient:
+    def __init__(self, outcome: str | Exception) -> None:
+        self.outcome = outcome
+        self.calls: list[dict[str, Any]] = []
+
+    async def call(self, **kwargs: Any) -> tuple[str, list[Any], dict[str, Any]]:
+        self.calls.append(kwargs)
+        if isinstance(self.outcome, Exception):
+            raise self.outcome
+        return self.outcome, [], {"usage": {"total_tokens": 24}}
+
+
+class _AnalysisRouter:
+    def __init__(self, outcome: str | Exception) -> None:
+        self.client = _AnalysisClient(outcome)
+        self.calls: list[tuple[str, str | None]] = []
+
+    def resolve_for_alias(
+        self,
+        alias: str,
+        *,
+        task_scope: str | None = None,
+    ) -> Any:
+        self.calls.append((alias, task_scope))
+        return SimpleNamespace(
+            client=self.client,
+            model_name="fixture-health-model",
+            provider_id="fixture-provider",
+        )
+
+
+def _approved_facts() -> dict[str, Any]:
+    return {
+        "purpose": PURPOSE,
+        "time_range": {
+            "start": (NOW - timedelta(days=1)).isoformat().replace("+00:00", "Z"),
+            "end": NOW.isoformat().replace("+00:00", "Z"),
+        },
+        "daily_steps": [{"local_day": "2026-08-01", "count": "1234", "unit": "count"}],
+        "sleep": {
+            "window_start_utc": (NOW - timedelta(hours=8)).isoformat().replace("+00:00", "Z"),
+            "window_end_utc": NOW.isoformat().replace("+00:00", "Z"),
+            "total_asleep_minutes": "420",
+            "stage_minutes": {
+                "awake": "20",
+                "core": "250",
+                "deep": "80",
+                "rem": "90",
+                "unspecified": "0",
+            },
+            "unit": "min",
+        },
+        "completeness_notice": "数据可能不完整。",
+    }
+
+
+def _analysis_payload(source_hash: str) -> dict[str, Any]:
+    models = importlib.import_module("octoagent.core.models")
+    facts = _approved_facts()
+    packet = {
+        "stage": "approved_analysis_packet",
+        "packet_id": "health-packet-1",
+        "purpose": PURPOSE,
+        "facts_sha256": models.canonical_sha256(facts),
+        "provenance": _review()["provenance"],
+        "consent_id": "health-consent-1",
+        "retention": {
+            "stage": "approved_analysis_packet",
+            "created_at": NOW.isoformat().replace("+00:00", "Z"),
+            "expires_at": (NOW + timedelta(minutes=15)).isoformat().replace("+00:00", "Z"),
+            "session_ends_at": None,
+        },
+    }
+    return {
+        "source_hash": source_hash,
+        "consent": {
+            "consent_id": "health-consent-1",
+            "bundle_sha256": source_hash,
+            "approved_packet_sha256": models.canonical_sha256(packet),
+            "purpose": PURPOSE,
+            "owner_id": _review()["provenance"][0]["owner_id"],
+            "device_id": "device-1",
+            "approved_at": NOW.isoformat().replace("+00:00", "Z"),
+            "expires_at": (NOW + timedelta(minutes=15)).isoformat().replace("+00:00", "Z"),
+            "used_at": None,
+        },
+        "packet": packet,
+        "approved_facts": facts,
+    }
+
+
+async def _prepared_analysis_app(
+    tmp_path: Path,
+    outcome: str | Exception,
+) -> tuple[FastAPI, Any, Any, str, str, _AnalysisRouter, str]:
+    health, routes = _analysis_contracts()
+    core_store = importlib.import_module("octoagent.core.store")
+    protocol = importlib.import_module("octoagent.protocol.privacy_ingestion")
+    access = importlib.import_module("octoagent.gateway.services.mobile_device_access")
+    group = await core_store.create_store_group(
+        str(tmp_path / "octo.db"),
+        tmp_path / "artifacts",
+    )
+    device_service, device, private_key = await _registered_device(group)
+    token, token_id = await _put_grant(
+        group,
+        device=device,
+        capability="health.analysis.run",
+        suffix="health-analysis",
+    )
+    review = protocol.validate_consumer_payload(
+        protocol.PrivacyConsumer.F154,
+        protocol.PrivacyContractName.REVIEW_BUNDLE,
+        _review(),
+    )
+    source_hash = await group.privacy_ingestion_store.put_review_bundle(review)
+    service = health.HealthIngestionService(
+        device_store=group.device_trust_store,
+        privacy_store=group.privacy_ingestion_store,
+        options=health.HealthIngestionServiceOptions(
+            clock=lambda: NOW,
+            id_factory=iter(
+                ("analysis-result-1", "analysis-audit-1", "analysis-reject-audit-1")
+            ).__next__,
+        ),
+    )
+    provider_router = _AnalysisRouter(outcome)
+    app = FastAPI()
+    app.state.device_trust_service = device_service
+    app.state.health_ingestion_service = service
+    app.state.provider_router = provider_router
+    app.state.mobile_device_access_manifest = access.MobileDeviceAccessManifestV1(
+        version=1,
+        web_hostname="web.example.test",
+        mobile_hostname="ios.example.test",
+        tunnel_id=UUID("11111111-1111-4111-8111-111111111111"),
+        loopback_origin="http://127.0.0.1:8000",
+        mobile_path_prefix="/api/mobile/v1/",
+        edge_policy="access-bypass-origin-device-proof",
+    )
+    app.add_middleware(access.MobileDeviceAccessMiddleware)
+    app.include_router(routes.router)
+    return app, group, private_key, token, token_id, provider_router, source_hash
+
+
+async def _post_analysis(
+    app: FastAPI,
+    private_key: Any,
+    token: str,
+    token_id: str,
+    payload: Mapping[str, Any],
+    *,
+    nonce: str,
+) -> httpx.Response:
+    body = _canonical_body(payload)
+    headers = _proof_headers(
+        private_key,
+        token=token,
+        token_id=token_id,
+        body=body,
+        nonce=nonce,
+    )
+    models = importlib.import_module("octoagent.core.models")
+    proof = models.RequestProofPayload(
+        method="POST",
+        canonical_path="/api/mobile/v1/health/analyses",
+        body_sha256=hashlib.sha256(body).hexdigest(),
+        timestamp=NOW,
+        nonce=nonce,
+        token_id=token_id,
+    )
+    headers["X-Octo-Device-Signature"] = _sign(
+        private_key,
+        models.canonical_json_bytes(proof),
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url=MOBILE_ORIGIN,
+    ) as client:
+        return await client.post(
+            "/api/mobile/v1/health/analyses",
+            content=body,
+            headers=headers,
+        )
+
+
+async def _analysis_counts(group: Any) -> tuple[int, int, int]:
+    counts = []
+    for table in (
+        "privacy_approved_packets",
+        "privacy_analysis_results",
+        "privacy_memory_candidates",
+    ):
+        cursor = await group.conn.execute(f"SELECT COUNT(*) FROM {table}")
+        row = await cursor.fetchone()
+        counts.append(int(row[0]))
+    return tuple(counts)  # type: ignore[return-value]
+
+
 @pytest.mark.asyncio
 async def test_health_review_requires_mobile_host_proof_and_exact_capability(
     tmp_path: Path,
@@ -475,5 +688,170 @@ async def test_health_review_rejects_raw_or_broadened_fields_without_writes(
         assert scope_response.status_code == 403, ORACLE
         assert scope_response.json()["detail"]["code"] == "HEALTH_REVIEW_SCOPE_MISMATCH"
         assert await _review_rows(group) == [], ORACLE
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_health_analysis_calls_provider_router_once_with_minimal_approved_prompt(
+    tmp_path: Path,
+) -> None:
+    app, group, key, token, token_id, router, source_hash = await _prepared_analysis_app(
+        tmp_path,
+        "最近活动与睡眠概览已完成。",
+    )
+    payload = _analysis_payload(source_hash)
+    try:
+        response = await _post_analysis(
+            app,
+            key,
+            token,
+            token_id,
+            payload,
+            nonce="health-analysis-success-nonce-0001",
+        )
+        assert response.status_code == 201, response.text
+        result = response.json()
+        assert set(result) == {"result", "summary"}, ORACLE
+        assert result["summary"] == "最近活动与睡眠概览已完成。", ORACLE
+        assert result["result"]["packet_id"] == "health-packet-1", ORACLE
+        assert router.calls == [("main", "health-analysis:health-packet-1")], ORACLE
+        assert len(router.client.calls) == 1, ORACLE
+        provider_call = router.client.calls[0]
+        assert provider_call["tools"] == [], ORACLE
+        prompt = json.dumps(provider_call, ensure_ascii=False, sort_keys=True)
+        assert "1234" in prompt and "420" in prompt, ORACLE
+        assert not any(
+            secret in prompt
+            for secret in (
+                "cf-owner-subject",
+                "device-1",
+                token,
+                "raw_samples",
+                "sample_id",
+                "owner@example",
+            )
+        ), ORACLE
+        assert await _analysis_counts(group) == (1, 1, 0), ORACLE
+        cursor = await group.conn.execute(
+            "SELECT reason_code, result FROM privacy_ingestion_audit "
+            "WHERE reason_code = 'HEALTH_ANALYSIS_COMPLETED'"
+        )
+        audit = await cursor.fetchone()
+        assert dict(audit) == {
+            "reason_code": "HEALTH_ANALYSIS_COMPLETED",
+            "result": "success",
+        }, ORACLE
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_health_analysis_consumes_approval_once_without_second_model_call(
+    tmp_path: Path,
+) -> None:
+    app, group, key, token, token_id, router, source_hash = await _prepared_analysis_app(
+        tmp_path,
+        "一次分析结果。",
+    )
+    payload = _analysis_payload(source_hash)
+    try:
+        first = await _post_analysis(
+            app,
+            key,
+            token,
+            token_id,
+            payload,
+            nonce="health-analysis-first-nonce-000001",
+        )
+        assert first.status_code == 201, first.text
+        second = await _post_analysis(
+            app,
+            key,
+            token,
+            token_id,
+            payload,
+            nonce="health-analysis-second-nonce-00001",
+        )
+        assert second.status_code == 409, second.text
+        assert second.json()["detail"]["code"] == "HEALTH_CONSENT_INVALID", ORACLE
+        assert len(router.client.calls) == 1, ORACLE
+        assert await _analysis_counts(group) == (1, 1, 0), ORACLE
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_health_analysis_auth_timeout_and_provider_errors_never_echo_success(
+    tmp_path: Path,
+) -> None:
+    exceptions = importlib.import_module("octoagent.provider.exceptions")
+    provider_client = importlib.import_module("octoagent.provider.provider_client")
+    failures = (
+        exceptions.CredentialError("missing credential"),
+        provider_client.LLMCallError("timeout", "provider timeout"),
+        provider_client.LLMCallError("api_error", "provider failed", retriable=False),
+    )
+    for ordinal, failure in enumerate(failures):
+        prepared = await _prepared_analysis_app(tmp_path / str(ordinal), failure)
+        app, group, key, token, token_id, router, source_hash = prepared
+        try:
+            response = await _post_analysis(
+                app,
+                key,
+                token,
+                token_id,
+                _analysis_payload(source_hash),
+                nonce=f"health-analysis-failure-nonce-{ordinal:04d}",
+            )
+            assert response.status_code == 502, response.text
+            assert response.json()["detail"]["code"] == "HEALTH_ANALYSIS_FAILED", ORACLE
+            assert "Echo:" not in response.text, ORACLE
+            assert len(router.client.calls) <= 1, ORACLE
+            assert await _analysis_counts(group) == (1, 0, 0), ORACLE
+            cursor = await group.conn.execute(
+                "SELECT COUNT(*) FROM privacy_ingestion_audit "
+                "WHERE reason_code = 'HEALTH_ANALYSIS_COMPLETED'"
+            )
+            row = await cursor.fetchone()
+            assert int(row[0]) == 0, ORACLE
+        finally:
+            await group.close()
+
+
+@pytest.mark.asyncio
+async def test_health_analysis_rejects_raw_or_hash_drift_before_provider_call(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepared_analysis_app(tmp_path, "must not be called")
+    app, group, key, token, token_id, router, source_hash = prepared
+    try:
+        raw_payload = _analysis_payload(source_hash)
+        raw_payload["approved_facts"]["raw_samples"] = [{"uuid": "secret"}]
+        raw = await _post_analysis(
+            app,
+            key,
+            token,
+            token_id,
+            raw_payload,
+            nonce="health-analysis-raw-field-nonce-01",
+        )
+        assert raw.status_code == 422, raw.text
+        assert raw.json()["detail"]["code"] == "HEALTH_RAW_FIELD_FORBIDDEN", ORACLE
+
+        drifted_payload = _analysis_payload(source_hash)
+        drifted_payload["approved_facts"]["daily_steps"][0]["count"] = "9999"
+        drifted = await _post_analysis(
+            app,
+            key,
+            token,
+            token_id,
+            drifted_payload,
+            nonce="health-analysis-hash-drift-nonce-1",
+        )
+        assert drifted.status_code == 422, drifted.text
+        assert drifted.json()["detail"]["code"] == "HEALTH_PREVIEW_HASH_MISMATCH"
+        assert router.client.calls == [], ORACLE
+        assert await _analysis_counts(group) == (0, 0, 0), ORACLE
     finally:
         await group.close()

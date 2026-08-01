@@ -56,8 +56,10 @@ class SqlitePrivacyIngestionStore:
         source_hash: str,
         packet: ApprovedAnalysisPacket,
     ) -> str:
-        source = await self._load_review_bundle(source_hash)
-        if packet.purpose != source.purpose or packet.provenance != source.provenance:
+        source = await self.get_review_bundle(source_hash)
+        if packet.purpose != source.purpose or canonical_json_bytes(
+            packet.provenance
+        ) != canonical_json_bytes(source.provenance):
             raise ValueError("approved packet does not match review bundle")
         object_hash = canonical_sha256(packet)
         await self._conn.execute(
@@ -128,7 +130,9 @@ class SqlitePrivacyIngestionStore:
         await self._conn.commit()
         return object_hash
 
-    async def _load_review_bundle(self, object_hash: str) -> ReviewBundle:
+    async def get_review_bundle(self, object_hash: str) -> ReviewBundle:
+        """从唯一 F152 store 读取一个已持久化 review，不创建第二读取路径。"""
+
         cursor = await self._conn.execute(
             "SELECT content FROM privacy_review_bundles WHERE object_hash = ?",
             (object_hash,),

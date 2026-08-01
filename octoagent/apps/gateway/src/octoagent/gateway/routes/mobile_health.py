@@ -6,10 +6,15 @@ import json
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from octoagent.provider import ProviderRouter
+from pydantic import ValidationError
 
 from ..services.health_ingestion import (
+    HealthAnalysisAccepted,
+    HealthAnalysisRequest,
     HealthIngestionError,
     HealthIngestionService,
+    HealthRequestContext,
     HealthReviewAccepted,
 )
 from .device_trust import (
@@ -38,13 +43,31 @@ def get_health_ingestion_service(request: Request) -> HealthIngestionService:
 HealthService = Annotated[HealthIngestionService, Depends(get_health_ingestion_service)]
 
 
+def get_provider_router(request: Request) -> ProviderRouter:
+    router = getattr(request.app.state, "provider_router", None)
+    if router is None or not callable(getattr(router, "resolve_for_alias", None)):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "HEALTH_ANALYSIS_NOT_READY",
+                "message": "健康分析服务尚未准备好。",
+            },
+        )
+    return router
+
+
+AnalysisRouter = Annotated[ProviderRouter, Depends(get_provider_router)]
+
+
 def _health_error(exc: HealthIngestionError) -> HTTPException:
     messages = {
         "DEVICE_NOT_FOUND": "没有找到这台设备。",
         "DEVICE_REQUEST_EXPIRED": "设备请求已过期，请重试。",
         "DEVICE_SIGNATURE_INVALID": "设备签名不正确。",
         "DEVICE_TOKEN_INVALID": "设备令牌无效或已经过期。",
+        "HEALTH_ANALYSIS_FAILED": "健康分析暂时没有完成，请稍后再试。",
         "HEALTH_CAPABILITY_DENIED": "这次设备授权不允许提交健康预览。",
+        "HEALTH_CONSENT_INVALID": "这次健康分析批准无效或已经使用。",
         "HEALTH_PREVIEW_HASH_MISMATCH": "健康预览已变化，请重新检查。",
         "HEALTH_RAW_FIELD_FORBIDDEN": "健康预览包含不允许发送的内容。",
         "HEALTH_REVIEW_INVALID": "健康预览格式不正确。",
@@ -92,4 +115,44 @@ async def submit_health_review(
         raise _health_error(exc) from exc
 
 
-__all__ = ["get_health_ingestion_service", "router"]
+@router.post(
+    "/analyses",
+    response_model=HealthAnalysisAccepted,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_health_analysis(
+    request: Request,
+    service: HealthService,
+    device_service: DeviceTrustServiceDependency,
+    provider_router: AnalysisRouter,
+) -> HealthAnalysisAccepted:
+    headers, raw_body = await _protected_route_context(
+        request,
+        service=device_service,
+    )
+    try:
+        payload = json.loads(raw_body)
+        analysis_request = HealthAnalysisRequest.model_validate(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValidationError) as exc:
+        reason = "HEALTH_REVIEW_INVALID"
+        if isinstance(exc, ValidationError) and any(
+            error.get("type") == "extra_forbidden" for error in exc.errors()
+        ):
+            reason = "HEALTH_RAW_FIELD_FORBIDDEN"
+        raise _health_error(HealthIngestionError(reason, status_code=422)) from exc
+    try:
+        return await service.submit_analysis(
+            context=HealthRequestContext(
+                headers=headers,
+                method=request.method,
+                canonical_path=request.url.path,
+                raw_body=raw_body,
+            ),
+            request=analysis_request,
+            provider_router=provider_router,
+        )
+    except HealthIngestionError as exc:
+        raise _health_error(exc) from exc
+
+
+__all__ = ["get_health_ingestion_service", "get_provider_router", "router"]

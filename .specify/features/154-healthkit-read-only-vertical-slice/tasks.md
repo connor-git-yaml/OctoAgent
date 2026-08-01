@@ -19,7 +19,7 @@
   schema、raw field forbid 与 F152 consent/lineage
 - [x] **T007 [GATEWAY L3][RED→GREEN→REFACTOR]** mobile health review route，F153
   Host/proof/replay/revoke + F152 store/audit
-- [ ] **T008 [GATEWAY L3/L2][RED→GREEN→REFACTOR]** approved packet 单次分析，
+- [x] **T008 [GATEWAY L3/L2][RED→GREEN→REFACTOR]** approved packet 单次分析，
   ProviderRouter auth-fatal/timeout/error fail closed、无 Echo
 - [ ] **T009 [GATEWAY L3][RED→GREEN→REFACTOR]** provenance deletion cascade、
   partial failure/reentry 与 durable receipt

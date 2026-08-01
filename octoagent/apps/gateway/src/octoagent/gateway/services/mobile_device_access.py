@@ -27,6 +27,7 @@ _MOBILE_PREFIX = "/api/mobile/v1/"
 _MOBILE_STATIC_PATHS = frozenset(
     {
         "/api/mobile/v1/enrollments",
+        "/api/mobile/v1/health/analyses",
         "/api/mobile/v1/health/reviews",
         "/api/mobile/v1/key-rotations",
         "/api/mobile/v1/tokens",

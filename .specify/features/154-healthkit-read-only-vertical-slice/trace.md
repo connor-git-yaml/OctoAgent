@@ -71,3 +71,16 @@
   e2e 26 passed/1 skipped、5 个 Feature authority 与 repository architecture gate 全部通过。
   checker SHA-256 `ac3c20c992801936710331b845f057200cdcf52ec0e1fabde34cb5d813e1fe1f`，
   T007 test SHA-256 `9ee0fdc2522ee454b334f949a6f51e972d4e6e4fd6a27f0f325f3bed063ef5b7`。
+- 2026-08-02：T008 先以 authority RED 证明分析必须通过 F152 单一 store 的公共 review
+  读取 seam，不能在 Gateway 复制 SQLite 查询；补入 exact store path 后 authority 恢复。
+  随后 4 个 Gateway L3/L2 node 真实 RED，均只命中 `F154_HEALTH_ANALYSIS_MISSING`。
+  GREEN 新增 `/api/mobile/v1/health/analyses` exact Host/path、analysis capability/proof/
+  replay、F154 consent/packet/provenance/facts hash 校验、一次 packet durable 与最小 approved
+  facts prompt；调用直接经现有 `ProviderRouter.resolve_for_alias(...).client.call(...)`，未接入
+  `FallbackManager` 或 Echo。认证、timeout、provider error 均返回 typed
+  `HEALTH_ANALYSIS_FAILED`，只保留 failure audit、0 success result；raw/hash 漂移在 provider
+  调用前拒绝，重复批准不产生第二次模型调用，Memory candidate 恒为 0。REFACTOR 将最大函数
+  收敛到 42 行、McCabe≤10、PLR0911/12/13/15 全部通过；health 8/8、相关 Core/Provider/
+  middleware 回归 76/76、repository architecture gate 均通过。checker SHA-256
+  `eb525b8fe83a5a9b2fd6f565322b8bfd2c0ee94deb4773030994f44bd5f6c5e3`，T008 test
+  SHA-256 `08c40579275d28080013a6b6ec17933df8ae8a8f0c84764df2fe478e7ad9ce40`。
