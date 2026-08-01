@@ -3,13 +3,15 @@
 **lazy import + 优雅降级（FR-6.4 / #6）**：`watchdog` 不可用 / observer 启动失败 → watcher 禁用，
 手动 `POST /refresh` 仍可，gateway 正常。
 
-**行为**：declarative 制品变更 → 自动 `registry.refresh()` 生效；**code/code_hash 变更 → reconcile
-自动转 pending_approval**（Phase B 换码闭合已实现：reconcile `_unload_all_code` + hash 不匹配 → pending），
+**行为**：declarative 制品变更 → 自动 `registry.refresh()` 生效；**code/code_hash 变更 →
+reconcile 自动转 pending_approval**（Phase B 换码闭合已实现：reconcile `_unload_all_code`
+且 hash 不匹配 → pending），
 registry emit `PLUGIN_CODE_CHANGED`。**不照搬 Agent Zero 盲目 purge_namespace reload**。
 
-**race 闭合（review H9）**：observer 在后台线程；经 `run_coroutine_threadsafe` 桥到 asyncio loop，
-refresh 走 registry `asyncio.Lock`（unload-then-rebuild 原子）。**防 reload loop**：忽略 marker
-（`.disabled`/`.approved`）+ `.git`/`__pycache__` 变更 + debounce 合并 + refresh 串行（pending future 时跳过）。
+**race 闭合（review H9）**：observer 在后台线程；只把同步 callback 投递到 asyncio loop，
+再由 loop 创建 refresh task，避免 loop 关闭时遗留未 await coroutine。refresh 走 registry
+`asyncio.Lock`（unload-then-rebuild 原子）。**防 reload loop**：忽略 marker
+（`.disabled`/`.approved`）+ `.git`/`__pycache__` 变更 + debounce 合并 + refresh 串行。
 """
 
 from __future__ import annotations
@@ -111,8 +113,34 @@ class PluginWatcher:
                 return  # 已停 / 已有 refresh 在跑，跳过
             self._refresh_inflight = True
         try:
-            fut = asyncio.run_coroutine_threadsafe(self._registry.refresh(), self._loop)
-            fut.result(timeout=30)
+            # 不能在 timer 线程先创建 coroutine 再交给 run_coroutine_threadsafe：
+            # loop 若正好关闭，投递会失败并遗留 never-awaited coroutine。
+            self._loop.call_soon_threadsafe(self._start_refresh_on_loop)
+        except Exception:
+            log.warning("plugin_watcher_refresh_failed", exc_info=True)
+            with self._lock:
+                self._refresh_inflight = False
+
+    def _start_refresh_on_loop(self) -> None:
+        """只在目标 event loop 内创建 refresh task。"""
+        with self._lock:
+            if self._stopped:
+                self._refresh_inflight = False
+                return
+        try:
+            task = self._loop.create_task(self._registry.refresh())
+            task.add_done_callback(self._finish_refresh)
+        except Exception:
+            log.warning("plugin_watcher_refresh_failed", exc_info=True)
+            with self._lock:
+                self._refresh_inflight = False
+
+    def _finish_refresh(self, task: asyncio.Task[Any]) -> None:
+        """消费 task 结果并释放单飞标志，避免异步异常丢失。"""
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            log.info("plugin_watcher_refresh_cancelled")
         except Exception:
             log.warning("plugin_watcher_refresh_failed", exc_info=True)
         finally:

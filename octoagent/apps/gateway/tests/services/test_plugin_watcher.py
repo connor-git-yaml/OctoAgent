@@ -70,15 +70,31 @@ def test_start_degrades_without_watchdog(tmp_path: Path, monkeypatch: pytest.Mon
     w.stop()  # 幂等，不抛
 
 
+def test_closed_loop_rejects_refresh_without_creating_coroutine(tmp_path: Path) -> None:
+    """loop 已关闭时只拒绝同步投递，不创建无法 await 的 refresh coroutine。"""
+    reg, plugins_dir = _registry(tmp_path)
+    loop = asyncio.new_event_loop()
+    loop.close()
+    watcher = PluginWatcher(plugins_dir, reg, loop, debounce_sec=0.1)
+
+    watcher._trigger_refresh()
+
+    assert watcher._refresh_inflight is False
+    watcher.stop()
+
+
 async def test_debounce_triggers_refresh(tmp_path: Path) -> None:
-    """add plugin 文件 → _on_event → debounce → run_coroutine_threadsafe → registry.refresh。"""
+    """add plugin 文件 → _on_event → debounce → loop task → registry.refresh。"""
     reg, plugins_dir = _registry(tmp_path)
     await reg.discover_and_register()
     assert reg.get_record("newp") is None
 
     watcher = PluginWatcher(plugins_dir, reg, asyncio.get_running_loop(), debounce_sec=0.1)
     _w(plugins_dir / "newp" / "plugin.yaml", "name: newp\nprovides:\n  skills: [s1]\n")
-    _w(plugins_dir / "newp" / "skills" / "s1" / "SKILL.md", "---\nname: s1\ndescription: d\n---\n# s1")
+    _w(
+        plugins_dir / "newp" / "skills" / "s1" / "SKILL.md",
+        "---\nname: s1\ndescription: d\n---\n# s1",
+    )
 
     watcher._on_event(str(plugins_dir / "newp" / "plugin.yaml"))  # 模拟 fs 事件
     await asyncio.sleep(0.5)  # 等 debounce + refresh
