@@ -11,6 +11,10 @@ AC 绑定（spec §4）：
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import tomllib
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -270,6 +274,34 @@ class TestFallbackManagerGuard:
 
 
 class TestDenyWiring:
+    def test_plugin_entrypoint_does_not_eager_import_provider_package(self) -> None:
+        """pytest 插件扫描期不得执行 Provider 公开包及其生产依赖。"""
+        provider_root = Path(__file__).resolve().parents[1]
+        pyproject = tomllib.loads((provider_root / "pyproject.toml").read_text())
+        entrypoint = pyproject["project"]["entry-points"]["pytest11"]
+        assert entrypoint["octoagent_model_request_gate"] == ("octoagent.provider_pytest_plugin"), (
+            "F158_COVERAGE_BOOTSTRAP_EAGER_PROVIDER_IMPORT"
+        )
+
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import importlib,sys; "
+                    "importlib.import_module('octoagent.provider_pytest_plugin'); "
+                    "assert 'octoagent.provider' not in sys.modules"
+                ),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert probe.returncode == 0, (
+            "F158_COVERAGE_BOOTSTRAP_EAGER_PROVIDER_IMPORT: "
+            f"stdout={probe.stdout!r} stderr={probe.stderr!r}"
+        )
+
     def test_session_default_is_deny(self) -> None:
         """FR-8d：标准测试会话下 gate 默认 deny——无论由根 conftest（worktree
         PYTHONPATH 锁模式）还是 pytest11 插件（安装态 venv）布线，效果必须成立。
@@ -281,7 +313,7 @@ class TestDenyWiring:
 
     def test_plugin_configure_sets_deny(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """插件 pytest_configure 直调翻 deny（无需 metadata 注册即可验证插件逻辑）。"""
-        from octoagent.provider.testing import pytest_model_request_gate as plugin
+        from octoagent import provider_pytest_plugin as plugin
 
         monkeypatch.delenv(mrg.ALLOW_MODEL_REQUESTS_ENV, raising=False)
         set_allow_model_requests(True)
@@ -333,7 +365,7 @@ class TestDenyWiring:
             "-p",
             "no:octoagent_model_request_gate",
             "-p",
-            "octoagent.provider.testing.pytest_model_request_gate",
+            "octoagent.provider_pytest_plugin",
             "-p",
             "no:cacheprovider",
         )
@@ -370,7 +402,7 @@ class TestDenyWiring:
             "-p",
             "no:octoagent_model_request_gate",
             "-p",
-            "octoagent.provider.testing.pytest_model_request_gate",
+            "octoagent.provider_pytest_plugin",
             "-p",
             "no:cacheprovider",
         )

@@ -133,6 +133,10 @@ def test_provenance_is_minimal_exact_and_canonical() -> None:
         models.Provenance,
         _valid_provenance_payload() | {"data_types": ["step_count", "step_count"]},
     )
+    _assert_rejected(
+        models.Provenance,
+        _valid_provenance_payload() | {"data_types": []},
+    )
 
 
 def test_sensitive_stage_ttl_is_bounded_and_fail_closed() -> None:
@@ -148,6 +152,10 @@ def test_sensitive_stage_ttl_is_bounded_and_fail_closed() -> None:
         models.IngestionStage.NORMALIZED_FACT,
         created_at=created_at,
         session_ends_at=created_at + timedelta(days=2),
+    ) == created_at + timedelta(hours=24), ORACLE
+    assert models.retention_deadline(
+        models.IngestionStage.RAW_SAMPLE,
+        created_at=created_at,
     ) == created_at + timedelta(hours=24), ORACLE
     assert models.retention_deadline(
         models.IngestionStage.REVIEW_BUNDLE,
@@ -179,6 +187,26 @@ def test_sensitive_stage_ttl_is_bounded_and_fail_closed() -> None:
             models.IngestionStage.ANALYSIS_RESULT,
             created_at=created_at,
         )
+    with pytest.raises(ValueError):
+        models.retention_deadline(
+            models.IngestionStage.RAW_SAMPLE,
+            created_at=created_at,
+            session_ends_at=created_at,
+        )
+    with pytest.raises(ValueError):
+        models.retention_deadline(
+            models.IngestionStage.REVIEW_BUNDLE,
+            created_at=created_at,
+            session_ends_at=created_at + timedelta(minutes=1),
+        )
+    _assert_rejected(
+        models.IngestionRetention,
+        {
+            "stage": "raw_sample",
+            "created_at": created_at,
+            "expires_at": created_at,
+        },
+    )
 
     provenance = models.Provenance.model_validate(_valid_provenance_payload())
     wrong_retention = {
@@ -224,6 +252,7 @@ def test_canonical_hash_is_stable_and_rejects_ambiguous_values() -> None:
     for rejected in (
         {"value": 1.5},
         {"values": {"a", "b"}},
+        {1: "non-string-key"},
         {"captured_at": datetime(2026, 7, 28, 10)},
         {"captured_at": _utc(10, microsecond=1)},
     ):
@@ -233,6 +262,57 @@ def test_canonical_hash_is_stable_and_rejects_ambiguous_values() -> None:
     assert get_args(Literal[models.IngestionStage.RAW_SAMPLE]) == (
         models.IngestionStage.RAW_SAMPLE,
     ), ORACLE
+
+
+def test_device_audit_and_deletion_lifecycle_fail_closed() -> None:
+    models = _models()
+    identity: dict[str, object] = {
+        "device_id": "device-1",
+        "owner_id": "owner-1",
+        "display_name": "iPhone",
+        "public_key": "public-key",
+        "device_key_thumbprint": "a" * 64,
+        "attestation_state": "verified",
+        "status": "active",
+        "created_at": _utc(10),
+        "last_seen_at": _utc(10),
+    }
+    _assert_rejected(models.DeviceIdentity, identity | {"last_seen_at": _utc(9)})
+    _assert_rejected(
+        models.DeviceIdentity,
+        identity | {"status": "revoked", "revoked_at": _utc(9)},
+    )
+
+    audit: dict[str, object] = {
+        "event_id": "event-1",
+        "event_type": "device_registered",
+        "owner_hash": "a" * 64,
+        "device_hash": "b" * 64,
+        "object_hash": "c" * 64,
+        "count": 1,
+        "decision": "allow",
+        "result": "success",
+        "reason_code": "DEVICE_REGISTERED",
+        "occurred_at": _utc(10),
+    }
+    _assert_rejected(
+        models.PrivacyAuditEvent,
+        audit | {"data_types": ["step_count", "step_count"]},
+    )
+    _assert_rejected(
+        models.PrivacyAuditEvent,
+        audit | {"capabilities": ["task.read", "task.read"]},
+    )
+    _assert_rejected(
+        models.DeletionReceipt,
+        {
+            "request_id": "delete-1",
+            "source_hash": "d" * 64,
+            "status": "completed",
+            "started_at": _utc(10),
+            "finished_at": _utc(9),
+        },
+    )
 
 
 def test_device_capability_vocabulary_is_finite_through_f154() -> None:
@@ -369,6 +449,7 @@ def test_request_proof_payload_has_exact_canonical_fields() -> None:
         {"canonical_path": "/v1/device/../messages"},
         {"canonical_path": "/v1/device/messages?admin=true"},
         {"canonical_path": "/v1/device/messages#fragment"},
+        {"canonical_path": "/v1/设备/messages"},
         {"body_sha256": "D" * 64},
         {"timestamp": datetime(2026, 7, 28, 10)},
         {"timestamp": _utc(10, microsecond=1)},

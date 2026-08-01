@@ -409,4 +409,16 @@
   先以 `F151_CI_WIRING_MISSING` 真实 RED 命中 architecture/coverage 两个 resolver，
   再统一为 PR=target base、master push=`event.before`、其他 branch=
   `merge-base(origin/master, HEAD)`。wiring 5/5、Ruff/YAML parse、repository architecture
-  本地通过；等待推送后的累计 workflow 复验。
+  本地通过。提交 `df77068c` 的 run `30718445846` 已证明累计 resolver 生效：base 精确为
+  `db3214ff`，architecture/frontend/L1 Playwright/benchmark 全绿，backend 两层测试通过；
+  changed-lines 对完整分支计算 `1917/2484 = 77.2%` 并诚实失败，没有被后续提交遗忘。
+- 2026-08-02：对 `30718445846` 的 LCOV 逐文件复核发现，不是 300 余个行为测试缺失，
+  而是 Provider pytest11 entry point 位于 `octoagent.provider.*`，pytest 在 pytest-cov
+  启动前扫描插件时先执行公开包 `__init__`，使隐私模型等已真实执行的定义行被记为 0。
+  fresh-interpreter 合同先以 `F158_COVERAGE_BOOTSTRAP_EAGER_PROVIDER_IMPORT` 见红；随后
+  entry point 移至轻量 `octoagent.provider_pytest_plugin`，顶层零 production import，
+  真 gate 延迟到 `pytest_configure`。同时补齐 13 条隐私模型失败关闭边界。聚焦回归
+  `66 passed`；CI 同参全量 `5763 passed / 10 skipped / 1 xfailed / 1 xpassed`，scripted
+  `18 passed`；local-working-tree 对 `origin/master` 累计计算
+  `2192/2420 = 90.6% PASS`。未降 90% 门槛、未加 `[cov-exempt]` 或 coverage pragma；
+  等待新提交的 GitHub workflow 复验。

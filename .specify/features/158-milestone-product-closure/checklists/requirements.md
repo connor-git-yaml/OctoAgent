@@ -60,7 +60,9 @@
 - [ ] 干净检出、CI、个人部署和 completion audit 全部通过
 - [ ] 非主分支 architecture/changed-lines CI 以 `origin/master` merge-base 累计验证，
   失败生产提交不能被后续 test/docs-only push 遗忘（T050 本地 RED→GREEN 已完成，
-  workflow 复验待推送）
+  首轮累计 run 已诚实暴露 coverage 启动前 eager import 缺陷；轻量 pytest entry point
+  修复后的本地 CI 同参 `5763 passed`、scripted `18 passed`、累计
+  `2192/2420 = 90.6% PASS`，workflow 复验待推送）
 
 ## 真实模型运行真值
 

@@ -119,4 +119,10 @@
   architecture/changed-lines coverage 统一累计比较 `merge-base(origin/master, HEAD)`；
   Pull Request 保持目标 base，`master` push 保持 `event.before`，防止失败生产提交被后续
   test/docs-only push 遗忘。必须以当前完整 LCOV 对原失败 base 的 `549/608 = 90.3%`
-  复算和新 workflow CI 共同验证，禁止降 90% 门槛或增加豁免。
+  复算和新 workflow CI 共同验证，禁止降 90% 门槛或增加豁免。首轮累计 run
+  `30718445846` 已证明 base resolver 生效，并以 `1917/2484 = 77.2%` 诚实失败；随后
+  找到 Provider pytest11 插件在 coverage 启动前 eager import 生产包的测量缺陷。插件
+  已移至轻量 `octoagent.provider_pytest_plugin` 并延迟 gate import，fresh interpreter
+  合同与 13 条隐私模型失败关闭分支已通过；本地 CI 同参为 `5763 passed`、scripted
+  `18 passed`、local-working-tree 累计覆盖 `2192/2420 = 90.6% PASS`，等待新提交的
+  GitHub 累计 workflow 复验后勾选。
