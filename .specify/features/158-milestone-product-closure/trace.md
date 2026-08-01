@@ -327,3 +327,16 @@
   registration disconnected 首屏已保存。两次 live UI XCTest 均在测试方法前被
   Apple device screen authentication 拦截；只读事实分别为镜像进程占用和设备自动
   锁屏，不计业务失败。用户保持屏幕常亮后必须重新生成短时挑战并执行配对旅程。
+- 2026-08-02：在用户取走 iPhone 后仅继续非设备工作。真实 Web 故障旅程先通过
+  `launchctl bootout` 暂停唯一 Gateway，Chrome 同 URL 得到 Cloudflare `502 Bad
+  gateway`；按原 plist 恢复后暴露两个真缺陷：lite snapshot 被
+  `setup_governance` 阻塞约 25.5 秒，且历史详情一次瞬时失败后被永久放弃。根因是
+  Gateway 已注入 `StoreGroup` 时 `SecretService` 仍另开 project migration 连接，
+  等待 SQLite busy timeout 后 `database is locked`；回归测试先稳定 RED，再让注入
+  store 复用已完成的启动迁移，并为 restore 同一候选增加一次无固定等待的有界重试。
+  后端相关 `94 passed / 1 skipped`、全前端 `70 files / 599 passed`、production build、
+  Ruff/format 与 repository architecture gate 均通过；提交 `ec55ba76` 经正式
+  installer 部署到个人实例。真实冷启动后 loopback lite snapshot=`0.093s`、task
+  detail=`0.003s`，日志中的 setup governance 回落到 `53–117ms`；同一 Chrome 会话
+  最终恢复标题、原用户消息和 `F158_WEB_E2E_OK`。该证据完成一次性上游错误恢复，
+  不替代 F150 24 小时自然 Access 过期，也不触碰 iPhone 或物理 Mac 重启。
