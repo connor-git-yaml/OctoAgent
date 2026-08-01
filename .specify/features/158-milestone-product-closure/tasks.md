@@ -23,8 +23,8 @@
 - [x] **T013 [L3]** 真实 Gateway/API/Settings 联调
 - [ ] **T014 [L1]** 在当前个人部署完成真实 Access 登录、过期、登出、恢复、
   SPA/API/SSE 与 Settings 远程访问旅程（真实登录、对话、SSE 运行态和
-  `SUCCEEDED` 事件链已通过；过期、主动登出、重新登录、一次性错误恢复及 Settings
-  状态同步仍缺）
+  `SUCCEEDED` 事件链已通过；主动登出和重新认证验证码挑战已通过；过期、重新登录
+  完成、一次性错误恢复及 Settings 状态同步仍缺）
 - [x] **T015 [ARTIFACT]** 生成 F150 verification report 并按真实状态纠正文档；
   报告当前结论仍为 `PARTIAL`，不等于 T014 或 F158 Verify 已通过
 

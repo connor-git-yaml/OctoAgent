@@ -11,7 +11,8 @@
 **状态**：`PARTIAL`。F150 产品字节、本地合同、个人部署与当前分支权威 CI 通过；
 当前分支在 `dc8b1b41` 之后没有 F150/production 字节变化，但部署 Git 身份仍是
 `dc8b1b41`。connector、Access 登录、真实 OpenAI 对话、SSE 运行态与 Task 终态已经
-复验；Access 过期、登出、重新登录、一次性错误恢复及对应 Settings 状态同步仍缺。
+复验；主动登出和重新认证验证码挑战已在 2026-08-01 后续复验中通过；重新登录完成、
+会话过期、一次性错误恢复与 Settings 同步仍缺。
 
 ## 复核背景
 
@@ -214,8 +215,10 @@ env LITELLM_LOCAL_MODEL_COST_MAP=True ~/.octoagent/bin/octo doctor --live
 
 完整事实、截图、尺寸与 SHA 见：
 `../158-milestone-product-closure/evidence/web/2026-08-01/verification-report.md`。
-本轮没有执行会话过期、主动登出、重新登录与一次性故障恢复，故不能把这次成功旅程
-扩大为全部 F150 lifecycle PASS。
+同日后续从 Settings 执行主动登出，受保护根页重新进入 Cloudflare Access 登录边界；
+owner 邮箱验证码请求成功并进入 10 分钟有效的 code challenge。验证码仍等待用户本人
+输入，因此只把主动登出和重新认证挑战判为 PASS，不把重新登录完成、会话过期或
+一次性故障恢复冒充已通过。对应截图与 SHA 继续见 F158 的同日验证报告。
 
 ## 架构与安全复核
 
@@ -231,7 +234,8 @@ env LITELLM_LOCAL_MODEL_COST_MAP=True ~/.octoagent/bin/octo doctor --live
 本地行为、产品入口、登录后真实对话/SSE与模型终态已经闭合，但 F150 的最终主线状态
 仍依赖 F158：
 
-1. 完成 Access 会话过期、主动登出、重新登录、一次性错误恢复与 Settings 状态同步；
+1. 完成 Access 会话过期、重新登录完成、一次性错误恢复与 Settings 状态同步；主动
+   登出和重新认证验证码挑战已经通过；
 2. 合并主线后校正 Blueprint/Milestone completion audit。
 
-在这三项完成前，本报告不得被解释为 F158 整体 Goal 已完成。
+在这些项目完成前，本报告不得被解释为 F158 整体 Goal 已完成。
