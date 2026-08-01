@@ -181,3 +181,15 @@
   version-store warning，但未 rerun，最终 process exit=0 且三个 testcase 均明确 PASS。该预检只
   证明 clean checkout 与非设备回归可复现；T013 真机、最终 CI/evidence inventory、verification
   report、Blueprint/F158 sync 仍未完成，因此 T016 与 `GATE_VERIFY` 继续保持关闭。
+- 2026-08-02：T016 非真机质量加固继续完成。`lane.py pr` 全绿，报告为
+  `/Users/connorlu/.octoagent/logs/lane/pr-20260802-023832.json`；`lane.py baseline`
+  全绿，报告为 `/Users/connorlu/.octoagent/logs/lane/baseline-20260802-025107.json`，其中
+  backend full 为 5861 passed、12 skipped、1 xfailed、1 xpassed。baseline 暴露的
+  `PytestUnhandledThreadExceptionWarning` 未被当作可忽略 warning：依次关闭 Phase C context、
+  daily routine、consolidation notify、consolidation trigger、task context integration 五处测试
+  `StoreGroup`，并把 plugin watcher 改为只在目标 event loop 内创建 refresh task，避免 loop
+  关闭时遗留未 await coroutine。最终 deterministic 全量同时启用
+  `error::pytest.PytestUnhandledThreadExceptionWarning` 与 `error::RuntimeWarning`，结果为
+  5853 passed、11 skipped、10 deselected、1 xfailed、1 xpassed，process exit=0；线程泄漏和
+  coroutine 泄漏均为 0。该记录不使用也不占用 iPhone，仍只属于 T016 非真机前置；T013
+  与最终 Verify 边界不变。
