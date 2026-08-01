@@ -14,9 +14,9 @@
 
 | 要求 | 当前证据 | 判定 | 缺口 | owner |
 |---|---|---|---|---|
-| M11 Web 视觉保持早期 Claude Design | 早期 frame、恢复后 1440 截图、14 个 pixel snapshot、逐 surface 结构合同、云端最终导出、当前个人部署 CSS | PROVEN_BRANCH_CI_DEPLOYED | 当前运行提交已部署；登录后旅程与总 completion audit 仍缺 | F158 / F149 |
-| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access 已登录并打开真实三栏工作台；过期、登出、重新认证与完整 SPA/API/SSE 动作链仍缺 | F158 / F150 |
-| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery、浏览器登录态与 2026-08-01 只读复验 | PARTIAL | Gateway/cloudflared running；Access 已登录；snapshot=`ready`、diagnostics=`degraded`，原因=`recovery,memory`；完整认证生命周期仍缺 | F158 / F150 |
+| M11 Web 视觉保持早期 Claude Design | 早期 frame、恢复后 1440 截图、14 个 pixel snapshot、逐 surface 结构合同、云端最终导出、当前个人部署 CSS与登录后截图 | PROVEN_BRANCH_CI_DEPLOYED | 当前运行提交已部署且真实对话/终态通过；完整Access生命周期与总completion audit仍缺 | F158 / F149 |
+| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access登录、真实对话、SSE与`SUCCEEDED`事件链通过；过期、登出、重新认证、恢复及Settings状态同步仍缺 | F158 / F150 |
+| F150 正式验证报告 | `verification/verification-report.md`、connector recovery、登录态工作台、真实对话与任务事件链 | PARTIAL | Gateway/cloudflared running；Access已登录；snapshot=`ready`、diagnostics=`degraded(recovery,memory)`；doctor与真实任务通过，完整认证生命周期仍缺 | F158 / F150 |
 | Web 功能 E2E | 11 个 Playwright spec / 39 nodes | PROVEN_BRANCH_CI_DEPLOYED | 2026-07-31 当前分支完整 `39/39`、retries=0；当前 runtime 已部署 | F158 |
 | Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_BRANCH_CI_DEPLOYED | 主框架与 9 surface + 真实任务详情进入像素门；部署 CSS map 与分支一致 | F158 |
 | 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
@@ -224,6 +224,15 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     代码变化且未触发新 run。该 CI 证明当前分支代码与 active 架构文档继续通过，
     不会把仍运行 `dc8b1b41` 的个人部署、Access 登录、OAuth、mobile live 或真机
     自动提升为 PASS。
+28. 2026-08-01 复用用户现有 Chrome Access 登录态执行当前个人部署真实旅程：Web
+    输入不含敏感信息的验收消息后，经 SSE 从`就绪→进行中→已完成→就绪`，OpenAI
+    Codex返回精确`F158_WEB_E2E_OK`；Task
+    `01KYY3E1Q3GVEQYPB2HRCE3F88`详情显示Orchestrator成功与`SUCCEEDED`终态，
+    两页console warning/error=0。同日`octo doctor --live`再次以`gpt-5.5`通过。
+    四张真实登录态截图及SHA见`evidence/web/2026-08-01/verification-report.md`；其中
+    Settings 点击“重新检查”后仍为pending，故只证明入口与诚实投影，不证明完整
+    Access lifecycle。
+    未执行过期/登出/重新认证/恢复，因此T045完成而T014仍未完成。
 
 ## F153 当前设计映射与偏离记录
 

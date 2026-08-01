@@ -1,16 +1,17 @@
 # Verification Report：F150 Cloudflare Tunnel 远程访问
 
 **Feature ID**：`150`
-**复核日期**：2026-07-31
+**复核日期**：2026-08-01
 **复核分支**：`codex/f158-milestone-product-closure`
 **初始基线提交**：`db3214fff722c6f969baf99528a76fc03a1e21a1`
 **本轮复验基线提交**：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
 **当前通过完整 CI 的代码/架构提交**：
 `a2dca2badba40f87cec922946d65d21396e1b709`（run `30604533484`）
 **当前个人部署提交**：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
-**状态**：F150 产品字节、本地合同、个人部署与当前分支权威 CI 通过；当前分支在
-`dc8b1b41` 之后没有 F150/production 字节变化，但部署 Git 身份仍是 `dc8b1b41`；
-connector 已恢复，等待真实登录态复验与主线合并
+**状态**：`PARTIAL`。F150 产品字节、本地合同、个人部署与当前分支权威 CI 通过；
+当前分支在 `dc8b1b41` 之后没有 F150/production 字节变化，但部署 Git 身份仍是
+`dc8b1b41`。connector、Access 登录、真实 OpenAI 对话、SSE 运行态与 Task 终态已经
+复验；Access 过期、登出、重新登录、一次性错误恢复及对应 Settings 状态同步仍缺。
 
 ## 复核背景
 
@@ -180,6 +181,42 @@ Provider 的正式恢复入口也已从当前部署 CLI 只读确认：
 传 `--skip-live-verify`。它会改变外部 OAuth 状态并需要用户完成账号确认，因此本轮
 没有自行执行，也没有把命令存在当成真实模型可用。
 
+## 2026-08-01 登录后真实产品旅程
+
+用户已在现有 Chrome profile 完成 Cloudflare Access 登录。本轮复用该真实登录态，
+没有读取 Cookie、local storage、密码或 Access JWT。当前个人部署工作台可观察事实：
+
+- 顶层 snapshot=`ready`；
+- diagnostics=`degraded`，原因精确为`recovery`与`memory`；
+- 普通 UI 诚实显示“受限运行”“可以继续用，但外部能力受影响”；
+- 页面为 Claude 早期视觉语言的三栏工作台，不是 Access HTML 或静态 mock。
+
+随后发送不含敏感信息的真实验收消息：
+
+```text
+这是 F158 Web 真实链路验收。请只回复：F158_WEB_E2E_OK
+```
+
+页面经 SSE 从`就绪`进入`进行中`，输入区切换为“加入队列”，右栏展示当前步骤与
+最近动作；约 8 秒后模型返回精确`F158_WEB_E2E_OK`，会话显示`已完成`并恢复`就绪`。
+Task `01KYY3E1Q3GVEQYPB2HRCE3F88` 的详情页显示 Orchestrator 步骤成功、
+`任务完成`事件与终态`SUCCEEDED`。工作台和任务详情页 console warning/error 均为0。
+
+同日再次执行：
+
+```bash
+env LITELLM_LOCAL_MODEL_COST_MAP=True ~/.octoagent/bin/octo doctor --live
+```
+
+命令 exit=0，`model_live=PASS`，真实调用
+`alias=main, provider=openai-codex, model=gpt-5.5`。总体`WARN`只来自
+`sleep_settings`，不是认证、Gateway、tunnel 或模型失败。
+
+完整事实、截图、尺寸与 SHA 见：
+`../158-milestone-product-closure/evidence/web/2026-08-01/verification-report.md`。
+本轮没有执行会话过期、主动登出、重新登录与一次性故障恢复，故不能把这次成功旅程
+扩大为全部 F150 lifecycle PASS。
+
 ## 架构与安全复核
 
 - production consumer 只有 Settings composition；
@@ -191,10 +228,10 @@ Provider 的正式恢复入口也已从当前部署 CLI 只读确认：
 
 ## 剩余交付门
 
-本地行为与产品入口已经闭合，但 F150 的最终主线状态仍依赖 F158：
+本地行为、产品入口、登录后真实对话/SSE与模型终态已经闭合，但 F150 的最终主线状态
+仍依赖 F158：
 
-1. 在已恢复 connector 的个人部署域名完成登录后 SPA、API、SSE 与 Settings 入口复验；
-2. 重新登录 OpenAI Codex provider 并验证真实模型对话；
-3. 合并主线后校正 Blueprint/Milestone completion audit。
+1. 完成 Access 会话过期、主动登出、重新登录、一次性错误恢复与 Settings 状态同步；
+2. 合并主线后校正 Blueprint/Milestone completion audit。
 
 在这三项完成前，本报告不得被解释为 F158 整体 Goal 已完成。

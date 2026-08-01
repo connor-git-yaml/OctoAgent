@@ -101,11 +101,26 @@ F117 前的 WorkerProfile/多 Session 类当作当前 schema。该批修改完�
 `87660ab5`、`981789f2` 只纠正本 Feature 的外部验收真值，没有产品代码变化且未触发
 新 run。因此当前分支代码/架构 CI 与个人部署身份必须分开记录。
 
+2026-08-01，用户在现有 Chrome profile 完成 Cloudflare Access 登录。本轮复用同一
+真实登录态，未读取 Cookie、local storage、密码或 Access JWT。个人部署三栏工作台
+显示 snapshot=`ready`、diagnostics=`degraded`，原因精确为`recovery`和`memory`，
+普通 UI 因此诚实显示“受限运行”。发送不含敏感信息的真实消息后，页面通过 SSE 从
+`就绪`进入`进行中`，右栏显示进度和最近动作；约 8 秒后 OpenAI Codex 返回精确
+`F158_WEB_E2E_OK`，会话转为`已完成`并恢复`就绪`。Task
+`01KYY3E1Q3GVEQYPB2HRCE3F88` 详情显示 Orchestrator 成功、任务完成事件与
+`SUCCEEDED`终态；两个页面 console warning/error 均为0。同日再次执行
+`octo doctor --live`，exit=0，`model_live=PASS`，真实模型为`gpt-5.5`。
+完整截图、SHA与事实见
+`evidence/web/2026-08-01/verification-report.md`。该成功链不替代 Access 过期、主动
+登出、重新登录、一次性错误恢复与 Settings 状态同步，故 T045 完成而 T014 仍未完成。
+
 整体 Goal 尚未完成：个人部署仍为 `dc8b1b41`；该提交之后到 `a2dca2ba` 没有
 `octoagent/`、`repo-scripts/` 或 workflow 产品字节变化，但最新分支身份尚未部署，
-登录态 SPA/API/SSE 也未复验。个人实例的 OpenAI Codex refresh token 已失效；
-F153 Simulator 已通过但没有连接
-真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154 只完成 Research/Design/Tasks
+登录态真实对话/SSE/任务事件链已复验，但完整 Access lifecycle 尚未完成。OpenAI
+Codex 已重新授权并通过真实 doctor 与产品对话；F153 Simulator 已通过、
+`ios.maojiwang.work` 与 exact Bypass 已配置、真 iPhone 已连接并启用 Developer Mode，
+但 Apple Development 签名、App 安装、配对/replay/revoke 与 F153 Verify 仍缺；
+F154 只完成 Research/Design/Tasks
 Gate，F155 已接受方案 A（系统 full access、Octo 物理只读）并通过
 Research/Design/Tasks Gate，F156 完成含 40 场景矩阵的
 Design/Tasks 草案与 current mobile API recon（5 routes / 8 product gaps），三者
@@ -251,21 +266,14 @@ checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均�
 Chrome 已由用户完成 Cloudflare Access 登录并打开真实 OctoAgent 三栏工作台；只读
 页面事实显示顶层 snapshot=`ready`，诊断 overall=`degraded`，原因精确为
 `recovery` 与 `memory`，UI 因此诚实显示“受限运行”，不是旧快照误判。当前仍缺
-过期、登出、重新认证、恢复及完整 SPA/API/SSE 动作链，所以 T014 继续保持
-unchecked，不能把“已登录并读取一次页面”冒充完整远程旅程。
-
-浏览器接管前诊断已确认 Chrome 进程、扩展安装/启用和 native host 均为 PASS；目标
-登录标签已原样保留给用户。下一步必须由用户在该标签完成 Access 登录，再复验同一
-旅程。标签可见性和登录边界本身不能替代登录态证据。
-
-2026-07-29 的后续复核确认远程地址仍稳定返回 Cloudflare Access `302`，不再是
-`Bad Gateway`。本机实际 Web 页面和 Settings 已通过浏览器读取；Chrome 现有标签仍
-停在 Access 登录页，没有可复用的已认证 OctoAgent 页面。该事实只把“本机产品入口”
-保持为 PASS，不能把远程认证旅程提升为 PASS。
+过期、主动登出、重新认证、一次性错误恢复与 Settings 状态同步，所以 T014 继续保持
+unchecked。2026-08-01 的真实消息经 SSE 进入运行态并返回`F158_WEB_E2E_OK`，
+Task event chain 到达`SUCCEEDED`，证明登录后 SPA/模型/SSE/终态可用；该成功链仍不能
+扩大为所有 Access lifecycle 状态均已通过。
 
 OpenAI Codex 已由用户重新授权；当前个人部署的 `octo doctor --live` 已真实调用
-`gpt-5.5` 并通过。真实对话终态、事件链与无 Echo 证据仍未完成，因此 T045 继续
-unchecked，doctor 单点成功不能冒充产品对话闭环。
+`gpt-5.5` 并通过。真实 Web 对话、SSE 运行态、精确模型回复与 Task
+`SUCCEEDED`事件链也已通过，且无 Echo fallback 迹象；T045 现已完成。
 
 当前部署正式重登录入口为
 `~/.octoagent/bin/octo setup --provider openai-codex`。该流程会启动 PKCE 授权、
@@ -335,8 +343,8 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（代码/架构提交 `a2dca2ba`） |
 | GitHub Actions backend deterministic | PASS（run `30604533484`） |
 | personal deployment | PASS（运行提交 `dc8b1b41`；登录后旅程仍缺） |
-| authenticated personal SPA/API/SSE | MISSING |
-| personal real-model conversation | PARTIAL（doctor live `gpt-5.5` PASS；真实对话/事件链仍缺） |
+| authenticated personal SPA/API/SSE | PARTIAL（真实对话/SSE/终态 PASS；Access 完整 lifecycle 仍缺） |
+| personal real-model conversation | PASS（doctor live `gpt-5.5` + Web 精确回复 + `SUCCEEDED` 事件链） |
 | M10 physical boot attestation | MISSING（等待明确物理重启） |
 | F153 iOS Simulator functional/visual E2E | PASS |
 | F154-F156 complete iOS product E2E | MISSING |

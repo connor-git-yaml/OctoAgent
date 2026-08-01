@@ -309,3 +309,10 @@
   但 Octo App/代码保持物理只读，所有 create/update/delete 写路径为零。F155
   Product Decision、Design、Tasks Gate 已同步通过；Implement/Verify 仍被 F153/F154
   上游硬门关闭，不能把产品决策冒充 Feature 完成。
+- 2026-08-01：当前个人部署完成真实 Access 登录后产品验收：三栏工作台
+  snapshot=`ready`、diagnostics=`degraded(recovery,memory)`并诚实显示“受限运行”；
+  真实 OpenAI Codex 对话经 SSE 从`进行中`到`已完成`，返回
+  `F158_WEB_E2E_OK`，Task `01KYY3E1Q3GVEQYPB2HRCE3F88`到达
+  `SUCCEEDED`，两个页面 console warning/error=0；`octo doctor --live`同日再次以
+  `gpt-5.5`通过。T045完成；Access过期、主动登出、重新登录、一次性恢复与Settings
+  状态同步未执行，T014继续unchecked。

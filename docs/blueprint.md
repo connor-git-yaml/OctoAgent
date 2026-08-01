@@ -434,7 +434,8 @@ Web/iOS trust 边界和 Apple 权限门禁见
 本机 `/tmp` 均不可恢复，因此历史 R/G/R archive 不能宣称 clean-checkout
 self-contained。F150 产品代码与 Web Access 架构保持 stable；用户已完成 Access
 登录并打开真实三栏工作台，但完整过期/登出/重新认证/恢复旅程仍缺。OpenAI Codex
-重授权后 `octo doctor --live` 已通过真实 `gpt-5.5`，真实对话事件链仍缺。个人实例
+重授权后 `octo doctor --live` 已通过真实 `gpt-5.5`；登录后真实Web消息经SSE返回
+`F158_WEB_E2E_OK`且Task到达`SUCCEEDED`。Access过期、登出、重新认证与恢复仍缺。个人实例
 `ios.maojiwang.work` 与 exact mobile path Bypass 已配置、真 iPhone 已连接并开启
 Developer Mode；Apple Development 签名、App 安装和设备注册/撤销仍需实时证据。
 

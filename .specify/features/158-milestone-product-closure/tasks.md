@@ -22,9 +22,9 @@
 - [x] **T012 [REFACTOR]** 收敛视觉、无障碍与状态职责，不增加第二 transport/state
 - [x] **T013 [L3]** 真实 Gateway/API/Settings 联调
 - [ ] **T014 [L1]** 在当前个人部署完成真实 Access 登录、过期、登出、恢复、
-  SPA/API/SSE 与 Settings 远程访问旅程（确定性 Playwright 合同已通过；当前
-  浏览器控制会话仍停在登录边界，不能用历史 T015 attestation 或 Access `302`
-  冒充本次登录后证据）
+  SPA/API/SSE 与 Settings 远程访问旅程（真实登录、对话、SSE 运行态和
+  `SUCCEEDED` 事件链已通过；过期、主动登出、重新登录、一次性错误恢复及 Settings
+  状态同步仍缺）
 - [x] **T015 [ARTIFACT]** 生成 F150 verification report 并按真实状态纠正文档；
   报告当前结论仍为 `PARTIAL`，不等于 T014 或 F158 Verify 已通过
 
@@ -70,7 +70,8 @@
   checkout 已通过；当前 iOS 提交/推送与 detached clean-checkout 12/12 已通过，
   当前代码/架构真值提交 `a2dca2ba` 的 run `30604533484` 五个 job 全绿；
   其后的 `87660ab5`、`981789f2` 仅纠正 F158 制品真值且未触发 CI。个人部署仍为
-  `dc8b1b41`，登录后 SPA/API/SSE、真实模型对话与最新分支部署复验仍缺）
+  `dc8b1b41`；登录后真实对话/SSE/事件链已通过，仍缺完整 Access lifecycle 与最新
+  分支部署复验）
 - [ ] **T038** 提交、推送、合并并确认主线真实交付
 
 ## Phase 5：真实模型运行真值
@@ -81,7 +82,9 @@
 - [x] **T042 [GREEN]** 复用现有 config/router/store 实现 doctor live model probe
 - [x] **T043 [GREEN]** 统一 credential/401/403 auth-fatal 分类与任务终态
 - [x] **T044 [REFACTOR]** 收敛 auth 分类与 probe seams，不新增第二 provider 路径
-- [ ] **T045 [LIVE VERIFY]** 重新授权后运行真实 doctor、真实对话与终态/事件链审计
+- [x] **T045 [LIVE VERIFY]** 重新授权后运行真实 doctor、真实对话与终态/事件链审计：
+  `model_live=PASS`（OpenAI Codex / `gpt-5.5`），Web 返回
+  `F158_WEB_E2E_OK`，Task `01KYY3E1Q3GVEQYPB2HRCE3F88` 终态`SUCCEEDED`
 
 ## Phase 6：物理 Milestone 验收
 

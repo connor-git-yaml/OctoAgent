@@ -28,7 +28,8 @@
 - [x] 390px Web 窄窗口视觉/a11y 通过
 - [x] 当前实现与早期 Claude Design 的偏离全部有合法理由
 - [ ] 当前个人部署已在真实 Cloudflare Access 登录态完成
-  SPA/API/SSE/Settings、刷新、过期、重新认证与登出旅程
+  SPA/API/SSE/Settings、刷新、过期、重新认证与登出旅程（真实对话/SSE/终态已
+  通过；过期、登出、重新认证、恢复与 Settings 状态同步仍缺）
 
 ## iOS
 
@@ -66,4 +67,5 @@
 - [x] 认证失败 `MODEL_CALL_FAILED.error_category=auth_error`
 - [x] 认证失败 Worker `retryable=false`
 - [x] 非认证瞬态错误仍保持既有 fallback/retry 语义
-- [ ] 个人部署重新授权后的 doctor 与真实模型任务通过
+- [x] 个人部署重新授权后的 doctor 与真实模型任务通过（`gpt-5.5`、
+  `F158_WEB_E2E_OK`、Task `SUCCEEDED`）
