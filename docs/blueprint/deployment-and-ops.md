@@ -656,6 +656,10 @@ F094 引入 `octo memory migrate-094` CLI 命令组（dry-run / apply / rollback
   Access 保护 Web hostname，cloudflared 只回源 loopback。
 - 原生 iOS 复用同一 tunnel，但只允许 F153 选定的 deployment-specific mobile
   hostname 与 `/api/mobile/v1/*` path-specific policy；origin device proof 仍是安全边界。
+  Gateway 继续以 `proxy_headers=False` 保留原始 TCP peer；mobile Host 中间件只在原始
+  peer 精确为 `127.0.0.1` 且唯一 `X-Forwarded-Proto` 为 `https` 时，把 tunnel 的
+  loopback HTTP 回源视为外部 HTTPS。缺失、重复、非 HTTPS 或非 loopback peer 均在
+  路由前返回 404，不把全局代理头信任面扩大到 Web/API。
 - Telegram 若使用需要 HTTPS 的 webhook，也必须通过受信外部边界；不得因此让 Gateway
   监听公网网卡。具体渠道部署模式不改变 Gateway 唯一 application host。
 

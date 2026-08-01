@@ -102,6 +102,21 @@ async def _get(app: FastAPI, *, base_url: str, path: str) -> httpx.Response:
         return await client.get(path)
 
 
+async def _get_from_origin_proxy(
+    app: FastAPI,
+    *,
+    client_host: str,
+    forwarded_proto: str | None,
+) -> httpx.Response:
+    headers = {"X-Forwarded-Proto": forwarded_proto} if forwarded_proto else None
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, client=(client_host, 43123)),
+        base_url="http://native.example.test",
+        headers=headers,
+    ) as client:
+        return await client.get("/api/mobile/v1/ready")
+
+
 @pytest.mark.asyncio
 async def test_mobile_hostname_exposes_only_exact_mobile_routes(tmp_path: Path) -> None:
     access, _, _ = _contracts()
@@ -132,6 +147,36 @@ async def test_mobile_hostname_exposes_only_exact_mobile_routes(tmp_path: Path) 
         assert (
             await _get(app, base_url="https://native.example.test", path=path)
         ).status_code == 404, path
+
+
+@pytest.mark.asyncio
+async def test_mobile_hostname_accepts_https_forwarded_only_by_loopback_tunnel(
+    tmp_path: Path,
+) -> None:
+    access, _, _ = _contracts()
+    _write_manifest(tmp_path)
+    manifest = access.load_mobile_device_access_manifest(tmp_path, MANIFEST_PATH)
+    app = await _matrix_app(manifest)
+
+    assert (
+        await _get_from_origin_proxy(
+            app,
+            client_host="127.0.0.1",
+            forwarded_proto="https",
+        )
+    ).status_code == 200
+    for client_host, forwarded_proto in (
+        ("127.0.0.1", None),
+        ("127.0.0.1", "http"),
+        ("203.0.113.9", "https"),
+    ):
+        assert (
+            await _get_from_origin_proxy(
+                app,
+                client_host=client_host,
+                forwarded_proto=forwarded_proto,
+            )
+        ).status_code == 404
 
 
 @pytest.mark.asyncio

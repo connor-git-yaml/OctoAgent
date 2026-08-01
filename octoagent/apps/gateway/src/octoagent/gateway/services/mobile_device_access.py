@@ -165,6 +165,23 @@ def _host_header(scope: Scope) -> str:
     return values[0] if len(values) == 1 else ""
 
 
+def _uses_external_https(scope: Scope) -> bool:
+    scheme = str(scope.get("scheme", "")).casefold()
+    if scheme == "https":
+        return True
+    if scheme != "http":
+        return False
+    client = scope.get("client")
+    if not isinstance(client, (tuple, list)) or not client or client[0] != "127.0.0.1":
+        return False
+    forwarded_proto = [
+        value.decode("latin-1").strip().casefold()
+        for key, value in scope.get("headers", [])
+        if key.decode("latin-1").casefold() == "x-forwarded-proto"
+    ]
+    return forwarded_proto == ["https"]
+
+
 async def _not_found(scope: Scope, receive: Receive, send: Send) -> None:
     response = JSONResponse(
         status_code=404,
@@ -204,9 +221,8 @@ class MobileDeviceAccessMiddleware:
             return
 
         host = _host_header(scope)
-        scheme = str(scope.get("scheme", "")).casefold()
         if host == manifest.mobile_hostname:
-            if scheme != "https" or not _mobile_path_allowed(path):
+            if not _uses_external_https(scope) or not _mobile_path_allowed(path):
                 await _not_found(scope, receive, send)
                 return
         elif path.startswith(_MOBILE_PREFIX) or (
