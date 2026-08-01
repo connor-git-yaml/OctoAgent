@@ -125,6 +125,233 @@ struct HealthPreview: Codable, Equatable {
     }
 }
 
+struct HealthReviewAccepted: Decodable, Equatable {
+    let bundleSHA256: String
+    let expiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case bundleSHA256 = "bundle_sha256"
+        case expiresAt = "expires_at"
+    }
+}
+
+struct HealthAnalysisAccepted: Decodable, Equatable {
+    let summary: String
+}
+
+struct HealthDeletionReceipt: Decodable, Equatable {
+    let sourceHash: String
+    let status: String
+
+    enum CodingKeys: String, CodingKey {
+        case sourceHash = "source_hash"
+        case status
+    }
+}
+
+enum HealthTransportPayloadError: Error, Equatable {
+    case invalidPreview
+    case invalidResponse
+}
+
+enum HealthTransportPayload {
+    static let purpose = "summarize_recent_activity_and_sleep"
+    static let capabilities = [
+        "device.profile.read",
+        "device.ready.read",
+        "health.analysis.run",
+        "health.review.submit",
+        "health.source.delete",
+    ]
+
+    private static let dataTypes = [
+        "apple_health.sleep_analysis",
+        "apple_health.step_count",
+    ]
+    private static let fieldManifest = [
+        "daily_steps[].local_day",
+        "daily_steps[].count",
+        "daily_steps[].unit",
+        "sleep.window_start_utc",
+        "sleep.window_end_utc",
+        "sleep.total_asleep_minutes",
+        "sleep.stage_minutes.awake",
+        "sleep.stage_minutes.core",
+        "sleep.stage_minutes.deep",
+        "sleep.stage_minutes.rem",
+        "sleep.stage_minutes.unspecified",
+        "sleep.unit",
+        "completeness_notice",
+    ]
+
+    static func review(
+        preview: HealthPreview,
+        ownerID: String,
+        deviceID: String,
+        approvedAt: Date
+    ) throws -> Data {
+        let provenance = try provenance(
+            preview: preview,
+            ownerID: ownerID,
+            deviceID: deviceID
+        )
+        let expiry = approvedAt.addingTimeInterval(86_400)
+        return try canonicalData([
+            "stage": "review_bundle",
+            "bundle_id": "health-review-\(UUID().uuidString.lowercased())",
+            "purpose": purpose,
+            "provenance": [provenance],
+            "fact_count": preview.dailySteps.count + (preview.sleep == nil ? 0 : 1),
+            "field_manifest": fieldManifest,
+            "preview_hash": preview.canonicalSha256,
+            "retention": retention(
+                stage: "review_bundle",
+                createdAt: approvedAt,
+                expiresAt: expiry
+            ),
+        ])
+    }
+
+    static func analysis(
+        preview: HealthPreview,
+        sourceHash: String,
+        ownerID: String,
+        deviceID: String,
+        approvedAt: Date
+    ) throws -> Data {
+        guard isSHA256(sourceHash) else {
+            throw HealthTransportPayloadError.invalidResponse
+        }
+        let provenance = try provenance(
+            preview: preview,
+            ownerID: ownerID,
+            deviceID: deviceID
+        )
+        let consentID = "health-consent-\(UUID().uuidString.lowercased())"
+        let expiry = approvedAt.addingTimeInterval(15 * 60)
+        let facts = approvedFacts(preview: preview)
+        let packet: [String: Any] = [
+            "stage": "approved_analysis_packet",
+            "packet_id": "health-packet-\(UUID().uuidString.lowercased())",
+            "purpose": purpose,
+            "facts_sha256": sha256Hex(try canonicalData(facts)),
+            "provenance": [provenance],
+            "consent_id": consentID,
+            "retention": retention(
+                stage: "approved_analysis_packet",
+                createdAt: approvedAt,
+                expiresAt: expiry
+            ),
+        ]
+        return try canonicalData([
+            "source_hash": sourceHash,
+            "consent": [
+                "consent_id": consentID,
+                "bundle_sha256": sourceHash,
+                "approved_packet_sha256": sha256Hex(try canonicalData(packet)),
+                "purpose": purpose,
+                "owner_id": ownerID,
+                "device_id": deviceID,
+                "approved_at": HealthCanonicalValue.utc(approvedAt),
+                "expires_at": HealthCanonicalValue.utc(expiry),
+                "used_at": NSNull(),
+            ],
+            "packet": packet,
+            "approved_facts": facts,
+        ])
+    }
+
+    private static func provenance(
+        preview: HealthPreview,
+        ownerID: String,
+        deviceID: String
+    ) throws -> [String: Any] {
+        guard
+            !ownerID.isEmpty,
+            !deviceID.isEmpty,
+            preview.dataTypes == [.sleepAnalysis, .stepCount],
+            isSHA256(preview.canonicalSha256)
+        else {
+            throw HealthTransportPayloadError.invalidPreview
+        }
+        return [
+            "source_kind": "healthkit",
+            "source_object_hash": preview.canonicalSha256,
+            "owner_id": ownerID,
+            "device_id": deviceID,
+            "captured_at": preview.capturedAtUtc,
+            "time_range": [
+                "start": HealthCanonicalValue.utc(preview.window.start),
+                "end": HealthCanonicalValue.utc(preview.window.end),
+            ],
+            "data_types": dataTypes,
+        ]
+    }
+
+    private static func approvedFacts(preview: HealthPreview) -> [String: Any] {
+        var result: [String: Any] = [
+            "purpose": purpose,
+            "time_range": [
+                "start": HealthCanonicalValue.utc(preview.window.start),
+                "end": HealthCanonicalValue.utc(preview.window.end),
+            ],
+            "daily_steps": preview.dailySteps.map {
+                ["local_day": $0.localDay, "count": $0.count, "unit": $0.unit]
+            },
+            "completeness_notice": preview.completenessNotice,
+        ]
+        if let sleep = preview.sleep {
+            result["sleep"] = [
+                "window_start_utc": sleep.windowStartUtc,
+                "window_end_utc": sleep.windowEndUtc,
+                "total_asleep_minutes": sleep.totalAsleepMinutes,
+                "stage_minutes": [
+                    "awake": sleep.stageMinutes.awake,
+                    "core": sleep.stageMinutes.core,
+                    "deep": sleep.stageMinutes.deep,
+                    "rem": sleep.stageMinutes.rem,
+                    "unspecified": sleep.stageMinutes.unspecified,
+                ],
+                "unit": sleep.unit,
+            ]
+        } else {
+            result["sleep"] = NSNull()
+        }
+        return result
+    }
+
+    private static func retention(
+        stage: String,
+        createdAt: Date,
+        expiresAt: Date
+    ) -> [String: Any] {
+        [
+            "stage": stage,
+            "created_at": HealthCanonicalValue.utc(createdAt),
+            "expires_at": HealthCanonicalValue.utc(expiresAt),
+            "session_ends_at": NSNull(),
+        ]
+    }
+
+    private static func canonicalData(_ value: [String: Any]) throws -> Data {
+        guard JSONSerialization.isValidJSONObject(value) else {
+            throw HealthTransportPayloadError.invalidPreview
+        }
+        return try JSONSerialization.data(
+            withJSONObject: value,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private static func isSHA256(_ value: String) -> Bool {
+        value.count == 64 && value.allSatisfy { $0.isNumber || ("a" ... "f").contains($0) }
+    }
+}
+
 private struct HealthPreviewPayload: Encodable {
     let previewID: String
     let capturedAtUtc: String

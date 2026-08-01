@@ -3,6 +3,14 @@ import SwiftUI
 enum HealthReviewActionError: Error, Equatable {
     case unavailable
     case offline
+    case revoked
+}
+
+struct HealthTransportContext {
+    let client: DeviceTrustClient
+    let credentials: DeviceCredentials
+    let profile: MobileDeviceProfile
+    let serverTime: Date
 }
 
 struct HealthReviewActions {
@@ -13,6 +21,92 @@ struct HealthReviewActions {
         analyze: { _ in throw HealthReviewActionError.unavailable },
         delete: { throw HealthReviewActionError.unavailable }
     )
+}
+
+@MainActor
+final class HealthTransportSession {
+    private let context: @MainActor () async throws -> HealthTransportContext
+    private var sourceHash: String?
+
+    init(
+        context: @escaping @MainActor () async throws -> HealthTransportContext
+    ) {
+        self.context = context
+    }
+
+    func actions() -> HealthReviewActions {
+        HealthReviewActions(
+            analyze: { [weak self] preview in
+                guard let self else { throw HealthReviewActionError.unavailable }
+                return try await self.analyze(preview)
+            },
+            delete: { [weak self] in
+                guard let self else { throw HealthReviewActionError.unavailable }
+                try await self.delete()
+            }
+        )
+    }
+
+    private func analyze(_ preview: HealthPreview) async throws -> String {
+        do {
+            let transport = try await context()
+            guard
+                transport.profile.deviceID == transport.credentials.deviceID,
+                transport.profile.capabilities == HealthTransportPayload.capabilities
+            else {
+                throw HealthReviewActionError.unavailable
+            }
+            let approvedAt = transport.serverTime
+            let reviewBody = try HealthTransportPayload.review(
+                preview: preview,
+                ownerID: transport.profile.ownerID,
+                deviceID: transport.credentials.deviceID,
+                approvedAt: approvedAt
+            )
+            let review = try await transport.client.submitHealthReview(
+                body: reviewBody,
+                credentials: transport.credentials
+            )
+            sourceHash = review.bundleSHA256
+            let analysisBody = try HealthTransportPayload.analysis(
+                preview: preview,
+                sourceHash: review.bundleSHA256,
+                ownerID: transport.profile.ownerID,
+                deviceID: transport.credentials.deviceID,
+                approvedAt: approvedAt
+            )
+            let result = try await transport.client.submitHealthAnalysis(
+                body: analysisBody,
+                credentials: transport.credentials
+            )
+            return result.summary
+        } catch DeviceTrustClientError.offline {
+            throw HealthReviewActionError.offline
+        } catch DeviceTrustClientError.revoked {
+            throw HealthReviewActionError.revoked
+        }
+    }
+
+    private func delete() async throws {
+        guard let sourceHash else {
+            throw HealthReviewActionError.unavailable
+        }
+        do {
+            let transport = try await context()
+            let receipt = try await transport.client.deleteHealthSource(
+                sourceHash,
+                credentials: transport.credentials
+            )
+            guard receipt.sourceHash == sourceHash, receipt.status == "completed" else {
+                throw HealthReviewActionError.unavailable
+            }
+            self.sourceHash = nil
+        } catch DeviceTrustClientError.offline {
+            throw HealthReviewActionError.offline
+        } catch DeviceTrustClientError.revoked {
+            throw HealthReviewActionError.revoked
+        }
+    }
 }
 
 struct HealthReviewPresentation: Equatable {
@@ -139,11 +233,11 @@ struct HealthReviewView: View {
     private let actions: HealthReviewActions
     private let now: () -> Date
 
-    init() {
+    init(actions: HealthReviewActions) {
         _coordinator = StateObject(
             wrappedValue: HealthImportCoordinator(store: AppleHealthDataStore())
         )
-        actions = .unavailable
+        self.actions = actions
         now = Date.init
     }
 
@@ -353,6 +447,8 @@ struct HealthReviewView: View {
         coordinator.beginAnalysis()
         do {
             coordinator.analysisDidComplete(summary: try await actions.analyze(preview))
+        } catch HealthReviewActionError.revoked {
+            coordinator.deviceWasRevoked()
         } catch {
             coordinator.analysisDidFail(isOffline: error as? HealthReviewActionError == .offline)
         }
@@ -363,6 +459,8 @@ struct HealthReviewView: View {
         do {
             try await actions.delete()
             coordinator.deletionDidComplete()
+        } catch HealthReviewActionError.revoked {
+            coordinator.deviceWasRevoked()
         } catch {
             coordinator.deletionDidFail()
         }

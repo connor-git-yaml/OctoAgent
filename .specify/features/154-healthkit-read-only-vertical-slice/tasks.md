@@ -32,7 +32,7 @@
   Wi-Fi↔蜂窝、撤销与删除
 - [ ] **T014 [LIVE MODEL]** 一次 approved 真模型分析、auth failure/no Echo、
   prompt/log/audit raw-field scan
-- [ ] **T015 [ARCHITECTURE/QUALITY]** 单 store/client/policy/runner、function≤50、
+- [x] **T015 [ARCHITECTURE/QUALITY]** 单 store/client/policy/runner、function≤50、
   McCabe≤10、secret/package/log/snapshot scan
 - [ ] **T016 [VERIFY]** clean checkout、blast-radius regression、CI、evidence inventory、
   verification report、Blueprint/F158 sync；通过后解锁 F155
@@ -59,5 +59,6 @@
 - `F154_HEALTH_UI_MISSING`
 - `F154_HEALTH_VISUAL_CONTRACT_MISSING`
 - `F154_HEALTH_SIMULATOR_CONTRACT_MISSING`
+- `F154_HEALTH_IOS_TRANSPORT_MISSING`
 
 collection/import/path/permission/tool 缺失不得冒充 RED；禁止 rerun/sleep 掩盖 flaky。

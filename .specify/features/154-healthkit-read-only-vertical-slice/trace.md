@@ -137,3 +137,25 @@
   的 exact 文案/action/44pt/像素基线、AXXXL/VoiceOver 合同共 3/3 PASS，没有
   rerun。Simulator 只能证明 deterministic DI 和“未弹权限”，该记录明确不计系统
   Health permission sheet、真实 step/sleep 或 Secure Enclave 证据，这些仍归 T013 真 iPhone。
+- 2026-08-02：T014 的非真机 transport 前置先以
+  `F154_HEALTH_IOS_TRANSPORT_MISSING` 取得 Python/Swift 双侧真实 RED，再在 F153 既有
+  `DeviceTrustClient` 上扩展 review/analysis/delete 三个 signed request；Gateway token 与
+  protected profile 从同一 capability tuple 签发 exact 五项权限，profile 只增加服务器派生的
+  pseudonymous `owner_id`。连接页复用已有 credentials、ready server time 与同一 client 注入
+  `HealthReviewView`，没有第二 URLSession/session/device/pairing；review、consent、packet 与
+  delete receipt 均绑定 owner/device/source hash。相关 Python/Core/Protocol/Policy 回归
+  129/129，完整 iOS unit `Test-OctoAgent-2026.08.02_02-21-54-+0800.xcresult`
+  为 21 passed / 3 个明确真机 live case skipped，Simulator UI
+  `Test-OctoAgent-2026.08.02_02-24-34-+0800.xcresult` 为 3/3 PASS，Release iPhoneOS arm64
+  warnings-as-errors build 成功。T014 仍未完成：一次 approved 真模型调用及其 auth-failure/
+  no-Echo/raw-field live scan 继续待办。
+- 2026-08-02：T015 quality gate 通过。repository architecture 与 F154 exact authority 均
+  PASS；Ruff/format/C901≤10 与 `git diff --check` PASS。生产静态事实为单
+  `HKHealthStore`、单 `URLSession`、单 ProviderRouter/policy/store/runner；本轮新增/触达
+  Swift production function 均不超过 50 行。HealthKit write/delete/background/observer/
+  anchored/clinical/heart-rate、diff secret 与 Release binary raw-field 扫描命中均为 0。
+  冻结 SHA-256：`HealthImportModels.swift`
+  `120533590468bd8c91a9b300fa600d9d21302418c021dc219080fc1708e59c66`，
+  `HealthReviewView.swift` `437705679a36f78931eaa6da5ecbeeae213f1f003e9c2a22dccb8ca969051bbb`，
+  `DeviceTrustClient.swift` `fc3527c3efbae500f06ef2753a7966d2995b74ac96047c67f0c3d9fb02054adf`，
+  `RegistrationView.swift` `acc59750633965e816a08e4f7d7fdddae8aa7409174d374ff2a1c63d42fb560d`。

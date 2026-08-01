@@ -309,6 +309,7 @@ class MobileReadyResponse(_StrictFrozenModel):
 
 class MobileDeviceProfileResponse(_StrictFrozenModel):
     device_id: NonEmptyString
+    owner_id: NonEmptyString
     display_name: NonEmptyString
     attestation_state: AttestationState
     capabilities: tuple[DeviceCapability, ...]

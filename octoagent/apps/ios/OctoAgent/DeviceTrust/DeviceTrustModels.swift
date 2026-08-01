@@ -212,12 +212,14 @@ struct MobileReady: Codable, Equatable, Sendable {
 
 struct MobileDeviceProfile: Codable, Equatable, Sendable {
     let deviceID: String
+    let ownerID: String
     let displayName: String
     let attestationState: DeviceAttestationState
     let capabilities: [String]
 
     enum CodingKeys: String, CodingKey {
         case deviceID = "device_id"
+        case ownerID = "owner_id"
         case displayName = "display_name"
         case attestationState = "attestation_state"
         case capabilities

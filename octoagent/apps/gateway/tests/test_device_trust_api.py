@@ -393,6 +393,9 @@ async def test_owner_approves_lists_and_revokes_only_own_pending_device(
         assert listed.json()[0]["capabilities"] == [
             "device.profile.read",
             "device.ready.read",
+            "health.analysis.run",
+            "health.review.submit",
+            "health.source.delete",
         ], ORACLE
 
         revoked = await _request(
@@ -569,6 +572,9 @@ async def test_active_mobile_gets_single_use_short_token_stored_only_as_hash(
         assert grant["capabilities"] == [
             "device.profile.read",
             "device.ready.read",
+            "health.analysis.run",
+            "health.review.submit",
+            "health.source.delete",
         ], MOBILE_ORACLE
         assert datetime.fromisoformat(grant["expires_at"]) - datetime.fromisoformat(
             grant["issued_at"]
@@ -827,6 +833,7 @@ async def test_protected_ready_requires_exact_device_proof_and_consumes_replay(
 async def test_protected_profile_is_minimal_and_capability_bound(
     tmp_path: Path,
 ) -> None:
+    service_module, _ = _contracts()
     app, group, _, private_key, _, issued = await _issued_mobile(tmp_path)
     try:
         profile = await _request(
@@ -845,14 +852,18 @@ async def test_protected_profile_is_minimal_and_capability_bound(
         assert profile.status_code == 200, f"{PROTECTED_ORACLE}: {profile.text}"
         assert profile.json() == {
             "device_id": "device-1",
+            "owner_id": service_module.owner_id_for_subject("cf-owner-subject"),
             "display_name": "Connor iPhone",
             "attestation_state": "unsupported",
             "capabilities": [
                 "device.profile.read",
                 "device.ready.read",
+                "health.analysis.run",
+                "health.review.submit",
+                "health.source.delete",
             ],
         }, PROTECTED_ORACLE
-        for forbidden in ("owner_id", "public_key", "token", "signature"):
+        for forbidden in ("public_key", "token", "signature"):
             assert forbidden not in profile.text, PROTECTED_ORACLE
     finally:
         await group.close()

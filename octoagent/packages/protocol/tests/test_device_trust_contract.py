@@ -232,9 +232,16 @@ def test_status_proof_and_ready_projection_are_strict() -> None:
     )
     profile = module.MobileDeviceProfileResponse(
         device_id="device-1",
+        owner_id="owner-1",
         display_name="Connor iPhone",
         attestation_state="unsupported",
-        capabilities=["device.ready.read", "device.profile.read"],
+        capabilities=[
+            "health.source.delete",
+            "device.ready.read",
+            "health.review.submit",
+            "device.profile.read",
+            "health.analysis.run",
+        ],
     )
     assert open_challenge.device_id is None
     assert status.state.value == "pending"
@@ -243,8 +250,11 @@ def test_status_proof_and_ready_projection_are_strict() -> None:
     assert profile.capabilities == (
         "device.profile.read",
         "device.ready.read",
+        "health.analysis.run",
+        "health.review.submit",
+        "health.source.delete",
     )
-    assert "owner_id" not in profile.model_dump()
+    assert profile.owner_id == "owner-1"
     assert "public_key" not in profile.model_dump()
     assert headers.authorization not in repr(headers)
     assert headers.signature not in repr(headers)

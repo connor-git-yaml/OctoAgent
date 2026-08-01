@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi import FastAPI
 
 ORACLE = "F154_HEALTH_REVIEW_ROUTE_MISSING"
+TRANSPORT_ORACLE = "F154_HEALTH_IOS_TRANSPORT_MISSING"
 NOW = datetime(2026, 8, 2, 1, 0, tzinfo=UTC)
 MOBILE_ORIGIN = "https://ios.example.test"
 REVIEW_PATH = "/api/mobile/v1/health/reviews"
@@ -152,6 +153,26 @@ def _enrollment_request(private_key: Any, public_key: str, secret: str) -> Any:
     )
 
 
+def _token_request(private_key: Any, challenge: Any) -> Any:
+    protocol = importlib.import_module("octoagent.protocol.device_trust")
+    unsigned = protocol.DeviceTokenRequest(
+        token_challenge_id=challenge.token_challenge_id,
+        device_id=challenge.device_id,
+        server_challenge=challenge.server_challenge,
+        mobile_origin=challenge.mobile_origin,
+        challenge_signature_der=_sign(private_key, b"temporary"),
+        timestamp=NOW,
+    )
+    return unsigned.model_copy(
+        update={
+            "challenge_signature_der": _sign(
+                private_key,
+                protocol.token_challenge_signature_bytes(unsigned),
+            )
+        }
+    )
+
+
 async def _put_grant(
     group: Any,
     *,
@@ -199,7 +220,16 @@ async def _put_grant(
 
 async def _registered_device(group: Any) -> tuple[Any, Any, Any]:
     trust = importlib.import_module("octoagent.gateway.services.device_trust")
-    ids = iter(("registration-1", "device-1", "device-audit-1"))
+    ids = iter(
+        (
+            "registration-1",
+            "device-1",
+            "device-audit-1",
+            "token-challenge-health-1",
+            "grant-health-1",
+            "token-health-1",
+        )
+    )
     service = trust.DeviceTrustService(
         device_store=group.device_trust_store,
         audit_store=group.privacy_ingestion_store,
@@ -222,6 +252,59 @@ async def _registered_device(group: Any) -> tuple[Any, Any, Any]:
     device = await group.device_trust_store.get_device("device-1")
     assert device is not None, ORACLE
     return service, device, private_key
+
+
+@pytest.mark.asyncio
+async def test_device_token_and_profile_expose_exact_health_transport_scope(
+    tmp_path: Path,
+) -> None:
+    core_store = importlib.import_module("octoagent.core.store")
+    protocol = importlib.import_module("octoagent.protocol.device_trust")
+    group = await core_store.create_store_group(
+        str(tmp_path / "octo.db"),
+        tmp_path / "artifacts",
+    )
+    try:
+        service, device, private_key = await _registered_device(group)
+        challenge = await service.create_token_challenge(device_id=device.device_id)
+        token = await service.issue_token(_token_request(private_key, challenge))
+        expected_capabilities = (
+            "device.profile.read",
+            "device.ready.read",
+            "health.analysis.run",
+            "health.review.submit",
+            "health.source.delete",
+        )
+        signed = _signed_headers(
+            private_key,
+            token=token.opaque_token,
+            token_id=token.grant.token_id,
+            method="GET",
+            path="/api/mobile/v1/device-profile",
+            body=b"",
+            nonce="health-profile-scope-nonce-000001",
+        )
+        profile = await service.protected_device_profile(
+            headers=protocol.DeviceProofHeaders(
+                authorization=signed["Authorization"],
+                timestamp=NOW,
+                nonce=signed["X-Octo-Device-Nonce"],
+                signature=signed["X-Octo-Device-Signature"],
+            ),
+            method="GET",
+            canonical_path="/api/mobile/v1/device-profile",
+            raw_body=b"",
+        )
+        issues = []
+        if tuple(item.value for item in token.grant.capabilities) != expected_capabilities:
+            issues.append("issued token omits the exact health capabilities")
+        if tuple(item.value for item in profile.capabilities) != expected_capabilities:
+            issues.append("device profile omits the exact health capabilities")
+        if getattr(profile, "owner_id", None) != device.owner_id:
+            issues.append("device profile omits the server-authoritative owner scope")
+        assert not issues, f"{TRANSPORT_ORACLE}: {'; '.join(issues)}"
+    finally:
+        await group.close()
 
 
 async def _prepared_app(tmp_path: Path) -> tuple[FastAPI, Any, Any, str, str]:

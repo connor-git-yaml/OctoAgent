@@ -112,6 +112,15 @@ def _identifier_hash(value: str) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
+_MOBILE_DEVICE_CAPABILITIES = (
+    DeviceCapability.DEVICE_PROFILE_READ,
+    DeviceCapability.DEVICE_READY_READ,
+    DeviceCapability.HEALTH_ANALYSIS_RUN,
+    DeviceCapability.HEALTH_REVIEW_SUBMIT,
+    DeviceCapability.HEALTH_SOURCE_DELETE,
+)
+
+
 class DeviceTrustService:
     """同一 store 上编排 owner challenge/decision；不接触 Cloudflare 凭证。"""
 
@@ -422,10 +431,7 @@ class DeviceTrustService:
             owner_id=device.owner_id,
             device_id=device.device_id,
             device_key_thumbprint=selected_key.device_key_thumbprint,
-            capabilities=(
-                DeviceCapability.DEVICE_PROFILE_READ,
-                DeviceCapability.DEVICE_READY_READ,
-            ),
+            capabilities=_MOBILE_DEVICE_CAPABILITIES,
             audience=DeviceAudience.OCTO_GATEWAY,
             issued_at=now,
             expires_at=now + timedelta(minutes=15),
@@ -478,12 +484,10 @@ class DeviceTrustService:
             raise DeviceTrustServiceError("DEVICE_NOT_ACTIVE", status_code=401)
         return MobileDeviceProfileResponse(
             device_id=device.device_id,
+            owner_id=device.owner_id,
             display_name=device.display_name,
             attestation_state=device.attestation_state,
-            capabilities=(
-                DeviceCapability.DEVICE_PROFILE_READ,
-                DeviceCapability.DEVICE_READY_READ,
-            ),
+            capabilities=_MOBILE_DEVICE_CAPABILITIES,
         )
 
     async def approve_registration(
@@ -553,12 +557,12 @@ class DeviceTrustService:
         owner_subject: str,
     ) -> list[OwnerDeviceProjection]:
         devices = await self._device_store.list_owner_devices(owner_id_for_subject(owner_subject))
-        capabilities = (
-            DeviceCapability.DEVICE_PROFILE_READ,
-            DeviceCapability.DEVICE_READY_READ,
-        )
         return [
-            OwnerDeviceProjection(device=device, capabilities=capabilities) for device in devices
+            OwnerDeviceProjection(
+                device=device,
+                capabilities=_MOBILE_DEVICE_CAPABILITIES,
+            )
+            for device in devices
         ]
 
     async def revoke_device(
@@ -591,10 +595,7 @@ class DeviceTrustService:
         )
         return OwnerDeviceProjection(
             device=revoked,
-            capabilities=(
-                DeviceCapability.DEVICE_PROFILE_READ,
-                DeviceCapability.DEVICE_READY_READ,
-            ),
+            capabilities=_MOBILE_DEVICE_CAPABILITIES,
         )
 
     async def _owned_challenge(
@@ -673,10 +674,7 @@ class DeviceTrustService:
                 device_hash=_identifier_hash(context.device_id),
                 object_hash=context.object_hash,
                 count=1,
-                capabilities=(
-                    DeviceCapability.DEVICE_PROFILE_READ,
-                    DeviceCapability.DEVICE_READY_READ,
-                ),
+                capabilities=_MOBILE_DEVICE_CAPABILITIES,
                 decision=context.decision,
                 result=context.result,
                 reason_code=context.reason_code,

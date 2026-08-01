@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import XCTest
 @testable import OctoAgent
 
@@ -61,6 +62,61 @@ final class HealthImportTests: XCTestCase {
         }
 
         XCTAssertTrue(issues.isEmpty, "F154_HEALTH_MODEL_MISSING: \(issues.joined(separator: "; "))")
+    }
+
+    func testHealthTransportPayloadBindsApprovedPreviewAndPacketHash() throws {
+        let approvedAt = date("2026-03-10T12:00:00Z")
+        let window = try HealthReadWindow(
+            start: date("2026-03-09T12:00:00Z"),
+            end: approvedAt,
+            preset: .last24Hours,
+            referenceNow: approvedAt
+        )
+        let preview = try makePreview(window: window, stepCount: "42")
+        let reviewData = try HealthTransportPayload.review(
+            preview: preview,
+            ownerID: "owner-1",
+            deviceID: "device-1",
+            approvedAt: approvedAt
+        )
+        let review = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: reviewData) as? [String: Any]
+        )
+        let provenance = try XCTUnwrap(
+            (review["provenance"] as? [[String: Any]])?.first
+        )
+        XCTAssertEqual(review["preview_hash"] as? String, preview.canonicalSha256)
+        XCTAssertEqual(provenance["owner_id"] as? String, "owner-1")
+        XCTAssertEqual(provenance["device_id"] as? String, "device-1")
+        XCTAssertEqual(
+            provenance["data_types"] as? [String],
+            ["apple_health.sleep_analysis", "apple_health.step_count"]
+        )
+
+        let sourceHash = String(repeating: "a", count: 64)
+        let analysisData = try HealthTransportPayload.analysis(
+            preview: preview,
+            sourceHash: sourceHash,
+            ownerID: "owner-1",
+            deviceID: "device-1",
+            approvedAt: approvedAt
+        )
+        let analysis = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: analysisData) as? [String: Any]
+        )
+        let packet = try XCTUnwrap(analysis["packet"] as? [String: Any])
+        let consent = try XCTUnwrap(analysis["consent"] as? [String: Any])
+        let packetData = try JSONSerialization.data(
+            withJSONObject: packet,
+            options: [.sortedKeys, .withoutEscapingSlashes]
+        )
+        let packetHash = SHA256.hash(data: packetData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        XCTAssertEqual(consent["bundle_sha256"] as? String, sourceHash)
+        XCTAssertEqual(consent["approved_packet_sha256"] as? String, packetHash)
+        XCTAssertEqual(consent["owner_id"] as? String, "owner-1")
+        XCTAssertTrue(consent["used_at"] is NSNull)
     }
 
     func testStepAggregationUsesFinalLocalDayAcrossDst() throws {
@@ -423,6 +479,35 @@ final class HealthImportTests: XCTestCase {
         XCTAssertTrue(
             issues.isEmpty,
             "F154_HEALTH_UI_MISSING: \(issues.joined(separator: "; "))"
+        )
+    }
+
+    func testConnectedHealthFlowUsesExistingSignedDeviceTransport() throws {
+        let clientSource = try sourceText("OctoAgent/DeviceTrust/DeviceTrustClient.swift")
+        let healthSource = try sourceText("OctoAgent/Health/HealthReviewView.swift")
+        let registrationSource = try sourceText("OctoAgent/App/RegistrationView.swift")
+        var issues: [String] = []
+
+        for method in [
+            "submitHealthReview",
+            "submitHealthAnalysis",
+            "deleteHealthSource",
+        ] where !clientSource.contains("func \(method)") {
+            issues.append("single DeviceTrust client is missing \(method)")
+        }
+        if healthSource.contains("actions = .unavailable") {
+            issues.append("production HealthReviewView still installs unavailable actions")
+        }
+        if registrationSource.contains("HealthReviewView()") {
+            issues.append("connected entry does not inject device credentials and transport")
+        }
+        if healthSource.contains("URLSession(") || registrationSource.contains("URLSession(") {
+            issues.append("health UI created a second network client")
+        }
+
+        XCTAssertTrue(
+            issues.isEmpty,
+            "F154_HEALTH_IOS_TRANSPORT_MISSING: \(issues.joined(separator: "; "))"
         )
     }
 

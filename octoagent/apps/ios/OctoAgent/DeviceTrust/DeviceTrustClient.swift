@@ -326,18 +326,69 @@ final class DeviceTrustClient {
     }
 
     func ready(credentials: DeviceCredentials) async throws -> MobileReady {
-        try await protectedGET(
+        try await protectedRequest(
             path: "/api/mobile/v1/ready",
-            credentials: credentials
+            method: "GET",
+            body: nil,
+            credentials: credentials,
+            isIdempotent: true
         )
     }
 
     func deviceProfile(
         credentials: DeviceCredentials
     ) async throws -> MobileDeviceProfile {
-        try await protectedGET(
+        try await protectedRequest(
             path: "/api/mobile/v1/device-profile",
-            credentials: credentials
+            method: "GET",
+            body: nil,
+            credentials: credentials,
+            isIdempotent: true
+        )
+    }
+
+    func submitHealthReview(
+        body: Data,
+        credentials: DeviceCredentials
+    ) async throws -> HealthReviewAccepted {
+        try await protectedRequest(
+            path: "/api/mobile/v1/health/reviews",
+            method: "POST",
+            body: body,
+            credentials: credentials,
+            isIdempotent: false
+        )
+    }
+
+    func submitHealthAnalysis(
+        body: Data,
+        credentials: DeviceCredentials
+    ) async throws -> HealthAnalysisAccepted {
+        try await protectedRequest(
+            path: "/api/mobile/v1/health/analyses",
+            method: "POST",
+            body: body,
+            credentials: credentials,
+            isIdempotent: false
+        )
+    }
+
+    func deleteHealthSource(
+        _ sourceHash: String,
+        credentials: DeviceCredentials
+    ) async throws -> HealthDeletionReceipt {
+        guard
+            sourceHash.count == 64,
+            sourceHash.allSatisfy({ $0.isNumber || ("a" ... "f").contains($0) })
+        else {
+            throw DeviceTrustClientError.invalidResponse
+        }
+        return try await protectedRequest(
+            path: "/api/mobile/v1/health/sources/\(sourceHash)",
+            method: "DELETE",
+            body: nil,
+            credentials: credentials,
+            isIdempotent: true
         )
     }
 
@@ -345,9 +396,12 @@ final class DeviceTrustClient {
         session.invalidateAndCancel()
     }
 
-    private func protectedGET<Response: Decodable>(
+    private func protectedRequest<Response: Decodable>(
         path: String,
-        credentials: DeviceCredentials
+        method: String,
+        body: Data?,
+        credentials: DeviceCredentials,
+        isIdempotent: Bool
     ) async throws -> Response {
         let requestTime = now()
         guard credentials.serverOrigin == serverOrigin else {
@@ -358,9 +412,9 @@ final class DeviceTrustClient {
         }
         let timestamp = utcSecond(requestTime)
         let proof = CanonicalRequestProof(
-            method: "GET",
+            method: method,
             canonicalPath: path,
-            bodySHA256: sha256Hex(Data()),
+            bodySHA256: sha256Hex(body ?? Data()),
             timestamp: timestamp,
             nonce: try nonce(),
             tokenID: credentials.tokenID
@@ -368,15 +422,15 @@ final class DeviceTrustClient {
         let signature = try signer.sign(proof.canonicalBytes()).signatureDER
         return try await request(
             path: path,
-            method: "GET",
-            body: nil,
+            method: method,
+            body: body,
             headers: [
                 "Authorization": "OctoDevice \(credentials.token)",
                 "X-Octo-Device-Timestamp": timestamp,
                 "X-Octo-Device-Nonce": proof.nonce,
                 "X-Octo-Device-Signature": base64URL(signature),
             ],
-            isIdempotent: true
+            isIdempotent: isIdempotent
         )
     }
 

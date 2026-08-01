@@ -94,6 +94,10 @@ final class RegistrationViewModel: ObservableObject {
     private let keyStore: DeviceKeyStore
     private var client: DeviceTrustClient?
     private var pendingDeviceID: String?
+    private var activeCredentials: DeviceCredentials?
+    private var activeProfile: MobileDeviceProfile?
+    private var activeServerTime: Date?
+    private var healthTransport: HealthTransportSession?
     private var restored = false
 
     init(
@@ -159,6 +163,7 @@ final class RegistrationViewModel: ObservableObject {
             }
             client = nextClient
             pendingDeviceID = deviceID
+            healthTransport = nil
             phase = .awaitingApproval
         } catch {
             phase = .disconnected
@@ -204,10 +209,57 @@ final class RegistrationViewModel: ObservableObject {
         guard let client else {
             throw DeviceTrustClientError.invalidResponse
         }
-        _ = try await client.ready(credentials: credentials)
+        let ready = try await client.ready(credentials: credentials)
         let profile = try await client.deviceProfile(credentials: credentials)
+        guard
+            profile.deviceID == credentials.deviceID,
+            profile.capabilities == HealthTransportPayload.capabilities
+        else {
+            throw DeviceTrustClientError.invalidResponse
+        }
+        activeCredentials = credentials
+        activeProfile = profile
+        activeServerTime = ready.serverTime
         phase = .connected(deviceName: profile.displayName)
         notice = ""
+    }
+
+    func healthReviewActions() -> HealthReviewActions {
+        if let healthTransport {
+            return healthTransport.actions()
+        }
+        let transport = HealthTransportSession { [weak self] in
+            guard let self else {
+                throw HealthReviewActionError.unavailable
+            }
+            return try await self.healthTransportContext()
+        }
+        healthTransport = transport
+        return transport.actions()
+    }
+
+    private func healthTransportContext() async throws -> HealthTransportContext {
+        guard let credentials = try keyStore.loadCredentials() else {
+            throw DeviceTrustClientError.credentialsExpired
+        }
+        if client == nil {
+            client = try makeClient(origin: credentials.serverOrigin)
+        }
+        try await refreshOrRenew(credentials: credentials)
+        guard
+            let client,
+            let activeCredentials,
+            let activeProfile,
+            let activeServerTime
+        else {
+            throw DeviceTrustClientError.invalidResponse
+        }
+        return HealthTransportContext(
+            client: client,
+            credentials: activeCredentials,
+            profile: activeProfile,
+            serverTime: activeServerTime
+        )
     }
 
     private func refreshOrRenew(credentials: DeviceCredentials) async throws {
@@ -256,6 +308,10 @@ final class RegistrationViewModel: ObservableObject {
         client?.cancelAll()
         client = nil
         pendingDeviceID = nil
+        activeCredentials = nil
+        activeProfile = nil
+        activeServerTime = nil
+        healthTransport = nil
         linkText = ""
         phase = .disconnected
         notice = ""
@@ -452,7 +508,7 @@ struct RegistrationView: View {
 
     private var healthEntry: some View {
         NavigationLink {
-            HealthReviewView()
+            HealthReviewView(actions: viewModel.healthReviewActions())
         } label: {
             HStack(spacing: 14) {
                 Image(systemName: "heart.text.square.fill")

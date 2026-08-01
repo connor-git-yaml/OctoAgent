@@ -29,10 +29,10 @@
 - [x] F153 GATE_VERIFY=true
 - [x] T001 architecture authority
 - [x] T002-T003 Swift model/normalization RED→GREEN→REFACTOR
-- [ ] T004-T011 RED→GREEN→REFACTOR
-- [ ] T012 Simulator
+- [x] T004-T011 RED→GREEN→REFACTOR
+- [x] T012 Simulator
 - [ ] T013 real iPhone
 - [ ] T014 live model
-- [ ] T015 architecture/quality
+- [x] T015 architecture/quality
 - [ ] T016 F154 Verify
 - [ ] F155 unlocked
