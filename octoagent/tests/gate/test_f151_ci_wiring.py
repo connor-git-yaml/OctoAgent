@@ -17,6 +17,14 @@ BENCHMARK_NODES = (
     "benchmarks/tests/unit/test_octo_runner.py::test_source_checkout_required_before_side_effects",
     "benchmarks/tests/unit/test_octo_runner.py::test_runner_fn_provider_error_maps_to_infra_error",
 )
+NODE24_ACTIONS = {
+    "actions/cache": "v5",
+    "actions/checkout": "v6",
+    "actions/setup-node": "v6",
+    "actions/setup-python": "v6",
+    "actions/upload-artifact": "v7",
+    "astral-sh/setup-uv": "v8",
+}
 
 
 def _workflow_documents() -> list[tuple[Path, dict[str, Any]]]:
@@ -119,6 +127,23 @@ def test_architecture_gate_runs_before_docs_fastpath_and_covers_docs_constitutio
             if missing:
                 issues.append(f"{path.name}:{event} paths missing {sorted(missing)}")
     _fail("F151_CI_WIRING_MISSING", issues)
+
+
+def test_ci_javascript_actions_use_node24_compatible_majors() -> None:
+    issues: list[str] = []
+    for path, document in _workflow_documents():
+        raw_jobs = document.get("jobs")
+        assert isinstance(raw_jobs, dict)
+        for job_id, raw_job in raw_jobs.items():
+            assert isinstance(raw_job, dict)
+            for step in _steps(raw_job):
+                uses = str(step.get("uses", ""))
+                for action, expected_major in NODE24_ACTIONS.items():
+                    if uses.startswith(f"{action}@") and uses != f"{action}@{expected_major}":
+                        issues.append(
+                            f"{path.name}:{job_id}:{action} must use {expected_major}, got {uses}"
+                        )
+    _fail("F151_CI_NODE24_ACTIONS_MISSING", issues)
 
 
 def test_ci_uses_pr_base_master_before_or_branch_merge_base_with_full_history() -> None:
