@@ -74,7 +74,9 @@
   `dc8b1b41`；登录后真实对话/SSE/事件链已通过，仍缺完整 Access lifecycle 与最新
   分支部署复验；F150 状态修复提交 `013762df` 已推送并通过正式 installer 部署，
   loopback ready 与真实 Chrome Settings ready 已通过；最新 `ec55ba76` 已通过正式
-  installer 部署并完成真实故障恢复复验，仍等待该提交推送与权威 CI）
+  installer 部署并完成真实故障恢复复验；内建记忆修复提交 `1b45c2f9` 也已通过
+  正式 installer 部署、70 个积压批次重放与新聊天后台同步，仍等待当前分支推送与
+  权威 CI）
 - [ ] **T038** 提交、推送、合并并确认主线真实交付
 
 ## Phase 5：真实模型运行真值
@@ -98,3 +100,11 @@
   `credential_expiry` 的本地时间戳语义与 `doctor --live` 远端可用性语义明确区分，
   避免同一报告出现“所有凭证均有效”与 `model_live=FAIL`；Doctor 回归 `33 passed`，
   F158 精确 authority gate `1 passed`，repository architecture gate PASS
+
+## Phase 7：运行时可靠性收口
+
+- [x] **T048 [MEMORY HARDENING]** 修复内建 `memu` 对当前 SoR、tombstone 与
+  `MemorySearchHit` 合同的漂移，并保证高级 backend 的候选仍经过 canonical recall
+  hooks。相关回归 `288 passed`、repository architecture gate PASS；个人实例真实
+  `memory.sync.resume` 以 `memu` 重放 70 个积压批次后剩余 0，新聊天任务
+  `01KYZF2X3XWT6NN27TJSFJNZ3Y` 成功且后台同步后积压仍为 0

@@ -340,3 +340,15 @@
   detail=`0.003s`，日志中的 setup governance 回落到 `53–117ms`；同一 Chrome 会话
   最终恢复标题、原用户消息和 `F158_WEB_E2E_OK`。该证据完成一次性上游错误恢复，
   不替代 F150 24 小时自然 Access 过期，也不触碰 iPhone 或物理 Mac 重启。
+- 2026-08-02：个人实例日志中的 `memory_backend_sync_degraded` 暴露内建
+  `memu` 仍读取已退役的 `SorRecord.summary`，同时 LanceDB 行仍构造旧版
+  `MemorySearchHit(memory_id/fragment_id/vault_id)`，高级 backend 成功时还会跳过
+  canonical recall hooks。两个单缺陷测试先分别稳定失败；修复后统一消费
+  `SorRecord.content`、字符串 tombstone、当前 `record_id/created_at` 合同，并让
+  高级候选继续通过过滤、rerank、时间衰减和 MMR。memory/Gateway 相关回归
+  `288 passed`，F158 精确 authority 与 repository architecture gate 均通过；提交
+  `1b45c2f9` 经正式 installer 部署。个人实例随后以 `memu` 一次重放 70 个积压批次，
+  `remaining_backlog=0`、无降级日志；真实聊天任务
+  `01KYZF2X3XWT6NN27TJSFJNZ3Y` 到达 `SUCCEEDED` 且包含 2 次
+  `MODEL_CALL_COMPLETED`，后台同步后再次复核积压仍为 0。该运行证据不触碰 iPhone，
+  也不计作物理 Mac 重启。
