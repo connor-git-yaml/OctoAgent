@@ -383,3 +383,30 @@
   `test_mobile_route_fail_closed_edges.py` 覆盖 Health service/router 未就绪、非法
   review JSON、delete body 与 key-rotation service error 共 8 条此前未覆盖生产行。
   新测试 5/5、相关 route 回归 35/35 通过，等待新提交 CI 复验。
+- 2026-08-02：把 F151 当前 authority 与历史 raw 留档限制拆开。tracked canonical
+  index=`bd717b9d…ce9e`、269 records/head=`913082c2…f878`，final report=
+  `50521128…500f`；当前提交 `2f6fcbc9` 的 GitHub run `30717516171` 已在 clean
+  checkout 通过 architecture job。F151 当前 authority 因而为 PASS；旧
+  `evidence/local` 按原 `.gitignore` 设计未提交且已不存在，只保留
+  `HISTORICAL_RAW_ARCHIVE_NOT_SELF_CONTAINED` 限制，禁止补造。F155/F156 仍必须在
+  同一 checker 中完成各自 exact authority，不能继承本 attestation。
+- 2026-08-02：只读复核个人 managed checkout HEAD 为
+  `d17c3e59879ee09dd79ba77fcebf9729e662730e` 且工作树干净；从该提交到当前 HEAD 的
+  差异只有 Feature/docs 与 Gateway tests，没有 production bytes。产品部署无需为
+  追随文档/test SHA 做无意义重启。生产与 CI 路径扫描中个人域名只出现在两个负向
+  测试断言，iOS production 只有唯一 `DeviceTrustClient` 创建 URLSession，WebView/
+  第二 pairing/session/device registry 命中为 0。
+- 2026-08-02：代码/测试提交 `2f6fcbc91408e14bc3f5291678bdfd018cc24473`
+  的 GitHub Actions run `30717516171` 五个 job 全部成功：backend deterministic
+  `5756 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted `18 passed`，frontend
+  `599 passed`，L1 Playwright `39 passed`，benchmark `2 passed`，architecture PASS。
+  该 push 相对 `0ec5997d` 只有测试，workflow changed-lines 因而为 `0/0`；未把它冒充
+  完整证明。从同一 run 下载 LCOV（SHA `35e59423…ee37`），在 detached clean clone
+  对原失败 base `d031809f…` 用同一 checker/90% 门复算为 `549/608 = 90.3% PASS`，
+  committed report=`d01ac479…1fa8`。
+- 2026-08-02：上述复核暴露旧 workflow 对所有 push 使用 `event.before`，允许失败生产
+  提交被后续 test/docs-only push 遗忘。F158 新增 FR-010/T050；现有 F151 wiring test
+  先以 `F151_CI_WIRING_MISSING` 真实 RED 命中 architecture/coverage 两个 resolver，
+  再统一为 PR=target base、master push=`event.before`、其他 branch=
+  `merge-base(origin/master, HEAD)`。wiring 5/5、Ruff/YAML parse、repository architecture
+  本地通过；等待推送后的累计 workflow 复验。

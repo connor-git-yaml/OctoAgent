@@ -100,7 +100,9 @@
     pyproject `[tool.coverage.run]` 9 个 src 目录）产 lcov ∩ git diff 新增行，
     ≥90% 否则 FAIL（`check-changed-lines-coverage.py` 机械计算；存量不背债；
     escape hatch = HEAD commit message `[cov-exempt]` 大声记录）；scope 底线/
-    棘轮两重门显式 defer。门禁脚本自身在 `octoagent/tests/gate/` 有单测
+    棘轮两重门显式 defer。PR 使用目标 base，`master` push 使用 `event.before`，
+    其他分支 push 累计比较 `merge-base(origin/master, HEAD)`，禁止失败生产提交被后续
+    test/docs-only push 遗忘。门禁脚本与 workflow wiring 自身在 `octoagent/tests/gate/` 有单测
     （cc-haha 教义：门禁脚本必须被测试）。
 - **测试目录结构**（实况；原愿景的 replay/evals 独立目录从未建立）：测试分布在
   各包 `packages/*/tests` + `apps/gateway/tests`（含 `e2e_live/` 真 LLM 套件）+

@@ -46,7 +46,7 @@
 | M9 | 完成 | 四层测试门、F151/F157 corrective 与 exact master CI 已闭环 | PROVEN | 最终总审计继续复用 run `30198514576` 与当前 F158 branch CI |
 | M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
 | M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 10 个业务 surface（含任务详情）视觉及功能 E2E 通过；Claude 云端谱系已清理并导出；当前 runtime 已部署 | PROVEN_BRANCH_CI_DEPLOYED | 登录后个人旅程与最终 completion audit |
-| M12 | In Progress | F152/F153 Verify；F153真实iPhone全旅程通过；F154非真机实现与Simulator通过；F155方案A/Design/Tasks通过；F156按10条mobile route完成recon | PARTIAL | F154真机HealthKit与Verify、F155/F156 Implement/Verify、F151 authority及完整iOS E2E |
+| M12 | In Progress | F152/F153 Verify；F153真实iPhone全旅程通过；F154非真机实现与Simulator通过；F155方案A/Design/Tasks通过；F156按10条mobile route完成recon | PARTIAL | F154真机HealthKit与Verify、F155/F156各自authority及Implement/Verify、完整iOS E2E |
 
 该矩阵的 `PROVISIONAL` 不是重新否定历史交付，而是区分“历史报告存在”与“当前
 Milestone Goal 已在同一 commit/环境复验”。最终 completion audit 只允许将取得当前
@@ -246,14 +246,19 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
    已实现；Python 25 项、F153 focused 48 项与当前 Simulator scheme 33 项
    （27 passed、6 live-only skipped）通过。T013 真机 HealthKit 与 T016 最终 Verify
    仍待设备再次可用。
-4. F155 继续等待 F154 Verify 与 F151 authority，production=0。F156 current recon
-   为 10 条 mobile route（F153=7、F154=3）、5 个已签发 capability、7 个声明未签发
-   capability 与 8 个产品缺口；Design/Tasks/production 仍关闭。
-5. 当前工作提交 `0ec5997dc79b072d255d4ea1a3f401d8ad22c4ea` 的 GitHub Actions
-   run `30716661085` 已有 architecture/frontend/benchmark/l1-playwright 成功；
-   backend-deterministic 的测试层通过后在 changed-lines coverage
-   `541/608 = 89.0%` 失败。未降低 90% 门槛；本地新增 5 个 fail-closed 路由测试，
-   相关 35 项回归通过且覆盖报告确认命中 8 条此前未覆盖生产行，等待新 CI 复验。
+4. F151 当前 authority 已由 clean-checkout repository architecture job 重新证明；
+   历史 `evidence/local` raw 不自包含继续作为审计限制，禁止补造。F155 继续等待
+   F154 Verify，随后须完成自身 T003 exact authority，production=0。F156 current
+   recon 为 10 条 mobile route（F153=7、F154=3）、5 个已签发 capability、7 个声明
+   未签发 capability 与 8 个产品缺口；上游 Verify、自身 authority、Design/Tasks/
+   production 仍关闭。
+5. 代码/测试提交 `2f6fcbc91408e14bc3f5291678bdfd018cc24473` 的 GitHub Actions
+   run `30717516171` 五个 job 全部成功；backend=`5756 passed`、scripted=`18 passed`、
+   frontend=`599 passed`、Playwright=`39 passed`、benchmark=`2 passed`、architecture=PASS。
+   workflow 同 push 报告为 `0/0`，故未把它冒充完整证明；下载同一 LCOV 后对原失败
+   base `d031809f…` 在 clean clone 复算为 `549/608 = 90.3% PASS`。F158 T050 已取得
+   wiring RED 并把非主分支 architecture/coverage base 改为累计 `origin/master`
+   merge-base，等待推送后的 workflow 直接复验。
 
 ## F153 当前设计映射与偏离记录
 

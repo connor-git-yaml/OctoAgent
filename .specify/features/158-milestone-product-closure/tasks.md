@@ -55,10 +55,12 @@
   仅 T013 真实 HealthKit 权限/数据/生命周期和 T016 最终 Verify 等待 iPhone 再次可用）
 - [ ] **T029** 完成 F155 EventKit Feature（方案 A 已接受：系统 full access、Octo
   物理只读；Research/Design/Tasks Gate 已通过，F153 Verify 已满足，Implement/Verify
-  仍等待 F154 Verify 与 F151 authority）
+  仍等待 F154 Verify；随后必须在唯一 F151 checker 中完成 F155 自身 T003 exact
+  paths/symbols authority）
 - [ ] **T030** 完成 F156 SwiftUI Native Companion Feature（Research、Design/Tasks 草案、
   40 场景矩阵与 current API recon 已创建；2026-08-02 当前 mobile routes=10
-  （F153=7、F154=3）、F156 产品 gaps=8，上游 Gate、production 与 E2E 未完成）
+  （F153=7、F154=3）、F156 产品 gaps=8，上游 Verify、F156 自身 T003 authority、
+  production 与 E2E 未完成）
 - [ ] **T031 [SIMULATOR]** 原生 iOS 冷启动、导航、状态与视觉回归（F153 registration
   六态、a11y、AXXXL、Reduce Motion 与视觉基线已通过；F154-F156 完整产品仍缺）
 - [x] **T032 [DEVICE]** F153 注册、ThisDeviceOnly Keychain、轮换、撤销、4G/断网恢复
@@ -72,9 +74,9 @@
 - [ ] **T036** 同步 Blueprint、Milestone 与所有 Feature verification reports
 - [ ] **T037** 干净检出、权威 CI、个人部署复验（上一批 Web 提交/CI/managed
   checkout 已通过；F153 真机 Verify 与 F154 当前非真机完整 scheme 已通过；当前分支
-  `0ec5997d` 的 run `30716661085` 有四个 job success，backend 测试层通过后仅因
-  changed-lines `541/608 = 89.0%` 失败；本地已补 5 个 fail-closed 路由测试、命中
-  8 条此前未覆盖生产行且相关 35 项回归通过，等待修复提交的新 CI。个人 managed checkout 已部署
+  `2f6fcbc9` 的 run `30717516171` 五个 job success，完整生产范围用同一 LCOV 独立
+  复算为 `549/608 = 90.3% PASS`；T050 已修复 test-only push 可遗忘旧生产差异的
+  workflow 盲点，等待累计 branch-base CI。个人 managed checkout 已部署
   device-trust 重连修复 `d17c3e59`，`/health=200`；登录后真实对话/SSE/事件链、Access
   登出/重登录/Settings ready 与一次性错误恢复已通过，仍缺自然过期、F154-F156 产品
   闭包、当前 truth commit 的 CI、mainline 与最终物理重启复验）
@@ -113,3 +115,8 @@
   时的 SQLite unique constraint：相同 owner/current key 复用原 device id，跨 owner、
   revoked/non-current key typed 409 且零半写入。F153 回归 `48 passed`、repository
   architecture gate PASS，提交 `d17c3e59` 已部署并恢复 `/health=200`
+- [ ] **T050 [CI HARDENING]** 用现有 F151 wiring contract 取得 RED，并让非主分支
+  architecture/changed-lines coverage 统一累计比较 `merge-base(origin/master, HEAD)`；
+  Pull Request 保持目标 base，`master` push 保持 `event.before`，防止失败生产提交被后续
+  test/docs-only push 遗忘。必须以当前完整 LCOV 对原失败 base 的 `549/608 = 90.3%`
+  复算和新 workflow CI 共同验证，禁止降 90% 门槛或增加豁免。

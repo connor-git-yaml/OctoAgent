@@ -1,0 +1,16 @@
+{
+  "base_ref": "d031809f98ffdd6df49e7ba1ed50a8af00cf0dc0",
+  "covered_lines": 549,
+  "executable_added_lines": 608,
+  "fresh_after_utc": "2026-08-01T20:41:30Z",
+  "head_sha": "2f6fcbc91408e14bc3f5291678bdfd018cc24473",
+  "head_tree_sha": "923356595e07d4750159d2299b0bae092133a1e4",
+  "lcov_fresh": true,
+  "lcov_mtime_utc": "2026-08-01T20:59:23.659067445Z",
+  "lcov_sha256": "35e5942376f6866636e97995e4614669a1efa2e5f9b90fe48fd99bd7fbfbee37",
+  "mode": "committed",
+  "resolved_base_sha": "d031809f98ffdd6df49e7ba1ed50a8af00cf0dc0",
+  "stage_task": "CI",
+  "status": "PASS",
+  "worktree_fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}

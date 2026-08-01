@@ -6,17 +6,19 @@
 - 状态：`PARTIAL`；
 - `GATE_VERIFY=false`；
 - 当前分支：`codex/f158-milestone-product-closure`；
-- 当前工作提交：`0ec5997dc79b072d255d4ea1a3f401d8ad22c4ea`；
-- 当前个人部署代码提交：`d17c3e59859ddb32f4d69528973d1f223ff5a67a`；
-- 当前权威 CI：run `30716661085`，head `0ec5997dc79b072d255d4ea1a3f401d8ad22c4ea`，
-  architecture/frontend/benchmark/l1-playwright 通过，backend-deterministic 的测试层
-  通过后在 changed-lines coverage `541/608 = 89.0%` 失败；本地已新增 5 个
-  fail-closed 路由测试覆盖其中 8 条生产行，尚待新提交 CI 复验。
+- 当前已验证代码/测试提交：`2f6fcbc91408e14bc3f5291678bdfd018cc24473`；
+- 当前个人部署代码提交：`d17c3e59879ee09dd79ba77fcebf9729e662730e`；
+- 当前代码/测试 CI：run `30717516171`，head `2f6fcbc91408e14bc3f5291678bdfd018cc24473`，
+  五个 job 全部成功；backend=`5756 passed`、scripted=`18 passed`、frontend=`599
+  passed`、Playwright=`39 passed`、benchmark=`2 passed`、architecture=PASS。同 push
+  changed-lines 为 `0/0`，不能冒充完整范围；下载该 run 的 LCOV 后对上一失败 base
+  `d031809f…` 在 detached clean clone 复算为 `549/608 = 90.3% PASS`。F158 T050 已用
+  RED→GREEN 修复 branch base 遗忘问题，等待推送后的累计 workflow 复验。
 
 当前 Goal **没有完成**。桌面 Web、Claude 最早期设计视觉恢复、个人部署远程访问、
 真实 OpenAI Codex 对话、F153 原生 iOS device-trust 以及 F154 非真机实现已经形成
 可复核证据；仍缺 F154 真 iPhone HealthKit 旅程、F155 EventKit production、F156
-完整 Companion product、F151 最终 authority 收口、F150 自然过期边界、最终 mainline
+完整 Companion product、F150 自然过期边界、最终 mainline
 确认和一次用户提前知情的 Mac 物理重启验收。
 
 手机产品只走原生 iOS App。390px 只表示桌面 Web 窄窗口健壮性，不是手机浏览器产品；
@@ -29,13 +31,13 @@ Web 与 iOS 都以 Claude Design 最早期方案的层级、留白、卡片节�
 |---|---|---|
 | F149 Desktop Web 功能与视觉 | PASS | 完整功能/视觉 E2E 与 Claude 早期视觉基线已通过 |
 | F150 个人远程访问 | PARTIAL | 登录、登出、重登录、Settings ready、真实对话/SSE/终态通过；自然过期仍待实时时间边界 |
-| F151 runtime architecture | PARTIAL | 当前 repository architecture PASS；历史 raw TDD archive 不自包含，最终 authority 未收口 |
+| F151 runtime architecture | PASS（历史留档受限） | 当前 clean-checkout repository architecture PASS，canonical index/report 已提交；历史 raw TDD archive 不自包含且禁止伪造 |
 | F152 privacy authority | PASS | consent/lineage/zero-retention authority 已供 F153/F154 复用 |
 | F153 device trust | PASS | `GATE_VERIFY=true`，真 iPhone security/lifecycle 与 Cloudflare live 已闭环 |
 | F154 HealthKit read-only | PARTIAL | T001-T012、T014、T015 完成；T013 真机与 T016 Verify 未完成 |
-| F155 EventKit read-only | CLOSED | Design/Tasks truth 已纠正；只等待 F154 Verify 与 F151 authority，production=0 |
+| F155 EventKit read-only | CLOSED | Design/Tasks truth 已纠正；等待 F154 Verify 后执行自身 T003 exact authority，production=0 |
 | F156 native Companion | CLOSED | recon 已纠正为 10 条 mobile route、5 个已签发 capability、8 个 product gap，production=0 |
-| 当前 CI | FAIL（修复待复验） | run `30716661085` 仅 changed-lines 89.0% 失败；5 个新增边界测试本地 35 项相关回归通过，未降低 90% 门槛 |
+| 当前 CI | PASS（完整范围复算；workflow hardening 待复验） | run `30717516171` 五 job 全绿；同一 LCOV 对原生产 base 复算 `549/608 = 90.3%`，未降门槛；T050 累计 branch base 本地 5/5 PASS，待推送 CI |
 | 当前个人部署 | PASS（已部署范围） | managed checkout 运行 `d17c3e59`，`/health=200` |
 | M10 物理开机 attestation | MISSING | 只允许 Goal 末尾提前通知用户后重启一次 Mac |
 | F158 Verify / mainline | MISSING | 仍有上述产品与外部边界 |
@@ -44,7 +46,7 @@ Web 与 iOS 都以 Claude Design 最早期方案的层级、留白、卡片节�
 
 ### Desktop Web 与 Claude Design
 
-- Vitest：`70 files / 598 passed`；
+- Vitest：`70 files / 599 passed`；
 - production build：PASS；
 - frontend complexity：PASS；
 - Playwright：`39 passed / 0 failed / retries=0`；
@@ -72,7 +74,7 @@ Web 与 iOS 都以 Claude Design 最早期方案的层级、留白、卡片节�
 - 真实消息通过 SSE 进入运行态，OpenAI Codex 返回精确 `F158_WEB_E2E_OK`；
 - Task 终态为 `SUCCEEDED`，浏览器 console warning/error 为 0；
 - `octo doctor --live` 真实调用 `openai-codex / gpt-5.5` 并通过；
-- 当前 managed checkout 运行提交 `d17c3e59859ddb32f4d69528973d1f223ff5a67a`；
+- 当前 managed checkout 运行提交 `d17c3e59879ee09dd79ba77fcebf9729e662730e`；
 - 部署后 `/health=200`。
 
 F150 仍缺真实等待得到的会话自然过期证据。Hermetic Playwright 已覆盖过期与一次性
@@ -98,7 +100,7 @@ F153 PASS 只解锁 F154，不会提前证明 HealthKit、EventKit 或 Companion
 
 ### F154 当前非真机实现
 
-当前提交 `0ec5997dc79b072d255d4ea1a3f401d8ad22c4ea` 上：
+当前已验证代码/测试提交 `2f6fcbc91408e14bc3f5291678bdfd018cc24473` 上：
 
 - F154 Gateway/Core/Policy/Protocol/authority：`25 passed / 0 failed`；
 - F153 device-trust focused：`48 passed / 0 failed / 1 existing warning`；
@@ -143,16 +145,15 @@ recon 与 Gate 前置，没有聊天、任务、审批、Memory、通知 product
 
 1. F154 T013：真 iPhone HealthKit permission、真实数据、本地 preview、canonical summary、
    Wi-Fi/蜂窝、锁屏、前后台、离线、revoke、delete 旅程；
-2. F154 T016：coverage 修复的新 CI、evidence inventory、Blueprint/F158 truth sync 与 Verify；
+2. F154 T016：累计 branch-base workflow 复验、evidence inventory 与 Verify；
 3. F155：EventKit 只读 production、测试、Simulator/真机 Verify；
 4. F156：原生 Companion 八项 product gap、SwiftUI 场景、功能/视觉 E2E；
-5. F151：最终 authority 与可复验 evidence 边界收口；
-6. F150：个人部署真实会话自然过期边界；
-7. 当前分支完整 CI 终态与后续 truth commit 的 CI；
-8. mainline rebase/recon、最终全量回归、secret/architecture/visual inventory；
-9. Goal 最后一次 Mac 物理重启与启动后 Gateway/tunnel/doctor/Web/iOS 复核。
+5. F150：个人部署真实会话自然过期边界；
+6. T050 累计 branch-base workflow CI 与后续 truth-only commit 边界；
+7. mainline rebase/recon、最终全量回归、secret/architecture/visual inventory；
+8. Goal 最后一次 Mac 物理重启与启动后 Gateway/tunnel/doctor/Web/iOS 复核。
 
-第 9 项不会在用户使用手机期间执行，也不会未经提前通知重启 Mac。
+第 8 项不会在用户使用手机期间执行，也不会未经提前通知重启 Mac。
 
 ## Verify 判定
 

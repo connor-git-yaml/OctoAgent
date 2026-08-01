@@ -145,6 +145,10 @@ conftest blanket——确定性套件抖动 = 真 bug 或入册，rerun 掩盖�
 - **changed-lines ≥90%**：`check-changed-lines-coverage.py` 用 git diff 新增行 ∩ lcov
   机械计算；范围 = `packages/*/src` + `apps/gateway/src` 的 `.py`；存量不背债；
   范围内新文件无任何覆盖记录 = 按 0 计（新模块必须有测试 import）。
+- **分支累计 base**：Pull Request 使用目标分支 base SHA，`master` push 使用
+  `github.event.before`；其他分支 push 必须使用 `merge-base(origin/master, HEAD)`，累计
+  覆盖全部未合入生产差异。禁止只检查最后一次 push，因为 test/docs-only 后续提交会
+  遗忘此前失败的生产变更并产生假绿。
 - escape hatch：HEAD commit message 加 `[cov-exempt]`（附原因）——与 `SKIP_E2E` 同级的
   显式可见 bypass，治「忘」不治「恶」（单人仓威胁模型），CI 日志大声记录。
 - scope 底线 / 棘轮两重门显式 defer（引入成本高；changed-lines 单条 ROI 最高——M9 审计拍板）。

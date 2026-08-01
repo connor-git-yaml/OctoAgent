@@ -135,6 +135,15 @@ MUST 将 F150 已有 remote-access adapter/view-model 接入 F149 Settings compo
 普通瞬态 provider/transport 故障仍可按既有 fallback/retry 合同处理，不得因本要求被
 一概改成认证失败。
 
+### FR-010 分支 CI 不得遗忘未通过的生产差异
+
+非主分支 push 的 architecture 与 changed-lines coverage MUST 始终以
+`merge-base(origin/master, HEAD)` 为 base，累计验证整条尚未合入主线的分支差异；不得
+使用 `github.event.before` 只检查最后一次 push，因为后续纯测试或文档提交会遗忘此前
+失败的生产变更。Pull Request 使用目标分支 base SHA；`master` push 才使用
+`github.event.before` 验证本次主线增量。两条门必须复用同一事件语义并由现有 F151 CI
+wiring contract 机器约束，禁止通过 `[cov-exempt]`、拆分 push 或第二 workflow 绕过。
+
 ## 非目标与禁止项
 
 - 禁止用手机浏览器或 WebView 冒充 iOS App，因为手机产品已明确为原生 iOS。
@@ -156,3 +165,5 @@ MUST 将 F150 已有 remote-access adapter/view-model 接入 F149 Settings compo
 8. 权威 CI 与个人部署验证通过，且正式 verification report 完整。
 9. `octo doctor --live` 与个人部署真实对话均证明真实 provider 可用；认证失败回归
    证明任务快速进入 `FAILED` 且不会 Echo 假绿。
+10. 非主分支连续 push 后，architecture 与 changed-lines coverage 仍覆盖相对
+    `origin/master` 的完整未合入差异，失败生产提交不能被后续测试-only push 洗绿。

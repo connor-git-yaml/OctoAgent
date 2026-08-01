@@ -16,6 +16,8 @@
 - [x] Blueprint 与实现级导览的 active Provider/API/deployment/security/runtime
   schema 与当前单 Gateway / OctoHarness / ProviderRouter / named-tunnel 架构一致
 - [x] F151 canonical v2 的 269 条 record hash/previous chain 独立重算无错误
+- [x] 当前提交在 GitHub clean checkout 的唯一 repository architecture gate 通过；
+  F151 当前 authority 为 PASS，F155/F156 仍须各自取得 exact paths/symbols authority
 - [ ] F151 canonical raw evidence 可从干净检出独立复验
   （当前 `evidence/local` 被忽略且已不存在；禁止伪造历史 R/G/R）
 
@@ -56,6 +58,9 @@
 - [ ] M10 `ATT-129-BOOT` 已由一次明确物理重启后的登录自启动与 `/ready` 证明
 - [ ] Blueprint/Milestone/Feature 状态无漂移
 - [ ] 干净检出、CI、个人部署和 completion audit 全部通过
+- [ ] 非主分支 architecture/changed-lines CI 以 `origin/master` merge-base 累计验证，
+  失败生产提交不能被后续 test/docs-only push 遗忘（T050 本地 RED→GREEN 已完成，
+  workflow 复验待推送）
 
 ## 真实模型运行真值
 

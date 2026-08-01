@@ -54,11 +54,12 @@ Milestone 已交付。
 4. F155：EventKit OS full-access 决策门与只读实现。用户已于 2026-08-01 明确选择
    方案 A：接受 iOS 系统日历 full access，但 Octo App/代码保持物理只读、写路径为零；
    Design/Tasks Gate 已通过，production=0；F153 Verify 已满足，Implement/Verify 继续
-   等待 F154 Verify 与 F151 authority。
+   等待 F154 Verify；随后先在唯一 F151 checker 中完成 F155 自身 exact authority。
 5. F156：SwiftUI 对话、任务、审批、记忆、连接与通知体验。Research、
    Design/Tasks 草案、40 行启动/功能/视觉矩阵与 current mobile API recon 已建立；
    2026-08-02 recon 确认当前有 F153 7 条、F154 3 条 owner route，F156 的 8 项
-   product contract gap 未减少。上游 Gate 未齐，Design/Tasks/Implement 仍为 false。
+   product contract gap 未减少。上游 Verify 与 F156 自身 authority 未齐，
+   Design/Tasks/Implement 仍为 false。
 6. 每个 Feature 独立 RED→GREEN→REFACTOR 与 verification report。
 
 ### Phase 4：双端运行验收
@@ -82,7 +83,9 @@ Phase 5 的设计子项 1–2 已于 2026-07-28 完成：云端必需 frames 已
 manifest 已不可变回存。当前交付提交已推送、权威 CI 五个 job 全绿，个人
 managed checkout 已更新并通过 loopback/Access 边界复验；登录后个人产品旅程、
 iOS F153 Simulator 与 detached clean-checkout scheme 已通过；当前修复提交的权威
-CI 已重新运行。F153 Verify 已完成；F154 production T001-T012/T014/T015 和当前
+CI 五个 job 已通过，同一 LCOV 对完整未合入生产范围复算为 `549/608 = 90.3%`；
+push-increment base 遗忘缺陷由 T050 进入同一 F151 wiring contract 修复，等待累计
+branch-base CI。F153 Verify 已完成；F154 production T001-T012/T014/T015 和当前
 Simulator/非真机回归已通过，但真 iPhone HealthKit 与最终 Verify 仍缺。F155 已完成
 方案 A 产品决策及 Design/Tasks Gate，F156 已建立 40 场景 Design/Tasks 草案与
 10-route API recon，但两者 production 均为 0。F154-F156 最终 Verify、主线合并与总

@@ -81,11 +81,19 @@ jobs:
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE="${{ github.event.pull_request.base.sha }}"
-          else
+          elif [[ "${{ github.ref_name }}" == "master" ]]; then
             BASE="${{ github.event.before }}"
+          else
+            git fetch origin master:refs/remotes/origin/master --quiet
+            BASE="$(git merge-base origin/master HEAD)"
           fi
           if [[ -z "${BASE}" || "${BASE}" =~ ^0+$ ]] || ! git cat-file -e "${BASE}^{commit}" 2>/dev/null; then
-            BASE="HEAD^"
+            if [[ "${{ github.ref_name }}" == "master" ]]; then
+              BASE="HEAD^"
+            else
+              echo "architecture base 不可解析: ${BASE}" >&2
+              exit 1
+            fi
           fi
           MERGE_BASE="$(git merge-base "${BASE}" HEAD)"
           echo "base=${MERGE_BASE}" >> "${GITHUB_OUTPUT}"
@@ -214,14 +222,21 @@ jobs:
           set -euo pipefail
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             BASE="${{ github.event.pull_request.base.sha }}"
-          else
+          elif [[ "${{ github.ref_name }}" == "master" ]]; then
             BASE="${{ github.event.before }}"
-          fi
-          # 新分支首推（全零）/ force-push 后不可解析 → 回退 merge-base origin/master
-          if [[ -z "${BASE}" || "${BASE}" =~ ^0+$ ]] || ! git cat-file -e "${BASE}" 2>/dev/null; then
-            git fetch origin master --quiet || true
+          else
+            git fetch origin master:refs/remotes/origin/master --quiet
             BASE="$(git merge-base origin/master HEAD)"
-            echo "diff base 回退 merge-base origin/master: ${BASE}"
+          fi
+          # master 首次 push 的 before 可能全零；普通分支必须保留累计 merge-base，
+          # 禁止用上一 push 洗掉此前未通过的生产差异。
+          if [[ -z "${BASE}" || "${BASE}" =~ ^0+$ ]] || ! git cat-file -e "${BASE}" 2>/dev/null; then
+            if [[ "${{ github.ref_name }}" == "master" ]]; then
+              BASE="HEAD^"
+            else
+              echo "coverage base 不可解析: ${BASE}" >&2
+              exit 1
+            fi
           fi
           echo "base=${BASE}" >> "${GITHUB_OUTPUT}"
 
@@ -247,7 +262,8 @@ jobs:
 
       - name: Changed-lines coverage gate（新增可执行行 ≥90%）
         # F141 件4（cc-haha coverage.ts 范式）：git diff 新增行 ∩ lcov DA 记录
-        # 机械计算；存量不背债（只算本次 push 新增行）；范围 = packages/*/src +
+        # 机械计算；存量不背债。非主分支累计计算相对 origin/master 的全部未合入
+        # 新增行，master push 只算本次主线增量；范围 = packages/*/src +
         # apps/gateway/src 的 .py。escape hatch = HEAD commit message 含
         # [cov-exempt]（脚本内大声记录 sha+subject）。
         working-directory: .
