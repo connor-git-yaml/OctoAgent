@@ -282,6 +282,14 @@ async def test_real_gateway_composes_one_guard_for_rest_sse_and_reconnect(
         status = await client.get("/api/control/resources/remote-access", headers=headers)
         if status.status_code != 200:
             issues.append(f"REST status={status.status_code}")
+        else:
+            status_payload = status.json()
+            if status_payload.get("state") != "ready":
+                issues.append(
+                    f"authenticated remote status={status_payload.get('state')}, expected ready"
+                )
+            if status_payload.get("last_verified_at") is None:
+                issues.append("authenticated remote status omitted verification time")
         stream = await client.get(f"/api/stream/task/{event.task_id}", headers=headers)
         if stream.status_code != 200 or event.event_id not in stream.text:
             issues.append(f"SSE status={stream.status_code}")

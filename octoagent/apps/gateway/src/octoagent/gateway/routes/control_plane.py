@@ -30,6 +30,7 @@ from octoagent.core.models import (
 
 from ..deps import get_control_plane_service
 from ..services.cloudflare_web_access import (
+    CloudflarePrincipal,
     _derive_remote_access_status,
     _RemoteAccessProbeFacts,
 )
@@ -68,31 +69,36 @@ async def remote_access_status(request: Request) -> dict[str, object]:
         config = load_config(request.app.state.project_root)
         front_door = config.front_door if config is not None else FrontDoorConfig()
     manifest = getattr(request.app.state, "cloudflare_access_manifest", None)
+    state = request.app.state
+    service_ready = getattr(state, "cloudflare_access_service_ready", None)
+    origin_ready = getattr(state, "cloudflare_access_origin_ready", None)
+    access_ready = getattr(state, "cloudflare_access_access_ready", None)
+    last_verified_at = getattr(state, "cloudflare_access_last_verified_at", None)
+    if any(
+        fact is not None for fact in (service_ready, origin_ready, access_ready, last_verified_at)
+    ):
+        probe = _RemoteAccessProbeFacts(
+            service_ready=service_ready,
+            origin_ready=origin_ready,
+            access_ready=access_ready,
+            last_verified_at=last_verified_at,
+        )
+    else:
+        principal = getattr(getattr(request, "state", None), "cloudflare_principal", None)
+        probe = (
+            _RemoteAccessProbeFacts(
+                service_ready=True,
+                origin_ready=True,
+                access_ready=True,
+                last_verified_at=principal.issued_at,
+            )
+            if isinstance(principal, CloudflarePrincipal)
+            else _RemoteAccessProbeFacts()
+        )
     status = _derive_remote_access_status(
         front_door=front_door,
         manifest=manifest,
-        probe=_RemoteAccessProbeFacts(
-            service_ready=getattr(
-                request.app.state,
-                "cloudflare_access_service_ready",
-                None,
-            ),
-            origin_ready=getattr(
-                request.app.state,
-                "cloudflare_access_origin_ready",
-                None,
-            ),
-            access_ready=getattr(
-                request.app.state,
-                "cloudflare_access_access_ready",
-                None,
-            ),
-            last_verified_at=getattr(
-                request.app.state,
-                "cloudflare_access_last_verified_at",
-                None,
-            ),
-        ),
+        probe=probe,
     ).model_dump(mode="json")
     desktop_web_url = None
     access_logout_url = None
