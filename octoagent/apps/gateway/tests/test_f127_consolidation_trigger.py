@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -97,11 +98,15 @@ _USER_MD_DISABLED = """# 用户档案
 
 
 @pytest_asyncio.fixture
-async def store_group(tmp_path: Path) -> StoreGroup:
+async def store_group(tmp_path: Path) -> AsyncIterator[StoreGroup]:
     db_path = str(tmp_path / "test.db")
     artifacts_dir = tmp_path / "artifacts"
     artifacts_dir.mkdir(exist_ok=True)
-    return await create_store_group(db_path, str(artifacts_dir))
+    group = await create_store_group(db_path, str(artifacts_dir))
+    try:
+        yield group
+    finally:
+        await group.close()
 
 
 #: F146 件①：默认构造用「盘上无 USER.md」哨兵 root（纯路径拼接不做 I/O）——
@@ -459,7 +464,10 @@ class TestFinding1NamespaceInjection:
         assert extra["synthetic_caller_project_id"] == "proj-main-f127"
 
     async def test_no_main_runtime_degrades_no_injection(self, store_group):
-        """无 MAIN runtime（全新实例）→ 不注入（降级），spawn 仍进行（subagent 拿不到记忆但不崩）。"""
+        """无 MAIN runtime（全新实例）→ 不注入（降级）。
+
+        spawn 仍进行，subagent 拿不到记忆但不崩。
+        """
         plane = _FakePlane()
         svc = _build_service(
             store_group,
