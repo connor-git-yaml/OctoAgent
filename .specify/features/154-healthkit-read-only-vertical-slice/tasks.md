@@ -25,7 +25,7 @@
   partial failure/reentry 与 durable receipt
 - [x] **T010 [SWIFTUI][RED→GREEN→REFACTOR]** Apple 健康入口、权限解释、无可读数据/
   权限受限、preview/approve/result/delete 状态
-- [ ] **T011 [VISUAL/A11Y][RED→GREEN→REFACTOR]** Claude early visual baseline、
+- [x] **T011 [VISUAL/A11Y][RED→GREEN→REFACTOR]** Claude early visual baseline、
   Dynamic Type、VoiceOver、Reduce Motion 与 44pt
 - [ ] **T012 [SIMULATOR]** 冷启动不弹权限；11 状态功能/视觉回归，DI 权限不冒充真机
 - [ ] **T013 [REAL DEVICE]** 系统权限 sheet、真实 step/sleep、锁屏/前后台、

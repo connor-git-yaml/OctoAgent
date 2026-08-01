@@ -110,3 +110,23 @@
   `HealthReviewView.swift` SHA-256
   `b0879e1d39eea1d49e6c43969d4f0db1cfd1b8c4a1bc6d4a89005c5a14dc1ca4`，iOS test
   SHA-256 `a1a3838b329dfac860915f3dfe82c23904a21449f43c580884ff631ac020a558`。
+- 2026-08-02：T011 在实现前以两个 exact Simulator UI node 取得真实 RED：
+  `Test-OctoAgent-2026.08.02_01-42-00-+0800.xcresult` 中两项都只命中
+  `F154_HEALTH_VISUAL_CONTRACT_MISSING`；中间的编译与 query 修正不计 evidence。
+  GREEN/REFACTOR 将 12 个有限状态、AXXXL Dynamic Type、VoiceOver 可读语义、
+  44pt action 与真实 `accessibilityReduceMotion` 环境分支收口到单一原生
+  `HealthReviewView`；DEBUG 的 deterministic launch seam 在 Release binary 中静态为 0。
+  13 张健康基线和更新后的 connected 基线均逐张人工审查：黑色底、单一鲜绿
+  强调、节制边框卡片、强层级与原生 navigation，不回退到现有 Web 布局；
+  snapshot path/SHA/size map aggregate 为
+  `4cb4765217189f7ff657bbf8436084130f2f5256db5075cd334cbd8245caf7d7`。
+  组合 xcresult `Test-OctoAgent-2026.08.02_01-53-13-+0800.xcresult` 中两个健康 UI
+  node 均 PASS，既有 connected 基线因 T010 新增“健康概览”合法入口而单独审查后更新，
+  并在 `Test-OctoAgent-2026.08.02_01-56-58-+0800.xcresult` 独立复验 PASS，
+  pixel 阈值仍为 2%。完整 iOS unit 为 22 tests（19 passed、3 个既有真机项显式
+  skipped），Release iPhoneOS arm64 warnings-as-errors build、F152/F153/F154/F158 authority
+  5/5、repository architecture gate 与 `git diff --check` 全部通过。冻结 SHA-256：
+  `OctoAgentApp.swift` `72bc8fdbabbb3475429de1ff4f16f73f5b3a8fc68b44deb9442743651ec7d5ac`，
+  `HealthImportCoordinator.swift` `033da63a8e5f50c6727920804e38d6717264ed4fa6fb8d533ab978b20b228dea`，
+  `HealthReviewView.swift` `29bc036cc66e0666e45c8a4eff3f68244aee2150b9dd7eae651f203be0b19312`，
+  `HealthImportFlowUITests.swift` `d7d972f08bfd7eb57cb3d9d97da8476e6a2618b8d79258390942ca67771469bc`。

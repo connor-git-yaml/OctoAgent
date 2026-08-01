@@ -22,6 +22,7 @@
 		100000000000000000000013 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000017 /* HealthKit.framework */; };
 		100000000000000000000014 /* HealthImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000018 /* HealthImportCoordinator.swift */; };
 		100000000000000000000015 /* HealthReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000019 /* HealthReviewView.swift */; };
+		100000000000000000000016 /* HealthImportFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000020 /* HealthImportFlowUITests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,6 +62,7 @@
 		200000000000000000000017 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
 		200000000000000000000018 /* HealthImportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportCoordinator.swift; sourceTree = "<group>"; };
 		200000000000000000000019 /* HealthReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthReviewView.swift; sourceTree = "<group>"; };
+		200000000000000000000020 /* HealthImportFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportFlowUITests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -154,6 +156,7 @@
 			isa = PBXGroup;
 			children = (
 				200000000000000000000010 /* RegistrationFlowUITests.swift */,
+				200000000000000000000020 /* HealthImportFlowUITests.swift */,
 				200000000000000000000012 /* __Snapshots__ */,
 			);
 			path = OctoAgentUITests;
@@ -333,6 +336,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000008 /* RegistrationFlowUITests.swift in Sources */,
+				100000000000000000000016 /* HealthImportFlowUITests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

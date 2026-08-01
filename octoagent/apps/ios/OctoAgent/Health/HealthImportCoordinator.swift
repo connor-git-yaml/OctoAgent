@@ -193,3 +193,71 @@ final class HealthImportCoordinator: ObservableObject {
         preview = nil
     }
 }
+
+#if DEBUG
+extension HealthImportCoordinator {
+    static func uiTest(phase: HealthImportPhase) -> HealthImportCoordinator {
+        let referenceDate = Date(timeIntervalSince1970: 1_767_225_600)
+        let coordinator = HealthImportCoordinator(
+            store: AppleHealthDataStore(),
+            now: { referenceDate }
+        )
+        coordinator.phase = phase
+        if phase.displaysPreview {
+            coordinator.preview = uiTestPreview(referenceDate: referenceDate)
+        }
+        if phase == .completed {
+            coordinator.analysisSummary = "过去 24 小时共记录 8,420 步，睡眠约 7 小时 20 分钟。"
+        }
+        if phase == .deletionFailed {
+            coordinator.notice = "删除尚未完成，可以安全重试。"
+        }
+        return coordinator
+    }
+
+    private static func uiTestPreview(referenceDate: Date) -> HealthPreview {
+        do {
+            let window = try HealthReadWindow(
+                start: referenceDate.addingTimeInterval(-86_400),
+                end: referenceDate,
+                preset: .last24Hours,
+                referenceNow: referenceDate
+            )
+            return try HealthPreview.make(
+                previewID: "ui-test-preview",
+                capturedAt: referenceDate,
+                window: window,
+                dataTypes: [.stepCount, .sleepAnalysis],
+                dailySteps: [.init(localDay: "2026-01-01", count: "8420", unit: "count")],
+                sleep: uiTestSleep(window: window),
+                completenessNotice: "只显示这次选择范围内可读取的汇总。",
+                expiresAt: referenceDate.addingTimeInterval(3_600)
+            )
+        } catch {
+            preconditionFailure("无法建立健康 UI 测试预览：\(error)")
+        }
+    }
+
+    private static func uiTestSleep(window: HealthReadWindow) -> SleepSummary {
+        SleepSummary(
+            windowStartUtc: HealthCanonicalValue.utc(window.start),
+            windowEndUtc: HealthCanonicalValue.utc(window.end),
+            totalAsleepMinutes: "440",
+            stageMinutes: .init(
+                awake: "20",
+                core: "250",
+                deep: "90",
+                rem: "100",
+                unspecified: "0"
+            ),
+            unit: "min"
+        )
+    }
+}
+
+private extension HealthImportPhase {
+    var displaysPreview: Bool {
+        [.reviewing, .submitting, .analyzing, .offline, .revoked].contains(self)
+    }
+}
+#endif

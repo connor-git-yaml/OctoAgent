@@ -184,6 +184,7 @@ struct HealthReviewView: View {
         .toolbarBackground(HealthPalette.background, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .preferredColorScheme(.dark)
+        .accessibilityIdentifier("health-screen")
         .animation(
             reduceMotion ? nil : .easeOut(duration: 0.2),
             value: coordinator.phase

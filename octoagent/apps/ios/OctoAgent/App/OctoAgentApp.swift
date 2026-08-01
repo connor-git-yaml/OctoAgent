@@ -5,11 +5,35 @@ import SwiftUI
 struct OctoAgentApp: App {
     var body: some Scene {
         WindowGroup {
-            RegistrationView(
-                viewModel: launchViewModel(),
-                restoresStoredConnection: !isUITesting
-            )
+            launchContent
         }
+    }
+
+    @ViewBuilder
+    private var launchContent: some View {
+#if DEBUG
+        if isUITesting,
+           let phase = HealthImportPhase(
+               rawValue: ProcessInfo.processInfo.environment["OCTOAGENT_UI_TEST_HEALTH_PHASE"] ?? ""
+           )
+        {
+            NavigationStack {
+                HealthReviewView(coordinator: .uiTest(phase: phase))
+            }
+            .environment(\.dynamicTypeSize, uiTestDynamicTypeSize)
+        } else {
+            registrationContent
+        }
+#else
+        registrationContent
+#endif
+    }
+
+    private var registrationContent: some View {
+        RegistrationView(
+            viewModel: launchViewModel(),
+            restoresStoredConnection: !isUITesting
+        )
     }
 
     private var isUITesting: Bool {
@@ -19,6 +43,16 @@ struct OctoAgentApp: App {
         false
 #endif
     }
+
+#if DEBUG
+    private var uiTestDynamicTypeSize: DynamicTypeSize {
+        uiTestAccessibilityMode ? .accessibility3 : .large
+    }
+
+    private var uiTestAccessibilityMode: Bool {
+        ProcessInfo.processInfo.environment["OCTOAGENT_UI_TEST_ACCESSIBILITY"] == "1"
+    }
+#endif
 
     private func launchViewModel() -> RegistrationViewModel {
 #if DEBUG

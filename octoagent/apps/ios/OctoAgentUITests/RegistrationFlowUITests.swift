@@ -221,12 +221,23 @@ final class RegistrationFlowUITests: XCTestCase {
     }
 
     private func assertMatchesBaseline(_ actualData: Data, named name: String) {
-        guard let expectedURL = Bundle(for: Self.self).url(
+        VisualSnapshotVerifier.assertMatchesBaseline(actualData, named: name)
+    }
+}
+
+enum VisualSnapshotVerifier {
+    static func assertMatchesBaseline(
+        _ actualData: Data,
+        named name: String,
+        failurePrefix: String = ""
+    ) {
+        let prefix = failurePrefix.isEmpty ? "" : "\(failurePrefix): "
+        guard let expectedURL = Bundle(for: RegistrationFlowUITests.self).url(
             forResource: name,
             withExtension: "png",
             subdirectory: "__Snapshots__"
         ) else {
-            XCTFail("缺少 iOS 视觉基线：\(name).png；先人工审查 attachment 再建立基线。")
+            XCTFail("\(prefix)缺少 iOS 视觉基线：\(name).png；先人工审查 attachment 再建立基线。")
             return
         }
         guard
@@ -234,7 +245,7 @@ final class RegistrationFlowUITests: XCTestCase {
             let expected = decodedPixels(expectedData),
             let actual = decodedPixels(actualData)
         else {
-            XCTFail("无法解码 iOS 视觉基线：\(name).png")
+            XCTFail("\(prefix)无法解码 iOS 视觉基线：\(name).png")
             return
         }
         XCTAssertEqual(actual.width, expected.width)
@@ -256,11 +267,11 @@ final class RegistrationFlowUITests: XCTestCase {
         XCTAssertLessThanOrEqual(
             Double(differingPixels) / Double(totalPixels),
             0.02,
-            "\(name) 与 Claude 早期视觉基线偏差超过 2%"
+            "\(prefix)\(name) 与 Claude 早期视觉基线偏差超过 2%"
         )
     }
 
-    private func decodedPixels(
+    private static func decodedPixels(
         _ data: Data
     ) -> (width: Int, height: Int, bytes: [UInt8])? {
         guard
