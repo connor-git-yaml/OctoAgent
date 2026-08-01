@@ -23,7 +23,7 @@ NODE24_ACTIONS = {
     "actions/setup-node": "v6",
     "actions/setup-python": "v6",
     "actions/upload-artifact": "v7",
-    "astral-sh/setup-uv": "v8",
+    "astral-sh/setup-uv": "11f9893b081a58869d3b5fccaea48c9e9e46f990",
 }
 
 
@@ -129,7 +129,7 @@ def test_architecture_gate_runs_before_docs_fastpath_and_covers_docs_constitutio
     _fail("F151_CI_WIRING_MISSING", issues)
 
 
-def test_ci_javascript_actions_use_node24_compatible_majors() -> None:
+def test_ci_javascript_actions_use_node24_compatible_versions() -> None:
     issues: list[str] = []
     for path, document in _workflow_documents():
         raw_jobs = document.get("jobs")
