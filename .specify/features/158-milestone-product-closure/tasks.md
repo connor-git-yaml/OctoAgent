@@ -47,11 +47,12 @@
 
 - [x] **T026** 创建并通过 F152 Privacy/Identity/Ingestion Feature Gate；production
   Implement 仍等待 F152 T001 authority，F153 仍关闭
-- [ ] **T027** 创建并通过 F153 真机 transport/device-proof Feature
-  （T001-T013/T016/T017 已完成；Simulator registration 功能/视觉已通过，
-  Cloudflare live/真机/Verify 仍阻断）
+- [x] **T027** 创建并通过 F153 真机 transport/device-proof Feature：Simulator、
+  dedicated mobile edge、真 iPhone Secure Enclave/Keychain/rotation/revoke/4G/restart
+  与最终 Verify 均已通过
 - [ ] **T028** 完成 F154 HealthKit Feature（Research/Design/Tasks Gate 已通过；
-  production Implement 与 Verify 继续被 F153 T014/T015/T018 硬门关闭）
+  F153 已解锁 production，下一步先推进不依赖真机的合同与实现，最终 HealthKit
+  权限/数据验收等待 iPhone 再次可用）
 - [ ] **T029** 完成 F155 EventKit Feature（方案 A 已接受：系统 full access、Octo
   物理只读；Research/Design/Tasks Gate 已通过，Implement/Verify 仍等待 F153/F154）
 - [ ] **T030** 完成 F156 SwiftUI Native Companion Feature（Research、Design/Tasks 草案、
@@ -59,7 +60,8 @@
   Gate、production 与 E2E 未完成）
 - [ ] **T031 [SIMULATOR]** 原生 iOS 冷启动、导航、状态与视觉回归（F153 registration
   六态、a11y、AXXXL、Reduce Motion 与视觉基线已通过；F154-F156 完整产品仍缺）
-- [ ] **T032 [DEVICE]** 注册、Keychain、轮换、撤销、断网恢复和 Apple 权限真机验收
+- [x] **T032 [DEVICE]** F153 注册、ThisDeviceOnly Keychain、轮换、撤销、4G/断网恢复
+  与整机重启后的冷启动验收；F154-F156 新权限/产品场景仍分别由 T028-T031 负责
 
 ## Phase 4：设计云端与交付
 
@@ -108,3 +110,7 @@
   hooks。相关回归 `288 passed`、repository architecture gate PASS；个人实例真实
   `memory.sync.resume` 以 `memu` 重放 70 个积压批次后剩余 0，新聊天任务
   `01KYZF2X3XWT6NN27TJSFJNZ3Y` 成功且后台同步后积压仍为 0
+- [x] **T049 [DEVICE TRUST HARDENING]** 修复同一 Secure Enclave public key 重新连接
+  时的 SQLite unique constraint：相同 owner/current key 复用原 device id，跨 owner、
+  revoked/non-current key typed 409 且零半写入。F153 回归 `48 passed`、repository
+  architecture gate PASS，提交 `d17c3e59` 已部署并恢复 `/health=200`

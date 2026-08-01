@@ -166,3 +166,11 @@
   `19 tests / 13 passed / 6 live-only skipped / 0 failed`；generic iPhoneOS Release build
   PASS，source/bundle 敏感材料扫描 0。T014/T015/T018 完成，`GATE_VERIFY=true`，F154
   production 解锁。
+- 2026-08-02：此前真机重新连接暴露同一 Secure Enclave public key 在新 challenge
+  上触发 SQLite unique constraint，现以幂等恢复合同补齐。相同 owner 的 current key
+  会复用原 pending/active device id；跨 owner、revoked 或非 current key 以 typed 409
+  拒绝，challenge/device/key 零半写入。回归先复现原始 `IntegrityError`，修复后
+  pending/active/跨 owner/revoked 四场景通过，F153 Protocol/Core/Gateway/authority
+  `48 passed / 1 既有 warning`，repository architecture gate PASS。提交
+  `d17c3e59879ee09dd79ba77fcebf9729e662730e` 已通过正式 installer 部署，Gateway
+  `/health` 恢复 200；本轮未操作 iPhone。

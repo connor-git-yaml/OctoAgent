@@ -352,3 +352,12 @@
   `01KYZF2X3XWT6NN27TJSFJNZ3Y` 到达 `SUCCEEDED` 且包含 2 次
   `MODEL_CALL_COMPLETED`，后台同步后再次复核积压仍为 0。该运行证据不触碰 iPhone，
   也不计作物理 Mac 重启。
+- 2026-08-02：继续在不占用用户 iPhone 的边界内修复 device-trust 重连健壮性。
+  先以真实 API 回归复现同一 public key 新 challenge 触发
+  `UNIQUE constraint failed: mobile_device_keys.device_key_thumbprint`；随后在唯一
+  SQLite transaction 内复用相同 owner/current key 的原 pending/active device id，
+  对跨 owner、revoked 与 non-current key 返回 typed 409 且保持 challenge/device/key
+  零半写入。F153 focused 回归 `48 passed / 1 既有 warning`，Ruff/format/C901、
+  `git diff --check` 与 repository architecture gate 均通过。提交 `d17c3e59` 已由
+  正式 installer 部署到个人 managed checkout，Gateway 重启后 `/health=200`；本轮
+  没有调用真机、没有重启 Mac。
