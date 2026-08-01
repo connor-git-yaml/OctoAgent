@@ -21,7 +21,7 @@
   Host/proof/replay/revoke + F152 store/audit
 - [x] **T008 [GATEWAY L3/L2][RED→GREEN→REFACTOR]** approved packet 单次分析，
   ProviderRouter auth-fatal/timeout/error fail closed、无 Echo
-- [ ] **T009 [GATEWAY L3][RED→GREEN→REFACTOR]** provenance deletion cascade、
+- [x] **T009 [GATEWAY L3][RED→GREEN→REFACTOR]** provenance deletion cascade、
   partial failure/reentry 与 durable receipt
 - [ ] **T010 [SWIFTUI][RED→GREEN→REFACTOR]** Apple 健康入口、权限解释、无可读数据/
   权限受限、preview/approve/result/delete 状态

@@ -37,6 +37,7 @@ _MOBILE_STATIC_PATHS = frozenset(
 )
 _MOBILE_TOKEN_CHALLENGE_PATTERN = re.compile(r"^/api/mobile/v1/token-challenges/[^/]+$")
 _MOBILE_ROTATION_CHALLENGE_PATTERN = re.compile(r"^/api/mobile/v1/key-rotation-challenges/[^/]+$")
+_MOBILE_HEALTH_SOURCE_PATTERN = re.compile(r"^/api/mobile/v1/health/sources/[0-9a-f]{64}$")
 
 
 class MobileDeviceAccessContractError(ValueError):
@@ -162,6 +163,7 @@ def _mobile_path_allowed(path: str) -> bool:
         for pattern in (
             _MOBILE_TOKEN_CHALLENGE_PATTERN,
             _MOBILE_ROTATION_CHALLENGE_PATTERN,
+            _MOBILE_HEALTH_SOURCE_PATTERN,
         )
     )
 

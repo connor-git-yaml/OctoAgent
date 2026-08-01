@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Request, status
+from octoagent.core.models import DeletionReceipt
 from octoagent.provider import ProviderRouter
 from pydantic import ValidationError
 
@@ -68,6 +69,7 @@ def _health_error(exc: HealthIngestionError) -> HTTPException:
         "HEALTH_ANALYSIS_FAILED": "健康分析暂时没有完成，请稍后再试。",
         "HEALTH_CAPABILITY_DENIED": "这次设备授权不允许提交健康预览。",
         "HEALTH_CONSENT_INVALID": "这次健康分析批准无效或已经使用。",
+        "HEALTH_DELETION_INCOMPLETE": "健康数据删除尚未完成，请重试。",
         "HEALTH_PREVIEW_HASH_MISMATCH": "健康预览已变化，请重新检查。",
         "HEALTH_RAW_FIELD_FORBIDDEN": "健康预览包含不允许发送的内容。",
         "HEALTH_REVIEW_INVALID": "健康预览格式不正确。",
@@ -150,6 +152,36 @@ async def submit_health_analysis(
             ),
             request=analysis_request,
             provider_router=provider_router,
+        )
+    except HealthIngestionError as exc:
+        raise _health_error(exc) from exc
+
+
+@router.delete(
+    "/sources/{source_hash}",
+    response_model=DeletionReceipt,
+)
+async def delete_health_source(
+    request: Request,
+    service: HealthService,
+    device_service: DeviceTrustServiceDependency,
+    source_hash: Annotated[str, Path(pattern=r"^[0-9a-f]{64}$")],
+) -> DeletionReceipt:
+    headers, raw_body = await _protected_route_context(
+        request,
+        service=device_service,
+    )
+    if raw_body:
+        raise _health_error(HealthIngestionError("HEALTH_DELETION_INCOMPLETE", status_code=422))
+    try:
+        return await service.delete_source(
+            context=HealthRequestContext(
+                headers=headers,
+                method=request.method,
+                canonical_path=request.url.path,
+                raw_body=raw_body,
+            ),
+            source_hash=source_hash,
         )
     except HealthIngestionError as exc:
         raise _health_error(exc) from exc

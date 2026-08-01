@@ -17,6 +17,8 @@ from octoagent.core.models import (
     AuditDecision,
     AuditResult,
     ConsentGrant,
+    DeletionReceipt,
+    DeletionStatus,
     DeviceCapability,
     PrivacyAuditEvent,
     PrivacyAuditEventType,
@@ -101,6 +103,7 @@ class HealthRequestContext:
 @dataclass(frozen=True, slots=True)
 class HealthAuditOutcome:
     event_type: PrivacyAuditEventType
+    capability: DeviceCapability
     decision: AuditDecision
     result: AuditResult
     reason_code: str
@@ -296,6 +299,73 @@ class HealthIngestionService:
         )
         return HealthAnalysisAccepted(result=result, summary=summary)
 
+    async def delete_source(
+        self,
+        *,
+        context: HealthRequestContext,
+        source_hash: str,
+    ) -> DeletionReceipt:
+        """删除同一 provenance 全链；失败 receipt 可用同一 request id 重入。"""
+
+        now = self._clock()
+        authorized = await self._authorize(
+            context=context,
+            now=now,
+            required_capability=DeviceCapability.HEALTH_SOURCE_DELETE,
+        )
+        request_id = self._deletion_request_id(authorized.device_id, source_hash)
+        existing = await self._privacy_store.get_deletion_receipt(request_id)
+        if existing is not None and existing.status is DeletionStatus.COMPLETED:
+            return existing
+        review = await self._load_scoped_review(
+            source_hash=source_hash,
+            device_id=authorized.device_id,
+        )
+        await self._append_health_audit(
+            review=review,
+            object_hash=source_hash,
+            outcome=HealthAuditOutcome(
+                event_type=PrivacyAuditEventType.DELETION_STARTED,
+                capability=DeviceCapability.HEALTH_SOURCE_DELETE,
+                decision=AuditDecision.ALLOW,
+                result=AuditResult.PENDING,
+                reason_code="HEALTH_DELETION_STARTED",
+            ),
+            now=now,
+        )
+        receipt = await self._privacy_store.delete_source_chain(
+            request_id=request_id,
+            source_hash=source_hash,
+            started_at=now,
+        )
+        if receipt.status is DeletionStatus.FAILED:
+            await self._append_health_audit(
+                review=review,
+                object_hash=source_hash,
+                outcome=HealthAuditOutcome(
+                    event_type=PrivacyAuditEventType.DELETION_FAILED,
+                    capability=DeviceCapability.HEALTH_SOURCE_DELETE,
+                    decision=AuditDecision.ALLOW,
+                    result=AuditResult.FAILURE,
+                    reason_code="HEALTH_DELETION_INCOMPLETE",
+                ),
+                now=receipt.finished_at or now,
+            )
+            raise HealthIngestionError("HEALTH_DELETION_INCOMPLETE", status_code=503)
+        await self._append_health_audit(
+            review=review,
+            object_hash=source_hash,
+            outcome=HealthAuditOutcome(
+                event_type=PrivacyAuditEventType.DELETION_COMPLETED,
+                capability=DeviceCapability.HEALTH_SOURCE_DELETE,
+                decision=AuditDecision.ALLOW,
+                result=AuditResult.SUCCESS,
+                reason_code="HEALTH_DELETION_COMPLETED",
+            ),
+            now=receipt.finished_at or now,
+        )
+        return receipt
+
     async def _authorize(
         self,
         *,
@@ -428,6 +498,31 @@ class HealthIngestionService:
         if device.owner_id != consent.owner_id or device.device_id != consent.device_id:
             raise HealthIngestionError("HEALTH_CONSENT_INVALID", status_code=403)
 
+    async def _load_scoped_review(
+        self,
+        *,
+        source_hash: str,
+        device_id: str,
+    ) -> ReviewBundle:
+        try:
+            stored = await self._privacy_store.get_review_bundle(source_hash)
+            review = validate_consumer_payload(
+                PrivacyConsumer.F154,
+                PrivacyContractName.REVIEW_BUNDLE,
+                stored.model_dump(mode="python"),
+            )
+        except (ValidationError, ValueError) as exc:
+            raise HealthIngestionError("HEALTH_DELETION_INCOMPLETE", status_code=404) from exc
+        if not isinstance(review, ReviewBundle):
+            raise HealthIngestionError("HEALTH_DELETION_INCOMPLETE", status_code=404)
+        await self._require_review_scope(device_id=device_id, review=review)
+        return review
+
+    @staticmethod
+    def _deletion_request_id(device_id: str, source_hash: str) -> str:
+        digest = hashlib.sha256(f"{device_id}:{source_hash}".encode()).hexdigest()
+        return f"health-delete-{digest}"
+
     async def _call_analysis_model(
         self,
         *,
@@ -487,11 +582,12 @@ class HealthIngestionService:
             ),
         )
         result_hash = await self._privacy_store.put_analysis_result(packet_hash, result)
-        await self._append_analysis_audit(
+        await self._append_health_audit(
             review=review,
             object_hash=result_hash,
             outcome=HealthAuditOutcome(
                 event_type=PrivacyAuditEventType.ANALYSIS_COMPLETED,
+                capability=DeviceCapability.HEALTH_ANALYSIS_RUN,
                 decision=AuditDecision.ALLOW,
                 result=AuditResult.SUCCESS,
                 reason_code="HEALTH_ANALYSIS_COMPLETED",
@@ -508,11 +604,12 @@ class HealthIngestionService:
         reason_code: str,
         now: datetime,
     ) -> None:
-        await self._append_analysis_audit(
+        await self._append_health_audit(
             review=review,
             object_hash=packet_hash,
             outcome=HealthAuditOutcome(
                 event_type=PrivacyAuditEventType.REJECTED,
+                capability=DeviceCapability.HEALTH_ANALYSIS_RUN,
                 decision=AuditDecision.DENY,
                 result=AuditResult.FAILURE,
                 reason_code=reason_code,
@@ -520,7 +617,7 @@ class HealthIngestionService:
             now=now,
         )
 
-    async def _append_analysis_audit(
+    async def _append_health_audit(
         self,
         *,
         review: ReviewBundle,
@@ -538,7 +635,7 @@ class HealthIngestionService:
                 object_hash=object_hash,
                 count=review.fact_count,
                 data_types=provenance.data_types,
-                capabilities=(DeviceCapability.HEALTH_ANALYSIS_RUN,),
+                capabilities=(outcome.capability,),
                 decision=outcome.decision,
                 result=outcome.result,
                 reason_code=outcome.reason_code,

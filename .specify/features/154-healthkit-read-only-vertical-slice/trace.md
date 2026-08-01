@@ -84,3 +84,16 @@
   middleware 回归 76/76、repository architecture gate 均通过。checker SHA-256
   `eb525b8fe83a5a9b2fd6f565322b8bfd2c0ee94deb4773030994f44bd5f6c5e3`，T008 test
   SHA-256 `08c40579275d28080013a6b6ec17933df8ae8a8f0c84764df2fe478e7ad9ce40`。
+- 2026-08-02：T009 四个 Gateway L3 node 先取得真实 RED，均只命中
+  `F154_HEALTH_DELETION_MISSING`。GREEN 新增 exact
+  `DELETE /api/mobile/v1/health/sources/{source_hash}`，继续复用 F153 Host/proof/replay/
+  revoke 和 exact `health.source.delete` capability；request id 由 device/source 稳定派生，
+  completed receipt 在源数据已删除后仍可幂等返回。删除事务复用 F152 单一 store 的
+  provenance cascade，一次清除 review、approved packet、analysis result 与 pending memory
+  candidate，保留 metadata-only audit 和 durable receipt；数据库故障会回滚数据链、写入
+  FAILED receipt，并允许同一 request id 重入完成。REFACTOR 合并 analysis/deletion audit
+  writer，production 最大复杂度门 McCabe≤10、PLR0911/12/13/15 全部通过；deletion 4/4、
+  health 12/12、相关 Core/Protocol/Policy/F153/F154 authority 103/103、deterministic Gateway
+  e2e 36/36 与 repository architecture gate 全部通过。checker SHA-256
+  `eb525b8fe83a5a9b2fd6f565322b8bfd2c0ee94deb4773030994f44bd5f6c5e3`，T009 test
+  SHA-256 `1ac5c042c66eda52574fcc51e0f77a7bd757835dea93d01c6c3b4eab2edcd37d`。

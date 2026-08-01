@@ -272,10 +272,31 @@ def _proof_headers(
     body: bytes,
     nonce: str,
 ) -> dict[str, str]:
+    return _signed_headers(
+        private_key,
+        token=token,
+        token_id=token_id,
+        method="POST",
+        path=REVIEW_PATH,
+        body=body,
+        nonce=nonce,
+    )
+
+
+def _signed_headers(
+    private_key: Any,
+    *,
+    token: str,
+    token_id: str,
+    method: str,
+    path: str,
+    body: bytes,
+    nonce: str,
+) -> dict[str, str]:
     models = importlib.import_module("octoagent.core.models")
     proof = models.RequestProofPayload(
-        method="POST",
-        canonical_path=REVIEW_PATH,
+        method=method,
+        canonical_path=path,
         body_sha256=hashlib.sha256(body).hexdigest(),
         timestamp=NOW,
         nonce=nonce,
@@ -430,7 +451,15 @@ async def _prepared_analysis_app(
         options=health.HealthIngestionServiceOptions(
             clock=lambda: NOW,
             id_factory=iter(
-                ("analysis-result-1", "analysis-audit-1", "analysis-reject-audit-1")
+                (
+                    "analysis-result-1",
+                    "analysis-audit-1",
+                    "analysis-reject-audit-1",
+                    "deletion-started-audit-1",
+                    "deletion-failed-audit-1",
+                    "deletion-reentry-audit-1",
+                    "deletion-completed-audit-1",
+                )
             ).__next__,
         ),
     )
@@ -463,32 +492,22 @@ async def _post_analysis(
     nonce: str,
 ) -> httpx.Response:
     body = _canonical_body(payload)
-    headers = _proof_headers(
+    path = "/api/mobile/v1/health/analyses"
+    headers = _signed_headers(
         private_key,
         token=token,
         token_id=token_id,
+        method="POST",
+        path=path,
         body=body,
         nonce=nonce,
-    )
-    models = importlib.import_module("octoagent.core.models")
-    proof = models.RequestProofPayload(
-        method="POST",
-        canonical_path="/api/mobile/v1/health/analyses",
-        body_sha256=hashlib.sha256(body).hexdigest(),
-        timestamp=NOW,
-        nonce=nonce,
-        token_id=token_id,
-    )
-    headers["X-Octo-Device-Signature"] = _sign(
-        private_key,
-        models.canonical_json_bytes(proof),
     )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
         base_url=MOBILE_ORIGIN,
     ) as client:
         return await client.post(
-            "/api/mobile/v1/health/analyses",
+            path,
             content=body,
             headers=headers,
         )
@@ -497,6 +516,117 @@ async def _post_analysis(
 async def _analysis_counts(group: Any) -> tuple[int, int, int]:
     counts = []
     for table in (
+        "privacy_approved_packets",
+        "privacy_analysis_results",
+        "privacy_memory_candidates",
+    ):
+        cursor = await group.conn.execute(f"SELECT COUNT(*) FROM {table}")
+        row = await cursor.fetchone()
+        counts.append(int(row[0]))
+    return tuple(counts)  # type: ignore[return-value]
+
+
+def _deletion_contracts() -> None:
+    service, _routes = _analysis_contracts()
+    if not hasattr(service.HealthIngestionService, "delete_source"):
+        pytest.fail(
+            "F154_HEALTH_DELETION_MISSING: health source deletion is absent",
+            pytrace=False,
+        )
+
+
+async def _seed_memory_candidate(group: Any) -> None:
+    models = importlib.import_module("octoagent.core.models")
+    packet_cursor = await group.conn.execute(
+        "SELECT object_hash, content FROM privacy_approved_packets"
+    )
+    packet_row = await packet_cursor.fetchone()
+    result_cursor = await group.conn.execute(
+        "SELECT object_hash, content FROM privacy_analysis_results"
+    )
+    result_row = await result_cursor.fetchone()
+    assert packet_row is not None and result_row is not None, ORACLE
+    packet = models.ApprovedAnalysisPacket.model_validate_json(packet_row["content"])
+    result = models.AnalysisResult.model_validate_json(result_row["content"])
+    candidate = models.OptionalMemoryCandidate(
+        candidate_id="health-memory-candidate-1",
+        result_id=result.result_id,
+        packet_sha256=str(packet_row["object_hash"]),
+        provenance=packet.provenance,
+        user_selected_text="用户主动选择的分析片段。",
+        review_state=models.MemoryReviewState.PENDING,
+    )
+    await group.privacy_ingestion_store.put_memory_candidate(
+        str(result_row["object_hash"]),
+        candidate,
+    )
+
+
+async def _prepared_deletion_app(
+    tmp_path: Path,
+) -> tuple[FastAPI, Any, Any, str, str, str, str]:
+    _deletion_contracts()
+    prepared = await _prepared_analysis_app(tmp_path, "可删除的健康分析结果。")
+    app, group, key, analysis_token, analysis_token_id, _router, source_hash = prepared
+    analysis = await _post_analysis(
+        app,
+        key,
+        analysis_token,
+        analysis_token_id,
+        _analysis_payload(source_hash),
+        nonce="health-deletion-seed-analysis-nonce-1",
+    )
+    assert analysis.status_code == 201, analysis.text
+    await _seed_memory_candidate(group)
+    device = await group.device_trust_store.get_device("device-1")
+    assert device is not None, ORACLE
+    delete_token, delete_token_id = await _put_grant(
+        group,
+        device=device,
+        capability="health.source.delete",
+        suffix="health-delete",
+    )
+    return (
+        app,
+        group,
+        key,
+        delete_token,
+        delete_token_id,
+        analysis_token,
+        source_hash,
+    )
+
+
+async def _delete_source(
+    app: FastAPI,
+    key: Any,
+    token: str,
+    token_id: str,
+    source_hash: str,
+    *,
+    nonce: str,
+) -> httpx.Response:
+    path = f"/api/mobile/v1/health/sources/{source_hash}"
+    headers = _signed_headers(
+        key,
+        token=token,
+        token_id=token_id,
+        method="DELETE",
+        path=path,
+        body=b"",
+        nonce=nonce,
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url=MOBILE_ORIGIN,
+    ) as client:
+        return await client.request("DELETE", path, content=b"", headers=headers)
+
+
+async def _chain_counts(group: Any) -> tuple[int, int, int, int]:
+    counts = []
+    for table in (
+        "privacy_review_bundles",
         "privacy_approved_packets",
         "privacy_analysis_results",
         "privacy_memory_candidates",
@@ -853,5 +983,148 @@ async def test_health_analysis_rejects_raw_or_hash_drift_before_provider_call(
         assert drifted.json()["detail"]["code"] == "HEALTH_PREVIEW_HASH_MISMATCH"
         assert router.client.calls == [], ORACLE
         assert await _analysis_counts(group) == (0, 0, 0), ORACLE
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_health_deletion_removes_full_provenance_chain_and_retains_audit(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepared_deletion_app(tmp_path)
+    app, group, key, token, token_id, _analysis_token, source_hash = prepared
+    try:
+        assert await _chain_counts(group) == (1, 1, 1, 1), ORACLE
+        response = await _delete_source(
+            app,
+            key,
+            token,
+            token_id,
+            source_hash,
+            nonce="health-delete-complete-nonce-0001",
+        )
+        assert response.status_code == 200, response.text
+        receipt = response.json()
+        assert receipt["status"] == "completed", ORACLE
+        assert receipt["source_hash"] == source_hash, ORACLE
+        assert len(receipt["deleted_object_hashes"]) == 4, ORACLE
+        assert await _chain_counts(group) == (0, 0, 0, 0), ORACLE
+        cursor = await group.conn.execute("SELECT COUNT(*) FROM privacy_ingestion_audit")
+        row = await cursor.fetchone()
+        assert int(row[0]) >= 3, ORACLE
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_health_deletion_completed_receipt_is_idempotent_after_source_is_gone(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepared_deletion_app(tmp_path)
+    app, group, key, token, token_id, _analysis_token, source_hash = prepared
+    try:
+        first = await _delete_source(
+            app,
+            key,
+            token,
+            token_id,
+            source_hash,
+            nonce="health-delete-first-nonce-0000001",
+        )
+        second = await _delete_source(
+            app,
+            key,
+            token,
+            token_id,
+            source_hash,
+            nonce="health-delete-second-nonce-000001",
+        )
+        assert first.status_code == second.status_code == 200, ORACLE
+        assert second.json() == first.json(), ORACLE
+        assert await _chain_counts(group) == (0, 0, 0, 0), ORACLE
+        cursor = await group.conn.execute("SELECT COUNT(*) FROM privacy_deletion_receipts")
+        row = await cursor.fetchone()
+        assert int(row[0]) == 1, ORACLE
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_health_deletion_partial_failure_is_durable_and_reentrant(
+    tmp_path: Path,
+) -> None:
+    import aiosqlite
+
+    prepared = await _prepared_deletion_app(tmp_path)
+    app, group, key, token, token_id, _analysis_token, source_hash = prepared
+    store = group.privacy_ingestion_store
+    original = store._delete_stage_rows
+
+    async def fail_once(_groups: Any) -> None:
+        raise aiosqlite.OperationalError("injected deletion failure")
+
+    try:
+        store._delete_stage_rows = fail_once
+        failed = await _delete_source(
+            app,
+            key,
+            token,
+            token_id,
+            source_hash,
+            nonce="health-delete-failed-nonce-00001",
+        )
+        assert failed.status_code == 503, failed.text
+        assert failed.json()["detail"]["code"] == "HEALTH_DELETION_INCOMPLETE"
+        assert await _chain_counts(group) == (1, 1, 1, 1), ORACLE
+        cursor = await group.conn.execute(
+            "SELECT request_id, status, started_at FROM privacy_deletion_receipts"
+        )
+        failed_receipt = await cursor.fetchone()
+        assert failed_receipt["status"] == "failed", ORACLE
+
+        store._delete_stage_rows = original
+        completed = await _delete_source(
+            app,
+            key,
+            token,
+            token_id,
+            source_hash,
+            nonce="health-delete-reentry-nonce-0001",
+        )
+        assert completed.status_code == 200, completed.text
+        assert completed.json()["request_id"] == failed_receipt["request_id"], ORACLE
+        completed_started_at = datetime.fromisoformat(completed.json()["started_at"])
+        failed_started_at = datetime.fromisoformat(failed_receipt["started_at"])
+        assert completed_started_at == failed_started_at, ORACLE
+        assert await _chain_counts(group) == (0, 0, 0, 0), ORACLE
+    finally:
+        store._delete_stage_rows = original
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_health_deletion_requires_exact_capability_and_preserves_chain_on_reject(
+    tmp_path: Path,
+) -> None:
+    prepared = await _prepared_deletion_app(tmp_path)
+    app, group, key, _delete_token, _delete_token_id, analysis_token, source_hash = prepared
+    cursor = await group.conn.execute(
+        "SELECT token_id FROM device_capability_grants "
+        "WHERE capabilities = '[\"health.analysis.run\"]'"
+    )
+    row = await cursor.fetchone()
+    assert row is not None, ORACLE
+    try:
+        rejected = await _delete_source(
+            app,
+            key,
+            analysis_token,
+            str(row["token_id"]),
+            source_hash,
+            nonce="health-delete-wrong-capability-001",
+        )
+        assert rejected.status_code == 401, rejected.text
+        assert rejected.json()["detail"]["code"] == "HEALTH_CAPABILITY_DENIED", ORACLE
+        assert await _chain_counts(group) == (1, 1, 1, 1), ORACLE
     finally:
         await group.close()
