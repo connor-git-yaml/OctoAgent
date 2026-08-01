@@ -67,6 +67,9 @@ class DeviceCapability(StrEnum):
     APPROVAL_DECIDE = "approval.decide"
     MEMORY_CANDIDATE_READ = "memory_candidate.read"
     MEMORY_CANDIDATE_DECIDE = "memory_candidate.decide"
+    HEALTH_REVIEW_SUBMIT = "health.review.submit"
+    HEALTH_ANALYSIS_RUN = "health.analysis.run"
+    HEALTH_SOURCE_DELETE = "health.source.delete"
 
 
 class DeviceAudience(StrEnum):

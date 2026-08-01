@@ -49,3 +49,13 @@
   unit 21 tests（18 passed、3 项既有真机测试显式 skipped）、Release iPhoneOS arm64
   warnings-as-errors build、F152/F153/F154/F158 authority 5 tests 与 repository architecture
   gate 全部通过。
+- 2026-08-02：T006 三组 Python L4 合同共 11 个 node 取得真实 RED，全部只命中
+  `F154_HEALTH_PROTOCOL_MISSING`。GREEN 在 F152 既有 `DeviceCapability` 中只增加
+  `health.review.submit`、`health.analysis.run`、`health.source.delete`，并为 F154 consumer
+  收窄 exact purpose、Health provenance/data type、field manifest、preview hash；unknown/raw/
+  broadened 字段均 fail closed。F153 contract schema 继续只暴露旧九项，DeviceTrust token
+  service 继续只签发 ready/profile 两项，未提前开放 health route。F154 consent、packet hash、
+  owner/device 与 provenance lineage 继续复用 F152 `approve_review_bundle` 和通用授权策略，
+  没有第二 capability/consent engine。REFACTOR 11/11、Core/Protocol/Policy 全量 737 tests、
+  F152/F153/F154/F158 authority 5 tests、Ruff/C901/py_compile 与 repository architecture gate
+  全部通过。

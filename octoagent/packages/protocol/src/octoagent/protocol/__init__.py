@@ -45,6 +45,9 @@ from .models import (
     A2AUpdatePayload,
 )
 from .privacy_ingestion import (
+    F154_HEALTH_DATA_TYPES,
+    F154_HEALTH_FIELD_MANIFEST,
+    F154_HEALTH_PURPOSE,
     PrivacyConsumer,
     PrivacyContractName,
     privacy_contract_bundle,
@@ -82,6 +85,9 @@ __all__ = [
     "DeviceTokenRequest",
     "DeviceTokenResponse",
     "DeviceTrustErrorResponse",
+    "F154_HEALTH_DATA_TYPES",
+    "F154_HEALTH_FIELD_MANIFEST",
+    "F154_HEALTH_PURPOSE",
     "MobileDeviceProfileResponse",
     "MobileReadyResponse",
     "OwnerDeviceProjection",

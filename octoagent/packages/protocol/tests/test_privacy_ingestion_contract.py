@@ -211,14 +211,10 @@ def test_f153_identity_fixtures_roundtrip_without_private_or_service_secret() ->
     assert "signature" not in encoded
 
 
-@pytest.mark.parametrize("consumer_name", ["F154", "F155"])
-def test_ingestion_consumer_fixtures_roundtrip(
-    consumer_name: str,
-) -> None:
+def test_f155_ingestion_consumer_fixtures_roundtrip() -> None:
     consumer, names, _, validate = _contract()
-    target = consumer(consumer_name)
     for name, payload in _ingestion_fixtures().items():
-        model = validate(target, names(name), payload)
+        model = validate(consumer.F155, names(name), payload)
         assert set(model.model_dump()) == set(payload)
 
 

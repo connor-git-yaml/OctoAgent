@@ -15,7 +15,7 @@
   user-action authorization、toShare empty 与 raw zero-retention
 - [x] **T005 [SWIFT L4][RED→GREEN→REFACTOR]** finite import coordinator、取消/expiry/
   offline/revoked/delete 与内存清理
-- [ ] **T006 [PYTHON L4][RED→GREEN→REFACTOR]** exact health capabilities、F154 consumer
+- [x] **T006 [PYTHON L4][RED→GREEN→REFACTOR]** exact health capabilities、F154 consumer
   schema、raw field forbid 与 F152 consent/lineage
 - [ ] **T007 [GATEWAY L3][RED→GREEN→REFACTOR]** mobile health review route，F153
   Host/proof/replay/revoke + F152 store/audit

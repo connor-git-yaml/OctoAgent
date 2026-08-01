@@ -235,7 +235,7 @@ def test_canonical_hash_is_stable_and_rejects_ambiguous_values() -> None:
     ), ORACLE
 
 
-def test_device_capability_vocabulary_is_finite_and_excludes_future_sources() -> None:
+def test_device_capability_vocabulary_is_finite_through_f154() -> None:
     models = _capability_models()
     assert [capability.value for capability in models.DeviceCapability] == [
         "device.ready.read",
@@ -247,12 +247,15 @@ def test_device_capability_vocabulary_is_finite_and_excludes_future_sources() ->
         "approval.decide",
         "memory_candidate.read",
         "memory_candidate.decide",
+        "health.review.submit",
+        "health.analysis.run",
+        "health.source.delete",
     ], CAPABILITY_ORACLE
     assert [audience.value for audience in models.DeviceAudience] == ["octo-gateway"], (
         CAPABILITY_ORACLE
     )
     assert all(
-        "health" not in capability.value and "calendar" not in capability.value
+        "calendar" not in capability.value and "*" not in capability.value
         for capability in models.DeviceCapability
     ), CAPABILITY_ORACLE
 
