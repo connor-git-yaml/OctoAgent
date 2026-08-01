@@ -146,9 +146,11 @@
   "test_paths": [
     "octoagent/apps/ios/OctoAgentTests/HealthImportTests.swift",
     "octoagent/apps/ios/OctoAgentUITests/HealthImportFlowUITests.swift",
+    "octoagent/apps/gateway/tests/test_device_trust_api.py",
     "octoagent/apps/gateway/tests/test_mobile_health_ingestion.py",
     "octoagent/packages/core/tests/test_f154_health_capabilities.py",
     "octoagent/packages/policy/tests/test_f154_health_policy.py",
+    "octoagent/packages/protocol/tests/test_device_trust_contract.py",
     "octoagent/packages/protocol/tests/test_f154_health_contract.py",
     "octoagent/tests/gate/test_f154_architecture_authority.py"
   ],
@@ -196,5 +198,5 @@
     "Web Access Cookie"
   ],
   "scope_hash_algorithm": "sha256(canonical_json(document_without_approved_scope_sha256))",
-  "approved_scope_sha256": "50cc411a1cc7b5af8b70046f60468e63bfc457a1dd77dae0f640bbd9d25b6723"
+  "approved_scope_sha256": "d897373bf8d20272dc6e78675981a5920e68e80833eb5732ca94cad5a90aa0e0"
 }
