@@ -35,6 +35,12 @@
       "role": "existing_f154_consumer_schema"
     },
     {
+      "path": "octoagent/packages/protocol/src/octoagent/protocol/device_trust.py",
+      "state": "existing_locked",
+      "owner": "protocol",
+      "role": "existing_mobile_profile_health_scope"
+    },
+    {
       "path": "octoagent/packages/core/src/octoagent/core/store/privacy_ingestion_store.py",
       "state": "existing_locked",
       "owner": "core",
@@ -51,6 +57,12 @@
       "state": "existing_locked",
       "owner": "gateway",
       "role": "existing_mobile_health_path_boundary"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/device_trust.py",
+      "state": "existing_locked",
+      "owner": "gateway",
+      "role": "existing_health_capability_issuance"
     },
     {
       "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/mobile_health.py",
@@ -87,6 +99,24 @@
       "state": "existing_locked",
       "owner": "ios",
       "role": "connected_slice_composition"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/App/RegistrationView.swift",
+      "state": "existing_locked",
+      "owner": "ios",
+      "role": "connected_health_transport_composition"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/DeviceTrust/DeviceTrustModels.swift",
+      "state": "existing_locked",
+      "owner": "ios",
+      "role": "existing_health_transport_models"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/DeviceTrust/DeviceTrustClient.swift",
+      "state": "existing_locked",
+      "owner": "ios",
+      "role": "single_health_signed_transport_client"
     },
     {
       "path": "octoagent/apps/ios/OctoAgent/Health/HealthImportModels.swift",
@@ -166,5 +196,5 @@
     "Web Access Cookie"
   ],
   "scope_hash_algorithm": "sha256(canonical_json(document_without_approved_scope_sha256))",
-  "approved_scope_sha256": "73f8c67a5967af23a88d243d1b1e9534132a12d46a69cd248e38f1b13e0b2a7c"
+  "approved_scope_sha256": "50cc411a1cc7b5af8b70046f60468e63bfc457a1dd77dae0f640bbd9d25b6723"
 }

@@ -115,6 +115,20 @@ def test_f154_exact_architecture_authority_is_fail_closed(tmp_path: Path) -> Non
         )
         == "existing_review_packet_read_boundary"
     ), f"{ORACLE}: analysis cannot consume the stored review through the single F152 store"
+    assert (
+        production_roles.get("octoagent/apps/ios/OctoAgent/DeviceTrust/DeviceTrustClient.swift")
+        == "single_health_signed_transport_client"
+    ), f"{ORACLE}: health cannot create a second signed URLSession client"
+    assert (
+        production_roles.get(
+            "octoagent/apps/gateway/src/octoagent/gateway/services/device_trust.py"
+        )
+        == "existing_health_capability_issuance"
+    ), f"{ORACLE}: health capabilities must come from the existing device token issuer"
+    assert (
+        production_roles.get("octoagent/apps/ios/OctoAgent/App/RegistrationView.swift")
+        == "connected_health_transport_composition"
+    ), f"{ORACLE}: connected UI must inject the existing device transport"
 
     cases: tuple[Callable[[dict[str, Any]], None], ...] = (
         lambda item: item.update(feature_id="F155"),
