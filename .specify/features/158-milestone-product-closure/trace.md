@@ -305,3 +305,7 @@
   `Sign in ・ Cloudflare Access`，URL 属于 `octo.maojiwang.work` Access 登录边界；
   没有已认证的 OctoAgent 产品页。该标签已原样保留给用户，没有读取 cookie/
   localStorage、代填账号或触发登录。T014 继续 unchecked。
+- 2026-08-01：用户明确接受 F155 方案 A：iOS 系统层允许 EventKit 日历 full access，
+  但 Octo App/代码保持物理只读，所有 create/update/delete 写路径为零。F155
+  Product Decision、Design、Tasks Gate 已同步通过；Implement/Verify 仍被 F153/F154
+  上游硬门关闭，不能把产品决策冒充 Feature 完成。

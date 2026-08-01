@@ -5,7 +5,7 @@
 - Research：PASS
 - Design：`DRAFT_COMPLETE_GATE_CLOSED`
 - Tasks：`DRAFT_COMPLETE_GATE_CLOSED`
-- Implement：`CLOSED_ON_F154_F155_DECISIONS`
+- Implement：`CLOSED_ON_F153_F154_F155_VERIFY`
 - Verify：`CLOSED`
 
 ## 背景
@@ -24,15 +24,16 @@ F156 production 开始前必须：
 
 1. F153 `GATE_VERIFY=true`；
 2. F154 要么 `GATE_VERIFY=true`，要么经产品决定从本次 companion 范围移除；
-3. F155 必须完成方案 A/B 产品决定；若保留，则在其 Verify 前 calendar surface
-   只能显示明确的“尚未开放”，不得伪造数据；
+3. F155 方案 A 已接受：系统 full access、Octo 物理只读；在其 Verify 前 calendar
+   surface 只能显示明确的“尚未开放”，不得伪造数据；
 4. F151 单一 architecture authority 批准 F156 exact paths/symbols；
 5. 当前 Gateway OpenAPI/事件/动作清单重新 recon，禁止 UI 发明后端不存在的动作。
 
 第 5 项已由 `inventories/mobile-api-recon.v1.json` 完成当前字节只读 recon：现有
 mobile hostname allowlist 只有 enrollment/token/ready/device-profile 五条 F153 路由；
 Chat、Task、Approval、Memory 与 Web Notification 路由仍是 Web front-door 专用，
-不能被 iOS 直接复用。其余四项前置门继续关闭。
+不能被 iOS 直接复用。F155 产品决定已经闭合，但 F153/F154/F155 Verify 与 F151
+authority 仍关闭。
 
 安全边界的权威清单见 `threat-model.md`；其中 service token/WebView 绕过、
 APNs 正文、后台敏感动作、快照泄漏与 revoked 竞争都必须在 Implement 前有对应

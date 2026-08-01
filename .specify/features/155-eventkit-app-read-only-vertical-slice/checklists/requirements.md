@@ -5,7 +5,7 @@
 - [x] Apple 没有 calendar read-only permission
 - [x] full access 系统能力包含 create/edit/delete
 - [x] 方案 A/B 与推荐理由明确
-- [ ] 用户明确选择 A 或 B
+- [x] 用户明确选择 A（2026-08-01，`user-f155-option-a-20260801`）
 - [x] 未来 24h/3d/7d，最大 7d
 - [x] title local visible / packet default absent
 - [x] Claude early visual language + SwiftUI native semantics
@@ -23,9 +23,9 @@
 ## Gate
 
 - [x] GATE_RESEARCH=true
-- [ ] GATE_PRODUCT_DECISION=true
-- [ ] GATE_DESIGN=true
-- [ ] GATE_TASKS=true
+- [x] GATE_PRODUCT_DECISION=true
+- [x] GATE_DESIGN=true
+- [x] GATE_TASKS=true
 - [ ] F153 GATE_VERIFY=true
 - [ ] F154 GATE_VERIFY=true
 - [ ] T003-T013 RED→GREEN→REFACTOR

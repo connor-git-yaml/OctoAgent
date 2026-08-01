@@ -51,8 +51,8 @@
   Cloudflare live/真机/Verify 仍阻断）
 - [ ] **T028** 完成 F154 HealthKit Feature（Research/Design/Tasks Gate 已通过；
   production Implement 与 Verify 继续被 F153 T014/T015/T018 硬门关闭）
-- [ ] **T029** 完成 F155 EventKit 决策门与 Feature（Research/决策档案已创建；
-  用户 A/B 决定、Design/Tasks Gate 与 Implement/Verify 未完成）
+- [ ] **T029** 完成 F155 EventKit Feature（方案 A 已接受：系统 full access、Octo
+  物理只读；Research/Design/Tasks Gate 已通过，Implement/Verify 仍等待 F153/F154）
 - [ ] **T030** 完成 F156 SwiftUI Native Companion Feature（Research、Design/Tasks 草案、
   40 场景矩阵与 current API recon 已创建；当前 mobile routes=5、产品 gaps=8，上游
   Gate、production 与 E2E 未完成）

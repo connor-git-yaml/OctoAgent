@@ -3,8 +3,8 @@
 ## 结论
 
 F156 应在 F153 连接能力之上建立一个四区原生 shell，而不是把 Web 三栏缩放到手机。
-当前可以完成产品/技术/视觉与场景设计草案，但 Design/Tasks Gate 仍需等待
-F154/F155 边界确定和 Gateway recon。
+当前可以完成产品/技术/视觉与场景设计草案；Gateway recon 与 F155 方案 A 决策已
+完成，但 Design/Tasks Gate 仍需等待 F153/F154/F155 Verify。
 
 ```text
 F153 identity + single URLSession
@@ -30,4 +30,4 @@ F153 identity + single URLSession
 - Research：PASS
 - Design Draft：完整
 - Tasks Draft：完整
-- Gate：false，等待 F153 Verify、F154 状态、F155 方案 A/B 与 current API recon
+- Gate：false；current API recon 与 F155 方案 A 决策已完成，仍等待 F153/F154/F155 Verify

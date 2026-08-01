@@ -14,11 +14,12 @@ Draft complete，Gate HARD STOP。
 与 test layers 已可审查。当前 API recon 已完成，并确认 mobile hostname 只有 F153
 enrollment、token challenge、token、ready、device-profile 这 5 条路由；
 Chat/Task/Approval/Memory/APNs 产品合同仍需后续实现。
-以下上游尚未满足：
+F155 已于 2026-08-01 接受方案 A：系统 full access、Octo 物理只读；该产品决定不再是
+阻断。以下上游尚未满足：
 
 - F153 Cloudflare mobile live / real iPhone / Verify；
 - F154 Implement/Verify；
-- F155 full-access A/B 产品决定；
+- F155 Implement/Verify；
 
 在这些事实确定前，把 Draft 标为 PASS 会允许 UI 发明后端动作或提前展示敏感 slice。
 

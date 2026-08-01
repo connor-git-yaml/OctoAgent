@@ -3,10 +3,10 @@
 ## 状态
 
 - Research：PASS
-- Product Decision：`PENDING_USER_DECISION`
-- Design：`CLOSED_ON_PRODUCT_DECISION`
-- Tasks：`CLOSED_ON_PRODUCT_DECISION`
-- Implement：`CLOSED_ON_F154_VERIFY`
+- Product Decision：`OPTION_A_ACCEPTED_2026-08-01`
+- Design：PASS
+- Tasks：PASS
+- Implement：`CLOSED_ON_F153_F154_VERIFY_AND_F151_AUTHORITY`
 - Verify：`CLOSED`
 
 ## 背景
@@ -33,8 +33,10 @@ capability、协议、代码与测试层物理删除所有写路径，而不是�
 不请求日历权限；F156 不展示日历入口，也不以截图、手工输入或 Web Cookie 伪装
 日程感知。M12 其余原生 iOS、Health 与 companion 能力继续推进。
 
-在收到明确选择前，F155 只允许 Research/Decision artifacts，不允许 entitlement、
-usage description、Swift/Python production、测试行为 RED 或 Gateway route。
+2026-08-01，用户明确选择方案 A，并接受上述系统 `full access` 与 Octo
+App-read-only 的差异。决策 review identity 为
+`user-f155-option-a-20260801`。该决定只解除产品决策门，不等于授权提前添加
+entitlement、usage description、Swift/Python production、行为 RED 或 Gateway route。
 
 ## 前置硬门
 

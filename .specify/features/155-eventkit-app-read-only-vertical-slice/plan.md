@@ -3,15 +3,16 @@
 ## Gate
 
 - Research：PASS
-- Product Decision：`PENDING_USER_DECISION`
-- Design/Tasks：`CLOSED_ON_PRODUCT_DECISION`
-- Implement：`CLOSED_ON_F154_VERIFY`
+- Product Decision：`OPTION_A_ACCEPTED_2026-08-01`
+- Design/Tasks：PASS
+- Implement：`CLOSED_ON_F153_F154_VERIFY_AND_F151_AUTHORITY`
 - Verify：`CLOSED`
 
 ## Phase 0：决策与 architecture authority
 
-1. 用户明确选择保留或移除 F155。
-2. 若保留，把 decision text/date/review identity 写入 Gate。
+1. 用户已明确选择保留 F155，并接受系统 full access + Octo App-read-only。
+2. decision text/date/review identity 已写入 Gate：
+   `user-f155-option-a-20260801`。
 3. F154 Verify 后，在 F151 单一 checker 登记 exact paths/symbols。
 4. RED 以 `F155_ARCHITECTURE_AUTHORITY_MISSING` 见红。
 5. 拒绝 calendar mutation、Reminders/Contacts、第二 store/client/session/runner。

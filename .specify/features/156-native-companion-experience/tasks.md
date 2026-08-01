@@ -1,11 +1,12 @@
 # F156 Tasks
 
-> 当前是可审查草案，不是已批准执行列表。F153/F154/F155 Gate 未齐，所有生产与
-> 行为 RED 均关闭。
+> 当前是可审查草案，不是已批准执行列表。F155 方案 A 已接受，但 F153/F154/F155
+> Verify Gate 未齐，所有生产与行为 RED 均关闭。
 
 - [x] **T000 [RESEARCH/DRAFT]** Apple 官方调研、产品结构、Data Model、Contract、
   40 场景矩阵、Plan/Tasks draft
-- [ ] **T001 [UPSTREAM]** F153 Verify、F154 状态与 F155 A/B 决策完成
+- [ ] **T001 [UPSTREAM]** F153 Verify、F154 Verify 与 F155 Verify 完成（F155
+  方案 A 产品决定已完成）
 - [x] **T002 [RECON]** current OpenAPI/event/action 双向 inventory；OpenAPI canonical
   SHA `21e052dda301de65dea1bb192ade88039320db9460b329eeda3b78858dfdd7e3`，
   当前 mobile routes=5、产品 contract gaps=8

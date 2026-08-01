@@ -2,7 +2,7 @@
 
 ## 审计基线
 
-- 审计日期：2026-07-31
+- 审计日期：2026-08-01
 - `origin/master`：`db3214fff722c6f969baf99528a76fc03a1e21a1`
 - F149 最终 design export：
   `1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`
@@ -15,12 +15,12 @@
 | 要求 | 当前证据 | 判定 | 缺口 | owner |
 |---|---|---|---|---|
 | M11 Web 视觉保持早期 Claude Design | 早期 frame、恢复后 1440 截图、14 个 pixel snapshot、逐 surface 结构合同、云端最终导出、当前个人部署 CSS | PROVEN_BRANCH_CI_DEPLOYED | 当前运行提交已部署；登录后旅程与总 completion audit 仍缺 | F158 / F149 |
-| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access 前边界通过；现有 Chrome 标签仍停在 Access 登录页，没有可复用的已认证 OctoAgent 页面 | F158 / F150 |
-| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery、浏览器接管诊断与 2026-07-31 只读复验 | PARTIAL | Gateway/cloudflared running、loopback health 200、Access 302、Settings projection `pending_verification`；Chrome 可读取现有标签标题/URL并确认登录边界，但登录需用户完成 | F158 / F150 |
+| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access 已登录并打开真实三栏工作台；过期、登出、重新认证与完整 SPA/API/SSE 动作链仍缺 | F158 / F150 |
+| F150 正式验证报告 | `verification/verification-report.md`、个人部署 connector recovery、浏览器登录态与 2026-08-01 只读复验 | PARTIAL | Gateway/cloudflared running；Access 已登录；snapshot=`ready`、diagnostics=`degraded`，原因=`recovery,memory`；完整认证生命周期仍缺 | F158 / F150 |
 | Web 功能 E2E | 11 个 Playwright spec / 39 nodes | PROVEN_BRANCH_CI_DEPLOYED | 2026-07-31 当前分支完整 `39/39`、retries=0；当前 runtime 已部署 | F158 |
 | Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_BRANCH_CI_DEPLOYED | 主框架与 9 surface + 真实任务详情进入像素门；部署 CSS map 与分支一致 | F158 |
 | 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
-| 原生 iOS 可启动 | iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 12/12 + detached clean-checkout 12/12 | PROVEN_PUSHED（F153 scope） | F153 T001-T013/T016/T017 registration 已真实启动并复验；F154 Research/Design/Tasks Gate 已通过但 production=0；F155 只完成 Research/决策档案；F156 只完成草案、40 场景矩阵与 API recon；完整 companion 与真机仍缺 | F153-F156 |
+| 原生 iOS 可启动 | iOS Simulator 完整 scheme 12/12 + detached clean-checkout 12/12；真 iPhone 已连接并启用 Developer Mode | PROVEN_PUSHED（F153 Simulator scope） | F155 方案 A 与 Design/Tasks Gate 已通过；本机仍无 Apple Development signing identity，真机 App 尚未安装；F154-F156 production=0 | F153-F156 |
 | iOS 功能 E2E | Swift unit 9/9、Simulator UI 3/3、六态冷启动；F153 live 写前 focused 39 pass | PARTIAL | F153 registration 已证，mobile live 写入/回滚矩阵已冻结但未执行；F154 exact HealthKit 场景与测试矩阵已冻结但未执行；F155/F156 已有设计合同但行为 E2E=0；真机及 F154-F156 行为仍缺 | F153-F156 |
 | iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；F154 已冻结 Claude early + SwiftUI native visual contract，但完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
 | Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_BRANCH_CI_DEPLOYED | 最终总 completion audit 尚未完成 | F158 |
@@ -46,7 +46,7 @@
 | M9 | 完成 | 四层测试门、F151/F157 corrective 与 exact master CI 已闭环 | PROVEN | 最终总审计继续复用 run `30198514576` 与当前 F158 branch CI |
 | M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
 | M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 10 个业务 surface（含任务详情）视觉及功能 E2E 通过；Claude 云端谱系已清理并导出；当前 runtime 已部署 | PROVEN_BRANCH_CI_DEPLOYED | 登录后个人旅程与最终 completion audit |
-| M12 | In Progress | F152 Verify；F153 T001-T013/T016/T017 已实现，Simulator registration 功能/视觉通过；mobile live preflight 与 39 个 focused origin 合同通过但未执行外部写入；F154 Research/Design/Tasks Gate 已通过；F155 Research/决策档案和 F156 40 场景 Design/Tasks 草案/API recon 已建立 | PARTIAL | Cloudflare mobile live、真机、F153 Verify、F155 A/B 决定、F154-F156 Implement/Verify 与完整 iOS E2E |
+| M12 | In Progress | F152 Verify；F153 Simulator registration 功能/视觉通过；`ios.maojiwang.work` 与 exact mobile path Bypass 已配置且负向 origin 探针符合合同；真 iPhone 已连接；F154 Gate 通过；F155 方案 A 与 Design/Tasks Gate 通过；F156 40 场景草案/API recon 已建立 | PARTIAL | 真机签名安装、device enrollment/approval/signature/replay/revoke、F153 Verify、F154-F156 Implement/Verify 与完整 iOS E2E |
 
 该矩阵的 `PROVISIONAL` 不是重新否定历史交付，而是区分“历史报告存在”与“当前
 Milestone Goal 已在同一 commit/环境复验”。最终 completion audit 只允许将取得当前

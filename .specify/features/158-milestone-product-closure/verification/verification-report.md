@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-- 日期：2026-07-31
+- 日期：2026-08-01
 - 状态：`PARTIAL`
 - `GATE_VERIFY=false`
 - 当前分支：`codex/f158-milestone-product-closure`
@@ -106,7 +106,8 @@ F117 前的 WorkerProfile/多 Session 类当作当前 schema。该批修改完�
 登录态 SPA/API/SSE 也未复验。个人实例的 OpenAI Codex refresh token 已失效；
 F153 Simulator 已通过但没有连接
 真 iPhone，Cloudflare mobile live 与 F153 Verify 仍缺；F154 只完成 Research/Design/Tasks
-Gate，F155 只完成 Research/产品决策档案，F156 完成含 40 场景矩阵的
+Gate，F155 已接受方案 A（系统 full access、Octo 物理只读）并通过
+Research/Design/Tasks Gate，F156 完成含 40 场景矩阵的
 Design/Tasks 草案与 current mobile API recon（5 routes / 8 product gaps），三者
 production 和产品 E2E 均为 0；iOS
 变更已提交、推送并在干净 detached worktree 复验；权威 GitHub Actions run
@@ -247,11 +248,11 @@ checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均�
 构建工具会为 JS chunk 生成不同文件名，因此没有把两次 build 的完整 asset
 目录误报为逐字节相同。
 
-内置浏览器与 Chrome 均能枚举或打开 Access 登录页；最新只读 Chrome 复核已能读取
-现有标签的标题和 URL，确认其仍是 `Sign in ・ Cloudflare Access` 登录边界，而不是
-已认证 OctoAgent 产品页。本轮没有读取浏览器 cookie/local storage、代填账号或触发
-登录。因此登录后的 SPA、API、SSE、刷新、过期、重新认证、登出和 Settings
-remote-access 仍保持 MISSING。
+Chrome 已由用户完成 Cloudflare Access 登录并打开真实 OctoAgent 三栏工作台；只读
+页面事实显示顶层 snapshot=`ready`，诊断 overall=`degraded`，原因精确为
+`recovery` 与 `memory`，UI 因此诚实显示“受限运行”，不是旧快照误判。当前仍缺
+过期、登出、重新认证、恢复及完整 SPA/API/SSE 动作链，所以 T014 继续保持
+unchecked，不能把“已登录并读取一次页面”冒充完整远程旅程。
 
 浏览器接管前诊断已确认 Chrome 进程、扩展安装/启用和 native host 均为 PASS；目标
 登录标签已原样保留给用户。下一步必须由用户在该标签完成 Access 登录，再复验同一
@@ -262,9 +263,9 @@ remote-access 仍保持 MISSING。
 停在 Access 登录页，没有可复用的已认证 OctoAgent 页面。该事实只把“本机产品入口”
 保持为 PASS，不能把远程认证旅程提升为 PASS。
 
-Gateway 日志同时显示 OpenAI Codex refresh token 已被复用并在刷新时返回 401。ready
-只证明 provider route 配置存在，不证明真实模型对话可用；重新登录 provider 与真实
-对话复验是独立未完成项。
+OpenAI Codex 已由用户重新授权；当前个人部署的 `octo doctor --live` 已真实调用
+`gpt-5.5` 并通过。真实对话终态、事件链与无 Echo 证据仍未完成，因此 T045 继续
+unchecked，doctor 单点成功不能冒充产品对话闭环。
 
 当前部署正式重登录入口为
 `~/.octoagent/bin/octo setup --provider openai-codex`。该流程会启动 PKCE 授权、
@@ -293,19 +294,22 @@ plist 早于本次系统 boot，证明描述符当时已经存在；但当前进
 - Xcode：`26.6 (17F113)`
 - iOS runtime：`26.5 (23F77)`
 - F153 Simulator registration：PASS
-- Cloudflare mobile hostname/Bypass/live probe：MISSING
-- F153 live 外部预检：READY（执行仍待单次授权）
-- connected iPhone：`0`
+- Cloudflare mobile hostname/exact-path Bypass：已配置 `ios.maojiwang.work`；匿名
+  origin 负向探针符合 mobile route/device-proof 合同
+- F153 live 外部预检：PASS；真实 enrollment/approval/signature/replay/revoke 仍 MISSING
+- connected iPhone：`1`（iPhone 17 Pro Max，Developer Mode 已启用）
 - F154 HealthKit：Research/Design/Tasks Gate 通过，production/E2E=0
-- F155 EventKit：Research/产品决策档案已建立，A/B 决定未给出，production/E2E=0
+- F155 EventKit：方案 A 已接受，Research/Design/Tasks Gate 通过，production/E2E=0
 - F156 companion：Research/Design/Tasks 草案、40 场景矩阵和 current mobile API
   recon 已建立；当前 5 条 mobile route 仅覆盖 F153，8 项产品合同 gap 未实现，
   Gate/production/E2E=0
 
 ### 真 iPhone
 
-当前没有连接真 iPhone，因此 Secure Enclave、ThisDeviceOnly Keychain、注册/轮换/
-撤销、Wi-Fi/蜂窝切换、前后台恢复与 Apple 权限场景均未验证。
+真实 iPhone 已连接并启用 Developer Mode，但本机尚无 Apple Development codesign
+identity，Xcode Apple Account 登录/签名仍在进行，因此 App 尚未安装到真机。
+Secure Enclave、ThisDeviceOnly Keychain、注册/轮换/撤销、Wi-Fi/蜂窝切换、前后台
+恢复与 Apple 权限场景仍未验证。
 
 ### 后续 Feature
 
@@ -332,11 +336,11 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | GitHub Actions backend deterministic | PASS（run `30604533484`） |
 | personal deployment | PASS（运行提交 `dc8b1b41`；登录后旅程仍缺） |
 | authenticated personal SPA/API/SSE | MISSING |
-| personal real-model conversation | BLOCKED（provider refresh token 401） |
+| personal real-model conversation | PARTIAL（doctor live `gpt-5.5` PASS；真实对话/事件链仍缺） |
 | M10 physical boot attestation | MISSING（等待明确物理重启） |
 | F153 iOS Simulator functional/visual E2E | PASS |
 | F154-F156 complete iOS product E2E | MISSING |
-| real-device security/lifecycle | BLOCKED |
+| real-device security/lifecycle | BLOCKED（设备已连接；Apple Development signing identity 仍缺） |
 | F154-F156 product implementation | CLOSED |
 | current iOS commit / push | PASS（`35d7aa14`；当前部署提交 `dc8b1b41`） |
 | current iOS clean-checkout scheme | PASS（12/12） |

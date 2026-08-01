@@ -4,12 +4,13 @@
 
 - Research：PASS
 - Design/Tasks Draft：complete
-- Design/Tasks Gate：`CLOSED_ON_UPSTREAM_DECISIONS`
+- Design/Tasks Gate：`CLOSED_ON_UPSTREAM_VERIFY`
 - Implement/Verify：`CLOSED`
 
 ## Phase 0：recon / authority
 
-1. F153 Verify、F154 状态与 F155 A/B 决定完成。
+1. F153 Verify、F154 Verify 与 F155 Verify 完成；F155 方案 A 产品决定已于
+   2026-08-01 完成。
 2. [完成] 从 current OpenAPI/event/action inventory 建 exact mobile contract map；当前
    仅 F153 五条 mobile route 可达，产品 route gap 为 8 项。
 3. F151 checker 登记 F156 exact paths/symbols，先取得 architecture RED。

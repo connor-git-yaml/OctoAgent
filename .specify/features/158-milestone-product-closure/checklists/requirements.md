@@ -39,7 +39,8 @@
 - [ ] F153 真机 device trust/transport 通过
 - [x] F154 HealthKit Research/Design/Tasks Gate 通过，production 仍由 F153 Verify 关闭
 - [ ] F154 HealthKit 通过
-- [ ] F155 EventKit 决策门通过或明确移出范围
+- [x] F155 EventKit 方案 A 决策门通过（系统 full access、Octo 物理只读）
+- [ ] F155 EventKit Implement/Verify 通过
 - [ ] F156 Native Companion 场景通过
 - [x] 模拟器视觉回归通过（F153 registration 六状态、AXXXL、Reduce Motion）
 - [ ] 真机专属场景通过

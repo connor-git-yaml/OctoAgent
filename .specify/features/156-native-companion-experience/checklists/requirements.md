@@ -9,7 +9,7 @@
 - [x] SwiftUI native navigation/a11y divergence ledger
 - [x] 40-row startup/function/visual scenario matrix
 - [x] current Gateway actions recon（5 mobile routes / 8 product gaps）
-- [ ] F155 A/B 决策
+- [x] F155 方案 A 决策（系统 full access、Octo 物理只读）
 
 ## Architecture / Privacy
 
@@ -28,7 +28,8 @@
 - [ ] GATE_TASKS=true
 - [ ] F153 GATE_VERIFY=true
 - [ ] F154 resolved
-- [ ] F155 decision/resolved
+- [x] F155 decision resolved
+- [ ] F155 GATE_VERIFY=true
 - [ ] T002-T019 RED→GREEN→REFACTOR
 - [ ] T020 Simulator E2E
 - [ ] T021 visual/a11y

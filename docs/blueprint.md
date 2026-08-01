@@ -12,13 +12,13 @@
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
 - 版本：v0.1（Roadmap 已增量同步至 M12；F152 已 Verify，F153 Simulator Gate 与
-  F154 Research/Design/Tasks Gate 已通过；F155 已建立 Research/产品决策档案，
+  F154 Research/Design/Tasks Gate 已通过；F155 方案 A 与 Design/Tasks Gate 已通过，
   F156 已建立 Research/Design/Tasks 草案、40 场景矩阵与 current mobile API recon）
 - 状态：M0-M11 Delivered；M10 的独立物理启动验收仍待闭环；M12 In Progress
   （F152 T001-T014 已验证；F153 Gateway/device trust/原生 registration App 已完成
   T001-T013、T016、T017，Simulator 功能/视觉/a11y 已通过，真机与 Cloudflare live
   仍未完成；F154 只完成 Research/Design/Tasks Gate，production 仍关闭；
-  F155 等待用户决定是否接受 EventKit OS full access，F156 完成草案与 API recon，
+  F155 已接受 EventKit OS full access + Octo 物理只读，F156 完成草案与 API recon，
   两者 production 均为 0）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - M5 完成日期：2026-05-25（F102 commit `9185862` + F103 同步）
@@ -397,7 +397,7 @@ TLS 边界与 DX 工具（octo config / doctor / onboard / start）。Docker 只
 | **M9 质量保证体系** | ✅ | L1-L4、LLM 网络硬闸、scripted harness、wire replay、三模式 lane、attestation |
 | **M10 部署完成度收尾** | ✅ 功能 | F145/F134/F146/F147 全完成；ATT-129-BOOT 作为独立物理验收保留 |
 | **M11 运行边界收口 + Cloudflare 远程访问 + Web v2** | ✅ | F148/F151/F150/F149 全部完成；电脑保留 Web，手机产品只走 M12 原生 iOS，不以手机浏览器交付 |
-| **M12 原生 iOS + 健康/日程感知** | 🚧 | F152 已 Verify；F153 Gateway/device trust 与原生 registration App 已通过 iOS 26.5 Simulator：42 项 focused regression、12 项 scheme tests、6 状态视觉回归、Dynamic Type、Reduce Motion、generic iPhoneOS Release build、架构与 bundle scan 均通过；F154 Research/Design/Tasks Gate 已通过但 production=0；F155 Research 已通过但等待 OS full-access 产品决策；F156 已有 40 场景 Design/Tasks 草案及 current mobile API recon（5 条 F153 route / 8 项产品 gap），Gate 仍关闭；真机、Cloudflare live、F153 Verify 及 F154-F156 Implement/Verify 仍是硬门 |
+| **M12 原生 iOS + 健康/日程感知** | 🚧 | F152 已 Verify；F153 registration App 已通过 Simulator 功能/视觉/a11y，`ios.maojiwang.work` 与 exact mobile path Bypass 已配置、真 iPhone 已连接，但 Apple Development 签名和完整 enrollment/replay/revoke 仍缺；F154 Research/Design/Tasks Gate 已通过但 production=0；F155 已接受方案 A（系统 full access、Octo 物理只读）并通过 Design/Tasks Gate，production=0；F156 已有 40 场景草案及 API recon，Gate 仍关闭；F153 Verify 及 F154-F156 Implement/Verify 仍是硬门 |
 
 ### 待办汇总
 
@@ -405,7 +405,7 @@ TLS 边界与 DX 工具（octo config / doctor / onboard / start）。Docker 只
 > 历史短板 1-5 ✅ | 旧架构 A1-A7 曾关闭，但 2026-07-20 复审确认 A2 反向依赖再次存在并纳入 F151 | Worker W1-W5 历史状态见审计
 > **M5 增补审计** §14.9-14.13：F084-F088 ✅ / F090-F092 ✅ / F093-F096 ✅ / F097-F100 ✅ / F101-F102 ✅
 
-**当前 P0（2026-07-31）**：M11 已完成。M12 F152 已实现 raw→review→approved
+**当前 P0（2026-08-01）**：M11 已完成。M12 F152 已实现 raw→review→approved
 packet→result→optional Memory candidate 的分层模型、短期 capability/request proof、
 逐次 consent、非敏感 audit、删除级联与跨端 exact schema 已完成 Verify。F153 已实现
 owner/mobile routes、P-256 proof、durable replay/revoke、Secure Enclave/Keychain、
@@ -415,8 +415,9 @@ generic iPhoneOS Release build、架构与 bundle secret scan 均通过。Cloudf
 与真机 Secure Enclave/网络生命周期仍未完成。F154 Apple 官方调研、Spec、Threat
 Model、Data Model、Contract 与 Tasks 已通过 Research/Design/Tasks Gate，但
 HealthKit production/entitlement/行为证据仍为 0。F155 已建立 EventKit 官方
-事实、只读安全边界与决策档案，但用户尚未选择“接受 OS full access
-且 Octo 代码物理只读”或“将 F155 移出 M12”；F156 已建立四区原生产品结构、
+事实和只读安全边界，用户已于 2026-08-01 接受方案 A：系统 full access、Octo
+代码物理只读且写路径为零；Design/Tasks Gate 已通过但 Implement/Verify 未开始。
+F156 已建立四区原生产品结构、
 Design/Tasks 草案、40 行启动/功能/视觉场景矩阵与 current mobile API recon；recon
 确认当前 mobile edge 只有 5 条 F153 route，Chat/Task/Approval/Memory/APNs 仍有 8 项
 产品合同缺口。上游 Gate 未闭合，两者
@@ -427,14 +428,15 @@ Safari/WebView；Web 与 iOS 均以 Claude Design 初稿为视觉/交互基线�
 Web/iOS trust 边界和 Apple 权限门禁见
 [blueprint/milestones.md](blueprint/milestones.md) §M10-M12。
 
-**当前证据边界（F158，2026-07-31）**：F151 当前仓库架构门 `all` 仍通过，
+**当前证据边界（F158，2026-08-01）**：F151 当前仓库架构门 `all` 仍通过，
 证明现有运行/打包边界没有回退；但其 historical v2 index 引用的
 `evidence/local` raw archive 被 `.gitignore` 排除且当前仓库、其他 worktree 与
 本机 `/tmp` 均不可恢复，因此历史 R/G/R archive 不能宣称 clean-checkout
-self-contained。F150 产品代码与 Web Access 架构保持 stable，但当前实例的
-verification projection 仍是 `pending_verification`，owner/last_verified 为空；
-当前 OAuth live、个人实例 mobile hostname/path 和真机验证必须重新取得实时证据，
-不能沿用历史 stable 标签代替。
+self-contained。F150 产品代码与 Web Access 架构保持 stable；用户已完成 Access
+登录并打开真实三栏工作台，但完整过期/登出/重新认证/恢复旅程仍缺。OpenAI Codex
+重授权后 `octo doctor --live` 已通过真实 `gpt-5.5`，真实对话事件链仍缺。个人实例
+`ios.maojiwang.work` 与 exact mobile path Bypass 已配置、真 iPhone 已连接并开启
+Developer Mode；Apple Development 签名、App 安装和设备注册/撤销仍需实时证据。
 
 ### 三条设计哲学（M5 引入）
 

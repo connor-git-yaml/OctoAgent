@@ -50,9 +50,9 @@ Milestone 已交付。
 3. F154：HealthKit 垂直切片。Research/Design/Tasks Gate 已于 2026-07-29 通过，
    exact 范围收敛为 stepCount + sleepAnalysis、24h/3d/7d、本地聚合、当次批准、
    单次分析与删除；production 仍由 F153 T014/T015/T018 硬门关闭。
-4. F155：EventKit OS full-access 决策门与只读实现。Research/决策档案已建立，
-   当前等待用户在“接受 OS full access 但 Octo 代码物理只读”与
-   “将 F155 移出 M12”之间明确选择；production=0。
+4. F155：EventKit OS full-access 决策门与只读实现。用户已于 2026-08-01 明确选择
+   方案 A：接受 iOS 系统日历 full access，但 Octo App/代码保持物理只读、写路径为零；
+   Design/Tasks Gate 已通过，production=0，Implement/Verify 继续等待 F153/F154。
 5. F156：SwiftUI 对话、任务、审批、记忆、连接与通知体验。Research、
    Design/Tasks 草案、40 行启动/功能/视觉矩阵与 current mobile API recon 已建立；
    recon 确认 5 条 F153 mobile route 与 8 项产品 contract gap。上游 Gate 未齐，
@@ -81,8 +81,8 @@ manifest 已不可变回存。当前交付提交已推送、权威 CI 五个 job
 managed checkout 已更新并通过 loopback/Access 边界复验；登录后个人产品旅程、
 iOS F153 Simulator 与 detached clean-checkout scheme 已通过；当前修复提交的权威
 CI 五个 job 全绿。F154 Research/Design/Tasks Gate 已完成，但没有 HealthKit
-production 字节；F155 已建立 Research/产品决策档案，F156 已建立 40 场景
-Design/Tasks 草案与 API recon，但两者 production 均为 0。真机、F153 Verify、
+production 字节；F155 已完成方案 A 产品决策及 Design/Tasks Gate，F156 已建立
+40 场景 Design/Tasks 草案与 API recon，但两者 production 均为 0。真机、F153 Verify、
 F154-F156 Implement/Verify、主线合并与总
 completion audit 仍未完成。
 

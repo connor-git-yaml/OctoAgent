@@ -14,3 +14,6 @@
   exact 只有 5 条 F153 enrollment/token/ready/profile route，Chat/Task/Approval/Memory/
   APNs 共 8 项产品 contract gap。T002 完成，但 F153/F154/F155 上游未齐，Design/Tasks
   Gate 继续 false，production/test behavior 仍为 0。
+- 2026-08-01：用户明确接受 F155 方案 A：系统 EventKit full access、Octo App/代码
+  物理只读、写路径为零。F156 不再等待 A/B 决策，但仍等待 F153/F154/F155 Verify
+  与 F151 authority；Design/Tasks/Implement 继续 false，production/E2E 仍为 0。

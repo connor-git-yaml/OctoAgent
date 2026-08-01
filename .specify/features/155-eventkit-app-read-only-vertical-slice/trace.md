@@ -8,3 +8,8 @@
   calendar mutation path=0。
 - 2026-07-29：Research PASS。用户尚未明确接受系统 full access，因此
   Product/Design/Tasks/Implement 均保持 false；production/test behavior=0。
+- 2026-08-01：用户明确选择方案 A，接受 iOS 系统向 App 授予 calendar events
+  full access，同时要求 Octo 产品、capability、protocol、route 与 EventKit 调用物理
+  只读、mutation path=0。review identity=`user-f155-option-a-20260801`；
+  Product Decision、Design、Tasks Gate 通过，Implement 仍关闭在 F153/F154 Verify
+  与 F151 authority，production/test behavior 仍为 0。

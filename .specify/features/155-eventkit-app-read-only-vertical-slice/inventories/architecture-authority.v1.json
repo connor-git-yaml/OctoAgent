@@ -1,14 +1,20 @@
 {
   "version": 1,
   "feature_id": "F155",
-  "authority_status": "RESEARCH_APPROVED_PRODUCT_DECISION_PENDING",
-  "approval_date": null,
+  "authority_status": "DESIGN_TASKS_APPROVED_IMPLEMENT_BLOCKED_ON_UPSTREAM",
+  "approval_date": "2026-08-01",
+  "product_decision": {
+    "option": "A",
+    "review_identity": "user-f155-option-a-20260801",
+    "system_permission": "calendar_events_full_access",
+    "application_boundary": "read_only_mutation_paths_zero"
+  },
   "architecture_checker": "repo-scripts/check-runtime-architecture.py",
   "preconditions": [
     {
       "feature_id": "F155",
       "required_gate": "GATE_PRODUCT_DECISION",
-      "current_state": false
+      "current_state": true
     },
     {
       "feature_id": "F153",
@@ -63,5 +69,5 @@
     "Web Access Cookie"
   ],
   "scope_hash_algorithm": "sha256(canonical_json(document_without_approved_scope_sha256))",
-  "approved_scope_sha256": null
+  "approved_scope_sha256": "b80a3dd34b13b20cb45e86959832af8ab64172b7984f6c3b266f1976d721c355"
 }
