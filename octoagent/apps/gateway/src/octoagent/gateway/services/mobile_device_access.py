@@ -27,12 +27,16 @@ _MOBILE_PREFIX = "/api/mobile/v1/"
 _MOBILE_STATIC_PATHS = frozenset(
     {
         "/api/mobile/v1/enrollments",
+        "/api/mobile/v1/key-rotations",
         "/api/mobile/v1/tokens",
         "/api/mobile/v1/ready",
         "/api/mobile/v1/device-profile",
     }
 )
 _MOBILE_TOKEN_CHALLENGE_PATTERN = re.compile(r"^/api/mobile/v1/token-challenges/[^/]+$")
+_MOBILE_ROTATION_CHALLENGE_PATTERN = re.compile(
+    r"^/api/mobile/v1/key-rotation-challenges/[^/]+$"
+)
 
 
 class MobileDeviceAccessContractError(ValueError):
@@ -153,7 +157,13 @@ def masked_hostname(value: str) -> str:
 
 
 def _mobile_path_allowed(path: str) -> bool:
-    return path in _MOBILE_STATIC_PATHS or bool(_MOBILE_TOKEN_CHALLENGE_PATTERN.fullmatch(path))
+    return path in _MOBILE_STATIC_PATHS or any(
+        pattern.fullmatch(path)
+        for pattern in (
+            _MOBILE_TOKEN_CHALLENGE_PATTERN,
+            _MOBILE_ROTATION_CHALLENGE_PATTERN,
+        )
+    )
 
 
 def _host_header(scope: Scope) -> str:

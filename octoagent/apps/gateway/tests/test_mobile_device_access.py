@@ -130,6 +130,8 @@ async def test_mobile_hostname_exposes_only_exact_mobile_routes(tmp_path: Path) 
 
     allowed = (
         "/api/mobile/v1/enrollments",
+        "/api/mobile/v1/key-rotation-challenges/device-1",
+        "/api/mobile/v1/key-rotations",
         "/api/mobile/v1/token-challenges/device-1",
         "/api/mobile/v1/tokens",
         "/api/mobile/v1/ready",
@@ -271,6 +273,8 @@ async def test_production_routes_and_service_builder_share_manifest(
     paths = {getattr(route, "path", "") for route in app.routes}
     assert "/api/device-trust/v1/challenges" in paths, ORACLE
     assert "/api/mobile/v1/enrollments" in paths, ORACLE
+    assert "/api/mobile/v1/key-rotation-challenges/{device_id}" in paths, ORACLE
+    assert "/api/mobile/v1/key-rotations" in paths, ORACLE
     assert "/api/mobile/v1/ready" in paths, ORACLE
 
     harness_source = Path(
