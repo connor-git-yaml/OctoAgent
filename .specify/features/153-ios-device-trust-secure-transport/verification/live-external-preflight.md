@@ -2,10 +2,11 @@
 
 ## 状态
 
-- 日期：2026-07-31
-- 状态：`READY_FOR_EXPLICIT_AUTHORIZATION`
-- 本文是只读预检和执行清单，不是 T014 live evidence。
-- 本轮没有修改 Cloudflare、DNS、Access、tunnel、个人实例配置或运行服务。
+- 初始预检日期：2026-07-31
+- 2026-08-01 状态：`EXECUTED_PARTIAL`
+- 本文保留写前事实和执行清单；它本身不是 T014 live evidence。
+- 用户已授权并完成 DNS/tunnel/Access/个人实例启用；负向 live 结果见
+  `../evidence/live/2026-08-01/negative-matrix.md`。真机正向 device-proof 链仍缺。
 
 ## 当前直接事实
 
@@ -14,10 +15,12 @@
 - named tunnel：
   `19957901-f4e1-4cb0-b387-37258436644d`（`octoagent-personal`）
 - 当前 tunnel 有 4 条 active connection。
-- 当前 ingress 只有：
-  `octo.maojiwang.work -> http://127.0.0.1:8000`
-- `ios.maojiwang.work` 当前没有 DNS 解析，HTTPS 探针不能建立连接。
-- 个人实例 `octoagent.yaml` 当前没有启用 `mobile_device_access`。
+- 写前 ingress 只有：
+  `octo.maojiwang.work -> http://127.0.0.1:8000`；2026-08-01 已在同一 tunnel 增加
+  `ios.maojiwang.work -> http://127.0.0.1:8000`。
+- 写前 `ios.maojiwang.work` 没有 DNS；2026-08-01 已解析并通过 HTTPS 负向矩阵。
+- 写前个人实例 `octoagent.yaml` 没有启用 `mobile_device_access`；2026-08-01 已通过
+  manifest/config 启用且 doctor 报告 PASS。
 - `CLOUDFLARE_API_TOKEN` 不在当前进程环境；本机有合法 `cloudflared`
   account certificate，因此 DNS route 可由 `cloudflared` 创建，Access application
   仍需使用已登录 Cloudflare Dashboard。

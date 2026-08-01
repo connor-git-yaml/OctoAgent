@@ -2,13 +2,14 @@
 
 ## 结论
 
-- 日期：2026-07-31（当前分支复验）
+- 日期：2026-08-01（当前分支与个人部署复验）
 - 状态：`PARTIAL`
 - `GATE_VERIFY=false`
 - T001-T013、T016、T017 已完成；
 - Swift unit、Simulator 冷启动、注册六态、视觉 snapshot、Dynamic Type、
   accessibility tree 与 Reduce Motion 已取得真实运行证据；
-- T014 Cloudflare mobile live、T015 真 iPhone 与 T018 最终 Verify 未完成；
+- T014 Cloudflare mobile live 已完成 hostname/Bypass/origin 启用与负向矩阵，正向
+  device-proof 链仍缺；T015 真 iPhone 与 T018 最终 Verify 未完成；
 - F154 HealthKit production 继续 fail closed。
 
 本报告只把 F153 registration/device-trust 范围提升为 Simulator `PROVEN`。它不把
@@ -20,7 +21,9 @@ scheme，机器摘要仍为 `12 passed / 0 failed / 0 skipped`。六个 registra
 实际启动并通过 committed Claude 早期视觉基线像素比较；未更新 baseline。当前证据见
 `evidence/simulator/2026-07-31/verification-report.md`。同日部署只读审计确认 Web
 Access `302`、Gateway/cloudflared running，但现有 ingress 仍只有 Web hostname，
-mobile hostname 与 exact Bypass 不存在，因此 T014/T015/T018 判定不变。
+mobile hostname 与 exact Bypass 当时不存在。2026-08-01，`ios.maojiwang.work`、同一
+tunnel ingress、精确 mobile path Bypass、origin manifest/config 已启用；Web/mobile
+负向 live 矩阵通过，但真机正向配对链仍缺，因此 T014/T015/T018 判定仍未提升为 PASS。
 
 ## 当前环境
 
@@ -29,7 +32,9 @@ mobile hostname 与 exact Bypass 不存在，因此 T014/T015/T018 判定不变�
 - 已安装 runtime：iOS 26.5（23F77）；
 - Simulator：iPhone 17 Pro；
 - device id：`3820A0E1-806E-4923-AC06-BA3A746F01DB`；
-- 已连接真 iPhone：`0`。
+- 已连接真 iPhone：`1`（iPhone 17 Pro Max，Developer Mode 已启用）；
+- Apple Development identity：`0`；Xcode Apple Account 登录/签名仍未完成；
+- 真机 App 安装：`0`。
 
 ## 已通过
 
@@ -165,17 +170,29 @@ test 1/1 PASS；实现通过 `@Environment(\.accessibilityReduceMotion)` 移除�
 
 ### Cloudflare mobile live
 
-F150 个人部署 Web edge 已从 502 恢复为 Access 302，但 F153 独立 mobile hostname、
-精确 `/api/mobile/v1/*` Bypass 与 Web/mobile 正负 live probe 尚未配置和验证。
-Web Access 登录重定向不能证明 mobile device-proof route 已通过。
+2026-08-01 已在同一 named tunnel 上启用 `ios.maojiwang.work` 与精确
+`/api/mobile/v1/*` Bypass，并启用个人实例 origin device-proof。只读 doctor 的
+`mobile_device_access=PASS`。
 
-当前 tunnel/DNS/个人实例事实、获准后的唯一写入顺序、正负 live matrix 与回滚步骤已
-冻结在 `verification/live-external-preflight.md`。该 preflight 仍是
-`READY_FOR_EXPLICIT_AUTHORIZATION`，不是 T014 evidence。
+同日执行真实 Web/mobile 负向 live 矩阵：
+
+- Web 根页和 Web hostname mobile path 均由 Access `302` 拦截；
+- iOS hostname 的根页、health、docs、OpenAPI 与 owner route 均为 JSON `404`；
+- mobile ready 无 proof 为 `401 / DEVICE_PROOF_HEADERS_INVALID`；
+- 伪 Web Cookie 与伪 service-token headers 均为
+  `401 / MOBILE_WEB_CREDENTIAL_REJECTED`；
+- 空 enrollment 为 typed `422`，unknown device token challenge 为
+  `404 / DEVICE_NOT_ACTIVE`。
+
+脱敏命令事实、body SHA 与判定边界见
+`evidence/live/2026-08-01/negative-matrix.md`。正向 owner challenge→真机
+enrollment→approve→token→signed ready→replay→revoke 尚未执行，因此 T014 仍为
+PARTIAL，不能把负向矩阵冒充完整 mobile live。
 
 ### 真 iPhone
 
-当前没有连接的 iPhone，以下仍为 `MISSING`：
+当前 iPhone 已连接且 Developer Mode 已启用，但 Xcode Apple Account/Apple Development
+签名仍未完成，App 尚未安装。以下仍为 `MISSING`：
 
 - Secure Enclave 私钥不可导出；
 - `AfterFirstUnlockThisDeviceOnly` Keychain；
@@ -203,7 +220,7 @@ F153 只拥有设备注册和 transport。对话、任务、审批、Memory、He
 | Swift XCTest execution | PASS |
 | Simulator functional E2E | PASS |
 | Simulator visual/a11y E2E | PASS |
-| Cloudflare mobile live | MISSING |
+| Cloudflare mobile live | PARTIAL（hostname/Bypass/origin/负向矩阵 PASS；正向 device-proof 链 MISSING） |
 | real-device security/lifecycle | MISSING |
 | F153 Verify / unlock F154 | FAIL CLOSED |
 
