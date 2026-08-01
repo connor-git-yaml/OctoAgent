@@ -153,9 +153,9 @@ async def test_subagent_helper_does_not_persist(tmp_path: Path):
 async def test_resolve_context_bundle_subagent_short_circuits_resolve_agent_profile(
     tmp_path: Path,
 ):
-    """P2-2 闭环：调真实 _resolve_context_bundle，验证 target_kind=subagent 短路 _resolve_agent_profile。
+    """P2-2 闭环：调真实 _resolve_context_bundle。
 
-    构造最小的 _resolve_context_bundle 调用环境，patch _resolve_agent_profile 确认未被调用。
+    验证 target_kind=subagent 短路 _resolve_agent_profile；构造最小调用环境并确认后者未被调用。
     """
     from octoagent.core.store import create_store_group
 
@@ -222,7 +222,6 @@ async def test_resolve_context_bundle_worker_does_not_short_circuit(tmp_path: Pa
         db_path=str(tmp_path / "phase-c-worker.db"),
         artifacts_dir=str(tmp_path / "artifacts"),
     )
-    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
     helper_calls = []
     real_helper = AgentContextService._build_ephemeral_subagent_profile
@@ -347,7 +346,7 @@ async def test_resolve_agent_profile_trusts_stored_mirror_without_rebuild(tmp_pa
 
 
 def test_ephemeral_profile_metadata_marks():
-    """AC-C1: ephemeral profile 的 metadata 应含 source_kind=ephemeral_subagent 和 ephemeral=True。"""
+    """AC-C1: ephemeral metadata 标记 source_kind=ephemeral_subagent 和 ephemeral=True。"""
     project = _make_project()
     profile = AgentContextService._build_ephemeral_subagent_profile(project)
 
@@ -464,27 +463,30 @@ async def test_build_context_request_worker_uses_delegation_target_over_session_
         db_path=str(tmp_path / "w3-build-context-request.db"),
         artifacts_dir=str(tmp_path / "artifacts"),
     )
-    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
+    try:
+        service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
-    task = _make_w3_task("task-w3-override-001")
-    runtime_context = RuntimeControlContext(
-        task_id=task.task_id,
-        session_owner_profile_id="agent-profile-MAIN-owner",
-        turn_executor_kind=TurnExecutorKind.WORKER,
-    )
-    # 委托目标经 dispatch_metadata 显式注入，与 session owner 分叉。
-    dispatch_metadata = {"delegation_target_profile_id": "agent-profile-WORKER-target"}
+        task = _make_w3_task("task-w3-override-001")
+        runtime_context = RuntimeControlContext(
+            task_id=task.task_id,
+            session_owner_profile_id="agent-profile-MAIN-owner",
+            turn_executor_kind=TurnExecutorKind.WORKER,
+        )
+        # 委托目标经 dispatch_metadata 显式注入，与 session owner 分叉。
+        dispatch_metadata = {"delegation_target_profile_id": "agent-profile-WORKER-target"}
 
-    request = service._build_context_request(
-        task=task,
-        trigger_text="hi",
-        dispatch_metadata=dispatch_metadata,
-        worker_capability=None,
-        runtime_context=runtime_context,
-    )
+        request = service._build_context_request(
+            task=task,
+            trigger_text="hi",
+            dispatch_metadata=dispatch_metadata,
+            worker_capability=None,
+            runtime_context=runtime_context,
+        )
 
-    assert request.agent_profile_id == "agent-profile-WORKER-target"
-    assert request.request_kind == ContextRequestKind.WORKER
+        assert request.agent_profile_id == "agent-profile-WORKER-target"
+        assert request.request_kind == ContextRequestKind.WORKER
+    finally:
+        await store_group.close()
 
 
 @pytest.mark.asyncio
@@ -498,21 +500,24 @@ async def test_build_context_request_chat_uses_session_owner(tmp_path: Path):
         db_path=str(tmp_path / "w3-build-context-request-chat.db"),
         artifacts_dir=str(tmp_path / "artifacts"),
     )
-    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
+    try:
+        service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
 
-    task = _make_w3_task("task-w3-chat-001")
-    runtime_context = RuntimeControlContext(
-        task_id=task.task_id,
-        session_owner_profile_id="agent-profile-MAIN-owner",
-    )
+        task = _make_w3_task("task-w3-chat-001")
+        runtime_context = RuntimeControlContext(
+            task_id=task.task_id,
+            session_owner_profile_id="agent-profile-MAIN-owner",
+        )
 
-    request = service._build_context_request(
-        task=task,
-        trigger_text="hi",
-        dispatch_metadata={},
-        worker_capability=None,
-        runtime_context=runtime_context,
-    )
+        request = service._build_context_request(
+            task=task,
+            trigger_text="hi",
+            dispatch_metadata={},
+            worker_capability=None,
+            runtime_context=runtime_context,
+        )
 
-    assert request.agent_profile_id == "agent-profile-MAIN-owner"
-    assert request.request_kind == ContextRequestKind.CHAT
+        assert request.agent_profile_id == "agent-profile-MAIN-owner"
+        assert request.request_kind == ContextRequestKind.CHAT
+    finally:
+        await store_group.close()
