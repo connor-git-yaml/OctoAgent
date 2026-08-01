@@ -5,7 +5,7 @@
 - `GATE_RESEARCH=true`
 - `GATE_DESIGN=true`
 - `GATE_TASKS=true`
-- `GATE_IMPLEMENT=false`
+- `GATE_IMPLEMENT=true`（2026-08-02 F153 Verify 后按任务顺序实施）
 
 ## 判定
 
@@ -13,17 +13,12 @@ PASS（artifacts only）。Spec、Plan 与 Tasks 已把 Apple 官方权限事实
 raw/normalized/review/approved/result/Memory/delete 边界、F152/F153/F156 owner、
 SwiftUI 视觉、Simulator/真机/L2/CI 证据逐项冻结。
 
-## 为何 Implement 仍关闭
+## Implement 解锁记录
 
-F153 当前真实状态是：
-
-- mobile hostname/DNS/tunnel ingress/Access Bypass 未配置；
-- Gateway doctor 报告 mobile device access disabled；
-- 没有连接真 iPhone；
-- F153 `GATE_VERIFY=false`。
-
-因此本 Gate 不能被解释为允许 HealthKit entitlement、production code 或 route。
-只有 F153 T014/T015/T018 全部通过后，T001 才能先以 architecture RED 开始。
+2026-08-02，F153 mobile hostname/tunnel/Access Bypass、真 iPhone Secure Enclave/
+Keychain/网络生命周期与 `GATE_VERIFY=true` 已全部闭环。T001 authority 已先行完成，
+后续 Implement 只按 tasks 的 T002→T016 顺序推进；尚未到达的 HealthKit entitlement、
+production route 或 capability 仍不在授权范围。
 
 ## Scope Review
 

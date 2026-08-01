@@ -5,11 +5,12 @@
 - Research：PASS
 - Design：PASS（2026-07-29 main review）
 - Tasks：PASS（2026-07-29 main review）
-- Implement：`CLOSED_ON_F153_VERIFY`
+- Implement：`OPEN_T001_AFTER_F153_VERIFY`
 - Verify：`CLOSED`
 
-本 Feature 的制品与 test-only contract 可继续准备；任何 HealthKit entitlement、
-production Swift/Python 或 Gateway route 在 F153 T014/T015/T018 前都不得写入。
+F153 T014/T015/T018 已完成并通过 Verify。实现仍从 T001 architecture authority 的
+独立 RED 开始；在该 Gate GREEN 前，不得写入其它 HealthKit entitlement、production
+Swift/Python 或 Gateway route。
 
 ## Phase 0：architecture authority
 

@@ -179,6 +179,12 @@ FEATURE_AUTHORITY_SCOPE_FIELDS = (
     "forbidden_terms",
 )
 FEATURE_AUTHORITY_PRODUCTION_FIELDS = frozenset("path state owner role".split())
+F154_AUTHORITY_FIELDS = FEATURE_AUTHORITY_FIELDS | frozenset(
+    "precondition allowed_health_types allowed_capabilities scope_hash_algorithm".split()
+)
+F154_PRODUCTION_STATES = frozenset(
+    ("existing_future_t001", "existing_locked", "planned_locked")
+)
 FEATURE_AUTHORITIES = MappingProxyType(
     {
         "F152": MappingProxyType(
@@ -216,6 +222,27 @@ FEATURE_AUTHORITIES = MappingProxyType(
                 ),
                 "gate_test": (
                     "octoagent/tests/gate/test_f153_architecture_authority.py"
+                ),
+            }
+        ),
+        "F154": MappingProxyType(
+            {
+                "inventory": (
+                    ".specify/features/154-healthkit-read-only-vertical-slice/"
+                    "inventories/architecture-authority.v1.json"
+                ),
+                "scope_sha256": (
+                    "54a6718e91fe993d1bc05af1b4891062b4ef9bc15cd2cded1330b5992e696d07"
+                ),
+                "status": "DESIGN_TASKS_APPROVED_IMPLEMENT_OPEN_T001_COMPLETE",
+                "owners": frozenset(
+                    ("architecture", "core", "policy", "protocol", "gateway", "ios")
+                ),
+                "artifact_prefix": (
+                    ".specify/features/154-healthkit-read-only-vertical-slice/"
+                ),
+                "gate_test": (
+                    "octoagent/tests/gate/test_f154_architecture_authority.py"
                 ),
             }
         ),
@@ -417,11 +444,127 @@ def _validate_feature_authority(repo: Path, feature_id: str) -> list[str]:
     return production_paths
 
 
+def _f154_production_paths(
+    repo: Path, production: Any, allowed_owners: frozenset[str]
+) -> list[str]:
+    require(
+        isinstance(production, list) and bool(production),
+        "FEATURE_AUTHORITY_INVALID",
+        "F154 production paths",
+    )
+    paths: list[str] = []
+    for ordinal, record in enumerate(production):
+        require(
+            isinstance(record, dict)
+            and set(record) == FEATURE_AUTHORITY_PRODUCTION_FIELDS
+            and record["state"] in F154_PRODUCTION_STATES
+            and record["owner"] in allowed_owners
+            and isinstance(record["role"], str)
+            and bool(record["role"]),
+            "FEATURE_AUTHORITY_INVALID",
+            f"F154 production[{ordinal}]",
+        )
+        relative = _authority_relative_path(
+            record["path"], f"F154 production[{ordinal}]"
+        )
+        require(
+            relative.startswith("octoagent/")
+            or relative == "repo-scripts/check-runtime-architecture.py",
+            "FEATURE_AUTHORITY_INVALID",
+            f"F154 production boundary: {relative}",
+        )
+        if str(record["state"]).startswith("existing"):
+            require(
+                (repo / relative).is_file(),
+                "FEATURE_AUTHORITY_INVALID",
+                f"missing existing F154 path: {relative}",
+            )
+        paths.append(relative)
+    require(
+        len(paths) == len(set(paths)),
+        "FEATURE_AUTHORITY_INVALID",
+        "duplicate F154 production path",
+    )
+    return paths
+
+
+def _validate_f154_finite_contract(inventory: JsonObject) -> None:
+    require(
+        inventory["precondition"]
+        == {
+            "feature_id": "F153",
+            "required_gate": "GATE_VERIFY",
+            "current_state": True,
+        }
+        and inventory["allowed_health_types"] == ["stepCount", "sleepAnalysis"]
+        and inventory["allowed_capabilities"]
+        == [
+            "health.review.submit",
+            "health.analysis.run",
+            "health.source.delete",
+        ],
+        "FEATURE_AUTHORITY_INVALID",
+        "F154 finite authority",
+    )
+
+
+def _validate_f154_authority(repo: Path, config: MappingProxyType) -> list[str]:
+    inventory = read_json(repo / str(config["inventory"]))
+    require(
+        set(inventory) == F154_AUTHORITY_FIELDS
+        and inventory["version"] == 1
+        and inventory["feature_id"] == "F154"
+        and inventory["authority_status"] == config["status"]
+        and inventory["architecture_checker"]
+        == "repo-scripts/check-runtime-architecture.py"
+        and inventory["scope_hash_algorithm"]
+        == "sha256(canonical_json(document_without_approved_scope_sha256))",
+        "FEATURE_AUTHORITY_INVALID",
+        "F154 top-level",
+    )
+    payload = {
+        key: value for key, value in inventory.items() if key != "approved_scope_sha256"
+    }
+    require(
+        canonical_sha(payload)
+        == inventory["approved_scope_sha256"]
+        == config["scope_sha256"],
+        "FEATURE_AUTHORITY_INVALID",
+        "F154 approved scope",
+    )
+    _validate_f154_finite_contract(inventory)
+    production_paths = _f154_production_paths(
+        repo, inventory["production_paths"], config["owners"]
+    )
+    _validate_authority_boundaries(
+        [path for path in production_paths if path.startswith("octoagent/")],
+        inventory,
+        artifact_prefix=str(config["artifact_prefix"]),
+        gate_test=str(config["gate_test"]),
+    )
+    require(
+        all(
+            not any(
+                path.startswith(prefix) for prefix in inventory["forbidden_prefixes"]
+            )
+            for path in production_paths
+        ),
+        "FEATURE_AUTHORITY_INVALID",
+        "F154 forbidden prefix",
+    )
+    return production_paths
+
+
 def validate_feature_authority(repo: Path, feature_id: str) -> list[str]:
     """验证已在主 checker 冻结的未来 Feature 精确生产权限。"""
 
     try:
-        _validate_feature_authority(repo, feature_id)
+        config = FEATURE_AUTHORITIES.get(feature_id)
+        if feature_id == "F154":
+            require(config is not None, "FEATURE_AUTHORITY_INVALID", feature_id)
+            _validate_f154_authority(repo, config)
+        else:
+            _validate_feature_authority(repo, feature_id)
     except GateFailure as exc:
         return [str(exc)]
     return []
@@ -436,6 +579,8 @@ def _feature_authority_production_paths_if_present(
     inventory_path = repo / str(config["inventory"])
     if not inventory_path.is_file():
         return set()
+    if feature_id == "F154":
+        return set(_validate_f154_authority(repo, config))
     return set(_validate_feature_authority(repo, feature_id))
 
 

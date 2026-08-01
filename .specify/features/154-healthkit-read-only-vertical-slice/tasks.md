@@ -1,15 +1,15 @@
 # F154 Tasks
 
-> Research/Design/Tasks Gate 已通过。Implement 继续由 F153 Verify 硬门关闭；任何标为
-> RED 的测试执行和 production 修改都必须在解锁后发生。
+> Research/Design/Tasks Gate 与 F153 Verify 已通过。Implement 已解锁，但必须从 T001
+> architecture authority 的独立 RED 开始；其 GREEN 前不得写入其它 production。
 
 - [x] **T000 [RESEARCH/DESIGN/TASKS]** 完成 Apple 官方调研、Spec、Threat Model、
   Data Model、Contract、authority inventory 与 Gate review
-- [ ] **T001 [AUTHORITY][RED→GREEN→REFACTOR]** 扩展 F151 单一 checker，登记 F154
+- [x] **T001 [AUTHORITY][RED→GREEN→REFACTOR]** 扩展 F151 单一 checker，登记 F154
   exact paths/symbols；拒绝 write/background/clinical/EventKit/第二 owner
-- [ ] **T002 [SWIFT L4][RED→GREEN→REFACTOR]** `HealthReadWindow`、finite types、
+- [x] **T002 [SWIFT L4][RED→GREEN→REFACTOR]** `HealthReadWindow`、finite types、
   canonical decimal/UTC 与 preview hash
-- [ ] **T003 [SWIFT L4][RED→GREEN→REFACTOR]** step daily aggregation、sleep interval
+- [x] **T003 [SWIFT L4][RED→GREEN→REFACTOR]** step daily aggregation、sleep interval
   clipping/union、DST/时区、unknown/future/oversized adversarial
 - [ ] **T004 [SWIFT L4][RED→GREEN→REFACTOR]** 单 `HKHealthStore` adapter、availability、
   user-action authorization、toShare empty 与 raw zero-retention

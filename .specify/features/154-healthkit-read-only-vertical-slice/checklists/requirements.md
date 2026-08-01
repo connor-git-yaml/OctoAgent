@@ -26,9 +26,10 @@
 - [x] GATE_RESEARCH=true
 - [x] GATE_DESIGN=true
 - [x] GATE_TASKS=true
-- [ ] F153 GATE_VERIFY=true
-- [ ] T001 architecture authority
-- [ ] T002-T011 RED→GREEN→REFACTOR
+- [x] F153 GATE_VERIFY=true
+- [x] T001 architecture authority
+- [x] T002-T003 Swift model/normalization RED→GREEN→REFACTOR
+- [ ] T004-T011 RED→GREEN→REFACTOR
 - [ ] T012 Simulator
 - [ ] T013 real iPhone
 - [ ] T014 live model

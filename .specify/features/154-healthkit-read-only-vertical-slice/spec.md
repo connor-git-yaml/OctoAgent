@@ -5,7 +5,7 @@
 - Research：PASS
 - Design：PASS（2026-07-29 main review）
 - Tasks：PASS（2026-07-29 main review）
-- Implement：`CLOSED`；必须先满足 F153 `GATE_VERIFY=true`
+- Implement：`OPEN_T001`；F153 `GATE_VERIFY=true` 已于 2026-08-02 满足
 - Verify：`CLOSED`
 
 ## 背景
@@ -18,7 +18,8 @@ F156 仍拥有最终 companion shell；F154 不复制 Web 三栏，也不把注�
 
 ## 前置硬门
 
-以下条件全部满足前，F154 production 与 entitlement 必须物理缺席：
+以下条件已于 2026-08-02 全部满足；F154 仍必须先完成 T001 architecture authority，
+之后才可写入其它 production 与 entitlement：
 
 1. F153 T014 mobile hostname/tunnel/Access Bypass live 正负探针通过；
 2. F153 T015 真 iPhone Secure Enclave/Keychain/网络生命周期通过；

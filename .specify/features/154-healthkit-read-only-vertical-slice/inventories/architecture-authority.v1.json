@@ -1,13 +1,13 @@
 {
   "version": 1,
   "feature_id": "F154",
-  "authority_status": "DESIGN_TASKS_APPROVED_IMPLEMENT_LOCKED_ON_F153_VERIFY",
+  "authority_status": "DESIGN_TASKS_APPROVED_IMPLEMENT_OPEN_T001_COMPLETE",
   "approval_date": "2026-07-29",
   "architecture_checker": "repo-scripts/check-runtime-architecture.py",
   "precondition": {
     "feature_id": "F153",
     "required_gate": "GATE_VERIFY",
-    "current_state": false
+    "current_state": true
   },
   "production_paths": [
     {
@@ -148,5 +148,5 @@
     "Web Access Cookie"
   ],
   "scope_hash_algorithm": "sha256(canonical_json(document_without_approved_scope_sha256))",
-  "approved_scope_sha256": "100cf04fdf431ba118af8710141b3929792244ff3e0ad86228c14baef0e6bdcf"
+  "approved_scope_sha256": "54a6718e91fe993d1bc05af1b4891062b4ef9bc15cd2cded1330b5992e696d07"
 }

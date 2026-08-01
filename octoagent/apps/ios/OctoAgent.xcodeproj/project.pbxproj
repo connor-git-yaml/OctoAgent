@@ -16,6 +16,8 @@
 		100000000000000000000007 /* RegistrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* RegistrationView.swift */; };
 		100000000000000000000008 /* RegistrationFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* RegistrationFlowUITests.swift */; };
 		100000000000000000000009 /* __Snapshots__ in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* __Snapshots__ */; };
+		100000000000000000000010 /* HealthImportModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* HealthImportModels.swift */; };
+		100000000000000000000011 /* HealthImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* HealthImportTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -48,6 +50,8 @@
 		200000000000000000000010 /* RegistrationFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegistrationFlowUITests.swift; sourceTree = "<group>"; };
 		200000000000000000000011 /* OctoAgentUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OctoAgentUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		200000000000000000000012 /* __Snapshots__ */ = {isa = PBXFileReference; lastKnownFileType = folder; path = __Snapshots__; sourceTree = "<group>"; };
+		200000000000000000000013 /* HealthImportModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportModels.swift; sourceTree = "<group>"; };
+		200000000000000000000014 /* HealthImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,6 +94,7 @@
 			children = (
 				700000000000000000000005 /* App */,
 				700000000000000000000006 /* DeviceTrust */,
+				700000000000000000000008 /* Health */,
 			);
 			path = OctoAgent;
 			sourceTree = "<group>";
@@ -98,6 +103,7 @@
 			isa = PBXGroup;
 			children = (
 				200000000000000000000002 /* DeviceTrustTests.swift */,
+				200000000000000000000014 /* HealthImportTests.swift */,
 			);
 			path = OctoAgentTests;
 			sourceTree = "<group>";
@@ -139,6 +145,14 @@
 				200000000000000000000012 /* __Snapshots__ */,
 			);
 			path = OctoAgentUITests;
+			sourceTree = "<group>";
+		};
+		700000000000000000000008 /* Health */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000013 /* HealthImportModels.swift */,
+			);
+			path = Health;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -278,6 +292,7 @@
 				100000000000000000000004 /* DeviceTrustModels.swift in Sources */,
 				100000000000000000000005 /* RequestProofSigner.swift in Sources */,
 				100000000000000000000006 /* DeviceTrustClient.swift in Sources */,
+				100000000000000000000010 /* HealthImportModels.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -286,6 +301,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000002 /* DeviceTrustTests.swift in Sources */,
+				100000000000000000000011 /* HealthImportTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
