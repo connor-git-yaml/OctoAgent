@@ -28,23 +28,23 @@
 - [x] 390px Web 窄窗口视觉/a11y 通过
 - [x] 当前实现与早期 Claude Design 的偏离全部有合法理由
 - [ ] 当前个人部署已在真实 Cloudflare Access 登录态完成
-  SPA/API/SSE/Settings、刷新、过期、重新认证与登出旅程（真实对话/SSE/终态已
-  通过；过期、登出、重新认证、恢复与 Settings 状态同步仍缺）
+  SPA/API/SSE/Settings、刷新、过期、重新认证与登出旅程（真实对话/SSE/终态、
+  主动登出、重新登录、一次性恢复与 Settings 状态同步已通过；仅自然过期仍缺）
 
 ## iOS
 
 - [x] 原生 SwiftUI 工程存在且 iPhoneOS App/XCTest target 可编译
 - [x] 原生 SwiftUI App 已在 Simulator 或真机真实启动（F153 registration 范围）
 - [x] F152 隐私/身份 Research/Design/Tasks Gate 与 architecture authority 通过
-- [ ] F153 Cloudflare mobile hostname/path-specific Bypass/origin device proof live 通过
-- [ ] F153 真机 device trust/transport 通过
-- [x] F154 HealthKit Research/Design/Tasks Gate 通过，production 仍由 F153 Verify 关闭
+- [x] F153 Cloudflare mobile hostname/path-specific Bypass/origin device proof live 通过
+- [x] F153 真机 device trust/transport 通过
+- [x] F154 HealthKit T001-T012、T014、T015 实现与 Simulator 验证通过
 - [ ] F154 HealthKit 通过
 - [x] F155 EventKit 方案 A 决策门通过（系统 full access、Octo 物理只读）
 - [ ] F155 EventKit Implement/Verify 通过
 - [ ] F156 Native Companion 场景通过
 - [x] 模拟器视觉回归通过（F153 registration 六状态、AXXXL、Reduce Motion）
-- [ ] 真机专属场景通过
+- [ ] 真机专属场景通过（F153 已通过；F154 HealthKit 与后续 Feature 仍待验证）
 
 ## 设计与交付
 

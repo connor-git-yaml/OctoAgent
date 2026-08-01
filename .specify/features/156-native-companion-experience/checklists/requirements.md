@@ -8,7 +8,7 @@
 - [x] Claude early 是视觉基线，现有 Web/later design 不是
 - [x] SwiftUI native navigation/a11y divergence ledger
 - [x] 40-row startup/function/visual scenario matrix
-- [x] current Gateway actions recon（5 mobile routes / 8 product gaps）
+- [x] current Gateway actions recon（10 mobile routes：F153=7、F154=3；F156 product gaps=8）
 - [x] F155 方案 A 决策（系统 full access、Octo 物理只读）
 
 ## Architecture / Privacy
@@ -26,8 +26,8 @@
 - [x] GATE_RESEARCH=true
 - [ ] GATE_DESIGN=true
 - [ ] GATE_TASKS=true
-- [ ] F153 GATE_VERIFY=true
-- [ ] F154 resolved
+- [x] F153 GATE_VERIFY=true
+- [ ] F154 GATE_VERIFY=true
 - [x] F155 decision resolved
 - [ ] F155 GATE_VERIFY=true
 - [ ] T002-T019 RED→GREEN→REFACTOR

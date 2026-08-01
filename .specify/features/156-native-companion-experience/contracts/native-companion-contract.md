@@ -15,14 +15,18 @@ Gateway canonical contract
 ## Current API recon boundary
 
 `inventories/mobile-api-recon.v1.json` 冻结当前事实：mobile hostname 的 exact allowlist
-只有 enrollment、token challenge、token、ready、device profile。Chat、Task、Approval、
-Memory 与 `/api/notifications` 均由 Web front door 保护，mobile hostname 会在路由前
-拒绝；`/api/notifications` 也不是 APNs。F156 只能扩展现有 mobile router、F153
-request proof 与既有 application service，不得从 iOS 调 Web route 或新增第二 transport。
+已有 F153 的 enrollment、token challenge、key rotation、token、ready、device profile
+共 7 条路由，以及 F154 的 health review/analysis/delete 3 条 owner route。Health route
+不属于 F156 Chat/Task/Inbox/APNs 合同，也不能用来冒充 Companion shell 已实现。
+Chat、Task、Approval、Memory 与 `/api/notifications` 仍由 Web front door 保护，mobile
+hostname 会在路由前拒绝；`/api/notifications` 也不是 APNs。F156 只能扩展现有 mobile
+router、F153 request proof 与既有 application service，不得从 iOS 调 Web route 或新增
+第二 transport。
 
-当前 capability 只有 `task.read`，没有 task control capability；因此 cancel/resume 等
-控制在新增 exact capability+route 前必须保持不可见/不可用。Operator action 的 source
-也只有 web/telegram/system，不得把 iOS 伪装成其中之一。
+当前实际签发的 capability 只覆盖 device ready/profile 与 F154 Health 三项操作；
+`task.read` 只是声明但未签发的 F156 未来 capability，task read/control route 都不存在。
+因此 task 列表、cancel/resume 等在新增 exact capability+route 前必须保持不可见/不可用。
+Operator action 的 source 也只有 web/telegram/system，不得把 iOS 伪装成其中之一。
 
 ## Exact top-level navigation
 

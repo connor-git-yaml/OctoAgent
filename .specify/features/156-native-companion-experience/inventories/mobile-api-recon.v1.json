@@ -1,22 +1,34 @@
 {
   "version": 1,
   "feature_id": "F156",
-  "captured_at_utc": "2026-07-31T03:21:23Z",
-  "source_commit": "b4529e61723a81fde49f559fd74b84ac378dd3ee",
+  "captured_at_utc": "2026-08-01T20:22:28Z",
+  "source_commit": "0ec5997dc79b072d255d4ea1a3f401d8ad22c4ea",
   "evidence_mode": "read_only_fastapi_openapi_and_source_sha256",
-  "openapi_sha256": "21e052dda301de65dea1bb192ade88039320db9460b329eeda3b78858dfdd7e3",
+  "openapi_sha256": "6fd9925ce7ddaf969c9422d8ad42ef4917a97f89985d0c04c3d09dab3b9866b5",
   "source_files": [
     {
       "path": "octoagent/apps/gateway/src/octoagent/gateway/main.py",
-      "sha256": "d50acb410162dfb30df99f0cf537995a45c3f730a75ddaadf146f0fa08e103e3"
+      "sha256": "9928067eb538e44bad6dd0f75cfd837834b256a9573a4045c55c3bb1e971ffda"
     },
     {
       "path": "octoagent/apps/gateway/src/octoagent/gateway/services/mobile_device_access.py",
-      "sha256": "03b67668dbccd4ef04a255b3b3cc9e3407162f74d1a3d772554bdaa35e0c7c2a"
+      "sha256": "6bad0379f4483bf71884e053b3a940ce66f143555699dcf07cd8ddbbc9a55460"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/device_trust.py",
+      "sha256": "62b5c1a03d356f17f83e2dae36ddd6669ff467f18cc45007fde6384acfe7a9cc"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/health_ingestion.py",
+      "sha256": "9ff6fb49bb29c67894aaa6251c23ad5d4b592a749e03167c86ae166776039864"
     },
     {
       "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/device_trust.py",
-      "sha256": "583c207a1a4d67f94411561fbfb24c0408e86fdba42b28e99c38b51bdbaeed87"
+      "sha256": "beed5073df6a37a3529b457fc4c4cf3e10499b772f502908566fdd52b391d827"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/mobile_health.py",
+      "sha256": "dd0ca4949aab73331e98db01730f1191137fd3f46dc06fa9310233f1e87bffbc"
     },
     {
       "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/chat.py",
@@ -48,7 +60,7 @@
     },
     {
       "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py",
-      "sha256": "fab28c71a88876b4f3ebc0fe84c6a9e56c081ba98fb0d1fb95813a133afa21f1"
+      "sha256": "113e5974f3fca32adf0a8711d0f2fbb3382d1907d843f159643c18a6364dc563"
     },
     {
       "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/notifications.py",
@@ -56,7 +68,7 @@
     },
     {
       "path": "octoagent/packages/core/src/octoagent/core/models/privacy_ingestion.py",
-      "sha256": "6afd8a043ac573969eb0584ccf81d51d41a6b449de2e801ecd8fd548ab0154cb"
+      "sha256": "930880760c6ee4b05b3dd85380d848c795961018259aa5656558f5fe06f7f4e6"
     }
   ],
   "mobile_edge": {
@@ -80,6 +92,18 @@
       },
       {
         "method": "POST",
+        "path": "/api/mobile/v1/key-rotation-challenges/{device_id}",
+        "proof_required": false,
+        "purpose": "create_key_rotation_challenge"
+      },
+      {
+        "method": "POST",
+        "path": "/api/mobile/v1/key-rotations",
+        "proof_required": false,
+        "purpose": "rotate_secure_enclave_device_key_with_dual_body_proof"
+      },
+      {
+        "method": "POST",
         "path": "/api/mobile/v1/tokens",
         "proof_required": false,
         "purpose": "issue_short_lived_device_token"
@@ -95,12 +119,35 @@
         "path": "/api/mobile/v1/device-profile",
         "proof_required": true,
         "purpose": "device_profile_read"
+      },
+      {
+        "method": "POST",
+        "path": "/api/mobile/v1/health/reviews",
+        "proof_required": true,
+        "purpose": "F154_health_review_submit"
+      },
+      {
+        "method": "POST",
+        "path": "/api/mobile/v1/health/analyses",
+        "proof_required": true,
+        "purpose": "F154_health_analysis_run"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/mobile/v1/health/sources/{source_hash}",
+        "proof_required": true,
+        "purpose": "F154_health_source_delete"
       }
     ]
   },
   "issued_device_capabilities": [
-    "device.ready.read",
     "device.profile.read",
+    "device.ready.read",
+    "health.analysis.run",
+    "health.review.submit",
+    "health.source.delete"
+  ],
+  "declared_but_unissued_companion_capabilities": [
     "conversation.read",
     "conversation.send",
     "task.read",
@@ -263,7 +310,7 @@
     "do_not_add_task_controls_until_an_exact_capability_and_route_exist",
     "do_not_treat_web_notifications_as_APNs"
   ],
-  "status": "CURRENT_API_RECON_COMPLETE_MOBILE_PRODUCT_ROUTES_ABSENT",
+  "status": "CURRENT_API_RECON_COMPLETE_F153_F154_OWNER_ROUTES_PRESENT_F156_PRODUCT_ROUTES_ABSENT",
   "recon_hash_algorithm": "sha256(canonical_json(document_without_recon_sha256))",
-  "recon_sha256": "02e6bf1ff94ce2e62d924f3f344a4f65a74f3ca7d4038f88ee36d5084ab9d635"
+  "recon_sha256": "62af2c5dca0ab90b5a513c88405d7547ee5ab862711e2a0c00ea7433b4d2e753"
 }

@@ -26,7 +26,7 @@
 - [x] GATE_PRODUCT_DECISION=true
 - [x] GATE_DESIGN=true
 - [x] GATE_TASKS=true
-- [ ] F153 GATE_VERIFY=true
+- [x] F153 GATE_VERIFY=true
 - [ ] F154 GATE_VERIFY=true
 - [ ] T003-T013 RED→GREEN→REFACTOR
 - [ ] T014 Simulator

@@ -501,7 +501,8 @@ kernel/worker 进程：
 > Cloudflare named tunnel 是唯一远程网络基础设施。F150 以 Access 提供电脑 Web
 > 入口；手机产品只走 F153+ 原生 iOS App。当前代码已具备本机 loopback、Web
 > Access 安全合同与只读部署诊断；历史 production live 与 stable commit 已通过。
-> F158 当前个人部署已恢复为 Access `302`，登录后 SPA/API/SSE 复验仍未完成。详见
+> F158 当前个人部署已完成登录后 SPA/API/SSE、主动登出、重新登录、一次性恢复与
+> Settings 状态同步；生命周期复验只剩自然会话过期。详见
 > `docs/codebase-architecture/remote-access.md`。
 
 **F150 电脑 Web 目标部署形态**：
@@ -552,9 +553,10 @@ ingress:
   proof、短期 opaque capability token、timestamp/nonce/signature、durable replay
   consume 与 revoke fail closed；Web Cookie、Access JWT 与 service-token header
   均不得解释成 device proof。
-- F153 Cloudflare live/真机 Verify 完成前，不得把上述已选架构描述成已部署；启用
-  mobile ingress/Bypass 必须按 F153 preflight 的写前快照、正负 live matrix 与回滚
-  顺序执行。
+- F153 Cloudflare live/真机 Verify 已完成：mobile ingress/Bypass 按写前快照、正负
+  live matrix 与回滚顺序配置，真实 iPhone 的 enrollment/signed ready/replay/revoke/
+  恢复全旅程已通过。后续 route 或 Access policy 变化仍须重开对应 live 门；F154
+  HealthKit 真机证据不得由 F153 传输证据替代。
 - Cloudflare 在边缘终止 TLS，产品文案不得宣称设备间端到端加密。
 - 配置失败保持本地 loopback 可恢复，不降低认证强度。
 

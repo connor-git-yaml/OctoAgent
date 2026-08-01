@@ -51,13 +51,14 @@
   dedicated mobile edge、真 iPhone Secure Enclave/Keychain/rotation/revoke/4G/restart
   与最终 Verify 均已通过
 - [ ] **T028** 完成 F154 HealthKit Feature（Research/Design/Tasks Gate 已通过；
-  F153 已解锁 production，下一步先推进不依赖真机的合同与实现，最终 HealthKit
-  权限/数据验收等待 iPhone 再次可用）
+  production T001-T012/T014/T015 已完成；当前 Simulator scheme 与非真机回归通过，
+  仅 T013 真实 HealthKit 权限/数据/生命周期和 T016 最终 Verify 等待 iPhone 再次可用）
 - [ ] **T029** 完成 F155 EventKit Feature（方案 A 已接受：系统 full access、Octo
-  物理只读；Research/Design/Tasks Gate 已通过，Implement/Verify 仍等待 F153/F154）
+  物理只读；Research/Design/Tasks Gate 已通过，F153 Verify 已满足，Implement/Verify
+  仍等待 F154 Verify 与 F151 authority）
 - [ ] **T030** 完成 F156 SwiftUI Native Companion Feature（Research、Design/Tasks 草案、
-  40 场景矩阵与 current API recon 已创建；当前 mobile routes=5、产品 gaps=8，上游
-  Gate、production 与 E2E 未完成）
+  40 场景矩阵与 current API recon 已创建；2026-08-02 当前 mobile routes=10
+  （F153=7、F154=3）、F156 产品 gaps=8，上游 Gate、production 与 E2E 未完成）
 - [ ] **T031 [SIMULATOR]** 原生 iOS 冷启动、导航、状态与视觉回归（F153 registration
   六态、a11y、AXXXL、Reduce Motion 与视觉基线已通过；F154-F156 完整产品仍缺）
 - [x] **T032 [DEVICE]** F153 注册、ThisDeviceOnly Keychain、轮换、撤销、4G/断网恢复
@@ -70,15 +71,13 @@
 - [ ] **T035** 双端场景、功能、视觉、无障碍与安全 completion audit
 - [ ] **T036** 同步 Blueprint、Milestone 与所有 Feature verification reports
 - [ ] **T037** 干净检出、权威 CI、个人部署复验（上一批 Web 提交/CI/managed
-  checkout 已通过；当前 iOS 提交/推送与 detached clean-checkout 12/12 已通过，
-  当前代码/架构真值提交 `a2dca2ba` 的 run `30604533484` 五个 job 全绿；
-  其后的 `87660ab5`、`981789f2` 仅纠正 F158 制品真值且未触发 CI。个人部署仍为
-  `dc8b1b41`；登录后真实对话/SSE/事件链已通过，仍缺完整 Access lifecycle 与最新
-  分支部署复验；F150 状态修复提交 `013762df` 已推送并通过正式 installer 部署，
-  loopback ready 与真实 Chrome Settings ready 已通过；最新 `ec55ba76` 已通过正式
-  installer 部署并完成真实故障恢复复验；内建记忆修复提交 `1b45c2f9` 也已通过
-  正式 installer 部署、70 个积压批次重放与新聊天后台同步，仍等待当前分支推送与
-  权威 CI）
+  checkout 已通过；F153 真机 Verify 与 F154 当前非真机完整 scheme 已通过；当前分支
+  `0ec5997d` 的 run `30716661085` 有四个 job success，backend 测试层通过后仅因
+  changed-lines `541/608 = 89.0%` 失败；本地已补 5 个 fail-closed 路由测试、命中
+  8 条此前未覆盖生产行且相关 35 项回归通过，等待修复提交的新 CI。个人 managed checkout 已部署
+  device-trust 重连修复 `d17c3e59`，`/health=200`；登录后真实对话/SSE/事件链、Access
+  登出/重登录/Settings ready 与一次性错误恢复已通过，仍缺自然过期、F154-F156 产品
+  闭包、当前 truth commit 的 CI、mainline 与最终物理重启复验）
 - [ ] **T038** 提交、推送、合并并确认主线真实交付
 
 ## Phase 5：真实模型运行真值

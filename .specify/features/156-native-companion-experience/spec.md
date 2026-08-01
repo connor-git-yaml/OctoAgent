@@ -23,17 +23,18 @@ F153 已交付原生 registration 与 device trust 的 Simulator 范围，但当
 F156 production 开始前必须：
 
 1. F153 `GATE_VERIFY=true`；
-2. F154 要么 `GATE_VERIFY=true`，要么经产品决定从本次 companion 范围移除；
+2. F154 `GATE_VERIFY=true`，Health owner surface 不得为提前实现 Companion 而移除；
 3. F155 方案 A 已接受：系统 full access、Octo 物理只读；在其 Verify 前 calendar
    surface 只能显示明确的“尚未开放”，不得伪造数据；
 4. F151 单一 architecture authority 批准 F156 exact paths/symbols；
 5. 当前 Gateway OpenAPI/事件/动作清单重新 recon，禁止 UI 发明后端不存在的动作。
 
-第 5 项已由 `inventories/mobile-api-recon.v1.json` 完成当前字节只读 recon：现有
-mobile hostname allowlist 只有 enrollment/token/ready/device-profile 五条 F153 路由；
-Chat、Task、Approval、Memory 与 Web Notification 路由仍是 Web front-door 专用，
-不能被 iOS 直接复用。F155 产品决定已经闭合，但 F153/F154/F155 Verify 与 F151
-authority 仍关闭。
+第 5 项已由 `inventories/mobile-api-recon.v1.json` 按当前字节重新 recon：mobile
+hostname allowlist 现有 10 条路由，其中 7 条属于 F153 enrollment/token/key-rotation/
+ready/device-profile，3 条属于 F154 health review/analysis/delete。Chat、Task、Approval、
+Memory 与 Web Notification 路由仍是 Web front-door 专用，不能被 iOS 直接复用；
+8 项 F156 产品 contract gap 数量不变。F153 Verify 与 F155 产品决定已经闭合，但
+F154/F155 Verify、F156 Design/Tasks Gate 与 F151 authority 仍关闭。
 
 安全边界的权威清单见 `threat-model.md`；其中 service token/WebView 绕过、
 APNs 正文、后台敏感动作、快照泄漏与 revoked 竞争都必须在 Implement 前有对应

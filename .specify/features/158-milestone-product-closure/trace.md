@@ -361,3 +361,25 @@
   `git diff --check` 与 repository architecture gate 均通过。提交 `d17c3e59` 已由
   正式 installer 部署到个人 managed checkout，Gateway 重启后 `/health=200`；本轮
   没有调用真机、没有重启 Mac。
+- 2026-08-02：用户取走 iPhone 后继续只做非设备收口。当前提交
+  `0ec5997dc79b072d255d4ea1a3f401d8ad22c4ea` 上，F154
+  Gateway/Core/Policy/Protocol/authority focused 为 `25 passed`，F153 focused 为
+  `48 passed / 1 existing warning`，repository architecture gate PASS。iOS 26.5 /
+  iPhone 17 Pro Simulator 完整 scheme 单次结果为
+  `33 total / 27 passed / 6 live-only skipped / 0 failed`；其中 F154
+  `HealthImportTests=10/10`、`HealthImportFlowUITests=3/3`，12 个有限状态 Claude
+  早期视觉 baseline、Dynamic Type、VoiceOver 与 44pt 均通过。该结果只完成 F154
+  T001-T012/T014/T015，不替代 T013 真 iPhone HealthKit 与 T016 最终 Verify。
+- 2026-08-02：纠正 F155/F156 Gate 真值。F155 已满足 F153 Verify，当前只等待 F154
+  Verify 与 F151 authority；没有 EventKit production/test 行为。F156 从当前 FastAPI
+  OpenAPI 重新计算为 10 条 mobile route（F153=7、F154=3），实际签发 capability=5，
+  声明但未签发 Companion capability=7，product gap=8；canonical OpenAPI SHA 为
+  `6fd9925ce7ddaf969c9422d8ad42ef4917a97f89985d0c04c3d09dab3b9866b5`，recon SHA 为
+  `62af2c5dca0ab90b5a513c88405d7547ee5ab862711e2a0c00ea7433b4d2e753`。
+  这只是 machine recon/Gate correction，不把 F156 production 或 E2E 提升为完成。
+- 2026-08-02：权威 run `30716661085` 的 architecture/frontend/benchmark/
+  l1-playwright 全部成功，backend deterministic 测试层也成功，但 changed-lines
+  coverage 为 `541/608 = 89.0%`，低于冻结的 90% 门槛。未加豁免或降门槛；新增
+  `test_mobile_route_fail_closed_edges.py` 覆盖 Health service/router 未就绪、非法
+  review JSON、delete body 与 key-rotation service error 共 8 条此前未覆盖生产行。
+  新测试 5/5、相关 route 回归 35/35 通过，等待新提交 CI 复验。

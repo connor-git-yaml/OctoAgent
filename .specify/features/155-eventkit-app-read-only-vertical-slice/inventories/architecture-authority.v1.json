@@ -19,7 +19,7 @@
     {
       "feature_id": "F153",
       "required_gate": "GATE_VERIFY",
-      "current_state": false
+      "current_state": true
     },
     {
       "feature_id": "F154",
@@ -69,5 +69,5 @@
     "Web Access Cookie"
   ],
   "scope_hash_algorithm": "sha256(canonical_json(document_without_approved_scope_sha256))",
-  "approved_scope_sha256": "b80a3dd34b13b20cb45e86959832af8ab64172b7984f6c3b266f1976d721c355"
+  "approved_scope_sha256": "cd4cab6654ded23b860de4b641cd4a671c78359bcdd0e4f1f3ef7d49e70a6d0d"
 }

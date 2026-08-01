@@ -5,8 +5,9 @@
 > 产品实现提交为 `bf29d6be7d7a86c298cd45699488a8640065a566`，仓库级门禁配套提交及
 > 当前稳定点为 `5e6f4846703b7126cd104c8b9678e0c2f5300cc8`。
 > Cloudflare named tunnel 是唯一远程网络基础设施：F150 交付电脑 Web Access
-> 入口，F153+ 交付原生 iOS 设备入口。F158 当前个人部署已恢复为 Web Access
-> `302`；当前登录态 SPA/API/SSE 复验与 F153 mobile live 仍未完成。
+> 入口，F153+ 交付原生 iOS 设备入口。F158 当前个人部署已完成登录态 SPA/API/SSE、
+> 主动登出、重新登录、一次性恢复与 Settings 状态同步；F153 mobile live/真机 Verify
+> 也已完成。Web 生命周期当前只剩自然会话过期。
 
 ## 1. 当前代码架构
 
@@ -78,9 +79,10 @@ F153 已选择独立 mobile API + Octo device proof：
   capability token、timestamp、nonce、signature、durable replay consume 与 revoke；
 - Web Cookie、Access JWT 与 service-token header 必须被 mobile route 拒绝。
 
-当前 Gateway/device-trust 实现与 Simulator 合同已通过，Cloudflare DNS/ingress/
-path-specific application、个人实例 manifest、正负 live matrix 和真 iPhone 仍未完成。
-在这些 Verify 门通过前，不得把已选架构描述为已部署。
+当前 Gateway/device-trust、Simulator、Cloudflare DNS/ingress/path-specific
+application、个人实例 manifest、正负 live matrix 与真实 iPhone 签名安装、
+enrollment/signed ready/replay/revoke/恢复均已通过，F153 `GATE_VERIFY=true`。F154
+HealthKit 真机权限与数据旅程是独立 Gate，不得由该传输证据代替。
 
 ## 5. 生命周期与配置边界
 
@@ -132,12 +134,13 @@ F150 的历史四层证据已齐：
 真实 SSE 的5-run时序、断线重连和最终production Web live均已通过；脱敏attestation
 位于F150 Feature evidence目录。协议若再次变化，必须另立Feature并重开live门。
 
-F158 对当前个人部署的复验只证明 Gateway/connector 健康、loopback `200` 与未登录
-Access `302`。当前浏览器控制会话在 DOM 接管阶段超时，因此没有把历史 login 或
-`302` 提升为当前登录态 SPA/API/SSE PASS；Provider OAuth 失效也独立阻断真实模型
-对话。
+F158 对当前个人部署已复验 Gateway/connector、loopback、Access 登录、真实
+OpenAI Codex doctor、Web 对话/SSE `SUCCEEDED`、主动登出、重新登录、一次性恢复与
+Settings 状态同步；当前 Web 生命周期只剩自然会话过期，不能用较短的主动登出旅程
+冒充该时间门。
 
-iOS 的 `URLSession`、蜂窝/Wi-Fi 切换、后台恢复、设备撤销和真机 L1 全部归 F153+，不得用 Web 证据代替。
+iOS 的 `URLSession`、网络切换/恢复、设备撤销和真机 L1 已由 F153 证据闭环，且没有
+使用 Web 证据代替；F154+ 的 HealthKit/EventKit/Companion 行为仍需各自独立验证。
 
 ## 7. 产品信息架构
 

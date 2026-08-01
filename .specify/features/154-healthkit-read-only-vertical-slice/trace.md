@@ -193,3 +193,15 @@
   5853 passed、11 skipped、10 deselected、1 xfailed、1 xpassed，process exit=0；线程泄漏和
   coroutine 泄漏均为 0。该记录不使用也不占用 iPhone，仍只属于 T016 非真机前置；T013
   与最终 Verify 边界不变。
+- 2026-08-02：用户取走 iPhone 后，在当前提交
+  `0ec5997dc79b072d255d4ea1a3f401d8ad22c4ea` 上只执行不占用真机的复验。F154
+  Python/Gateway/Core/Policy/Protocol/authority focused 为 `25 passed`；F153 device-trust
+  focused 为 `48 passed / 1 个既有 Pydantic warning`；repository architecture gate
+  PASS。独立 DerivedData 的 iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme 为
+  `33 total / 27 passed / 6 个明确 live-device case skipped / 0 failed`，其中 F154
+  `HealthImportTests` 10/10、`HealthImportFlowUITests` 3/3 全部通过。result bundle 为
+  `/tmp/f158-f154-current.2vvthi/Logs/Test/Test-OctoAgent-2026.08.02_04-18-09-+0800.xcresult`；
+  Xcode 启动测试时重复报告 LLDB version-store warning，但单次 transaction 最终
+  `TEST SUCCEEDED`，没有 rerun。该证据已写入 partial verification report，只提升当前
+  非真机复现性；T013 真实 Health permission/step/sleep/lifecycle、最终 CI 终态、最终
+  evidence inventory 与 `GATE_VERIFY` 仍保持未完成。

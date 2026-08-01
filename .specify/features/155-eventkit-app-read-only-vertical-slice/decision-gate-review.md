@@ -24,7 +24,7 @@ access，而系统能力同时允许 create/edit/delete。用户已在 2026-08-0
 
 ## 即使选择 A 仍关闭 Implement
 
-F153/F154 Verify 与 F151 exact architecture authority 尚未完成。当前不得添加
+F153 Verify 已完成；F154 Verify 与 F151 exact architecture authority 尚未完成。当前不得添加
 EventKit usage description、production Swift/Python、Gateway route、capability 或
 行为 RED。
 

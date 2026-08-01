@@ -8,17 +8,18 @@
     {
       "feature_id": "F153",
       "required_gate": "GATE_VERIFY",
-      "current_state": false
+      "current_state": true
     },
     {
       "feature_id": "F154",
-      "required_gate": "RESOLVED",
+      "required_gate": "GATE_VERIFY",
       "current_state": false
     },
     {
       "feature_id": "F155",
-      "required_gate": "GATE_PRODUCT_DECISION",
-      "current_state": false
+      "required_gate": "GATE_VERIFY",
+      "current_state": false,
+      "product_decision_state": "OPTION_A_ACCEPTED_2026-08-01"
     }
   ],
   "exact_tabs": [

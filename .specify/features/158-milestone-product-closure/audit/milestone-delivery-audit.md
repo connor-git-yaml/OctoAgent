@@ -15,13 +15,13 @@
 | 要求 | 当前证据 | 判定 | 缺口 | owner |
 |---|---|---|---|---|
 | M11 Web 视觉保持早期 Claude Design | 早期 frame、恢复后 1440 截图、14 个 pixel snapshot、逐 surface 结构合同、云端最终导出、当前个人部署 CSS与登录后截图 | PROVEN_BRANCH_CI_DEPLOYED | 当前运行提交已部署且真实对话/终态通过；完整Access生命周期与总completion audit仍缺 | F158 / F149 |
-| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access登录、真实对话、SSE与`SUCCEEDED`事件链通过；过期、登出、重新认证、恢复及Settings状态同步仍缺 | F158 / F150 |
-| F150 正式验证报告 | `verification/verification-report.md`、connector recovery、登录态工作台、真实对话与任务事件链 | PARTIAL | Gateway/cloudflared running；Access已登录；snapshot=`ready`、diagnostics=`degraded(recovery,memory)`；doctor与真实任务通过，完整认证生命周期仍缺 | F158 / F150 |
+| F150 远程访问 Settings 用户可达 | production consumer、样式、L4/L1、真实截图与当前个人部署 | PROVEN_BRANCH_CI_DEPLOYED | Access登录、真实对话、SSE与`SUCCEEDED`、主动登出、重新登录、一次性恢复及Settings同步通过；只剩自然过期 | F158 / F150 |
+| F150 正式验证报告 | `verification/verification-report.md`、connector recovery、登录态工作台、真实对话与生命周期事件链 | PARTIAL | Gateway/cloudflared running；doctor、真实任务、登出/重登/恢复/Settings通过，剩自然过期 | F158 / F150 |
 | Web 功能 E2E | 11 个 Playwright spec / 39 nodes | PROVEN_BRANCH_CI_DEPLOYED | 2026-07-31 当前分支完整 `39/39`、retries=0；当前 runtime 已部署 | F158 |
 | Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_BRANCH_CI_DEPLOYED | 主框架与 9 surface + 真实任务详情进入像素门；部署 CSS map 与分支一致 | F158 |
 | 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
-| 原生 iOS 可启动 | iOS Simulator 完整 scheme 12/12 + detached clean-checkout 12/12；真 iPhone 已连接并启用 Developer Mode | PROVEN_PUSHED（F153 Simulator scope） | F155 方案 A 与 Design/Tasks Gate 已通过；本机仍无 Apple Development signing identity，真机 App 尚未安装；F154-F156 production=0 | F153-F156 |
-| iOS 功能 E2E | Swift unit 9/9、Simulator UI 3/3、六态冷启动；F153 live 写前 focused 39 pass | PARTIAL | F153 registration 已证，mobile live 写入/回滚矩阵已冻结但未执行；F154 exact HealthKit 场景与测试矩阵已冻结但未执行；F155/F156 已有设计合同但行为 E2E=0；真机及 F154-F156 行为仍缺 | F153-F156 |
+| 原生 iOS 可启动 | Simulator/Release build + 真实 iPhone 签名安装与启动 | PROVEN（F153） | F153 Verify通过；F154 真机 HealthKit 与 F155/F156 尚未完成 | F153-F156 |
+| iOS 功能 E2E | F153 Simulator/真机 enrollment、signed ready、replay/revoke/恢复；F154 Simulator scheme 33项 | PARTIAL | F153已证；F154非真机实现与Simulator通过，剩真机HealthKit；F155/F156行为E2E=0 | F153-F156 |
 | iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；F154 已冻结 Claude early + SwiftUI native visual contract，但完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
 | Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_BRANCH_CI_DEPLOYED | 最终总 completion audit 尚未完成 | F158 |
 | F151 当前 runtime/architecture | 当前 `architecture all`、verification report metadata、CI architecture/backend | PROVEN_CURRENT | 当前提交相对当前主线 architecture all exit0；产品架构合同可继续作为当前交付依据 | F151 / F158 |
@@ -46,7 +46,7 @@
 | M9 | 完成 | 四层测试门、F151/F157 corrective 与 exact master CI 已闭环 | PROVEN | 最终总审计继续复用 run `30198514576` 与当前 F158 branch CI |
 | M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
 | M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 10 个业务 surface（含任务详情）视觉及功能 E2E 通过；Claude 云端谱系已清理并导出；当前 runtime 已部署 | PROVEN_BRANCH_CI_DEPLOYED | 登录后个人旅程与最终 completion audit |
-| M12 | In Progress | F152 Verify；F153 Simulator registration 功能/视觉通过；`ios.maojiwang.work` 与 exact mobile path Bypass 已配置且负向 origin 探针符合合同；真 iPhone 已连接；F154 Gate 通过；F155 方案 A 与 Design/Tasks Gate 通过；F156 40 场景草案/API recon 已建立 | PARTIAL | 真机签名安装、device enrollment/approval/signature/replay/revoke、F153 Verify、F154-F156 Implement/Verify 与完整 iOS E2E |
+| M12 | In Progress | F152/F153 Verify；F153真实iPhone全旅程通过；F154非真机实现与Simulator通过；F155方案A/Design/Tasks通过；F156按10条mobile route完成recon | PARTIAL | F154真机HealthKit与Verify、F155/F156 Implement/Verify、F151 authority及完整iOS E2E |
 
 该矩阵的 `PROVISIONAL` 不是重新否定历史交付，而是区分“历史报告存在”与“当前
 Milestone Goal 已在同一 commit/环境复验”。最终 completion audit 只允许将取得当前
@@ -232,7 +232,28 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
     四张真实登录态截图及SHA见`evidence/web/2026-08-01/verification-report.md`；其中
     Settings 点击“重新检查”后仍为pending，故只证明入口与诚实投影，不证明完整
     Access lifecycle。
-    未执行过期/登出/重新认证/恢复，因此T045完成而T014仍未完成。
+    该条是 2026-08-01 当时快照；后续增量证据见下一节。
+
+## 2026-08-02 增量真值
+
+1. F150 已继续完成主动登出、重新登录、一次性恢复与 Settings 状态同步；自然会话
+   过期仍未到达，因此 F150 当前验证保持 `PARTIAL`，但缺口不再包含前述已完成动作。
+2. F153 已在真实 `ios.maojiwang.work` 与真实 iPhone 上完成签名安装、
+   owner-assisted enrollment、signed ready、replay 拒绝、revoke、重连及网络生命周期，
+   `GATE_VERIFY=true`。较早“无签名身份/未装机/mobile live未执行”的条目只保留为
+   当时审计过程，不能继续作为当前结论。
+3. F154 的 Gateway、SwiftUI、entitlement、预览/批准/分析/删除与 Memory 二次确认
+   已实现；Python 25 项、F153 focused 48 项与当前 Simulator scheme 33 项
+   （27 passed、6 live-only skipped）通过。T013 真机 HealthKit 与 T016 最终 Verify
+   仍待设备再次可用。
+4. F155 继续等待 F154 Verify 与 F151 authority，production=0。F156 current recon
+   为 10 条 mobile route（F153=7、F154=3）、5 个已签发 capability、7 个声明未签发
+   capability 与 8 个产品缺口；Design/Tasks/production 仍关闭。
+5. 当前工作提交 `0ec5997dc79b072d255d4ea1a3f401d8ad22c4ea` 的 GitHub Actions
+   run `30716661085` 已有 architecture/frontend/benchmark/l1-playwright 成功；
+   backend-deterministic 的测试层通过后在 changed-lines coverage
+   `541/608 = 89.0%` 失败。未降低 90% 门槛；本地新增 5 个 fail-closed 路由测试，
+   相关 35 项回归通过且覆盖报告确认命中 8 条此前未覆盖生产行，等待新 CI 复验。
 
 ## F153 当前设计映射与偏离记录
 

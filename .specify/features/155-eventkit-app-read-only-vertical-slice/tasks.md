@@ -1,14 +1,14 @@
 # F155 Tasks
 
 > 2026-08-01 用户已选择方案 A；Product Decision、Design、Tasks Gate 均通过。
-> F153/F154 Verify 与 F151 authority 未齐前，下列实现任务仍不得执行。
+> F153 Verify 已通过；F154 Verify 与 F151 authority 未齐前，下列实现任务仍不得执行。
 
 - [x] **T000 [RESEARCH]** Apple 官方权限事实、产品方案、Data Model、Threat Model、
   Contract 与 decision dossier
 - [x] **T001 [PRODUCT DECISION]** 用户明确选择方案 A；记录 exact 决定、日期与
   review identity `user-f155-option-a-20260801`
 - [x] **T002 [GATE]** 复审并批准 Spec/Plan/Tasks/authority inventory；Implement
-  继续关闭在 F153/F154 Verify 与 F151 authority
+  继续关闭在 F154 Verify 与 F151 authority
 - [ ] **T003 [AUTHORITY][RED→GREEN→REFACTOR]** F151 checker 登记 exact paths/symbols，
   拒绝 write/Reminders/Contacts/第二 owner
 - [ ] **T004 [SWIFT L4][RED→GREEN→REFACTOR]** finite authorization/window/models/hash

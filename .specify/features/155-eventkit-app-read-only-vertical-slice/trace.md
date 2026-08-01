@@ -13,3 +13,7 @@
   只读、mutation path=0。review identity=`user-f155-option-a-20260801`；
   Product Decision、Design、Tasks Gate 通过，Implement 仍关闭在 F153/F154 Verify
   与 F151 authority，production/test behavior 仍为 0。
+- 2026-08-02：按当前上游真值纠正 Gate：F153 `GATE_VERIFY=true` 已完成，不再是
+  F155 阻断；F154 仍缺真 iPhone HealthKit T013 与最终 Verify，F151 也尚未登记 F155
+  exact authority。因此 Implement 继续严格关闭在 F154 Verify + F151 authority，
+  本次只更新 artifacts，没有添加 EventKit entitlement、production、行为 RED 或 route。

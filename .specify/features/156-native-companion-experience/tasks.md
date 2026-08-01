@@ -7,9 +7,10 @@
   40 场景矩阵、Plan/Tasks draft
 - [ ] **T001 [UPSTREAM]** F153 Verify、F154 Verify 与 F155 Verify 完成（F155
   方案 A 产品决定已完成）
-- [x] **T002 [RECON]** current OpenAPI/event/action 双向 inventory；OpenAPI canonical
-  SHA `21e052dda301de65dea1bb192ade88039320db9460b329eeda3b78858dfdd7e3`，
-  当前 mobile routes=5、产品 contract gaps=8
+- [x] **T002 [RECON]** current OpenAPI/event/action 双向 inventory；2026-08-02 刷新的
+  OpenAPI canonical SHA 为
+  `6fd9925ce7ddaf969c9422d8ad42ef4917a97f89985d0c04c3d09dab3b9866b5`，当前
+  mobile routes=10（F153=7、F154=3）、F156 产品 contract gaps=8
 - [ ] **T003 [AUTHORITY][RED→GREEN→REFACTOR]** F151 exact paths/symbols、禁止第二
   transport/state/session/device/notification registry
 - [ ] **T004 [DESIGN GATE]** Claude early scene mapping、later-design negative set、

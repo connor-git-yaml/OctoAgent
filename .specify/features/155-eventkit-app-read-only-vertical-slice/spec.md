@@ -6,7 +6,7 @@
 - Product Decision：`OPTION_A_ACCEPTED_2026-08-01`
 - Design：PASS
 - Tasks：PASS
-- Implement：`CLOSED_ON_F153_F154_VERIFY_AND_F151_AUTHORITY`
+- Implement：`CLOSED_ON_F154_VERIFY_AND_F151_AUTHORITY`
 - Verify：`CLOSED`
 
 ## 背景
@@ -46,6 +46,9 @@ entitlement、usage description、Swift/Python production、行为 RED 或 Gatew
 2. F154 `GATE_VERIFY=true`；
 3. F151 单一 architecture authority 批准 F155 exact paths/symbols；
 4. 决策文案、日期与 review identity 写入本 Feature Gate record。
+
+其中 F153 `GATE_VERIFY=true` 已于 2026-08-02 满足；当前剩余前置是 F154
+`GATE_VERIFY=true` 与 F151 对 F155 exact paths/symbols 的独立 authority RED→GREEN。
 
 ## 用户故事
 

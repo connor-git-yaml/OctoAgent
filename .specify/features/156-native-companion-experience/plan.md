@@ -11,8 +11,9 @@
 
 1. F153 Verify、F154 Verify 与 F155 Verify 完成；F155 方案 A 产品决定已于
    2026-08-01 完成。
-2. [完成] 从 current OpenAPI/event/action inventory 建 exact mobile contract map；当前
-   仅 F153 五条 mobile route 可达，产品 route gap 为 8 项。
+2. [完成并于 2026-08-02 刷新] 从 current OpenAPI/event/action inventory 建 exact
+   mobile contract map；当前 F153 7 条、F154 3 条 owner route 可达，F156 Chat/Task/
+   Approval/Memory/APNs 产品 route gap 仍为 8 项。
 3. F151 checker 登记 F156 exact paths/symbols，先取得 architecture RED。
 4. 冻结 Claude early source SHA、scene mapping 和 later-design negative set。
 

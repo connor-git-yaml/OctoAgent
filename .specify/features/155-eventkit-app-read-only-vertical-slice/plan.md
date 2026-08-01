@@ -5,7 +5,7 @@
 - Research：PASS
 - Product Decision：`OPTION_A_ACCEPTED_2026-08-01`
 - Design/Tasks：PASS
-- Implement：`CLOSED_ON_F153_F154_VERIFY_AND_F151_AUTHORITY`
+- Implement：`CLOSED_ON_F154_VERIFY_AND_F151_AUTHORITY`
 - Verify：`CLOSED`
 
 ## Phase 0：决策与 architecture authority

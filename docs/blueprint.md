@@ -11,15 +11,14 @@
 - 项目名称：**OctoAgent**
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
-- 版本：v0.1（Roadmap 已增量同步至 M12；F152 已 Verify，F153 Simulator Gate 与
-  F154 Research/Design/Tasks Gate 已通过；F155 方案 A 与 Design/Tasks Gate 已通过，
-  F156 已建立 Research/Design/Tasks 草案、40 场景矩阵与 current mobile API recon）
+- 版本：v0.1（Roadmap 已增量同步至 M12；F152/F153 已 Verify，F154 非真机实现与
+  Simulator 验证已完成；F155 方案 A 与 Design/Tasks Gate 已通过，F156 已按当前
+  10 条 mobile route 重做 Research/Design/Tasks recon）
 - 状态：M0-M11 Delivered；M10 的独立物理启动验收仍待闭环；M12 In Progress
-  （F152 T001-T014 已验证；F153 Gateway/device trust/原生 registration App 已完成
-  T001-T013、T016、T017，Simulator 功能/视觉/a11y 已通过，真机与 Cloudflare live
-  仍未完成；F154 只完成 Research/Design/Tasks Gate，production 仍关闭；
-  F155 已接受 EventKit OS full access + Octo 物理只读，F156 完成草案与 API recon，
-  两者 production 均为 0）
+  （F152/F153 已验证；F154 T001-T012、T014、T015 已完成且 Simulator 全绿，真机
+  HealthKit T013 与最终 T016 Verify 待设备可用时执行；F155 已接受 EventKit OS full
+  access + Octo 物理只读，等待 F154 Verify 与 F151 authority；F156 已完成 10-route
+  recon，Design/Tasks 与 production 仍关闭）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - M5 完成日期：2026-05-25（F102 commit `9185862` + F103 同步）
 - M9 完成日期：2026-07-13
@@ -397,7 +396,7 @@ TLS 边界与 DX 工具（octo config / doctor / onboard / start）。Docker 只
 | **M9 质量保证体系** | ✅ | L1-L4、LLM 网络硬闸、scripted harness、wire replay、三模式 lane、attestation |
 | **M10 部署完成度收尾** | ✅ 功能 | F145/F134/F146/F147 全完成；ATT-129-BOOT 作为独立物理验收保留 |
 | **M11 运行边界收口 + Cloudflare 远程访问 + Web v2** | ✅ | F148/F151/F150/F149 全部完成；电脑保留 Web，手机产品只走 M12 原生 iOS，不以手机浏览器交付 |
-| **M12 原生 iOS + 健康/日程感知** | 🚧 | F152 已 Verify；F153 registration App 已通过 Simulator 功能/视觉/a11y，`ios.maojiwang.work` 与 exact mobile path Bypass 已配置、真 iPhone 已连接，但 Apple Development 签名和完整 enrollment/replay/revoke 仍缺；F154 Research/Design/Tasks Gate 已通过但 production=0；F155 已接受方案 A（系统 full access、Octo 物理只读）并通过 Design/Tasks Gate，production=0；F156 已有 40 场景草案及 API recon，Gate 仍关闭；F153 Verify 及 F154-F156 Implement/Verify 仍是硬门 |
+| **M12 原生 iOS + 健康/日程感知** | 🚧 | F152/F153 已 Verify；F153 的签名安装、owner-assisted enrollment、signed ready、replay 拒绝、revoke 与生命周期恢复已在真实 iPhone/真实 `ios.maojiwang.work` 完成。F154 非真机实现与 Simulator 验证已完成，剩 T013 真机 HealthKit 与 T016 最终 Verify；F155 Design/Tasks 已通过但等待 F154/F151；F156 recon 已覆盖 10 条 mobile route、5 个已签发 capability、7 个声明未签发 capability 与 8 个产品缺口，Gate/production 仍关闭 |
 
 ### 待办汇总
 
@@ -405,39 +404,40 @@ TLS 边界与 DX 工具（octo config / doctor / onboard / start）。Docker 只
 > 历史短板 1-5 ✅ | 旧架构 A1-A7 曾关闭，但 2026-07-20 复审确认 A2 反向依赖再次存在并纳入 F151 | Worker W1-W5 历史状态见审计
 > **M5 增补审计** §14.9-14.13：F084-F088 ✅ / F090-F092 ✅ / F093-F096 ✅ / F097-F100 ✅ / F101-F102 ✅
 
-**当前 P0（2026-08-01）**：M11 已完成。M12 F152 已实现 raw→review→approved
+**当前 P0（2026-08-02）**：M11 已完成。M12 F152 已实现 raw→review→approved
 packet→result→optional Memory candidate 的分层模型、短期 capability/request proof、
 逐次 consent、非敏感 audit、删除级联与跨端 exact schema 已完成 Verify。F153 已实现
 owner/mobile routes、P-256 proof、durable replay/revoke、Secure Enclave/Keychain、
-单 URLSession client 与原生 registration states；iOS 26.5 Simulator 上 42 项 focused
-regression、12 项 scheme tests、6 状态视觉回归、Dynamic Type、Reduce Motion、
-generic iPhoneOS Release build、架构与 bundle secret scan 均通过。Cloudflare live
-与真机 Secure Enclave/网络生命周期仍未完成。F154 Apple 官方调研、Spec、Threat
-Model、Data Model、Contract 与 Tasks 已通过 Research/Design/Tasks Gate，但
-HealthKit production/entitlement/行为证据仍为 0。F155 已建立 EventKit 官方
+单 URLSession client 与原生 registration states；Simulator、generic iPhoneOS Release、
+架构与 bundle secret scan，以及真实 iPhone 上的签名安装、owner-assisted enrollment、
+signed ready、replay 拒绝、revoke、重连与网络生命周期均完成，GATE_VERIFY=true。
+F154 已完成 HealthKit stepCount/sleepAnalysis 的 Gateway、SwiftUI、entitlement、预览、
+逐次批准、分析、删除与 Memory 二次确认实现；Python 25 项、F153 focused 48 项及当前
+Simulator scheme 33 项（27 passed、6 live-only skipped）全绿，剩 T013 真机 HealthKit
+和 T016 最终 Verify。F155 已建立 EventKit 官方
 事实和只读安全边界，用户已于 2026-08-01 接受方案 A：系统 full access、Octo
 代码物理只读且写路径为零；Design/Tasks Gate 已通过但 Implement/Verify 未开始。
 F156 已建立四区原生产品结构、
 Design/Tasks 草案、40 行启动/功能/视觉场景矩阵与 current mobile API recon；recon
-确认当前 mobile edge 只有 5 条 F153 route，Chat/Task/Approval/Memory/APNs 仍有 8 项
-产品合同缺口。上游 Gate 未闭合，两者
-production 仍为 0。在 F153 Verify 通过前，不启动 HealthKit/EventKit/
-Companion production 实现。手机端不交付
+确认当前 mobile edge 有 F153 的 7 条 device-trust route 与 F154 的 3 条 health route，
+当前签发 5 个 capability、另有 7 个 F156 capability 仅声明未签发，Chat/Task/
+Approval/Memory/APNs 等仍有 8 项产品合同缺口。F155/F156 production 仍为 0；后续
+严格等待 F154 Verify、F151 authority 及各自 Gate。手机端不交付
 Safari/WebView；Web 与 iOS 均以 Claude Design 初稿为视觉/交互基线，实现适配设计
 而不是反向迁就旧 Web 外观。ATT-129-BOOT 继续作为独立物理验收项保留。准确顺序、
 Web/iOS trust 边界和 Apple 权限门禁见
 [blueprint/milestones.md](blueprint/milestones.md) §M10-M12。
 
-**当前证据边界（F158，2026-08-01）**：F151 当前仓库架构门 `all` 仍通过，
+**当前证据边界（F158，2026-08-02）**：F151 当前仓库架构门 `all` 仍通过，
 证明现有运行/打包边界没有回退；但其 historical v2 index 引用的
 `evidence/local` raw archive 被 `.gitignore` 排除且当前仓库、其他 worktree 与
 本机 `/tmp` 均不可恢复，因此历史 R/G/R archive 不能宣称 clean-checkout
-self-contained。F150 产品代码与 Web Access 架构保持 stable；用户已完成 Access
-登录并打开真实三栏工作台，但完整过期/登出/重新认证/恢复旅程仍缺。OpenAI Codex
-重授权后 `octo doctor --live` 已通过真实 `gpt-5.5`；登录后真实Web消息经SSE返回
-`F158_WEB_E2E_OK`且Task到达`SUCCEEDED`。Access过期、登出、重新认证与恢复仍缺。个人实例
-`ios.maojiwang.work` 与 exact mobile path Bypass 已配置、真 iPhone 已连接并开启
-Developer Mode；Apple Development 签名、App 安装和设备注册/撤销仍需实时证据。
+self-contained；F151 最终 authority 仍待 closure。F150 产品代码与 Web Access 架构
+保持 stable；真实 OpenAI Codex doctor、Web 对话/SSE `SUCCEEDED`、主动登出、重新登录、
+一次性恢复与 Settings 状态同步均已完成，剩余生命周期证据仅为自然过期。个人实例
+`ios.maojiwang.work` 与 exact mobile path Bypass 已配置；F153 真实 iPhone 的签名安装、
+设备注册、signed ready、replay/revoke 与恢复均已完成。F154 真机 HealthKit、F151/F155/
+F156 后续 Gate、最终主线验证和一次提前通知后的 Mac 重启仍待完成。
 
 ### 三条设计哲学（M5 引入）
 

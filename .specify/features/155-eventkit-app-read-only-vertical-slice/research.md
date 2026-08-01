@@ -3,7 +3,9 @@
 ## 结论
 
 技术上可实现“系统 full access + Octo App-read-only”，但这是产品权限决策，不是
-工程师可替用户默认接受的实现细节。F155 当前只能进入用户决策门：
+工程师可替用户默认接受的实现细节。用户已于 2026-08-01 明确选择方案 A；当前
+Product Decision/Design/Tasks Gate 已通过，Implement 仍等待 F154 Verify 与 F151
+architecture authority：
 
 ```text
 用户明确接受系统 full access
@@ -28,13 +30,14 @@
 4. 标题本地可见、默认不上送；当前 preview 可明确 opt-in。
 5. notes/location/URL/attendees/organizer/identifier 永不进入 normalized model。
 6. 所有 calendar 写 capability、API、protocol 与 EventKit mutation symbol 为零。
-7. F152/F153/F154 Verify 完成前无 production entitlement 或行为 RED。
+7. F152/F153 Verify 已完成；F154 Verify 与 F151 authority 完成前无 production
+   entitlement 或行为 RED。
 
 ## 建议
 
-在个人单用户部署场景下，若“日程感知”是 M12 的明确目标，建议选择方案 A，但必须
-接受系统权限文字会显得比产品实际能力更宽。若用户不愿授予 full access，应选择
-方案 B 并从 M12 删除该能力；不应通过含糊文案降低决策成本。
+个人单用户部署已选择方案 A，并接受系统权限文字会显得比产品实际能力更宽；Octo
+App/代码仍必须保持物理只读、mutation path=0。该决定不会替代上游 Verify 与独立
+architecture authority，也不得通过含糊文案降低权限风险的可见性。
 
 ## 证据
 
