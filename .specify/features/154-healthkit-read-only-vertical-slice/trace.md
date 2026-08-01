@@ -159,3 +159,15 @@
   `HealthReviewView.swift` `437705679a36f78931eaa6da5ecbeeae213f1f003e9c2a22dccb8ca969051bbb`，
   `DeviceTrustClient.swift` `fc3527c3efbae500f06ef2753a7966d2995b74ac96047c67f0c3d9fb02054adf`，
   `RegistrationView.swift` `acc59750633965e816a08e4f7d7fdddae8aa7409174d374ff2a1c63d42fb560d`。
+- 2026-08-02：T014 live model 通过。前两次隔离 transaction 分别被本地过宽的
+  pseudonymous device-id 扫描和 31 字符 nonce schema 在进入 ProviderRouter 前拒绝，均为
+  0 次模型调用且不计 live evidence；修正 transaction 夹具后，使用 managed provider
+  `openai-codex` / `gpt-5.5`、真实 FastAPI mobile health route、device proof/capability、
+  F152 review→consent→approved packet 与临时 SQLite/artifact store 完成恰好一次真实模型
+  调用。最终只记录 metadata：`summary_sha256=bb213d81667d6319fb0cf62d9d316d617827c76144cdda49bd0126ce02ddbdc3`、
+  `summary_length=401`、`audit_reason=HEALTH_ANALYSIS_COMPLETED`、`model_calls=1`、
+  `memory_candidates=0`、`raw_forbidden_hits=0`；未输出 summary 内容、credential 或原始健康
+  字段，隔离目录随 transaction 删除。随后 exact 4 个 deterministic L3/L2 node 4/4 PASS，
+  独立证明 minimal approved prompt、approval 只消费一次、auth/timeout/provider error typed
+  fail closed 且绝不回退 Echo，以及 raw/hash drift 在模型调用前拒绝。T013 真 iPhone 生命周期
+  仍独立待办，不由本次无手机 live model 证据替代。

@@ -32,7 +32,7 @@
 - [x] T004-T011 RED→GREEN→REFACTOR
 - [x] T012 Simulator
 - [ ] T013 real iPhone
-- [ ] T014 live model
+- [x] T014 live model
 - [x] T015 architecture/quality
 - [ ] T016 F154 Verify
 - [ ] F155 unlocked
