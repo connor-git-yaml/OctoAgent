@@ -54,6 +54,12 @@
       "role": "claude_design_workbench_projection"
     },
     {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/memory/builtin_memu_bridge.py",
+      "state": "existing",
+      "owner": "gateway",
+      "role": "canonical_memory_backend_sync_bridge"
+    },
+    {
       "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
       "state": "existing",
       "owner": "gateway",
@@ -64,6 +70,12 @@
       "state": "existing",
       "owner": "gateway",
       "role": "authentication_failure_terminalization"
+    },
+    {
+      "path": "octoagent/packages/memory/src/octoagent/memory/recall_service.py",
+      "state": "existing",
+      "owner": "memory",
+      "role": "canonical_recall_pipeline_for_advanced_backend"
     },
     {
       "path": "octoagent/packages/provider/src/octoagent/provider/exceptions.py",
@@ -92,6 +104,7 @@
     "octoagent/frontend/e2e/remote-access-web.spec.ts",
     "octoagent/frontend/e2e/visual-claude-baseline.spec.ts",
     "octoagent/frontend/e2e/visual-claude-surfaces.spec.ts",
+    "octoagent/apps/gateway/tests/test_builtin_memu_bridge_sync.py",
     "octoagent/apps/gateway/tests/cli/test_doctor.py",
     "octoagent/apps/gateway/tests/test_task_service_hardening.py",
     "octoagent/apps/gateway/tests/test_worker_runtime.py",
@@ -121,5 +134,5 @@
     "current Web visual baseline",
     "maojiwang.work"
   ],
-  "approved_scope_sha256": "14480527eb27aac71b51f338cd7a24e43abbf2679e912f0f94633ec95fe6397c"
+  "approved_scope_sha256": "c3933695669e42dd324bf00e606d53c2cbef6b7c2c0ba813c70c66a00c28f655"
 }

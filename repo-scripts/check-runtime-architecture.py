@@ -253,10 +253,10 @@ FEATURE_AUTHORITIES = MappingProxyType(
                     "inventories/architecture-authority.v1.json"
                 ),
                 "scope_sha256": (
-                    "14480527eb27aac71b51f338cd7a24e43abbf2679e912f0f94633ec95fe6397c"
+                    "c3933695669e42dd324bf00e606d53c2cbef6b7c2c0ba813c70c66a00c28f655"
                 ),
                 "status": "GOAL_ACTIVE_IMPLEMENT_OPEN_WEB_VERIFIED_MODEL_TRUTH",
-                "owners": frozenset(("frontend", "gateway", "provider")),
+                "owners": frozenset(("frontend", "gateway", "memory", "provider")),
                 "artifact_prefix": (".specify/features/158-milestone-product-closure/"),
                 "gate_test": (
                     "octoagent/tests/gate/test_f158_architecture_authority.py"

@@ -103,6 +103,7 @@ def test_f158_exact_web_architecture_authority_is_fail_closed(tmp_path: Path) ->
     assert validator(REPO_ROOT, "F158") == [], f"{ORACLE}: canonical authority rejected"
     production = {record["path"] for record in inventory["production_paths"]}
     assert production == {
+        "octoagent/apps/gateway/src/octoagent/gateway/services/memory/builtin_memu_bridge.py",
         "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
         "octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py",
         "octoagent/frontend/src/components/shell/WorkbenchLayout.tsx",
@@ -116,6 +117,7 @@ def test_f158_exact_web_architecture_authority_is_fail_closed(tmp_path: Path) ->
         "octoagent/packages/provider/src/octoagent/provider/__init__.py",
         "octoagent/packages/provider/src/octoagent/provider/exceptions.py",
         "octoagent/packages/provider/src/octoagent/provider/fallback.py",
+        "octoagent/packages/memory/src/octoagent/memory/recall_service.py",
     }
     checker = _load_checker()
     checker.validate_f150_implementation_scope(REPO_ROOT, "origin/master")

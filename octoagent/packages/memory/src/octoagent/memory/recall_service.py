@@ -220,9 +220,16 @@ class MemoryRecallService:
                 scope_ids=selected_scope_ids,
                 scope_results=scope_results,
             )
-            hook_trace.candidate_count = len(collected)
-            hook_trace.delivered_count = min(len(collected), max(1, max_hits))
-            selected_candidates = collected[: max(1, max_hits)]
+            # 高级 backend 消费 search options 来改进候选检索；确定性的过滤、
+            # rerank、时间衰减和 MMR 仍由 canonical recall pipeline 执行，
+            # 否则 backend 返回成功却会跳过 hook 语义与 provenance。
+            selected_candidates, hook_trace = await self._apply_recall_hooks(
+                collected=collected,
+                query=normalized_query,
+                max_hits=max_hits,
+                hook_options=normalized_hook_options,
+                degraded_reasons=degraded_reasons,
+            )
         else:
             scope_results = await self._parallel_search_scopes(
                 scope_ids=selected_scope_ids,
