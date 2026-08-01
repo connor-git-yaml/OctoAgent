@@ -20,6 +20,7 @@
 		100000000000000000000011 /* HealthImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* HealthImportTests.swift */; };
 		100000000000000000000012 /* AppleHealthDataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* AppleHealthDataStore.swift */; };
 		100000000000000000000013 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000017 /* HealthKit.framework */; };
+		100000000000000000000014 /* HealthImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000018 /* HealthImportCoordinator.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -57,6 +58,7 @@
 		200000000000000000000015 /* AppleHealthDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleHealthDataStore.swift; sourceTree = "<group>"; };
 		200000000000000000000016 /* OctoAgent.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OctoAgent.entitlements; sourceTree = "<group>"; };
 		200000000000000000000017 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
+		200000000000000000000018 /* HealthImportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportCoordinator.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -160,6 +162,7 @@
 			children = (
 				200000000000000000000013 /* HealthImportModels.swift */,
 				200000000000000000000015 /* AppleHealthDataStore.swift */,
+				200000000000000000000018 /* HealthImportCoordinator.swift */,
 			);
 			path = Health;
 			sourceTree = "<group>";
@@ -308,6 +311,7 @@
 				100000000000000000000006 /* DeviceTrustClient.swift in Sources */,
 				100000000000000000000010 /* HealthImportModels.swift in Sources */,
 				100000000000000000000012 /* AppleHealthDataStore.swift in Sources */,
+				100000000000000000000014 /* HealthImportCoordinator.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -40,3 +40,12 @@
   API。focused 2/2、完整 iOS unit 19 tests（16 passed、3 项既有真机测试显式 skipped）、
   Release iPhoneOS arm64 warnings-as-errors build、F152/F153/F154/F158 authority 5 tests
   与 repository architecture gate 全部通过。
+- 2026-08-02：T005 首次测试夹具在到达稳定 oracle 前被 `XCTUnwrap` 截断，明确不计
+  RED；改为聚合缺口后的 fresh RED 正常执行 2 个 node、2 个 assertion failure，且只命中
+  `F154_HEALTH_COORDINATOR_MISSING`。GREEN 新增有限状态 coordinator：读取必须由用户动作
+  发起，取消、session 结束与过期都会使在途结果失效并清空 preview；offline 保留本地
+  preview 但拒绝提交，revoked 保留本地删除能力并拒绝提交；无 HealthKit 与无可读数据分别
+  映射为诚实状态，完成分析和删除均清除内存数据。REFACTOR 精确选择器 2/2 通过；完整 iOS
+  unit 21 tests（18 passed、3 项既有真机测试显式 skipped）、Release iPhoneOS arm64
+  warnings-as-errors build、F152/F153/F154/F158 authority 5 tests 与 repository architecture
+  gate 全部通过。

@@ -243,6 +243,133 @@ final class HealthImportTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testCoordinatorFiniteReadCancelExpiryAndSessionCleanup() async throws {
+        let fixture = try healthStoreFixture()
+        let now = fixture.window.end
+        let coordinator = HealthImportCoordinator(store: fixture.store, now: { now })
+        var issues: [String] = []
+
+        if HealthImportPhase.allCases != [
+            .unavailable, .idle, .requestingPermission,
+            .noReadableDataOrLimitedAccess, .reviewing, .submitting,
+            .analyzing, .completed, .offline, .revoked, .deleting,
+            .deletionFailed,
+        ] {
+            issues.append("phase set is not exact")
+        }
+        await coordinator.userRequestedRead(window: fixture.window, calendar: fixture.calendar)
+        if coordinator.phase != .reviewing || coordinator.preview == nil {
+            issues.append("user read did not reach reviewing")
+        }
+        coordinator.cancel()
+        if coordinator.phase != .idle || coordinator.preview != nil {
+            issues.append("cancel retained normalized preview")
+        }
+
+        await coordinator.userRequestedRead(window: fixture.window, calendar: fixture.calendar)
+        if let expiry = coordinator.preview.flatMap({
+            ISO8601DateFormatter().date(from: $0.expiresAtUtc)
+        }) {
+            if !coordinator.expirePreviewIfNeeded(at: expiry) {
+                issues.append("expiry did not report cleanup")
+            }
+        } else {
+            issues.append("read did not produce an expirable preview")
+        }
+        if coordinator.phase != .idle || coordinator.preview != nil {
+            issues.append("expiry retained normalized preview")
+        }
+
+        await coordinator.userRequestedRead(window: fixture.window, calendar: fixture.calendar)
+        coordinator.sessionDidEnd()
+        if coordinator.phase != .idle || coordinator.preview != nil {
+            issues.append("session end retained normalized preview")
+        }
+        XCTAssertTrue(
+            issues.isEmpty,
+            "F154_HEALTH_COORDINATOR_MISSING: \(issues.joined(separator: "; "))"
+        )
+    }
+
+    @MainActor
+    func testCoordinatorOfflineRevokedSubmissionAndDeletionAreFailClosed() async throws {
+        let fixture = try healthStoreFixture()
+        let coordinator = HealthImportCoordinator(store: fixture.store, now: { fixture.window.end })
+        var issues: [String] = []
+
+        let unavailable = HealthImportCoordinator(
+            store: AppleHealthDataStore(backend: FakeHealthKitBackend(available: false))
+        )
+        await unavailable.userRequestedRead(window: fixture.window, calendar: fixture.calendar)
+        if unavailable.phase != .unavailable || unavailable.preview != nil {
+            issues.append("unavailable Health data was not reported honestly")
+        }
+        let emptyFixture = try healthStoreFixture(steps: [], sleep: [])
+        let empty = HealthImportCoordinator(store: emptyFixture.store)
+        await empty.userRequestedRead(window: emptyFixture.window, calendar: emptyFixture.calendar)
+        if empty.phase != .noReadableDataOrLimitedAccess || empty.preview != nil {
+            issues.append("empty or limited Health data was misreported")
+        }
+
+        await coordinator.userRequestedRead(window: fixture.window, calendar: fixture.calendar)
+        coordinator.connectivityDidChange(isOnline: false)
+        if coordinator.phase != .offline || coordinator.preview == nil {
+            issues.append("offline transition discarded local deletion input")
+        }
+        if coordinator.beginSubmission() != nil || coordinator.phase != .offline {
+            issues.append("offline preview entered submission")
+        }
+        coordinator.connectivityDidChange(isOnline: true)
+        if coordinator.phase != .reviewing {
+            issues.append("online recovery did not restore review")
+        }
+        coordinator.deviceWasRevoked()
+        if coordinator.phase != .revoked || coordinator.preview == nil {
+            issues.append("revocation lost local deletion capability")
+        }
+        if coordinator.beginSubmission() != nil {
+            issues.append("revoked preview entered submission")
+        }
+        coordinator.deleteLocalPreview()
+        if coordinator.phase != .revoked || coordinator.preview != nil {
+            issues.append("local delete failed after revocation")
+        }
+
+        let onlineFixture = try healthStoreFixture()
+        let online = HealthImportCoordinator(
+            store: onlineFixture.store,
+            now: { onlineFixture.window.end }
+        )
+        await online.userRequestedRead(window: onlineFixture.window, calendar: onlineFixture.calendar)
+        if online.beginSubmission() == nil || online.phase != .submitting {
+            issues.append("review did not enter submission")
+        }
+        online.beginAnalysis()
+        if online.phase != .analyzing {
+            issues.append("submission did not enter analysis")
+        }
+        online.analysisDidComplete()
+        if online.phase != .completed || online.preview != nil {
+            issues.append("analysis completion retained preview")
+        }
+        online.beginDeletion()
+        online.deletionDidFail()
+        if online.phase != .deletionFailed {
+            issues.append("deletion failure was reported as complete")
+        }
+        online.beginDeletion()
+        online.deletionDidComplete()
+        if online.phase != .idle || online.preview != nil {
+            issues.append("deletion completion did not clear local state")
+        }
+
+        XCTAssertTrue(
+            issues.isEmpty,
+            "F154_HEALTH_COORDINATOR_MISSING: \(issues.joined(separator: "; "))"
+        )
+    }
+
     private func makePreview(window: HealthReadWindow, stepCount: String) throws -> HealthPreview {
         try HealthPreview.make(
             previewID: "preview-1",
