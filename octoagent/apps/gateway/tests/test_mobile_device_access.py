@@ -89,7 +89,11 @@ async def _matrix_app(manifest: Any | None) -> FastAPI:
 
     @app.api_route("/{path:path}", methods=["GET", "POST"])
     async def echo(request: Request, path: str) -> dict[str, str]:
-        return {"path": request.url.path, "host": request.headers["host"]}
+        return {
+            "path": request.url.path,
+            "host": request.headers["host"],
+            "scheme": request.url.scheme,
+        }
 
     return app
 
@@ -158,13 +162,13 @@ async def test_mobile_hostname_accepts_https_forwarded_only_by_loopback_tunnel(
     manifest = access.load_mobile_device_access_manifest(tmp_path, MANIFEST_PATH)
     app = await _matrix_app(manifest)
 
-    assert (
-        await _get_from_origin_proxy(
-            app,
-            client_host="127.0.0.1",
-            forwarded_proto="https",
-        )
-    ).status_code == 200
+    forwarded = await _get_from_origin_proxy(
+        app,
+        client_host="127.0.0.1",
+        forwarded_proto="https",
+    )
+    assert forwarded.status_code == 200
+    assert forwarded.json()["scheme"] == "https"
     for client_host, forwarded_proto in (
         ("127.0.0.1", None),
         ("127.0.0.1", "http"),

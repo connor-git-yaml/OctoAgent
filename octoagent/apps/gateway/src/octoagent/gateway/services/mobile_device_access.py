@@ -225,6 +225,8 @@ class MobileDeviceAccessMiddleware:
             if not _uses_external_https(scope) or not _mobile_path_allowed(path):
                 await _not_found(scope, receive, send)
                 return
+            if str(scope.get("scheme", "")).casefold() == "http":
+                scope = {**scope, "scheme": "https"}
         elif path.startswith(_MOBILE_PREFIX) or (
             path.startswith(_OWNER_PREFIX) and host != manifest.web_hostname
         ):
