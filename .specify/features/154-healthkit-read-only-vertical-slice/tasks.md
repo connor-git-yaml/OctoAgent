@@ -11,7 +11,7 @@
   canonical decimal/UTC 与 preview hash
 - [x] **T003 [SWIFT L4][RED→GREEN→REFACTOR]** step daily aggregation、sleep interval
   clipping/union、DST/时区、unknown/future/oversized adversarial
-- [ ] **T004 [SWIFT L4][RED→GREEN→REFACTOR]** 单 `HKHealthStore` adapter、availability、
+- [x] **T004 [SWIFT L4][RED→GREEN→REFACTOR]** 单 `HKHealthStore` adapter、availability、
   user-action authorization、toShare empty 与 raw zero-retention
 - [ ] **T005 [SWIFT L4][RED→GREEN→REFACTOR]** finite import coordinator、取消/expiry/
   offline/revoked/delete 与内存清理

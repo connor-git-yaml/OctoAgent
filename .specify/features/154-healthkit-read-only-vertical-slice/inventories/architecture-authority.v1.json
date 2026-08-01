@@ -65,6 +65,12 @@
       "role": "healthkit_capability_and_file_membership"
     },
     {
+      "path": "octoagent/apps/ios/OctoAgent/OctoAgent.entitlements",
+      "state": "existing_locked",
+      "owner": "ios",
+      "role": "read_only_healthkit_entitlement"
+    },
+    {
       "path": "octoagent/apps/ios/OctoAgent/App/OctoAgentApp.swift",
       "state": "existing_locked",
       "owner": "ios",
@@ -148,5 +154,5 @@
     "Web Access Cookie"
   ],
   "scope_hash_algorithm": "sha256(canonical_json(document_without_approved_scope_sha256))",
-  "approved_scope_sha256": "54a6718e91fe993d1bc05af1b4891062b4ef9bc15cd2cded1330b5992e696d07"
+  "approved_scope_sha256": "62ff4364dcea325eb3cbe674e7c7e0661215a82601d7a18cb6d58b666a020d1f"
 }

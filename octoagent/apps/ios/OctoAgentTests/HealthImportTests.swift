@@ -157,6 +157,92 @@ final class HealthImportTests: XCTestCase {
         )
     }
 
+    func testHealthStoreRequiresExplicitReadOnlyAuthorization() async throws {
+        let fixture = try healthStoreFixture()
+        let store = fixture.store
+        let backend = fixture.backend
+        var issues: [String] = []
+
+        if !store.isAvailable() {
+            issues.append("available backend reported unavailable")
+        }
+        do {
+            _ = try await store.readPreview(window: fixture.window, calendar: fixture.calendar)
+            issues.append("read succeeded before explicit authorization")
+        } catch let error as HealthDataStoreError where error == .authorizationRequired {
+        } catch {
+            issues.append("pre-authorization read returned wrong error")
+        }
+        if !backend.authorizationCalls.isEmpty {
+            issues.append("read triggered authorization implicitly")
+        }
+
+        do {
+            try await store.requestReadAuthorization(for: Set(HealthDataType.allCases))
+            let preview = try await store.readPreview(window: fixture.window, calendar: fixture.calendar)
+            if preview.dataTypes != [.sleepAnalysis, .stepCount] || preview.dailySteps.count != 1 {
+                issues.append("preview omitted exact normalized types")
+            }
+        } catch {
+            issues.append("explicit authorization/read failed: \(error)")
+        }
+        if backend.authorizationCalls != [
+            .init(read: Set(HealthDataType.allCases), share: [])
+        ] {
+            issues.append("authorization was not exact read-only")
+        }
+        if backend.stepReads != 1 || backend.sleepReads != 1 {
+            issues.append("preview did not execute one bounded query per type")
+        }
+
+        XCTAssertTrue(
+            issues.isEmpty,
+            "F154_HEALTH_STORE_CONTRACT_MISSING: \(issues.joined(separator: "; "))"
+        )
+    }
+
+    func testHealthStoreReportsUnavailableAndEmptyResultsHonestly() async throws {
+        let unavailable = FakeHealthKitBackend(available: false)
+        let unavailableStore = AppleHealthDataStore(backend: unavailable)
+        var issues: [String] = []
+        do {
+            try await unavailableStore.requestReadAuthorization(for: Set(HealthDataType.allCases))
+            issues.append("unavailable store authorized")
+        } catch let error as HealthDataStoreError where error == .unavailable {
+        } catch {
+            issues.append("unavailable store returned wrong error")
+        }
+
+        let fixture = try healthStoreFixture(steps: [], sleep: [])
+        do {
+            try await fixture.store.requestReadAuthorization(for: Set(HealthDataType.allCases))
+            do {
+                _ = try await fixture.store.readPreview(
+                    window: fixture.window,
+                    calendar: fixture.calendar
+                )
+                issues.append("empty query produced a preview")
+            } catch let error as HealthDataStoreError where error == .noReadableDataOrLimitedAccess {
+            } catch {
+                issues.append("empty query claimed a permission verdict")
+            }
+        } catch {
+            issues.append("available empty store failed authorization")
+        }
+        do {
+            try await fixture.store.requestReadAuthorization(for: [.stepCount])
+            issues.append("partial type request was accepted")
+        } catch let error as HealthDataStoreError where error == .invalidReadTypes {
+        } catch {
+            issues.append("partial type request returned wrong error")
+        }
+
+        XCTAssertTrue(
+            issues.isEmpty,
+            "F154_HEALTH_STORE_CONTRACT_MISSING: \(issues.joined(separator: "; "))"
+        )
+    }
+
     private func makePreview(window: HealthReadWindow, stepCount: String) throws -> HealthPreview {
         try HealthPreview.make(
             previewID: "preview-1",
@@ -174,6 +260,38 @@ final class HealthImportTests: XCTestCase {
         ISO8601DateFormatter().date(from: value)!
     }
 
+    private func healthStoreFixture(
+        steps: [StepSample]? = nil,
+        sleep: [SleepSample]? = nil
+    ) throws -> HealthStoreFixture {
+        let now = date("2026-03-10T00:00:00Z")
+        let window = try HealthReadWindow(
+            start: date("2026-03-09T00:00:00Z"),
+            end: now,
+            preset: .last24Hours,
+            referenceNow: now
+        )
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = utc
+        let backend = FakeHealthKitBackend(
+            available: true,
+            steps: steps ?? [StepSample(start: window.start, end: window.end, count: 42)],
+            sleep: sleep ?? [
+                SleepSample(
+                    start: date("2026-03-09T01:00:00Z"),
+                    end: date("2026-03-09T02:00:00Z"),
+                    category: .deep
+                )
+            ]
+        )
+        return HealthStoreFixture(
+            store: AppleHealthDataStore(backend: backend, now: { now }, previewID: { "preview-1" }),
+            backend: backend,
+            window: window,
+            calendar: calendar
+        )
+    }
+
     private func expectThrows(
         _ issues: inout [String],
         _ label: String,
@@ -183,5 +301,57 @@ final class HealthImportTests: XCTestCase {
             try operation()
             issues.append("\(label) was accepted")
         } catch {}
+    }
+}
+
+private struct AuthorizationCall: Equatable {
+    let read: Set<HealthDataType>
+    let share: Set<HealthDataType>
+}
+
+private struct HealthStoreFixture {
+    let store: AppleHealthDataStore
+    let backend: FakeHealthKitBackend
+    let window: HealthReadWindow
+    let calendar: Calendar
+}
+
+private final class FakeHealthKitBackend: HealthKitBackend {
+    let available: Bool
+    let steps: [StepSample]
+    let sleep: [SleepSample]
+    var authorizationCalls: [AuthorizationCall] = []
+    var stepReads = 0
+    var sleepReads = 0
+
+    init(
+        available: Bool,
+        steps: [StepSample] = [],
+        sleep: [SleepSample] = []
+    ) {
+        self.available = available
+        self.steps = steps
+        self.sleep = sleep
+    }
+
+    func isAvailable() -> Bool {
+        available
+    }
+
+    func requestAuthorization(
+        readTypes: Set<HealthDataType>,
+        shareTypes: Set<HealthDataType>
+    ) async throws {
+        authorizationCalls.append(.init(read: readTypes, share: shareTypes))
+    }
+
+    func readSteps(window: HealthReadWindow) async throws -> [StepSample] {
+        stepReads += 1
+        return steps
+    }
+
+    func readSleep(window: HealthReadWindow) async throws -> [SleepSample] {
+        sleepReads += 1
+        return sleep
     }
 }

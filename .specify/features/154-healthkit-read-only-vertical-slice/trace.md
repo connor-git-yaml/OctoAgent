@@ -30,3 +30,13 @@
   unit 17 tests（其中 3 项既有显式真机测试按设计 skipped）均无失败，Release iPhoneOS
   arm64 warnings-as-errors build 成功。F152/F153/F154/F158 authority 5 tests 继续通过，
   未新增 HealthKit entitlement、store、持久化、网络或 raw identifier 字段。
+- 2026-08-02：T004 首次测试夹具因 placeholder error 未被捕获而产生 unexpected failure，
+  明确不计 RED；修正夹具后的 fresh RED 正常执行 2 个 node、2 个 assertion failure、
+  0 unexpected，且只命中 `F154_HEALTH_STORE_CONTRACT_MISSING`。GREEN 新增单一
+  `HKHealthStore` adapter、显式 user-action authorization、exact step/sleep read set、空
+  `toShare`、每类型一次 bounded query，以及 unavailable/未授权/无可读数据的诚实错误。
+  entitlement 只含 `com.apple.developer.healthkit=true`，Info 只有 read usage、没有 write
+  usage；静态审计确认单 `HKHealthStore` 且无 save/delete/background/observer/anchored
+  API。focused 2/2、完整 iOS unit 19 tests（16 passed、3 项既有真机测试显式 skipped）、
+  Release iPhoneOS arm64 warnings-as-errors build、F152/F153/F154/F158 authority 5 tests
+  与 repository architecture gate 全部通过。

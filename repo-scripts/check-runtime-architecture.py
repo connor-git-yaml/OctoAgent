@@ -232,7 +232,7 @@ FEATURE_AUTHORITIES = MappingProxyType(
                     "inventories/architecture-authority.v1.json"
                 ),
                 "scope_sha256": (
-                    "54a6718e91fe993d1bc05af1b4891062b4ef9bc15cd2cded1330b5992e696d07"
+                    "62ff4364dcea325eb3cbe674e7c7e0661215a82601d7a18cb6d58b666a020d1f"
                 ),
                 "status": "DESIGN_TASKS_APPROVED_IMPLEMENT_OPEN_T001_COMPLETE",
                 "owners": frozenset(
