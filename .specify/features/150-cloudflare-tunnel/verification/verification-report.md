@@ -7,12 +7,13 @@
 **本轮复验基线提交**：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
 **当前通过完整 CI 的代码/架构提交**：
 `a2dca2badba40f87cec922946d65d21396e1b709`（run `30604533484`）
-**当前个人部署提交**：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
-**状态**：`PARTIAL`。F150 产品字节、本地合同、个人部署与当前分支权威 CI 通过；
-当前分支在 `dc8b1b41` 之后没有 F150/production 字节变化，但部署 Git 身份仍是
-`dc8b1b41`。connector、Access 登录、真实 OpenAI 对话、SSE 运行态与 Task 终态已经
-复验；主动登出和重新认证验证码挑战已在 2026-08-01 后续复验中通过；重新登录完成、
-会话过期、一次性错误恢复与 Settings 同步仍缺。
+**当前个人部署提交**：`013762dfff200f3a1c1fc010fb59e1e4ffd52e4f`
+**状态**：`PARTIAL`。F150 既有产品字节、本地合同与上一权威 CI 通过；当前状态修复
+`013762df` 已通过 `98 passed`、静态门、F151 repository architecture gate 和个人部署，
+但该提交的权威 CI 尚待完成；
+connector、Access 登录、真实 OpenAI 对话、SSE 运行态与 Task 终态已经复验；主动
+登出、重新认证挑战、用户完成重新登录及登录后 Settings 同步均已在 2026-08-01
+后续复验中通过；会话自然过期与一次性错误恢复仍缺。
 
 ## 复核背景
 
@@ -220,6 +221,13 @@ owner 邮箱验证码请求成功并进入 10 分钟有效的 code challenge。�
 输入，因此只把主动登出和重新认证挑战判为 PASS，不把重新登录完成、会话过期或
 一次性故障恢复冒充已通过。对应截图与 SHA 继续见 F158 的同日验证报告。
 
+用户随后亲自完成验证码。同一 Chrome 会话重新进入真实 Settings，证明重新登录
+PASS；该页面同时暴露 status 永久停在 `pending_verification` 的单缺陷。针对该缺陷
+建立 RED 后，只在既有 `remote_access_status` authority 内消费同一请求已经验证的
+`CloudflarePrincipal`，没有增加持久认证状态机。组合回归 `98 passed`、F151
+repository architecture gate PASS；提交 `013762df` 经正式 installer 部署并重启后，
+真实 Settings 显示“远程访问已就绪”。两张部署前后截图及 SHA 见 F158 同日报告。
+
 ## 架构与安全复核
 
 - production consumer 只有 Settings composition；
@@ -234,8 +242,8 @@ owner 邮箱验证码请求成功并进入 10 分钟有效的 code challenge。�
 本地行为、产品入口、登录后真实对话/SSE与模型终态已经闭合，但 F150 的最终主线状态
 仍依赖 F158：
 
-1. 完成 Access 会话过期、重新登录完成、一次性错误恢复与 Settings 状态同步；主动
-   登出和重新认证验证码挑战已经通过；
+1. 完成 Access 会话自然过期与一次性错误恢复；主动登出、重新认证挑战、重新登录
+   完成及 Settings 状态同步已经通过；
 2. 合并主线后校正 Blueprint/Milestone completion audit。
 
 在这些项目完成前，本报告不得被解释为 F158 整体 Goal 已完成。

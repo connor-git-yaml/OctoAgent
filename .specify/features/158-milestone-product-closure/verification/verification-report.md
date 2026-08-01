@@ -11,7 +11,7 @@
 - 当前通过完整 CI 的代码/架构提交：
   `a2dca2badba40f87cec922946d65d21396e1b709`
 - 对应权威 CI：`30604533484`
-- 当前个人部署提交：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
+- 当前个人部署提交：`013762dfff200f3a1c1fc010fb59e1e4ffd52e4f`
 
 F158 已完成 Milestone/Blueprint/Feature 真值审计、F150 Settings 用户入口、桌面 Web
 逐 route/state 功能 E2E、Claude 早期设计视觉恢复、视觉 regression、F152 privacy
@@ -111,15 +111,19 @@ F117 前的 WorkerProfile/多 Session 类当作当前 schema。该批修改完�
 `SUCCEEDED`终态；两个页面 console warning/error 均为0。同日再次执行
 `octo doctor --live`，exit=0，`model_live=PASS`，真实模型为`gpt-5.5`。
 完整截图、SHA与事实见
-`evidence/web/2026-08-01/verification-report.md`。该成功链不替代 Access 过期、主动
-登出、重新登录、一次性错误恢复与 Settings 状态同步，故 T045 完成而 T014 仍未完成。
+`evidence/web/2026-08-01/verification-report.md`。随后主动登出、验证码挑战、用户完成
+重新登录均通过；Settings 永久 pending 的单缺陷先取得 RED，再由提交 `013762df`
+在现有 F150 authority 内修复。正式 installer 部署后，真实 Chrome Settings 显示
+“远程访问已就绪”。Access 会话自然过期与一次性错误恢复仍未执行，故 T045 完成而
+T014 仍未完成。
 
-整体 Goal 尚未完成：个人部署仍为 `dc8b1b41`；该提交之后到 `a2dca2ba` 没有
-`octoagent/`、`repo-scripts/` 或 workflow 产品字节变化，但最新分支身份尚未部署，
-登录态真实对话/SSE/任务事件链已复验，但完整 Access lifecycle 尚未完成。OpenAI
-Codex 已重新授权并通过真实 doctor 与产品对话；F153 Simulator 已通过、
+整体 Goal 尚未完成：个人部署已更新为 `013762df`，登录态真实对话/SSE/任务事件链、
+主动登出、重新登录与 Settings ready 已复验，但完整 Access lifecycle 尚缺自然过期
+和一次性错误恢复。OpenAI Codex 已重新授权并通过真实 doctor 与产品对话；F153
+Simulator 已通过、
 `ios.maojiwang.work` 与 exact Bypass 已配置、真 iPhone 已连接并启用 Developer Mode，
-但 Apple Development 签名、App 安装、配对/replay/revoke 与 F153 Verify 仍缺；
+Apple Development 签名、Release 真机构建、安装和启动已通过，但真实配对、
+replay/revoke 与 F153 Verify 仍缺；
 F154 只完成 Research/Design/Tasks
 Gate，F155 已接受方案 A（系统 full access、Octo 物理只读）并通过
 Research/Design/Tasks Gate，F156 完成含 40 场景矩阵的
@@ -231,6 +235,12 @@ baseline；未知第三种仍 fail closed。最终
 - UI：3/3 PASS
 - registration 六态 pixel baseline：6/6 PASS
 - AXXXL Dynamic Type、accessibility tree、Reduce Motion：PASS
+- iPhone 17 Pro Max / iOS 27.0 Beta 有线连接、paired、Developer Mode：PASS
+- Personal Team `34GR9QLLMY` Release 真机构建、安装与启动：PASS
+- 真机 executable SHA-256：
+  `01b8d8c19e9ec1dc441a417c64cbe2572aeb30cd8e896f16411c0e9495e88e28`
+- 真机 registration disconnected 首屏截图 SHA-256：
+  `7f4208c8dcab9f18c253b0b96bd95657090645b8cadbe7208a47b3bb6a4486c3`
 
 普通字号六张 baseline 位于
 `octoagent/apps/ios/OctoAgentUITests/__Snapshots__/`；AXXXL 证据和完整运行说明位于
@@ -254,8 +264,8 @@ baseline；未知第三种仍 fail closed。最终
   hostname；独立 mobile hostname/exact Bypass 仍未配置
 
 仓库正式 managed-checkout installer 已把 `~/.octoagent/app` 更新到包含 Web、F150、
-F153 Simulator 与真实模型终态修复的运行提交
-`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`，完成依赖同步和 production build；
+F153 Simulator、真实模型终态和已认证 remote-access status 修复的运行提交
+`013762dfff200f3a1c1fc010fb59e1e4ffd52e4f`，完成依赖同步和 production build；
 checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均为 `200`，
 个人域名返回预期 Access `302`，tunnel LaunchAgent running。部署目录的 11 个 CSS
 文件与当前分支 build 逐字节相等，canonical path→SHA map 为
@@ -265,9 +275,10 @@ checkout clean。重启 Gateway 后 loopback `/ready?profile=core` 与 `/` 均�
 
 Chrome 已由用户完成 Cloudflare Access 登录并打开真实 OctoAgent 三栏工作台；只读
 页面事实显示顶层 snapshot=`ready`，诊断 overall=`degraded`，原因精确为
-`recovery` 与 `memory`，UI 因此诚实显示“受限运行”，不是旧快照误判。当前仍缺
-过期、主动登出、重新认证、一次性错误恢复与 Settings 状态同步，所以 T014 继续保持
-unchecked。2026-08-01 的真实消息经 SSE 进入运行态并返回`F158_WEB_E2E_OK`，
+`recovery` 与 `memory`，UI 因此诚实显示“受限运行”，不是旧快照误判。主动登出、
+重新认证和部署后 Settings ready 已通过；当前仍缺会话自然过期与一次性错误恢复，
+所以 T014 继续保持 unchecked。2026-08-01 的真实消息经 SSE 进入运行态并返回
+`F158_WEB_E2E_OK`，
 Task event chain 到达`SUCCEEDED`，证明登录后 SPA/模型/SSE/终态可用；该成功链仍不能
 扩大为所有 Access lifecycle 状态均已通过。
 
@@ -314,10 +325,12 @@ plist 早于本次系统 boot，证明描述符当时已经存在；但当前进
 
 ### 真 iPhone
 
-真实 iPhone 已连接并启用 Developer Mode，但本机尚无 Apple Development codesign
-identity，Xcode Apple Account 登录/签名仍在进行，因此 App 尚未安装到真机。
-Secure Enclave、ThisDeviceOnly Keychain、注册/轮换/撤销、Wi-Fi/蜂窝切换、前后台
-恢复与 Apple 权限场景仍未验证。
+真实 iPhone 已连接、paired、启用 Developer Mode；Xcode Apple Account、Personal
+Team 自动签名、Release 真机构建、安装和启动均已通过，App 显示原生 registration
+首屏。首次两次 UI XCTest 均在测试方法启动前被 Apple device screen authentication
+拦截：第一次镜像仍占用设备，第二次设备自动锁屏。该失败不计业务 RED/PASS；需保持
+屏幕常亮后重新执行。Secure Enclave、ThisDeviceOnly Keychain、注册/轮换/撤销、
+Wi-Fi/蜂窝切换、前后台恢复与 Apple 权限场景仍未验证。
 
 ### 后续 Feature
 
@@ -342,15 +355,15 @@ Cloudflare live/真机 Verify 通过，不允许用 Simulator registration、tar
 | iPhoneOS target compilation | PASS |
 | GitHub Actions frontend / architecture / benchmark / L1 Playwright | PASS（代码/架构提交 `a2dca2ba`） |
 | GitHub Actions backend deterministic | PASS（run `30604533484`） |
-| personal deployment | PASS（运行提交 `dc8b1b41`；登录后旅程仍缺） |
-| authenticated personal SPA/API/SSE | PARTIAL（真实对话/SSE/终态 PASS；Access 完整 lifecycle 仍缺） |
+| personal deployment | PASS（运行提交 `013762df`；loopback ready 与真实 Chrome Settings ready） |
+| authenticated personal SPA/API/SSE | PARTIAL（对话/SSE/终态、登出/重新登录/Settings ready PASS；过期/一次性恢复仍缺） |
 | personal real-model conversation | PASS（doctor live `gpt-5.5` + Web 精确回复 + `SUCCEEDED` 事件链） |
 | M10 physical boot attestation | MISSING（等待明确物理重启） |
 | F153 iOS Simulator functional/visual E2E | PASS |
 | F154-F156 complete iOS product E2E | MISSING |
-| real-device security/lifecycle | BLOCKED（设备已连接；Apple Development signing identity 仍缺） |
+| real-device security/lifecycle | PARTIAL（签名/构建/安装/启动 PASS；配对、replay、revoke 与权限旅程仍缺） |
 | F154-F156 product implementation | CLOSED |
-| current iOS commit / push | PASS（`35d7aa14`；当前部署提交 `dc8b1b41`） |
+| current iOS commit / push | PASS（`35d7aa14`；当前部署提交 `013762df`） |
 | current iOS clean-checkout scheme | PASS（12/12） |
 | current complete CI | PASS（run `30604533484`，head `a2dca2ba`） |
 | mainline confirmation | MISSING |

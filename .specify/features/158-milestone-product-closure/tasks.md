@@ -23,8 +23,8 @@
 - [x] **T013 [L3]** 真实 Gateway/API/Settings 联调
 - [ ] **T014 [L1]** 在当前个人部署完成真实 Access 登录、过期、登出、恢复、
   SPA/API/SSE 与 Settings 远程访问旅程（真实登录、对话、SSE 运行态和
-  `SUCCEEDED` 事件链已通过；主动登出和重新认证验证码挑战已通过；过期、重新登录
-  完成、一次性错误恢复及 Settings 状态同步仍缺）
+  `SUCCEEDED` 事件链已通过；主动登出、重新认证挑战、用户完成重新登录及部署后
+  Settings“远程访问已就绪”同步已通过；会话自然过期与一次性错误恢复仍缺）
 - [x] **T015 [ARTIFACT]** 生成 F150 verification report 并按真实状态纠正文档；
   报告当前结论仍为 `PARTIAL`，不等于 T014 或 F158 Verify 已通过
 
@@ -71,7 +71,8 @@
   当前代码/架构真值提交 `a2dca2ba` 的 run `30604533484` 五个 job 全绿；
   其后的 `87660ab5`、`981789f2` 仅纠正 F158 制品真值且未触发 CI。个人部署仍为
   `dc8b1b41`；登录后真实对话/SSE/事件链已通过，仍缺完整 Access lifecycle 与最新
-  分支部署复验）
+  分支部署复验；F150 状态修复提交 `013762df` 已推送并通过正式 installer 部署，
+  loopback ready 与真实 Chrome Settings ready 已通过，仍等待该提交权威 CI）
 - [ ] **T038** 提交、推送、合并并确认主线真实交付
 
 ## Phase 5：真实模型运行真值

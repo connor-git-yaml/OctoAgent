@@ -9,7 +9,8 @@
 - Task event chain：PASS，终态 `SUCCEEDED`；
 - Chrome console warning/error：0；
 - Access 主动登出：PASS；登出后根页重新进入 Access 登录边界；
-- Access 重新登录：PARTIAL，邮箱验证码挑战已到达，等待用户完成验证码；
+- Access 重新登录：PASS；用户完成验证码后同一 Chrome 会话重新进入受保护产品页；
+- Settings 远程访问同步：PASS；部署修复提交 `013762df` 后显示“远程访问已就绪”；
 - Access 会话过期与一次性故障恢复：本轮未执行，继续 MISSING；
 - F150/F158 整体结论：仍为 `PARTIAL`。
 
@@ -57,7 +58,7 @@ Chrome 两个页面的 console warning/error 均为 0。
 
 ## Settings 远程访问投影
 
-真实登录态下打开 Settings，并进入“从电脑安全访问 Octo”区块。页面显示：
+首次真实登录态下打开 Settings，并进入“从电脑安全访问 Octo”区块。页面显示：
 
 - “正在确认远程访问”；
 - 脱敏 Web 地址 `o***.maojiwang.work`；
@@ -69,6 +70,14 @@ Chrome 两个页面的 console warning/error 均为 0。
 warning/error 为 0。该结果证明 Settings 入口、脱敏和 pending 投影存在，但也暴露出
 当前投影尚未收敛为已确认；因此它是 T014 的真实未通过边界，不是 PASS 证据。
 
+用户完成 Access 验证码并重新进入同一受保护产品页后，针对上述单缺陷先建立集成
+RED：已认证 REST/SSE 均通过，但 remote-access status 仍为
+`pending_verification`。修复只在现有 `remote_access_status` 权威函数内消费同一请求
+的 `CloudflarePrincipal`；显式 probe/fault facts 仍优先。组合回归为
+`98 passed / 0 failed`，F151 repository architecture gate 通过。提交
+`013762dfff200f3a1c1fc010fb59e1e4ffd52e4f` 经正式 installer 进入个人部署并重启后，
+真实 Chrome Settings 显示“远程访问已就绪”、脱敏地址/owner 与打开/退出动作。
+
 ## Access 主动登出与重新认证边界
 
 从真实登录态 Settings 执行“退出远程登录”后，旧 SPA 画面没有被当成有效会话继续
@@ -78,9 +87,9 @@ warning/error 为 0。该结果证明 Settings 入口、脱敏和 pending 投影
 过期。
 
 该结果证明主动登出已使受保护根页重新回到 Access 身份边界，也证明重新认证挑战可以
-到达。验证码仍由用户本人输入；本报告不读取 Gmail、Cookie、local storage、密码或
-验证码，也不把停在验证码页冒充重新登录成功。因此重新登录和登录后 Settings 状态同步
-继续保持 `PARTIAL`。
+到达。验证码由用户本人输入；本报告没有读取 Gmail、Cookie、local storage、密码或
+验证码。用户完成验证后，同一 Chrome 会话重新进入 Settings，因此重新登录为 PASS；
+随后部署上述状态投影修复并取得“远程访问已就绪”，登录后 Settings 同步也为 PASS。
 
 ## 真实模型 Doctor
 
@@ -103,6 +112,8 @@ env LITELLM_LOCAL_MODEL_COST_MAP=True ~/.octoagent/bin/octo doctor --live
 | `remote-task-event-chain-succeeded.png` | `821750c5e7defb1093dba4b17f9f9e85d8c23b03bd8334709b9414b536adfbae` | 1084×830 | Task Detail、Orchestrator 成功与 `SUCCEEDED` 终态 |
 | `remote-settings-pending-verification.png` | `4b83bb96b5da037a997210f95ffa43213de61ba0506fa0ccf1ab23e896c12b32` | 1084×830 | 真实 Settings 远程访问区块、脱敏地址/owner 与点击“重新检查”后仍 pending 的诚实状态 |
 | `remote-access-code-challenge.png` | `01e7b4dfa7fddc8103fd9cb07f8da7cf47e31a601134d5d36ad1ba4fb5fe87a9` | 1084×886 | 主动登出后受保护根页重新进入 Access 邮箱验证码挑战；未包含验证码 |
+| `remote-access-reauthenticated-settings-pending.jpg` | `2e31827267f3e38bdfb9faa4009da5f9aef85a97484dc741f1141b369406624c` | 1084×886 | 用户完成重新认证并进入真实 Settings；部署修复前仍 pending 的单缺陷现场 |
+| `remote-access-settings-ready.jpg` | `9262c4692e0bceddb87b66a1cd6bf3ac20800a98a5e62dda9c3c0a4a479bb86c` | 1084×886 | 提交 `013762df` 部署后同一真实 Chrome 会话显示“远程访问已就绪” |
 
 截图来自当前个人部署的真实登录态或重新认证状态，不是 mock、静态 HTML、设计稿或
 本地 fixture。
@@ -112,9 +123,7 @@ env LITELLM_LOCAL_MODEL_COST_MAP=True ~/.octoagent/bin/octo doctor --live
 本轮成功旅程不能替代以下独立行为：
 
 1. Access 会话过期；
-2. 重新登录完成及登录后刷新复验；主动登出与验证码挑战已通过；
-3. 一次性上游错误后的恢复；
-4. Settings remote-access 区块在上述状态间的同步；当前点击“重新检查”后仍为
-   “正在确认远程访问”。
+2. 一次性上游错误后的恢复。
 
-因此 F158 T045 可以完成，但 T014 继续保持 unchecked。
+主动登出、验证码挑战、重新登录完成和登录后 Settings 同步已经通过；T014 仍因上述
+两个独立未执行边界保持 unchecked。

@@ -314,5 +314,16 @@
   真实 OpenAI Codex 对话经 SSE 从`进行中`到`已完成`，返回
   `F158_WEB_E2E_OK`，Task `01KYY3E1Q3GVEQYPB2HRCE3F88`到达
   `SUCCEEDED`，两个页面 console warning/error=0；`octo doctor --live`同日再次以
-  `gpt-5.5`通过。T045完成；Access过期、主动登出、重新登录、一次性恢复与Settings
-  状态同步未执行，T014继续unchecked。
+  `gpt-5.5`通过。T045完成；随后主动登出、验证码挑战和用户完成重新登录均通过。
+- 2026-08-01：登录后 Settings 仍永久显示 `pending_verification`。单缺陷测试先在
+  authenticated REST/SSE 已通过时稳定见红；修复只在既有 `remote_access_status`
+  authority 内消费同一请求的 `CloudflarePrincipal`，显式 probe/fault facts 仍优先。
+  组合回归 `98 passed`，Ruff/format/diff 与 F151 repository architecture gate 均
+  通过。提交 `013762df` 已推送并经正式 installer 部署，Gateway 新 PID ready；同一
+  真实 Chrome Settings 显示“远程访问已就绪”。会话自然过期与一次性错误恢复仍未
+  执行，T014 继续 unchecked。
+- 2026-08-01：真实 iPhone 17 Pro Max 已有线连接、paired、Developer Mode enabled。
+  Personal Team `34GR9QLLMY` 的 Release 真机构建、自动签名、安装和启动通过，原生
+  registration disconnected 首屏已保存。两次 live UI XCTest 均在测试方法前被
+  Apple device screen authentication 拦截；只读事实分别为镜像进程占用和设备自动
+  锁屏，不计业务失败。用户保持屏幕常亮后必须重新生成短时挑战并执行配对旅程。
