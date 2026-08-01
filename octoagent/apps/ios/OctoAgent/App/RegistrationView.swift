@@ -290,6 +290,9 @@ struct RegistrationView: View {
                     VStack(alignment: .leading, spacing: 20) {
                         brandHeader
                         connectionCard
+                        if case .connected = viewModel.phase {
+                            healthEntry
+                        }
                         if viewModel.phase == .disconnected {
                             connectionForm
                         }
@@ -445,6 +448,37 @@ struct RegistrationView: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .octoCard()
+    }
+
+    private var healthEntry: some View {
+        NavigationLink {
+            HealthReviewView()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: "heart.text.square.fill")
+                    .font(.title2)
+                    .foregroundStyle(OctoPalette.accent)
+                    .frame(width: 38, height: 38)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("健康概览")
+                        .font(.headline)
+                        .foregroundStyle(OctoPalette.primary)
+                    Text("读取 Apple 健康前先查看权限和发送内容")
+                        .font(.footnote)
+                        .foregroundStyle(OctoPalette.muted)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .foregroundStyle(OctoPalette.muted)
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 52)
+        }
+        .buttonStyle(.plain)
+        .octoCard()
+        .accessibilityIdentifier("health-entry")
+        .accessibilityLabel("打开健康概览")
     }
 
     private func primaryButton(_ title: String) -> some View {

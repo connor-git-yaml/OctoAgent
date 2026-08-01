@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 
 enum HealthImportPhase: String, CaseIterable {
@@ -16,11 +17,13 @@ enum HealthImportPhase: String, CaseIterable {
 }
 
 @MainActor
-final class HealthImportCoordinator {
+final class HealthImportCoordinator: ObservableObject {
     private let store: HealthDataStore
     private let now: () -> Date
-    private(set) var phase: HealthImportPhase = .idle
-    private(set) var preview: HealthPreview?
+    @Published private(set) var phase: HealthImportPhase = .idle
+    @Published private(set) var preview: HealthPreview?
+    @Published private(set) var analysisSummary: String?
+    @Published private(set) var notice = ""
     private var operationGeneration = 0
     private var isOnline = true
     private var isRevoked = false
@@ -43,6 +46,8 @@ final class HealthImportCoordinator {
         operationGeneration += 1
         let generation = operationGeneration
         preview = nil
+        analysisSummary = nil
+        notice = ""
         phase = .requestingPermission
         do {
             try await store.requestReadAuthorization(for: Set(HealthDataType.allCases))
@@ -124,10 +129,18 @@ final class HealthImportCoordinator {
         phase = .analyzing
     }
 
-    func analysisDidComplete() {
+    func analysisDidComplete(summary: String? = nil) {
         guard phase == .analyzing else { return }
         clearPreview()
+        analysisSummary = summary
+        notice = ""
         phase = .completed
+    }
+
+    func analysisDidFail(isOffline: Bool) {
+        guard phase == .submitting || phase == .analyzing else { return }
+        notice = isOffline ? "当前离线，预览仍只保存在这台 iPhone。" : "这次分析没有完成，请稍后重试。"
+        phase = isOffline ? .offline : .reviewing
     }
 
     func beginDeletion() {
@@ -137,12 +150,15 @@ final class HealthImportCoordinator {
 
     func deletionDidFail() {
         guard phase == .deleting else { return }
+        notice = "删除尚未完成，可以安全重试。"
         phase = .deletionFailed
     }
 
     func deletionDidComplete() {
         guard phase == .deleting else { return }
         clearPreview()
+        analysisSummary = nil
+        notice = ""
         phase = baselinePhase
     }
 

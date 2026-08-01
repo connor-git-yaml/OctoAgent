@@ -97,3 +97,16 @@
   e2e 36/36 与 repository architecture gate 全部通过。checker SHA-256
   `eb525b8fe83a5a9b2fd6f565322b8bfd2c0ee94deb4773030994f44bd5f6c5e3`，T009 test
   SHA-256 `1ac5c042c66eda52574fcc51e0f77a7bd757835dea93d01c6c3b4eab2edcd37d`。
+- 2026-08-02：T010 前两次尝试因测试夹具在 `@MainActor` 默认参数求值处编译失败，
+  明确不计 RED；修正夹具后的 fresh selector 正常执行，并只以
+  `F154_HEALTH_UI_MISSING` 报告 12 个有限状态、exact action、原生视图标识与 connected
+  `NavigationLink` 缺失。GREEN 新增原生 `HealthReviewView`、24 小时/3 天/7 天选择、
+  read-only 权限说明、preview/approve/result/delete/offline/revoked 状态，以及只在已连接
+  设备显示的“健康概览”入口；视觉继续使用 Claude early 黑色层级、绿色强调、紧凑卡片与
+  SwiftUI 原生 navigation，未引入 WebView。REFACTOR 将 100 行状态 switch 收敛为静态有限
+  状态表，文案和行为不变。focused selector 通过；完整 iOS unit 22 tests（19 passed、
+  3 项既有真机测试显式 skipped）、Release iPhoneOS arm64 warnings-as-errors build、
+  F152/F153/F154/F158 authority 5 tests 与 repository architecture gate 全部通过。
+  `HealthReviewView.swift` SHA-256
+  `b0879e1d39eea1d49e6c43969d4f0db1cfd1b8c4a1bc6d4a89005c5a14dc1ca4`，iOS test
+  SHA-256 `a1a3838b329dfac860915f3dfe82c23904a21449f43c580884ff631ac020a558`。

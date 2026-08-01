@@ -23,7 +23,7 @@
   ProviderRouter auth-fatal/timeout/error fail closed、无 Echo
 - [x] **T009 [GATEWAY L3][RED→GREEN→REFACTOR]** provenance deletion cascade、
   partial failure/reentry 与 durable receipt
-- [ ] **T010 [SWIFTUI][RED→GREEN→REFACTOR]** Apple 健康入口、权限解释、无可读数据/
+- [x] **T010 [SWIFTUI][RED→GREEN→REFACTOR]** Apple 健康入口、权限解释、无可读数据/
   权限受限、preview/approve/result/delete 状态
 - [ ] **T011 [VISUAL/A11Y][RED→GREEN→REFACTOR]** Claude early visual baseline、
   Dynamic Type、VoiceOver、Reduce Motion 与 44pt

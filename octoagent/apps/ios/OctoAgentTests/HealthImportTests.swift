@@ -370,6 +370,62 @@ final class HealthImportTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testHealthSwiftUIPresentationAndConnectedEntryContract() throws {
+        var issues: [String] = []
+        let expectedActions: [HealthImportPhase: String?] = [
+            .unavailable: nil,
+            .idle: "从 Apple 健康读取",
+            .requestingPermission: nil,
+            .noReadableDataOrLimitedAccess: "重新读取",
+            .reviewing: "批准并分析",
+            .submitting: nil,
+            .analyzing: nil,
+            .completed: "删除这次数据",
+            .offline: "网络恢复后重试",
+            .revoked: "删除本地预览",
+            .deleting: nil,
+            .deletionFailed: "重试删除",
+        ]
+        for phase in HealthImportPhase.allCases {
+            let presentation = HealthReviewPresentation(phase: phase)
+            if presentation.title.isEmpty
+                || presentation.detail.isEmpty
+                || presentation.statusLabel.isEmpty
+                || presentation.symbol.isEmpty
+            {
+                issues.append("\(phase.rawValue) lacks ordinary-language presentation")
+            }
+            if presentation.actionTitle != expectedActions[phase] {
+                issues.append("\(phase.rawValue) action is not exact")
+            }
+        }
+
+        let healthSource = try sourceText("OctoAgent/Health/HealthReviewView.swift")
+        let registrationSource = try sourceText("OctoAgent/App/RegistrationView.swift")
+        for required in [
+            "不会写入 Apple 健康",
+            "health-window-picker",
+            "health-preview-card",
+            "health-primary-action",
+            "health-delete-action",
+        ] where !healthSource.contains(required) {
+            issues.append("health view is missing \(required)")
+        }
+        for required in ["NavigationLink", "健康概览", "health-entry"]
+        where !registrationSource.contains(required) {
+            issues.append("connected entry is missing \(required)")
+        }
+        if healthSource.contains("WebView") || healthSource.contains("WKWebView") {
+            issues.append("native health view escaped to WebView")
+        }
+
+        XCTAssertTrue(
+            issues.isEmpty,
+            "F154_HEALTH_UI_MISSING: \(issues.joined(separator: "; "))"
+        )
+    }
+
     private func makePreview(window: HealthReadWindow, stepCount: String) throws -> HealthPreview {
         try HealthPreview.make(
             previewID: "preview-1",
@@ -385,6 +441,15 @@ final class HealthImportTests: XCTestCase {
 
     private func date(_ value: String) -> Date {
         ISO8601DateFormatter().date(from: value)!
+    }
+
+    private func sourceText(_ relativePath: String) throws -> String {
+        let tests = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let appRoot = tests.deletingLastPathComponent()
+        return try String(
+            contentsOf: appRoot.appendingPathComponent(relativePath),
+            encoding: .utf8
+        )
     }
 
     private func healthStoreFixture(
