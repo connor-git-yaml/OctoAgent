@@ -8,6 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from octoagent.protocol.device_trust import (
     DeviceEnrollmentRequest,
     DeviceEnrollmentStatusResponse,
+    DeviceKeyRotationChallengeResponse,
+    DeviceKeyRotationRequest,
+    DeviceKeyRotationResponse,
     DeviceProofHeaders,
     DeviceTokenChallengeResponse,
     DeviceTokenRequest,
@@ -173,6 +176,9 @@ def _service_error(exc: DeviceTrustServiceError) -> HTTPException:
         "DEVICE_ATTESTATION_INVALID": "这台设备的真实性检查未通过。",
         "DEVICE_ATTESTATION_UNAVAILABLE": "设备真实性检查暂不可用，请稍后重试。",
         "DEVICE_MOBILE_ORIGIN_MISMATCH": "手机连接地址与配对信息不一致。",
+        "DEVICE_KEY_ROTATION_CHALLENGE_INVALID": "密钥轮换请求已使用、已过期或不匹配。",
+        "DEVICE_KEY_ROTATION_CURRENT_KEY_MISMATCH": "当前设备密钥已经变化，请重新连接。",
+        "DEVICE_KEY_ROTATION_INVALID": "新设备密钥必须与当前密钥不同。",
         "DEVICE_NOT_FOUND": "没有找到这台设备。",
         "DEVICE_NOT_ACTIVE": "这台设备尚未批准或已经撤销。",
         "DEVICE_REGISTRATION_NOT_FOUND": "没有找到这次连接请求。",
@@ -219,6 +225,36 @@ async def create_mobile_token_challenge(
 ) -> DeviceTokenChallengeResponse:
     try:
         return await service.create_token_challenge(device_id=device_id)
+    except DeviceTrustServiceError as exc:
+        raise _service_error(exc) from exc
+
+
+@mobile_router.post(
+    "/key-rotation-challenges/{device_id}",
+    response_model=DeviceKeyRotationChallengeResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_mobile_key_rotation_challenge(
+    device_id: str,
+    service: MobileService,
+) -> DeviceKeyRotationChallengeResponse:
+    try:
+        return await service.create_key_rotation_challenge(device_id=device_id)
+    except DeviceTrustServiceError as exc:
+        raise _service_error(exc) from exc
+
+
+@mobile_router.post(
+    "/key-rotations",
+    response_model=DeviceKeyRotationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def rotate_mobile_device_key(
+    rotation_request: DeviceKeyRotationRequest,
+    service: MobileService,
+) -> DeviceKeyRotationResponse:
+    try:
+        return await service.rotate_device_key(rotation_request)
     except DeviceTrustServiceError as exc:
         raise _service_error(exc) from exc
 

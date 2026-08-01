@@ -7,7 +7,7 @@ import hashlib
 import importlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, Unpack
 
 import httpx
 import pytest
@@ -18,8 +18,15 @@ from fastapi import FastAPI
 ORACLE = "F153_OWNER_REGISTRATION_ROUTES_MISSING"
 MOBILE_ORACLE = "F153_MOBILE_ENROLLMENT_TOKEN_ROUTES_MISSING"
 PROTECTED_ORACLE = "F153_PROTECTED_MOBILE_ROUTES_MISSING"
+ROTATION_ORACLE = "F153_DEVICE_KEY_ROTATION_FLOW_MISSING"
 NOW = datetime(2026, 7, 28, 14, 0, tzinfo=UTC)
 PUBLIC_KEY = "B" + ("A" * 86)
+
+
+class _RequestOptions(TypedDict, total=False):
+    json: dict[str, Any] | None
+    headers: dict[str, str] | None
+    base_url: str
 
 
 def _contracts() -> tuple[Any, Any]:
@@ -41,6 +48,7 @@ def _contracts() -> tuple[Any, Any]:
 async def _app(tmp_path: Path, *, authenticated: bool) -> tuple[FastAPI, Any, Any]:
     service_module, routes = _contracts()
     core_store = importlib.import_module("octoagent.core.store")
+    entropy = iter(range(1, 256))
     group = await core_store.create_store_group(
         str(tmp_path / "octo.db"),
         tmp_path / "artifacts",
@@ -51,7 +59,7 @@ async def _app(tmp_path: Path, *, authenticated: bool) -> tuple[FastAPI, Any, An
         options=service_module.DeviceTrustServiceOptions(
             mobile_origin="https://ios.example.test",
             clock=lambda: NOW,
-            random_bytes=lambda size: b"\x01" * size,
+            random_bytes=lambda size: bytes([next(entropy)]) * size,
             id_factory=iter(
                 (
                     "challenge-1",
@@ -62,6 +70,10 @@ async def _app(tmp_path: Path, *, authenticated: bool) -> tuple[FastAPI, Any, An
                     "grant-1",
                     "audit-2",
                     "audit-3",
+                    "rotation-token-challenge-1",
+                    "rotation-grant-1",
+                    "rotation-token-1",
+                    "audit-4",
                 )
             ).__next__,
         ),
@@ -83,16 +95,18 @@ async def _request(
     app: FastAPI,
     method: str,
     path: str,
-    *,
-    json: dict[str, Any] | None = None,
-    headers: dict[str, str] | None = None,
-    base_url: str = "https://web.example.test",
+    **options: Unpack[_RequestOptions],
 ) -> httpx.Response:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
-        base_url=base_url,
+        base_url=options.get("base_url", "https://web.example.test"),
     ) as client:
-        return await client.request(method, path, json=json, headers=headers)
+        return await client.request(
+            method,
+            path,
+            json=options.get("json"),
+            headers=options.get("headers"),
+        )
 
 
 def _b64url(value: bytes) -> str:
@@ -243,6 +257,35 @@ def _proof_headers(
             models.canonical_json_bytes(proof),
         ),
     }
+
+
+def _rotation_payload(
+    *,
+    challenge: dict[str, Any],
+    current_private_key: Any,
+    current_key_thumbprint: str,
+    new_private_key: Any,
+    new_public_key: str,
+) -> dict[str, Any]:
+    protocol = importlib.import_module("octoagent.protocol.device_trust")
+    unsigned = protocol.DeviceKeyRotationRequest(
+        rotation_challenge_id=challenge["rotation_challenge_id"],
+        device_id=challenge["device_id"],
+        server_challenge=challenge["server_challenge"],
+        mobile_origin=challenge["mobile_origin"],
+        current_key_thumbprint=current_key_thumbprint,
+        new_public_key_x963=new_public_key,
+        current_key_signature_der=_sign(current_private_key, b"temporary-current"),
+        new_key_signature_der=_sign(new_private_key, b"temporary-new"),
+        timestamp=NOW,
+    )
+    signed_bytes = protocol.key_rotation_signature_bytes(unsigned)
+    return unsigned.model_copy(
+        update={
+            "current_key_signature_der": _sign(current_private_key, signed_bytes),
+            "new_key_signature_der": _sign(new_private_key, signed_bytes),
+        }
+    ).model_dump(mode="json")
 
 
 @pytest.mark.asyncio
@@ -578,6 +621,164 @@ async def test_mobile_routes_reject_web_cookie_and_cloudflare_service_token(
             assert response.status_code == 401, response.text
             assert "browser-session" not in response.text, MOBILE_ORACLE
             assert "service-secret" not in response.text, MOBILE_ORACLE
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_active_device_rotates_to_dual_proven_key_with_bounded_overlap(
+    tmp_path: Path,
+) -> None:
+    app, group, _, current_private, _, issued = await _issued_mobile(tmp_path)
+    try:
+        challenge = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/key-rotation-challenges/device-1",
+            base_url="https://ios.example.test",
+        )
+        assert challenge.status_code == 201, challenge.text
+        new_private, new_public = _key_material(scalar=13)
+        payload = _rotation_payload(
+            challenge=challenge.json(),
+            current_private_key=current_private,
+            current_key_thumbprint=issued["grant"]["device_key_thumbprint"],
+            new_private_key=new_private,
+            new_public_key=new_public,
+        )
+        rotated = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/key-rotations",
+            json=payload,
+            base_url="https://ios.example.test",
+        )
+        assert rotated.status_code == 201, rotated.text
+        response = rotated.json()
+        expected_new_thumbprint = hashlib.sha256(
+            base64.urlsafe_b64decode(new_public + "=" * (-len(new_public) % 4))
+        ).hexdigest()
+        assert response == {
+            "device_id": "device-1",
+            "previous_key_thumbprint": issued["grant"]["device_key_thumbprint"],
+            "current_key_thumbprint": expected_new_thumbprint,
+            "rotated_at": "2026-07-28T14:00:00Z",
+            "overlap_expires_at": "2026-07-28T14:15:00Z",
+        }, ROTATION_ORACLE
+        keys = await group.device_trust_store.list_verification_keys(
+            device_id="device-1",
+            now=NOW,
+        )
+        assert {key.device_key_thumbprint for key in keys} == {
+            issued["grant"]["device_key_thumbprint"],
+            expected_new_thumbprint,
+        }, ROTATION_ORACLE
+
+        old_ready = await _request(
+            app,
+            "GET",
+            "/api/mobile/v1/ready",
+            headers=_proof_headers(
+                private_key=current_private,
+                token=issued["opaque_token"],
+                token_id=issued["grant"]["token_id"],
+                path="/api/mobile/v1/ready",
+                nonce="o" * 32,
+            ),
+            base_url="https://ios.example.test",
+        )
+        assert old_ready.status_code == 200, old_ready.text
+
+        token_challenge = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/token-challenges/device-1",
+            base_url="https://ios.example.test",
+        )
+        protocol = importlib.import_module("octoagent.protocol.device_trust")
+        unsigned_token = protocol.DeviceTokenRequest(
+            token_challenge_id=token_challenge.json()["token_challenge_id"],
+            device_id="device-1",
+            server_challenge=token_challenge.json()["server_challenge"],
+            mobile_origin="https://ios.example.test",
+            challenge_signature_der=_sign(new_private, b"temporary"),
+            timestamp=NOW,
+        )
+        signed_token = unsigned_token.model_copy(
+            update={
+                "challenge_signature_der": _sign(
+                    new_private,
+                    protocol.token_challenge_signature_bytes(unsigned_token),
+                )
+            }
+        )
+        renewed = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/tokens",
+            json=signed_token.model_dump(mode="json"),
+            base_url="https://ios.example.test",
+        )
+        assert renewed.status_code == 201, renewed.text
+        assert renewed.json()["grant"]["device_key_thumbprint"] == expected_new_thumbprint
+
+        replay = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/key-rotations",
+            json=payload,
+            base_url="https://ios.example.test",
+        )
+        assert replay.status_code == 409, replay.text
+        assert (
+            len(
+                await group.device_trust_store.list_verification_keys(
+                    device_id="device-1",
+                    now=NOW + timedelta(minutes=16),
+                )
+            )
+            == 1
+        ), ROTATION_ORACLE
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_rotation_wrong_new_key_proof_is_zero_write(tmp_path: Path) -> None:
+    app, group, _, current_private, _, issued = await _issued_mobile(tmp_path)
+    try:
+        challenge = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/key-rotation-challenges/device-1",
+            base_url="https://ios.example.test",
+        )
+        assert challenge.status_code == 201, challenge.text
+        new_private, new_public = _key_material(scalar=13)
+        wrong_private, _ = _key_material(scalar=17)
+        payload = _rotation_payload(
+            challenge=challenge.json(),
+            current_private_key=current_private,
+            current_key_thumbprint=issued["grant"]["device_key_thumbprint"],
+            new_private_key=new_private,
+            new_public_key=new_public,
+        )
+        payload["new_key_signature_der"] = _sign(wrong_private, b"wrong")
+        before = await group.device_trust_store.get_device("device-1")
+        rejected = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/key-rotations",
+            json=payload,
+            base_url="https://ios.example.test",
+        )
+        assert rejected.status_code == 401, rejected.text
+        assert await group.device_trust_store.get_device("device-1") == before
+        keys = await group.device_trust_store.list_verification_keys(
+            device_id="device-1",
+            now=NOW,
+        )
+        assert len(keys) == 1, ROTATION_ORACLE
     finally:
         await group.close()
 

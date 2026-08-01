@@ -1,3 +1,4 @@
+import Foundation
 import Security
 import XCTest
 @testable import OctoAgent
@@ -71,6 +72,29 @@ final class DeviceTrustTests: XCTestCase {
             {"body_sha256":"\(emptyBodySHA256)","canonical_path":\
             "/api/mobile/v1/ready","method":"GET","nonce":"\(String(repeating: "a", count: 32))",\
             "timestamp":"2026-07-28T10:00:00Z","token_id":"token-1"}
+            """
+        )
+    }
+
+    func test_canonical_key_rotation_proof_binds_current_and_new_keys() throws {
+        let proof = CanonicalKeyRotationProof(
+            currentKeyThumbprint: String(repeating: "a", count: 64),
+            deviceID: "device-1",
+            mobileOrigin: "https://native.example.test",
+            newPublicKeyX963: "BAAA",
+            rotationChallengeID: "rotation-1",
+            serverChallengeSHA256: String(repeating: "b", count: 64),
+            timestamp: "2026-08-01T14:30:00Z"
+        )
+
+        XCTAssertEqual(
+            String(decoding: try proof.canonicalBytes(), as: UTF8.self),
+            """
+            {"current_key_thumbprint":"\(String(repeating: "a", count: 64))",\
+            "device_id":"device-1","mobile_origin":"https://native.example.test",\
+            "new_public_key_x963":"BAAA","rotation_challenge_id":"rotation-1",\
+            "server_challenge_sha256":"\(String(repeating: "b", count: 64))",\
+            "timestamp":"2026-08-01T14:30:00Z"}
             """
         )
     }
@@ -182,6 +206,145 @@ final class DeviceTrustTests: XCTestCase {
                 "https://mobile.example.test/api/mobile/v1/enrollments"
             )
         )
+    }
+
+    func test_live_identical_signed_request_is_rejected_as_replay() async throws {
+#if targetEnvironment(simulator)
+        throw XCTSkip("仅由显式真机 replay transaction 启用")
+#else
+        guard ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_REPLAY"] == "1" else {
+            throw XCTSkip("未显式启用真机 replay transaction")
+        }
+
+        let keyStore = DeviceKeyStore()
+        var credentials = try XCTUnwrap(keyStore.loadCredentials())
+        let signer = RequestProofSigner(keyProvider: keyStore)
+        let client = try DeviceTrustClient(
+            serverOrigin: credentials.serverOrigin,
+            signer: signer
+        )
+        if credentials.tokenExpiresAt <= Date().addingTimeInterval(5) {
+            credentials = try await client.issueToken(deviceID: credentials.deviceID)
+            try keyStore.saveCredentials(credentials)
+        }
+
+        let path = "/api/mobile/v1/ready"
+        let timestampFormatter = ISO8601DateFormatter()
+        timestampFormatter.formatOptions = [.withInternetDateTime]
+        let timestamp = timestampFormatter.string(
+            from: Date(timeIntervalSince1970: floor(Date().timeIntervalSince1970))
+        )
+        let nonce = String(repeating: "r", count: 32)
+        let emptyBodySHA256 =
+            "e3b0c44298fc1c149afbf4c8996fb924"
+            + "27ae41e4649b934ca495991b7852b855"
+        let proof = CanonicalRequestProof(
+            method: "GET",
+            canonicalPath: path,
+            bodySHA256: emptyBodySHA256,
+            timestamp: timestamp,
+            nonce: nonce,
+            tokenID: credentials.tokenID
+        )
+        let signature = try signer.sign(proof.canonicalBytes()).signatureDER
+        let encodedSignature = signature.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        var request = URLRequest(
+            url: credentials.serverOrigin.appending(path: String(path.dropFirst()))
+        )
+        request.httpMethod = "GET"
+        request.setValue(
+            "OctoDevice \(credentials.token)",
+            forHTTPHeaderField: "Authorization"
+        )
+        request.setValue(proof.timestamp, forHTTPHeaderField: "X-Octo-Device-Timestamp")
+        request.setValue(proof.nonce, forHTTPHeaderField: "X-Octo-Device-Nonce")
+        request.setValue(
+            encodedSignature,
+            forHTTPHeaderField: "X-Octo-Device-Signature"
+        )
+
+        let session = URLSession(configuration: DeviceTrustClient.sessionConfiguration())
+        defer { session.invalidateAndCancel() }
+        let (_, firstResponse) = try await session.data(for: request)
+        XCTAssertEqual((firstResponse as? HTTPURLResponse)?.statusCode, 200)
+
+        let (replayData, replayResponse) = try await session.data(for: request)
+        XCTAssertEqual((replayResponse as? HTTPURLResponse)?.statusCode, 401)
+        let replayJSON = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: replayData) as? [String: Any]
+        )
+        let detail = try XCTUnwrap(replayJSON["detail"] as? [String: Any])
+        XCTAssertEqual(detail["code"] as? String, "REQUEST_REPLAYED")
+#endif
+    }
+
+    func test_live_expired_token_rotates_without_replacing_device_key() async throws {
+#if targetEnvironment(simulator)
+        throw XCTSkip("仅由显式真机 token expiry transaction 启用")
+#else
+        guard ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_TOKEN_ROTATION"] == "1"
+        else {
+            throw XCTSkip("未显式启用真机 token expiry transaction")
+        }
+
+        let keyStore = DeviceKeyStore()
+        let expired = try XCTUnwrap(keyStore.loadCredentials())
+        XCTAssertLessThanOrEqual(expired.tokenExpiresAt, Date())
+        let keyBefore = try keyStore.publicKeyX963()
+        let client = try DeviceTrustClient(
+            serverOrigin: expired.serverOrigin,
+            signer: RequestProofSigner(keyProvider: keyStore)
+        )
+
+        let renewed = try await client.issueToken(deviceID: expired.deviceID)
+        XCTAssertEqual(renewed.deviceID, expired.deviceID)
+        XCTAssertNotEqual(renewed.tokenID, expired.tokenID)
+        XCTAssertNotEqual(renewed.token, expired.token)
+        XCTAssertGreaterThan(renewed.tokenExpiresAt, Date())
+        XCTAssertEqual(try keyStore.publicKeyX963(), keyBefore)
+        try keyStore.saveCredentials(renewed)
+
+        let ready = try await client.ready(credentials: renewed)
+        XCTAssertEqual(ready.status, "ready")
+        XCTAssertEqual(ready.deviceID, renewed.deviceID)
+#endif
+    }
+
+    func test_live_device_key_rotation_replaces_secure_enclave_key() async throws {
+#if targetEnvironment(simulator)
+        throw XCTSkip("仅由显式真机 device key rotation transaction 启用")
+#else
+        guard ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_KEY_ROTATION"] == "1"
+        else {
+            throw XCTSkip("未显式启用真机 device key rotation transaction")
+        }
+
+        let keyStore = DeviceKeyStore()
+        let credentials = try XCTUnwrap(keyStore.loadCredentials())
+        let keyBefore = try keyStore.publicKeyX963()
+        let client = try DeviceTrustClient(
+            serverOrigin: credentials.serverOrigin,
+            signer: RequestProofSigner(keyProvider: keyStore)
+        )
+
+        let rotated = try await client.rotateKey(
+            credentials: credentials,
+            keyStore: keyStore
+        )
+        let keyAfter = try keyStore.publicKeyX963()
+        XCTAssertEqual(rotated.deviceID, credentials.deviceID)
+        XCTAssertNotEqual(keyAfter, keyBefore)
+        XCTAssertNotEqual(rotated.tokenID, credentials.tokenID)
+        XCTAssertGreaterThan(rotated.tokenExpiresAt, Date())
+        try keyStore.saveCredentials(rotated)
+
+        let ready = try await client.ready(credentials: rotated)
+        XCTAssertEqual(ready.status, "ready")
+        XCTAssertEqual(ready.deviceID, rotated.deviceID)
+#endif
     }
 }
 

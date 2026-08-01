@@ -23,6 +23,7 @@ from octoagent.core.models import (
     PrivacyAuditEventType,
 )
 from octoagent.core.store.device_trust_store import (
+    DeviceKeyRotation,
     RegistrationChallengeCreate,
     RegistrationChallengeRecord,
     RegistrationChallengeState,
@@ -34,6 +35,9 @@ from octoagent.protocol.device_trust import (
     DeviceEnrollmentRequest,
     DeviceEnrollmentStatus,
     DeviceEnrollmentStatusResponse,
+    DeviceKeyRotationChallengeResponse,
+    DeviceKeyRotationRequest,
+    DeviceKeyRotationResponse,
     DeviceProofHeaders,
     DeviceTokenChallengeResponse,
     DeviceTokenRequest,
@@ -51,6 +55,7 @@ from .mobile_device_auth import (
     generate_opaque_device_token,
     opaque_token_sha256,
     verify_enrollment_signature,
+    verify_key_rotation_signatures,
     verify_token_challenge_signature,
 )
 
@@ -276,29 +281,100 @@ class DeviceTrustService:
     ) -> DeviceTokenChallengeResponse:
         """为 active device 返回一次 raw server challenge，数据库只保存 hash。"""
 
-        now = self._clock()
-        material = self._random_bytes(32)
-        if not isinstance(material, bytes) or len(material) != 32:
-            raise DeviceTrustServiceError("DEVICE_CHALLENGE_ENTROPY_INVALID")
-        server_challenge = base64.urlsafe_b64encode(material).rstrip(b"=").decode()
-        token_challenge_id = self._id_factory()
-        expires_at = now + timedelta(minutes=2)
-        try:
-            await self._device_store.create_token_challenge(
-                token_challenge_id=token_challenge_id,
-                device_id=device_id,
-                challenge_sha256=self.hash_challenge_secret(server_challenge),
-                created_at=now,
-                expires_at=expires_at,
-            )
-        except ValueError as exc:
-            raise DeviceTrustServiceError("DEVICE_NOT_ACTIVE", status_code=404) from exc
+        (
+            token_challenge_id,
+            server_challenge,
+            expires_at,
+        ) = await self._create_active_device_challenge(device_id=device_id)
         return DeviceTokenChallengeResponse(
             token_challenge_id=token_challenge_id,
             device_id=device_id,
             server_challenge=server_challenge,
             mobile_origin=self._mobile_origin,
             expires_at=expires_at,
+        )
+
+    async def create_key_rotation_challenge(
+        self,
+        *,
+        device_id: str,
+    ) -> DeviceKeyRotationChallengeResponse:
+        """为 active device 返回一次与 token protocol 分离的轮换 challenge。"""
+
+        (
+            rotation_challenge_id,
+            server_challenge,
+            expires_at,
+        ) = await self._create_active_device_challenge(device_id=device_id)
+        return DeviceKeyRotationChallengeResponse(
+            rotation_challenge_id=rotation_challenge_id,
+            device_id=device_id,
+            server_challenge=server_challenge,
+            mobile_origin=self._mobile_origin,
+            expires_at=expires_at,
+        )
+
+    async def rotate_device_key(
+        self,
+        request: DeviceKeyRotationRequest,
+    ) -> DeviceKeyRotationResponse:
+        """验证 current/new 双证明，再原子采用 challenge 与新 key。"""
+
+        now = self._clock()
+        self._require_current_request(request.timestamp, now=now)
+        if request.mobile_origin != self._mobile_origin:
+            raise DeviceTrustServiceError("DEVICE_MOBILE_ORIGIN_MISMATCH", status_code=404)
+        device = await self._device_store.get_device(request.device_id)
+        if device is None or device.status is not DeviceStatus.ACTIVE:
+            raise DeviceTrustServiceError("DEVICE_NOT_ACTIVE", status_code=404)
+        if request.current_key_thumbprint != device.device_key_thumbprint:
+            raise DeviceTrustServiceError(
+                "DEVICE_KEY_ROTATION_CURRENT_KEY_MISMATCH",
+                status_code=409,
+            )
+        try:
+            new_thumbprint = verify_key_rotation_signatures(
+                request,
+                current_public_key_x963=device.public_key,
+            )
+        except DeviceAuthError as exc:
+            raise DeviceTrustServiceError(exc.reason_code, status_code=401) from exc
+        overlap_expires_at = now + timedelta(minutes=15)
+        try:
+            await self._device_store.consume_rotation_challenge_and_rotate_key(
+                rotation_challenge_id=request.rotation_challenge_id,
+                challenge_sha256=self.hash_challenge_secret(request.server_challenge),
+                rotation=DeviceKeyRotation(
+                    device_id=request.device_id,
+                    current_key_thumbprint=request.current_key_thumbprint,
+                    public_key_x963=request.new_public_key_x963,
+                    device_key_thumbprint=new_thumbprint,
+                    rotated_at=now,
+                    overlap_expires_at=overlap_expires_at,
+                ),
+            )
+        except ValueError as exc:
+            raise DeviceTrustServiceError(
+                "DEVICE_KEY_ROTATION_CHALLENGE_INVALID",
+                status_code=409,
+            ) from exc
+        await self._append_device_audit(
+            _DeviceAuditContext(
+                device_id=device.device_id,
+                owner_id=device.owner_id,
+                object_hash=new_thumbprint,
+                event_type=PrivacyAuditEventType.KEY_ROTATED,
+                decision=AuditDecision.ALLOW,
+                result=AuditResult.SUCCESS,
+                reason_code="DEVICE_KEY_ROTATED",
+            )
+        )
+        return DeviceKeyRotationResponse(
+            device_id=device.device_id,
+            previous_key_thumbprint=device.device_key_thumbprint,
+            current_key_thumbprint=new_thumbprint,
+            rotated_at=now,
+            overlap_expires_at=overlap_expires_at,
         )
 
     async def issue_token(
@@ -531,6 +607,30 @@ class DeviceTrustService:
         if record is None or record.owner_id != owner_id_for_subject(owner_subject):
             raise DeviceTrustServiceError("DEVICE_REGISTRATION_NOT_FOUND", status_code=404)
         return record
+
+    async def _create_active_device_challenge(
+        self,
+        *,
+        device_id: str,
+    ) -> tuple[str, str, datetime]:
+        now = self._clock()
+        material = self._random_bytes(32)
+        if not isinstance(material, bytes) or len(material) != 32:
+            raise DeviceTrustServiceError("DEVICE_CHALLENGE_ENTROPY_INVALID")
+        server_challenge = base64.urlsafe_b64encode(material).rstrip(b"=").decode()
+        challenge_id = self._id_factory()
+        expires_at = now + timedelta(minutes=2)
+        try:
+            await self._device_store.create_token_challenge(
+                token_challenge_id=challenge_id,
+                device_id=device_id,
+                challenge_sha256=self.hash_challenge_secret(server_challenge),
+                created_at=now,
+                expires_at=expires_at,
+            )
+        except ValueError as exc:
+            raise DeviceTrustServiceError("DEVICE_NOT_ACTIVE", status_code=404) from exc
+        return challenge_id, server_challenge, expires_at
 
     @staticmethod
     def _require_current_request(timestamp: datetime, *, now: datetime) -> None:

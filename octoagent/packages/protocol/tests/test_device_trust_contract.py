@@ -11,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 ORACLE = "F153_DEVICE_TRUST_CONTRACT_MISSING"
+ROTATION_ORACLE = "F153_DEVICE_KEY_ROTATION_CONTRACT_MISSING"
 NOW = datetime(2026, 7, 28, 10, 0, tzinfo=UTC)
 MOBILE_ORIGIN = "https://ios.example.test"
 PUBLIC_KEY = "B" + ("A" * 86)
@@ -28,6 +29,9 @@ def _contract() -> Any:
         "DeviceEnrollmentStatus",
         "DeviceEnrollmentStatusResponse",
         "DeviceProofHeaders",
+        "DeviceKeyRotationChallengeResponse",
+        "DeviceKeyRotationRequest",
+        "DeviceKeyRotationResponse",
         "DeviceTokenChallengeResponse",
         "DeviceTokenRequest",
         "DeviceTokenResponse",
@@ -35,6 +39,7 @@ def _contract() -> Any:
         "MobileReadyResponse",
         "OwnerRegistrationChallengeResponse",
         "enrollment_signature_bytes",
+        "key_rotation_signature_bytes",
         "token_challenge_signature_bytes",
     )
     missing = [name for name in required if not hasattr(module, name)]
@@ -146,6 +151,60 @@ def test_token_challenge_signature_and_response_reuse_f152_grant() -> None:
     assert response.opaque_token not in repr(response)
 
 
+def test_key_rotation_requires_current_and_new_key_proof_with_bounded_overlap() -> None:
+    module = _contract()
+    challenge = module.DeviceKeyRotationChallengeResponse(
+        rotation_challenge_id="rotation-challenge-1",
+        device_id="device-1",
+        server_challenge=SECRET,
+        mobile_origin=MOBILE_ORIGIN,
+        expires_at=NOW + timedelta(minutes=2),
+    )
+    request = module.DeviceKeyRotationRequest(
+        rotation_challenge_id=challenge.rotation_challenge_id,
+        device_id=challenge.device_id,
+        server_challenge=challenge.server_challenge,
+        mobile_origin=challenge.mobile_origin,
+        current_key_thumbprint="a" * 64,
+        new_public_key_x963=PUBLIC_KEY,
+        current_key_signature_der=SIGNATURE,
+        new_key_signature_der=SIGNATURE,
+        timestamp=NOW,
+    )
+    expected = (
+        b'{"current_key_thumbprint":"'
+        + ("a" * 64).encode()
+        + b'","device_id":"device-1","mobile_origin":"https://ios.example.test",'
+        + b'"new_public_key_x963":"'
+        + PUBLIC_KEY.encode()
+        + b'","rotation_challenge_id":"rotation-challenge-1",'
+        + b'"server_challenge_sha256":"'
+        + hashlib.sha256(SECRET.encode()).hexdigest().encode()
+        + b'","timestamp":"2026-07-28T10:00:00Z"}'
+    )
+    assert module.key_rotation_signature_bytes(request) == expected, ROTATION_ORACLE
+    assert request.current_key_signature_der not in expected.decode()
+    assert request.new_key_signature_der not in expected.decode()
+    assert request.server_challenge not in expected.decode()
+
+    response = module.DeviceKeyRotationResponse(
+        device_id="device-1",
+        previous_key_thumbprint="a" * 64,
+        current_key_thumbprint="b" * 64,
+        rotated_at=NOW,
+        overlap_expires_at=NOW + timedelta(minutes=15),
+    )
+    assert response.overlap_expires_at - response.rotated_at == timedelta(minutes=15)
+    with pytest.raises(ValidationError):
+        module.DeviceKeyRotationResponse(
+            device_id="device-1",
+            previous_key_thumbprint="a" * 64,
+            current_key_thumbprint="b" * 64,
+            rotated_at=NOW,
+            overlap_expires_at=NOW + timedelta(minutes=15, seconds=1),
+        )
+
+
 def test_status_proof_and_ready_projection_are_strict() -> None:
     module = _contract()
     open_challenge = module.DeviceEnrollmentStatusResponse(
@@ -234,6 +293,9 @@ def test_schema_has_no_web_cookie_service_token_or_health_calendar() -> None:
         "OwnerRegistrationChallengeResponse",
         "DeviceEnrollmentRequest",
         "DeviceEnrollmentStatusResponse",
+        "DeviceKeyRotationChallengeResponse",
+        "DeviceKeyRotationRequest",
+        "DeviceKeyRotationResponse",
         "DeviceTokenChallengeResponse",
         "DeviceTokenRequest",
         "DeviceTokenResponse",

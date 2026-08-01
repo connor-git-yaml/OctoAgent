@@ -64,6 +64,129 @@ final class RegistrationFlowUITests: XCTestCase {
         XCTAssertGreaterThanOrEqual(approveButton.frame.height, 44)
     }
 
+    func test_live_registration_completes_owner_approval() throws {
+#if targetEnvironment(simulator)
+        throw XCTSkip("仅由显式真机 device-trust transaction 启用")
+#else
+        guard let connectionLink = ProcessInfo.processInfo.environment[
+            "OCTOAGENT_LIVE_CONNECTION_LINK"
+        ] else {
+            throw XCTSkip("未通过显式真机 transaction 注入一次性连接信息")
+        }
+        XCTAssertTrue(
+            connectionLink.hasPrefix("octoagent://connect?"),
+            "真机连接信息格式不正确"
+        )
+
+        app.launchArguments = [
+            "-AppleLanguages",
+            "(zh-Hans)",
+            "-AppleLocale",
+            "zh_CN",
+        ]
+        app.launch()
+
+        let connectionInformation = app.textFields["Octo 连接信息"]
+        let connectButton = app.buttons["连接此 Octo"]
+        XCTAssertTrue(connectionInformation.waitForExistence(timeout: 5))
+        connectionInformation.tap()
+        connectionInformation.typeText(connectionLink)
+        XCTAssertTrue(connectButton.isEnabled)
+        connectButton.tap()
+
+        XCTAssertTrue(app.staticTexts["等待电脑批准"].waitForExistence(timeout: 20))
+        XCTAssertTrue(app.staticTexts["等待批准"].exists)
+        keepLiveScreenshot(named: "registration-live-awaiting-approval")
+
+        let approvalButton = app.buttons["我已在电脑上批准"]
+        let connectedStatus = app.staticTexts["已连接"]
+        let approvalDeadline = Date().addingTimeInterval(90)
+        while !connectedStatus.exists, Date() < approvalDeadline {
+            XCTAssertTrue(approvalButton.waitForExistence(timeout: 5))
+            approvalButton.tap()
+            if connectedStatus.waitForExistence(timeout: 5) {
+                break
+            }
+        }
+        XCTAssertTrue(connectedStatus.exists, "电脑批准后真机未取得设备令牌")
+        keepLiveScreenshot(named: "registration-live-connected")
+#endif
+    }
+
+    func test_live_connection_restores_after_background_and_relaunch() throws {
+#if targetEnvironment(simulator)
+        throw XCTSkip("仅由显式真机 Keychain 恢复 transaction 启用")
+#else
+        guard ProcessInfo.processInfo.environment[
+            "OCTOAGENT_LIVE_RESTORE_CONNECTION"
+        ] == "1" else {
+            throw XCTSkip("未显式启用真机 Keychain 恢复 transaction")
+        }
+
+        app.launchArguments = [
+            "-AppleLanguages",
+            "(zh-Hans)",
+            "-AppleLocale",
+            "zh_CN",
+        ]
+        app.launch()
+
+        let connectedStatus = app.staticTexts["已连接"]
+        XCTAssertTrue(
+            connectedStatus.waitForExistence(timeout: 20),
+            "真机未从 ThisDeviceOnly Keychain 恢复已连接状态"
+        )
+        app.buttons["检查连接"].tap()
+        XCTAssertTrue(
+            connectedStatus.waitForExistence(timeout: 20),
+            "恢复后的签名 ready/profile 检查失败"
+        )
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        XCTAssertTrue(
+            connectedStatus.waitForExistence(timeout: 20),
+            "App 从后台恢复后未保持已连接状态"
+        )
+        keepLiveScreenshot(named: "registration-live-restored-from-background")
+
+        app.terminate()
+        app.launch()
+        XCTAssertTrue(
+            connectedStatus.waitForExistence(timeout: 20),
+            "App 进程重启后未从设备 Keychain 恢复连接"
+        )
+        keepLiveScreenshot(named: "registration-live-restored-after-relaunch")
+#endif
+    }
+
+    func test_live_owner_revocation_requires_reconnect() throws {
+#if targetEnvironment(simulator)
+        throw XCTSkip("仅由显式真机 revoke transaction 启用")
+#else
+        guard ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_EXPECT_REVOKED"] == "1"
+        else {
+            throw XCTSkip("未显式启用真机 revoke transaction")
+        }
+
+        app.launchArguments = [
+            "-AppleLanguages",
+            "(zh-Hans)",
+            "-AppleLocale",
+            "zh_CN",
+        ]
+        app.launch()
+
+        XCTAssertTrue(
+            app.staticTexts["连接已撤销"].waitForExistence(timeout: 20),
+            "owner revoke 后 App 未进入明确的重新连接状态"
+        )
+        XCTAssertTrue(app.staticTexts["需要重新连接"].exists)
+        XCTAssertTrue(app.buttons["重新连接"].exists)
+        keepLiveScreenshot(named: "registration-live-revoked")
+#endif
+    }
+
     private func launch(phase: String) {
         app.launchEnvironment = [
             "OCTOAGENT_UI_TESTING": "1",
@@ -85,6 +208,16 @@ final class RegistrationFlowUITests: XCTestCase {
         attachment.lifetime = .keepAlways
         add(attachment)
         assertMatchesBaseline(screenshot.pngRepresentation, named: name)
+    }
+
+    private func keepLiveScreenshot(named name: String) {
+        let attachment = XCTAttachment(
+            screenshot: app.screenshot(),
+            quality: .original
+        )
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 
     private func assertMatchesBaseline(_ actualData: Data, named name: String) {

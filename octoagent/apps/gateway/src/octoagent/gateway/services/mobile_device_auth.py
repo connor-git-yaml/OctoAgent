@@ -30,9 +30,11 @@ from octoagent.policy import (
 from octoagent.policy.privacy_ingestion_policy import AuthorizedRequest
 from octoagent.protocol.device_trust import (
     DeviceEnrollmentRequest,
+    DeviceKeyRotationRequest,
     DeviceProofHeaders,
     DeviceTokenRequest,
     enrollment_signature_bytes,
+    key_rotation_signature_bytes,
     token_challenge_signature_bytes,
 )
 
@@ -165,6 +167,34 @@ def verify_token_challenge_signature(
     )
 
 
+def verify_key_rotation_signatures(
+    request: DeviceKeyRotationRequest,
+    *,
+    current_public_key_x963: str,
+) -> str:
+    """验证 current/new 双密钥持有证明并返回新 key thumbprint。"""
+
+    payload = key_rotation_signature_bytes(request)
+    _verify_signature(
+        public_key_x963=current_public_key_x963,
+        signature_der=request.current_key_signature_der,
+        payload=payload,
+    )
+    _verify_signature(
+        public_key_x963=request.new_public_key_x963,
+        signature_der=request.new_key_signature_der,
+        payload=payload,
+    )
+    new_public_key = _decode_base64url(
+        request.new_public_key_x963,
+        reason_code="DEVICE_PUBLIC_KEY_INVALID",
+    )
+    new_thumbprint = hashlib.sha256(new_public_key).hexdigest()
+    if new_thumbprint == request.current_key_thumbprint:
+        _deny("DEVICE_KEY_ROTATION_INVALID")
+    return new_thumbprint
+
+
 def _token_from_headers(headers: DeviceProofHeaders) -> str:
     prefix = "OctoDevice "
     if not headers.authorization.startswith(prefix):
@@ -276,5 +306,6 @@ __all__ = [
     "generate_opaque_device_token",
     "opaque_token_sha256",
     "verify_enrollment_signature",
+    "verify_key_rotation_signatures",
     "verify_token_challenge_signature",
 ]

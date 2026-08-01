@@ -22,6 +22,28 @@ struct CanonicalRequestProof: Equatable, Sendable {
     }
 }
 
+struct CanonicalKeyRotationProof: Equatable, Sendable {
+    let currentKeyThumbprint: String
+    let deviceID: String
+    let mobileOrigin: String
+    let newPublicKeyX963: String
+    let rotationChallengeID: String
+    let serverChallengeSHA256: String
+    let timestamp: String
+
+    func canonicalBytes() throws -> Data {
+        try canonicalJSON([
+            "current_key_thumbprint": currentKeyThumbprint,
+            "device_id": deviceID,
+            "mobile_origin": mobileOrigin,
+            "new_public_key_x963": newPublicKeyX963,
+            "rotation_challenge_id": rotationChallengeID,
+            "server_challenge_sha256": serverChallengeSHA256,
+            "timestamp": timestamp,
+        ])
+    }
+}
+
 enum DeviceTrustClientError: Error, Equatable {
     case invalidOrigin
     case invalidKeyMaterial
@@ -167,6 +189,97 @@ final class DeviceTrustClient {
     }
 
     func issueToken(deviceID: String) async throws -> DeviceCredentials {
+        try await issueToken(deviceID: deviceID, using: signer)
+    }
+
+    func rotateKey(
+        credentials: DeviceCredentials,
+        keyStore: DeviceKeyStore
+    ) async throws -> DeviceCredentials {
+        guard credentials.serverOrigin == serverOrigin else {
+            throw DeviceTrustClientError.invalidOrigin
+        }
+        let safeDeviceID = try pathComponent(credentials.deviceID)
+        let currentPublicKey = try signer.publicKeyX963()
+        let currentThumbprint = sha256Hex(currentPublicKey)
+        let rotation = try keyStore.beginKeyRotation()
+        var cancelCandidate = true
+        defer {
+            if cancelCandidate {
+                try? rotation.cancel()
+            }
+        }
+        let newPublicKey = try rotation.publicKeyX963()
+        let newThumbprint = sha256Hex(newPublicKey)
+        guard currentThumbprint != newThumbprint else {
+            throw DeviceTrustClientError.invalidKeyMaterial
+        }
+        let challenge: DeviceKeyRotationChallenge = try await request(
+            path: "/api/mobile/v1/key-rotation-challenges/\(safeDeviceID)",
+            method: "POST",
+            body: nil,
+            headers: [:],
+            isIdempotent: false
+        )
+        guard
+            challenge.deviceID == credentials.deviceID,
+            challenge.mobileOrigin == serverOrigin.absoluteString
+        else {
+            throw DeviceTrustClientError.invalidResponse
+        }
+        let timestamp = utcSecond(now())
+        let proof = CanonicalKeyRotationProof(
+            currentKeyThumbprint: currentThumbprint,
+            deviceID: challenge.deviceID,
+            mobileOrigin: challenge.mobileOrigin,
+            newPublicKeyX963: base64URL(newPublicKey),
+            rotationChallengeID: challenge.rotationChallengeID,
+            serverChallengeSHA256: sha256Hex(Data(challenge.serverChallenge.utf8)),
+            timestamp: timestamp
+        )
+        let payload = try proof.canonicalBytes()
+        let result: DeviceKeyRotationResult = try await request(
+            path: "/api/mobile/v1/key-rotations",
+            method: "POST",
+            body: encode(
+                KeyRotationRequest(
+                    rotationChallengeID: challenge.rotationChallengeID,
+                    deviceID: challenge.deviceID,
+                    serverChallenge: challenge.serverChallenge,
+                    mobileOrigin: challenge.mobileOrigin,
+                    currentKeyThumbprint: currentThumbprint,
+                    newPublicKeyX963: base64URL(newPublicKey),
+                    currentKeySignatureDER: base64URL(
+                        try signer.sign(payload).signatureDER
+                    ),
+                    newKeySignatureDER: base64URL(try rotation.sign(payload)),
+                    timestamp: timestamp
+                )
+            ),
+            headers: [:],
+            isIdempotent: false
+        )
+        cancelCandidate = false
+        guard
+            result.deviceID == credentials.deviceID,
+            result.previousKeyThumbprint == currentThumbprint,
+            result.currentKeyThumbprint == newThumbprint,
+            result.overlapExpiresAt > result.rotatedAt,
+            result.overlapExpiresAt.timeIntervalSince(result.rotatedAt) <= 15 * 60
+        else {
+            throw DeviceTrustClientError.invalidResponse
+        }
+        try rotation.commit()
+        return try await issueToken(
+            deviceID: credentials.deviceID,
+            using: RequestProofSigner(keyProvider: rotation)
+        )
+    }
+
+    private func issueToken(
+        deviceID: String,
+        using tokenSigner: RequestProofSigner
+    ) async throws -> DeviceCredentials {
         let safeDeviceID = try pathComponent(deviceID)
         let challenge: DeviceTokenChallenge = try await request(
             path: "/api/mobile/v1/token-challenges/\(safeDeviceID)",
@@ -186,7 +299,7 @@ final class DeviceTrustClient {
             "timestamp": timestamp,
             "token_challenge_id": challenge.tokenChallengeID,
         ])
-        let signature = try signer.sign(signaturePayload).signatureDER
+        let signature = try tokenSigner.sign(signaturePayload).signatureDER
         let token: DeviceToken = try await request(
             path: "/api/mobile/v1/tokens",
             method: "POST",
@@ -402,6 +515,30 @@ private struct TokenRequest: Encodable {
         case serverChallenge = "server_challenge"
         case mobileOrigin = "mobile_origin"
         case challengeSignatureDER = "challenge_signature_der"
+        case timestamp
+    }
+}
+
+private struct KeyRotationRequest: Encodable {
+    let rotationChallengeID: String
+    let deviceID: String
+    let serverChallenge: String
+    let mobileOrigin: String
+    let currentKeyThumbprint: String
+    let newPublicKeyX963: String
+    let currentKeySignatureDER: String
+    let newKeySignatureDER: String
+    let timestamp: String
+
+    enum CodingKeys: String, CodingKey {
+        case rotationChallengeID = "rotation_challenge_id"
+        case deviceID = "device_id"
+        case serverChallenge = "server_challenge"
+        case mobileOrigin = "mobile_origin"
+        case currentKeyThumbprint = "current_key_thumbprint"
+        case newPublicKeyX963 = "new_public_key_x963"
+        case currentKeySignatureDER = "current_key_signature_der"
+        case newKeySignatureDER = "new_key_signature_der"
         case timestamp
     }
 }

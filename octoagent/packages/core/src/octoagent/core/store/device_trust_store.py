@@ -56,6 +56,18 @@ class DeviceKeyRecord:
 
 
 @dataclass(frozen=True, slots=True)
+class DeviceKeyRotation:
+    """一次设备公钥轮换中必须共同提交的不可分割事实。"""
+
+    device_id: str
+    current_key_thumbprint: str
+    public_key_x963: str
+    device_key_thumbprint: str
+    rotated_at: datetime
+    overlap_expires_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class RegistrationChallengeCreate:
     challenge_id: str
     owner_id: str
@@ -533,51 +545,135 @@ class SqliteDeviceTrustStore:
         rotated_at: datetime,
         overlap_expires_at: datetime,
     ) -> list[DeviceKeyRecord]:
-        if overlap_expires_at < rotated_at:
-            raise ValueError("key overlap cannot end before rotation")
-        if overlap_expires_at > rotated_at + timedelta(minutes=15):
-            raise ValueError("key overlap exceeds fifteen minutes")
         await self._conn.execute("BEGIN IMMEDIATE")
         try:
             device = await self.get_device(device_id)
             if device is None or device.status is not DeviceStatus.ACTIVE:
                 raise ValueError("key rotation requires active device")
-            await self._conn.execute(
-                """
-                UPDATE mobile_device_keys
-                SET state = 'overlap', valid_until = ?
-                WHERE device_key_thumbprint = ? AND state = 'current'
-                """,
-                (overlap_expires_at.isoformat(), device.device_key_thumbprint),
+            rotation = DeviceKeyRotation(
+                device_id=device_id,
+                current_key_thumbprint=device.device_key_thumbprint,
+                public_key_x963=public_key_x963,
+                device_key_thumbprint=device_key_thumbprint,
+                rotated_at=rotated_at,
+                overlap_expires_at=overlap_expires_at,
             )
-            await self._conn.execute(
-                """
-                INSERT INTO mobile_device_keys (
-                    device_key_thumbprint, device_id, public_key_x963,
-                    state, valid_from, valid_until
-                )
-                VALUES (?, ?, ?, 'current', ?, NULL)
-                """,
-                (
-                    device_key_thumbprint,
-                    device_id,
-                    public_key_x963,
-                    rotated_at.isoformat(),
-                ),
-            )
-            await self._conn.execute(
-                """
-                UPDATE mobile_devices
-                SET current_key_thumbprint = ?, last_seen_at = ?
-                WHERE device_id = ? AND status = 'active'
-                """,
-                (device_key_thumbprint, rotated_at.isoformat(), device_id),
-            )
+            self._validate_key_rotation_window(rotation)
+            await self._rotate_device_key_rows(rotation)
             await self._conn.commit()
         except Exception:
             await self._conn.rollback()
             raise
         return await self.list_verification_keys(device_id=device_id, now=rotated_at)
+
+    async def consume_rotation_challenge_and_rotate_key(
+        self,
+        *,
+        rotation_challenge_id: str,
+        challenge_sha256: str,
+        rotation: DeviceKeyRotation,
+    ) -> list[DeviceKeyRecord]:
+        """原子消费单次 challenge，并把新 key 切为 current。"""
+
+        self._validate_key_rotation_window(rotation)
+        await self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            challenge = await self._conn.execute(
+                """
+                UPDATE device_token_challenges
+                SET used_at = ?
+                WHERE token_challenge_id = ?
+                  AND device_id = ?
+                  AND challenge_sha256 = ?
+                  AND used_at IS NULL
+                  AND expires_at > ?
+                """,
+                (
+                    rotation.rotated_at.isoformat(),
+                    rotation_challenge_id,
+                    rotation.device_id,
+                    challenge_sha256,
+                    rotation.rotated_at.isoformat(),
+                ),
+            )
+            if challenge.rowcount != 1:
+                raise ValueError("key rotation challenge is invalid")
+            await self._rotate_device_key_rows(rotation)
+            await self._conn.commit()
+        except Exception:
+            await self._conn.rollback()
+            raise
+        return await self.list_verification_keys(
+            device_id=rotation.device_id,
+            now=rotation.rotated_at,
+        )
+
+    @staticmethod
+    def _validate_key_rotation_window(rotation: DeviceKeyRotation) -> None:
+        if rotation.overlap_expires_at <= rotation.rotated_at:
+            raise ValueError("key overlap must end after rotation")
+        if rotation.overlap_expires_at > rotation.rotated_at + timedelta(minutes=15):
+            raise ValueError("key overlap exceeds fifteen minutes")
+
+    async def _rotate_device_key_rows(
+        self,
+        rotation: DeviceKeyRotation,
+    ) -> None:
+        device = await self.get_device(rotation.device_id)
+        if device is None or device.status is not DeviceStatus.ACTIVE:
+            raise ValueError("key rotation requires active device")
+        if device.device_key_thumbprint != rotation.current_key_thumbprint:
+            raise ValueError("key rotation current key mismatch")
+        if rotation.device_key_thumbprint == rotation.current_key_thumbprint:
+            raise ValueError("key rotation must replace current key")
+        overlap = await self._conn.execute(
+            """
+            UPDATE mobile_device_keys
+            SET state = 'overlap', valid_until = ?
+            WHERE device_key_thumbprint = ?
+              AND device_id = ?
+              AND state = 'current'
+            """,
+            (
+                rotation.overlap_expires_at.isoformat(),
+                rotation.current_key_thumbprint,
+                rotation.device_id,
+            ),
+        )
+        if overlap.rowcount != 1:
+            raise ValueError("key rotation current key is unavailable")
+        await self._conn.execute(
+            """
+            INSERT INTO mobile_device_keys (
+                device_key_thumbprint, device_id, public_key_x963,
+                state, valid_from, valid_until
+            )
+            VALUES (?, ?, ?, 'current', ?, NULL)
+            """,
+            (
+                rotation.device_key_thumbprint,
+                rotation.device_id,
+                rotation.public_key_x963,
+                rotation.rotated_at.isoformat(),
+            ),
+        )
+        updated = await self._conn.execute(
+            """
+            UPDATE mobile_devices
+            SET current_key_thumbprint = ?, last_seen_at = ?
+            WHERE device_id = ?
+              AND current_key_thumbprint = ?
+              AND status = 'active'
+            """,
+            (
+                rotation.device_key_thumbprint,
+                rotation.rotated_at.isoformat(),
+                rotation.device_id,
+                rotation.current_key_thumbprint,
+            ),
+        )
+        if updated.rowcount != 1:
+            raise ValueError("key rotation device update failed")
 
     async def list_verification_keys(
         self,
@@ -690,6 +786,7 @@ class SqliteDeviceTrustStore:
 
 __all__ = [
     "DeviceKeyRecord",
+    "DeviceKeyRotation",
     "DeviceKeyState",
     "RegistrationChallengeCreate",
     "RegistrationChallengeRecord",

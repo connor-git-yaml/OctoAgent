@@ -156,6 +156,38 @@ struct DeviceTokenChallenge: Codable, Equatable, Sendable {
     }
 }
 
+struct DeviceKeyRotationChallenge: Codable, Equatable, Sendable {
+    let rotationChallengeID: String
+    let deviceID: String
+    let serverChallenge: String
+    let mobileOrigin: String
+    let expiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case rotationChallengeID = "rotation_challenge_id"
+        case deviceID = "device_id"
+        case serverChallenge = "server_challenge"
+        case mobileOrigin = "mobile_origin"
+        case expiresAt = "expires_at"
+    }
+}
+
+struct DeviceKeyRotationResult: Codable, Equatable, Sendable {
+    let deviceID: String
+    let previousKeyThumbprint: String
+    let currentKeyThumbprint: String
+    let rotatedAt: Date
+    let overlapExpiresAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case deviceID = "device_id"
+        case previousKeyThumbprint = "previous_key_thumbprint"
+        case currentKeyThumbprint = "current_key_thumbprint"
+        case rotatedAt = "rotated_at"
+        case overlapExpiresAt = "overlap_expires_at"
+    }
+}
+
 struct DeviceToken: Codable, Equatable, Sendable {
     let opaqueToken: String
     let grant: DeviceCapabilityGrant

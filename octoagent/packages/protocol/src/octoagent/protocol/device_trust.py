@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from datetime import timedelta
 from enum import StrEnum
 from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
@@ -83,6 +84,20 @@ def _validate_https_origin(value: str) -> str:
     return canonical
 
 
+def _validate_public_key_transport(value: str) -> str:
+    decoded = _decode_base64url(value)
+    if len(decoded) != 65 or decoded[0] != 0x04:
+        raise ValueError("public key must be uncompressed P-256 X9.63")
+    return value
+
+
+def _validate_signature_transport(value: str) -> str:
+    decoded = _decode_base64url(value)
+    if not 8 <= len(decoded) <= 80:
+        raise ValueError("signature must be bounded DER bytes")
+    return value
+
+
 class DeviceEnrollmentStatus(StrEnum):
     PENDING = "pending"
     ACTIVE = "active"
@@ -116,18 +131,12 @@ class DeviceEnrollmentRequest(_StrictFrozenModel):
     @field_validator("public_key_x963")
     @classmethod
     def validate_public_key(cls, value: str) -> str:
-        decoded = _decode_base64url(value)
-        if len(decoded) != 65 or decoded[0] != 0x04:
-            raise ValueError("public key must be uncompressed P-256 X9.63")
-        return value
+        return _validate_public_key_transport(value)
 
     @field_validator("challenge_signature_der")
     @classmethod
     def validate_signature_transport(cls, value: str) -> str:
-        decoded = _decode_base64url(value)
-        if not 8 <= len(decoded) <= 80:
-            raise ValueError("signature must be bounded DER bytes")
-        return value
+        return _validate_signature_transport(value)
 
     @model_validator(mode="after")
     def validate_attestation(self) -> DeviceEnrollmentRequest:
@@ -197,6 +206,58 @@ class OwnerDeviceProjection(_StrictFrozenModel):
         return tuple(sorted(values, key=lambda value: value.value))
 
 
+class DeviceKeyRotationChallengeResponse(_StrictFrozenModel):
+    rotation_challenge_id: NonEmptyString
+    device_id: NonEmptyString
+    server_challenge: Base64Url43 = Field(repr=False)
+    mobile_origin: NonEmptyString
+    expires_at: UtcSecond
+
+    _mobile_origin = field_validator("mobile_origin")(_validate_https_origin)
+
+
+class DeviceKeyRotationRequest(_StrictFrozenModel):
+    rotation_challenge_id: NonEmptyString
+    device_id: NonEmptyString
+    server_challenge: Base64Url43 = Field(repr=False)
+    mobile_origin: NonEmptyString
+    current_key_thumbprint: Sha256
+    new_public_key_x963: PublicKeyX963
+    current_key_signature_der: Base64Url = Field(repr=False)
+    new_key_signature_der: Base64Url = Field(repr=False)
+    timestamp: UtcSecond
+
+    _mobile_origin = field_validator("mobile_origin")(_validate_https_origin)
+
+    @field_validator("new_public_key_x963")
+    @classmethod
+    def validate_public_key(cls, value: str) -> str:
+        return _validate_public_key_transport(value)
+
+    @field_validator("current_key_signature_der", "new_key_signature_der")
+    @classmethod
+    def validate_signature_transport(cls, value: str) -> str:
+        return _validate_signature_transport(value)
+
+
+class DeviceKeyRotationResponse(_StrictFrozenModel):
+    device_id: NonEmptyString
+    previous_key_thumbprint: Sha256
+    current_key_thumbprint: Sha256
+    rotated_at: UtcSecond
+    overlap_expires_at: UtcSecond
+
+    @model_validator(mode="after")
+    def validate_rotation_window(self) -> DeviceKeyRotationResponse:
+        if self.current_key_thumbprint == self.previous_key_thumbprint:
+            raise ValueError("rotation must replace the current key")
+        if not self.rotated_at < self.overlap_expires_at:
+            raise ValueError("rotation overlap must end after rotation")
+        if self.overlap_expires_at > self.rotated_at + timedelta(minutes=15):
+            raise ValueError("rotation overlap exceeds fifteen minutes")
+        return self
+
+
 class DeviceTokenChallengeResponse(_StrictFrozenModel):
     token_challenge_id: NonEmptyString
     device_id: NonEmptyString
@@ -220,10 +281,7 @@ class DeviceTokenRequest(_StrictFrozenModel):
     @field_validator("challenge_signature_der")
     @classmethod
     def validate_signature_transport(cls, value: str) -> str:
-        decoded = _decode_base64url(value)
-        if not 8 <= len(decoded) <= 80:
-            raise ValueError("signature must be bounded DER bytes")
-        return value
+        return _validate_signature_transport(value)
 
 
 class DeviceTokenResponse(_StrictFrozenModel):
@@ -240,10 +298,7 @@ class DeviceProofHeaders(_StrictFrozenModel):
     @field_validator("signature")
     @classmethod
     def validate_signature_transport(cls, value: str) -> str:
-        decoded = _decode_base64url(value)
-        if not 8 <= len(decoded) <= 80:
-            raise ValueError("signature must be bounded DER bytes")
-        return value
+        return _validate_signature_transport(value)
 
 
 class MobileReadyResponse(_StrictFrozenModel):
@@ -306,10 +361,28 @@ def token_challenge_signature_bytes(request: DeviceTokenRequest) -> bytes:
     return canonical_json_bytes(payload)
 
 
+def key_rotation_signature_bytes(request: DeviceKeyRotationRequest) -> bytes:
+    """返回 current/new device key 必须共同签名的 rotation bytes。"""
+
+    payload: dict[str, Any] = {
+        "current_key_thumbprint": request.current_key_thumbprint,
+        "device_id": request.device_id,
+        "mobile_origin": request.mobile_origin,
+        "new_public_key_x963": request.new_public_key_x963,
+        "rotation_challenge_id": request.rotation_challenge_id,
+        "server_challenge_sha256": _sha256_text(request.server_challenge),
+        "timestamp": request.timestamp,
+    }
+    return canonical_json_bytes(payload)
+
+
 __all__ = [
     "DeviceEnrollmentRequest",
     "DeviceEnrollmentStatus",
     "DeviceEnrollmentStatusResponse",
+    "DeviceKeyRotationChallengeResponse",
+    "DeviceKeyRotationRequest",
+    "DeviceKeyRotationResponse",
     "DeviceProofHeaders",
     "DeviceTokenChallengeResponse",
     "DeviceTokenRequest",
@@ -320,5 +393,6 @@ __all__ = [
     "OwnerDeviceProjection",
     "OwnerRegistrationChallengeResponse",
     "enrollment_signature_bytes",
+    "key_rotation_signature_bytes",
     "token_challenge_signature_bytes",
 ]
