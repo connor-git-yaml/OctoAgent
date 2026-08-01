@@ -44,6 +44,6 @@
 - [x] T016 single client/store/auth、complexity、audit/source/bundle ratchet
 - [x] T017 Blueprint/F150/F158 truth sync 与 iOS 设计偏离记录
 - [x] T012-T013/T016 本地 Implement prerequisites
-- [ ] T014 Cloudflare live 与 T015 真机
-- [ ] T018 Verify
-- [ ] F154 解锁
+- [x] T014 Cloudflare live 与 T015 真机
+- [x] T018 Verify
+- [x] F154 解锁

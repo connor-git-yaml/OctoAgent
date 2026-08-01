@@ -78,13 +78,7 @@ final class RegistrationFlowUITests: XCTestCase {
             "真机连接信息格式不正确"
         )
 
-        app.launchArguments = [
-            "-AppleLanguages",
-            "(zh-Hans)",
-            "-AppleLocale",
-            "zh_CN",
-        ]
-        app.launch()
+        startLiveApp()
 
         let connectionInformation = app.textFields["Octo 连接信息"]
         let connectButton = app.buttons["连接此 Octo"]
@@ -123,13 +117,7 @@ final class RegistrationFlowUITests: XCTestCase {
             throw XCTSkip("未显式启用真机 Keychain 恢复 transaction")
         }
 
-        app.launchArguments = [
-            "-AppleLanguages",
-            "(zh-Hans)",
-            "-AppleLocale",
-            "zh_CN",
-        ]
-        app.launch()
+        startLiveApp()
 
         let connectedStatus = app.staticTexts["已连接"]
         XCTAssertTrue(
@@ -151,7 +139,7 @@ final class RegistrationFlowUITests: XCTestCase {
         keepLiveScreenshot(named: "registration-live-restored-from-background")
 
         app.terminate()
-        app.launch()
+        startLiveApp()
         XCTAssertTrue(
             connectedStatus.waitForExistence(timeout: 20),
             "App 进程重启后未从设备 Keychain 恢复连接"
@@ -169,13 +157,7 @@ final class RegistrationFlowUITests: XCTestCase {
             throw XCTSkip("未显式启用真机 revoke transaction")
         }
 
-        app.launchArguments = [
-            "-AppleLanguages",
-            "(zh-Hans)",
-            "-AppleLocale",
-            "zh_CN",
-        ]
-        app.launch()
+        startLiveApp()
 
         XCTAssertTrue(
             app.staticTexts["连接已撤销"].waitForExistence(timeout: 20),
@@ -199,6 +181,24 @@ final class RegistrationFlowUITests: XCTestCase {
             "zh_CN",
         ]
         app.launch()
+    }
+
+    private func startLiveApp() {
+        app.launchArguments = [
+            "-AppleLanguages",
+            "(zh-Hans)",
+            "-AppleLocale",
+            "zh_CN",
+        ]
+        if ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_PRELAUNCHED"] == "1" {
+            guard app.wait(for: .runningForeground, timeout: 20) else {
+                XCTFail("外部真机启动器未在时限内启动 OctoAgent")
+                return
+            }
+            app.activate()
+        } else {
+            app.launch()
+        }
     }
 
     private func keepScreenshot(named name: String) {

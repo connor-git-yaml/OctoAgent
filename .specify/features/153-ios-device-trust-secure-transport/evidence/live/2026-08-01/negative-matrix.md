@@ -9,9 +9,9 @@
 - mobile Host/path 隔离：PASS；
 - Web Cookie/service token 拒绝：PASS；
 - origin typed error：PASS；
-- owner challenge→真机 enrollment→approve→signed ready→replay→revoke：本文件未执行，
-  继续 MISSING；
-- F153 T014/T015/T018：保持 unchecked。
+- owner challenge→真机 enrollment→approve→signed ready→replay→revoke：不由本负向
+  transaction 执行，已由同目录 `real-device-positive-chain.md` 补齐；
+- 负向矩阵与正向链合并后，F153 T014/T015/T018 已完成。
 
 本轮只发送不创建、不批准、不撤销设备记录的负向请求。请求没有携带真实 Cookie、
 Access JWT、service token、device token、challenge、签名或私钥。Cloudflare 登录跳转的
@@ -43,6 +43,6 @@ Access JWT、service token、device token、challenge、签名或私钥。Cloudf
 3. mobile route 不接受 Web Cookie、Access JWT/service-token 模式；
 4. Bypass 后仍由 Gateway Host/path/device-proof 合同 fail closed。
 
-它不能证明 Secure Enclave、ThisDeviceOnly Keychain、owner approval、opaque token、
-signed ready、nonce replay、网络切换、前后台恢复或 revoke/rotation。必须由真 iPhone
-正向链补齐后，T014/T015/T018 才能完成。
+它自身不能证明 Secure Enclave、ThisDeviceOnly Keychain、owner approval、opaque
+token、signed ready、nonce replay、网络切换、前后台恢复或 revoke/rotation；这些正向
+事实由同目录 `real-device-positive-chain.md` 的真 iPhone 证据独立承担。

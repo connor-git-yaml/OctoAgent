@@ -150,3 +150,19 @@
   通过 committed Claude 早期视觉基线像素比较，baseline 未更新。同期只读部署审计
   确认 Web Access `302`、Gateway/cloudflared running，但 ingress 仍只有 Web hostname，
   mobile hostname/exact Bypass 和真 iPhone 仍不存在，故 T014/T015/T018 不变。
+- 2026-08-01：在同一 named tunnel 上启用部署专属 `ios.maojiwang.work` 与 exact
+  `/api/mobile/v1/*` Bypass；Web 根页与 Web-host mobile path 仍由 Access 302
+  保护，mobile Host 的 SPA/health/docs/OpenAPI/owner route 为 404，无 proof、伪
+  Cookie 与伪 service-token 均按 device-trust 合同拒绝。负向矩阵完成 T014 edge
+  隔离的一半，不单独冒充正向真机证据。
+- 2026-08-01 至 2026-08-02：使用个人 Apple Development 签名在 iPhone 17 Pro Max
+  安装当前 Swift App，完成 owner-assisted registration、Secure Enclave P-256、
+  ThisDeviceOnly Keychain、signed ready/profile、重复签名请求 replay 拒绝、真实 15 分钟
+  token expiry/renew、连续两轮设备公钥 rotation、纯 4G 前后台与进程重启恢复、owner
+  revoke，以及整台 iPhone 重启后的撤销态冷启动恢复。所有 live selector 均单次 PASS；
+  截图与 result bundle 清单见 `evidence/live/2026-08-01/real-device-positive-chain.md`。
+- 2026-08-02：当前仓库字节完成最终 T018 回归。F153 Protocol/Core/Gateway/authority
+  `40 passed`，repository architecture gate PASS；iPhone 17 Pro Simulator 完整 scheme
+  `19 tests / 13 passed / 6 live-only skipped / 0 failed`；generic iPhoneOS Release build
+  PASS，source/bundle 敏感材料扫描 0。T014/T015/T018 完成，`GATE_VERIFY=true`，F154
+  production 解锁。

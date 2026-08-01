@@ -32,14 +32,14 @@
   regression、secret scan
 - [x] **T013 [SIMULATOR]** 安装获准 runtime 后冷启动、registration states、visual
   snapshot、a11y；没有 runtime 时保持 blocked
-- [ ] **T014 [LIVE EXTERNAL]** 经单次授权配置 per-deployment mobile hostname、same
+- [x] **T014 [LIVE EXTERNAL]** 经单次授权配置 per-deployment mobile hostname、same
   tunnel ingress 与 exact Access Bypass application；Web/mobile正负live probe
-- [ ] **T015 [REAL DEVICE]** 真 iPhone Secure Enclave/Keychain、owner approval、
+- [x] **T015 [REAL DEVICE]** 真 iPhone Secure Enclave/Keychain、owner approval、
   Wi-Fi↔蜂窝、background、token expiry、revoke/rotation
 - [x] **T016 [ARCHITECTURE]** no second auth/client/store、complexity、secret/log/audit、
   package/bundle ratchet
 - [x] **T017 [DOC]** 同步 Blueprint、remote access、F158 trace 与设计偏离记录
-- [ ] **T018 [VERIFY]** full regression、evidence inventory、verification report；
+- [x] **T018 [VERIFY]** full regression、evidence inventory、verification report；
   通过后才解锁 F154
 
 ## 测试层级
