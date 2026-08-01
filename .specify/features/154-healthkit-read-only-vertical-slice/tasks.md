@@ -27,7 +27,7 @@
   权限受限、preview/approve/result/delete 状态
 - [x] **T011 [VISUAL/A11Y][RED→GREEN→REFACTOR]** Claude early visual baseline、
   Dynamic Type、VoiceOver、Reduce Motion 与 44pt
-- [ ] **T012 [SIMULATOR]** 冷启动不弹权限；11 状态功能/视觉回归，DI 权限不冒充真机
+- [x] **T012 [SIMULATOR]** 冷启动不弹权限；12 状态功能/视觉回归，DI 权限不冒充真机
 - [ ] **T013 [REAL DEVICE]** 系统权限 sheet、真实 step/sleep、锁屏/前后台、
   Wi-Fi↔蜂窝、撤销与删除
 - [ ] **T014 [LIVE MODEL]** 一次 approved 真模型分析、auth failure/no Echo、
@@ -58,5 +58,6 @@
 - `F154_HEALTH_DELETION_MISSING`
 - `F154_HEALTH_UI_MISSING`
 - `F154_HEALTH_VISUAL_CONTRACT_MISSING`
+- `F154_HEALTH_SIMULATOR_CONTRACT_MISSING`
 
 collection/import/path/permission/tool 缺失不得冒充 RED；禁止 rerun/sleep 掩盖 flaky。

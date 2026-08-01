@@ -130,3 +130,10 @@
   `HealthImportCoordinator.swift` `033da63a8e5f50c6727920804e38d6717264ed4fa6fb8d533ab978b20b228dea`，
   `HealthReviewView.swift` `29bc036cc66e0666e45c8a4eff3f68244aee2150b9dd7eae651f203be0b19312`，
   `HealthImportFlowUITests.swift` `d7d972f08bfd7eb57cb3d9d97da8476e6a2618b8d79258390942ca67771469bc`。
+- 2026-08-02：T012 以单次 Simulator transaction 复验冷启动、退到后台再恢复与进程
+  终止后重启：三个阶段都保持注册入口，App 与 SpringBoard alert 数均为 0，
+  也不会自动进入健康 DI 界面。同一 xcresult
+  `Test-OctoAgent-2026.08.02_02-02-54-+0800.xcresult` 中，冷启动合同、12 个有限状态
+  的 exact 文案/action/44pt/像素基线、AXXXL/VoiceOver 合同共 3/3 PASS，没有
+  rerun。Simulator 只能证明 deterministic DI 和“未弹权限”，该记录明确不计系统
+  Health permission sheet、真实 step/sleep 或 Secure Enclave 证据，这些仍归 T013 真 iPhone。

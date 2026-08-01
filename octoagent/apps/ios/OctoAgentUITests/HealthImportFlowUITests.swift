@@ -2,6 +2,7 @@ import XCTest
 
 final class HealthImportFlowUITests: XCTestCase {
     private static let oracle = "F154_HEALTH_VISUAL_CONTRACT_MISSING"
+    private static let simulatorOracle = "F154_HEALTH_SIMULATOR_CONTRACT_MISSING"
     private let app = XCUIApplication()
 
     override func setUpWithError() throws {
@@ -83,6 +84,19 @@ final class HealthImportFlowUITests: XCTestCase {
         }
     }
 
+    func test_cold_launch_background_and_relaunch_do_not_request_health_permission() {
+        launchRegistration()
+        assertRegistrationWithoutHealthPermission(stage: "cold launch")
+
+        XCUIDevice.shared.press(.home)
+        app.activate()
+        assertRegistrationWithoutHealthPermission(stage: "background restore")
+
+        app.terminate()
+        launchRegistration()
+        assertRegistrationWithoutHealthPermission(stage: "process relaunch")
+    }
+
     private var healthStates: [HealthStateExpectation] {
         [
             .init("unavailable", "这台设备无法读取 Apple 健康", "不可用", nil),
@@ -120,6 +134,41 @@ final class HealthImportFlowUITests: XCTestCase {
             app.launchEnvironment["OCTOAGENT_UI_TEST_ACCESSIBILITY"] = "1"
         }
         app.launch()
+    }
+
+    private func launchRegistration() {
+        app.launchEnvironment = [
+            "OCTOAGENT_UI_TESTING": "1",
+            "OCTOAGENT_UI_TEST_PHASE": "disconnected",
+        ]
+        app.launchArguments = [
+            "-AppleLanguages",
+            "(zh-Hans)",
+            "-AppleLocale",
+            "zh_CN",
+        ]
+        app.launch()
+    }
+
+    private func assertRegistrationWithoutHealthPermission(stage: String) {
+        XCTAssertTrue(
+            app.staticTexts["连接你的 Octo"].waitForExistence(timeout: 3),
+            "\(Self.simulatorOracle): \(stage) 未保持注册入口"
+        )
+        XCTAssertFalse(
+            app.scrollViews["health-screen"].exists,
+            "\(Self.simulatorOracle): \(stage) 意外进入健康 DI 界面"
+        )
+        XCTAssertEqual(
+            app.alerts.count,
+            0,
+            "\(Self.simulatorOracle): \(stage) 意外弹出 App 权限面板"
+        )
+        XCTAssertEqual(
+            XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.count,
+            0,
+            "\(Self.simulatorOracle): \(stage) 意外弹出系统权限面板"
+        )
     }
 
     private func keepScreenshot(named name: String) {
