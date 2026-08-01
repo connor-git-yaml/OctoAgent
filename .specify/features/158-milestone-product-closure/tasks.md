@@ -74,9 +74,9 @@
 - [ ] **T036** 同步 Blueprint、Milestone 与所有 Feature verification reports
 - [ ] **T037** 干净检出、权威 CI、个人部署复验（上一批 Web 提交/CI/managed
   checkout 已通过；F153 真机 Verify 与 F154 当前非真机完整 scheme 已通过；当前分支
-  `2f6fcbc9` 的 run `30717516171` 五个 job success，完整生产范围用同一 LCOV 独立
-  复算为 `549/608 = 90.3% PASS`；T050 已修复 test-only push 可遗忘旧生产差异的
-  workflow 盲点，等待累计 branch-base CI。个人 managed checkout 已部署
+  `2b1fb5ec` 的累计 branch-base run `30719719793` 五个 job success，完整分支直接由
+  workflow 计算为 `2192/2420 = 90.6% PASS`；T050 已修复 test-only push 可遗忘旧
+  生产差异的 workflow 盲点。个人 managed checkout 已部署
   device-trust 重连修复 `d17c3e59`，`/health=200`；登录后真实对话/SSE/事件链、Access
   登出/重登录/Settings ready 与一次性错误恢复已通过，仍缺自然过期、F154-F156 产品
   闭包、当前 truth commit 的 CI、mainline 与最终物理重启复验）
@@ -115,7 +115,7 @@
   时的 SQLite unique constraint：相同 owner/current key 复用原 device id，跨 owner、
   revoked/non-current key typed 409 且零半写入。F153 回归 `48 passed`、repository
   architecture gate PASS，提交 `d17c3e59` 已部署并恢复 `/health=200`
-- [ ] **T050 [CI HARDENING]** 用现有 F151 wiring contract 取得 RED，并让非主分支
+- [x] **T050 [CI HARDENING]** 用现有 F151 wiring contract 取得 RED，并让非主分支
   architecture/changed-lines coverage 统一累计比较 `merge-base(origin/master, HEAD)`；
   Pull Request 保持目标 base，`master` push 保持 `event.before`，防止失败生产提交被后续
   test/docs-only push 遗忘。必须以当前完整 LCOV 对原失败 base 的 `549/608 = 90.3%`
@@ -123,6 +123,6 @@
   `30718445846` 已证明 base resolver 生效，并以 `1917/2484 = 77.2%` 诚实失败；随后
   找到 Provider pytest11 插件在 coverage 启动前 eager import 生产包的测量缺陷。插件
   已移至轻量 `octoagent.provider_pytest_plugin` 并延迟 gate import，fresh interpreter
-  合同与 13 条隐私模型失败关闭分支已通过；本地 CI 同参为 `5763 passed`、scripted
-  `18 passed`、local-working-tree 累计覆盖 `2192/2420 = 90.6% PASS`，等待新提交的
-  GitHub 累计 workflow 复验后勾选。
+  合同与 13 条隐私模型失败关闭分支已通过。提交 `2b1fb5ec` 的累计 run
+  `30719719793` 五个 job 全部成功：backend `5759 passed`、scripted `18 passed`，
+  committed branch-base 覆盖 `2192/2420 = 90.6% PASS`；未降门槛、未加豁免。

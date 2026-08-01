@@ -421,4 +421,13 @@
   `66 passed`；CI 同参全量 `5763 passed / 10 skipped / 1 xfailed / 1 xpassed`，scripted
   `18 passed`；local-working-tree 对 `origin/master` 累计计算
   `2192/2420 = 90.6% PASS`。未降 90% 门槛、未加 `[cov-exempt]` 或 coverage pragma；
-  等待新提交的 GitHub workflow 复验。
+  随后的 run `30719719793` 已完成远端复验，见下一条。
+- 2026-08-02：提交 `2b1fb5ec4a78ca1a3a2cba2343e0b45d5abc2204` 的 GitHub Actions
+  run `30719719793` 完成累计 branch-base 复验，五个 job 全部 success：backend
+  deterministic `5759 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted
+  `18 passed`，frontend、L1 Playwright、benchmark 与 repository architecture 均通过。
+  workflow 精确选择 `origin/master` merge-base `db3214fff722c6f969baf99528a76fc03a1e21a1`，
+  committed changed-lines 为 `2192/2420 = 90.6% PASS`；LCOV SHA
+  `db3b26b174d0f2f8fd68f18f102c22eec43b541a4c41c6037c3c65f2f57f5f8d`，报告 SHA
+  `7dee4209a0e9ed1bdbcb56e520843685837755dbbc5f05458d80a30b1c8d9aba`。T050 完成；
+  用户使用 iPhone 期间没有调用设备，也没有重启 Mac。

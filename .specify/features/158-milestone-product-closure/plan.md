@@ -87,9 +87,9 @@ CI 五个 job 已通过，同一 LCOV 对完整未合入生产范围复算为 `5
 push-increment base 遗忘缺陷由 T050 进入同一 F151 wiring contract 修复。首轮累计
 branch-base run `30718445846` 已证明 resolver 生效并以 `1917/2484 = 77.2%` 诚实失败；
 失败进一步暴露 pytest11 entry point 在 coverage 启动前 eager import Provider 生产包的
-测量缺陷。轻量 namespace-root 插件与延迟 gate import 修复后，本地 CI 同参为
-`5763 passed`、scripted `18 passed`，local-working-tree 累计覆盖
-`2192/2420 = 90.6% PASS`，等待新提交远端复验。F153 Verify 已完成；F154 production
+测量缺陷。轻量 namespace-root 插件与延迟 gate import 修复提交 `2b1fb5ec` 的累计
+branch-base run `30719719793` 五个 job 全绿：backend `5759 passed`、scripted
+`18 passed`，committed 覆盖 `2192/2420 = 90.6% PASS`。T050 已完成。F153 Verify 已完成；F154 production
 T001-T012/T014/T015 和当前
 Simulator/非真机回归已通过，但真 iPhone HealthKit 与最终 Verify 仍缺。F155 已完成
 方案 A 产品决策及 Design/Tasks Gate，F156 已建立 40 场景 Design/Tasks 草案与

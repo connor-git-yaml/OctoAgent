@@ -252,13 +252,12 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
    recon 为 10 条 mobile route（F153=7、F154=3）、5 个已签发 capability、7 个声明
    未签发 capability 与 8 个产品缺口；上游 Verify、自身 authority、Design/Tasks/
    production 仍关闭。
-5. 代码/测试提交 `2f6fcbc91408e14bc3f5291678bdfd018cc24473` 的 GitHub Actions
-   run `30717516171` 五个 job 全部成功；backend=`5756 passed`、scripted=`18 passed`、
-   frontend=`599 passed`、Playwright=`39 passed`、benchmark=`2 passed`、architecture=PASS。
-   workflow 同 push 报告为 `0/0`，故未把它冒充完整证明；下载同一 LCOV 后对原失败
-   base `d031809f…` 在 clean clone 复算为 `549/608 = 90.3% PASS`。F158 T050 已取得
-   wiring RED 并把非主分支 architecture/coverage base 改为累计 `origin/master`
-   merge-base，等待推送后的 workflow 直接复验。
+5. T050 已完成。代码/测试提交 `2b1fb5ec4a78ca1a3a2cba2343e0b45d5abc2204`
+   的 GitHub Actions run `30719719793` 五个 job 全部成功；backend=`5759 passed`、
+   scripted=`18 passed`，frontend、Playwright、benchmark、architecture 全绿。非主分支
+   workflow 精确选择 `origin/master` merge-base `db3214ff…`，直接对完整累计范围得到
+   `2192/2420 = 90.6% PASS`。LCOV SHA 为 `db3b26b1…f5f8d`，committed report SHA
+   为 `7dee4209…9aba`；未降 90% 门槛，也未增加 coverage 豁免。
 
 ## F153 当前设计映射与偏离记录
 

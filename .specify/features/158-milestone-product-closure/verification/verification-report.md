@@ -6,15 +6,13 @@
 - 状态：`PARTIAL`；
 - `GATE_VERIFY=false`；
 - 当前分支：`codex/f158-milestone-product-closure`；
-- 当前已推送代码/测试提交：`df77068cdf50257ed6a80559f8a5feb1dbed7691`；
+- 当前已推送代码/测试提交：`2b1fb5ec4a78ca1a3a2cba2343e0b45d5abc2204`；
 - 当前个人部署代码提交：`d17c3e59879ee09dd79ba77fcebf9729e662730e`；
-- 当前已推送 CI：run `30718445846`，head `df77068c`。累计 branch resolver 已正确选择
-  `origin/master` merge-base `db3214ff`；architecture/frontend/Playwright/benchmark 与
-  backend 两层测试通过，changed-lines 对完整分支以 `1917/2484 = 77.2%` 诚实失败。
-  根因为 pytest11 entry point 在 coverage 启动前 eager import Provider 生产包，导致
-  已执行模块的定义行被错误记为 0。当前未推送修复已通过 fresh-interpreter 合同、
-  聚焦 `66 passed`、CI 同参 `5763 passed`、scripted `18 passed`，local-working-tree
-  累计覆盖 `2192/2420 = 90.6% PASS`；等待新提交 GitHub workflow 复验。
+- 当前已推送 CI：run `30719719793`，head `2b1fb5ec`，五个 job 全部成功。非主分支
+  resolver 精确选择 `origin/master` merge-base `db3214ff`；backend deterministic
+  `5759 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted `18 passed`，committed
+  changed-lines 对完整分支为 `2192/2420 = 90.6% PASS`。LCOV SHA 为
+  `db3b26b174d0f2f8fd68f18f102c22eec43b541a4c41c6037c3c65f2f57f5f8d`；T050 已完成。
 
 当前 Goal **没有完成**。桌面 Web、Claude 最早期设计视觉恢复、个人部署远程访问、
 真实 OpenAI Codex 对话、F153 原生 iOS device-trust 以及 F154 非真机实现已经形成
@@ -38,7 +36,7 @@ Web 与 iOS 都以 Claude Design 最早期方案的层级、留白、卡片节�
 | F154 HealthKit read-only | PARTIAL | T001-T012、T014、T015 完成；T013 真机与 T016 Verify 未完成 |
 | F155 EventKit read-only | CLOSED | Design/Tasks truth 已纠正；等待 F154 Verify 后执行自身 T003 exact authority，production=0 |
 | F156 native Companion | CLOSED | recon 已纠正为 10 条 mobile route、5 个已签发 capability、8 个 product gap，production=0 |
-| 当前 CI | FAIL（修复已本地通过，待远端复验） | run `30718445846` 已正确累计完整分支并以 `77.2%` 阻断；coverage bootstrap eager import 已修复，本地同口径 `90.6% PASS`，未降门槛或加豁免 |
+| 当前 CI | PASS | run `30719719793` 五个 job 全绿；累计 `origin/master` merge-base 范围 `2192/2420 = 90.6% PASS`，未降门槛或加豁免 |
 | 当前个人部署 | PASS（已部署范围） | managed checkout 运行 `d17c3e59`，`/health=200` |
 | M10 物理开机 attestation | MISSING | 只允许 Goal 末尾提前通知用户后重启一次 Mac |
 | F158 Verify / mainline | MISSING | 仍有上述产品与外部边界 |
@@ -101,8 +99,7 @@ F153 PASS 只解锁 F154，不会提前证明 HealthKit、EventKit 或 Companion
 
 ### F154 当前非真机实现
 
-当前已推送代码/测试提交 `df77068cdf50257ed6a80559f8a5feb1dbed7691` 上的产品范围，
-连同当前本地 coverage-bootstrap 修复验证：
+当前已推送代码/测试提交 `2b1fb5ec4a78ca1a3a2cba2343e0b45d5abc2204` 上的产品范围：
 
 - F154 Gateway/Core/Policy/Protocol/authority：`25 passed / 0 failed`；
 - F153 device-trust focused：`48 passed / 0 failed / 1 existing warning`；
@@ -151,12 +148,10 @@ recon 与 Gate 前置，没有聊天、任务、审批、Memory、通知 product
 3. F155：EventKit 只读 production、测试、Simulator/真机 Verify；
 4. F156：原生 Companion 八项 product gap、SwiftUI 场景、功能/视觉 E2E；
 5. F150：个人部署真实会话自然过期边界；
-6. T050 coverage-bootstrap 修复提交、累计 branch-base workflow CI 与后续 truth-only
-   commit 边界；
-7. mainline rebase/recon、最终全量回归、secret/architecture/visual inventory；
-8. Goal 最后一次 Mac 物理重启与启动后 Gateway/tunnel/doctor/Web/iOS 复核。
+6. mainline rebase/recon、最终全量回归、secret/architecture/visual inventory；
+7. Goal 最后一次 Mac 物理重启与启动后 Gateway/tunnel/doctor/Web/iOS 复核。
 
-第 8 项不会在用户使用手机期间执行，也不会未经提前通知重启 Mac。
+第 7 项不会在用户使用手机期间执行，也不会未经提前通知重启 Mac。
 
 ## Verify 判定
 
