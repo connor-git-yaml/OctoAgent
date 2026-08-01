@@ -131,10 +131,11 @@ def _enrollment_payload(
     private_key: Any,
     public_key_x963: str,
     secret: str,
+    challenge_id: str = "challenge-1",
 ) -> dict[str, Any]:
     protocol = importlib.import_module("octoagent.protocol.device_trust")
     unsigned = protocol.DeviceEnrollmentRequest(
-        challenge_id="challenge-1",
+        challenge_id=challenge_id,
         challenge_secret=secret,
         display_name="Connor iPhone",
         mobile_origin="https://ios.example.test",
@@ -485,6 +486,148 @@ async def test_mobile_enrollment_verifies_p256_and_consumes_owner_challenge_once
             payload["challenge_signature_der"],
         ):
             assert secret.encode() not in database, MOBILE_ORACLE
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_mobile_enrollment_reuses_same_owner_current_key_without_second_device(
+    tmp_path: Path,
+) -> None:
+    app, group, _, private_key, public_key = await _registered_mobile(tmp_path)
+    try:
+        created = await _request(app, "POST", "/api/device-trust/v1/challenges")
+        assert created.status_code == 201, created.text
+        payload = created.json()
+
+        recovered = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/enrollments",
+            json=_enrollment_payload(
+                private_key=private_key,
+                public_key_x963=public_key,
+                secret=payload["challenge_secret"],
+                challenge_id=payload["challenge_id"],
+            ),
+            base_url="https://ios.example.test",
+        )
+
+        assert recovered.status_code == 202, recovered.text
+        assert recovered.json()["state"] == "active", MOBILE_ORACLE
+        assert recovered.json()["device_id"] == "device-1", MOBILE_ORACLE
+        status = await _request(
+            app,
+            "GET",
+            f"/api/device-trust/v1/challenges/{payload['challenge_id']}",
+        )
+        assert status.status_code == 200, status.text
+        assert status.json()["state"] == "active", MOBILE_ORACLE
+        assert status.json()["device_id"] == "device-1", MOBILE_ORACLE
+        devices = await group.conn.execute("SELECT device_id FROM mobile_devices")
+        keys = await group.conn.execute(
+            "SELECT device_key_thumbprint, device_id FROM mobile_device_keys"
+        )
+        assert [tuple(row) for row in await devices.fetchall()] == [("device-1",)]
+        assert len(await keys.fetchall()) == 1, MOBILE_ORACLE
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+async def test_mobile_enrollment_reuses_same_owner_pending_key_without_second_device(
+    tmp_path: Path,
+) -> None:
+    app, group, _ = await _mobile_app(tmp_path)
+    try:
+        first = await _request(app, "POST", "/api/device-trust/v1/challenges")
+        private_key, public_key = _key_material()
+        submitted = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/enrollments",
+            json=_enrollment_payload(
+                private_key=private_key,
+                public_key_x963=public_key,
+                secret=first.json()["challenge_secret"],
+            ),
+            base_url="https://ios.example.test",
+        )
+        assert submitted.status_code == 202, submitted.text
+
+        second = await _request(app, "POST", "/api/device-trust/v1/challenges")
+        recovered = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/enrollments",
+            json=_enrollment_payload(
+                private_key=private_key,
+                public_key_x963=public_key,
+                secret=second.json()["challenge_secret"],
+                challenge_id=second.json()["challenge_id"],
+            ),
+            base_url="https://ios.example.test",
+        )
+
+        assert recovered.status_code == 202, recovered.text
+        assert recovered.json()["state"] == "pending", MOBILE_ORACLE
+        assert recovered.json()["device_id"] == "device-1", MOBILE_ORACLE
+        devices = await group.conn.execute("SELECT device_id FROM mobile_devices")
+        keys = await group.conn.execute("SELECT device_id FROM mobile_device_keys")
+        assert [tuple(row) for row in await devices.fetchall()] == [("device-1",)]
+        assert [tuple(row) for row in await keys.fetchall()] == [("device-1",)]
+    finally:
+        await group.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", ["another-owner", "revoked"])
+async def test_mobile_enrollment_key_conflict_is_typed_and_zero_write(
+    tmp_path: Path,
+    case: str,
+) -> None:
+    app, group, _, private_key, public_key = await _registered_mobile(tmp_path)
+    try:
+        if case == "another-owner":
+            routes = importlib.import_module("octoagent.gateway.routes.device_trust")
+
+            async def another_owner() -> str:
+                return "another-owner-subject"
+
+            app.dependency_overrides[routes.require_cloudflare_owner] = another_owner
+        else:
+            revoked = await _request(
+                app,
+                "POST",
+                "/api/device-trust/v1/devices/device-1/revoke",
+            )
+            assert revoked.status_code == 200, revoked.text
+
+        created = await _request(app, "POST", "/api/device-trust/v1/challenges")
+        response = await _request(
+            app,
+            "POST",
+            "/api/mobile/v1/enrollments",
+            json=_enrollment_payload(
+                private_key=private_key,
+                public_key_x963=public_key,
+                secret=created.json()["challenge_secret"],
+                challenge_id=created.json()["challenge_id"],
+            ),
+            base_url="https://ios.example.test",
+        )
+
+        assert response.status_code == 409, response.text
+        assert response.json()["detail"]["code"] == "DEVICE_KEY_ALREADY_REGISTERED"
+        assert "UNIQUE constraint" not in response.text, MOBILE_ORACLE
+        challenge = await group.device_trust_store.load_registration_challenge(
+            created.json()["challenge_id"]
+        )
+        assert challenge is not None and challenge.pending_device_id is None
+        devices = await group.conn.execute("SELECT device_id FROM mobile_devices")
+        keys = await group.conn.execute("SELECT device_id FROM mobile_device_keys")
+        assert [tuple(row) for row in await devices.fetchall()] == [("device-1",)]
+        assert [tuple(row) for row in await keys.fetchall()] == [("device-1",)]
     finally:
         await group.close()
 

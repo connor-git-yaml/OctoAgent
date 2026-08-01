@@ -85,6 +85,9 @@ challenge。Challenge：
 - 2 分钟 TTL；
 - 绑定 owner、web hostname、mobile origin、challenge id；
 - 一次只接受一个 pending public key；被抢占/过期后 owner 必须拒绝并新建；
+- 同一 owner 使用仍为 current 的同一 public key 重新提交有效 challenge 时，必须复用既有
+  pending/active device id，不得创建第二个 device；不同 owner、已撤销或非 current key
+  必须以稳定 `409` 拒绝，禁止泄露数据库异常或留下半写入；
 - owner 在 Web 上看到 display name、thumbprint、attestation state 后显式批准。
 
 iOS 扫码或输入 deployment link，提交 public key 与对 challenge envelope 的签名。

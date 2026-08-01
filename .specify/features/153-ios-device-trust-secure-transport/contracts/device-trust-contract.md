@@ -25,6 +25,10 @@
 iOS 对 canonical bytes 签名。Gateway 先验证 secret hash/TTL/host，再验证 public key
 thumbprint/signature，最后创建 pending device。
 
+同一 owner 的 current public key 已对应 pending/active device 时，新鲜有效 challenge 只可
+绑定并返回原 device id；不得插入第二个 device/key。不同 owner、revoked key 或历史 overlap
+key 必须在同一事务内以 typed `409` fail closed，challenge/device/key 均不得出现半写入。
+
 ## Token challenge envelope
 
 ```json

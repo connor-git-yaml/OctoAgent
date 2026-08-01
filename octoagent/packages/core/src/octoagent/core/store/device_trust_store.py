@@ -32,6 +32,10 @@ class DeviceKeyState(StrEnum):
     REVOKED = "revoked"
 
 
+class DeviceKeyConflictError(ValueError):
+    """注册公钥已经属于不可复用的设备身份。"""
+
+
 @dataclass(frozen=True, slots=True)
 class RegistrationChallengeRecord:
     challenge_id: str
@@ -173,15 +177,26 @@ class SqliteDeviceTrustStore:
                 raise ValueError("registration challenge origin mismatch")
             if device.owner_id != record.owner_id or device.status is not DeviceStatus.PENDING:
                 raise ValueError("pending device does not match registration owner")
-            await self._insert_pending_device(device)
-            await self._conn.execute(
+            pending_device_id, challenge_state, decided_at = await self._resolve_enrollment_device(
+                record=record,
+                device=device,
+                now=now,
+            )
+            updated = await self._conn.execute(
                 """
                 UPDATE device_registration_challenges
-                SET state = 'submitted', pending_device_id = ?
+                SET state = ?, pending_device_id = ?, decided_at = ?
                 WHERE challenge_id = ? AND state = 'open'
                 """,
-                (device.device_id, challenge_id),
+                (
+                    challenge_state.value,
+                    pending_device_id,
+                    None if decided_at is None else decided_at.isoformat(),
+                    challenge_id,
+                ),
             )
+            if updated.rowcount != 1:
+                raise ValueError("registration challenge state changed")
             await self._conn.commit()
         except Exception:
             await self._conn.rollback()
@@ -190,6 +205,45 @@ class SqliteDeviceTrustStore:
         if claimed is None:
             raise RuntimeError("claimed registration challenge disappeared")
         return claimed
+
+    async def _resolve_enrollment_device(
+        self,
+        *,
+        record: RegistrationChallengeRecord,
+        device: DeviceIdentity,
+        now: datetime,
+    ) -> tuple[str, RegistrationChallengeState, datetime | None]:
+        existing_key = await self._load_enrollment_key(device.device_key_thumbprint)
+        if existing_key is None:
+            await self._insert_pending_device(device)
+            return device.device_id, RegistrationChallengeState.SUBMITTED, None
+        existing_status = DeviceStatus(str(existing_key["status"]))
+        if (
+            str(existing_key["owner_id"]) != record.owner_id
+            or str(existing_key["public_key_x963"]) != device.public_key
+            or str(existing_key["current_key_thumbprint"]) != device.device_key_thumbprint
+            or existing_status is DeviceStatus.REVOKED
+        ):
+            raise DeviceKeyConflictError("device key is already registered")
+        if existing_status is DeviceStatus.ACTIVE:
+            return str(existing_key["device_id"]), RegistrationChallengeState.APPROVED, now
+        return str(existing_key["device_id"]), RegistrationChallengeState.SUBMITTED, None
+
+    async def _load_enrollment_key(
+        self,
+        device_key_thumbprint: str,
+    ) -> aiosqlite.Row | None:
+        cursor = await self._conn.execute(
+            """
+            SELECT d.device_id, d.owner_id, d.current_key_thumbprint, d.status,
+                   k.public_key_x963
+            FROM mobile_device_keys AS k
+            JOIN mobile_devices AS d ON d.device_id = k.device_id
+            WHERE k.device_key_thumbprint = ?
+            """,
+            (device_key_thumbprint,),
+        )
+        return await cursor.fetchone()
 
     async def _insert_pending_device(self, device: DeviceIdentity) -> None:
         await self._conn.execute(
@@ -785,6 +839,7 @@ class SqliteDeviceTrustStore:
 
 
 __all__ = [
+    "DeviceKeyConflictError",
     "DeviceKeyRecord",
     "DeviceKeyRotation",
     "DeviceKeyState",

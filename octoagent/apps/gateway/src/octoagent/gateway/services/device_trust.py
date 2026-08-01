@@ -23,6 +23,7 @@ from octoagent.core.models import (
     PrivacyAuditEventType,
 )
 from octoagent.core.store.device_trust_store import (
+    DeviceKeyConflictError,
     DeviceKeyRotation,
     RegistrationChallengeCreate,
     RegistrationChallengeRecord,
@@ -270,17 +271,31 @@ class DeviceTrustService:
                 device=device,
                 now=now,
             )
+        except DeviceKeyConflictError as exc:
+            raise DeviceTrustServiceError(
+                "DEVICE_KEY_ALREADY_REGISTERED",
+                status_code=409,
+            ) from exc
         except ValueError as exc:
             raise DeviceTrustServiceError(
                 "DEVICE_REGISTRATION_NOT_CLAIMABLE",
                 status_code=409,
             ) from exc
+        claimed_device = await self._device_store.get_device(
+            claimed.pending_device_id or device.device_id
+        )
+        if claimed_device is None:
+            raise RuntimeError("claimed registration device disappeared")
         return DeviceEnrollmentStatusResponse(
             challenge_id=claimed.challenge_id,
-            state=DeviceEnrollmentStatus.PENDING,
-            device_id=device.device_id,
-            device_key_thumbprint=device.device_key_thumbprint,
-            attestation_state=device.attestation_state,
+            state=(
+                DeviceEnrollmentStatus.ACTIVE
+                if claimed_device.status is DeviceStatus.ACTIVE
+                else DeviceEnrollmentStatus.PENDING
+            ),
+            device_id=claimed_device.device_id,
+            device_key_thumbprint=claimed_device.device_key_thumbprint,
+            attestation_state=claimed_device.attestation_state,
         )
 
     async def create_token_challenge(

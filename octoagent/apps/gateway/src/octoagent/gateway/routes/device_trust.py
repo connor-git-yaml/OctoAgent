@@ -179,6 +179,9 @@ def _service_error(exc: DeviceTrustServiceError) -> HTTPException:
         "DEVICE_KEY_ROTATION_CHALLENGE_INVALID": "密钥轮换请求已使用、已过期或不匹配。",
         "DEVICE_KEY_ROTATION_CURRENT_KEY_MISMATCH": "当前设备密钥已经变化，请重新连接。",
         "DEVICE_KEY_ROTATION_INVALID": "新设备密钥必须与当前密钥不同。",
+        "DEVICE_KEY_ALREADY_REGISTERED": (
+            "这个设备密钥已经连接过；请使用现有连接，或在手机上重新生成设备密钥。"
+        ),
         "DEVICE_NOT_FOUND": "没有找到这台设备。",
         "DEVICE_NOT_ACTIVE": "这台设备尚未批准或已经撤销。",
         "DEVICE_REGISTRATION_NOT_FOUND": "没有找到这次连接请求。",
