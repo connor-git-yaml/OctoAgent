@@ -11,6 +11,7 @@ export const ACTIVE_CHAT_TASK_STORAGE_KEY = "octoagent.chat.activeTaskId";
 export const AGENT_STREAM_PLACEHOLDER = "主助手已接手，正在处理这条消息…";
 
 const RESTORE_TASK_DETAIL_TIMEOUT_MS = 3_000;
+const RESTORE_TASK_DETAIL_ATTEMPTS = 2;
 type SSEPayloadEvent = {
   type: string;
   payload: Record<string, unknown>;
@@ -21,26 +22,32 @@ export function makePlaceholderId(): string {
   return `agent-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-/** 带超时的任务详情拉取（restore 路径专用，超时即放弃该候选） */
+/** 带超时的任务详情拉取（restore 路径专用，同一候选最多重试一次） */
 export async function fetchTaskDetailWithTimeout(
   taskId: string,
   timeoutMs: number = RESTORE_TASK_DETAIL_TIMEOUT_MS
 ): Promise<TaskDetailResponse> {
-  let timer: number | null = null;
-  try {
-    return await Promise.race([
-      fetchTaskDetail(taskId),
-      new Promise<TaskDetailResponse>((_, reject) => {
-        timer = window.setTimeout(() => {
-          reject(new Error("RESTORE_TIMEOUT"));
-        }, timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer != null) {
-      window.clearTimeout(timer);
+  let lastError: unknown = new Error("RESTORE_FAILED");
+  for (let attempt = 0; attempt < RESTORE_TASK_DETAIL_ATTEMPTS; attempt += 1) {
+    let timer: number | null = null;
+    try {
+      return await Promise.race([
+        fetchTaskDetail(taskId),
+        new Promise<TaskDetailResponse>((_, reject) => {
+          timer = window.setTimeout(() => {
+            reject(new Error("RESTORE_TIMEOUT"));
+          }, timeoutMs);
+        }),
+      ]);
+    } catch (error) {
+      lastError = error;
+    } finally {
+      if (timer != null) {
+        window.clearTimeout(timer);
+      }
     }
   }
+  throw lastError;
 }
 
 /** 构造 control plane action 请求体（web surface 固定 actor） */
