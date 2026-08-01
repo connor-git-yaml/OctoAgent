@@ -258,6 +258,11 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
    workflow 精确选择 `origin/master` merge-base `db3214ff…`，直接对完整累计范围得到
    `2192/2420 = 90.6% PASS`。LCOV SHA 为 `db3b26b1…f5f8d`，committed report SHA
    为 `7dee4209…9aba`；未降 90% 门槛，也未增加 coverage 豁免。
+6. CI JavaScript Actions 已迁移到 Node 24-compatible 版本，第三方 `setup-uv`
+   固定到 v8.3.2 发布提交。当前 head `1723c84f` 的 run `30720799929` 五个 job
+   全部成功，累计 coverage 仍为 `2192/2420 = 90.6% PASS`；Node 20 deprecation
+   annotation=0。三条相同 uv cache reserve warning 是并行 job 的 first-writer-wins
+   结果，architecture job 已成功保存 cache，不影响测试、恢复或 artifact。
 
 ## F153 当前设计映射与偏离记录
 

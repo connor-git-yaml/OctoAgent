@@ -431,3 +431,15 @@
   `db3b26b174d0f2f8fd68f18f102c22eec43b541a4c41c6037c3c65f2f57f5f8d`，报告 SHA
   `7dee4209a0e9ed1bdbcb56e520843685837755dbbc5f05458d80a30b1c8d9aba`。T050 完成；
   用户使用 iPhone 期间没有调用设备，也没有重启 Mac。
+- 2026-08-02：在用户取走 iPhone 后继续执行非设备 CI 维护。现有 F151 wiring test
+  先证明旧 JavaScript Actions 不满足 Node 24 合同；随后把 checkout/setup-python/
+  setup-node/cache/upload-artifact 升级到 Node 24-compatible major，并把第三方
+  `setup-uv` 固定到 v8.3.2 发布提交
+  `11f9893b081a58869d3b5fccaea48c9e9e46f990`。一次错误使用不存在的浮动 `v8`
+  tag 在 action resolution 阶段 fail fast，未启动 pytest；修正后提交
+  `1723c84f9fb07ac8273c2a6bc6af52f7016cb1da` 的 run `30720799929` 五个 job
+  全部 success：backend `5760 passed / 14 skipped / 1 xfailed / 1 xpassed`、scripted
+  `18 passed`、frontend `599 passed`、L1 `39 passed`、benchmark `2 passed`、
+  architecture PASS。累计 changed-lines 仍为 `2192/2420 = 90.6% PASS`，Node 20
+  deprecation annotation=0。三个并行 job 只出现同一 uv cache reserve warning，
+  architecture 已成功保存该 cache，故不为 first-writer-wins 非阻断提示再触发长 CI。

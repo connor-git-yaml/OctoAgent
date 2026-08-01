@@ -6,13 +6,14 @@
 - 状态：`PARTIAL`；
 - `GATE_VERIFY=false`；
 - 当前分支：`codex/f158-milestone-product-closure`；
-- 当前已推送代码/测试提交：`2b1fb5ec4a78ca1a3a2cba2343e0b45d5abc2204`；
+- 当前已推送代码/测试/workflow 提交：`1723c84f9fb07ac8273c2a6bc6af52f7016cb1da`；
 - 当前个人部署代码提交：`d17c3e59879ee09dd79ba77fcebf9729e662730e`；
-- 当前已推送 CI：run `30719719793`，head `2b1fb5ec`，五个 job 全部成功。非主分支
+- 当前已推送 CI：run `30720799929`，head `1723c84f`，五个 job 全部成功。非主分支
   resolver 精确选择 `origin/master` merge-base `db3214ff`；backend deterministic
-  `5759 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted `18 passed`，committed
+  `5760 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted `18 passed`，committed
   changed-lines 对完整分支为 `2192/2420 = 90.6% PASS`。LCOV SHA 为
-  `db3b26b174d0f2f8fd68f18f102c22eec43b541a4c41c6037c3c65f2f57f5f8d`；T050 已完成。
+  `1e2a0d9011d5d0e1d4af892c9ddf56b2b351e272368e70b124c0b08e3c7129c2`；T050 已完成，
+  Node 20 deprecation annotation=0。
 
 当前 Goal **没有完成**。桌面 Web、Claude 最早期设计视觉恢复、个人部署远程访问、
 真实 OpenAI Codex 对话、F153 原生 iOS device-trust 以及 F154 非真机实现已经形成
@@ -36,7 +37,7 @@ Web 与 iOS 都以 Claude Design 最早期方案的层级、留白、卡片节�
 | F154 HealthKit read-only | PARTIAL | T001-T012、T014、T015 完成；T013 真机与 T016 Verify 未完成 |
 | F155 EventKit read-only | CLOSED | Design/Tasks truth 已纠正；等待 F154 Verify 后执行自身 T003 exact authority，production=0 |
 | F156 native Companion | CLOSED | recon 已纠正为 10 条 mobile route、5 个已签发 capability、8 个 product gap，production=0 |
-| 当前 CI | PASS | run `30719719793` 五个 job 全绿；累计 `origin/master` merge-base 范围 `2192/2420 = 90.6% PASS`，未降门槛或加豁免 |
+| 当前 CI | PASS | run `30720799929` 五个 job 全绿；Node 24 Actions；累计 `origin/master` merge-base 范围 `2192/2420 = 90.6% PASS`，未降门槛或加豁免 |
 | 当前个人部署 | PASS（已部署范围） | managed checkout 运行 `d17c3e59`，`/health=200` |
 | M10 物理开机 attestation | MISSING | 只允许 Goal 末尾提前通知用户后重启一次 Mac |
 | F158 Verify / mainline | MISSING | 仍有上述产品与外部边界 |

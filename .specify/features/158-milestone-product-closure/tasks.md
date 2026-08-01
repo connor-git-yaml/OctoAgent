@@ -74,9 +74,9 @@
 - [ ] **T036** 同步 Blueprint、Milestone 与所有 Feature verification reports
 - [ ] **T037** 干净检出、权威 CI、个人部署复验（上一批 Web 提交/CI/managed
   checkout 已通过；F153 真机 Verify 与 F154 当前非真机完整 scheme 已通过；当前分支
-  `2b1fb5ec` 的累计 branch-base run `30719719793` 五个 job success，完整分支直接由
+  `1723c84f` 的累计 branch-base run `30720799929` 五个 job success，完整分支直接由
   workflow 计算为 `2192/2420 = 90.6% PASS`；T050 已修复 test-only push 可遗忘旧
-  生产差异的 workflow 盲点。个人 managed checkout 已部署
+  生产差异的 workflow 盲点，并完成 Node 24 Actions 迁移复验。个人 managed checkout 已部署
   device-trust 重连修复 `d17c3e59`，`/health=200`；登录后真实对话/SSE/事件链、Access
   登出/重登录/Settings ready 与一次性错误恢复已通过，仍缺自然过期、F154-F156 产品
   闭包、当前 truth commit 的 CI、mainline 与最终物理重启复验）
@@ -126,3 +126,6 @@
   合同与 13 条隐私模型失败关闭分支已通过。提交 `2b1fb5ec` 的累计 run
   `30719719793` 五个 job 全部成功：backend `5759 passed`、scripted `18 passed`，
   committed branch-base 覆盖 `2192/2420 = 90.6% PASS`；未降门槛、未加豁免。
+  后续 Node 24 Actions head `1723c84f` 的 run `30720799929` 再次五个 job 全绿：
+  backend `5760 passed`、scripted `18 passed`，累计覆盖仍为 `90.6% PASS`，Node 20
+  deprecation annotation=0。
