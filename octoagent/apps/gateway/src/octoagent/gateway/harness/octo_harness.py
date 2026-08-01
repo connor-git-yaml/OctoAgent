@@ -603,6 +603,7 @@ class OctoHarness:
         from .. import main as _main_module
         from ..main import _resolve_telegram_polling_timeout
         from ..services.content_threat_scan import ContentThreatScanService
+        from ..services.health_ingestion import build_health_ingestion_service
         from ..services.mobile_device_access import build_device_trust_service
 
         # 通过 _main_module 拿这些符号，保留 monkeypatch.setattr(main, "X", ...)
@@ -643,6 +644,13 @@ class OctoHarness:
         app.state.device_trust_service = (
             build_device_trust_service(
                 manifest=mobile_manifest,
+                store_group=store_group,
+            )
+            if mobile_manifest is not None
+            else None
+        )
+        app.state.health_ingestion_service = (
+            build_health_ingestion_service(
                 store_group=store_group,
             )
             if mobile_manifest is not None

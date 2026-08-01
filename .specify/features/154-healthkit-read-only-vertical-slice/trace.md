@@ -59,3 +59,15 @@
   没有第二 capability/consent engine。REFACTOR 11/11、Core/Protocol/Policy 全量 737 tests、
   F152/F153/F154/F158 authority 5 tests、Ruff/C901/py_compile 与 repository architecture gate
   全部通过。
+- 2026-08-02：T007 实施前先由 authority RED 发现既有 mobile Host middleware 未授权
+  `/api/mobile/v1/health/reviews`，若直接写 route 会在真实 iPhone 入口恒定 404；补入 exact
+  `mobile_device_access.py` authority 后 gate 恢复。随后 4 个 Gateway L3 node 取得真实 RED，
+  全部只因 health service/router 不存在而命中 `F154_HEALTH_REVIEW_ROUTE_MISSING`。GREEN 新增
+  唯一 health application service 与 mobile router，复用 F153 Host/proof/body hash/nonce/
+  durable replay/revoke、同一 device trust store，并复用 F152 consumer validation、
+  `SqlitePrivacyIngestionStore` 与 metadata-only audit；capability/replay/raw-field 拒绝投影为
+  F154 stable code，owner/device lineage mismatch 零写。REFACTOR 后 production 最大函数 34 行、
+  McCabe≤10；focused/相关 F153 回归 28/28、Core/Protocol/Policy 相关 17/17、deterministic
+  e2e 26 passed/1 skipped、5 个 Feature authority 与 repository architecture gate 全部通过。
+  checker SHA-256 `ac3c20c992801936710331b845f057200cdcf52ec0e1fabde34cb5d813e1fe1f`，
+  T007 test SHA-256 `9ee0fdc2522ee454b334f949a6f51e972d4e6e4fd6a27f0f325f3bed063ef5b7`。

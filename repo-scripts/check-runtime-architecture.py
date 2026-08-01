@@ -232,7 +232,7 @@ FEATURE_AUTHORITIES = MappingProxyType(
                     "inventories/architecture-authority.v1.json"
                 ),
                 "scope_sha256": (
-                    "62ff4364dcea325eb3cbe674e7c7e0661215a82601d7a18cb6d58b666a020d1f"
+                    "0921de415b66a167f3eaebe72692f9d94811c7aefbf8573fcd5e51115c596c2d"
                 ),
                 "status": "DESIGN_TASKS_APPROVED_IMPLEMENT_OPEN_T001_COMPLETE",
                 "owners": frozenset(
@@ -1669,6 +1669,12 @@ F153_F150_OVERLAP_PATHS = frozenset(
         "octoagent/apps/gateway/src/octoagent/gateway/main.py",
     }
 )
+F154_F150_OVERLAP_PATHS = frozenset(
+    {
+        "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+        "octoagent/apps/gateway/src/octoagent/gateway/main.py",
+    }
+)
 F158_F150_OVERLAP_PATHS = frozenset(
     {
         "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
@@ -3062,12 +3068,95 @@ def _strip_f153_main_overlay(tree: ast.Module) -> None:
     )
 
 
+def _strip_f154_harness_overlay(tree: ast.Module) -> None:
+    error_code = "F154_F150_AUTHORITY_OVERLAP_INVALID"
+    runtime = _f153_class_method(
+        tree,
+        "OctoHarness",
+        "_bootstrap_runtime_services",
+        error_code=error_code,
+    )
+    _f153_remove_import_alias(
+        runtime.body,
+        module="services.health_ingestion",
+        level=2,
+        name="build_health_ingestion_service",
+        detail="OctoHarness health ingestion import",
+        error_code=error_code,
+    )
+    _f153_remove_exact_statement(
+        runtime.body,
+        """app.state.health_ingestion_service = (
+    build_health_ingestion_service(
+        store_group=store_group,
+    )
+    if mobile_manifest is not None
+    else None
+)
+""",
+        "OctoHarness health ingestion composition",
+        error_code=error_code,
+    )
+    _f153_require_no_overlay_refs(
+        tree,
+        frozenset({"build_health_ingestion_service", "health_ingestion_service"}),
+        "OctoHarness F154 overlay residue",
+        error_code=error_code,
+    )
+
+
+def _strip_f154_main_overlay(tree: ast.Module) -> None:
+    error_code = "F154_F150_AUTHORITY_OVERLAP_INVALID"
+    _f153_remove_import_alias(
+        tree.body,
+        module="routes",
+        level=1,
+        name="mobile_health",
+        detail="main mobile health route import",
+        error_code=error_code,
+    )
+    create_app = _top_level_function(tree, "create_app")
+    _f153_remove_exact_statement(
+        create_app.body,
+        "app.include_router(mobile_health.router)",
+        "main health route registration",
+        error_code=error_code,
+    )
+    _f153_require_no_overlay_refs(
+        tree,
+        frozenset({"mobile_health"}),
+        "main F154 overlay residue",
+        error_code=error_code,
+    )
+
+
+def _strip_f154_f150_overlay(relative: str, current: str) -> str:
+    require(
+        relative in F154_F150_OVERLAP_PATHS,
+        "F154_F150_AUTHORITY_OVERLAP_INVALID",
+        relative,
+    )
+    try:
+        tree = ast.parse(current)
+    except SyntaxError as exc:
+        fail("F154_F150_AUTHORITY_OVERLAP_INVALID", str(exc))
+    if relative.endswith("/harness/octo_harness.py"):
+        _strip_f154_harness_overlay(tree)
+    else:
+        _strip_f154_main_overlay(tree)
+    return ast.unparse(tree)
+
+
 def _strip_f153_f150_overlay(relative: str, current: str) -> str:
     require(
         relative in F153_F150_OVERLAP_PATHS,
         "F153_F150_AUTHORITY_OVERLAP_INVALID",
         relative,
     )
+    if relative in F154_F150_OVERLAP_PATHS and _f154_overlay_in_baseline(
+        relative, current
+    ):
+        current = _strip_f154_f150_overlay(relative, current)
     try:
         tree = ast.parse(current)
     except SyntaxError as exc:
@@ -3310,6 +3399,18 @@ def _f153_overlay_in_baseline(relative: str, baseline: str) -> bool:
     return bool(marker and marker in baseline)
 
 
+def _f154_overlay_in_baseline(relative: str, baseline: str) -> bool:
+    markers = {
+        "octo_harness.py": "health_ingestion_service",
+        "main.py": "mobile_health",
+    }
+    marker = next(
+        (value for suffix, value in markers.items() if relative.endswith(suffix)),
+        "",
+    )
+    return bool(marker and marker in baseline)
+
+
 def _f158_overlay_in_baseline(relative: str, baseline: str) -> bool:
     return relative.endswith("/services/operations/doctor.py") and (
         "check_model_live" in baseline
@@ -3323,6 +3424,7 @@ def _validate_f150_authority_path(
     contract: tuple[Any, ...],
     *,
     allow_f153_overlay: bool = False,
+    allow_f154_overlay: bool = False,
     allow_f158_overlay: bool = False,
 ) -> None:
     kind, name, allowed = contract
@@ -3336,6 +3438,8 @@ def _validate_f150_authority_path(
         validate_f150_security_surface(relative, current, baseline)
     structural_baseline = baseline
     structural_current = current
+    if allow_f154_overlay and not _f154_overlay_in_baseline(relative, baseline):
+        structural_current = _strip_f154_f150_overlay(relative, structural_current)
     if allow_f153_overlay and not _f153_overlay_in_baseline(relative, baseline):
         structural_current = _strip_f153_f150_overlay(relative, structural_current)
     if allow_f158_overlay:
@@ -3455,6 +3559,7 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
     resolve_base(repo, base_ref)
     changed = changed_paths(repo)
     f153_paths = _feature_authority_production_paths_if_present(repo, "F153")
+    f154_paths = _feature_authority_production_paths_if_present(repo, "F154")
     f158_paths = _feature_authority_production_paths_if_present(repo, "F158")
     f149_t010_active = F149_T010_WEB_CONTRACT_PATH in changed
     f149_t011_active = F149_T011_AUTHORITY_PATHS <= changed
@@ -3502,6 +3607,13 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
                     _f150_source_at_ref(repo, base_ref, relative),
                 )
                 continue
+            if relative in f154_paths:
+                validate_f150_security_surface(
+                    relative,
+                    text,
+                    _f150_source_at_ref(repo, base_ref, relative),
+                )
+                continue
             validate_f150_security_surface(
                 relative,
                 text,
@@ -3516,6 +3628,9 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
         allow_f153_overlay = relative in f153_paths.intersection(
             F153_F150_OVERLAP_PATHS
         )
+        allow_f154_overlay = relative in f154_paths.intersection(
+            F154_F150_OVERLAP_PATHS
+        )
         allow_f158_overlay = relative in f158_paths.intersection(
             F158_F150_OVERLAP_PATHS
         )
@@ -3525,6 +3640,7 @@ def validate_f150_implementation_scope(repo: Path, base_ref: str) -> None:
             relative,
             contract,
             allow_f153_overlay=allow_f153_overlay,
+            allow_f154_overlay=allow_f154_overlay,
             allow_f158_overlay=allow_f158_overlay,
         )
 
@@ -3543,11 +3659,20 @@ def check_f150_scope(repo: Path) -> None:
     if current_text == baseline_text:
         return
     f153_paths = _feature_authority_production_paths_if_present(repo, "F153")
-    structural_current = (
-        _strip_f153_f150_overlay(relative.as_posix(), current_text)
-        if relative.as_posix() in f153_paths
-        else current_text
-    )
+    f154_paths = _feature_authority_production_paths_if_present(repo, "F154")
+    structural_current = current_text
+    if relative.as_posix() in f154_paths and not _f154_overlay_in_baseline(
+        relative.as_posix(), baseline_text
+    ):
+        structural_current = _strip_f154_f150_overlay(
+            relative.as_posix(), structural_current
+        )
+    if relative.as_posix() in f153_paths and not _f153_overlay_in_baseline(
+        relative.as_posix(), baseline_text
+    ):
+        structural_current = _strip_f153_f150_overlay(
+            relative.as_posix(), structural_current
+        )
     mapping = _namespace_python_module_map(repo)
     has_t042_change = (
         "detect_legacy_runtime_files" in structural_current

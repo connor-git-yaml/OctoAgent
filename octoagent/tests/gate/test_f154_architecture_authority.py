@@ -102,6 +102,13 @@ def test_f154_exact_architecture_authority_is_fail_closed(tmp_path: Path) -> Non
         "health.analysis.run",
         "health.source.delete",
     ]
+    production_roles = {record["path"]: record["role"] for record in inventory["production_paths"]}
+    assert (
+        production_roles.get(
+            "octoagent/apps/gateway/src/octoagent/gateway/services/mobile_device_access.py"
+        )
+        == "existing_mobile_health_path_boundary"
+    ), f"{ORACLE}: mobile health route cannot pass the existing Host/path middleware"
 
     cases: tuple[Callable[[dict[str, Any]], None], ...] = (
         lambda item: item.update(feature_id="F155"),

@@ -58,6 +58,7 @@ from .routes import (
     health,
     memory_candidates,
     message,
+    mobile_health,
     notifications,
     operator_inbox,
     ops,
@@ -556,6 +557,7 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
     app.include_router(health.router, tags=["health"])
     app.include_router(device_trust.router)
     app.include_router(device_trust.mobile_router)
+    app.include_router(mobile_health.router)
     # OAuth 回调路由（不需要 front door auth，OAuth redirect 不携带 auth token）
     app.include_router(auth_callback.router, tags=["auth"])
     app.include_router(ops.router, tags=["ops"], dependencies=protected)

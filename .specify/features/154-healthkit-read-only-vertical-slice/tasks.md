@@ -17,7 +17,7 @@
   offline/revoked/delete 与内存清理
 - [x] **T006 [PYTHON L4][RED→GREEN→REFACTOR]** exact health capabilities、F154 consumer
   schema、raw field forbid 与 F152 consent/lineage
-- [ ] **T007 [GATEWAY L3][RED→GREEN→REFACTOR]** mobile health review route，F153
+- [x] **T007 [GATEWAY L3][RED→GREEN→REFACTOR]** mobile health review route，F153
   Host/proof/replay/revoke + F152 store/audit
 - [ ] **T008 [GATEWAY L3/L2][RED→GREEN→REFACTOR]** approved packet 单次分析，
   ProviderRouter auth-fatal/timeout/error fail closed、无 Echo
