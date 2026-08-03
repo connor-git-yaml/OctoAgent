@@ -62,7 +62,7 @@
 
 #### 5.1.3 Orchestrator + Workers（多代理/分层）
 
-- FR-A2A-1（必须，[M1.5]，M5 H1 落地）：主 Agent（Butler / Main Agent，唯一 user-facing speaker）负责：
+- FR-A2A-1（必须，[M1.5]，M5 H1 落地）：主 Agent（唯一 user-facing speaker）负责：
   - 当前阶段作为**唯一对用户负责的发言人**，同时是主要执行者
   - 拥有自己的 `AgentSession`、`AgentMemory` 与 Recall runtime
   - 目标理解与分类，直接处理用户请求

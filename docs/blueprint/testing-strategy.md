@@ -17,8 +17,12 @@
 - **框架**：pytest + pytest-asyncio（`asyncio_mode = "auto"`）✅ 已落地
 - **全局 LLM 安全锁** ✅ **F137 已落地**（原愿景 `ALLOW_MODEL_REQUESTS` 的实际形态）：
   - `octoagent.provider.model_request_gate`——env `OCTOAGENT_ALLOW_MODEL_REQUESTS`
-    缺省 allow（生产零感知）；测试布线（provider 包 pytest11 entry-point 插件
+    缺省 allow（生产零感知）；测试布线（`octoagent` namespace 根的轻量 pytest11
+    entry-point 插件
     `octoagent_model_request_gate` + `octoagent/conftest.py` 冗余布线）默认置 deny。
+    插件顶层不得导入 `octoagent.provider`，真正 gate import 延迟到
+    `pytest_configure`，避免 pytest 在 pytest-cov 启动前扫描 entry point 时提前执行
+    Provider 公开包及其生产依赖，造成定义行被错误记为 0 覆盖。
   - 闸点在 `ProviderClient.call()` / `embed()` 入口第一行（早于 auth resolver 的
     preemptive refresh 网络副作用）；漏网真调用抛 `ModelRequestsNotAllowedError`
     （`RuntimeError` 子类），FallbackManager / llm_service / SkillRunner /
@@ -100,8 +104,11 @@
     pyproject `[tool.coverage.run]` 9 个 src 目录）产 lcov ∩ git diff 新增行，
     ≥90% 否则 FAIL（`check-changed-lines-coverage.py` 机械计算；存量不背债；
     escape hatch = HEAD commit message `[cov-exempt]` 大声记录）；scope 底线/
-    棘轮两重门显式 defer。门禁脚本自身在 `octoagent/tests/gate/` 有单测
-    （cc-haha 教义：门禁脚本必须被测试）。
+    棘轮两重门显式 defer。PR 使用目标 base，`master` push 使用 `event.before`，
+    其他分支 push 累计比较 `merge-base(origin/master, HEAD)`，禁止失败生产提交被后续
+    test/docs-only push 遗忘。pytest11 插件另有 fresh-interpreter 合同，断言 entry point
+    import 不会提前加载 production package。门禁脚本与 workflow wiring 自身在
+    `octoagent/tests/gate/` 有单测（cc-haha 教义：门禁脚本必须被测试）。
 - **测试目录结构**（实况；原愿景的 replay/evals 独立目录从未建立）：测试分布在
   各包 `packages/*/tests` + `apps/gateway/tests`（含 `e2e_live/` 真 LLM 套件）+
   顶层 `tests/integration`（Echo 全栈），由 `octoagent/pyproject.toml` testpaths

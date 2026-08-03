@@ -15,6 +15,7 @@ import os
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -335,7 +336,7 @@ class BuiltinMemUBridge:
                 "subject_key": sor.subject_key or "",
                 "content_text": content,
                 "text_tokens": _tokenize_for_fts(content),
-                "summary": (sor.summary or sor.content or "")[:200],
+                "summary": (sor.content or "")[:200],
                 "status": sor.status or "current",
                 "version": sor.version if hasattr(sor, "version") else 0,
                 "created_at": sor.updated_at.isoformat() if hasattr(sor, "updated_at") and sor.updated_at else "",
@@ -363,7 +364,7 @@ class BuiltinMemUBridge:
 
         # 处理 tombstones
         if batch.tombstones:
-            await self._delete_from_lancedb([t.record_id for t in batch.tombstones])
+            await self._delete_from_lancedb(batch.tombstones)
 
         return result.model_copy(update={"backend_state": MemoryBackendState.HEALTHY})
 
@@ -449,7 +450,7 @@ class BuiltinMemUBridge:
             "subject_key": record.subject_key or "",
             "content_text": content,
             "text_tokens": _tokenize_for_fts(content),
-            "summary": (record.summary or record.content or "")[:200],
+            "summary": (record.content or "")[:200],
             "status": record.status or "current",
             "version": record.version if hasattr(record, "version") else 0,
             "created_at": record.updated_at.isoformat() if hasattr(record, "updated_at") and record.updated_at else "",
@@ -616,7 +617,7 @@ class BuiltinMemUBridge:
                     "subject_key": sor.subject_key or "",
                     "content_text": content,
                     "text_tokens": _tokenize_for_fts(content),
-                    "summary": (sor.summary or sor.content or "")[:200],
+                    "summary": (sor.content or "")[:200],
                     "status": sor.status or "current",
                     "version": sor.version if hasattr(sor, "version") else 0,
                     "created_at": sor.updated_at.isoformat() if hasattr(sor, "updated_at") and sor.updated_at else "",
@@ -770,17 +771,22 @@ class BuiltinMemUBridge:
         layer = row.get("layer", "")
         record_id = row.get("record_id", "")
         score = row.get("_relevance_score") or row.get("_score") or 0.0
+        created_at = row.get("created_at")
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+        if not isinstance(created_at, datetime):
+            raise ValueError("LanceDB memory row 缺少合法 created_at")
 
         return MemorySearchHit(
-            memory_id=record_id if layer == "sor" else "",
-            fragment_id=record_id if layer == "fragment" else "",
-            vault_id=record_id if layer == "vault" else "",
+            record_id=record_id,
             layer=layer or "sor",
             subject_key=row.get("subject_key", ""),
             summary=row.get("summary", ""),
             scope_id=row.get("scope_id", ""),
             partition=row.get("partition", ""),
-            relevance_score=float(score),
+            version=row.get("version") or None,
+            status=row.get("status") or None,
+            created_at=created_at,
             metadata={
                 "search_mode": "hybrid" if resolved_target.uses_qwen or resolved_target.uses_proxy_alias else "fts-bm25",
                 "embedding_target": requested_target,
@@ -791,6 +797,7 @@ class BuiltinMemUBridge:
                 "builtin_embedding_warning": resolved_target.warning,
                 "embed_model": row.get("embed_model", ""),
                 "status": row.get("status", ""),
+                "relevance_score": float(score),
             },
         )
 

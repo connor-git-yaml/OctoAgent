@@ -697,6 +697,7 @@ def classify_distribution_imports(
     distribution, files = _distribution_python_files(target, name)
     plugins = _pytest_plugin_modules(distribution)
     occurrences: list[dict[str, Any]] = []
+    ownership_cache: dict[str, str | None] = {}
     for relative, path in files:
         tree = _parse_installed_module(path, name)
         parents = _parent_nodes(tree)
@@ -713,6 +714,7 @@ def classify_distribution_imports(
                 syntax,
                 parents,
                 plugins,
+                ownership_cache,
             )
             if occurrence is not None:
                 occurrences.append(occurrence)
@@ -815,11 +817,14 @@ def _classified_occurrence(
     syntax: str,
     parents: dict[ast.AST, ast.AST],
     plugins: set[str],
+    ownership_cache: dict[str, str | None],
 ) -> dict[str, Any] | None:
     import_root = imported.split(".", 1)[0]
     if import_root in sys.stdlib_module_names:
         return None
-    distribution = _resolve_import_distribution(target, imported)
+    if imported not in ownership_cache:
+        ownership_cache[imported] = _resolve_import_distribution(target, imported)
+    distribution = ownership_cache[imported]
     if distribution == own:
         return None
     workspace = (

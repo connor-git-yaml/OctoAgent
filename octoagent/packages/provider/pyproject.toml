@@ -23,12 +23,12 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/octoagent"]
 
-# F137 硬闸 deny 主布线：安装本包的 venv 内所有 pytest 会话自动加载本插件，
-# 测试默认拒绝真 LLM 网络调用（octoagent/conftest.py 为冗余次选布线，覆盖
-# worktree PYTHONPATH 锁模式下 entry point 未注册的窗口）。
+# F137 硬闸 deny 主布线：插件必须位于 octoagent namespace 根，避免 pytest 在
+# coverage 启动前为扫描 entry point 而执行整个 octoagent.provider 公开包；真正的
+# gate import 延迟到 pytest_configure。octoagent/conftest.py 是冗余次选布线。
 # 旧 worktree 逃生门：-p no:octoagent_model_request_gate
 [project.entry-points.pytest11]
-octoagent_model_request_gate = "octoagent.provider.testing.pytest_model_request_gate"
+octoagent_model_request_gate = "octoagent.provider_pytest_plugin"
 
 [project.optional-dependencies]
 dev = [

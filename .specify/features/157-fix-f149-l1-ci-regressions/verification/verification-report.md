@@ -2,8 +2,9 @@
 
 ## 结论
 
-本地验证通过。四项 F149 L1 回归均已恢复，且没有修改页面组件、CSS、Claude Design
-输出或产品功能。最终通过条件仍包括提交后的权威 `master` CI 全绿。
+PASS。四项 F149 L1 回归均已恢复，且没有修改页面组件、CSS、Claude Design
+输出或产品功能。F151 clean-checkout corrective 已合并到 `master`，对应 exact
+commit 的权威 CI 五个 job 全部通过。
 
 ## TDD 证据
 
@@ -47,7 +48,18 @@
 - 完整 `octoagent/tests/gate`：`206 passed`。
 - F151 runtime checker 无 diff；修复只在 gate test 的 Git baseline、临时 tree/JUnit
   fixture、F150 fixture 与 optional raw cross-check。
-- 新权威 `master` CI 尚待本次 corrective 提交后最终确认。
+
+### 权威 master CI
+
+- commit：
+  `db3214fff722c6f969baf99528a76fc03a1e21a1`
+- run：
+  [30198514576](https://github.com/connor-git-yaml/OctoAgent/actions/runs/30198514576)
+- workflow conclusion：`success`
+- jobs：benchmark、frontend、l1-playwright、architecture、
+  backend-deterministic 全部 `success`
+- backend 同次运行已覆盖 deterministic layers、`e2e_scripted` 和 changed-lines
+  coverage gate；因此 clean-checkout corrective 不再依赖开发机本地状态。
 
 ## 回归闭环
 
@@ -59,7 +71,8 @@
    `drift_detected_count=0`。
 4. 390px 合法只读空状态使用全局 shell 键盘操作作为可达性控制，不增加无意义 CTA。
 
-## 待完成
+## 完成状态
 
-- 提交并推送 corrective。
-- 等待新的权威 `master` CI 全部 job 通过。
+- F157 T001-T013 全部完成。
+- 本报告的权威终态绑定上述 `master` commit 与 CI run；后续 Milestone 审计可将
+  F157 视为已证明，不再标记为文档漂移。

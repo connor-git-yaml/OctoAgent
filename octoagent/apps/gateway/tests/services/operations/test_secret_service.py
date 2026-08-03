@@ -5,12 +5,20 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from octoagent.core.models import ManagedRuntimeDescriptor, SecretRefSourceType, utc_now
+from octoagent.core.store import create_store_group
 from octoagent.gateway.services.config.config_schema import (
     ModelAlias,
     OctoAgentConfig,
     ProviderEntry,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
+from octoagent.gateway.services.operations.backup_service import (
+    resolve_artifacts_dir,
+    resolve_db_path,
+)
+from octoagent.gateway.services.operations.project_migration import (
+    ProjectWorkspaceMigrationService,
+)
 from octoagent.gateway.services.operations.project_selector import ProjectSelectorService
 from octoagent.gateway.services.operations.secret_models import (
     RuntimeSecretMaterialization,
@@ -278,6 +286,40 @@ async def test_secret_service_warning_only_bridge_reports_ready(tmp_path: Path) 
     assert report.missing_targets == []
     assert report.reload_required is False
     assert len(report.warnings) == 1
+
+
+async def test_secret_service_reuses_injected_store_without_nested_migration(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Gateway 已初始化 StoreGroup 时，secret audit 不得再争抢迁移写锁。"""
+    _write_secret_test_config(tmp_path)
+    await ProjectWorkspaceMigrationService(tmp_path).ensure_default_project()
+    store_group = await create_store_group(
+        str(resolve_db_path(tmp_path)),
+        resolve_artifacts_dir(tmp_path),
+    )
+
+    async def _unexpected_migration(_self) -> None:
+        raise AssertionError("注入 StoreGroup 后不应再次执行 project migration")
+
+    monkeypatch.setattr(
+        ProjectWorkspaceMigrationService,
+        "ensure_default_project",
+        _unexpected_migration,
+    )
+    service = SecretService(
+        tmp_path,
+        store_group=store_group,
+        environ={"OPENROUTER_API_KEY": "provider-secret"},
+    )
+    try:
+        report = await service.audit()
+    finally:
+        await store_group.close()
+
+    assert report.overall_status == "ready"
+    assert report.missing_targets == []
 
 
 async def test_project_inspect_uses_project_scoped_secret_status(tmp_path: Path) -> None:

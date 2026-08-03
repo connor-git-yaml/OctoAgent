@@ -5,16 +5,21 @@
 
 from __future__ import annotations
 
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
 from octoagent.gateway.cli.cli import main
 from octoagent.gateway.cli.console_output import format_report
 from octoagent.gateway.services.config.config_schema import (
+    AuthApiKey,
     ChannelsConfig,
+    ModelAlias,
     OctoAgentConfig,
+    ProviderEntry,
     TelegramChannelConfig,
 )
 from octoagent.gateway.services.config.config_wizard import save_config
@@ -131,6 +136,18 @@ class TrackingTelegramVerifier:
         )()
 
 
+class TrackingLiveModelProbe:
+    def __init__(self, *, error: Exception | None = None) -> None:
+        self.calls: list[Path] = []
+        self.error = error
+
+    async def __call__(self, project_root: Path) -> tuple[str, str, str]:
+        self.calls.append(project_root)
+        if self.error is not None:
+            raise self.error
+        return ("cheap", "openai-codex", "gpt-5.5")
+
+
 class TestDoctorChecks:
     """个别检查项测试"""
 
@@ -240,6 +257,37 @@ class TestDoctorChecks:
         runner._store = store
         result = await runner.check_credential_expiry()
         assert result.status == CheckStatus.WARN
+
+    async def test_credential_expiry_reports_local_timestamp_semantics(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        store = CredentialStore(store_path=tmp_path / "auth.json")
+        now = datetime.now(tz=UTC)
+        store.set_profile(
+            ProviderProfile(
+                name="future-token",
+                provider="anthropic",
+                auth_mode="token",
+                credential=TokenCredential(
+                    provider="anthropic",
+                    token=SecretStr("sk-ant-oat01-test"),
+                    acquired_at=now,
+                    expires_at=now + timedelta(hours=24),
+                ),
+                created_at=now,
+                updated_at=now,
+            ),
+        )
+        runner = DoctorRunner(project_root=tmp_path)
+        runner._store = store
+
+        result = await runner.check_credential_expiry()
+
+        assert result.status == CheckStatus.PASS
+        assert "本地过期时间" in result.message
+        assert "不代表远端授权可用" in result.message
+        assert "所有凭证均有效" not in result.message
 
     async def test_telegram_config_skip_when_disabled(self, tmp_path: Path) -> None:
         _write_telegram_config(tmp_path, enabled=False)
@@ -360,6 +408,198 @@ class TestDoctorOverall:
         assert verifier.readiness_calls == 1
         readiness = next(check for check in report.checks if check.name == "telegram_readiness")
         assert readiness.status == CheckStatus.PASS
+
+    async def test_run_all_checks_live_executes_real_model_probe(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        probe = TrackingLiveModelProbe()
+        runner = DoctorRunner(project_root=tmp_path, live_model_probe=probe)
+
+        offline_report = await runner.run_all_checks(live=False)
+        live_report = await runner.run_all_checks(live=True)
+
+        assert probe.calls == [tmp_path]
+        assert all(check.name != "model_live" for check in offline_report.checks)
+        model_live = next(check for check in live_report.checks if check.name == "model_live")
+        assert model_live.status == CheckStatus.PASS
+        assert model_live.level == CheckLevel.REQUIRED
+        assert "cheap" in model_live.message
+        assert "openai-codex" in model_live.message
+        assert "gpt-5.5" in model_live.message
+
+    async def test_model_live_credential_failure_is_blocking(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from octoagent.provider.exceptions import CredentialExpiredError
+
+        probe = TrackingLiveModelProbe(
+            error=CredentialExpiredError("refresh_token_reused"),
+        )
+        runner = DoctorRunner(project_root=tmp_path, live_model_probe=probe)
+
+        report = await runner.run_all_checks(live=True)
+
+        model_live = next(check for check in report.checks if check.name == "model_live")
+        assert model_live.status == CheckStatus.FAIL
+        assert model_live.level == CheckLevel.REQUIRED
+        assert "重新授权" in model_live.fix_hint
+        assert report.overall_status == CheckStatus.FAIL
+
+    async def test_local_expiry_pass_does_not_claim_remote_authorization(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from octoagent.provider.exceptions import CredentialExpiredError
+
+        store = CredentialStore(store_path=tmp_path / "auth.json")
+        now = datetime.now(tz=UTC)
+        store.set_profile(
+            ProviderProfile(
+                name="future-token",
+                provider="anthropic",
+                auth_mode="token",
+                credential=TokenCredential(
+                    provider="anthropic",
+                    token=SecretStr("sk-ant-oat01-test"),
+                    acquired_at=now,
+                    expires_at=now + timedelta(hours=24),
+                ),
+                created_at=now,
+                updated_at=now,
+            ),
+        )
+        probe = TrackingLiveModelProbe(
+            error=CredentialExpiredError("refresh_token_reused"),
+        )
+        runner = DoctorRunner(project_root=tmp_path, live_model_probe=probe)
+        runner._store = store
+
+        report = await runner.run_all_checks(live=True)
+
+        expiry = next(check for check in report.checks if check.name == "credential_expiry")
+        model_live = next(check for check in report.checks if check.name == "model_live")
+        assert expiry.status == CheckStatus.PASS
+        assert "本地过期时间" in expiry.message
+        assert "不代表远端授权可用" in expiry.message
+        assert "所有凭证均有效" not in expiry.message
+        assert model_live.status == CheckStatus.FAIL
+        assert report.overall_status == CheckStatus.FAIL
+
+    async def test_model_live_missing_config_is_blocking(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_model_live()
+
+        assert result.status == CheckStatus.FAIL
+        assert result.level == CheckLevel.REQUIRED
+        assert "RuntimeError" in result.message
+        assert "配置与网络连通性" in result.fix_hint
+
+    async def test_model_live_empty_response_is_blocking(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setattr(
+            "octoagent.gateway.services.config.config_wizard.load_config",
+            lambda _root: SimpleNamespace(model_aliases={"main": object()}),
+        )
+
+        async def fake_complete(
+            _adapter: object,
+            *,
+            messages: list[dict[str, str]],
+            model_alias: str,
+        ) -> SimpleNamespace:
+            assert messages
+            assert model_alias == "main"
+            return SimpleNamespace(
+                content="",
+                provider="doctor-provider",
+                model_name="doctor-main",
+            )
+
+        monkeypatch.setattr(
+            "octoagent.provider.ProviderRouterMessageAdapter.complete",
+            fake_complete,
+        )
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_model_live()
+
+        assert result.status == CheckStatus.FAIL
+        assert result.level == CheckLevel.REQUIRED
+        assert "RuntimeError" in result.message
+        assert "配置与网络连通性" in result.fix_hint
+
+    async def test_model_live_uses_instance_dotenv_and_prefers_main(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        save_config(
+            OctoAgentConfig(
+                updated_at="2026-07-28",
+                providers=[
+                    ProviderEntry(
+                        id="doctor-provider",
+                        name="Doctor Provider",
+                        transport="openai_chat",
+                        api_base="https://provider.example.test/v1",
+                        auth=AuthApiKey(env="DOCTOR_TEST_API_KEY"),
+                    )
+                ],
+                model_aliases={
+                    "main": ModelAlias(
+                        provider="doctor-provider",
+                        model="doctor-main",
+                    ),
+                    "cheap": ModelAlias(
+                        provider="doctor-provider",
+                        model="doctor-cheap",
+                    ),
+                },
+            ),
+            tmp_path,
+        )
+        (tmp_path / ".env").write_text(
+            "DOCTOR_TEST_API_KEY=instance-secret\n",
+            encoding="utf-8",
+        )
+        monkeypatch.delenv("DOCTOR_TEST_API_KEY", raising=False)
+        observed_aliases: list[str] = []
+
+        async def fake_complete(
+            _adapter: object,
+            *,
+            messages: list[dict[str, str]],
+            model_alias: str,
+        ) -> SimpleNamespace:
+            assert messages
+            assert os.environ["DOCTOR_TEST_API_KEY"] == "instance-secret"
+            observed_aliases.append(model_alias)
+            return SimpleNamespace(
+                content="OCTOAGENT_DOCTOR_OK",
+                provider="doctor-provider",
+                model_name="doctor-main",
+            )
+
+        monkeypatch.setattr(
+            "octoagent.provider.ProviderRouterMessageAdapter.complete",
+            fake_complete,
+        )
+        runner = DoctorRunner(project_root=tmp_path)
+
+        result = await runner.check_model_live()
+
+        assert result.status == CheckStatus.PASS
+        assert observed_aliases == ["main"]
+        assert "alias=main" in result.message
 
     async def test_run_all_checks_does_not_crash_on_invalid_telegram_config(
         self,

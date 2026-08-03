@@ -1,0 +1,542 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000001 /* OctoAgentApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* OctoAgentApp.swift */; };
+		100000000000000000000002 /* DeviceTrustTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* DeviceTrustTests.swift */; };
+		100000000000000000000003 /* DeviceKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000005 /* DeviceKeyStore.swift */; };
+		100000000000000000000004 /* DeviceTrustModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000006 /* DeviceTrustModels.swift */; };
+		100000000000000000000005 /* RequestProofSigner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* RequestProofSigner.swift */; };
+		100000000000000000000006 /* DeviceTrustClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000008 /* DeviceTrustClient.swift */; };
+		100000000000000000000007 /* RegistrationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000009 /* RegistrationView.swift */; };
+		100000000000000000000008 /* RegistrationFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000010 /* RegistrationFlowUITests.swift */; };
+		100000000000000000000009 /* __Snapshots__ in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000012 /* __Snapshots__ */; };
+		100000000000000000000010 /* HealthImportModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000013 /* HealthImportModels.swift */; };
+		100000000000000000000011 /* HealthImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000014 /* HealthImportTests.swift */; };
+		100000000000000000000012 /* AppleHealthDataStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000015 /* AppleHealthDataStore.swift */; };
+		100000000000000000000013 /* HealthKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 200000000000000000000017 /* HealthKit.framework */; };
+		100000000000000000000014 /* HealthImportCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000018 /* HealthImportCoordinator.swift */; };
+		100000000000000000000015 /* HealthReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000019 /* HealthReviewView.swift */; };
+		100000000000000000000016 /* HealthImportFlowUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000020 /* HealthImportFlowUITests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		300000000000000000000001 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 400000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000001;
+			remoteInfo = OctoAgent;
+		};
+		300000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 400000000000000000000001 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 500000000000000000000001;
+			remoteInfo = OctoAgent;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		200000000000000000000001 /* OctoAgentApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OctoAgentApp.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* DeviceTrustTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceTrustTests.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* OctoAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OctoAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000004 /* OctoAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OctoAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000005 /* DeviceKeyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceKeyStore.swift; sourceTree = "<group>"; };
+		200000000000000000000006 /* DeviceTrustModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceTrustModels.swift; sourceTree = "<group>"; };
+		200000000000000000000007 /* RequestProofSigner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestProofSigner.swift; sourceTree = "<group>"; };
+		200000000000000000000008 /* DeviceTrustClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceTrustClient.swift; sourceTree = "<group>"; };
+		200000000000000000000009 /* RegistrationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegistrationView.swift; sourceTree = "<group>"; };
+		200000000000000000000010 /* RegistrationFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegistrationFlowUITests.swift; sourceTree = "<group>"; };
+		200000000000000000000011 /* OctoAgentUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = OctoAgentUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000012 /* __Snapshots__ */ = {isa = PBXFileReference; lastKnownFileType = folder; path = __Snapshots__; sourceTree = "<group>"; };
+		200000000000000000000013 /* HealthImportModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportModels.swift; sourceTree = "<group>"; };
+		200000000000000000000014 /* HealthImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportTests.swift; sourceTree = "<group>"; };
+		200000000000000000000015 /* AppleHealthDataStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleHealthDataStore.swift; sourceTree = "<group>"; };
+		200000000000000000000016 /* OctoAgent.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OctoAgent.entitlements; sourceTree = "<group>"; };
+		200000000000000000000017 /* HealthKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = HealthKit.framework; path = System/Library/Frameworks/HealthKit.framework; sourceTree = SDKROOT; };
+		200000000000000000000018 /* HealthImportCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportCoordinator.swift; sourceTree = "<group>"; };
+		200000000000000000000019 /* HealthReviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthReviewView.swift; sourceTree = "<group>"; };
+		200000000000000000000020 /* HealthImportFlowUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthImportFlowUITests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		600000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000013 /* HealthKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		600000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		600000000000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		700000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				700000000000000000000002 /* OctoAgent */,
+				700000000000000000000003 /* OctoAgentTests */,
+				700000000000000000000007 /* OctoAgentUITests */,
+				700000000000000000000004 /* Products */,
+				200000000000000000000017 /* HealthKit.framework */,
+			);
+			sourceTree = "<group>";
+		};
+		700000000000000000000002 /* OctoAgent */ = {
+			isa = PBXGroup;
+			children = (
+				700000000000000000000005 /* App */,
+				700000000000000000000006 /* DeviceTrust */,
+				700000000000000000000008 /* Health */,
+				200000000000000000000016 /* OctoAgent.entitlements */,
+			);
+			path = OctoAgent;
+			sourceTree = "<group>";
+		};
+		700000000000000000000003 /* OctoAgentTests */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000002 /* DeviceTrustTests.swift */,
+				200000000000000000000014 /* HealthImportTests.swift */,
+			);
+			path = OctoAgentTests;
+			sourceTree = "<group>";
+		};
+		700000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000003 /* OctoAgent.app */,
+				200000000000000000000004 /* OctoAgentTests.xctest */,
+				200000000000000000000011 /* OctoAgentUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		700000000000000000000005 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000001 /* OctoAgentApp.swift */,
+				200000000000000000000009 /* RegistrationView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		700000000000000000000006 /* DeviceTrust */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000005 /* DeviceKeyStore.swift */,
+				200000000000000000000006 /* DeviceTrustModels.swift */,
+				200000000000000000000007 /* RequestProofSigner.swift */,
+				200000000000000000000008 /* DeviceTrustClient.swift */,
+			);
+			path = DeviceTrust;
+			sourceTree = "<group>";
+		};
+		700000000000000000000007 /* OctoAgentUITests */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000010 /* RegistrationFlowUITests.swift */,
+				200000000000000000000020 /* HealthImportFlowUITests.swift */,
+				200000000000000000000012 /* __Snapshots__ */,
+			);
+			path = OctoAgentUITests;
+			sourceTree = "<group>";
+		};
+		700000000000000000000008 /* Health */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000013 /* HealthImportModels.swift */,
+				200000000000000000000015 /* AppleHealthDataStore.swift */,
+				200000000000000000000018 /* HealthImportCoordinator.swift */,
+				200000000000000000000019 /* HealthReviewView.swift */,
+			);
+			path = Health;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		500000000000000000000001 /* OctoAgent */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000001 /* Build configuration list for PBXNativeTarget "OctoAgent" */;
+			buildPhases = (
+				600000000000000000000001 /* Frameworks */,
+				900000000000000000000001 /* Sources */,
+				900000000000000000000002 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = OctoAgent;
+			productName = OctoAgent;
+			productReference = 200000000000000000000003 /* OctoAgent.app */;
+			productType = "com.apple.product-type.application";
+		};
+		500000000000000000000002 /* OctoAgentTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000002 /* Build configuration list for PBXNativeTarget "OctoAgentTests" */;
+			buildPhases = (
+				600000000000000000000002 /* Frameworks */,
+				900000000000000000000003 /* Sources */,
+				900000000000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				300000000000000000000002 /* PBXTargetDependency */,
+			);
+			name = OctoAgentTests;
+			productName = OctoAgentTests;
+			productReference = 200000000000000000000004 /* OctoAgentTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		500000000000000000000003 /* OctoAgentUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 800000000000000000000004 /* Build configuration list for PBXNativeTarget "OctoAgentUITests" */;
+			buildPhases = (
+				600000000000000000000003 /* Frameworks */,
+				900000000000000000000005 /* Sources */,
+				900000000000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				300000000000000000000004 /* PBXTargetDependency */,
+			);
+			name = OctoAgentUITests;
+			productName = OctoAgentUITests;
+			productReference = 200000000000000000000011 /* OctoAgentUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		400000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					500000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+						SystemCapabilities = {
+							com.apple.HealthKit = {
+								enabled = 1;
+							};
+						};
+					};
+					500000000000000000000002 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 500000000000000000000001;
+					};
+					500000000000000000000003 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 500000000000000000000001;
+					};
+				};
+			};
+			buildConfigurationList = 800000000000000000000003 /* Build configuration list for PBXProject "OctoAgent" */;
+			compatibilityVersion = "Xcode 16.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 700000000000000000000001;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 700000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				500000000000000000000001 /* OctoAgent */,
+				500000000000000000000002 /* OctoAgentTests */,
+				500000000000000000000003 /* OctoAgentUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		900000000000000000000002 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000006 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000009 /* __Snapshots__ in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		900000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000001 /* OctoAgentApp.swift in Sources */,
+				100000000000000000000007 /* RegistrationView.swift in Sources */,
+				100000000000000000000003 /* DeviceKeyStore.swift in Sources */,
+				100000000000000000000004 /* DeviceTrustModels.swift in Sources */,
+				100000000000000000000005 /* RequestProofSigner.swift in Sources */,
+				100000000000000000000006 /* DeviceTrustClient.swift in Sources */,
+				100000000000000000000010 /* HealthImportModels.swift in Sources */,
+				100000000000000000000012 /* AppleHealthDataStore.swift in Sources */,
+				100000000000000000000014 /* HealthImportCoordinator.swift in Sources */,
+				100000000000000000000015 /* HealthReviewView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000002 /* DeviceTrustTests.swift in Sources */,
+				100000000000000000000011 /* HealthImportTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		900000000000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000008 /* RegistrationFlowUITests.swift in Sources */,
+				100000000000000000000016 /* HealthImportFlowUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		300000000000000000000002 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000001 /* OctoAgent */;
+			targetProxy = 300000000000000000000001 /* PBXContainerItemProxy */;
+		};
+		300000000000000000000004 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 500000000000000000000001 /* OctoAgent */;
+			targetProxy = 300000000000000000000003 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		A00000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				ONLY_ACTIVE_ARCH = NO;
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A00000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		A00000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = OctoAgent/OctoAgent.entitlements;
+				CODE_SIGNING_ALLOWED = NO;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = OctoAgent;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "仅在你确认时读取步数和睡眠摘要，用于生成本次分析预览。";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.octoagent.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A00000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = OctoAgent/OctoAgent.entitlements;
+				CODE_SIGNING_ALLOWED = NO;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = OctoAgent;
+				INFOPLIST_KEY_NSHealthShareUsageDescription = "仅在你确认时读取步数和睡眠摘要，用于生成本次分析预览。";
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.octoagent.app;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		A00000000000000000000005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.octoagent.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OctoAgent.app/OctoAgent";
+			};
+			name = Debug;
+		};
+		A00000000000000000000006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.octoagent.app.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/OctoAgent.app/OctoAgent";
+			};
+			name = Release;
+		};
+		A00000000000000000000007 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.octoagent.app.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = OctoAgent;
+			};
+			name = Debug;
+		};
+		A00000000000000000000008 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGNING_ALLOWED = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = io.octoagent.app.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_TARGET_NAME = OctoAgent;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		800000000000000000000001 /* Build configuration list for PBXNativeTarget "OctoAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000003 /* Debug */,
+				A00000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		800000000000000000000002 /* Build configuration list for PBXNativeTarget "OctoAgentTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000005 /* Debug */,
+				A00000000000000000000006 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		800000000000000000000003 /* Build configuration list for PBXProject "OctoAgent" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000001 /* Debug */,
+				A00000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		800000000000000000000004 /* Build configuration list for PBXNativeTarget "OctoAgentUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A00000000000000000000007 /* Debug */,
+				A00000000000000000000008 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 400000000000000000000001 /* Project object */;
+}

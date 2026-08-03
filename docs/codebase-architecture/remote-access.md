@@ -5,7 +5,9 @@
 > 产品实现提交为 `bf29d6be7d7a86c298cd45699488a8640065a566`，仓库级门禁配套提交及
 > 当前稳定点为 `5e6f4846703b7126cd104c8b9678e0c2f5300cc8`。
 > Cloudflare named tunnel 是唯一远程网络基础设施：F150 交付电脑 Web Access
-> 入口，F153+ 交付原生 iOS 设备入口。
+> 入口，F153+ 交付原生 iOS 设备入口。F158 当前个人部署已完成登录态 SPA/API/SSE、
+> 主动登出、重新登录、一次性恢复与 Settings 状态同步；F153 mobile live/真机 Verify
+> 也已完成。Web 生命周期当前只剩自然会话过期。
 
 ## 1. 当前代码架构
 
@@ -61,13 +63,26 @@
 
 电脑 Web 不保存 bearer token 或 Cloudflare service token。SSE 与 REST 使用同一 Access JWT/owner identity 校验，mutation 再执行 Host/Origin/CSRF 策略。任何带 proxy marker 的 Web 请求都必须验 JWT；直接 loopback 且无 proxy marker 的请求才保留本机入口语义。
 
-## 4. Session 与设备边界（规划）
+## 4. Session 与设备边界
 
 F150 不新增 Web 配对码、remote session 或 browser device 数据表。Cloudflare Access 已管理 application session；Octo 再签发 Cookie 只会复制到期、登出和撤销状态，并不能证明浏览器设备拥有独立密钥。这个约束只适用于电脑 Web，不表示全产品“无设备身份”。
 
 手机产品只提供原生 iOS App。设备注册由 F153 单独定义：设备密钥 + challenge + proof-of-possession + 短期 capability token + 单设备撤销。浏览器 Cookie 不能替代该模型，Cloudflare service token 也不得内置进 App。
 
-F153 必须先用真实 iPhone spike 在交互式 Access、独立 mobile API + Octo device proof、或套餐可用时的 mTLS 中选出方案。它复用同一 named tunnel 基础设施，但不必复用 Web hostname/application session；F150 在该决策前不开放 mobile route 或 Access Bypass。
+F153 已选择独立 mobile API + Octo device proof：
+
+- 复用同一 named tunnel 与同一 loopback Gateway；
+- 每次部署使用部署者自有的独立 mobile hostname，不硬编码个人域名；
+- 只有更具体的 `/api/mobile/v1/*` self-hosted Access application 使用
+  `Bypass / Everyone`，Web hostname/application session 与其它 mobile path 不放宽；
+- Bypass 只跳过浏览器 Access session，origin 仍要求 P-256 device proof、短期 opaque
+  capability token、timestamp、nonce、signature、durable replay consume 与 revoke；
+- Web Cookie、Access JWT 与 service-token header 必须被 mobile route 拒绝。
+
+当前 Gateway/device-trust、Simulator、Cloudflare DNS/ingress/path-specific
+application、个人实例 manifest、正负 live matrix 与真实 iPhone 签名安装、
+enrollment/signed ready/replay/revoke/恢复均已通过，F153 `GATE_VERIFY=true`。F154
+HealthKit 真机权限与数据旅程是独立 Gate，不得由该传输证据代替。
 
 ## 5. 生命周期与配置边界
 
@@ -109,7 +124,7 @@ F150 typed manifest 单独声明。只读 doctor 要求：
 
 ## 6. 验证策略
 
-F150 的四层证据已齐：
+F150 的历史四层证据已齐：
 
 - L4：JWT、owner allowlist、暴露矩阵、Host/Origin/CSRF 和 secret 脱敏；
 - L3：SPA、REST、SSE 的确定性认证全链；
@@ -119,7 +134,13 @@ F150 的四层证据已齐：
 真实 SSE 的5-run时序、断线重连和最终production Web live均已通过；脱敏attestation
 位于F150 Feature evidence目录。协议若再次变化，必须另立Feature并重开live门。
 
-iOS 的 `URLSession`、蜂窝/Wi-Fi 切换、后台恢复、设备撤销和真机 L1 全部归 F153+，不得用 Web 证据代替。
+F158 对当前个人部署已复验 Gateway/connector、loopback、Access 登录、真实
+OpenAI Codex doctor、Web 对话/SSE `SUCCEEDED`、主动登出、重新登录、一次性恢复与
+Settings 状态同步；当前 Web 生命周期只剩自然会话过期，不能用较短的主动登出旅程
+冒充该时间门。
+
+iOS 的 `URLSession`、网络切换/恢复、设备撤销和真机 L1 已由 F153 证据闭环，且没有
+使用 Web 证据代替；F154+ 的 HealthKit/EventKit/Companion 行为仍需各自独立验证。
 
 ## 7. 产品信息架构
 

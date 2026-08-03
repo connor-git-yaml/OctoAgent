@@ -11,8 +11,14 @@
 - 项目名称：**OctoAgent**
 - 内部代号：**ATM（Advanced Token Monster）**
 - 文档类型：Project Blueprint / Engineering Blueprint
-- 版本：v0.1（Roadmap 已增量同步至 M12；F151 已完成运行边界与架构真值收敛）
-- 状态：M0-M11 Delivered；M10 的独立物理启动验收仍待闭环；M12 Planned（privacy/identity gate first）
+- 版本：v0.1（Roadmap 已增量同步至 M12；F152/F153/F154 已 Verify；F155 方案 A 与
+  Design/Tasks Gate 已通过并已解锁，F156 已按当前
+  10 条 mobile route 重做 Research/Design/Tasks recon）
+- 状态：M0-M11 Delivered；M10 的独立物理启动验收仍待闭环；M12 In Progress
+  （F152/F153/F154 已验证；F154 真机 HealthKit、preview/批准/分析/删除、锁屏生命周期、
+  clean checkout 与双 CI 已闭合；F155 已接受 EventKit OS full access + Octo 物理只读，
+  当前从自身 authority 开始 Implement；F156 已完成
+  10-route recon，Design/Tasks 与 production 仍关闭）
 - M0 完成日期：2026-02-28（commit `52959a7`）
 - M5 完成日期：2026-05-25（F102 commit `9185862` + F103 同步）
 - M9 完成日期：2026-07-13
@@ -34,9 +40,9 @@
 | [architecture-overview.md](blueprint/architecture-overview.md) | §6 | 分层架构 + Mermaid 图 + 关键路径 |
 | [core-design.md](blueprint/core-design.md) | §8 | 9 个子系统核心设计（最大章节） |
 | [module-design.md](blueprint/module-design.md) | §9 | Monorepo 结构 + 12 个模块职责 |
-| [api-and-protocol.md](blueprint/api-and-protocol.md) | §10 | Gateway-Kernel / A2A / Tool Call 协议 |
+| [api-and-protocol.md](blueprint/api-and-protocol.md) | §10 | Gateway public API / Agent runtime / A2A / Tool Call 协议 |
 | [architecture-tradeoffs.md](blueprint/architecture-tradeoffs.md) | §11 | 14 个架构权衡点与收敛方案 |
-| [deployment-and-ops.md](blueprint/deployment-and-ops.md) | §12 | 部署拓扑 / Docker / 备份 / 故障策略 / DX |
+| [deployment-and-ops.md](blueprint/deployment-and-ops.md) | §12 | 单 Gateway host / OS service / named tunnel / 备份 / 故障策略 / DX |
 | [testing-strategy.md](blueprint/testing-strategy.md) | §13 | 10 个测试类别 + 覆盖矩阵 |
 | [milestones.md](blueprint/milestones.md) | §14 | M0-M12 里程碑、Feature 状态、实施波次与完成门禁 |
 | [architecture-audit.md](blueprint/architecture-audit.md) | §14.5-14.14 | 短板 / 架构问题 / Worker 审计 / 代码审计 / F084-F102 完成审计 / M11 前全仓与竞品复审 |
@@ -241,7 +247,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 
 ### 7.2 Web / API
 
-- FastAPI + Uvicorn（Gateway + Kernel API）
+- FastAPI + Uvicorn（单一 Gateway application host 的 public API）
 - SSE（任务流式事件）优先；WS 可选
 
 理由：
@@ -309,7 +315,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 | 8.6 Policy Engine | PermissionPreset × SideEffectLevel + Two-Phase Approval | ✅ |
 | 8.7 Memory | SoR/Fragments/Vault + Facade + fast_commit + 并行 recall | ✅ |
 | 8.8 Execution Plane | Gateway 内逻辑 Worker + Inline/Graph RuntimeBackend；Docker sandbox 未实现 | ✅ |
-| 8.9 Provider Plane | LiteLLM alias + fallback + Auth Adapter + PKCE | ✅ |
+| 8.9 Provider Plane | ProviderRouter direct transport + alias/fallback + credential adapter + PKCE | ✅ |
 
 ---
 
@@ -322,10 +328,11 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 |------|------|
 | packages/core | Domain Models + Event Store + SQLite |
 | apps/gateway | 渠道适配 + SSE 转发 + 出站发送 |
+| apps/ios | 原生 SwiftUI App + Secure Enclave/Keychain + 单一 DeviceTrustClient |
 | packages/protocol | A2A-Lite envelope + NormalizedMessage |
 | packages/tooling | Schema 反射 + ToolBroker + Permission |
 | packages/memory | SoR/Fragments/Vault + 仲裁 |
-| packages/provider | LiteLLM client + alias + cost |
+| packages/provider | ProviderRouter + RouteResolver + direct clients + OAuth/credentials + cost |
 | packages/observability | Logfire + structlog |
 | frontend/ | React + Vite Web UI |
 
@@ -335,8 +342,8 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 
 > 详见 [blueprint/api-and-protocol.md](blueprint/api-and-protocol.md)
 
-- **Gateway ↔ Kernel**：HTTP（ingest_message / tasks / stream / approvals）
-- **Kernel ↔ Worker**：A2A-Lite Envelope（TASK/UPDATE/CANCEL/RESULT/ERROR/HEARTBEAT）
+- **外部客户端 ↔ Gateway**：HTTP/SSE（message / tasks / stream / approvals / control plane）
+- **Gateway 内 Agent runtime ↔ Worker runtime**：message-native A2A contract + `DispatchEnvelope`；这是单一 application host 内的逻辑边界，不是第二个 Kernel/Worker 服务
 - **A2A 状态映射**：内部超集 ↔ 标准 A2A TaskState 双向映射
 - **Tool Call 协议**：tool_calls JSON → ToolBroker 执行 → ToolResult 回��
 
@@ -354,7 +361,10 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 
 > 详见 [blueprint/deployment-and-ops.md](blueprint/deployment-and-ops.md)
 
-覆盖：部署拓扑（开发/生产）、Docker Compose、健康检查、备份与恢复、故障策略、优雅关闭、升级迁移、日志管理、SSL/TLS、DX 工具（octo config / doctor / onboard / start）。
+覆盖：单 Gateway host、launchd/systemd user service、loopback 回源、Cloudflare named
+tunnel、健康检查、备份与恢复、故障策略、优雅关闭、升级迁移、日志管理、
+TLS 边界与 DX 工具（octo config / doctor / onboard / start）。Docker 只保留为历史
+设计与未来独立隔离能力的参考，不是当前生产部署或执行 backend。
 
 ---
 
@@ -386,7 +396,7 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 | **M9 质量保证体系** | ✅ | L1-L4、LLM 网络硬闸、scripted harness、wire replay、三模式 lane、attestation |
 | **M10 部署完成度收尾** | ✅ 功能 | F145/F134/F146/F147 全完成；ATT-129-BOOT 作为独立物理验收保留 |
 | **M11 运行边界收口 + Cloudflare 远程访问 + Web v2** | ✅ | F148/F151/F150/F149 全部完成；电脑保留 Web，手机产品只走 M12 原生 iOS，不以手机浏览器交付 |
-| **M12 原生 iOS + 健康/日程感知** | 📋 | F152-F156 编号预留；privacy/identity/ingestion → 真机 transport/device proof → HealthKit → EventKit OS full-access 决策门 → native UX |
+| **M12 原生 iOS + 健康/日程感知** | 🚧 | F152/F153/F154 已 Verify；F153 的签名安装、owner-assisted enrollment、signed ready、replay 拒绝、revoke 与生命周期恢复已在真实 iPhone/真实 `ios.maojiwang.work` 完成。F154 真机 HealthKit、preview/批准/分析/删除、锁屏生命周期、clean checkout 与双 CI 已闭合；F155 Design/Tasks 已通过并从自身 authority 开始 Implement；F156 recon 已覆盖 10 条 mobile route、5 个已签发 capability、7 个声明未签发 capability 与 8 个产品缺口，Gate/production 仍关闭 |
 
 ### 待办汇总
 
@@ -394,12 +404,44 @@ Channels (Telegram/Web) → Gateway 单一运行时 → ProviderRouter → Model
 > 历史短板 1-5 ✅ | 旧架构 A1-A7 曾关闭，但 2026-07-20 复审确认 A2 反向依赖再次存在并纳入 F151 | Worker W1-W5 历史状态见审计
 > **M5 增补审计** §14.9-14.13：F084-F088 ✅ / F090-F092 ✅ / F093-F096 ✅ / F097-F100 ✅ / F101-F102 ✅
 
-**当前 P0（2026-07-26）**：M11 已完成。下一波从 M12 F152 privacy/identity/ingestion
-contract 开始；在该 Gate 与 F153 真机 transport/device-proof 通过前，不启动原生 iOS
-生产实现。手机端不交付 Safari/WebView；Web 与 iOS 均以 Claude Design 初稿为视觉/
-交互基线，实现适配设计而不是反向迁就旧 Web 外观。ATT-129-BOOT 继续作为独立物理
-验收项保留。准确顺序、Web/iOS trust 边界和 Apple 权限门禁见
+**当前 P0（2026-08-02）**：M11 已完成。M12 F152 已实现 raw→review→approved
+packet→result→optional Memory candidate 的分层模型、短期 capability/request proof、
+逐次 consent、非敏感 audit、删除级联与跨端 exact schema 已完成 Verify。F153 已实现
+owner/mobile routes、P-256 proof、durable replay/revoke、Secure Enclave/Keychain、
+单 URLSession client 与原生 registration states；Simulator、generic iPhoneOS Release、
+架构与 bundle secret scan，以及真实 iPhone 上的签名安装、owner-assisted enrollment、
+signed ready、replay 拒绝、revoke、重连与网络生命周期均完成，GATE_VERIFY=true。
+F154 已完成 HealthKit stepCount/sleepAnalysis 的 Gateway、SwiftUI、entitlement、预览、
+逐次批准、分析、删除与 Memory 二次确认实现；真 iPhone 权限、真实 24h/3d/7d 数据、
+唯一一次批准分析/删除、preview-only 锁屏恢复、clean checkout、Release 与双 CI 全部
+通过，`GATE_VERIFY=true`。F155 已建立 EventKit 官方
+事实和只读安全边界，用户已于 2026-08-01 接受方案 A：系统 full access、Octo
+代码物理只读且写路径为零；Design/Tasks Gate 已通过，现已解锁自身 authority 与
+Implement，Verify 尚未开始。
+F156 已建立四区原生产品结构、
+Design/Tasks 草案、40 行启动/功能/视觉场景矩阵与 current mobile API recon；recon
+确认当前 mobile edge 有 F153 的 7 条 device-trust route 与 F154 的 3 条 health route，
+当前签发 5 个 capability、另有 7 个 F156 capability 仅声明未签发，Chat/Task/
+Approval/Memory/APNs 等仍有 8 项产品合同缺口。F155/F156 production 当前仍为 0；后续
+严格等待各自 exact authority、Gate 与上游 Verify。手机端不交付
+Safari/WebView；Web 与 iOS 均以 Claude Design 初稿为视觉/交互基线，实现适配设计
+而不是反向迁就旧 Web 外观。ATT-129-BOOT 继续作为独立物理验收项保留。准确顺序、
+Web/iOS trust 边界和 Apple 权限门禁见
 [blueprint/milestones.md](blueprint/milestones.md) §M10-M12。
+
+**当前证据边界（F158，2026-08-02）**：F151 当前仓库架构门 `all` 仍通过，
+证明现有运行/打包边界没有回退；但其 historical v2 index 引用的
+`evidence/local` raw archive 被 `.gitignore` 排除且当前仓库、其他 worktree 与
+本机 `/tmp` 均不可恢复，因此历史 R/G/R archive 不能宣称 clean-checkout
+self-contained；F151 canonical index/report 已提交且当前 clean-checkout repository
+architecture job 通过，因此当前 authority 为 PASS，历史 raw 缺失单列为留档限制。
+F150 产品代码与 Web Access 架构
+保持 stable；真实 OpenAI Codex doctor、Web 对话/SSE `SUCCEEDED`、主动登出、重新登录、
+一次性恢复与 Settings 状态同步均已完成，剩余生命周期证据仅为自然过期。个人实例
+`ios.maojiwang.work` 与 exact mobile path Bypass 已配置；F153 真实 iPhone 的签名安装、
+设备注册、signed ready、replay/revoke 与恢复均已完成。F154 真机 HealthKit 与最终
+Verify 已完成；F155/F156 production/Verify、最终主线验证和一次提前通知后的 Mac 重启
+仍待完成。
 
 ### 三条设计哲学（M5 引入）
 
@@ -415,14 +457,17 @@ contract 开始；在该 Gate 与 F153 真机 transport/device-proof 通过前�
 
 > 每条风险附带检测指标与触发阈值，确保可操作化。
 
-1) **Provider/订阅认证不稳定** — LiteLLM alias + fallback；连续 3 次失败自动切换
+1) **Provider/订阅认证不稳定** — ProviderRouter route/fallback + auth-fatal
+   fail-closed；`octo doctor --live` 验证当前凭证，禁止退 Echo 冒充成功
 2) **Tool/插件供应链风险** — manifest + health gate；未注册工具调用直接 deny
 3) **记忆污染** — WriteProposal + 仲裁；confidence < 0.5 → 不写入
 4) **长任务失控与成本爆炸** — 预算三级阈值（80%/100%/150%）+ watchdog
 5) **SQLite 扩展瓶颈** — WAL > 100MB 或跨机 Worker 时升级 Postgres
 6) **LLM 幻觉** — OutputModel 强校验 + guardrails；校验失败率 > 30% 升级模型
 7) **上下文窗口溢出** — 工具输出压缩 + Context GC；> 80% 窗口触发
-8) **安全攻击面** — Docker 隔离 + secrets 不进 LLM 上下文 + 输入消毒
+8) **安全攻击面** — ToolBroker/Policy/Approval、device proof、secret redaction、
+   untrusted-evidence rendering 与 Host/Origin/CSRF 边界共同 fail-closed；当前没有
+   可依赖的 Docker sandbox，不得把未实现隔离写成安全保证
 
 ---
 
@@ -438,7 +483,8 @@ contract 开始；在该 Gate 与 F153 真机 transport/device-proof 通过前�
 
 ### 16.2 准备类（工程环境就绪，开工前完成）
 
-- [x] 开发环境确认：Python 3.12 + uv + Docker Desktop + Node.js（Web UI）— M0 已验证
+- [x] 开发环境确认：Python 3.12 + uv + Node.js（Web UI）— M0 已验证；Docker
+  Desktop 仅为历史开发环境事实，不是当前运行前提
 - [x] ProviderRouter 就绪：Provider alias + main/fallback 路由已由 F081 交付
 - [x] SQLite schema 初始化脚本准备 — M0 已交付（lifespan 自动建表）
 - [x] CI/测试基础设施：pytest + pytest-asyncio + ruff — M0 已交付（105 tests）

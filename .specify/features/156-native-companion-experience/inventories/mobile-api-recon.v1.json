@@ -1,0 +1,316 @@
+{
+  "version": 1,
+  "feature_id": "F156",
+  "captured_at_utc": "2026-08-01T20:22:28Z",
+  "source_commit": "0ec5997dc79b072d255d4ea1a3f401d8ad22c4ea",
+  "evidence_mode": "read_only_fastapi_openapi_and_source_sha256",
+  "openapi_sha256": "6fd9925ce7ddaf969c9422d8ad42ef4917a97f89985d0c04c3d09dab3b9866b5",
+  "source_files": [
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/main.py",
+      "sha256": "9928067eb538e44bad6dd0f75cfd837834b256a9573a4045c55c3bb1e971ffda"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/mobile_device_access.py",
+      "sha256": "6bad0379f4483bf71884e053b3a940ce66f143555699dcf07cd8ddbbc9a55460"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/device_trust.py",
+      "sha256": "62b5c1a03d356f17f83e2dae36ddd6669ff467f18cc45007fde6384acfe7a9cc"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/health_ingestion.py",
+      "sha256": "9ff6fb49bb29c67894aaa6251c23ad5d4b592a749e03167c86ae166776039864"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/device_trust.py",
+      "sha256": "beed5073df6a37a3529b457fc4c4cf3e10499b772f502908566fdd52b391d827"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/mobile_health.py",
+      "sha256": "dd0ca4949aab73331e98db01730f1191137fd3f46dc06fa9310233f1e87bffbc"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/chat.py",
+      "sha256": "1020505c1d891cbff98feb994c6b6305a3886a438f38d1454aba7c1ce8009f71"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/tasks.py",
+      "sha256": "c24936e7bc70708817191bf809c3a6d39b2c41e223b368bd1daff8e7772b3a32"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/cancel.py",
+      "sha256": "5fb6d818afdba8d3193acbe0265f0e5d4ba73c4e6404591648cb95f1f90aa6e3"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/stream.py",
+      "sha256": "99838417c4d701cf28918e410d43a8c4b9f0ac31869b765f9cdbd9e2df8f0faa"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/approvals.py",
+      "sha256": "bc050ab407bd059ea202e4ec1d9622ffbb8b32e18b9bb8ebef32e51950971153"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/operator_inbox.py",
+      "sha256": "0ad409ec78b0ad0d392a32d35f9bf70cc0b9c1ad287f2d837b955dc6c05947d0"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/memory_candidates.py",
+      "sha256": "7587f97e7aaf03f65d0ee1a619ebc57b82d48caa0b27065c93d703297a7072f2"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/control_plane.py",
+      "sha256": "113e5974f3fca32adf0a8711d0f2fbb3382d1907d843f159643c18a6364dc563"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/notifications.py",
+      "sha256": "ba511ae4de66dbde5cdf052730b5ccfcac7db8025f2abfe13df79fa326bac996"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/models/privacy_ingestion.py",
+      "sha256": "930880760c6ee4b05b3dd85380d848c795961018259aa5656558f5fe06f7f4e6"
+    }
+  ],
+  "mobile_edge": {
+    "path_prefix": "/api/mobile/v1/",
+    "authentication": "F153_OctoDevice_token_and_request_proof",
+    "web_cookie_allowed": false,
+    "cloudflare_service_token_allowed": false,
+    "query_string_allowed_on_protected_routes": false,
+    "allowed_routes": [
+      {
+        "method": "POST",
+        "path": "/api/mobile/v1/enrollments",
+        "proof_required": false,
+        "purpose": "submit_device_enrollment"
+      },
+      {
+        "method": "POST",
+        "path": "/api/mobile/v1/token-challenges/{device_id}",
+        "proof_required": false,
+        "purpose": "create_token_challenge"
+      },
+      {
+        "method": "POST",
+        "path": "/api/mobile/v1/key-rotation-challenges/{device_id}",
+        "proof_required": false,
+        "purpose": "create_key_rotation_challenge"
+      },
+      {
+        "method": "POST",
+        "path": "/api/mobile/v1/key-rotations",
+        "proof_required": false,
+        "purpose": "rotate_secure_enclave_device_key_with_dual_body_proof"
+      },
+      {
+        "method": "POST",
+        "path": "/api/mobile/v1/tokens",
+        "proof_required": false,
+        "purpose": "issue_short_lived_device_token"
+      },
+      {
+        "method": "GET",
+        "path": "/api/mobile/v1/ready",
+        "proof_required": true,
+        "purpose": "device_ready_read"
+      },
+      {
+        "method": "GET",
+        "path": "/api/mobile/v1/device-profile",
+        "proof_required": true,
+        "purpose": "device_profile_read"
+      },
+      {
+        "method": "POST",
+        "path": "/api/mobile/v1/health/reviews",
+        "proof_required": true,
+        "purpose": "F154_health_review_submit"
+      },
+      {
+        "method": "POST",
+        "path": "/api/mobile/v1/health/analyses",
+        "proof_required": true,
+        "purpose": "F154_health_analysis_run"
+      },
+      {
+        "method": "DELETE",
+        "path": "/api/mobile/v1/health/sources/{source_hash}",
+        "proof_required": true,
+        "purpose": "F154_health_source_delete"
+      }
+    ]
+  },
+  "issued_device_capabilities": [
+    "device.profile.read",
+    "device.ready.read",
+    "health.analysis.run",
+    "health.review.submit",
+    "health.source.delete"
+  ],
+  "declared_but_unissued_companion_capabilities": [
+    "conversation.read",
+    "conversation.send",
+    "task.read",
+    "approval.read",
+    "approval.decide",
+    "memory_candidate.read",
+    "memory_candidate.decide"
+  ],
+  "web_only_product_routes": [
+    {
+      "surface": "chat",
+      "method": "GET",
+      "path": "/api/control/snapshot",
+      "response_schema": "F149SnapshotEnvelope"
+    },
+    {
+      "surface": "chat",
+      "method": "POST",
+      "path": "/api/chat/send",
+      "request_schema": "ChatSendRequest",
+      "response_schema": "ChatSendResponse"
+    },
+    {
+      "surface": "chat",
+      "method": "GET",
+      "path": "/api/stream/task/{task_id}",
+      "response_media_type": "text/event-stream"
+    },
+    {
+      "surface": "tasks",
+      "method": "GET",
+      "path": "/api/tasks",
+      "response_schema": "TaskListResponse"
+    },
+    {
+      "surface": "tasks",
+      "method": "GET",
+      "path": "/api/tasks/{task_id}",
+      "response_schema": "F149TaskDetailResponse"
+    },
+    {
+      "surface": "tasks",
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/resume",
+      "response_schema": "ResumeTaskResponse"
+    },
+    {
+      "surface": "tasks",
+      "method": "POST",
+      "path": "/api/tasks/{task_id}/cancel"
+    },
+    {
+      "surface": "approvals",
+      "method": "GET",
+      "path": "/api/approvals",
+      "response_schema": "ApprovalsListResponse"
+    },
+    {
+      "surface": "approvals",
+      "method": "POST",
+      "path": "/api/approve/{approval_id}",
+      "request_schema": "ApprovalResolveRequest",
+      "request_enum": [
+        "allow-once",
+        "allow-always",
+        "deny"
+      ],
+      "response_schema": "ApprovalResolveResponse"
+    },
+    {
+      "surface": "inbox",
+      "method": "GET",
+      "path": "/api/operator/inbox",
+      "response_schema": "OperatorInboxResponse"
+    },
+    {
+      "surface": "inbox",
+      "method": "POST",
+      "path": "/api/operator/actions",
+      "request_schema": "OperatorActionRequest",
+      "allowed_sources": [
+        "web",
+        "telegram",
+        "system"
+      ]
+    },
+    {
+      "surface": "memory",
+      "method": "GET",
+      "path": "/api/memory/candidates",
+      "response_schema": "CandidatesListResponse"
+    },
+    {
+      "surface": "memory",
+      "method": "POST",
+      "path": "/api/memory/candidates/{candidate_id}/promote",
+      "request_schema": "PromoteRequest",
+      "response_schema": "PromoteCandidateResponse"
+    },
+    {
+      "surface": "memory",
+      "method": "POST",
+      "path": "/api/memory/candidates/{candidate_id}/discard",
+      "response_schema": "DiscardCandidateResponse"
+    },
+    {
+      "surface": "notifications",
+      "method": "GET",
+      "path": "/api/notifications",
+      "purpose": "web_notification_center_not_apns"
+    }
+  ],
+  "current_contract_gaps": [
+    {
+      "id": "G01",
+      "surface": "chat",
+      "gap": "no_mobile_conversation_list_detail_send_or_sse_route"
+    },
+    {
+      "id": "G02",
+      "surface": "tasks",
+      "gap": "no_mobile_task_list_detail_artifact_or_action_route"
+    },
+    {
+      "id": "G03",
+      "surface": "tasks",
+      "gap": "task_read_exists_but_no_task_control_capability"
+    },
+    {
+      "id": "G04",
+      "surface": "approvals",
+      "gap": "no_mobile_approval_read_or_decide_route"
+    },
+    {
+      "id": "G05",
+      "surface": "memory",
+      "gap": "no_mobile_memory_candidate_read_or_decide_route"
+    },
+    {
+      "id": "G06",
+      "surface": "inbox",
+      "gap": "operator_action_source_has_no_mobile_value_and_must_not_be_reused_as_a_bypass"
+    },
+    {
+      "id": "G07",
+      "surface": "apns",
+      "gap": "no_apns_device_token_registration_provider_payload_or_deep_link_contract"
+    },
+    {
+      "id": "G08",
+      "surface": "all",
+      "gap": "web_front_door_routes_are_rejected_on_mobile_hostname_by_exact_allowlist"
+    }
+  ],
+  "implementation_constraints": [
+    "extend_the_existing_mobile_router_and_F153_proof_path_only",
+    "reuse_existing_application_services_and_generated_contracts",
+    "do_not_call_web_front_door_routes_from_iOS",
+    "do_not_add_web_cookie_or_cloudflare_service_token_to_iOS",
+    "do_not_add_task_controls_until_an_exact_capability_and_route_exist",
+    "do_not_treat_web_notifications_as_APNs"
+  ],
+  "status": "CURRENT_API_RECON_COMPLETE_F153_F154_OWNER_ROUTES_PRESENT_F156_PRODUCT_ROUTES_ABSENT",
+  "recon_hash_algorithm": "sha256(canonical_json(document_without_recon_sha256))",
+  "recon_sha256": "62af2c5dca0ab90b5a513c88405d7547ee5ab862711e2a0c00ea7433b4d2e753"
+}

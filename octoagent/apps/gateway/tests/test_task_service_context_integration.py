@@ -278,46 +278,52 @@ async def test_agent_context_backfills_bootstrap_templates_and_routes(
         str(tmp_path / "f055-bootstrap.db"),
         str(tmp_path / "artifacts"),
     )
-    await _seed_project_context(store_group)
-    await store_group.agent_context_store.save_agent_profile(
-        AgentProfile(
-            profile_id="singleton:research",
-            kind="worker",
-            scope=AgentProfileScope.PROJECT,
-            project_id="project-alpha",
-            name="Research Root Agent",
-            summary="负责研究与外部资料核实。",
-            tool_profile="standard",
-            status=AgentProfileStatus.ACTIVE,
-            origin_kind=AgentProfileOriginKind.BUILTIN,
-            active_revision=1,
+    try:
+        await _seed_project_context(store_group)
+        await store_group.agent_context_store.save_agent_profile(
+            AgentProfile(
+                profile_id="singleton:research",
+                kind="worker",
+                scope=AgentProfileScope.PROJECT,
+                project_id="project-alpha",
+                name="Research Root Agent",
+                summary="负责研究与外部资料核实。",
+                tool_profile="standard",
+                status=AgentProfileStatus.ACTIVE,
+                origin_kind=AgentProfileOriginKind.BUILTIN,
+                active_revision=1,
+            )
         )
-    )
 
-    service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
-    project = await store_group.project_store.get_project("project-alpha")
-    assert project is not None
+        service = AgentContextService(store_group, project_root=tmp_path, storage_only=True)
+        project = await store_group.project_store.get_project("project-alpha")
+        assert project is not None
 
-    owner_profile = await service._ensure_owner_profile()
-    agent_profile = await service._ensure_agent_profile(project)
-    owner_overlay = await service._ensure_owner_overlay(
-        owner_profile=owner_profile,
-        project=project,
-    )
-    # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（与原 _ensure 等价：读
-    # worker_profile → build_worker_agent_profile）。W4-4 删 worker store 方法后这些测试改构造 DTO。
-    _worker_research = await store_group.agent_context_store.get_agent_profile("singleton:research")
-    assert _worker_research is not None
-    mirrored = build_worker_agent_profile(_worker_research)
+        owner_profile = await service._ensure_owner_profile()
+        agent_profile = await service._ensure_agent_profile(project)
+        owner_overlay = await service._ensure_owner_overlay(
+            owner_profile=owner_profile,
+            project=project,
+        )
+        # F117 Wave 4：materialize-on-read 已删——直喂 canonical builder（与原 _ensure 等价：读
+        # worker_profile → build_worker_agent_profile）。W4-4 删 worker store 方法后，
+        # 这些测试改为直接构造 DTO。
+        _worker_research = await store_group.agent_context_store.get_agent_profile(
+            "singleton:research"
+        )
+        assert _worker_research is not None
+        mirrored = build_worker_agent_profile(_worker_research)
 
-    assert owner_overlay is not None
-    assert mirrored is not None
-    assert "behavior:system:AGENTS.md" in agent_profile.bootstrap_template_ids
-    assert "behavior:agent:IDENTITY.md" in agent_profile.bootstrap_template_ids
-    assert "behavior:project:PROJECT.md" in agent_profile.bootstrap_template_ids
-    assert "behavior:project:PROJECT.md" in owner_overlay.bootstrap_template_ids
-    assert "behavior:project_agent:TOOLS.md" in mirrored.bootstrap_template_ids
-    # F084 Phase 4 T067：_ensure_bootstrap_session 已退役，仅验证模板 IDs 正确填充。
+        assert owner_overlay is not None
+        assert mirrored is not None
+        assert "behavior:system:AGENTS.md" in agent_profile.bootstrap_template_ids
+        assert "behavior:agent:IDENTITY.md" in agent_profile.bootstrap_template_ids
+        assert "behavior:project:PROJECT.md" in agent_profile.bootstrap_template_ids
+        assert "behavior:project:PROJECT.md" in owner_overlay.bootstrap_template_ids
+        assert "behavior:project_agent:TOOLS.md" in mirrored.bootstrap_template_ids
+        # F084 Phase 4 T067：_ensure_bootstrap_session 已退役，仅验证模板 IDs 正确填充。
+    finally:
+        await store_group.close()
 
 
 async def test_task_service_injects_profile_bootstrap_recent_and_memory(
@@ -3143,7 +3149,8 @@ async def test_session_create_with_project_does_not_double_write_agent_rows(
         task_id, created = await service.create_task(message)
         assert created is True
         latest_metadata = await service.get_latest_user_metadata(task_id)
-        # 模拟 chat.py 把 Path A 的 ids 透传到 dispatch_metadata（消除 composite-key fallback 触发条件）
+        # 模拟 chat.py 把 Path A 的 ids 透传到 dispatch_metadata，
+        # 消除 composite-key fallback 触发条件。
         dispatch_metadata = {
             **latest_metadata,
             "agent_runtime_id": path_a_runtime_id,

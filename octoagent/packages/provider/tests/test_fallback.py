@@ -195,6 +195,38 @@ class TestFallbackManagerAuthError:
         assert result.is_fallback is True
         mock_fallback.complete.assert_called_once()
 
+    @pytest.mark.parametrize(
+        "error_type",
+        [
+            pytest.param("expired", id="credential-expired"),
+            pytest.param("missing", id="credential-missing"),
+        ],
+    )
+    async def test_preflight_credential_error_skips_echo_fallback(
+        self,
+        mock_primary,
+        mock_fallback,
+        error_type: str,
+    ) -> None:
+        from octoagent.provider.exceptions import (
+            CredentialExpiredError,
+            CredentialNotFoundError,
+        )
+
+        error = (
+            CredentialExpiredError("refresh_token_reused")
+            if error_type == "expired"
+            else CredentialNotFoundError("oauth profile missing")
+        )
+        mock_primary.complete.side_effect = error
+        manager = FallbackManager(primary=mock_primary, fallback=mock_fallback)
+
+        with pytest.raises(type(error)) as exc_info:
+            await manager.call_with_fallback([{"role": "user", "content": "test"}])
+
+        assert exc_info.value is error
+        mock_fallback.complete.assert_not_called()
+
 
 async def test_provider_fallback_uses_provider_error_without_proxy_compatibility_subclass(
     mock_primary, mock_fallback

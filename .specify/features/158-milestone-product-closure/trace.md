@@ -1,0 +1,457 @@
+# F158 Trace
+
+- 2026-07-28：用户建立跨 Milestone Goal，要求重新核对交付、启动 Web/iOS、逐场景
+  验收、跑通功能与视觉 E2E，并将 Claude Design 后期不佳方案改回早期方向。
+- 2026-07-28：个人部署真实 LLM smoke 暴露 OpenAI OAuth
+  `refresh_token_reused`；同一次探针中 Echo fallback 被激活且任务在 180 秒内仍为
+  `RUNNING`。随后只读复核确认 `octo doctor --live` 实际只追加 Telegram readiness，
+  没有模型调用。两项均作为 FR-009/T039-T045 真缺口进入 F158，`/ready` 与 doctor
+  exit 0 不再计作模型可用证据。
+- 2026-07-28：FR-009 先取得 6 个确定性 RED：两个 preflight credential 异常错误
+  激活 Echo、两个 doctor live seam 不存在、Task 的 `error_category` 为空、Worker
+  仍返回 `retryable=true`。GREEN 复用生产 `ProviderRouter`/config/credential store
+  做无 fallback 的受控模型探针，并以唯一 `is_provider_auth_error` 统一
+  `CredentialError`、`AuthenticationError` 与 HTTP 401/403。相同 6 节点随后
+  `6 passed`，相关四文件回归 `66 passed`；普通瞬态错误的既有 fallback/retry
+  回归保持。个人部署 T045 仍等待用户重新授权，不把 deterministic seam 当成真实
+  provider 成功。
+- 2026-07-28：确认当前活动 Goal 已建立。
+- 2026-07-28：从干净 `origin/master=db3214ff` 开始审计，未在含未跟踪截图的旧 detached
+  worktree 上修改。
+- 2026-07-28：建立分支 `codex/f158-milestone-product-closure` 和独立 worktree。
+- 2026-07-28：发现 Spec Driver wrapper 可读，但仓库声明的
+  `plugins/spec-driver/scripts/*` 不存在；按相同 Gate 手工执行并记录风险。
+- 2026-07-28：初始审计确认 F150 Settings consumer/style、Web visual E2E、iOS 工程与
+  F150 verification report 缺失；M11 视觉完成声明与真实截图矛盾。
+- 2026-07-28：创建 F158 Spec、Plan、Tasks 和交付审计；生产 Implement 继续关闭。
+- 2026-07-28：直接渲染不可变设计导出 `#1a`，确认它就是用户指定的早期紧凑三栏
+  工作台；保存浏览器证据 SHA
+  `7262ef63a1fea81caf97371071527ba22f843f5f01efeb8b1821179aefb01cbf`。
+- 2026-07-28：在 F158 工作树完成 `npm ci` 与 production build，并以真实 hermetic
+  Gateway 启动当前 Web；保存主工作台截图 SHA
+  `f9f77e9d8ff75cbcc38688b49c0561baa65c4b7266192f5d4e21c0b5b72a149a`。
+  直接对照确认当前 Web 仅保留深色/绿色/三栏表面特征，没有保持早期稿的信息密度、
+  对话层级、蓝黑标题层、任务/工件卡与右侧运行信息架构。
+- 2026-07-28：冻结 `contracts/visual-product-contract.md` 与
+  `inventories/e2e-visual-matrix.md`；明确 Web 视觉像素门、iOS 原生/真机边界和
+  后期设计 lineage 处置。F158 Research/Design/Tasks Gate 通过，Implement 放行。
+- 2026-07-28：为 F150 Settings composition 新增真实 RED 合同，复用既有
+  `RemoteAccessSettings`、adapter 与 view-model 接入生产页面；真实浏览器确认
+  “从电脑安全访问 Octo”、状态、恢复动作和 Advanced 诊断可达。
+- 2026-07-28：修正 F149 A-wave 固定事件前缀与 Chat/F150 E2E 的 durable
+  observable assertions；全 Playwright 最终 `19 passed / 1 conditional skip /
+  0 failed / retries=0`，全前端单元 `70 files / 598 tests passed`。
+- 2026-07-28：新增主工作台视觉 E2E。第一次因 pixel snapshots 不存在真实失败；
+  人工检查生成图后，同一 1440×900 selector 通过四个 `toHaveScreenshot` 基线及
+  三栏 geometry/computed-style 合同。
+- 2026-07-28：实际恢复紧凑左栏、蓝黑中央主舞台、深色用户消息、透明 agent
+  回复、胶囊 composer 和连续右侧运行 rail；保存 1440×900 最终截图 SHA
+  `9363b49495fa52bfd57fe52b4f2d8707c2c1e3b45a889ac25c44232df3acd9e8`。
+- 2026-07-28：补建 F150
+  `verification/verification-report.md`，如实区分“本地产品闭环通过”与“提交、CI、
+  个人部署复验尚未完成”。
+- 2026-07-28：创建 F152 Privacy/Identity/Ingestion Feature，冻结原生 iOS 唯一手机
+  入口、device capability、逐次 consent、数据分层、TTL、删除链、非敏感 audit、
+  HealthKit/EventKit 权限诚实边界与 SwiftUI 视觉原则；Research/Design/Tasks Gate
+  通过，但 production Implement 在 T001 architecture authority 前保持关闭。
+- 2026-07-28：F152 T001 在现有单一 runtime architecture checker 中建立
+  `validate_feature_authority`，以 canonical scope hash 冻结 10 个 production path、
+  7 个 test path、10 个 artifact path与禁止前缀；同一 test 先因
+  `F152_ARCHITECTURE_AUTHORITY_MISSING` 真实 RED，再 GREEN/REFACTOR 通过，完整
+  `octoagent/tests/gate/` 回归通过。F152 Implement 放行，F153 仍关闭。
+- 2026-07-28：F152 T002 新增六个独立 ingestion stage、最小 provenance、
+  raw/normalized/review/approved TTL 上界与无歧义 canonical JSON/SHA-256。4 个 L4
+  节点先以 `F152_PRIVACY_INGESTION_MODELS_MISSING` 真实 RED，GREEN 后又以
+  retention-stage 错配单缺陷再次见红并修复；最终 focused `4 passed`，core 与 F152
+  gate 回归 `581 passed / 1 既有 warning`。
+- 2026-07-28：F152 T003/T004 继续同一模型 owner：9 项 initial device capability、
+  唯一 Gateway audience、设备 thumbprint、15 分钟 token 与 method/path/body
+  hash/timestamp/nonce request proof 均先取得稳定缺失能力 RED；unknown/wildcard/
+  future health/calendar capability、跨 audience、非 canonical path/timestamp 和把
+  signature 混入 payload 均 fail closed，focused 最终 `31 passed`，未实现 F153 crypto。
+- 2026-07-28：F152 T005/T006 完成 consent 与单向 ingestion 状态机：consent 精确绑定
+  bundle/packet/purpose/owner/device/15 分钟窗口且一次消费；review bundle 只能转为
+  同 provenance 的 approved packet，analysis result 不会自动写 Memory，只有用户显式
+  选择且 `pending` 的 candidate 才能进入既有 review。两组分别先以
+  `F152_CONSENT_GRANT_CONTRACT_MISSING` 和 `F152_INGESTION_STATE_MACHINE_MISSING`
+  见红，最终 focused `16 passed`，core + authority gate 回归
+  `624 passed / 1 既有 warning`。
+- 2026-07-28：F152 T007 在唯一 `sqlite_init`/`StoreGroup` 下新增 append-only
+  privacy audit：schema 只含 event/type/version、owner/device/object hash、count、
+  data type/capability、decision/result/reason/UTC，无 payload/body/token/signature/
+  nonce/email/system identifier 列。3 个节点先以
+  `F152_PRIVACY_AUDIT_CONTRACT_MISSING` 见红，随后验证重启 durable、重复 event
+  fail-closed 与敏感字段拒绝；core + authority gate 回归
+  `627 passed / 1 既有 warning`。
+- 2026-07-28：F152 T008 在同一 store 以 review/approved/result/memory-candidate
+  四张阶段表取代通用 blob；raw/normalized 仍无服务端表。删除使用
+  `BEGIN IMMEDIATE`、secure-delete 与 WAL truncate，先收集 lineage 和 retained
+  audit hash，再原子删除正文并写 receipt；完成后同 request 幂等返回。SQLite trigger
+  注入中途失败时所有正文保持、receipt 标记 failed，移除故障后同 request 可恢复完成，
+  candidate marker 在 DB/WAL 均不存在。3 个 deletion 节点先以
+  `F152_PRIVACY_DELETION_CASCADE_MISSING` 见红，最终 store `6 passed`，core +
+  authority gate 回归 `630 passed / 1 既有 warning`。
+- 2026-07-28：F152 T009 新增不含私钥的 `DeviceIdentity` 与单一 Policy 请求授权
+  seam；active device、短期 capability、request proof 和 replay key 必须精确绑定。
+  17 个对抗节点先统一以 `F152_PRIVACY_POLICY_MISSING` 见红，随后验证 revoke 优先于
+  expiry、cross-owner/device/key、过期/未来 token、nonce replay、method/path/body/
+  token 漂移、超时 timestamp、缺 capability 及 unknown stage/capability 全部稳定
+  fail-closed；Policy + F152 focused 回归 `104 passed`。
+- 2026-07-28：F152 T010 将 Memory 候选确认冻结为独立 exact model，必须绑定
+  candidate canonical hash、owner、device、decision 与 UTC；只有 `pending` 候选可
+  在第二次明确 approve/reject 后生成新状态，原对象保持不变。9 个节点先以
+  `F152_MEMORY_SECOND_CONFIRMATION_MISSING` 见红，随后验证 analysis result 不能冒充
+  candidate、确认 hash/身份漂移、mixed provenance 和重复确认均 fail-closed；
+  T009/T010 focused `26 passed`。
+- 2026-07-28：F152 T011 在既有 Protocol 包新增唯一跨端 projection：F153 只消费
+  device identity/capability/request proof，F154/F155 只消费 review→deletion 的七项
+  ingestion contract；raw/normalized local stage 不发布。JSON Schema 每次从同一
+  Pydantic authority 生成并绑定 canonical SHA，consumer 不能跨 Feature fallback。
+  7 个节点先以 `F152_PROTOCOL_CONTRACT_MISSING` 见红，最终三 consumer fixtures、
+  schema deterministic/mutation isolation 与 health/calendar absence 均通过；
+  Core/Policy/Protocol/F152 focused `137 passed`。
+- 2026-07-28：F152 T012 新增 architecture ratchet，机械验证 Core→Policy→Protocol
+  单向依赖、唯一 privacy store/audit/policy/schema owner、无 Memory store 旁路、无
+  broad exception、六张 SQLite 表仅由 `sqlite_init` 声明，且 F152 production
+  functions 均不超过 50 行；删除 transaction 的 54 行职责被提炼后 focused
+  architecture/store `8 passed`，McCabe≤10。
+- 2026-07-28：F152 T013 已同步 Blueprint 索引、总体架构数据流与 M12 roadmap：
+  raw/normalized local-only、单次 consent、approved packet、独立 Memory 二次确认、
+  non-sensitive audit、provenance 删除级联、revoke/replay fail-closed 及三 consumer
+  exact schema 成为上游真值；M12 状态改为 In Progress，但 F153/iOS production 仍由
+  T014 Verify 阻断。
+- 2026-07-28：F152 T014 完成 Verify。F152 blast radius 最终
+  `714 passed / 1 既有 warning`，全仓库 Gate `208 passed`，Ruff/format/C901/
+  py_compile、secret scan 与 `git diff --check` 均通过。全 Gate 首次在既有 F151
+  clean-wheel relocation 被误判挂起；诊断确认是 import owner 对每条 occurrence
+  重扫 site-packages 的算法退化。既有 selector 先以“repeated import owner was
+  rescanned”见红，再用 transaction-local cache 修复，relocation 从 `138.68s`
+  降至 `21.34s`，clean-wheel `9 passed`。F152 verification report 已落盘，F153
+  原生 iOS production 解锁；F158 总 Goal、提交、CI、部署和 iOS 交付仍未完成。
+- 2026-07-28：F153 T001-T011 完成 Gateway/device trust 与原生 registration App
+  的代码闭环：唯一 SQLite store、owner/mobile routes、P-256 proof、短 token、
+  replay/revoke、Secure Enclave/ThisDeviceOnly Keychain、单 ephemeral URLSession
+  与六个 SwiftUI registration states。iPhoneOS App/XCTest target 均成功编译；
+  focused Python/Gateway/authority `42 passed`，source/bundle secret scan 与 T016
+  architecture ratchet 通过。
+- 2026-07-28：F153 T012 保持 partial。scheme generic destination 因
+  CoreSimulator `1051.54.0 < 1051.55.0`、iOS runtime=0 以 exit 70 失败；runtime
+  自动安装需要 macOS 管理员授权。因此 Swift XCTest、Simulator cold start/
+  screenshot/visual/a11y、Cloudflare live 和真 iPhone 场景均未声称通过。F153
+  T017 已同步 Blueprint/F158 真值与设计偏离；F154 继续关闭。
+- 2026-07-28：完成 Web 全 route/surface 的 Claude 早期视觉恢复。新增独立
+  `claude-surfaces.css`，把 Approvals、Tasks、Task Detail、Automation、Settings、
+  Agents、Memory、Files、Skills、MCP 收敛为紧凑页头、低亮度连续卡片、细边框与
+  单一绿色强调；没有恢复后期大 Hero、径向发光或大面积低信息密度卡片。
+- 2026-07-28：新增 9 条真实 L1 surface 场景和 10 个业务 surface pixel
+  baselines。完整当前字节回归为 build PASS、complexity PASS、Vitest
+  `70 files / 598 passed`、Playwright `38 passed / 1 once-only conditional skip /
+  0 failed`；重建 fresh L1 fixture 后审批 UI→REST→真实落盘另行 `1 passed`。
+  视觉 snapshot generation 与 no-update rerun 均 `10 passed`，人工检查后清除了
+  Playwright 洋红遮罩噪声。正式证据见
+  `evidence/web/2026-07-28/verification-report.md`。
+- 2026-07-28：在 Claude Design 云端项目
+  `851e3fb2-2b5b-4251-a095-8a678b1b7fec` 完成最终谱系清理。必需 frame 没有重复
+  中间副本可安全删除，因此删除数为 0，后期 radial glow、大 Hero、大圆角卡片墙
+  在原 frame 上改回 `1a` 的近黑、紧凑、高密度工作台语言。第一次写回误删 `4n`
+  与 `4o`，机械导出核验发现后立即窄修恢复；最终 `4a`–`4o` 各 1、`4n`
+  为表头 6 列 + 20 行、`4o` 为表头 8 列 + 10 行，23 个
+  `data-screen-label` 唯一，Spotify Design System/Figtree/radial-gradient 均为 0。
+  新不可变导出 SHA
+  `1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`，
+  Task Detail 视觉抽查 SHA
+  `201ae887e8072f40afc982a603693f91a254db27b99d21195fc2f60853b903e4`。
+  谱系、初次回归与窄修事实见
+  `../149-web-pages-v2/design-output/2026-07-28/lineage-cleanup-status.md`。
+- 2026-07-28：F153/F158 最终架构收口没有通过放宽门或 `noqa` 规避。七个新增的
+  多参数函数改为 typed request/options/context，focused F152/F153/F158
+  `77 passed / 1 既有 warning`，完整 repository architecture gate 返回 `0`。
+- 2026-07-28：从 F158 worktree 使用显式九段 pre-SDK `PYTHONPATH`、禁用 user
+  site，并排除需要真实 OpenAI OAuth 的 `apps/gateway/tests/e2e_live` 后，确定性后端
+  完整回归为 `5709 passed / 9 skipped / 1 xfailed / 1 xpassed`。一次误把 live lane
+  纳入的运行因宿主 OAuth refresh token 已复用失败，不计作回归证据，也没有通过补跑
+  冒充 deterministic PASS。
+- 2026-07-28：个人部署只读审计确认 loopback Gateway 与 Cloudflare connector 已
+  恢复，但 launchd 仍指向 `~/.octoagent/app` 的 2026-07-25 旧 managed checkout。
+  当前域名页面因此不是本分支字节。后续必须先提交，再使用仓库正式 managed checkout
+  安装/更新路径部署，随后完成登录态 SPA/API/SSE 与 Settings 复验。
+- 2026-07-28：提交并推送 Web/iOS/F150/F158 第一批真实交付
+  `7f72e23ab7168f07e602bbdd19a9776d39a16c28`。GitHub Actions 首轮仅在 Ubuntu
+  Chromium 的 280×32 中文标题 glyph 边缘出现 419 像素差异；diff 没有布局、背景、
+  边框或尺寸漂移。
+- 2026-07-28：提交 `d440413c85a59cba9e868f51b002d135dbb45735` 收敛空 composer
+  的状态顺序，并使视觉样式断言不依赖前序聊天内容；提交
+  `e84ffd435f742ba2784b85c074346ab63ecedbc1` 同时设置该唯一标题断言的 pixel/ratio
+  上限，避免 Playwright 取两阈值较小值继续误报。14 个 snapshot 均未重生成；
+  authoritative CI 的 frontend、architecture、benchmark 与 L1 Playwright 已通过。
+- 2026-07-28：通过仓库正式 `install-octo-user.sh` 更新个人 managed checkout 到
+  `e84ffd43`，完成 `uv sync`、前端 build 并重启 Gateway。loopback ready/home=200，
+  个人域名=Access 302，tunnel running，部署源码 SHA 与分支一致。
+- 2026-07-28：Chrome 可枚举既有 Access 登录页，但接管页面持续超时；没有读取
+  cookie/local storage 绕过认证，登录后个人 SPA/API/SSE 保持未验证。Gateway 启动
+  日志另行暴露 OpenAI Codex refresh token reused/401，真实模型对话保持阻断。
+- 2026-07-28：提交 `e84ffd43` 的权威 GitHub Actions run
+  `30364899065` 最终 success：backend deterministic、frontend、architecture、
+  benchmark、L1 Playwright 五个 job 全部通过。L1 在 Linux/Chromium 上证明功能和
+  视觉基线可复现；Node 20 action deprecation 仅为上游 action annotation，不是失败。
+- 2026-07-29：提交并推送 F153 registration 六态视觉、Simulator UI/Swift unit
+  与真实模型终态收口 `35d7aa14`；iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme
+  为 12/12。随后在 detached clean worktree
+  `/tmp/f158-ios-clean-worktree.YDqxgp/repo` 对同一提交再执行完整 scheme，仍为
+  12/12，运行后 worktree clean。
+- 2026-07-29：使用仓库正式 `install-octo-user.sh` 把个人 managed checkout 更新到
+  `35d7aa14` 并重启 Gateway；loopback ready/home=200，`octo.maojiwang.work`
+  返回 Access 302，11 个部署 CSS 与当前分支 build 的 path→SHA map 逐字节一致。
+  内置浏览器和 Chrome 都能到达 Access 登录页，但 DOM/交互通道超时；没有读取
+  cookie/local storage 绕过认证，登录后 SPA/API/SSE 继续保持未验证。
+- 2026-07-29：提交 `35d7aa14` 的权威 run `30376168635` 中 frontend、
+  architecture、benchmark、L1 Playwright 均通过；backend 的 pytest assertions
+  通过，但 changed-lines coverage 为 36/42，未达 90%，所以该 run 正确失败。
+  没有使用 `[cov-exempt]` 绕过；新增两个 doctor 真实模型探针失败边界测试后，
+  本地 CI 等价回归为 `5715 passed / 10 skipped / 1 xfailed / 1 xpassed`，
+  scripted gate `18 passed`，changed-lines coverage 提升为 38/42=90.5% PASS。
+  修复提交 `ebe8cd29` 已推送，权威 run `30378276329` 的四个前端/架构 job 已通过，
+  随后 backend deterministic 也通过；该 run 最终五个 job 全绿。
+- 2026-07-29：对当前个人部署重新执行真实
+  `~/.octoagent/bin/octo doctor --live`。命令约两秒后 `exit=1`，
+  `model_live=FAIL`，远端返回 HTTP 401 `refresh_token_reused`；日志明确
+  `CredentialExpiredError`、`doctor_model_live_failed auth_failure=True`，没有
+  Echo fallback 或总体 PASS。部署代码的 fail-closed 已实证，T045 仍等待一次新的
+  OpenAI Codex OAuth 授权。
+- 2026-07-29：同一 doctor 输出同时显示离线 `credential_expiry=PASS / 所有凭证均有效`
+  与远端 `model_live=FAIL`，会误导用户把本地时间戳视为远端授权有效。单缺陷测试先
+  稳定见红，文案草稿的 focused/doctor 回归也通过；提交前 F151 architecture gate
+  正确阻断了对 F150/F158 共享 doctor 的未授权语义扩张。生产与测试草稿已撤回，
+  新增 T047，后续必须先建立明确 authority，不能为一句文案绕过现有 Gate。
+- 2026-07-29：M10 只读物理审计确认 LaunchAgent plist 早于当前
+  `2026-07-20 10:43:48 +0800` boot，launchd 当前 loaded/running/runatload，
+  `octo service status` 与 loopback ready=200；但本轮部署执行过手工
+  `kickstart -k`，当前 pid 不能作为登录自启动证据。新增 T046，只有一次用户明确
+  允许的物理重启后复核才能签署 `ATT-129-BOOT`。同日
+  `xcrun devicectl list devices` 仍为 `No devices found`，F153 T015 保持未完成。
+- 2026-07-29：复核 F157 最终提交
+  `db3214fff722c6f969baf99528a76fc03a1e21a1` 已是 `origin/master`，对应权威
+  GitHub Actions run `30198514576` 的 benchmark、frontend、l1-playwright、
+  architecture、backend-deterministic 五个 job 全部 `success`。F157 T013、
+  plan、fix report 与 verification report 已同步为完成；F158 审计不再把该项标成
+  `DOC DRIFT`，M9 提升为 `PROVEN`。
+- 2026-07-29：只读核验个人 Cloudflare 当前态：named tunnel
+  `19957901-f4e1-4cb0-b387-37258436644d` 只有
+  `octo.maojiwang.work -> 127.0.0.1:8000` 的 Web ingress；mobile/native/ios
+  hostname 均无 DNS，个人部署 doctor 也报告原生 iOS 远程入口未启用。该事实保持
+  F153 T014 未完成，不能用 Web Access 302 或健康 connector 冒充 mobile live。
+- 2026-07-29：建立 F154 Apple 健康只读垂直切片。Apple 官方调研、Spec、Data
+  Model、Threat Model、Contract、architecture authority inventory、Plan 与 Tasks
+  已完成 Research/Design/Tasks Gate；v0.1 exact 为 stepCount + sleepAnalysis、
+  24h/3d/7d、本地 raw zero-retention、用户预览/当次批准/单次分析/删除。F153
+  T014/T015/T018 未通过，因此 F154 entitlement、production Swift/Python、Gateway
+  route 与行为 RED 均为 0，Implement/Verify 继续关闭。
+- 2026-07-29：在提交 `1d6b11704aa6` 上重新执行当前产品字节验收。本机真实 Web
+  加载三栏工作台，Settings 中 F150 远程访问卡片、脱敏事实、动作、重试和高级诊断
+  可达；远程地址稳定返回 Access `302` 而非 502，但 Chrome 没有可复用登录态，
+  当前投影保持 `pending_verification`。同一字节 Vitest 为
+  `70 files / 598 passed`，完整 Playwright 为 `39/39 passed / 0 retry`，14 个
+  `claude-early-*` 像素基线未更新。iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme
+  再次为 `12/12 passed`，result bundle 为
+  `/tmp/f158-ios-rerun.iZzEea/current.xcresult`。这些当前证据不替代 Access 登录后
+  SPA/API/SSE、真实 Provider OAuth、Cloudflare mobile live 或真 iPhone 验收。
+- 2026-07-31：使用 `spec-driver-resume` 恢复 M12 断点。仓库声明的
+  `plugins/spec-driver/scripts/*` 仍不存在，因此按 Skill 采用制品存在性的人工
+  fallback，没有伪造 execution-state 或 workflow run。
+- 2026-07-31：完成 T047。两个单缺陷测试先证明旧 `credential_expiry=PASS / 所有凭证均有效`
+  会与同份报告中的 `model_live=FAIL` 形成误导，再把该检查收敛为“仅验证本地
+  `expires_at`，不代表远端授权可用”，并明确提示运行 `octo doctor --live`。Doctor
+  全文件回归 `33 passed`。F158 authority 以当前/旧版方法 AST 双哈希只放行
+  `check_credential_expiry` 的这一处语义变化，篡改新提示语会 fail closed；精确 gate
+  `1 passed`。首次提交门还暴露 checker 把暂存态 `HEAD` baseline 固定解释为旧
+  `_probe_live_model` 哈希；修复后只接受已冻结旧版或已冻结当前版两种 exact baseline，
+  未知第三种继续 fail closed。最终 repository `architecture all` PASS。
+- 2026-07-31：建立 F155 EventKit Research/产品决策档案。Apple 官方事实确认
+  读取日历需要 OS full access，没有系统级 read-only 权限。提案已冻结为
+  未来 24h/3d/7d、raw local-only、title 默认不上传、敏感字段和所有写路径物理
+  缺席。Research PASS，但用户 A/B 产品决定尚未给出，Design/Tasks/Implement
+  均保持 false，production/test behavior=0。
+- 2026-07-31：建立 F156 Native Companion Research、Design/Tasks 草案与 40 行
+  exact scenario matrix。四个原生顶层 Tab 为 `chat/tasks/inbox/settings`；
+  只复用 F153 身份与单 transport，通知只含 opaque id，后台不得执行 Health/
+  Calendar/LLM/审批/Memory/发送。视觉上游精确绑定 F149 2026-07-28 导出
+  SHA `1d497d8cc4e8a06e9f2bff296784d4648e0bb0784a73c8fe4f8a7bd9812132f7`，
+  禁止后期大 Hero/radial glow/低密度卡片墙回流。该日 F153/F154/F155 上游 Gate 和
+  mobile OpenAPI recon 尚未完成，故 Design/Tasks/Implement 为 false，production/E2E=0。
+- 2026-07-31：完成 F156 current mobile API recon。FastAPI OpenAPI canonical SHA
+  `21e052dda301de65dea1bb192ade88039320db9460b329eeda3b78858dfdd7e3`；mobile edge
+  exact 只有 5 条 F153 enrollment/token/ready/profile route，Chat/Task/Approval/Memory/
+  APNs 共 8 项产品合同缺口。现有 Web front-door route 在 mobile hostname 会被 exact
+  allowlist 拒绝，不能由 iOS 复用；T002 完成，F156 Gate 仍被 F153/F154/F155 阻断。
+- 2026-07-31：推送当前真值提交
+  `dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`。权威 GitHub Actions run
+  `30602259193` 的 backend-deterministic、frontend、architecture、benchmark 与
+  l1-playwright 五个 job 全绿；backend 为
+  `5715 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted lane `18 passed`，
+  L1 为 `39 passed`。随后用正式 installer 从同一远程分支更新
+  `~/.octoagent/app`，完成依赖同步、production build 与普通 Gateway 重启；
+  checkout clean 且 HEAD 精确相等。部署后 ready/health/root 均为 `200`，公网为
+  Access `302`，F150 projection 仍为 `pending_verification`；普通 doctor
+  `exit=0 / WARN`，新的 credential 文案已生效。该重启不计 M10 物理开机证明，
+  Access 登录后、真实模型、mobile live 与真机边界均未提升。
+- 2026-07-31：Blueprint/Milestone active schema 真值同步提交
+  `a2dca2badba40f87cec922946d65d21396e1b709` 的权威 GitHub Actions run
+  `30604533484` 到达终态：backend-deterministic、frontend、architecture、
+  benchmark、l1-playwright 五个 job 全部 success，L1 为 `39 passed`。后续
+  `87660ab5`、`981789f2` 仅撤回 F158 远程旅程假完成标记并显式保留外部验收缺口，
+  没有产品代码变化且未触发新 run。当前个人部署仍是 `dc8b1b41`，因此 CI 与部署
+  身份不再混写。
+- 2026-07-31：Chrome `connor` profile 的现有标签可被只读枚举，目标标签标题为
+  `Sign in ・ Cloudflare Access`，URL 属于 `octo.maojiwang.work` Access 登录边界；
+  没有已认证的 OctoAgent 产品页。该标签已原样保留给用户，没有读取 cookie/
+  localStorage、代填账号或触发登录。T014 继续 unchecked。
+- 2026-08-01：用户明确接受 F155 方案 A：iOS 系统层允许 EventKit 日历 full access，
+  但 Octo App/代码保持物理只读，所有 create/update/delete 写路径为零。F155
+  Product Decision、Design、Tasks Gate 已同步通过；Implement/Verify 仍被 F153/F154
+  上游硬门关闭，不能把产品决策冒充 Feature 完成。
+- 2026-08-01：当前个人部署完成真实 Access 登录后产品验收：三栏工作台
+  snapshot=`ready`、diagnostics=`degraded(recovery,memory)`并诚实显示“受限运行”；
+  真实 OpenAI Codex 对话经 SSE 从`进行中`到`已完成`，返回
+  `F158_WEB_E2E_OK`，Task `01KYY3E1Q3GVEQYPB2HRCE3F88`到达
+  `SUCCEEDED`，两个页面 console warning/error=0；`octo doctor --live`同日再次以
+  `gpt-5.5`通过。T045完成；随后主动登出、验证码挑战和用户完成重新登录均通过。
+- 2026-08-01：登录后 Settings 仍永久显示 `pending_verification`。单缺陷测试先在
+  authenticated REST/SSE 已通过时稳定见红；修复只在既有 `remote_access_status`
+  authority 内消费同一请求的 `CloudflarePrincipal`，显式 probe/fault facts 仍优先。
+  组合回归 `98 passed`，Ruff/format/diff 与 F151 repository architecture gate 均
+  通过。提交 `013762df` 已推送并经正式 installer 部署，Gateway 新 PID ready；同一
+  真实 Chrome Settings 显示“远程访问已就绪”。会话自然过期与一次性错误恢复仍未
+  执行，T014 继续 unchecked。
+- 2026-08-01：真实 iPhone 17 Pro Max 已有线连接、paired、Developer Mode enabled。
+  Personal Team `34GR9QLLMY` 的 Release 真机构建、自动签名、安装和启动通过，原生
+  registration disconnected 首屏已保存。两次 live UI XCTest 均在测试方法前被
+  Apple device screen authentication 拦截；只读事实分别为镜像进程占用和设备自动
+  锁屏，不计业务失败。用户保持屏幕常亮后必须重新生成短时挑战并执行配对旅程。
+- 2026-08-02：在用户取走 iPhone 后仅继续非设备工作。真实 Web 故障旅程先通过
+  `launchctl bootout` 暂停唯一 Gateway，Chrome 同 URL 得到 Cloudflare `502 Bad
+  gateway`；按原 plist 恢复后暴露两个真缺陷：lite snapshot 被
+  `setup_governance` 阻塞约 25.5 秒，且历史详情一次瞬时失败后被永久放弃。根因是
+  Gateway 已注入 `StoreGroup` 时 `SecretService` 仍另开 project migration 连接，
+  等待 SQLite busy timeout 后 `database is locked`；回归测试先稳定 RED，再让注入
+  store 复用已完成的启动迁移，并为 restore 同一候选增加一次无固定等待的有界重试。
+  后端相关 `94 passed / 1 skipped`、全前端 `70 files / 599 passed`、production build、
+  Ruff/format 与 repository architecture gate 均通过；提交 `ec55ba76` 经正式
+  installer 部署到个人实例。真实冷启动后 loopback lite snapshot=`0.093s`、task
+  detail=`0.003s`，日志中的 setup governance 回落到 `53–117ms`；同一 Chrome 会话
+  最终恢复标题、原用户消息和 `F158_WEB_E2E_OK`。该证据完成一次性上游错误恢复，
+  不替代 F150 24 小时自然 Access 过期，也不触碰 iPhone 或物理 Mac 重启。
+- 2026-08-02：个人实例日志中的 `memory_backend_sync_degraded` 暴露内建
+  `memu` 仍读取已退役的 `SorRecord.summary`，同时 LanceDB 行仍构造旧版
+  `MemorySearchHit(memory_id/fragment_id/vault_id)`，高级 backend 成功时还会跳过
+  canonical recall hooks。两个单缺陷测试先分别稳定失败；修复后统一消费
+  `SorRecord.content`、字符串 tombstone、当前 `record_id/created_at` 合同，并让
+  高级候选继续通过过滤、rerank、时间衰减和 MMR。memory/Gateway 相关回归
+  `288 passed`，F158 精确 authority 与 repository architecture gate 均通过；提交
+  `1b45c2f9` 经正式 installer 部署。个人实例随后以 `memu` 一次重放 70 个积压批次，
+  `remaining_backlog=0`、无降级日志；真实聊天任务
+  `01KYZF2X3XWT6NN27TJSFJNZ3Y` 到达 `SUCCEEDED` 且包含 2 次
+  `MODEL_CALL_COMPLETED`，后台同步后再次复核积压仍为 0。该运行证据不触碰 iPhone，
+  也不计作物理 Mac 重启。
+- 2026-08-02：继续在不占用用户 iPhone 的边界内修复 device-trust 重连健壮性。
+  先以真实 API 回归复现同一 public key 新 challenge 触发
+  `UNIQUE constraint failed: mobile_device_keys.device_key_thumbprint`；随后在唯一
+  SQLite transaction 内复用相同 owner/current key 的原 pending/active device id，
+  对跨 owner、revoked 与 non-current key 返回 typed 409 且保持 challenge/device/key
+  零半写入。F153 focused 回归 `48 passed / 1 既有 warning`，Ruff/format/C901、
+  `git diff --check` 与 repository architecture gate 均通过。提交 `d17c3e59` 已由
+  正式 installer 部署到个人 managed checkout，Gateway 重启后 `/health=200`；本轮
+  没有调用真机、没有重启 Mac。
+- 2026-08-02：用户取走 iPhone 后继续只做非设备收口。当前提交
+  `0ec5997dc79b072d255d4ea1a3f401d8ad22c4ea` 上，F154
+  Gateway/Core/Policy/Protocol/authority focused 为 `25 passed`，F153 focused 为
+  `48 passed / 1 existing warning`，repository architecture gate PASS。iOS 26.5 /
+  iPhone 17 Pro Simulator 完整 scheme 单次结果为
+  `33 total / 27 passed / 6 live-only skipped / 0 failed`；其中 F154
+  `HealthImportTests=10/10`、`HealthImportFlowUITests=3/3`，12 个有限状态 Claude
+  早期视觉 baseline、Dynamic Type、VoiceOver 与 44pt 均通过。该结果只完成 F154
+  T001-T012/T014/T015，不替代 T013 真 iPhone HealthKit 与 T016 最终 Verify。
+- 2026-08-02：纠正 F155/F156 Gate 真值。F155 已满足 F153 Verify，当前只等待 F154
+  Verify 与 F151 authority；没有 EventKit production/test 行为。F156 从当前 FastAPI
+  OpenAPI 重新计算为 10 条 mobile route（F153=7、F154=3），实际签发 capability=5，
+  声明但未签发 Companion capability=7，product gap=8；canonical OpenAPI SHA 为
+  `6fd9925ce7ddaf969c9422d8ad42ef4917a97f89985d0c04c3d09dab3b9866b5`，recon SHA 为
+  `62af2c5dca0ab90b5a513c88405d7547ee5ab862711e2a0c00ea7433b4d2e753`。
+  这只是 machine recon/Gate correction，不把 F156 production 或 E2E 提升为完成。
+- 2026-08-02：权威 run `30716661085` 的 architecture/frontend/benchmark/
+  l1-playwright 全部成功，backend deterministic 测试层也成功，但 changed-lines
+  coverage 为 `541/608 = 89.0%`，低于冻结的 90% 门槛。未加豁免或降门槛；新增
+  `test_mobile_route_fail_closed_edges.py` 覆盖 Health service/router 未就绪、非法
+  review JSON、delete body 与 key-rotation service error 共 8 条此前未覆盖生产行。
+  新测试 5/5、相关 route 回归 35/35 通过，等待新提交 CI 复验。
+- 2026-08-02：把 F151 当前 authority 与历史 raw 留档限制拆开。tracked canonical
+  index=`bd717b9d…ce9e`、269 records/head=`913082c2…f878`，final report=
+  `50521128…500f`；当前提交 `2f6fcbc9` 的 GitHub run `30717516171` 已在 clean
+  checkout 通过 architecture job。F151 当前 authority 因而为 PASS；旧
+  `evidence/local` 按原 `.gitignore` 设计未提交且已不存在，只保留
+  `HISTORICAL_RAW_ARCHIVE_NOT_SELF_CONTAINED` 限制，禁止补造。F155/F156 仍必须在
+  同一 checker 中完成各自 exact authority，不能继承本 attestation。
+- 2026-08-02：只读复核个人 managed checkout HEAD 为
+  `d17c3e59879ee09dd79ba77fcebf9729e662730e` 且工作树干净；从该提交到当前 HEAD 的
+  差异只有 Feature/docs 与 Gateway tests，没有 production bytes。产品部署无需为
+  追随文档/test SHA 做无意义重启。生产与 CI 路径扫描中个人域名只出现在两个负向
+  测试断言，iOS production 只有唯一 `DeviceTrustClient` 创建 URLSession，WebView/
+  第二 pairing/session/device registry 命中为 0。
+- 2026-08-02：代码/测试提交 `2f6fcbc91408e14bc3f5291678bdfd018cc24473`
+  的 GitHub Actions run `30717516171` 五个 job 全部成功：backend deterministic
+  `5756 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted `18 passed`，frontend
+  `599 passed`，L1 Playwright `39 passed`，benchmark `2 passed`，architecture PASS。
+  该 push 相对 `0ec5997d` 只有测试，workflow changed-lines 因而为 `0/0`；未把它冒充
+  完整证明。从同一 run 下载 LCOV（SHA `35e59423…ee37`），在 detached clean clone
+  对原失败 base `d031809f…` 用同一 checker/90% 门复算为 `549/608 = 90.3% PASS`，
+  committed report=`d01ac479…1fa8`。
+- 2026-08-02：上述复核暴露旧 workflow 对所有 push 使用 `event.before`，允许失败生产
+  提交被后续 test/docs-only push 遗忘。F158 新增 FR-010/T050；现有 F151 wiring test
+  先以 `F151_CI_WIRING_MISSING` 真实 RED 命中 architecture/coverage 两个 resolver，
+  再统一为 PR=target base、master push=`event.before`、其他 branch=
+  `merge-base(origin/master, HEAD)`。wiring 5/5、Ruff/YAML parse、repository architecture
+  本地通过。提交 `df77068c` 的 run `30718445846` 已证明累计 resolver 生效：base 精确为
+  `db3214ff`，architecture/frontend/L1 Playwright/benchmark 全绿，backend 两层测试通过；
+  changed-lines 对完整分支计算 `1917/2484 = 77.2%` 并诚实失败，没有被后续提交遗忘。
+- 2026-08-02：对 `30718445846` 的 LCOV 逐文件复核发现，不是 300 余个行为测试缺失，
+  而是 Provider pytest11 entry point 位于 `octoagent.provider.*`，pytest 在 pytest-cov
+  启动前扫描插件时先执行公开包 `__init__`，使隐私模型等已真实执行的定义行被记为 0。
+  fresh-interpreter 合同先以 `F158_COVERAGE_BOOTSTRAP_EAGER_PROVIDER_IMPORT` 见红；随后
+  entry point 移至轻量 `octoagent.provider_pytest_plugin`，顶层零 production import，
+  真 gate 延迟到 `pytest_configure`。同时补齐 13 条隐私模型失败关闭边界。聚焦回归
+  `66 passed`；CI 同参全量 `5763 passed / 10 skipped / 1 xfailed / 1 xpassed`，scripted
+  `18 passed`；local-working-tree 对 `origin/master` 累计计算
+  `2192/2420 = 90.6% PASS`。未降 90% 门槛、未加 `[cov-exempt]` 或 coverage pragma；
+  随后的 run `30719719793` 已完成远端复验，见下一条。
+- 2026-08-02：提交 `2b1fb5ec4a78ca1a3a2cba2343e0b45d5abc2204` 的 GitHub Actions
+  run `30719719793` 完成累计 branch-base 复验，五个 job 全部 success：backend
+  deterministic `5759 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted
+  `18 passed`，frontend、L1 Playwright、benchmark 与 repository architecture 均通过。
+  workflow 精确选择 `origin/master` merge-base `db3214fff722c6f969baf99528a76fc03a1e21a1`，
+  committed changed-lines 为 `2192/2420 = 90.6% PASS`；LCOV SHA
+  `db3b26b174d0f2f8fd68f18f102c22eec43b541a4c41c6037c3c65f2f57f5f8d`，报告 SHA
+  `7dee4209a0e9ed1bdbcb56e520843685837755dbbc5f05458d80a30b1c8d9aba`。T050 完成；
+  用户使用 iPhone 期间没有调用设备，也没有重启 Mac。
+- 2026-08-02：在用户取走 iPhone 后继续执行非设备 CI 维护。现有 F151 wiring test
+  先证明旧 JavaScript Actions 不满足 Node 24 合同；随后把 checkout/setup-python/
+  setup-node/cache/upload-artifact 升级到 Node 24-compatible major，并把第三方
+  `setup-uv` 固定到 v8.3.2 发布提交
+  `11f9893b081a58869d3b5fccaea48c9e9e46f990`。一次错误使用不存在的浮动 `v8`
+  tag 在 action resolution 阶段 fail fast，未启动 pytest；修正后提交
+  `1723c84f9fb07ac8273c2a6bc6af52f7016cb1da` 的 run `30720799929` 五个 job
+  全部 success：backend `5760 passed / 14 skipped / 1 xfailed / 1 xpassed`、scripted
+  `18 passed`、frontend `599 passed`、L1 `39 passed`、benchmark `2 passed`、
+  architecture PASS。累计 changed-lines 仍为 `2192/2420 = 90.6% PASS`，Node 20
+  deprecation annotation=0。三个并行 job 只出现同一 uv cache reserve warning，
+  architecture 已成功保存该 cache，故不为 first-writer-wins 非阻断提示再触发长 CI。
+- 2026-08-03：F154 使用同一签名 App 与 production HealthKit adapter 完成有效
+  preview-only 物理锁屏→解锁 transaction：`1 passed / 0 failed / 0 skipped`，恢复后
+  preview 保留且未自动批准、提交或分析，随后只删除本地 preview。xcresult 38 files /
+  362425 bytes，byte-map aggregate
+  `ac92cab0b27b00ce73cac0cadb8c3fa0f3004b96ef85d0359717bbbb626d37a3`；仓库只保存
+  不含健康值、设备标识、凭证或截图的结构化 attestation。
+- 2026-08-03：F154 T016 在 detached clean checkout `4daf983f` 上完成 Backend 24/24、
+  repository architecture、iOS scheme 27 passed + 9 live-only skipped 和 generic
+  iPhoneOS Release PASS。push run `30782680229` 与 PR run `30782732897` 五个 job 均
+  success；两个 backend 均为 5760 passed、14 skipped、1 xfailed、1 xpassed，scripted
+  18 passed，changed-lines `2192/2420 = 90.6% PASS`。最终 evidence inventory 两件、
+  7,950 bytes；F154 `GATE_VERIFY=true`，F158 T028 完成，F155 解锁。

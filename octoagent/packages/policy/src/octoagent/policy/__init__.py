@@ -36,8 +36,18 @@ from .models import (
     PolicyProfile,
     SSEApprovalEvent,
 )
+from .privacy_ingestion_policy import (
+    AuthorizedRequest,
+    DeviceAuthorizationContext,
+    PrivacyIngestionPolicyError,
+    authorize_device_request,
+    review_memory_candidate,
+)
 
 __all__ = [
+    "DEFAULT_PROFILE",
+    "PERMISSIVE_PROFILE",
+    "STRICT_PROFILE",
     # 枚举
     "PolicyAction",
     "ApprovalDecision",
@@ -48,6 +58,7 @@ __all__ = [
     "ApprovalResolveRequest",
     "ApprovalListItem",
     "PolicyDecision",
+    "PolicyProfile",
     # 事件 Payload
     "PolicyDecisionEventPayload",
     "ApprovalRequestedEventPayload",
@@ -69,4 +80,10 @@ __all__ = [
     "ApprovalOverrideDeleteResponse",
     "ApprovalOverrideRepository",
     "ApprovalOverrideCache",
+    # F152 原生设备有限权限策略
+    "AuthorizedRequest",
+    "DeviceAuthorizationContext",
+    "PrivacyIngestionPolicyError",
+    "authorize_device_request",
+    "review_memory_candidate",
 ]

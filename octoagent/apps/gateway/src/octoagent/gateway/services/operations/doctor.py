@@ -8,7 +8,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,9 +38,16 @@ from octoagent.gateway.services.operations.service_manager import (
 )
 from octoagent.gateway.services.operations.sleep_probe import SleepRisk, probe_sleep_risk
 from octoagent.gateway.services.operations.telegram_verifier import TelegramOnboardingVerifier
+from octoagent.provider import (
+    ProviderRouter,
+    ProviderRouterMessageAdapter,
+    is_provider_auth_error,
+)
 from octoagent.provider.auth.store import CredentialStore
 
 log = structlog.get_logger()
+
+LiveModelProbe = Callable[[Path], Awaitable[tuple[str, str, str]]]
 
 
 @dataclass(slots=True)
@@ -64,6 +71,7 @@ class DoctorRunner:
         telegram_verifier: TelegramOnboardingVerifier | None = None,
         service_manager_factory: Callable[[Path], ServiceManager] | None = None,
         sleep_risk_probe: Callable[[], SleepRisk] | None = None,
+        live_model_probe: LiveModelProbe | None = None,
     ) -> None:
         if project_root is None:
             self._root = Path.cwd()
@@ -80,6 +88,7 @@ class DoctorRunner:
             lambda _root: build_service_manager(resolve_instance_root())
         )
         self._sleep_risk_probe = sleep_risk_probe or probe_sleep_risk
+        self._live_model_probe = live_model_probe or self._probe_live_model
 
     def _has_yaml_runtime_config(self) -> bool:
         return (self._root / "octoagent.yaml").exists()
@@ -130,9 +139,11 @@ class DoctorRunner:
 
         # front-door host↔mode 暴露面
         checks.append(await self.check_front_door_exposure())
+        checks.append(await self.check_mobile_device_access())
 
         # --live 检查
         if live:
+            checks.append(await self.check_model_live())
             checks.append(await self.check_telegram_readiness())
 
         # 计算整体状态
@@ -142,6 +153,79 @@ class DoctorRunner:
             checks=checks,
             overall_status=overall,
             timestamp=datetime.now(tz=UTC),
+        )
+
+    async def _probe_live_model(self, project_root: Path) -> tuple[str, str, str]:
+        """通过生产 ProviderRouter 做一次真实、无 Echo fallback 的模型调用。"""
+        from octoagent.gateway.services.config.config_wizard import load_config
+        from octoagent.gateway.services.config.dotenv_loader import load_project_dotenv
+        from octoagent.gateway.services.config.provider_route_resolver import (
+            resolve_provider_route,
+        )
+
+        load_project_dotenv(project_root=project_root, override=False)
+        config = load_config(project_root)
+        if config is None:
+            raise RuntimeError("octoagent.yaml 不存在")
+        alias = "main" if "main" in config.model_aliases else "cheap"
+        if alias not in config.model_aliases:
+            raise RuntimeError("缺少可用于 live probe 的 main/cheap model alias")
+
+        router = ProviderRouter(
+            route_resolver=lambda requested_alias: resolve_provider_route(
+                config,
+                requested_alias,
+            ),
+            credential_store=self._store,
+        )
+        try:
+            result = await ProviderRouterMessageAdapter(router).complete(
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "这是 OctoAgent readiness 探针。不要调用工具。",
+                    },
+                    {
+                        "role": "user",
+                        "content": "只回复 OCTOAGENT_DOCTOR_OK",
+                    },
+                ],
+                model_alias=alias,
+            )
+        finally:
+            await router.aclose()
+        if not result.content.strip():
+            raise RuntimeError("模型返回空响应")
+        return alias, result.provider, result.model_name
+
+    async def check_model_live(self) -> CheckResult:
+        """执行真实模型调用；失败是 ``doctor --live`` 的 REQUIRED 阻断。"""
+        try:
+            alias, provider, model = await self._live_model_probe(self._root)
+        except Exception as exc:
+            auth_failure = is_provider_auth_error(exc)
+            fix_hint = (
+                "重新授权当前 Provider 凭证后，再运行 octo doctor --live"
+                if auth_failure
+                else "检查 Provider 配置与网络连通性后，再运行 octo doctor --live"
+            )
+            log.warning(
+                "doctor_model_live_failed",
+                error_type=type(exc).__name__,
+                auth_failure=auth_failure,
+            )
+            return CheckResult(
+                name="model_live",
+                status=CheckStatus.FAIL,
+                level=CheckLevel.REQUIRED,
+                message=f"真实模型调用失败（{type(exc).__name__}）",
+                fix_hint=fix_hint,
+            )
+        return CheckResult(
+            name="model_live",
+            status=CheckStatus.PASS,
+            level=CheckLevel.REQUIRED,
+            message=f"真实模型调用成功：alias={alias}, provider={provider}, model={model}",
         )
 
     async def check_python_version(self) -> CheckResult:
@@ -271,7 +355,7 @@ class DoctorRunner:
         )
 
     async def check_credential_expiry(self) -> CheckResult:
-        """Token 类凭证未过期"""
+        """仅检查 Token 的本地 ``expires_at``，不推断远端授权状态。"""
         profiles = self._store.list_profiles()
         for profile in profiles:
             if profile.auth_mode == "token":
@@ -283,15 +367,18 @@ class DoctorRunner:
                             name="credential_expiry",
                             status=CheckStatus.WARN,
                             level=CheckLevel.RECOMMENDED,
-                            message=f"Token 已过期: {profile.name}",
-                            fix_hint="重新获取 Token 或切换到 API Key 模式",
+                            message=f"本地 Token 过期时间已到: {profile.name}",
+                            fix_hint=(
+                                "重新获取 Token 或切换到 API Key 模式；"
+                                "随后运行 octo doctor --live 验证远端授权"
+                            ),
                         )
 
         return CheckResult(
             name="credential_expiry",
             status=CheckStatus.PASS,
             level=CheckLevel.RECOMMENDED,
-            message="所有凭证均有效",
+            message=("本地过期时间检查通过（不代表远端授权可用；运行 octo doctor --live 验证）"),
         )
 
     # F081 cleanup：删除 check_live_ping —— LiteLLM Proxy 时代的端到端 ping，
@@ -748,6 +835,59 @@ class DoctorRunner:
             level=CheckLevel.RECOMMENDED,
             message=f"{status.state}: {status.reason_code}",
             fix_hint=fix_hint,
+        )
+
+    async def check_mobile_device_access(self) -> CheckResult:
+        """使用运行时同一config/manifest边界诊断原生iOS入口。"""
+
+        name = "mobile_device_access"
+        try:
+            config, skip = self._load_config_safe(name)
+        except Exception as exc:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.FAIL,
+                level=CheckLevel.RECOMMENDED,
+                message=f"mobile device access配置无效：{type(exc).__name__}",
+                fix_hint="修复octoagent.yaml中的mobile_device_access配置",
+            )
+        if skip is not None:
+            return skip
+        mobile_config = getattr(config, "mobile_device_access", None)
+        if mobile_config is None or not mobile_config.enabled:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.SKIP,
+                level=CheckLevel.RECOMMENDED,
+                message="原生iOS远程入口未启用",
+            )
+        try:
+            from octoagent.gateway.services.mobile_device_access import (
+                load_mobile_device_access_manifest,
+                masked_hostname,
+            )
+
+            manifest = load_mobile_device_access_manifest(
+                self._root,
+                Path(mobile_config.manifest_path),
+            )
+        except Exception as exc:
+            return CheckResult(
+                name=name,
+                status=CheckStatus.FAIL,
+                level=CheckLevel.RECOMMENDED,
+                message=f"mobile device access manifest无效：{type(exc).__name__}",
+                fix_hint="修复项目内mobile device access manifest后重试",
+            )
+        return CheckResult(
+            name=name,
+            status=CheckStatus.PASS,
+            level=CheckLevel.RECOMMENDED,
+            message=(
+                "原生iOS入口manifest有效："
+                f"web={masked_hostname(manifest.web_hostname)}，"
+                f"mobile={masked_hostname(manifest.mobile_hostname)}"
+            ),
         )
 
     async def check_front_door_exposure(self) -> CheckResult:

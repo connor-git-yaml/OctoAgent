@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -34,7 +35,6 @@ from octoagent.gateway.services.notification import (
     NotificationPriority,
     NotificationService,
 )
-
 
 # ============================================================
 # Fixtures
@@ -77,11 +77,15 @@ class _FakeScheduler:
 
 
 @pytest_asyncio.fixture
-async def store_group(tmp_path: Path) -> StoreGroup:
+async def store_group(tmp_path: Path) -> AsyncIterator[StoreGroup]:
     db_path = str(tmp_path / "test.db")
     artifacts_dir = tmp_path / "artifacts"
     artifacts_dir.mkdir(exist_ok=True)
-    return await create_store_group(db_path, str(artifacts_dir))
+    group = await create_store_group(db_path, str(artifacts_dir))
+    try:
+        yield group
+    finally:
+        await group.close()
 
 
 @pytest.fixture
@@ -185,9 +189,7 @@ class TestStartupShutdown:
         svc = _build_service(store_group, notification_service)
         await svc.startup()
         await svc.shutdown()
-        svc._scheduler._scheduler.remove_job.assert_called_once_with(
-            DAILY_ROUTINE_JOB_ID
-        )
+        svc._scheduler._scheduler.remove_job.assert_called_once_with(DAILY_ROUTINE_JOB_ID)
 
     @pytest.mark.asyncio
     async def test_startup_idempotent(
@@ -218,9 +220,7 @@ class TestRoutineDisabled:
 
         await svc._run_daily_summary()
 
-        events = await store_group.event_store.get_events_for_task(
-            DAILY_ROUTINE_AUDIT_TASK_ID
-        )
+        events = await store_group.event_store.get_events_for_task(DAILY_ROUTINE_AUDIT_TASK_ID)
         event_types = [e.type for e in events]
         assert EventType.ROUTINE_TRIGGERED in event_types
         assert EventType.ROUTINE_SKIPPED in event_types
@@ -249,7 +249,9 @@ class TestRoutineFailure:
 
         notif = _CapturingNotif()
         svc = _build_service(
-            store_group, notif, user_md='- **routine_active**: "true"'  # type: ignore[arg-type]
+            store_group,
+            notif,
+            user_md='- **routine_active**: "true"',  # type: ignore[arg-type]
         )
         await svc.startup()
 
@@ -260,9 +262,7 @@ class TestRoutineFailure:
 
         await svc._run_daily_summary()  # 不崩
 
-        events = await store_group.event_store.get_events_for_task(
-            DAILY_ROUTINE_AUDIT_TASK_ID
-        )
+        events = await store_group.event_store.get_events_for_task(DAILY_ROUTINE_AUDIT_TASK_ID)
         failed = [e for e in events if e.type == EventType.ROUTINE_FAILED]
         assert len(failed) == 1
 
@@ -293,12 +293,8 @@ class TestEmptyData:
         await svc.startup()
         await svc._run_daily_summary()
 
-        events = await store_group.event_store.get_events_for_task(
-            DAILY_ROUTINE_AUDIT_TASK_ID
-        )
-        completed_events = [
-            e for e in events if e.type == EventType.ROUTINE_COMPLETED
-        ]
+        events = await store_group.event_store.get_events_for_task(DAILY_ROUTINE_AUDIT_TASK_ID)
+        completed_events = [e for e in events if e.type == EventType.ROUTINE_COMPLETED]
         assert len(completed_events) == 1
         payload = completed_events[0].payload
         assert payload["worker_count"] == 0
@@ -338,6 +334,7 @@ class TestAttentionCountAlgorithm:
         # 创建昨日范围内的 5 个 task（按 UTC 计算，确保落入 _compute_yesterday_range_utc）
         now_utc = datetime.now(UTC)
         from datetime import timedelta
+
         yesterday_noon = now_utc - timedelta(days=1)
         yesterday_noon = yesterday_noon.replace(hour=12, minute=0, second=0, microsecond=0)
 
@@ -348,15 +345,11 @@ class TestAttentionCountAlgorithm:
         await _create_task(store_group, "t-run", yesterday_noon, TaskStatus.RUNNING)
         await store_group.conn.commit()
 
-        svc = _build_service(
-            store_group, notification_service, llm_return="测试摘要内容。"
-        )
+        svc = _build_service(store_group, notification_service, llm_return="测试摘要内容。")
         await svc.startup()
         await svc._run_daily_summary()
 
-        events = await store_group.event_store.get_events_for_task(
-            DAILY_ROUTINE_AUDIT_TASK_ID
-        )
+        events = await store_group.event_store.get_events_for_task(DAILY_ROUTINE_AUDIT_TASK_ID)
         completed = [e for e in events if e.type == EventType.ROUTINE_COMPLETED]
         assert len(completed) == 1
         payload = completed[0].payload
@@ -366,12 +359,17 @@ class TestAttentionCountAlgorithm:
 
     def test_attention_statuses_set_definition(self) -> None:
         """SD-7 校正实证：attention_statuses 4 个 TaskStatus 值，无 'escalated'。"""
-        assert ATTENTION_TASK_STATUSES == frozenset({
-            TaskStatus.WAITING_INPUT,
-            TaskStatus.WAITING_APPROVAL,
-            TaskStatus.PAUSED,
-            TaskStatus.FAILED,
-        })
+        assert (
+            frozenset(
+                {
+                    TaskStatus.WAITING_INPUT,
+                    TaskStatus.WAITING_APPROVAL,
+                    TaskStatus.PAUSED,
+                    TaskStatus.FAILED,
+                }
+            )
+            == ATTENTION_TASK_STATUSES
+        )
 
 
 # ============================================================
@@ -396,9 +394,7 @@ class TestPriorityElevation:
         await _create_task(store_group, "t-fail", yesterday_noon, TaskStatus.FAILED)
         await store_group.conn.commit()
 
-        svc = _build_service(
-            store_group, notification_service, llm_return="昨日 1 任务失败。"
-        )
+        svc = _build_service(store_group, notification_service, llm_return="昨日 1 任务失败。")
         await svc.startup()
         await svc._run_daily_summary()
 
@@ -406,12 +402,8 @@ class TestPriorityElevation:
         telegram_ch, web_ch = notification_service._channels
         assert len(telegram_ch.calls) == 1
         # priority 通过 NOTIFICATION_DISPATCHED event 验证
-        events = await store_group.event_store.get_events_for_task(
-            DAILY_ROUTINE_AUDIT_TASK_ID
-        )
-        notif_events = [
-            e for e in events if e.type == EventType.NOTIFICATION_DISPATCHED
-        ]
+        events = await store_group.event_store.get_events_for_task(DAILY_ROUTINE_AUDIT_TASK_ID)
+        notif_events = [e for e in events if e.type == EventType.NOTIFICATION_DISPATCHED]
         assert len(notif_events) >= 1
         assert notif_events[-1].payload["priority"] == NotificationPriority.MEDIUM.value
 
@@ -428,7 +420,7 @@ class TestEventChain:
         store_group: StoreGroup,
         notification_service: NotificationService,
     ) -> None:
-        """AC-E1 + AC-F1：完整流程 ROUTINE_TRIGGERED → ROUTINE_COMPLETED + NOTIFICATION_DISPATCHED。"""
+        """AC-E1 + AC-F1：完整 ROUTINE_TRIGGERED → COMPLETED → DISPATCHED 流程。"""
         from datetime import timedelta
 
         now_utc = datetime.now(UTC)
@@ -438,15 +430,11 @@ class TestEventChain:
         await _create_task(store_group, "t-1", yesterday_noon, TaskStatus.SUCCEEDED)
         await store_group.conn.commit()
 
-        svc = _build_service(
-            store_group, notification_service, llm_return="昨日完成 1 个任务。"
-        )
+        svc = _build_service(store_group, notification_service, llm_return="昨日完成 1 个任务。")
         await svc.startup()
         await svc._run_daily_summary()
 
-        events = await store_group.event_store.get_events_for_task(
-            DAILY_ROUTINE_AUDIT_TASK_ID
-        )
+        events = await store_group.event_store.get_events_for_task(DAILY_ROUTINE_AUDIT_TASK_ID)
         event_types_ordered = [e.type for e in events]
 
         # 必须含 TRIGGERED + COMPLETED + DISPATCHED
@@ -455,16 +443,12 @@ class TestEventChain:
         assert EventType.NOTIFICATION_DISPATCHED in event_types_ordered
 
         # ROUTINE_COMPLETED.elapsed_ms 应 > 0
-        completed = next(
-            e for e in events if e.type == EventType.ROUTINE_COMPLETED
-        )
+        completed = next(e for e in events if e.type == EventType.ROUTINE_COMPLETED)
         assert completed.payload["elapsed_ms"] >= 0
         assert completed.payload["worker_count"] == 1
 
         # NOTIFICATION_DISPATCHED 含 channels 字段（FR-B8）
-        notif = next(
-            e for e in events if e.type == EventType.NOTIFICATION_DISPATCHED
-        )
+        notif = next(e for e in events if e.type == EventType.NOTIFICATION_DISPATCHED)
         # 默认 summary_channels = ["telegram", "web_sse"]
         assert sorted(notif.payload.get("channels", [])) == ["telegram", "web_sse"]
 
@@ -499,12 +483,8 @@ class TestLLMFallback:
         await svc.startup()
         await svc._run_daily_summary()
 
-        events = await store_group.event_store.get_events_for_task(
-            DAILY_ROUTINE_AUDIT_TASK_ID
-        )
-        completed = next(
-            e for e in events if e.type == EventType.ROUTINE_COMPLETED
-        )
+        events = await store_group.event_store.get_events_for_task(DAILY_ROUTINE_AUDIT_TASK_ID)
+        completed = next(e for e in events if e.type == EventType.ROUTINE_COMPLETED)
         assert completed.payload["fallback"] is True
         assert completed.payload["llm_elapsed_ms"] is None
         # fallback 模板含 "昨日 Worker 摘要" 关键词
@@ -533,12 +513,8 @@ class TestLLMFallback:
         await svc.startup()
         await svc._run_daily_summary()
 
-        events = await store_group.event_store.get_events_for_task(
-            DAILY_ROUTINE_AUDIT_TASK_ID
-        )
-        completed = next(
-            e for e in events if e.type == EventType.ROUTINE_COMPLETED
-        )
+        events = await store_group.event_store.get_events_for_task(DAILY_ROUTINE_AUDIT_TASK_ID)
+        completed = next(e for e in events if e.type == EventType.ROUTINE_COMPLETED)
         assert completed.payload["fallback"] is True
 
 
@@ -652,7 +628,9 @@ class TestLLMPromptTokenBudget:
             hour=12, minute=0, second=0, microsecond=0
         )
         # 50 个 attention task（FAILED）每个 title 100 char ≈ 5000 char ≫ budget
-        long_title = "一个相当长的失败任务标题用来测试 attention task 优先级是否生效啊不行还得再长一点"
+        long_title = (
+            "一个相当长的失败任务标题用来测试 attention task 优先级是否生效啊不行还得再长一点"
+        )
         for i in range(50):
             await _create_task(
                 store_group,
@@ -711,26 +689,16 @@ class TestUserTimezoneResolver:
     def test_user_md_overrides_env(self, monkeypatch: Any) -> None:
         """AC-1：USER.md 有效时区优先于 env（USER.md is SoT）。"""
         monkeypatch.setenv("OCTOAGENT_USER_TIMEZONE", "Asia/Shanghai")
-        assert (
-            DailyRoutineService._resolve_user_timezone("America/New_York")
-            == "America/New_York"
-        )
+        assert DailyRoutineService._resolve_user_timezone("America/New_York") == "America/New_York"
 
-    def test_user_md_overrides_env_even_when_env_absent(
-        self, monkeypatch: Any
-    ) -> None:
+    def test_user_md_overrides_env_even_when_env_absent(self, monkeypatch: Any) -> None:
         monkeypatch.delenv("OCTOAGENT_USER_TIMEZONE", raising=False)
-        assert (
-            DailyRoutineService._resolve_user_timezone("Europe/London")
-            == "Europe/London"
-        )
+        assert DailyRoutineService._resolve_user_timezone("Europe/London") == "Europe/London"
 
     def test_env_fallback_when_user_md_none(self, monkeypatch: Any) -> None:
         """AC-2：USER.md 未提供（None）时降级到 env。"""
         monkeypatch.setenv("OCTOAGENT_USER_TIMEZONE", "Asia/Shanghai")
-        assert (
-            DailyRoutineService._resolve_user_timezone(None) == "Asia/Shanghai"
-        )
+        assert DailyRoutineService._resolve_user_timezone(None) == "Asia/Shanghai"
 
     def test_utc_when_both_absent(self, monkeypatch: Any) -> None:
         """AC-3：USER.md + env 均缺 → UTC。"""
@@ -888,9 +856,7 @@ class TestCronHotReload:
         monkeypatch.delenv("OCTOAGENT_USER_TIMEZONE", raising=False)
         project_root = tmp_path / "root"
         self._write_user_md(project_root, "08:30")
-        svc = _build_service(
-            store_group, notification_service, project_root=project_root
-        )
+        svc = _build_service(store_group, notification_service, project_root=project_root)
         await svc.startup()
         assert svc._registered_cron_key == ("30 8 * * *", "UTC")
 
@@ -910,9 +876,7 @@ class TestCronHotReload:
         monkeypatch.delenv("OCTOAGENT_USER_TIMEZONE", raising=False)
         project_root = tmp_path / "root"
         self._write_user_md(project_root, "08:30")
-        svc = _build_service(
-            store_group, notification_service, project_root=project_root
-        )
+        svc = _build_service(store_group, notification_service, project_root=project_root)
         await svc.startup()
         await svc._run_daily_summary()
         assert svc._scheduler._scheduler.add_job.call_count == 1  # 仅 startup 一次

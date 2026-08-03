@@ -188,10 +188,26 @@ test.describe.serial("F150 desktop Web Access", () => {
       await page
         .getByTestId(L1_TESTIDS.chatInput)
         .fill(`请回复一条远程访问验证消息 ${L1_WRITE_MARKER}`);
+      const assistantReplies = page
+        .getByTestId(L1_TESTIDS.chatMessageAssistant)
+        .filter({ hasText: L1_WRITE_REPLY });
+      const assistantReplyCountBefore = await assistantReplies.count();
       await page.getByTestId(L1_TESTIDS.chatSend).click();
+      await expect(assistantReplies).toHaveCount(assistantReplyCountBefore + 1, {
+        timeout: 30_000,
+      });
+      await expect(assistantReplies.last()).toBeVisible();
+
+      await page.goto(`${edge.url}/settings`);
+      const remoteAccessRegion = page.getByRole("region", {
+        name: "从电脑安全访问 Octo",
+      });
+      await expect(remoteAccessRegion).toBeVisible();
       await expect(
-        page.getByTestId(L1_TESTIDS.chatMessageAssistant).filter({ hasText: L1_WRITE_REPLY })
-      ).toBeVisible({ timeout: 30_000 });
+        remoteAccessRegion.getByRole("heading", { name: "远程访问尚未设置" })
+      ).toBeVisible();
+      await expect(remoteAccessRegion.getByText("本机使用不受影响。")).toBeVisible();
+      await expect(remoteAccessRegion.getByText("高级诊断")).toBeVisible();
 
       const storedOctoCredential = await page.evaluate(() => ({
         session: sessionStorage.getItem("octoagent.frontdoorToken.session"),

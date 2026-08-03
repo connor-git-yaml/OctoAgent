@@ -17,6 +17,14 @@ BENCHMARK_NODES = (
     "benchmarks/tests/unit/test_octo_runner.py::test_source_checkout_required_before_side_effects",
     "benchmarks/tests/unit/test_octo_runner.py::test_runner_fn_provider_error_maps_to_infra_error",
 )
+NODE24_ACTIONS = {
+    "actions/cache": "v5",
+    "actions/checkout": "v6",
+    "actions/setup-node": "v6",
+    "actions/setup-python": "v6",
+    "actions/upload-artifact": "v7",
+    "astral-sh/setup-uv": "11f9893b081a58869d3b5fccaea48c9e9e46f990",
+}
 
 
 def _workflow_documents() -> list[tuple[Path, dict[str, Any]]]:
@@ -121,52 +129,93 @@ def test_architecture_gate_runs_before_docs_fastpath_and_covers_docs_constitutio
     _fail("F151_CI_WIRING_MISSING", issues)
 
 
-def test_ci_uses_pr_base_or_push_before_sha_with_full_history() -> None:
+def test_ci_javascript_actions_use_node24_compatible_versions() -> None:
     issues: list[str] = []
-    architecture_entry = _jobs().get("architecture")
-    if architecture_entry is None:
-        _fail("F151_CI_WIRING_MISSING", ["architecture job missing"])
-        return
-    _, architecture = architecture_entry
-    steps = _steps(architecture)
-    checkout = next(
-        (step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")),
-        None,
-    )
-    checkout_with = checkout.get("with") if checkout else None
-    if not isinstance(checkout_with, dict) or checkout_with.get("fetch-depth") != "0":
-        issues.append("architecture checkout must use fetch-depth 0")
-    base_step = next(
-        (
-            step
-            for step in steps
-            if "github.event.pull_request.base.sha" in str(step.get("run", ""))
+    for path, document in _workflow_documents():
+        raw_jobs = document.get("jobs")
+        assert isinstance(raw_jobs, dict)
+        for job_id, raw_job in raw_jobs.items():
+            assert isinstance(raw_job, dict)
+            for step in _steps(raw_job):
+                uses = str(step.get("uses", ""))
+                for action, expected_major in NODE24_ACTIONS.items():
+                    if uses.startswith(f"{action}@") and uses != f"{action}@{expected_major}":
+                        issues.append(
+                            f"{path.name}:{job_id}:{action} must use {expected_major}, got {uses}"
+                        )
+    _fail("F151_CI_NODE24_ACTIONS_MISSING", issues)
+
+
+def test_ci_uses_pr_base_master_before_or_branch_merge_base_with_full_history() -> None:
+    issues: list[str] = []
+    jobs = _jobs()
+    entries = {
+        "architecture": jobs.get("architecture"),
+        "backend coverage": next(
+            (
+                value
+                for value in jobs.values()
+                if "check-changed-lines-coverage.py" in _run_text(value[1])
+            ),
+            None,
         ),
-        None,
-    )
-    if base_step is None:
-        issues.append("architecture base resolver missing")
-    else:
+    }
+    for label, entry in entries.items():
+        if entry is None:
+            issues.append(f"{label} job missing")
+            continue
+        _, job = entry
+        steps = _steps(job)
+        checkout = next(
+            (step for step in steps if str(step.get("uses", "")).startswith("actions/checkout@")),
+            None,
+        )
+        checkout_with = checkout.get("with") if checkout else None
+        if not isinstance(checkout_with, dict) or checkout_with.get("fetch-depth") != "0":
+            issues.append(f"{label} checkout must use fetch-depth 0")
+        base_step = next(
+            (
+                step
+                for step in steps
+                if "github.event.pull_request.base.sha" in str(step.get("run", ""))
+            ),
+            None,
+        )
+        if base_step is None:
+            issues.append(f"{label} base resolver missing")
+            continue
         resolver = str(base_step.get("run", ""))
         required = (
             "github.event_name",
             "github.event.pull_request.base.sha",
+            "github.ref_name",
+            '== "master"',
             "github.event.before",
-            "HEAD^",
-            "git merge-base",
+            "git fetch origin master",
+            "git merge-base origin/master HEAD",
             "GITHUB_OUTPUT",
         )
         issues.extend(
-            f"architecture base resolver missing {token}"
-            for token in required
-            if token not in resolver
+            f"{label} base resolver missing {token}" for token in required if token not in resolver
         )
-        if "origin/master" in resolver:
-            issues.append("all-zero push fallback must use HEAD^, not a remote branch")
+        ordered = (
+            '== "pull_request"',
+            'elif [[ "${{ github.ref_name }}" == "master" ]]',
+            'BASE="${{ github.event.before }}"',
+            "git fetch origin master:refs/remotes/origin/master --quiet",
+            'BASE="$(git merge-base origin/master HEAD)"',
+        )
+        positions = [resolver.find(token) for token in ordered]
+        if any(position < 0 for position in positions) or positions != sorted(positions):
+            issues.append(f"{label} PR/master/branch base resolver order is not exact")
+        if resolver.count('BASE="${{ github.event.before }}"') != 1:
+            issues.append(f"{label} event.before must be owned only by master push")
+        if resolver.count('BASE="$(git merge-base origin/master HEAD)"') != 1:
+            issues.append(f"{label} branch merge-base assignment must be unique")
         step_id = str(base_step.get("id", ""))
-        command = _run_text(architecture)
+        command = _run_text(job)
         if not step_id or f"steps.{step_id}.outputs.base" not in command:
-            issues.append("architecture command does not consume resolved merge-base output")
+            issues.append(f"{label} command does not consume resolved base output")
     _fail("F151_CI_WIRING_MISSING", issues)
 
 

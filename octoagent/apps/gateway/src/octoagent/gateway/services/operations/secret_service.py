@@ -399,6 +399,11 @@ class SecretService:
             )
 
     async def _ensure_migration_ready(self) -> None:
+        if self._store_group is not None:
+            # Gateway 注入的 StoreGroup 已在应用启动时完成 schema/migration。
+            # 再开一个迁移连接会与当前请求持有的 SQLite 事务争抢写锁，
+            # 让 setup-governance 每次等待完整 busy timeout 后才降级。
+            return
         migration = ProjectWorkspaceMigrationService(self._root)
         await migration.ensure_default_project()
 

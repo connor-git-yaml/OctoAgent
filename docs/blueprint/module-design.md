@@ -124,11 +124,13 @@ Worker 类型与专长（Orchestrator Router 据此派发）：
 - **F098 关闭 D14 Worker↔Worker 硬禁止**：删除 `_enforce_child_target_kind_policy`；Worker 现在可委托 Worker（A2A 真 P2P 模式，H3-B）
 - 未来允许用户直连 Worker，但必须创建独立 `worker_direct` session，并维持独立 memory / recall / policy / audit 链
 
-worker 的最小端点：
-- `POST /a2a/run`（TASK）
-- `POST /a2a/update`（UPDATE）
-- `POST /a2a/cancel`（CANCEL）
-- `GET /health`
+worker 的逻辑消息面：
+
+- `TASK / UPDATE / CANCEL / RESULT / ERROR / HEARTBEAT` 通过进程内
+  `A2AMessage + DispatchEnvelope + A2AConversation` 编排与持久化；
+- Worker health、状态与取消由同一 Gateway control plane/runtime service 暴露；
+- 当前没有 `POST /a2a/run`、`/a2a/update`、`/a2a/cancel` 或 Worker 专用
+  `/health` 这组独立网络服务端点，Blueprint 不为未来物理拆分预造假 API。
 
 ### 9.6 packages/protocol
 
@@ -153,39 +155,47 @@ worker 的最小端点：
 - `ArtifactMapper.to_a2a(artifact) → a2a_artifact`
 - `worker.ask_back(...)` / `worker.request_input(...)` / `worker.escalate_permission(...)`（F099 三工具，`ask_back_tools.py`）：统一 emit `CONTROL_METADATA_UPDATED` 审计事件；`escalate_permission` 走 ApprovalGate（F101 production 接入）
 
-### 9.7 packages/plugins
+### 9.7 User Plugin Loader（packages/skills + apps/gateway）
 
 职责：
-- Plugin manifest 解析
-- Plugin Loader（enable/disable）
-- Capability Graph（依赖解析、健康门禁）
-- 插件隔离策略（超时、崩溃熔断）
+
+- `packages/skills/src/octoagent/skills/plugins/`：`plugin.yaml` Pydantic manifest、
+  discovery、code-hash 与审批 marker；
+- `apps/gateway/services/plugin_registry.py`：实例级发现、enable/disable、approve、
+  refresh、git install/update/uninstall 与 ToolRegistry/SkillDiscovery 接线；
+- `apps/gateway/services/plugin_loader.py`：只有 code hash 已审批的 code plugin 才能
+  namespaced import；工具名冲突拒载，失败事务回滚；
+- `apps/gateway/services/plugin_watcher.py`：热重载；单 plugin 失败隔离，不拖垮
+  Gateway；
+- 默认实例目录是 `~/.octoagent/plugins`，可由 `OCTOAGENT_PLUGINS_DIR` 覆盖；
+  仓库当前没有独立 `packages/plugins` workspace，也没有要求每个 plugin 启动
+  HTTP health service。
 
 Manifest 示例：
 
 ```yaml
-id: "channel.telegram"
+name: "example-tools"
 version: "0.1.0"
-type: "channel"
-requires:
-  - "core>=0.1"
-  - "provider.litellm"
-capabilities:
-  - "channel.ingest"
-  - "channel.send"
-healthcheck:
-  kind: "http"
-  url: "http://localhost:9001/health"
-config_schema:
-  ...
+description: "示例用户插件"
+author: "owner"
+repo: "https://example.invalid/example-tools.git"
+provides:
+  skills: ["example-skill"]
+  behavior: ["KNOWLEDGE.md"]
+  tools: ["tools.py"]
+  hooks: true
+  extensions: []
 ```
 
-`plugins/` 实现目录约定（实际插件放在 repo 顶层 `plugins/` 下）：
+实例目录约定：
 
-- 每个插件一个子目录，包含 `manifest.yaml` + Python 模块
-- 目录结构示例：`plugins/channels/telegram/`（manifest.yaml + adapter.py）
-- 插件实现依赖 `packages/plugins` 提供的 Loader / Manifest 解析能力
-- Channel 插件须实现 `ChannelAdapter` 协议；Tool 插件须实现 `ToolMeta` 声明
+- 每个 plugin 是 `~/.octoagent/plugins/<kebab-name>/` 下含 `plugin.yaml` 的一级目录；
+- `provides.skills` 指向 `skills/<name>/SKILL.md`，`provides.behavior` 只允许当前
+  allowlist，`provides.tools` 指向审批后才会 import 的 `ToolEntry` 模块；
+- 目录名必须等于 manifest `name`，symlink/path escape、未知制品、name collision、
+  threat scan 命中或 code approval 缺失均 fail closed；
+- 渠道不是 User Plugin Loader 的假想 HTTP plugin；Telegram/Web/Slack/Discord
+  继续由 Gateway `ChannelAdapter + PlatformRegistry` 承载。
 
 ### 9.8 packages/tooling
 
@@ -220,14 +230,16 @@ capability_pack 下沉，生产 TTL 实现在 packages/policy）。三层职责�
 - alias 与策略（router/extractor/planner/executor/summarizer 仍在用）
 - 详见 [codebase-architecture/provider-direct-routing.md](../codebase-architecture/provider-direct-routing.md)
 
-### 9.11 packages/observability
+### 9.11 Observability（Gateway middleware + Event Store）
 
 职责：
 
-- Logfire init（自动 instrument Pydantic AI / FastAPI）
-- structlog 配置（dev pretty / prod JSON）
+- `apps/gateway/middleware/logging_config.py` 负责 Logfire init 与 structlog 配置
 - 统一 trace_id 贯穿 event payload
-- Event Store metrics 查询辅助（cost/tokens 聚合）
+- Event Store 与控制面查询负责 cost/tokens 等运行事实聚合
+
+当前仓库没有独立 `packages/observability` workspace；可观测能力横跨 Gateway
+middleware、Provider 记账与 Core Event Store，不能把历史目标目录写成现役包。
 
 ### 9.12 frontend/（React + Vite Web UI）
 

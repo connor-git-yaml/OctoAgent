@@ -82,3 +82,16 @@ class AuthenticationError(ProviderError):
         super().__init__(message, recoverable=True)
         self.status_code = status_code
         self.provider = provider
+
+
+def is_provider_auth_error(error: Exception) -> bool:
+    """判断异常是否表示无法通过重试或 Echo fallback 修复的认证失败。
+
+    OAuth profile 缺失/过期等错误可能在 HTTP 请求前抛出 ``CredentialError``；
+    Provider HTTP 认证失败则通过 ``AuthenticationError`` 或带 401/403
+    ``status_code`` 的统一调用异常到达。这里统一分类，避免不同调用层各自遗漏。
+    """
+
+    if isinstance(error, (CredentialError, AuthenticationError)):
+        return True
+    return getattr(error, "status_code", None) in (401, 403)

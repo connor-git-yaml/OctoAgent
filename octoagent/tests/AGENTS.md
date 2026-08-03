@@ -145,6 +145,15 @@ conftest blanket——确定性套件抖动 = 真 bug 或入册，rerun 掩盖�
 - **changed-lines ≥90%**：`check-changed-lines-coverage.py` 用 git diff 新增行 ∩ lcov
   机械计算；范围 = `packages/*/src` + `apps/gateway/src` 的 `.py`；存量不背债；
   范围内新文件无任何覆盖记录 = 按 0 计（新模块必须有测试 import）。
+- **分支累计 base**：Pull Request 使用目标分支 base SHA，`master` push 使用
+  `github.event.before`；其他分支 push 必须使用 `merge-base(origin/master, HEAD)`，累计
+  覆盖全部未合入生产差异。禁止只检查最后一次 push，因为 test/docs-only 后续提交会
+  遗忘此前失败的生产变更并产生假绿。
+- **coverage 启动前禁止 eager production import**：pytest11 entry-point 插件必须放在
+  轻量 namespace 根，顶层不得导入对应 production package；真正 gate import 延迟到
+  `pytest_configure`。否则 pytest 扫描插件时会先执行 package `__init__`，让大量生产定义
+  行在 pytest-cov 启动前加载并被错误记为 0 覆盖。插件布线测试必须用 fresh interpreter
+  断言导入 entry point 后对应 production package 仍不在 `sys.modules`。
 - escape hatch：HEAD commit message 加 `[cov-exempt]`（附原因）——与 `SKIP_E2E` 同级的
   显式可见 bypass，治「忘」不治「恶」（单人仓威胁模型），CI 日志大声记录。
 - scope 底线 / 棘轮两重门显式 defer（引入成本高；changed-lines 单条 ROI 最高——M9 审计拍板）。

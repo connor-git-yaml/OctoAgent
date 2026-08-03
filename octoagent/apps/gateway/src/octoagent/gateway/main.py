@@ -52,11 +52,13 @@ from .routes import (
     chat,
     consolidation_candidates,
     control_plane,
+    device_trust,
     execution,
     files,
     health,
     memory_candidates,
     message,
+    mobile_health,
     notifications,
     operator_inbox,
     ops,
@@ -77,6 +79,7 @@ from .services.delegation_plane import DelegationPlaneService  # noqa: F401
 from .services.frontdoor_auth import FrontDoorGuard  # noqa: F401
 from .services.frontdoor_exposure import validate_front_door_exposure
 from .services.llm_service import LLMService  # noqa: F401
+from .services.mobile_device_access import MobileDeviceAccessMiddleware
 from .services.mcp_registry import McpRegistryService  # noqa: F401
 from .services.operator_actions import OperatorActionService  # noqa: F401
 from .services.operator_inbox import OperatorInboxService  # noqa: F401
@@ -529,6 +532,7 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
     # 注册中间件（顺序：先 Trace 后 Logging）
     app.add_middleware(TraceMiddleware)
     app.add_middleware(LoggingMiddleware)
+    app.add_middleware(MobileDeviceAccessMiddleware)
 
     # 初始化日志
     setup_logging()
@@ -551,6 +555,9 @@ def create_app(*, harness_factory: Any | None = None) -> FastAPI:
     app.include_router(execution.router, tags=["execution"], dependencies=protected)
     app.include_router(stream.router, tags=["stream"], dependencies=protected)
     app.include_router(health.router, tags=["health"])
+    app.include_router(device_trust.router)
+    app.include_router(device_trust.mobile_router)
+    app.include_router(mobile_health.router)
     # OAuth 回调路由（不需要 front door auth，OAuth redirect 不携带 auth token）
     app.include_router(auth_callback.router, tags=["auth"])
     app.include_router(ops.router, tags=["ops"], dependencies=protected)

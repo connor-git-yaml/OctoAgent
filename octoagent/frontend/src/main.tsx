@@ -12,6 +12,8 @@ import "./index.css";
 // v2 主题层与工作台布局——末位导入，覆盖 index.css 深色媒体块
 import "./styles/theme-v2.css";
 import "./styles/workbench-v2.css";
+import "./styles/claude-workbench.css";
+import "./styles/claude-surfaces.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

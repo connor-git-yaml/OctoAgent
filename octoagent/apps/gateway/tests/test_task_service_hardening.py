@@ -392,6 +392,35 @@ class TestTaskServiceHardening:
         assert failed_events[0].payload["error_type"] == "LLMCallError"
         assert failed_events[0].payload["error_category"] == "auth_error"
 
+    async def test_preflight_credential_failure_marks_auth_category(self, service_with_store):
+        """HTTP 前的 OAuth refresh 失败也必须是 auth_error 并快速终止。"""
+        from octoagent.provider.exceptions import CredentialExpiredError
+
+        service, store_group, runtime_llm = service_with_store
+        task_id, _ = await service.create_task(
+            NormalizedMessage(
+                text="auth-fail-preflight",
+                idempotency_key="auth-fail-preflight-001",
+            )
+        )
+
+        class PreflightAuthBrokenLLM:
+            async def call(self, *args, **kwargs):
+                raise CredentialExpiredError("refresh_token_reused")
+
+        runtime_llm.delegate = PreflightAuthBrokenLLM()
+        await service.process_task_with_llm(task_id=task_id, user_text="hello")
+
+        task = await store_group.task_store.get_task(task_id)
+        assert task is not None
+        assert task.status == TaskStatus.FAILED
+
+        events = await store_group.event_store.get_events_for_task(task_id)
+        failed_events = [event for event in events if event.type == EventType.MODEL_CALL_FAILED]
+        assert len(failed_events) == 1
+        assert failed_events[0].payload["error_type"] == "CredentialExpiredError"
+        assert failed_events[0].payload["error_category"] == "auth_error"
+
     async def test_llm_failure_while_waiting_approval_keeps_state(self, service_with_store):
         """LLM 失败时 task 已进 WAITING_APPROVAL → 不得强推 FAILED。
 

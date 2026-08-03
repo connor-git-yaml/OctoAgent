@@ -162,7 +162,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [x] 一键安装 / 一键升级 / 迁移修复（installer + updater + doctor/migrate）
 - [x] 统一配置与 Secret Store（Provider / Channel / Model / Gateway 一体化向导，环境变量退居高级路径）
 - [x] Project / Workspace 一等公民（project = instructions + memory + secrets + files + channel/A2A bindings 的统一隔离单位）
-- [~] WorkerProfile / capability pack 与主 Agent Profile + Context Continuity 主链已具备骨架；Butler/Worker 的全 Agent session/memory/recall parity 仍待补齐
+- [x] 统一 AgentProfile / capability pack 与主 Agent Context Continuity 主链已落地；F093-F096 已关闭主 Agent/Worker 的 session/memory/recall parity，F117 已把 WorkerProfile 合并进 `AgentProfile(kind=worker)`
 - [x] Telegram / Web 控制命令面（`approve` / model 切换 / skill 调用 / subagent 控制 / status）
 - [x] 用户友好的 Web 管理台（dashboard / agents / memory / permissions / secrets / runtime status）
 - [x] Session / Chat Lifecycle Center（history / export / queue / focus / reset / interrupt / resume）
@@ -177,7 +177,7 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - [x] ToolIndex（向量检索）+ 动态工具注入
 - [x] Skill Pipeline Engine（关键子流程固化、可回放）+ 多 Worker 类型（ops/research/dev）+ Orchestrator 智能派发 / Work 合并
 - [x] Feature 031：M3 User-Ready E2E Acceptance（正式 release gates、迁移演练、最终验收报告）
-- [~] Feature 033：Agent Profile + Bootstrap + Context Continuity（Butler 主链已接入 profile / context frame / recent context / memory retrieval；Worker runtime continuity 与独立 session 仍待补齐）
+- [x] Feature 033：Agent Profile + Bootstrap + Context Continuity（主 Agent 主链已接入 profile / context frame / recent context / memory retrieval；Worker continuity 与独立 session 已由 F093-F096 闭环）
 - [~] Feature 038：Agent Memory Recall Optimization（project-scoped recall 主链、agent-private namespace、worker hint-first recall runtime 已打通；仍待更细粒度 user-facing evidence）
 - [ ] 多端远程节点 / companion surfaces（按需引入，留给 M4）
 
@@ -196,14 +196,14 @@ M2 执行约束（2026-03-06 OpenClaw / Agent Zero 可用性复核）：
 - 2026-03-14 产品化纠偏：`/memory` 必须先经过用户态 display model，再展示 current memory / vault refs / derived 结果；不得把 raw projection、技术写回或占位摘要直接暴露给用户。
 - 2026-03-14 配置纠偏：Memory 设置原要求显式支持三条路径（已于 2026-03-17 简化为 `local_only` 单一模式，MemU bridge 实现已整体移除）。
 - 2026-03-10 M4 升级波次已启动：Feature 035 已落地 guided workbench shell 与五个主页面骨架；Feature 036 已落地 setup-governance 资源与 review/profile/policy 主链；Feature 037 已完成 runtime lineage hardening；Feature 039 已完成 supervisor-only 主 Agent、worker review/apply 与 message-native A2A 主链。
-- 2026-03-12 起持续补齐的 Feature 041 已把 ambient current time、Butler-owned freshness delegation、worker governed web/tool readiness、worker private recall、缺城市追问、backend unavailable 降级与 runtime truth/workbench 可视化收口到同一主链；041 现已完成签收。
+- 2026-03-12 起持续补齐的 Feature 041 已把 ambient current time、主 Agent-owned freshness delegation、worker governed web/tool readiness、worker private recall、缺城市追问、backend unavailable 降级与 runtime truth/workbench 可视化收口到同一主链；041 现已完成签收。
 - front-door `loopback` 模式已补充对常见代理转发 header 的 fail-closed 拒绝，降低"本机反向代理误暴露 = owner-facing API 被放行"的风险。
 
 2026-03-13 架构复核纠偏（基于 live usage + Agent Zero + OpenClaw 对标）：
 
 - 当前实现已具备 `project / profile / work graph / dispatch envelope / memory recall` 的骨架，但运行语义仍偏向"单主 Agent + preflight 路由 + worker 直调"
-- 这与目标中的"Butler 拥有自己的 session/memory/recall，并通过 message-native A2A 与拥有独立 session/memory/recall 的 Worker 通信"仍有语义差距
-- 自本次复核起，Feature 033 / 038 / 039 / 041 的后续验收以"每个 Agent 都有完整上下文系统 + Butler ↔ Worker 真 A2A roundtrip + Worker 默认不直读用户主会话"为准
+- 当时这与目标中的“主 Agent 拥有自己的 session/memory/recall，并通过 message-native A2A 与拥有独立 session/memory/recall 的 Worker 通信”仍有语义差距；该差距后来由 F093-F096 关闭
+- 自本次复核起，Feature 033 / 038 / 039 / 041 的后续验收以“每个 Agent 都有完整上下文系统 + 主 Agent ↔ Worker 真 A2A roundtrip + Worker 默认不直读用户主会话”为准
 - Agent Zero 的 `project = instructions + memory + secrets + subagent settings + workspace` 设计被明确吸收为 `Project` 根隔离单位
 - OpenClaw 的 `agentId + sessionKey` 维度、按 session 的 compaction / usage / metadata 管理被明确吸收为 `AgentSession` 设计基线
 
@@ -212,14 +212,14 @@ M3 产品化约束（基于 OpenClaw / Agent Zero 调研）：
 - 安装、配置、首聊、管理台打开必须是一条连续路径；不能要求用户手工拼装多份 `.env`、Docker 命令和 channel token
 - secret 默认应集中收敛到统一 store，并提供 audit / reload / rotate / apply；环境变量只保留给 CI、容器编排和高级用户
 - `project/workspace` 必须成为 M3 的一等公民；instructions、memory、secrets、knowledge、files、A2A target 与 channel bindings 都应优先挂在 project 上，而不是散落为独立配置块
-- `AgentProfile` / `WorkerProfile` 必须是正式产品对象；session、automation、work delegation 必须引用 profile id 与 effective config snapshot，而不是把 prompt、模型、工具包、策略散落在多处
-- `AgentProfile` / owner basics / bootstrap / recent summary / memory retrieval 必须进入 Butler 与 Worker 的真实运行链；不能只在控制台、文档或 worker preflight 中存在
+- `AgentProfile` 必须是正式产品对象；Worker 配置由 `AgentProfile(kind=worker)` 承载，session、automation、work delegation 必须引用 profile id 与 effective config snapshot，而不是把 prompt、模型、工具包、策略散落在多处
+- `AgentProfile` / owner basics / bootstrap / recent summary / memory retrieval 必须进入主 Agent 与 Worker 的真实运行链；不能只在控制台、文档或 worker preflight 中存在
 - CLI / Web 共享同一 wizard session 与 config schema，避免出现"CLI 能做、Web 不能做"或两边语义不一致
 - Telegram / Web 必须共用同一命令/动作语义，不能出现"Web 能 approve，Telegram 只能看不能控"的半控制面
 - 用户与 Agent 的"会话"必须成为可管理对象，而不是仅把一切折叠成 task；history/export/focus/queue/reset/intervene 等生命周期操作要进入正式产品面
 - `AgentRuntime -> AgentSession -> Work/A2AConversation` 必须成为正式运行链；不得继续把 Worker 私有上下文压扁为 task metadata 或 runtime 临时对象
 - 每个 Agent 都必须拥有完整上下文栈：persona / project markdown / session recency / memory namespaces / recall frame / capability / scratchpad
-- Butler 当前必须是唯一 user-facing speaker；后续若开放 DirectWorkerSession，必须在产品面和数据模型中显式建模
+- 主 Agent 当前必须是唯一 user-facing speaker；后续若开放 direct-worker surface，必须使用显式 `AgentSession(kind=direct_worker)`，不得另造平行 Session 实体
 - automation / scheduler 必须是用户可理解、可操作、可回放的产品能力，而不是只在底层放一个 APScheduler job
 - 必须明确 `project -> agent runtime -> agent session -> work` 与 `project -> automation -> work` 两条继承链：project 提供默认 bindings，agent runtime 选择 profile 与 context policy，session/automation 决定交互边界，work 继承 effective config 并允许显式覆盖少数字段
 - 管理台优先复用成熟开源 UI primitives，而不是手写整套控件体系；配置中心、审批、恢复、Memory 浏览应统一在同一控制台
@@ -236,20 +236,16 @@ M3 核心对象关系（2026-03-08 补充）：
 | 对象 | 归属 / 作用域 | 主要承载 | 默认继承来源 | 说明 |
 |------|---------------|----------|--------------|------|
 | `Project` | 主 Agent / Worker 共同拥有的一级产品对象 | instructions、memory bindings、secret bindings、asset bindings、channel/A2A routing、`primary_agent_id`（主负责人） | system defaults | M3 的根隔离单位；每个 Project 同时只有一个活跃 Session（Project ↔ Session 一一对应）；Worker 无合适 Project 时可动态创建 |
-| `BehaviorWorkspace` | `system_shared / agent_private / project_shared / project_agent` 四层作用域 | `AGENTS.md / USER.md / TOOLS.md / BOOTSTRAP.md` 等共享规则文件、`IDENTITY.md / SOUL.md / HEARTBEAT.md` 等 Agent 私有文件、`PROJECT.md / KNOWLEDGE.md / instructions/*` 等项目行为文件、可见性、版本、effective source chain | system defaults + agent defaults + project overrides + project-agent overrides | 任意 Agent 的正式行为文件入口，不再围绕 Butler 特殊化 |
+| `BehaviorWorkspace` | `system_shared / agent_private / project_shared / project_agent` 四层作用域 | `AGENTS.md / USER.md / TOOLS.md / BOOTSTRAP.md` 等共享规则文件、`IDENTITY.md / SOUL.md / HEARTBEAT.md` 等 Agent 私有文件、`PROJECT.md / KNOWLEDGE.md / instructions/*` 等项目行为文件、可见性、版本、effective source chain | system defaults + agent defaults + project overrides + project-agent overrides | 任意 Agent 的正式行为文件入口，不围绕主 Agent 特殊化 |
 | `AgentProfile` | system 或 project 作用域的可复用模板 | persona、instruction overlays、model route、tool profile、capability refs、policy refs、budget defaults | project | 主 Agent / Worker runtime 的静态模板 |
-| `WorkerProfile` | project 作用域的可复用模板 | worker role、bootstrap、工具集合、权限集合、能力集合 | project + AgentProfile | WorkerRuntime 的静态模板；Worker 是持久化角色，类似 Agent Zero 的 Agent0 |
 | `AgentRuntime` | 严格隶属于一个 project | agent identity、effective config、persona、capability、memory namespace bindings | project + selected profile | 主 Agent 或 Worker 的长期运行实体 |
-| `ButlerSession` | 严格隶属于一个 ButlerRuntime | 用户 ↔ Butler 对话、history、queue、focus、rolling summary | project + ButlerRuntime | 当前阶段唯一 user-facing session；与 Project 一一对应 |
-| `WorkerSession` | 严格隶属于一个 WorkerRuntime | Butler ↔ Worker 内部对话、worker recency、tool/evidence summary、compaction | project + WorkerRuntime + A2AConversation | 默认 internal-only，不直接面向用户 |
-| `DirectWorkerSession` | 严格隶属于一个 WorkerRuntime | 用户 ↔ Worker 直接对话 | project + WorkerRuntime | 后续扩展能力；当前不默认开放 |
-| `SubagentSession` | 严格隶属于一个 WorkerSession | Worker ↔ Subagent 临时对话 | Worker 的 Project + WorkerRuntime | Subagent 不拥有 Project，共享 Worker 的 Project 上下文；任务完成后整个 session 可回收 |
+| `AgentSession` | 严格隶属于一个 AgentRuntime | `main_bootstrap / worker_internal / direct_worker / subagent_internal / automation_internal / user_channel` 会话、history、focus、rolling summary 与 memory cursor | project + AgentRuntime + 可选 A2AConversation/Work | 单一正式 Session 模型；main 是当前 user-facing 主链，worker/subagent 默认 internal-only |
 | `Automation` | 严格隶属于一个 project | schedule、trigger、target、run history、effective config snapshot | project + selected runtime/profile | 可创建 session 或直接派生 work |
-| `Work` | 隶属于一个 ButlerSession / WorkerSession / Automation | delegation graph、owner、children、artifacts、budget、state | session 或 automation | 执行与委派单元，不再兼职承载 Agent 私有会话 |
-| `A2AConversation` | 隶属于一个 Work | Butler ↔ Worker / Worker ↔ Subagent 消息往返、context capsule、message lineage | Work + source/target sessions | 多 Agent 运行链的一等对象；Subagent 的 A2AConversation 在任务完成后可归档或删除 |
+| `Work` | 隶属于一个 AgentSession / Automation | delegation graph、owner、children、artifacts、budget、state | session 或 automation | 执行与委派单元，不再兼职承载 Agent 私有会话 |
+| `A2AConversation` | 隶属于一个 Work | 主 Agent ↔ Worker / Worker ↔ Subagent 消息往返、context capsule、message lineage | Work + source/target AgentSession | 多 Agent 运行链的一等对象；Subagent 的 A2AConversation 在任务完成后可归档或删除 |
 | `MemoryNamespace` | project 或 agent 作用域 | shared memory / private memory / partition bindings | project 或 agent runtime | 支撑 SoR / Fragments / Vault |
 | `RecallFrame` | 单次响应或单次 A2A 交互 | session recency、memory hits、artifact evidence、provenance | AgentSession + MemoryNamespace + Work | "当前问题真正取回了什么"的 durable 证明 |
-| `RuntimeHintBundle` | 单次 Butler/Worker/Subagent 响应 | 当前时间、surface、tool availability、confirmed facts、user defaults、最近失败限制、RecentConversation 摘要 | session + project + runtime | 供 Agent 进行 `direct / ask / delegate / best-effort` 判断，而不是让代码写场景树 |
+| `RuntimeHintBundle` | 单次主 Agent/Worker/Subagent 响应 | 当前时间、surface、tool availability、confirmed facts、user defaults、最近失败限制、RecentConversation 摘要 | session + project + runtime | 供 Agent 进行 `direct / ask / delegate / best-effort` 判断，而不是让代码写场景树 |
 
 BehaviorWorkspace 设计补充（2026-03-15，2026-03-21 更新）：
 
@@ -315,20 +311,20 @@ $PROJECT_ROOT (~/.octoagent)/
 - 新机器从安装脚本或 App 入口开始，在 10 分钟内完成安装、统一向导配置、dashboard 打开和首条消息验证；过程中不要求用户手工维护多处环境变量
 - 升级路径支持 doctor/migrate/preflight，失败时可给出回滚或恢复建议；用户可从 CLI 或 Web 发起一键升级
 - 用户可以创建 / 选择 / 切换 project，并让 project 统一承载 instructions、memory mode、secrets bindings、knowledge/files、channel/A2A routing
-- 用户可以为 project 选择默认 `AgentProfile` / `WorkerProfile`，并让 runtime / session / automation / work 展示继承后的 effective config；跨 project 切换时不得串用 secrets、memory 或 profile
-- Butler 与 Worker 的每次实际响应都必须消费各自的 profile/bootstrap/recent summary/memory retrieval 形成的 context frame，而不是只基于当前一句话
+- 用户可以为 project 选择默认 `AgentProfile`（含 `kind=worker`），并让 runtime / session / automation / work 展示继承后的 effective config；跨 project 切换时不得串用 secrets、memory 或 profile
+- 主 Agent 与 Worker 的每次实际响应都必须消费各自的 profile/bootstrap/recent summary/memory retrieval 形成的 context frame，而不是只基于当前一句话
 - 用户可以在 Web 或 CLI 中查看并编辑当前 project 的核心 behavior files（至少 `AGENTS.md / USER.md / PROJECT.md / TOOLS.md`），并看到每次运行的 effective behavior source
 - 当前阶段 Web 已把行为文件管理入口收口到 `Agents` 页的 `Behavior Center`；CLI 提供 `octo behavior ls/show/init/edit/diff/apply --agent ...` 作为 canonical 管理入口
 - Telegram 与 Web 都可以完成最基本的控制命令：approve、model 切换、skill 调用、subagent/work 控制、状态查询
 - Web 管理台可以完成 provider/channel 配置、device pairing、agents / memory / permissions / secrets 管理、任务查看、backup/restore dry-run、memory 浏览与证据追溯，不再依赖终端作为唯一操作面
-- 用户可以在正式的 session/chat center 中完成 ButlerSession / WorkerSession 的 history/export、queue、focus/unfocus、reset/new、interrupt/resume 等日常会话操作
+- 用户可以在正式的 session/chat center 中完成各类 `AgentSession` 的 history/export、queue、focus/unfocus、reset/new、interrupt/resume 等日常会话操作
 - 用户可以创建 recurring automation / scheduler job，查看 run history，并把任务明确绑定到某个 project / channel / target
 - Project 至少提供 asset manifest 的 upload / list / inspect / bind 路径，使 knowledge/files/artifacts 能稳定挂载到 project，而不是只停留在目录约定
 - runtime diagnostics console 可以查看 health、logs、event stream、provider/model 状态、usage/cost、worker/subagent/work graph 执行态与最近失败原因
 - Vault 分区默认不可检索，授权后可查且带证据链
 - 多模态记忆、Category、ToM 等高级能力通过 Memory backend 提供，其输出必须可追溯、可审核，并通过 SoR/WriteProposal 治理落盘
-- Butler 能创建/管理/合并 Work，能把 Work 派发给 Worker / Subagent / ACP-like runtime / Graph Agent，且整条委派链可审计、可中断、可降级
-- Butler ↔ Worker 的委派链必须能在控制台中看到 `A2AConversation + A2AMessage + WorkerSession + RecallFrame`，而不是只有 `WORKER_DISPATCHED`
+- 主 Agent 能创建/管理/合并 Work，能把 Work 派发给 Worker / Subagent / ACP-like runtime / Graph Agent，且整条委派链可审计、可中断、可降级
+- 主 Agent ↔ Worker 的委派链必须能在控制台中看到 `A2AConversation + A2AMessage + AgentSession + RecallFrame`，而不是只有 `WORKER_DISPATCHED`
 - 默认行为判断必须由 `behavior files + runtime hints + agent decision` 形成主路径；代码只保留治理、权限和审计护栏，不得继续把天气/推荐/排期等场景扩张为硬编码分类树
 - automation 触发的 work 必须保留其继承来源（project / agent profile / budget / target），并能在控制台与事件链中解释"为什么使用这套配置"
 - ToolIndex 向量检索精度满足 top-5 命中率 > 80%，Skill Pipeline 可 checkpoint + 可回放 + 可中断（HITL），多 Worker 派发策略可解释且失败可降级回单 Worker 路径
@@ -336,7 +332,7 @@ $PROJECT_ROOT (~/.octoagent)/
 
 ### M3 Carry-Forward（Feature 033）：Agent Profile + Bootstrap + Context Continuity ✅ 已完成（M5 阶段 1 关闭）
 
-- 目标：把 `AgentProfile`、owner basics、bootstrap、recent session summary 和 long-term memory retrieval 真正接进 Butler 与 Worker 的运行链
+- 目标：把 `AgentProfile`、owner basics、bootstrap、recent session summary 和 long-term memory retrieval 真正接进主 Agent 与 Worker 的运行链
 - 这不是 M4 体验增强，而是当前多 Agent 系统"是否像长期助手组织而不是 stateless router + tools shell" 的基础门槛
 - **2026-05-25 关闭状态**：F093-F096 Worker 完整对等 4 维（Session / Memory / Behavior / Recall Audit）全部交付，Worker 侧的 session continuity / private memory / recall parity 已与主 Agent 对等
 - `GATE-M3-CONTEXT-CONTINUITY` ✅ 全 Agent 路径关闭（M5 阶段 1）
@@ -404,7 +400,7 @@ M4 约束：
 - 若系统已具备 delegated `web.search / web.fetch / browser.*` 路径，主 Agent/Worker 必须把"实时/外部事实问题"优先解释为可治理 delegation，而非退回"没有实时能力"
 - 默认行为主路径来自 `BehaviorWorkspace` 与 `RuntimeHintBundle`，由主 Agent 产出结构化决策；不得继续扩张硬编码分类树
 - 兼容路径必须显式标记为 compatibility fallback，在 work/request metadata 中暴露 provenance
-- live dispatch 必须经过 `MainAgentSession -> A2AConversation -> WorkerSession` 的 message-native 主链，保留 runtime context / work lineage
+- live dispatch 必须经过 `AgentSession(main_bootstrap) -> A2AConversation -> AgentSession(worker_internal|direct_worker)` 的 message-native 主链，保留 runtime context / work lineage
 - 每个 Agent 必须拥有完整上下文管理：session、Memory namespaces、recall、persona、project markdown、policy/tool/auth context 与 scratchpad
 - UX 收尾（074-076）以用户可感知的体验改进为目标，不引入新的后端架构变更
 - 本轮执行顺序与升级波次事实源，见 `docs/milestone/m4-feature-split.md`
@@ -491,7 +487,7 @@ M5 acceptance gate 全部关闭：
 
 #### M5 carry-forward gate 关闭
 
-- `GATE-M3-CONTEXT-CONTINUITY` ✅：Butler 主链 + Worker session continuity（F093）+ Worker memory parity（F094）+ Worker recall audit（F096）全部闭环
+- `GATE-M3-CONTEXT-CONTINUITY` ✅：主 Agent 主链 + Worker session continuity（F093）+ Worker memory parity（F094）+ Worker recall audit（F096）全部闭环
 - `GATE-M4-AGENT-RUNTIME-CONTINUITY` ✅：F093-F096 Worker 完整对等 4 维全部实现，主 Agent 与 Worker 上下文栈对等
 
 ---
@@ -685,8 +681,8 @@ M5 全部关闭后启动。原计划"M6 不做架构债清理"——但 **2026-0
 | Feature | 规模 | 一句话 | 波次 |
 |---------|------|--------|------|
 | **F148 设计系统 + Web 主工作台 v2** ✅ 完成（2026-07-20，9 commits ff push master；Codex spec+final 2 finding 全闭环 + Opus 自审 0 HIGH；438 vitest + L1 4/4 + tsc 0 + complexity 过）| L | 已交付：**Phase 0** `tokens.css` `--cp-*` 原地翻转 Spotify 深色（committed dark 删冗余 dark-media 块，不并造第二套）+ Figtree/remixicon 自托管 + `theme-v2.css` 三动画（octoPulse/octoBar/octoJelly）+ 旧 accent 覆盖；**Phase 1** 三栏——左栏会话按 `project_id` 分组+折叠+octoBar 运行指示+就绪卡 / 中栏对话加壳（内核 JSX 保留）+octoJelly 空舞台 / 右栏新 `SessionRunPanel`（本会话运行状态只读镜像：状态/进度/事件流/工件/打开任务）；**Phase 2** `GlobalTaskOverlay`（读 `delegation.works` 同源同状态词表）；**Phase 3** 加载页 octoPulse。**纯前端零后端**（勘察先验：跨项目会话+当前运行任务现成；多并发任务列表 defer）。**复用数据逻辑只换视觉/结构**（零新 hook/fetch/协议）。文案映射 Butler→主 Agent、无 LiteLLM 泄漏。`index.css` 4477 零增长。**限制**：原稿逐像素未自证（DesignSync 不可达，按 §M11 书面规格+Spotify 语言实现）/ 右栏停止控制+多任务列表 defer / octo-mark 已换设计稿绿泡泡（主 session 从原稿 assets 取，subagent DesignSync 不可达） / F149 页 accent 残留渐进边界。详见 `.specify/features/148-web-workbench-v2/completion-report.md` | ① |
-| **F151 Runtime Boundary & Architecture Truth** ✅ 稳定（2026-07-22） | XL | 已完成Gateway唯一module entry、运行/打包边界、retired Proxy/SDK路径清理与F150 exact authority；stable commit `687f20fc6246e7157957ab51ac474d46e91578b6`。后续仍按其复杂度与ownership ratchet演进，不恢复management/kernel/worker平行体系 | ① 硬前置 |
-| **F150 Cloudflare 零信任远程** ✅ 稳定（2026-07-25）| M | 唯一 named-tunnel 网络地基 + 电脑 Web 入口已通过：官方 service、Gateway loopback 回源、Web Access 全站保护、origin JWT + owner allowlist、Host/Origin/CSRF、真实 SSE与production浏览器旅程。Web复用Access application session且不新增browser session/device；iOS route/device trust归F153，禁App内service token。产品实现提交`bf29d6be7d7a86c298cd45699488a8640065a566`，仓库级门禁配套提交及stable tip `5e6f4846703b7126cd104c8b9678e0c2f5300cc8`。制品 `.specify/features/150-cloudflare-tunnel/` | ② |
+| **F151 Runtime Boundary & Architecture Truth** ✅ 产品代码稳定（2026-07-22） | XL | 已完成Gateway唯一module entry、运行/打包边界、retired Proxy/SDK路径清理与F150 exact authority；stable commit `687f20fc6246e7157957ab51ac474d46e91578b6`，2026-07-31 当前仓库 architecture `all` 仍通过。证据限制：historical v2 index 的hash/previous链元数据完整，但其被忽略的`evidence/local` raw archive已不可恢复，故不能宣称历史R/G/R archive在clean checkout自包含；这不是当前产品代码回退。后续仍按复杂度与ownership ratchet演进，不恢复management/kernel/worker平行体系 | ① 硬前置 |
+| **F150 Cloudflare 零信任远程** ✅ 产品代码稳定 / 当前实例复验中（2026-08-02）| M | 唯一 named-tunnel 网络地基 + 电脑 Web 入口的代码与历史验收已交付：官方 service、Gateway loopback 回源、Web Access 全站保护、origin JWT + owner allowlist、Host/Origin/CSRF、真实 SSE与production浏览器旅程。Web复用Access application session且不新增browser session/device；iOS route/device trust归F153，禁App内service token。产品实现提交`bf29d6be7d7a86c298cd45699488a8640065a566`，仓库级门禁配套提交及stable tip `5e6f4846703b7126cd104c8b9678e0c2f5300cc8`。当前个人实例已完成Access登录、真实OpenAI Codex doctor、Web对话、SSE `SUCCEEDED`、主动登出、重新登录、一次性恢复及Settings状态同步。当前生命周期证据只剩自然会话过期；不得用历史stable标签替代该剩余实时验证。制品 `.specify/features/150-cloudflare-tunnel/` | ② |
 | **F149 Web 其余页面 v2** ✅ 完成（2026-07-26，branch `codex/f149-web-pages-v2`） | M-L | 两波全站已交付：A 波=审批/任务/自动化/设置，B 波=智能体/记忆/文件/技能/MCP。REST DTO 从 OpenAPI generated boundary进入runtime decoder与pure projection；页面统一消费`api/client`、`platform/queries/actions`，page/domain direct transport与token helper清零。write-only secret、task SSE Advanced diagnostic、F150 global 401/F149 origin-403 owner闭合。69 files/596 Vitest、Gateway contract 14/14、deterministic smoke/scripted 26 passed、changed-lines 90.12%、20 viewport surface与坏味道MUST FIX=0全部通过。Claude Design初稿仍是视觉基线，没有为迁就旧Web回退；390px只作Web窄窗口回归，手机产品只走原生iOS。历史证据限制（T044 partial、T051–T054 late RED、两份raw log缺失）已在completion report如实归档。制品`.specify/features/149-web-pages-v2/` | ③ |
 
 **新波次**：0️⃣ 旧 VPN 删除与全绿baseline ✅ → ① F151完整Spec Driver闭环 ✅ → ② F150实施、live、验证与stable commit ✅ → ③ F149 T000 rebase/recon后两波全站v2。
@@ -701,22 +697,29 @@ Access、F148主工作台和F149其余十页全部完成。桌面Web保留；手
 没有用旧Web外观反向改造设计。M12可按隐私→设备信任→HealthKit/EventKit→SwiftUI体验的
 严格顺序启动。
 
-### M12（原生 iOS + 健康/日程感知）📋 设计门禁先行（2026-07-20 重排）
+**F158 重新验收说明（2026-08-01）**：M11 的产品代码交付结论不因本轮审计被
+抹除；但“产品代码稳定”“历史验收曾通过”和“当前 checkout/当前个人实例可重新
+签字”是三件事。F151 historical raw archive 当前不自包含；F150 当前个人实例已
+完成Access登录、真实OpenAI OAuth doctor、Web对话、SSE与`SUCCEEDED`事件链，并已
+验证主动登出、重新登录、一次性恢复及Settings状态同步；当前只剩自然会话过期作为
+Milestone closure的证据缺口跟踪。
+
+### M12（原生 iOS + 健康/日程感知）🚧 In Progress（2026-08-02 真值同步）
 
 > **为何独立**：HealthKit/EventKit 是新的高敏感数据入口与 Agent 能力域，不是 Web UI 的原生外壳。M12 必须先回答“设备如何可信连接、数据如何最小化、什么能进 LLM、如何撤销/删除/审计”，再做 SwiftUI 页面。
 > **安全翻转**：旧 F150 handoff 提议在 iOS App 使用 `CF-Access-Client-Id/Secret`，现已否决。静态 service secret 一旦进入 App 包就不是可信 secret。F152/F153 必须从交互式 Access 或设备注册换短期凭证中完成设计，并支持撤销、轮换和单设备审计。
-> **浏览器与原生分界**：手机产品只走原生 iOS App，不提供 Safari/WebView 产品入口。F150 的 Access browser session 不能直接给 `URLSession` 当原生设备凭证。F153 必须先用真实 iPhone spike 在“交互式 Access user session / 独立 mobile API + Octo device proof / 可用套餐下的 mTLS”中选出无需内置 service secret 的可行路径；未通过前不得读取 HealthKit。
+> **浏览器与原生分界**：手机产品只走原生 iOS App，不提供 Safari/WebView 产品入口。F150 的 Access browser session 不能直接给 `URLSession` 当原生设备凭证。F153 已选定“同一 named tunnel + deployment-specific mobile hostname + exact `/api/mobile/v1/*` edge bypass + Octo P-256 device proof/replay/revoke”的原生路径；当前个人实例已配置`ios.maojiwang.work`与exact `/api/mobile/v1/*` Bypass，匿名/伪设备负向探针按合同拒绝；真实 iPhone 的签名安装、owner-assisted enrollment、signed ready、replay拒绝、revoke与恢复全旅程已完成。F154 真机 HealthKit 权限、真实数据、批准/分析/删除与锁屏生命周期也已单独验证。
 > **数据安全不变量**：Memory/召回内容是不可信证据，不是指令；raw sample、normalized fact、retrieval snapshot、transcript/LLM context 四层分开。每次进入 LLM 或 Memory 的事实都需 provenance、consent、delete/revoke audit；高敏感写入不能采用 shutdown 时允许丢写的 best-effort 语义。
 > **Apple 权限事实**：[HealthKit 读权限按数据类型授权](https://developer.apple.com/documentation/HealthKit/authorizing-access-to-health-data)，App 不能把“用户拒绝读取”与“没有数据”简单区分；[EventKit 读取日历在当前 iOS API 下需要 full access](https://developer.apple.com/documentation/eventkit/accessing-the-event-store)，没有 OS 级 read-only 权限。F155 的“只读”只能是 Octo 代码与产品承诺，不能误写为系统最小权限。
 > **启动依赖**：M11 的 F150 电脑 Web 远程/named-tunnel 地基和 F151 架构/打包边界均完成；M12 privacy threat model 通过 review。iOS 继续以 Claude Design 最初移动方案为视觉与交互基线，功能实现适配设计；同时遵守原生 SwiftUI/Apple 平台语义，不照搬 Web 三栏或让现有 Web 外观反向改造设计。
 
 | Feature | 规模 | 目标 | 顺序 |
 |---------|------|------|------|
-| **F152 Privacy, Identity & Ingestion Contract** 📋 编号预留、待立项 | L | threat model + 数据分类：raw sample / normalized fact / retrieval snapshot / transcript/LLM context / Memory；定义 provenance、consent、撤销、删除、审计、TTL 与 device capability。明确 Memory 是不可信证据、哪些数据永不进模型、哪些每次需批准 | ① 严格前置 |
-| **F153 iOS Device Trust & Secure Transport** 📋 编号预留、待立项 | L-XL | 先做真机 transport spike，再冻结方案；设备生成密钥，browser/owner 辅助 challenge 注册，短期 capability-scoped token，Keychain 保存、proof-of-possession、单设备撤销/轮换。复用同一 tunnel 但不内置 Cloudflare service secret；只打通 `/ready` + 最小 API，不接 HealthKit | ② |
-| **F154 HealthKit Read-Only Vertical Slice** 📋 编号预留、待立项 | L-XL | 按最小数据类型授权 → 只读样本 → 本地归一化 → 用户预览/批准 → 单次 Agent 分析 → 审计。UI 必须把“无可读数据/权限受限”作为诚实状态；v0.1 不后台全量同步、不自动写 Memory | ③ |
-| **F155 EventKit App-Read-Only Vertical Slice（OS Full-Access Gate）** 📋 编号预留、待立项 | L | 启动前由用户明确接受“系统要求 full access、Octo 实现层不写日历”。写路径在代码和 capability 中物理缺席；只读限定时间范围、预览批准和单次分析，正文默认不进长期记忆。若不能接受该权限，F152 review 时将本 Feature 移出 M12，而不是伪装成系统 read-only | ④ 决策门 |
-| **F156 Native Companion Experience** 📋 编号预留、待立项 | XL | SwiftUI 对话、任务、审批、记忆候选、连接状态与通知；只消费 F152-F155 已证明的认证/数据能力，不复制 Web 三栏或另造状态词表。以 Claude Design 最初移动方案为视觉/交互基线，非功能、可用性或无障碍所必需不得重排；APNs、后台刷新和上架准备在能力链通过后进入 | ⑤ |
+| **F152 Privacy, Identity & Ingestion Contract** ✅ Verify（2026-07-28） | L | 六阶段 exact Pydantic model、canonical hash/TTL、device identity/capability/request proof、一次性 consent、单向 ingestion、独立 Memory 二次确认、非敏感 append-only audit、durable deletion cascade 和 F153/F154/F155 Protocol schema均已实现；focused `714 passed`、全 Gate `208 passed`、secret scan 与 architecture ratchet 通过。报告见 `.specify/features/152-privacy-identity-ingestion-contract/verification/verification-report.md` | ① 严格前置 |
+| **F153 iOS Device Trust & Secure Transport** ✅ Verify（2026-08-01） | L-XL | Gateway 已实现 owner-assisted challenge、P-256 enrollment/token/request proof、Host/path 隔离、durable replay/revoke/audit；原生 SwiftUI registration App 已实现 Secure Enclave、ThisDeviceOnly Keychain、单 URLSession client 与 awaiting/connecting/connected/disconnected/offline/revoked states。Simulator、generic iPhoneOS Release、architecture/bundle scan 全绿；个人部署的`ios.maojiwang.work`与exact Bypass、真实 iPhone 签名安装、enrollment、signed ready、replay拒绝、revoke、重连及网络生命周期均已通过，GATE_VERIFY=true | ② |
+| **F154 HealthKit Read-Only Vertical Slice** ✅ Verify（2026-08-03） | L-XL | v0.1 exact 为 stepCount + sleepAnalysis、24h/3d/7d、raw local-only、本地聚合、用户预览/当次批准、单次 ProviderRouter 分析、删除与 Memory 二次确认。Gateway、SwiftUI、entitlement、Simulator/Release、真 iPhone 权限与真实数据、唯一一次批准分析/删除、preview-only 锁屏恢复、clean checkout 及 push/PR 双 CI 全部通过，`GATE_VERIFY=true` | ③ |
+| **F155 EventKit App-Read-Only Vertical Slice（OS Full-Access Gate）** 🚧 Design/Tasks PASS / Implement unlocked（2026-08-03） | L | 已建立 Apple 官方权限事实、Data/Threat Model、只读合同、Plan/Tasks 与 architecture authority inventory。用户已明确选择A：接受EventKit系统级full access，同时Octo产品与代码边界严格只读、create/update/delete mutation path数量必须为0。exact范围为未来24h/3d/7d events、raw local-only、本地预览、当次批准/分析/删除，title默认不上传，notes/location/URL/attendees/organizer/identifier物理禁止。产品决策、Design Gate、Tasks Gate 与 F154 Verify 已通过；当前先在唯一F151 checker完成F155自身T003 exact authority，production=0 | ④ |
+| **F156 Native Companion Experience** 🚧 Research PASS / Design+Tasks Draft Gate Closed（2026-08-02 recon） | XL | 已冻结 `chat / tasks / inbox / settings` 四个原生 Tab、单一 F153 identity/transport、typed approval/Memory inbox、opaque APNs、background 敏感动作禁止、Claude 最早期视觉基线，并建立 40 行启动/对话/任务/审批/记忆/通知/权限/断网/视觉/a11y 场景矩阵。current mobile API recon 已完成：mobile edge 有 F153 7 条 device-trust route 与 F154 3 条 health route；当前签发 5 个 capability，另有 7 个 F156 capability 仅声明未签发，Chat/Task/Approval/Memory/APNs 等仍有 8 项产品合同缺口。仍等待F155 Verify、F156自身T003 exact authority及本Feature Design/Tasks Gate，production=0 | ⑤ |
 
 **M12 波次**：F152 → F153 → F154 → F155 → F156，默认严格串行。只有视觉探索可与 F152/F153 并行，生产代码不得绕过隐私/身份 gate。
 

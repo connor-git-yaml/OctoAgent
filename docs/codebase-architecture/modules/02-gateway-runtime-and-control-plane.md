@@ -2,7 +2,7 @@
 
 当前 OctoAgent 的“运行时大脑”主要不在一个叫 `kernel` 的独立目录里，而是落在 [`octoagent/apps/gateway`](../../../octoagent/apps/gateway) 下面。
 
-这是理解当前代码最容易出错的地方：**Gateway 现在不只是 HTTP 入口，它同时承载了应用装配、durable task runtime、Butler / delegation / worker runtime、控制面资源和大量运行治理逻辑。**
+这是理解当前代码最容易出错的地方：**Gateway 现在不只是 HTTP 入口，它同时承载了应用装配、durable task runtime、主 Agent / delegation / worker runtime、控制面资源和大量运行治理逻辑。**
 
 ## 1. 模块职责
 
@@ -10,7 +10,7 @@
 
 1. **FastAPI 应用装配与生命周期**
 2. **Task runtime**
-3. **Orchestrator / Butler / delegation / worker dispatch**
+3. **Orchestrator / 主 Agent / delegation / worker dispatch**
 4. **Control plane snapshot 和 action**
 5. **SSE、Execution Console、Operator Inbox、Automation 等外部 surface**
 
@@ -21,7 +21,7 @@
 | [`main.py`](../../../octoagent/apps/gateway/src/octoagent/gateway/main.py) | 应用装配入口 |
 | [`services/task_service.py`](../../../octoagent/apps/gateway/src/octoagent/gateway/services/task_service.py) | task durable 主链 |
 | [`services/task_runner.py`](../../../octoagent/apps/gateway/src/octoagent/gateway/services/task_runner.py) | 持久化调度、恢复、监控 |
-| [`services/orchestrator.py`](../../../octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py) | Butler / A2A / dispatch / worker 回传 |
+| [`services/orchestrator.py`](../../../octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py) | 主 Agent / A2A / dispatch / worker 回传 |
 | [`services/delegation_plane.py`](../../../octoagent/apps/gateway/src/octoagent/gateway/services/delegation_plane.py) | work / target selection / pipeline plane |
 | [`services/worker_runtime.py`](../../../octoagent/apps/gateway/src/octoagent/gateway/services/worker_runtime.py) | 执行后端、预算、取消、超时 |
 | [`services/llm_service.py`](../../../octoagent/apps/gateway/src/octoagent/gateway/services/llm_service.py) | 运行时 LLM 入口 |
@@ -49,19 +49,20 @@
 
 这一步把“配置层 alias”接到了“运行时调用 alias”。
 
-### 3.3 `lifespan`
+### 3.3 `lifespan` 与 `OctoHarness`
 
 主逻辑可以概括成：
 
 1. 加载 `.env`
-2. 创建 `StoreGroup`
-3. 初始化 memory db
-4. 装配 `LiteLLMClient`、`LLMService`
+2. 创建 `OctoHarness`，并把 11 段 `_bootstrap_*` 交给它执行
+3. 创建 `StoreGroup`、初始化 memory db
+4. 装配共享 `ProviderRouter`、`ProviderRouterMessageAdapter`、`ProviderModelClient` 与 `LLMService`
 5. 装配 `TaskRunner`、`ControlPlaneService`、`DelegationPlaneService`
 6. 注册路由、SSE、Telegram、Automation 等服务
-7. 在关闭时做后台任务的优雅 shutdown
+7. `harness.commit_to_app(app)` 后再挂载 SPA catch-all
+8. 在关闭时由 `harness.shutdown(app)` 做后台任务与共享 ProviderRouter 的优雅 shutdown
 
-因此 `main.py` 是“实例从文件系统和配置，变成可运行系统”的根装配器。
+因此 `main.py` 是应用与生命周期入口，`OctoHarness` 才是“实例从文件系统和配置，变成可运行系统”的当前根装配器。
 
 ## 4. `TaskService`: durable task 主链
 
@@ -197,7 +198,7 @@
 
 这让多 worker / delegation 结果最终回到同一套 durable 调度框架里。
 
-## 6. `OrchestratorService`: Butler / A2A / dispatch 中枢
+## 6. `OrchestratorService`: 主 Agent / A2A / dispatch 中枢
 
 位置：[`orchestrator.py`](../../../octoagent/apps/gateway/src/octoagent/gateway/services/orchestrator.py)
 
@@ -209,27 +210,27 @@
 
 - 接受 `OrchestratorRequest`
 - 做高风险 gate
-- 决定 Butler 是否直接回答、委派给 worker，还是走 graph delegation
+- 决定主 Agent 是否直接回答、委派给 worker，还是走 graph delegation
 - 最终转成 `DispatchEnvelope` 并执行
 
-### 6.2 `_resolve_butler_decision()`
+### 6.2 `_resolve_routing_decision()`
 
 职责：
 
 - 结合当前请求、behavior hints、freshness、worker capability 等信息
-- 决定 Butler 的处理模式
+- 决定主 Agent 的处理模式
 
-这是当前 Butler “先自己收口还是继续委派”的核心判断点。
+这是当前主 Agent “先自己收口还是继续委派”的核心判断点。
 
-### 6.3 `_dispatch_inline_butler_decision()` / `_dispatch_butler_direct_execution()`
+### 6.3 `_dispatch_inline_decision()` / `_dispatch_direct_execution()`
 
 职责：
 
-- 在确定 Butler 可以直接回答时，走 inline reply 或 owner-self execution 路径
+- 在确定主 Agent 可以直接回答时，走 inline reply 或 direct execution 路径
 
-这部分解释了为什么当前系统里 Butler 有时不会创建新的 specialist work。
+这部分解释了为什么当前系统里主 Agent 有时不会创建新的 specialist work。
 
-### 6.4 `_dispatch_butler_delegate_graph()`
+### 6.4 `_dispatch_delegate_graph()`
 
 职责：
 

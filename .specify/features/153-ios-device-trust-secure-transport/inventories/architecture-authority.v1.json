@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "feature_id": "F153",
+  "authority_status": "DESIGN_TASKS_APPROVED_IMPLEMENT_OPEN_T001_COMPLETE",
+  "approval_date": "2026-07-28",
+  "architecture_checker": "repo-scripts/check-runtime-architecture.py",
+  "production_paths": [
+    {
+      "path": "octoagent/packages/protocol/src/octoagent/protocol/device_trust.py",
+      "state": "declared_new",
+      "owner": "protocol",
+      "role": "transport_dto_projection"
+    },
+    {
+      "path": "octoagent/packages/protocol/src/octoagent/protocol/__init__.py",
+      "state": "existing",
+      "owner": "protocol",
+      "role": "protocol_exports"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/store/device_trust_store.py",
+      "state": "declared_new",
+      "owner": "core",
+      "role": "single_durable_device_trust_store"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/store/sqlite_init.py",
+      "state": "existing",
+      "owner": "core",
+      "role": "single_schema_migration_owner"
+    },
+    {
+      "path": "octoagent/packages/core/src/octoagent/core/store/__init__.py",
+      "state": "existing",
+      "owner": "core",
+      "role": "single_store_group_composition"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/mobile_device_access.py",
+      "state": "declared_new",
+      "owner": "gateway",
+      "role": "mobile_manifest_and_host_path_classifier"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/device_trust.py",
+      "state": "declared_new",
+      "owner": "gateway",
+      "role": "registration_and_token_orchestration"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/mobile_device_auth.py",
+      "state": "declared_new",
+      "owner": "gateway",
+      "role": "p256_and_request_proof_verification"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/routes/device_trust.py",
+      "state": "declared_new",
+      "owner": "gateway",
+      "role": "single_owner_and_mobile_route_family"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/config/config_schema.py",
+      "state": "existing",
+      "owner": "gateway",
+      "role": "single_root_config_extension"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+      "state": "existing",
+      "owner": "gateway",
+      "role": "single_runtime_composition"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/services/operations/doctor.py",
+      "state": "existing",
+      "owner": "gateway",
+      "role": "single_mobile_device_diagnostic"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/deps.py",
+      "state": "existing",
+      "owner": "gateway",
+      "role": "request_dependencies"
+    },
+    {
+      "path": "octoagent/apps/gateway/src/octoagent/gateway/main.py",
+      "state": "existing",
+      "owner": "gateway",
+      "role": "single_router_composition"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent.xcodeproj/project.pbxproj",
+      "state": "declared_new",
+      "owner": "ios",
+      "role": "single_native_project"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/App/OctoAgentApp.swift",
+      "state": "declared_new",
+      "owner": "ios",
+      "role": "single_swiftui_app_entry"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/App/RegistrationView.swift",
+      "state": "declared_new",
+      "owner": "ios",
+      "role": "device_registration_states"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/DeviceTrust/DeviceKeyStore.swift",
+      "state": "declared_new",
+      "owner": "ios",
+      "role": "secure_enclave_and_keychain_owner"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/DeviceTrust/DeviceTrustModels.swift",
+      "state": "declared_new",
+      "owner": "ios",
+      "role": "swift_transport_models"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/DeviceTrust/DeviceTrustClient.swift",
+      "state": "declared_new",
+      "owner": "ios",
+      "role": "single_urlsession_client"
+    },
+    {
+      "path": "octoagent/apps/ios/OctoAgent/DeviceTrust/RequestProofSigner.swift",
+      "state": "declared_new",
+      "owner": "ios",
+      "role": "canonical_request_signing"
+    }
+  ],
+  "test_paths": [
+    "octoagent/packages/protocol/tests/test_device_trust_contract.py",
+    "octoagent/packages/core/tests/test_device_trust_store.py",
+    "octoagent/apps/gateway/tests/test_device_trust_service.py",
+    "octoagent/apps/gateway/tests/test_device_trust_api.py",
+    "octoagent/apps/gateway/tests/test_mobile_device_access.py",
+    "octoagent/apps/ios/OctoAgentTests/DeviceTrustTests.swift",
+    "octoagent/apps/ios/OctoAgentUITests/RegistrationFlowUITests.swift",
+    "octoagent/tests/gate/test_f153_architecture_authority.py"
+  ],
+  "artifact_paths": [
+    ".specify/features/153-ios-device-trust-secure-transport/spec.md",
+    ".specify/features/153-ios-device-trust-secure-transport/research.md",
+    ".specify/features/153-ios-device-trust-secure-transport/threat-model.md",
+    ".specify/features/153-ios-device-trust-secure-transport/data-model.md",
+    ".specify/features/153-ios-device-trust-secure-transport/plan.md",
+    ".specify/features/153-ios-device-trust-secure-transport/tasks.md",
+    ".specify/features/153-ios-device-trust-secure-transport/trace.md",
+    ".specify/features/153-ios-device-trust-secure-transport/design-gate-review.md",
+    ".specify/features/153-ios-device-trust-secure-transport/plan-tasks-gate-review.md",
+    ".specify/features/153-ios-device-trust-secure-transport/contracts/device-trust-contract.md",
+    ".specify/features/153-ios-device-trust-secure-transport/checklists/requirements.md",
+    ".specify/features/153-ios-device-trust-secure-transport/inventories/edge-transport.v1.json",
+    ".specify/features/153-ios-device-trust-secure-transport/inventories/architecture-authority.v1.json"
+  ],
+  "forbidden_prefixes": [
+    "octoagent/frontend/",
+    "octoagent/apps/ios/OctoAgent/HealthKit/",
+    "octoagent/apps/ios/OctoAgent/EventKit/",
+    "octoagent/apps/gateway/src/octoagent/gateway/routes/healthkit",
+    "octoagent/apps/gateway/src/octoagent/gateway/routes/eventkit"
+  ],
+  "forbidden_terms": [
+    "WKWebView",
+    "SFSafariViewController",
+    "CF-Access-Client-Id",
+    "CF-Access-Client-Secret",
+    "CF_Authorization",
+    "maojiwang.work",
+    "cloudflared access",
+    "WARP"
+  ],
+  "approved_scope_sha256": "ef18603e0c92774ecb8df0257f810b3bde19bacaa7943fe8a5c4116e0a4ad9f6"
+}

@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "feature_id": "F156",
+  "authority_status": "RESEARCH_DRAFT_COMPLETE_UPSTREAM_GATES_PENDING",
+  "approval_date": null,
+  "architecture_checker": "repo-scripts/check-runtime-architecture.py",
+  "preconditions": [
+    {
+      "feature_id": "F153",
+      "required_gate": "GATE_VERIFY",
+      "current_state": true
+    },
+    {
+      "feature_id": "F154",
+      "required_gate": "GATE_VERIFY",
+      "current_state": false
+    },
+    {
+      "feature_id": "F155",
+      "required_gate": "GATE_VERIFY",
+      "current_state": false,
+      "product_decision_state": "OPTION_A_ACCEPTED_2026-08-01"
+    }
+  ],
+  "exact_tabs": [
+    "chat",
+    "tasks",
+    "inbox",
+    "settings"
+  ],
+  "planned_ios_paths": [
+    "octoagent/apps/ios/OctoAgent/App/OctoAgentApp.swift",
+    "octoagent/apps/ios/OctoAgent/App/CompanionRoot.swift",
+    "octoagent/apps/ios/OctoAgent/App/CompanionNavigation.swift",
+    "octoagent/apps/ios/OctoAgent/Chat/",
+    "octoagent/apps/ios/OctoAgent/Tasks/",
+    "octoagent/apps/ios/OctoAgent/Inbox/",
+    "octoagent/apps/ios/OctoAgent/Settings/",
+    "octoagent/apps/ios/OctoAgent/Notifications/"
+  ],
+  "forbidden_paths": [
+    "octoagent/apps/ios/OctoAgent/WebView/",
+    "octoagent/apps/ios/OctoAgent/Transport/",
+    "octoagent/apps/ios/OctoAgent/Session/",
+    "octoagent/apps/ios/OctoAgent/DeviceRegistry/",
+    "octoagent/apps/ios/OctoAgent/LocalAgent/"
+  ],
+  "forbidden_terms": [
+    "WKWebView",
+    "SFSafariViewController",
+    "CF-Access-Client-Secret",
+    "Web Access Cookie",
+    "second URLSession",
+    "auto approve",
+    "auto memory",
+    "fixed background interval"
+  ],
+  "scenario_matrix": ".specify/features/156-native-companion-experience/inventories/scenario-matrix.md",
+  "api_recon": ".specify/features/156-native-companion-experience/inventories/mobile-api-recon.v1.json",
+  "scenario_count": 40,
+  "scope_hash_algorithm": "sha256(canonical_json(document_without_approved_scope_sha256))",
+  "approved_scope_sha256": null
+}

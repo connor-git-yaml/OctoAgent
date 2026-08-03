@@ -22,6 +22,7 @@ orchestrator._notify_state_change）——Phase E 是**专用直调** notify_tas
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -84,7 +85,9 @@ class _RecordingRunner:
     """返回可配置 DiscoveryOutcome（或抛异常）的发现端 runner。"""
 
     def __init__(
-        self, *, outcome: DiscoveryOutcome | None = None,
+        self,
+        *,
+        outcome: DiscoveryOutcome | None = None,
         raise_exc: Exception | None = None,
     ) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -139,9 +142,12 @@ _USER_MD_ACTIVE = """# 用户档案
 - **consolidation_max_facts**: 80
 """
 
-_USER_MD_ACTIVE_TELEGRAM_ONLY = _USER_MD_ACTIVE + """
+_USER_MD_ACTIVE_TELEGRAM_ONLY = (
+    _USER_MD_ACTIVE
+    + """
 - **summary_channels**: "telegram"
 """
+)
 
 _USER_MD_DISABLED = """# 用户档案
 
@@ -150,11 +156,15 @@ _USER_MD_DISABLED = """# 用户档案
 
 
 @pytest_asyncio.fixture
-async def store_group(tmp_path: Path) -> StoreGroup:
+async def store_group(tmp_path: Path) -> AsyncIterator[StoreGroup]:
     db_path = str(tmp_path / "test.db")
     artifacts_dir = tmp_path / "artifacts"
     artifacts_dir.mkdir(exist_ok=True)
-    return await create_store_group(db_path, str(artifacts_dir))
+    group = await create_store_group(db_path, str(artifacts_dir))
+    try:
+        yield group
+    finally:
+        await group.close()
 
 
 async def _seed_main_runtime_with_namespace(
@@ -217,12 +227,8 @@ def _build_service(
     )
 
 
-async def _events_of_type(
-    store_group: StoreGroup, event_type: EventType
-) -> list[Any]:
-    events = await store_group.event_store.get_events_for_task(
-        CONSOLIDATION_ROOT_TASK_ID
-    )
+async def _events_of_type(store_group: StoreGroup, event_type: EventType) -> list[Any]:
+    events = await store_group.event_store.get_events_for_task(CONSOLIDATION_ROOT_TASK_ID)
     return [e for e in events if e.type == event_type]
 
 
@@ -232,15 +238,11 @@ async def _events_of_type(
 
 
 class TestPendingReviewNotification:
-    async def test_proposals_positive_sends_one_medium_notification(
-        self, store_group
-    ):
+    async def test_proposals_positive_sends_one_medium_notification(self, store_group):
         """FR-E1：proposals>0 → 恰好一条通知，MEDIUM + 专用 event_type + 计数 payload。"""
         await _seed_main_runtime_with_namespace(store_group)
         notif = _CapturingNotificationService()
-        svc = _build_service(
-            store_group, runner=_RecordingRunner(), notification_service=notif
-        )
+        svc = _build_service(store_group, runner=_RecordingRunner(), notification_service=notif)
         await svc._run_consolidation()
 
         assert len(notif.calls) == 1, "有提议应发且仅发一条通知"
@@ -278,9 +280,7 @@ class TestPendingReviewNotification:
         assert len(notif.calls) == 1
         assert notif.calls[0]["channels"] == frozenset({"telegram"})
 
-    async def test_notification_sent_after_completed_event_persisted(
-        self, store_group
-    ):
+    async def test_notification_sent_after_completed_event_persisted(self, store_group):
         """审计先行：通知发出时 COMPLETED 事件必须已在 event_store（真查库，非 mock 自证）。"""
         await _seed_main_runtime_with_namespace(store_group)
         completed_at_notify_time: list[int] = []
@@ -313,15 +313,11 @@ class TestNoNotificationBranches:
         """FR-E2：0 提议（事实已干净）→ COMPLETED 照写但不发通知（无噪声）。"""
         await _seed_main_runtime_with_namespace(store_group)
         notif = _CapturingNotificationService()
-        runner = _RecordingRunner(
-            outcome=DiscoveryOutcome(facts_reviewed=7, proposals_made=0)
-        )
+        runner = _RecordingRunner(outcome=DiscoveryOutcome(facts_reviewed=7, proposals_made=0))
         svc = _build_service(store_group, runner=runner, notification_service=notif)
         await svc._run_consolidation()
 
-        completed = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
-        )
+        completed = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED)
         assert len(completed) == 1  # 审计事件不受影响
         assert notif.calls == [], "0 提议不该发通知"
 
@@ -329,13 +325,9 @@ class TestNoNotificationBranches:
         """FR-E2：无 scope 空运行（COMPLETED fallback proposals=0）→ 不发。"""
         # 不 seed namespace → scope 解析为空 → 空运行
         notif = _CapturingNotificationService()
-        svc = _build_service(
-            store_group, runner=_RecordingRunner(), notification_service=notif
-        )
+        svc = _build_service(store_group, runner=_RecordingRunner(), notification_service=notif)
         await svc._run_consolidation()
-        completed = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
-        )
+        completed = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED)
         assert len(completed) == 1
         assert completed[0].payload["fallback"] is True
         assert notif.calls == []
@@ -349,9 +341,7 @@ class TestNoNotificationBranches:
         svc = _build_service(store_group, runner=runner, notification_service=notif)
         await svc._run_consolidation()
 
-        failed = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_FAILED
-        )
+        failed = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_FAILED)
         assert len(failed) == 1  # 事件审计不可少（C2）
         assert len(notif.calls) == 1, "发现端失败应发一条 HIGH 通知"
         call = notif.calls[0]
@@ -376,9 +366,7 @@ class TestNoNotificationBranches:
         )
         await svc._run_consolidation()
 
-        skipped = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
-        )
+        skipped = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED)
         assert len(skipped) == 1
         assert skipped[0].payload["reason"] == "spawn_error"
         assert len(notif.calls) == 1, "spawn_error 应发一条 HIGH 通知"
@@ -396,42 +384,30 @@ class TestNoNotificationBranches:
             notification_service=notif,
         )
         await svc._run_consolidation()
-        skipped = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED
-        )
+        skipped = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_SKIPPED)
         assert len(skipped) == 1
         assert notif.calls == []
 
     async def test_no_notification_service_graceful(self, store_group):
         """C6：notification_service=None（未注入）→ 有提议也静默跳过，不崩。"""
         await _seed_main_runtime_with_namespace(store_group)
-        svc = _build_service(
-            store_group, runner=_RecordingRunner(), notification_service=None
-        )
+        svc = _build_service(store_group, runner=_RecordingRunner(), notification_service=None)
         await svc._run_consolidation()  # 不应抛
-        completed = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
-        )
+        completed = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED)
         assert len(completed) == 1
 
     async def test_notify_exception_does_not_fail_run(self, store_group):
         """C6：通知抛异常 → 巩固运行不受影响（COMPLETED 已落盘 + _running 复位）。"""
         await _seed_main_runtime_with_namespace(store_group)
         notif = _CapturingNotificationService(raise_exc=RuntimeError("channel down"))
-        svc = _build_service(
-            store_group, runner=_RecordingRunner(), notification_service=notif
-        )
+        svc = _build_service(store_group, runner=_RecordingRunner(), notification_service=notif)
         await svc._run_consolidation()  # 不应抛
         assert len(notif.calls) == 1  # 通知确实尝试过
-        completed = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED
-        )
+        completed = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_COMPLETED)
         assert len(completed) == 1
         assert svc._running is False
         # FAILED 不该因通知失败而出现（通知失败 ≠ 巩固失败）
-        failed = await _events_of_type(
-            store_group, EventType.MEMORY_CONSOLIDATION_FAILED
-        )
+        failed = await _events_of_type(store_group, EventType.MEMORY_CONSOLIDATION_FAILED)
         assert failed == []
 
 
@@ -463,9 +439,7 @@ class TestRealNotificationServiceIntegration:
         await _seed_main_runtime_with_namespace(store_group)
         # USER.md 无 active_hours → 全时段推送
         notif_svc, tg, web = self._build_real_notif(store_group)
-        svc = _build_service(
-            store_group, runner=_RecordingRunner(), notification_service=notif_svc
-        )
+        svc = _build_service(store_group, runner=_RecordingRunner(), notification_service=notif_svc)
         await svc._run_consolidation()
 
         # 两个渠道各收到一条（默认全渠道）
@@ -476,15 +450,10 @@ class TestRealNotificationServiceIntegration:
         assert event_type == CONSOLIDATION_PENDING_REVIEW_EVENT_TYPE
         assert "notification_id" in payload  # dismiss 按钮锚点
         # NOTIFICATION_DISPATCHED 审计事件真在 event_store（H4 链）
-        dispatched = await _events_of_type(
-            store_group, EventType.NOTIFICATION_DISPATCHED
-        )
+        dispatched = await _events_of_type(store_group, EventType.NOTIFICATION_DISPATCHED)
         assert len(dispatched) == 1
         assert dispatched[0].payload["filtered"] is False
-        assert (
-            dispatched[0].payload["notification_type"]
-            == CONSOLIDATION_PENDING_REVIEW_EVENT_TYPE
-        )
+        assert dispatched[0].payload["notification_type"] == CONSOLIDATION_PENDING_REVIEW_EVENT_TYPE
         assert dispatched[0].payload["priority"] == NotificationPriority.MEDIUM.value
 
     async def test_quiet_hours_discards_but_audits(self, store_group):
@@ -498,21 +467,15 @@ class TestRealNotificationServiceIntegration:
         start = (now + timedelta(hours=2)).strftime("%H:%M")
         end = (now + timedelta(hours=3)).strftime("%H:%M")
         user_md_quiet = f'- **active_hours**: "{start}-{end}"\n'
-        notif_svc, tg, web = self._build_real_notif(
-            store_group, user_md=user_md_quiet
-        )
-        svc = _build_service(
-            store_group, runner=_RecordingRunner(), notification_service=notif_svc
-        )
+        notif_svc, tg, web = self._build_real_notif(store_group, user_md=user_md_quiet)
+        svc = _build_service(store_group, runner=_RecordingRunner(), notification_service=notif_svc)
         await svc._run_consolidation()
 
         # channel 0 推送（quiet 内 MEDIUM discard）
         assert tg.calls == []
         assert web.calls == []
         # 但审计链保留（H4 discard 审计）
-        dispatched = await _events_of_type(
-            store_group, EventType.NOTIFICATION_DISPATCHED
-        )
+        dispatched = await _events_of_type(store_group, EventType.NOTIFICATION_DISPATCHED)
         assert len(dispatched) == 1
         assert dispatched[0].payload["filtered"] is True
 
@@ -520,9 +483,7 @@ class TestRealNotificationServiceIntegration:
         """FR-E4：同 run_id 重放（e.g. crash 重试）→ sha256 notification_id 去重，只推一次。"""
         await _seed_main_runtime_with_namespace(store_group)
         notif_svc, tg, _web = self._build_real_notif(store_group)
-        svc = _build_service(
-            store_group, runner=_RecordingRunner(), notification_service=notif_svc
-        )
+        svc = _build_service(store_group, runner=_RecordingRunner(), notification_service=notif_svc)
         # 直接调 Phase E 通知方法两次（同 run_id 模拟重放）
         config = svc._read_config()
         await svc._ensure_consolidation_root()
@@ -539,9 +500,7 @@ class TestRealNotificationServiceIntegration:
         """对照：不同 run_id → 各发各的（每晚一条互不吞）。"""
         await _seed_main_runtime_with_namespace(store_group)
         notif_svc, tg, _web = self._build_real_notif(store_group)
-        svc = _build_service(
-            store_group, runner=_RecordingRunner(), notification_service=notif_svc
-        )
+        svc = _build_service(store_group, runner=_RecordingRunner(), notification_service=notif_svc)
         config = svc._read_config()
         await svc._ensure_consolidation_root()
         for run_id in ("mcons-night-1", "mcons-night-2"):
@@ -556,9 +515,7 @@ class TestRealNotificationServiceIntegration:
         """
         await _seed_main_runtime_with_namespace(store_group)
         notif_svc, _tg, _web = self._build_real_notif(store_group)
-        svc = _build_service(
-            store_group, runner=_RecordingRunner(), notification_service=notif_svc
-        )
+        svc = _build_service(store_group, runner=_RecordingRunner(), notification_service=notif_svc)
         await svc._run_consolidation()
 
         inbox = notif_svc.list_active("")  # notifications 路由默认 session_id=""

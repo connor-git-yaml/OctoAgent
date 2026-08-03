@@ -7,10 +7,9 @@ Lazy probe 策略：每次调用时先尝试 primary，失败则切换到 fallba
 
 import structlog
 
-from .exceptions import ProviderError
+from .exceptions import ProviderError, is_provider_auth_error
 from .model_request_gate import ModelRequestsNotAllowedError
 from .models import ModelCallResult
-from .provider_client import LLMCallError
 
 log = structlog.get_logger()
 
@@ -82,15 +81,15 @@ class FallbackManager:
                     model_alias=model_alias,
                 )
                 raise
-            if isinstance(e, LLMCallError) and e.status_code in (401, 403):
+            if is_provider_auth_error(e):
                 # 凭证失效（provider_client 内部已 force_refresh 失败）：
                 # fallback（Echo）无法恢复凭证，且 Echo 假成功会把事故掩盖成
-                # 正常回复——2026-06-12 production 实测这条路径让凭证断链的
-                # task 永远到不了 FAILED 终态。直接向上抛，由上层
-                # _handle_llm_failure 把 task 推进 FAILED。
+                # 正常回复。这里同时覆盖 HTTP 前的 profile/refresh 失败和
+                # HTTP 401/403；直接向上抛，由上层把 task 推进 FAILED。
                 log.warning(
                     "primary_auth_error_skip_fallback",
-                    status_code=e.status_code,
+                    error_type=type(e).__name__,
+                    status_code=getattr(e, "status_code", None),
                     model_alias=model_alias,
                 )
                 raise

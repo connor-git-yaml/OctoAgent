@@ -135,7 +135,7 @@
 `get_profile_allowlist()` 做的事情是：  
 根据角色返回可加载的行为文件白名单，控制不同角色能看到哪些行为材料。
 
-这为后续的 Butler / Worker / Subagent 差异化上下文加载提供了基础。
+这为主 Agent / Worker / Subagent 差异化上下文加载提供了基础。
 
 #### `load_onboarding_state()` / `save_onboarding_state()` / `mark_onboarding_completed()`
 

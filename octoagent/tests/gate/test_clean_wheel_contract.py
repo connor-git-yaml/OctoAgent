@@ -983,6 +983,41 @@ def _assert_target_owner_ignores_host_shadow(
         pytest.fail(f"{IMPORT_CLASSIFICATION_ORACLE}: host owner shadow accepted", pytrace=False)
 
 
+def _assert_repeated_import_owner_resolution_is_deduplicated(
+    module: Any,
+    classifier: Any,
+    root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = _classification_fixture(root)
+    runtime = target / "demo_pkg/runtime.py"
+    runtime.write_text(
+        runtime.read_text(encoding="utf-8") + "\nimport requests\nimport requests\n",
+        encoding="utf-8",
+    )
+    original = module._resolve_import_distribution
+    calls: list[str] = []
+
+    def counted(location: Path, imported: str) -> str | None:
+        calls.append(imported)
+        return original(location, imported)
+
+    with monkeypatch.context() as context:
+        context.setattr(module, "_resolve_import_distribution", counted)
+        occurrences = classifier(target, "demo-dist")
+    requests = [item for item in occurrences if item.get("import_root") == "requests"]
+    if len(requests) != 3:
+        pytest.fail(
+            f"{IMPORT_CLASSIFICATION_ORACLE}: repeated import fixture drifted",
+            pytrace=False,
+        )
+    if calls.count("requests") != 1:
+        pytest.fail(
+            f"{IMPORT_CLASSIFICATION_ORACLE}: repeated import owner was rescanned",
+            pytrace=False,
+        )
+
+
 def _assert_preliminary_inventory(builder: Any, occurrences: list[dict[str, Any]]) -> None:
     manifest = [
         "requests",
@@ -1615,6 +1650,12 @@ class TestCleanWheelContract:
         )
         _assert_target_owner_ignores_host_shadow(
             module, classifier, target, occurrences, monkeypatch
+        )
+        _assert_repeated_import_owner_resolution_is_deduplicated(
+            module,
+            classifier,
+            tmp_path / "deduplicated-owner-resolution",
+            monkeypatch,
         )
         _assert_preliminary_inventory(builder, occurrences)
         _assert_workspace_owner_controls(classifier, validator, tmp_path / "workspace-owner")

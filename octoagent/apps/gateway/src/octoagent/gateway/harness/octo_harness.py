@@ -409,11 +409,22 @@ class OctoHarness:
             load_cloudflare_web_access_manifest,
             verify_cloudflare_access_jwt,
         )
+        from ..services.mobile_device_access import (
+            load_mobile_device_access_manifest,
+        )
 
         project_root = self._project_root
         _warn_duplicate_instance_roots(project_root)  # Feature 082 P4
         app.state.project_root = project_root
         config = load_config(project_root)
+        app.state.mobile_device_access_manifest = None
+        if config is not None and config.mobile_device_access.enabled:
+            app.state.mobile_device_access_manifest = (
+                load_mobile_device_access_manifest(
+                    project_root,
+                    Path(config.mobile_device_access.manifest_path),
+                )
+            )
         if config is not None and config.front_door.mode == "cloudflared":
             manifest = load_cloudflare_web_access_manifest(
                 project_root,
@@ -592,6 +603,8 @@ class OctoHarness:
         from .. import main as _main_module
         from ..main import _resolve_telegram_polling_timeout
         from ..services.content_threat_scan import ContentThreatScanService
+        from ..services.health_ingestion import build_health_ingestion_service
+        from ..services.mobile_device_access import build_device_trust_service
 
         # 通过 _main_module 拿这些符号，保留 monkeypatch.setattr(main, "X", ...)
         # 路径（baseline 行为）。
@@ -623,6 +636,26 @@ class OctoHarness:
         _ops_dir.mkdir(parents=True, exist_ok=True)
 
         app.state.store_group = store_group
+        mobile_manifest = getattr(
+            app.state,
+            "mobile_device_access_manifest",
+            None,
+        )
+        app.state.device_trust_service = (
+            build_device_trust_service(
+                manifest=mobile_manifest,
+                store_group=store_group,
+            )
+            if mobile_manifest is not None
+            else None
+        )
+        app.state.health_ingestion_service = (
+            build_health_ingestion_service(
+                store_group=store_group,
+            )
+            if mobile_manifest is not None
+            else None
+        )
 
         # 初始化 SSEHub
         app.state.sse_hub = SSEHub()

@@ -60,6 +60,7 @@ from .exceptions import (
     CredentialValidationError,
     OAuthFlowError,
     ProviderError,
+    is_provider_auth_error,
 )
 from .fallback import FallbackManager
 
@@ -103,6 +104,7 @@ __all__ = [
     "CredentialNotFoundError",
     "CredentialExpiredError",
     "CredentialValidationError",
+    "is_provider_auth_error",
     "OAuthFlowError",
     # F137：真 LLM 调用许可 gate
     "ModelRequestsNotAllowedError",

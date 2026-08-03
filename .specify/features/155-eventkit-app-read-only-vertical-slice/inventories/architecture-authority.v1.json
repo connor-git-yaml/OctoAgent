@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "feature_id": "F155",
+  "authority_status": "DESIGN_TASKS_APPROVED_IMPLEMENT_BLOCKED_ON_UPSTREAM",
+  "approval_date": "2026-08-01",
+  "product_decision": {
+    "option": "A",
+    "review_identity": "user-f155-option-a-20260801",
+    "system_permission": "calendar_events_full_access",
+    "application_boundary": "read_only_mutation_paths_zero"
+  },
+  "architecture_checker": "repo-scripts/check-runtime-architecture.py",
+  "preconditions": [
+    {
+      "feature_id": "F155",
+      "required_gate": "GATE_PRODUCT_DECISION",
+      "current_state": true
+    },
+    {
+      "feature_id": "F153",
+      "required_gate": "GATE_VERIFY",
+      "current_state": true
+    },
+    {
+      "feature_id": "F154",
+      "required_gate": "GATE_VERIFY",
+      "current_state": false
+    }
+  ],
+  "planned_capabilities": [
+    "calendar.review.submit",
+    "calendar.analysis.run",
+    "calendar.source.delete"
+  ],
+  "forbidden_capability_fragments": [
+    "calendar.create",
+    "calendar.update",
+    "calendar.write",
+    "calendar.delete"
+  ],
+  "planned_production_paths": [
+    "repo-scripts/check-runtime-architecture.py",
+    "octoagent/packages/core/src/octoagent/core/models/privacy_ingestion.py",
+    "octoagent/packages/policy/src/octoagent/policy/privacy_ingestion_policy.py",
+    "octoagent/packages/protocol/src/octoagent/protocol/privacy_ingestion.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/services/calendar_ingestion.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/routes/mobile_calendar.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/harness/octo_harness.py",
+    "octoagent/apps/gateway/src/octoagent/gateway/main.py",
+    "octoagent/apps/ios/OctoAgent.xcodeproj/project.pbxproj",
+    "octoagent/apps/ios/OctoAgent/App/OctoAgentApp.swift",
+    "octoagent/apps/ios/OctoAgent/Calendar/CalendarImportModels.swift",
+    "octoagent/apps/ios/OctoAgent/Calendar/AppleCalendarEventStore.swift",
+    "octoagent/apps/ios/OctoAgent/Calendar/CalendarImportCoordinator.swift",
+    "octoagent/apps/ios/OctoAgent/Calendar/CalendarReviewView.swift"
+  ],
+  "forbidden_terms": [
+    "EKEventStore.save",
+    "EKEventStore.remove",
+    "EKEventStore.commit",
+    "EKEventStore.reset",
+    "EKEventEditViewController",
+    "EKCalendarChooser",
+    "requestWriteOnlyAccessToEvents",
+    "NSCalendarsWriteOnlyAccessUsageDescription",
+    "requestFullAccessToReminders",
+    "WebView",
+    "Cloudflare service token",
+    "Web Access Cookie"
+  ],
+  "scope_hash_algorithm": "sha256(canonical_json(document_without_approved_scope_sha256))",
+  "approved_scope_sha256": "cd4cab6654ded23b860de4b641cd4a671c78359bcdd0e4f1f3ef7d49e70a6d0d"
+}

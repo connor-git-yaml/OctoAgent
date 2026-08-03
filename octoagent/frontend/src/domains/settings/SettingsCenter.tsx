@@ -1,5 +1,6 @@
 import { useWorkbench } from "../../components/shell/WorkbenchLayout";
 import MaintenanceRecoverySection from "./MaintenanceRecoverySection";
+import { RemoteAccessSettings } from "./RemoteAccessSettings";
 import SettingsPage from "./SettingsPage";
 
 function hasConnectedProvider(value: unknown): boolean {
@@ -24,7 +25,7 @@ export default function SettingsCenter() {
 
   return (
     <div className="f149-settings-composition">
-      <SettingsPage />
+      <SettingsPage remoteAccess={<RemoteAccessSettings />} />
       <MaintenanceRecoverySection connected={hasConnectedProvider(providers)} />
     </div>
   );

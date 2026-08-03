@@ -125,6 +125,54 @@ describe("useChatStream", () => {
     expect(fetchTaskDetailMock).toHaveBeenCalledTimes(1);
   });
 
+  it("恢复历史对话遇到一次瞬时失败后会重试同一任务", async () => {
+    window.sessionStorage.setItem("octoagent.chat.activeTaskId", "task-restore-retry");
+    fetchTaskDetailMock
+      .mockRejectedValueOnce(new Error("gateway restart race"))
+      .mockResolvedValueOnce({
+        task: {
+          task_id: "task-restore-retry",
+          title: "重启后的对话",
+          status: "SUCCEEDED",
+        },
+        events: [
+          {
+            event_id: "evt-user-retry",
+            task_id: "task-restore-retry",
+            task_seq: 1,
+            ts: "2026-08-01T10:00:00Z",
+            type: "USER_MESSAGE",
+            actor: "user",
+            payload: { text: "恢复这轮对话" },
+          },
+          {
+            event_id: "evt-agent-retry",
+            task_id: "task-restore-retry",
+            task_seq: 2,
+            ts: "2026-08-01T10:00:01Z",
+            type: "MODEL_CALL_COMPLETED",
+            actor: "system",
+            payload: { response_summary: "已经从短暂中断中恢复。" },
+          },
+        ],
+        artifacts: [],
+      });
+
+    const { result } = renderHook(() =>
+      useChatStream({ taskIds: ["task-restore-retry"] })
+    );
+
+    await waitFor(() => {
+      expect(result.current.restoring).toBe(false);
+      expect(result.current.messages).toHaveLength(2);
+    });
+    expect(fetchTaskDetailMock).toHaveBeenCalledTimes(2);
+    expect(result.current.messages[1]?.content).toBe("已经从短暂中断中恢复。");
+    expect(window.sessionStorage.getItem("octoagent.chat.activeTaskId")).toBe(
+      "task-restore-retry"
+    );
+  });
+
   it("新对话首条消息会携带 session-scoped 起点，包括显式 Agent 会话入口", async () => {
     const FakeEventSource = installFakeEventSource();
     executeControlActionMock.mockResolvedValueOnce({

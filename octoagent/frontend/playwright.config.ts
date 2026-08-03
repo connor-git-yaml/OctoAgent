@@ -51,11 +51,18 @@ const SHARED_ENV = {
 export default defineConfig({
   testDir: "./e2e",
   outputDir: "./e2e/.l1-runtime/test-results",
+  snapshotPathTemplate: "{testDir}/__snapshots__/{testFilePath}/{arg}{ext}",
   workers: 1,
   fullyParallel: false,
   retries: 0,
   timeout: 60_000,
-  expect: { timeout: 15_000 },
+  expect: {
+    timeout: 15_000,
+    toHaveScreenshot: {
+      animations: "disabled",
+      maxDiffPixelRatio: 0.02,
+    },
+  },
   reporter: process.env.CI ? [["list"], ["html", { open: "never" }]] : [["list"]],
   use: {
     trace: "retain-on-failure",
