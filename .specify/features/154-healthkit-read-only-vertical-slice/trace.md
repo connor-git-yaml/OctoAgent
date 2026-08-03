@@ -233,3 +233,11 @@
   `ac92cab0b27b00ce73cac0cadb8c3fa0f3004b96ef85d0359717bbbb626d37a3`。approve flag
   缺失、screenshot capture 关闭，没有上传新摘要或记录健康值。T013 至此完成，只剩 T016
   最终 CI/evidence inventory/verification/Blueprint/F158 truth sync。
+- 2026-08-03：T016 在 detached clean checkout `4daf983f` 上完成最终复验：F154 focused
+  Backend 24/24、repository architecture、iOS scheme 27 passed + 9 explicit live-only
+  skipped、generic iPhoneOS Release warnings-as-errors 全绿。push run `30782680229` 与 PR
+  run `30782732897` 的 backend/frontend/Playwright/architecture/benchmark 五个 job 均
+  success；两个 backend 都为 5760 passed、14 skipped、1 xfailed、1 xpassed，scripted
+  18 passed，changed-lines `2192/2420 = 90.6% PASS`。仓库最终 evidence inventory 为
+  两件、7,950 bytes；verification/Blueprint/F158 truth 同步完成，`GATE_VERIFY=true`，
+  F155 解锁。

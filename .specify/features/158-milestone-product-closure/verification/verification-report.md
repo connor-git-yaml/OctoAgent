@@ -6,21 +6,22 @@
 - 状态：`PARTIAL`；
 - `GATE_VERIFY=false`；
 - 当前分支：`codex/f158-milestone-product-closure`；
-- 当前已推送代码/测试/workflow 提交：`1723c84f9fb07ac8273c2a6bc6af52f7016cb1da`；
+- 当前已验证代码/测试提交：`4daf983f1c5893593d920f985ab671c2b7f4f1b1`；
 - 当前个人部署代码提交：`d17c3e59879ee09dd79ba77fcebf9729e662730e`；
-- 当前已推送 CI：run `30720799929`，head `1723c84f`，五个 job 全部成功。非主分支
-  resolver 精确选择 `origin/master` merge-base `db3214ff`；backend deterministic
+- 当前最终 F154 CI：push run `30782680229` 与 PR run `30782732897`，五个 job 均
+  success。非主分支 resolver 精确选择 `origin/master` merge-base `db3214ff`；两个
+  backend deterministic 均为
   `5760 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted `18 passed`，committed
   changed-lines 对完整分支为 `2192/2420 = 90.6% PASS`。LCOV SHA 为
-  `1e2a0d9011d5d0e1d4af892c9ddf56b2b351e272368e70b124c0b08e3c7129c2`；T050 已完成，
-  Node 20 deprecation annotation=0。
+  push `541e3daa34c4c005b48c7b8d23ce70eae2e4df529910fab3734439d5d58ab9e4`、PR
+  `55d6b36018e49201a4ace022c2d937a2a4a59bbbccf2594af7e4febfd1790ac0`。
 
 当前 Goal **没有完成**。桌面 Web、Claude 最早期设计视觉恢复、个人部署远程访问、
 真实 OpenAI Codex 对话、F153 原生 iOS device-trust，以及 F154 真 iPhone 权限、真实
 preview、一次获批分析和删除闭环已经形成可复核证据；F150 的真实会话自然过期也已
-通过。F154 的物理锁屏→解锁生命周期也已通过；仍缺 F154 最终 Verify、F155 EventKit
-production、F156 完整 Companion、最终 mainline 确认和一次用户提前知情的 Mac 物理重启
-验收。
+通过。F154 的物理锁屏→解锁生命周期、clean checkout、双 CI 与最终 Verify 也已通过；
+仍缺 F155 EventKit production、F156 完整 Companion、最终 mainline 确认和一次用户
+提前知情的 Mac 物理重启验收。
 
 手机产品只走原生 iOS App。390px 只表示桌面 Web 窄窗口健壮性，不是手机浏览器产品；
 Web 与 iOS 都以 Claude Design 最早期方案的层级、留白、卡片节奏、排版与视觉张力为
@@ -35,10 +36,10 @@ Web 与 iOS 都以 Claude Design 最早期方案的层级、留白、卡片节�
 | F151 runtime architecture | PASS（历史留档受限） | 当前 clean-checkout repository architecture PASS，canonical index/report 已提交；历史 raw TDD archive 不自包含且禁止伪造 |
 | F152 privacy authority | PASS | consent/lineage/zero-retention authority 已供 F153/F154 复用 |
 | F153 device trust | PASS | `GATE_VERIFY=true`，真 iPhone security/lifecycle 与 Cloudflare live 已闭环 |
-| F154 HealthKit read-only | PARTIAL | T013 真机权限、24h/3d/7d preview、批准/分析/删除与物理锁屏生命周期均通过；只缺 T016 Verify |
-| F155 EventKit read-only | CLOSED | Design/Tasks truth 已纠正；等待 F154 Verify 后执行自身 T003 exact authority，production=0 |
+| F154 HealthKit read-only | PASS | T013 真机权限、24h/3d/7d preview、批准/分析/删除、物理锁屏生命周期与 T016 clean checkout/双 CI 全部通过，`GATE_VERIFY=true` |
+| F155 EventKit read-only | READY | Design/Tasks PASS，F153/F154 Verify 已满足；从自身 T003 exact authority 开始 Implement，production 当前仍为 0 |
 | F156 native Companion | CLOSED | recon 已纠正为 10 条 mobile route、5 个已签发 capability、8 个 product gap，production=0 |
-| 当前 CI | PASS | run `30720799929` 五个 job 全绿；Node 24 Actions；累计 `origin/master` merge-base 范围 `2192/2420 = 90.6% PASS`，未降门槛或加豁免 |
+| 当前 CI | PASS | push `30782680229` 与 PR `30782732897` 五个 job 全绿；累计 `origin/master` merge-base 范围 `2192/2420 = 90.6% PASS`，未降门槛或加豁免 |
 | 当前个人部署 | PASS（已部署范围） | managed checkout 运行 `d17c3e59`，`/health=200` |
 | M10 物理开机 attestation | MISSING | 只允许 Goal 末尾提前通知用户后重启一次 Mac |
 | F158 Verify / mainline | MISSING | 仍有上述产品与外部边界 |
@@ -103,9 +104,9 @@ F153 当前 verification report 为 `PASS / GATE_VERIFY=true`。已通过：
 `../153-ios-device-trust-secure-transport/verification/verification-report.md` 为准。
 F153 PASS 只解锁 F154，不会提前证明 HealthKit、EventKit 或 Companion。
 
-### F154 当前实现与真机阶段性证据
+### F154 最终 Verify
 
-当前已推送代码/测试提交 `2b1fb5ec4a78ca1a3a2cba2343e0b45d5abc2204` 上的产品范围：
+最终验证提交 `4daf983f1c5893593d920f985ab671c2b7f4f1b1` 的产品范围：
 
 - F154 Gateway/Core/Policy/Protocol/authority：`25 passed / 0 failed`；
 - F153 device-trust focused：`48 passed / 0 failed / 1 existing warning`；
@@ -146,7 +147,10 @@ warnings-as-errors 与 repository architecture gate 均通过。preview-only 锁
 终止 App 清除 session-only preview，没有再次上传健康摘要。
 
 该无效历史随后已由有效 transaction 取代。有效 transaction 的 approve flag 缺失、
-screenshot capture 关闭，仓库只保留不含健康值、设备标识、凭证或截图的结构化 attestation。
+screenshot capture 关闭，仓库只保留不含健康值、设备标识、凭证或截图的结构化
+attestation。detached clean checkout 又完成 F154 Backend 24/24、repository architecture、
+iOS scheme 27 passed + 9 live-only skipped 与 generic iPhoneOS Release PASS；push/PR 双 CI
+均为五 job success。因此 F154 `GATE_VERIFY=true`，F155 已解锁。
 
 ## 当前架构与质量事实
 
@@ -169,18 +173,17 @@ recon 与 Gate 前置，没有聊天、任务、审批、Memory、通知 product
 
 ## 当前未完成清单
 
-1. F154 T016：累计 branch-base workflow 复验、evidence inventory 与 Verify；
-2. F155：EventKit 只读 production、测试、Simulator/真机 Verify；
-3. F156：原生 Companion 八项 product gap、SwiftUI 场景、功能/视觉 E2E；
-4. mainline rebase/recon、最终全量回归、secret/architecture/visual inventory；
-5. Goal 最后一次 Mac 物理重启与启动后 Gateway/tunnel/doctor/Web/iOS 复核。
+1. F155：EventKit 只读 production、测试、Simulator/真机 Verify；
+2. F156：原生 Companion 八项 product gap、SwiftUI 场景、功能/视觉 E2E；
+3. mainline rebase/recon、最终全量回归、secret/architecture/visual inventory；
+4. Goal 最后一次 Mac 物理重启与启动后 Gateway/tunnel/doctor/Web/iOS 复核。
 
-第 5 项不会在用户使用手机期间执行，也不会未经提前通知重启 Mac。
+第 4 项不会在用户使用手机期间执行，也不会未经提前通知重启 Mac。
 
 ## Verify 判定
 
-当前已交付范围有真实、分层且可定位的证据，但 F154-F156 产品闭包、F151/F150 剩余
-authority/live 边界、mainline 与物理重启均未完成。因此：
+当前已交付范围有真实、分层且可定位的证据，但 F155-F156 产品闭包、mainline 与物理
+重启均未完成。因此：
 
 ```text
 GATE_VERIFY=false

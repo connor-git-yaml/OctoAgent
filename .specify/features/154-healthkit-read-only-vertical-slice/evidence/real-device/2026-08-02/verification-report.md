@@ -4,13 +4,13 @@
 
 - 日期：2026-08-02（Asia/Shanghai）；
 - 设备：真 iPhone 17 Pro Max / iOS 27.0 beta / arm64；
-- 状态：`T013_PASS / T016_PENDING`；
+- 状态：`T013_PASS / T016_PASS`；
 - 本轮只获得一次“上传 7 天 canonical 健康摘要”的用户明确授权；没有再次上传，
   没有输出健康值、source hash、device identifier、token 或 owner identity；
 - 用户动作权限、真实 24 小时/3 天/7 天本地预览、7 天批准→分析→删除、前后台恢复、
   server-side provenance cascade 已通过；
-- 健康页面 preview-only 锁屏→解锁已于 2026-08-03 通过；T013 完成，T016 最终 Verify
-  仍待完成。
+- 健康页面 preview-only 锁屏→解锁已于 2026-08-03 通过；T013 完成，T016 随后也已
+  通过 clean checkout、双 CI 与 evidence inventory，`GATE_VERIFY=true`。
 
 ## 真实 HealthKit 读取
 

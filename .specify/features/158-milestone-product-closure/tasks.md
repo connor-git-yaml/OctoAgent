@@ -51,14 +51,14 @@
 - [x] **T027** 创建并通过 F153 真机 transport/device-proof Feature：Simulator、
   dedicated mobile edge、真 iPhone Secure Enclave/Keychain/rotation/revoke/4G/restart
   与最终 Verify 均已通过
-- [ ] **T028** 完成 F154 HealthKit Feature（Research/Design/Tasks Gate 已通过；
+- [x] **T028** 完成 F154 HealthKit Feature（Research/Design/Tasks Gate 已通过；
   production T001-T012/T014/T015 已完成；真 iPhone 权限、真实 24h/3d/7d preview、
   一次获批摘要分析与删除、preview-only 物理锁屏→解锁生命周期均已通过；T013 已完成，
-  只剩 T016 最终 evidence/CI/Blueprint Verify）
+  T016 clean checkout、双 CI、evidence inventory 与 Blueprint/F158 sync 已完成，
+  `GATE_VERIFY=true`）
 - [ ] **T029** 完成 F155 EventKit Feature（方案 A 已接受：系统 full access、Octo
-  物理只读；Research/Design/Tasks Gate 已通过，F153 Verify 已满足，Implement/Verify
-  仍等待 F154 Verify；随后必须在唯一 F151 checker 中完成 F155 自身 T003 exact
-  paths/symbols authority）
+  物理只读；Research/Design/Tasks Gate 已通过，F153/F154 Verify 已满足；当前从唯一
+  F151 checker 中的 F155 自身 T003 exact paths/symbols authority 开始 Implement）
 - [ ] **T030** 完成 F156 SwiftUI Native Companion Feature（Research、Design/Tasks 草案、
   40 场景矩阵与 current API recon 已创建；2026-08-02 当前 mobile routes=10
   （F153=7、F154=3）、F156 产品 gaps=8，上游 Verify、F156 自身 T003 authority、

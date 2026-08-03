@@ -43,9 +43,10 @@ early frame canvas and one 390px Web robustness viewport.
 
 当前直接证据：F153 registration/device-trust 的 Swift unit 为 9/9，Simulator UI
 为 3/3，六个注册状态视觉 baseline 在禁止更新模式下通过；AXXXL Dynamic Type、
-accessibility tree 与 Reduce Motion 已实测。conversation/tasks/approvals/memory、
-HealthKit、EventKit、notification/deep-link 仍分别等待 F154-F156，真机列仍全部不能
-由上述 Simulator 结果替代。
+accessibility tree 与 Reduce Motion 已实测。F154 HealthKit Simulator 状态矩阵、视觉/
+无障碍、真 iPhone 权限、真实数据、Wi-Fi/蜂窝、撤销、删除与锁屏生命周期已经通过；
+这些真机结果未由 Simulator 替代。conversation/tasks/approvals/memory、EventKit 与
+notification/deep-link 仍分别等待 F155-F156。
 
 ## 证据格式
 

@@ -31,8 +31,8 @@
 - [x] T002-T003 Swift model/normalization RED→GREEN→REFACTOR
 - [x] T004-T011 RED→GREEN→REFACTOR
 - [x] T012 Simulator
-- [ ] T013 real iPhone
+- [x] T013 real iPhone
 - [x] T014 live model
 - [x] T015 architecture/quality
-- [ ] T016 F154 Verify
-- [ ] F155 unlocked
+- [x] T016 F154 Verify
+- [x] F155 unlocked

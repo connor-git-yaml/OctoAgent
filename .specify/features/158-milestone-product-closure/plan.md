@@ -49,12 +49,12 @@ Milestone 已交付。
 2. F153：真实 iPhone transport/device-proof spike。
 3. F154：HealthKit 垂直切片。Research/Design/Tasks Gate 已于 2026-07-29 通过，
    exact 范围收敛为 stepCount + sleepAnalysis、24h/3d/7d、本地聚合、当次批准、
-   单次分析与删除；F153 Verify 后已完成 T001-T012/T014/T015，当前只缺真 iPhone
-   HealthKit T013 与最终 T016 Verify。
+   单次分析与删除；F153 Verify 后已完成 production、Simulator、真 iPhone 权限/数据/
+   网络/撤销/锁屏生命周期与最终 T016 clean checkout、双 CI，`GATE_VERIFY=true`。
 4. F155：EventKit OS full-access 决策门与只读实现。用户已于 2026-08-01 明确选择
    方案 A：接受 iOS 系统日历 full access，但 Octo App/代码保持物理只读、写路径为零；
-   Design/Tasks Gate 已通过，production=0；F153 Verify 已满足，Implement/Verify 继续
-   等待 F154 Verify；随后先在唯一 F151 checker 中完成 F155 自身 exact authority。
+   Design/Tasks Gate 已通过，F153/F154 Verify 已满足，production=0；Implement 已解锁，
+   先在唯一 F151 checker 中完成 F155 自身 exact authority。
 5. F156：SwiftUI 对话、任务、审批、记忆、连接与通知体验。Research、
    Design/Tasks 草案、40 行启动/功能/视觉矩阵与 current mobile API recon 已建立；
    2026-08-02 recon 确认当前有 F153 7 条、F154 3 条 owner route，F156 的 8 项
@@ -90,9 +90,9 @@ branch-base run `30718445846` 已证明 resolver 生效并以 `1917/2484 = 77.2%
 测量缺陷。轻量 namespace-root 插件与延迟 gate import 修复提交 `2b1fb5ec` 的累计
 branch-base run `30719719793` 五个 job 全绿：backend `5759 passed`、scripted
 `18 passed`，committed 覆盖 `2192/2420 = 90.6% PASS`。T050 已完成。F153 Verify 已完成；F154 production
-T001-T012/T014/T015 和当前
-Simulator/非真机回归已通过，但真 iPhone HealthKit 与最终 Verify 仍缺。F155 已完成
-方案 A 产品决策及 Design/Tasks Gate，F156 已建立 40 场景 Design/Tasks 草案与
+与 Simulator/真机权限、真实数据、网络、撤销、物理锁屏生命周期及最终 Verify 已通过。
+F155 已完成方案 A 产品决策及 Design/Tasks Gate，并已由 F154 Verify 解锁 Implement；
+F156 已建立 40 场景 Design/Tasks 草案与
 10-route API recon，但两者 production 均为 0。F154-F156 最终 Verify、主线合并与总
 completion audit 仍未完成。
 

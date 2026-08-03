@@ -443,3 +443,15 @@
   architecture PASS。累计 changed-lines 仍为 `2192/2420 = 90.6% PASS`，Node 20
   deprecation annotation=0。三个并行 job 只出现同一 uv cache reserve warning，
   architecture 已成功保存该 cache，故不为 first-writer-wins 非阻断提示再触发长 CI。
+- 2026-08-03：F154 使用同一签名 App 与 production HealthKit adapter 完成有效
+  preview-only 物理锁屏→解锁 transaction：`1 passed / 0 failed / 0 skipped`，恢复后
+  preview 保留且未自动批准、提交或分析，随后只删除本地 preview。xcresult 38 files /
+  362425 bytes，byte-map aggregate
+  `ac92cab0b27b00ce73cac0cadb8c3fa0f3004b96ef85d0359717bbbb626d37a3`；仓库只保存
+  不含健康值、设备标识、凭证或截图的结构化 attestation。
+- 2026-08-03：F154 T016 在 detached clean checkout `4daf983f` 上完成 Backend 24/24、
+  repository architecture、iOS scheme 27 passed + 9 live-only skipped 和 generic
+  iPhoneOS Release PASS。push run `30782680229` 与 PR run `30782732897` 五个 job 均
+  success；两个 backend 均为 5760 passed、14 skipped、1 xfailed、1 xpassed，scripted
+  18 passed，changed-lines `2192/2420 = 90.6% PASS`。最终 evidence inventory 两件、
+  7,950 bytes；F154 `GATE_VERIFY=true`，F158 T028 完成，F155 解锁。

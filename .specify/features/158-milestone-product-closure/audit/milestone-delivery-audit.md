@@ -20,9 +20,9 @@
 | Web 功能 E2E | 11 个 Playwright spec / 39 nodes | PROVEN_BRANCH_CI_DEPLOYED | 2026-07-31 当前分支完整 `39/39`、retries=0；当前 runtime 已部署 | F158 |
 | Web 视觉 E2E | geometry/computed-style + 14 个 pixel snapshots | PROVEN_BRANCH_CI_DEPLOYED | 主框架与 9 surface + 真实任务详情进入像素门；部署 CSS map 与分支一致 | F158 |
 | 390px Web 健壮性 | 10 surface 参数化 Playwright + F150 narrow journey | PROVEN_IN_BRANCH | overflow/focus/a11y/reduced motion 通过；不是手机产品 | F158 |
-| 原生 iOS 可启动 | Simulator/Release build + 真实 iPhone 签名安装与启动 | PROVEN（F153） | F153 Verify通过；F154 真机 HealthKit 与 F155/F156 尚未完成 | F153-F156 |
-| iOS 功能 E2E | F153 Simulator/真机 enrollment、signed ready、replay/revoke/恢复；F154 Simulator scheme与真机HealthKit preview/批准/删除 | PARTIAL | F153已证；F154只剩preview-only锁屏生命周期与最终Verify；F155/F156行为E2E=0 | F153-F156 |
-| iOS 视觉回归 | 六状态 pixel baseline、AXXXL 截图、a11y/Reduce Motion | PARTIAL | F153 registration 视觉已证；F154 已冻结 Claude early + SwiftUI native visual contract，但完整 companion/HealthKit/EventKit/真机视觉仍缺 | F153-F156 / F158 |
+| 原生 iOS 可启动 | Simulator/Release build + 真实 iPhone 签名安装与启动 | PROVEN（F153/F154） | F153/F154 Verify通过；F155/F156 尚未完成 | F153-F156 |
+| iOS 功能 E2E | F153 Simulator/真机 enrollment、signed ready、replay/revoke/恢复；F154 Simulator scheme、真机HealthKit preview/批准/删除与锁屏恢复 | PARTIAL | F153/F154已证；F155/F156行为E2E=0 | F153-F156 |
+| iOS 视觉回归 | registration/HealthImport pixel baseline、AXXXL、a11y/Reduce Motion | PARTIAL | F153 registration 与 F154 HealthImport 视觉已证；F155 EventKit 与 F156 完整 companion 仍缺 | F153-F156 / F158 |
 | Claude Design 后期不佳方案已清理 | 2026-07-28 云端写回、不可变导出、谱系与结构/资产机械核验 | PROVEN_BRANCH_CI_DEPLOYED | 最终总 completion audit 尚未完成 | F158 |
 | F151 当前 runtime/architecture | 当前 `architecture all`、verification report metadata、CI architecture/backend | PROVEN_CURRENT | 当前提交相对当前主线 architecture all exit0；产品架构合同可继续作为当前交付依据 | F151 / F158 |
 | F151 历史 TDD evidence 可复验性 | canonical v2 269-record hash chain、干净检出 verify | CONTRADICTED | `origin/master` 已前移；immutable base 下又因 ignored `evidence/local` 缺失而失败，旧 raw 未找到；不得伪造或用当前 GREEN 重跑替代 | F151 / F158 |
@@ -46,7 +46,7 @@
 | M9 | 完成 | 四层测试门、F151/F157 corrective 与 exact master CI 已闭环 | PROVEN | 最终总审计继续复用 run `30198514576` 与当前 F158 branch CI |
 | M10 | 功能完成 | F145/F134/F146/F147 主线存在 | INCOMPLETE | ATT-129-BOOT 物理重启 attestation |
 | M11 | 完成 | Web 可启动；F150 Settings 可达；主框架与 10 个业务 surface（含任务详情）视觉及功能 E2E 通过；Claude 云端谱系已清理并导出；当前 runtime 已部署；登录后个人旅程与完整Access生命周期通过 | PROVEN_BRANCH_CI_DEPLOYED | 最终 completion audit |
-| M12 | In Progress | F152/F153 Verify；F153真实iPhone全旅程通过；F154 Simulator、真机HealthKit preview/批准/删除通过；F155方案A/Design/Tasks通过；F156按10条mobile route完成recon | PARTIAL | F154锁屏生命周期与Verify、F155/F156各自authority及Implement/Verify、完整iOS E2E |
+| M12 | In Progress | F152/F153/F154 Verify；F153真实iPhone全旅程通过；F154 Simulator/Release、真机HealthKit preview/批准/删除/锁屏恢复与双CI通过；F155方案A/Design/Tasks通过并已解锁；F156按10条mobile route完成recon | PARTIAL | F155/F156各自authority及Implement/Verify、完整iOS E2E |
 
 该矩阵的 `PROVISIONAL` 不是重新否定历史交付，而是区分“历史报告存在”与“当前
 Milestone Goal 已在同一 commit/环境复验”。最终 completion audit 只允许将取得当前
@@ -274,8 +274,15 @@ path→SHA map 与分支 build 逐字节一致；登录后 Access 旅程和总 c
    当前判定提升为 `PASS`。隐私安全记录位于
    `evidence/web/2026-08-03/access-session-natural-expiry.md`。
 2. F154 已在同一真 iPhone 完成真实 Health 权限、24 小时/3 天/7 天本地 preview、
-   唯一一次用户批准的 review→analysis→delete；删除后敏感业务阶段计数为零。当前仅缺
-   preview-only 锁屏→解锁→前台恢复与 T016 最终 Verify，不能据此提前解锁 F155。
+   唯一一次用户批准的 review→analysis→delete；删除后敏感业务阶段计数为零。
+   preview-only 锁屏→解锁→前台恢复也由同一 production App 的独立 live transaction
+   通过，未自动批准/上传/分析，恢复后只删除本地 preview。
+3. F154 T016 在 detached clean checkout `4daf983f` 完成 focused Backend 24/24、
+   repository architecture、iOS scheme 27 passed + 9 live-only skipped 与 generic
+   iPhoneOS Release PASS。push run `30782680229`、PR run `30782732897` 的五个 job
+   均 success；两个 backend 均为 5760 passed、14 skipped、1 xfailed、1 xpassed，
+   scripted 18 passed，changed-lines `2192/2420 = 90.6% PASS`。F154
+   `GATE_VERIFY=true`，F155 已解锁。
 
 ## F153 当前设计映射与偏离记录
 

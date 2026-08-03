@@ -42,7 +42,7 @@
 - [x] F153 Cloudflare mobile hostname/path-specific Bypass/origin device proof live 通过
 - [x] F153 真机 device trust/transport 通过
 - [x] F154 HealthKit T001-T012、T014、T015 实现与 Simulator 验证通过
-- [ ] F154 HealthKit 通过
+- [x] F154 HealthKit 通过
 - [x] F155 EventKit 方案 A 决策门通过（系统 full access、Octo 物理只读）
 - [ ] F155 EventKit Implement/Verify 通过
 - [ ] F156 Native Companion 场景通过

@@ -34,7 +34,7 @@
   prompt/log/audit raw-field scan
 - [x] **T015 [ARCHITECTURE/QUALITY]** 单 store/client/policy/runner、function≤50、
   McCabe≤10、secret/package/log/snapshot scan
-- [ ] **T016 [VERIFY]** clean checkout、blast-radius regression、CI、evidence inventory、
+- [x] **T016 [VERIFY]** clean checkout、blast-radius regression、CI、evidence inventory、
   verification report、Blueprint/F158 sync；通过后解锁 F155
 
 ## Test Layers

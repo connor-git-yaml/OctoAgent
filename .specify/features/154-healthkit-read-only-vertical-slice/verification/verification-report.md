@@ -3,17 +3,18 @@
 ## 当前结论
 
 - 日期：2026-08-03；
-- 状态：`PARTIAL`；
-- `GATE_VERIFY=false`；
-- 当前提交：`1086d987a7037fbc1766e667dfc5f3f5664954f8`；
-- T001-T015 已完成；只剩 T016 最终 Verify 未完成。
+- 状态：`PASS`；
+- `GATE_VERIFY=true`；
+- 当前验证提交：`4daf983f1c5893593d920f985ab671c2b7f4f1b1`；
+- T001-T016 全部完成，F155 已解锁。
 
 当前代码已经证明 HealthKit 只读垂直切片的 deterministic contract、Gateway 路由、
 真实模型一次性分析、删除闭环、Simulator 功能/视觉/无障碍以及真 iPhone 权限、真实
 24 小时/3 天/7 天预览、一次经授权的摘要上传和删除。2026-08-03 又完成了 preview-only
 锁屏→解锁→前台恢复，证明未批准预览不会自动提交或分析，并能删除后返回空闲状态。
-T013 因此完成；F155 production 仍须等待 T016 的最终 CI、evidence inventory、
-verification/Blueprint/F158 truth sync 正式通过。
+T013 因此完成。detached clean checkout、双触发远端 CI、evidence inventory、
+verification/Blueprint/F158 truth sync 也已通过，F154 至此正式 Verify，F155 可按其既有
+Tasks Gate 从自身 architecture authority 开始实施。
 
 ## 当前复验
 
@@ -26,6 +27,38 @@ verification/Blueprint/F158 truth sync 正式通过。
 - 模型证据仅保留 metadata：`model_calls=1`、`memory_candidates=0`、
   `raw_forbidden_hits=0`，不保存 summary 内容或原始健康字段。
 
+### T016 clean checkout、回归与远端 CI
+
+在 detached worktree `/tmp/f158-f154-clean.6GMI5G/worktree` 对提交 `4daf983f` 执行，
+执行前后工作树均 clean：
+
+- F154 focused Backend：`24 passed / 0 failed`；
+- repository architecture gate：PASS；
+- iOS 完整 scheme：`36 total / 27 passed / 9 个明确 live-only skipped / 0 failed`；
+- clean-checkout xcresult：
+  `/tmp/f158-f154-clean-ios.PnWn7c/F154CleanCheckout.xcresult`；
+- xcresult：178 files / 4,927,734 bytes；directory byte-map aggregate：
+  `fdaa8995641a8830aea25125e7a0ba2320b348d98a21f0ca2467e73de3036e19`；
+- generic iPhoneOS Release arm64 warnings-as-errors：`BUILD SUCCEEDED`，DerivedData：
+  `/tmp/f158-f154-clean-release.LggLOd`。
+
+同一提交的 push run `30782680229` 与 PR run `30782732897` 均为 success，两个 run 的
+backend、frontend、Playwright、architecture、benchmark 五个 job 全部成功：
+
+- push backend：`5760 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted
+  `18 passed`；
+- PR backend：`5760 passed / 14 skipped / 1 xfailed / 1 xpassed`，scripted
+  `18 passed`；
+- frontend：`70 files / 599 passed`；Playwright：`39 passed`；
+- push 与 PR changed-lines 均为 `2192/2420 = 90.6% PASS`，base 为
+  `db3214fff722c6f969baf99528a76fc03a1e21a1`；
+- push LCOV SHA：`541e3daa34c4c005b48c7b8d23ce70eae2e4df529910fab3734439d5d58ab9e4`；
+- PR LCOV SHA：`55d6b36018e49201a4ace022c2d937a2a4a59bbbccf2594af7e4febfd1790ac0`。
+
+PR workflow 验证的是 GitHub merge commit `c17ad9dafbf1ae89d525bed23253a9793a720efc`，其
+tree 与 push head 相同，均为 `e4b95674e9f7ab890f997612df1fe07ef4b32399`。缓存上传的
+并发占位 warning 不影响任何 job 结论、测试结果或 coverage gate。
+
 ### iOS Simulator 完整 scheme
 
 环境：
@@ -35,16 +68,16 @@ verification/Blueprint/F158 truth sync 正式通过。
 - iOS：`26.5 (23F77)`；
 - device id：`3820A0E1-806E-4923-AC06-BA3A746F01DB`。
 
-2026-08-03 当前未提交字节的最新单次执行结果：
+2026-08-03 clean checkout 的最终单次执行结果：
 
 ```text
 result bundle:
-/tmp/f158-f154-current-simulator.j8ykha/F154CurrentSimulator.xcresult
+/tmp/f158-f154-clean-ios.PnWn7c/F154CleanCheckout.xcresult
 
 36 total / 27 passed / 9 skipped / 0 failed
 files=178
-bytes=4950086
-directory byte-map aggregate=9efd087edde28df1a8f4731b750e982c62cd07e5bd8a7ba41dc3832eb17248fb
+bytes=4927734
+directory byte-map aggregate=fdaa8995641a8830aea25125e7a0ba2320b348d98a21f0ca2467e73de3036e19
 ```
 
 九个 skip 全是必须依赖真 iPhone credential/live flag 的显式 live 用例。F154 本次精确为：
@@ -129,8 +162,8 @@ LaunchAgent 后，config SHA 保持不变，公网 mobile route 恢复到 origin
 | real iPhone approve/analyze/delete 与 zero-retention | PASS |
 | real iPhone background/network/revoke 分层闭包 | PASS |
 | real iPhone health preview lock→unlock lifecycle | PASS |
-| final CI/evidence inventory/Blueprint sync | PENDING |
-| F154 Verify | CLOSED |
+| final CI/evidence inventory/Blueprint sync | PASS |
+| F154 Verify | PASS |
 
 ## 真机完成边界
 
@@ -140,10 +173,15 @@ preview-only 后台与物理锁屏恢复、一次经授权分析/删除，以及
 persistence 共同闭合。锁屏 transaction 自身明确证明不会自动批准、不会提交，且仍可
 删除本地 preview；没有用其它分层证据替代该 UI 物理场景。
 
-2026-08-03 的首次 lock-cycle 行为尝试已真实生成本地 preview 并到达锁屏等待点，但
-180 秒内 iPhone 始终保持前台，测试以明确 assertion 失败，不能计为通过证据。该
-transaction 未设置 approve、禁用 screenshot，且在失败后终止 App 清除了 session-only
-preview；没有上传健康摘要。下一次必须由用户在提示后实际按侧边键锁屏再解锁。
+首次 lock-cycle 行为尝试已真实生成本地 preview 并到达锁屏等待点，但 180 秒内设备
+始终保持前台，故明确失败且不计证据；有效 transaction 已在同一生产字节下取代它。
 
-当前只剩 T016：完成当前 truth CI 终态、最终 evidence inventory、verification report 与
-Blueprint/F158 truth sync 后，才能勾选 T016 并把 `GATE_VERIFY` 改为 `true`。
+仓库内最终 evidence inventory 精确为两件、7,950 bytes：
+
+- `evidence/real-device/2026-08-02/verification-report.md`：
+  SHA `d3575887f85cfcb641d4ddfe99e472d763c47ea61f168291df53d71768f5ac7f`；
+- `evidence/real-device/2026-08-03/lock-cycle-attestation.v1.json`：
+  SHA `f12d1d79810919631369ef42e34b209bef29d7b90b5dfb10a60f72468d381462`。
+
+敏感原始 xcresult 继续只保存在本机 `/tmp`；仓库 evidence 不含健康值、设备标识、凭证
+或截图。T016 与 `GATE_VERIFY=true` 已闭合，F155 正式解锁。
