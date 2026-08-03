@@ -21,13 +21,14 @@
 - [x] **T011 [GREEN]** 复用现有 adapter/view-model 接入 Settings composition
 - [x] **T012 [REFACTOR]** 收敛视觉、无障碍与状态职责，不增加第二 transport/state
 - [x] **T013 [L3]** 真实 Gateway/API/Settings 联调
-- [ ] **T014 [L1]** 在当前个人部署完成真实 Access 登录、过期、登出、恢复、
+- [x] **T014 [L1]** 在当前个人部署完成真实 Access 登录、过期、登出、恢复、
   SPA/API/SSE 与 Settings 远程访问旅程（真实登录、对话、SSE 运行态和
   `SUCCEEDED` 事件链已通过；主动登出、重新认证挑战、用户完成重新登录及部署后
   Settings“远程访问已就绪”同步已通过；真实上游 502、Gateway 恢复、同 URL
-  重载及历史消息恢复已通过；仅会话自然过期仍缺）
+  重载及历史消息恢复已通过；2026-08-03 同一既有 Chrome 会话普通 reload 后自然回到
+  Access 登录边界，未清理浏览器状态或请求新验证码）
 - [x] **T015 [ARTIFACT]** 生成 F150 verification report 并按真实状态纠正文档；
-  报告当前结论仍为 `PARTIAL`，不等于 T014 或 F158 Verify 已通过
+  报告当前结论为 `PASS`，但不等于 F158 Verify 已通过
 
 ## Phase 2：Web 早期 Claude Design 视觉恢复
 
@@ -51,8 +52,9 @@
   dedicated mobile edge、真 iPhone Secure Enclave/Keychain/rotation/revoke/4G/restart
   与最终 Verify 均已通过
 - [ ] **T028** 完成 F154 HealthKit Feature（Research/Design/Tasks Gate 已通过；
-  production T001-T012/T014/T015 已完成；当前 Simulator scheme 与非真机回归通过，
-  仅 T013 真实 HealthKit 权限/数据/生命周期和 T016 最终 Verify 等待 iPhone 再次可用）
+  production T001-T012/T014/T015 已完成；真 iPhone 权限、真实 24h/3d/7d preview、
+  一次获批摘要分析与删除、preview-only 物理锁屏→解锁生命周期均已通过；T013 已完成，
+  只剩 T016 最终 evidence/CI/Blueprint Verify）
 - [ ] **T029** 完成 F155 EventKit Feature（方案 A 已接受：系统 full access、Octo
   物理只读；Research/Design/Tasks Gate 已通过，F153 Verify 已满足，Implement/Verify
   仍等待 F154 Verify；随后必须在唯一 F151 checker 中完成 F155 自身 T003 exact
@@ -78,7 +80,7 @@
   workflow 计算为 `2192/2420 = 90.6% PASS`；T050 已修复 test-only push 可遗忘旧
   生产差异的 workflow 盲点，并完成 Node 24 Actions 迁移复验。个人 managed checkout 已部署
   device-trust 重连修复 `d17c3e59`，`/health=200`；登录后真实对话/SSE/事件链、Access
-  登出/重登录/Settings ready 与一次性错误恢复已通过，仍缺自然过期、F154-F156 产品
+  登出/重登录/自然过期/Settings ready 与一次性错误恢复已通过，仍缺 F154-F156 产品
   闭包、当前 truth commit 的 CI、mainline 与最终物理重启复验）
 - [ ] **T038** 提交、推送、合并并确认主线真实交付
 

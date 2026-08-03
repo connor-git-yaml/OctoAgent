@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "feature_id": "F154",
+  "task_id": "T013",
+  "evidence_type": "real-device-preview-lock-cycle",
+  "executed_utc": {
+    "started": "2026-08-03T03:39:47Z",
+    "finished": "2026-08-03T03:40:07Z"
+  },
+  "test": {
+    "node": "OctoAgentUITests/HealthImportFlowUITests/test_live_health_read_preview_and_optional_approval",
+    "selected": 1,
+    "passed": 1,
+    "failed": 0,
+    "skipped": 0,
+    "duration_seconds": 20.308
+  },
+  "lifecycle": [
+    "preview_ready",
+    "app_left_foreground",
+    "app_restored_foreground",
+    "preview_preserved",
+    "no_automatic_submission_or_analysis",
+    "local_preview_deleted",
+    "idle"
+  ],
+  "privacy": {
+    "approval_flag_present": false,
+    "screenshot_capture_enabled": false,
+    "summary_uploaded": false,
+    "health_values_recorded": false,
+    "device_identifier_recorded": false,
+    "credentials_recorded": false
+  },
+  "result_bundle": {
+    "storage": "local-tmp-only",
+    "files": 38,
+    "bytes": 362425,
+    "canonical_path_sha256_size_map_sha256": "ac92cab0b27b00ce73cac0cadb8c3fa0f3004b96ef85d0359717bbbb626d37a3"
+  },
+  "inputs": {
+    "test_source_sha256": "def3058fd7e8c0f96d841f1626121701bcd7e12020239d54b9c29e152536d010",
+    "xctestrun_sha256": "f519026d25d55a1966423a7d1ecaa23eb4a9dbdcdc81b1d5eb4464201ddce97a",
+    "xctestrun_bytes": 11161
+  },
+  "verdict": "PASS"
+}

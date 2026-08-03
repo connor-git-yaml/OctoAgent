@@ -2,7 +2,7 @@
 
 ## 当前结论
 
-- 日期：2026-08-02；
+- 日期：2026-08-03；
 - 状态：`PARTIAL`；
 - `GATE_VERIFY=false`；
 - 当前分支：`codex/f158-milestone-product-closure`；
@@ -16,10 +16,11 @@
   Node 20 deprecation annotation=0。
 
 当前 Goal **没有完成**。桌面 Web、Claude 最早期设计视觉恢复、个人部署远程访问、
-真实 OpenAI Codex 对话、F153 原生 iOS device-trust 以及 F154 非真机实现已经形成
-可复核证据；仍缺 F154 真 iPhone HealthKit 旅程、F155 EventKit production、F156
-完整 Companion product、F150 自然过期边界、最终 mainline
-确认和一次用户提前知情的 Mac 物理重启验收。
+真实 OpenAI Codex 对话、F153 原生 iOS device-trust，以及 F154 真 iPhone 权限、真实
+preview、一次获批分析和删除闭环已经形成可复核证据；F150 的真实会话自然过期也已
+通过。F154 的物理锁屏→解锁生命周期也已通过；仍缺 F154 最终 Verify、F155 EventKit
+production、F156 完整 Companion、最终 mainline 确认和一次用户提前知情的 Mac 物理重启
+验收。
 
 手机产品只走原生 iOS App。390px 只表示桌面 Web 窄窗口健壮性，不是手机浏览器产品；
 Web 与 iOS 都以 Claude Design 最早期方案的层级、留白、卡片节奏、排版与视觉张力为
@@ -30,11 +31,11 @@ Web 与 iOS 都以 Claude Design 最早期方案的层级、留白、卡片节�
 | 范围 | 当前判定 | 说明 |
 |---|---|---|
 | F149 Desktop Web 功能与视觉 | PASS | 完整功能/视觉 E2E 与 Claude 早期视觉基线已通过 |
-| F150 个人远程访问 | PARTIAL | 登录、登出、重登录、Settings ready、真实对话/SSE/终态通过；自然过期仍待实时时间边界 |
+| F150 个人远程访问 | PASS | 登录、登出、重登录、自然过期、Settings ready、真实对话/SSE/终态与一次性错误恢复通过 |
 | F151 runtime architecture | PASS（历史留档受限） | 当前 clean-checkout repository architecture PASS，canonical index/report 已提交；历史 raw TDD archive 不自包含且禁止伪造 |
 | F152 privacy authority | PASS | consent/lineage/zero-retention authority 已供 F153/F154 复用 |
 | F153 device trust | PASS | `GATE_VERIFY=true`，真 iPhone security/lifecycle 与 Cloudflare live 已闭环 |
-| F154 HealthKit read-only | PARTIAL | T001-T012、T014、T015 完成；T013 真机与 T016 Verify 未完成 |
+| F154 HealthKit read-only | PARTIAL | T013 真机权限、24h/3d/7d preview、批准/分析/删除与物理锁屏生命周期均通过；只缺 T016 Verify |
 | F155 EventKit read-only | CLOSED | Design/Tasks truth 已纠正；等待 F154 Verify 后执行自身 T003 exact authority，production=0 |
 | F156 native Companion | CLOSED | recon 已纠正为 10 条 mobile route、5 个已签发 capability、8 个 product gap，production=0 |
 | 当前 CI | PASS | run `30720799929` 五个 job 全绿；Node 24 Actions；累计 `origin/master` merge-base 范围 `2192/2420 = 90.6% PASS`，未降门槛或加豁免 |
@@ -77,8 +78,12 @@ Web 与 iOS 都以 Claude Design 最早期方案的层级、留白、卡片节�
 - 当前 managed checkout 运行提交 `d17c3e59879ee09dd79ba77fcebf9729e662730e`；
 - 部署后 `/health=200`。
 
-F150 仍缺真实等待得到的会话自然过期证据。Hermetic Playwright 已覆盖过期与一次性
-错误恢复合同，不能代替真实时间边界；因此 F150 在 F158 总验收中保持 `PARTIAL`。
+2026-08-03，同一既有 Chrome 标签在 reload 前仍为 OctoAgent；普通 reload 后由
+Cloudflare Access 在进入 SPA/API/SSE 前送回登录页。没有读取 Cookie/localStorage/JWT，
+没有清理浏览器状态、请求验证码或重新登录。这是经过真实时间后的自然过期，不是
+fixture；与此前主动登出、重登录、Settings ready、真实对话/SSE 和一次性 Gateway 502
+恢复共同闭合 F150。隐私安全记录见
+`evidence/web/2026-08-03/access-session-natural-expiry.md`。
 
 ### F153 原生 iOS device trust
 
@@ -98,29 +103,50 @@ F153 当前 verification report 为 `PASS / GATE_VERIFY=true`。已通过：
 `../153-ios-device-trust-secure-transport/verification/verification-report.md` 为准。
 F153 PASS 只解锁 F154，不会提前证明 HealthKit、EventKit 或 Companion。
 
-### F154 当前非真机实现
+### F154 当前实现与真机阶段性证据
 
 当前已推送代码/测试提交 `2b1fb5ec4a78ca1a3a2cba2343e0b45d5abc2204` 上的产品范围：
 
 - F154 Gateway/Core/Policy/Protocol/authority：`25 passed / 0 failed`；
 - F153 device-trust focused：`48 passed / 0 failed / 1 existing warning`；
 - repository architecture gate：PASS；
-- iOS 26.5 / iPhone 17 Pro Simulator 完整 scheme：
-  `33 total / 27 passed / 6 live-only skipped / 0 failed`；
-- F154 `HealthImportTests`：10/10 PASS；
-- F154 `HealthImportFlowUITests`：3/3 PASS；
+- iOS 26.5 / iPhone 17 Pro Simulator 当前完整 scheme：
+  `36 total / 27 passed / 9 live-only skipped / 0 failed`；
+- F154 `HealthImportTests`：11/11 PASS；
+- F154 `HealthImportFlowUITests` 非 live：3/3 PASS；lock-cycle live node 默认明确 skip；
 - 12 个有限状态 Claude 早期视觉 baseline、Dynamic Type、VoiceOver、44pt：PASS；
 - result bundle：
-  `/tmp/f158-f154-current.2vvthi/Logs/Test/`
-  `Test-OctoAgent-2026.08.02_04-18-09-+0800.xcresult`。
+  `/tmp/f158-f154-current-simulator.j8ykha/F154CurrentSimulator.xcresult`；
+- result byte-map aggregate：
+  `9efd087edde28df1a8f4731b750e982c62cd07e5bd8a7ba41dc3832eb17248fb`。
 
 Xcode 的 `DebuggerLLDB.DebuggerVersionStore.StoreError` 为同一成功 process 中的非致命
-诊断；没有补跑，最终为 `TEST SUCCEEDED / failedTests=0`。六个 skip 全是显式真机
+诊断；没有补跑，最终为 `TEST SUCCEEDED / failedTests=0`。九个 skip 全是显式真机
 live-device 用例。
 
-这证明 F154 deterministic、Gateway、Simulator 功能/视觉/a11y，不证明真实 Apple
-Health 权限 sheet、真实步数/睡眠、锁屏或网络切换。完整边界见
-`../154-healthkit-read-only-vertical-slice/verification/verification-report.md`。
+在同一真 iPhone 上又完成了：权限只由用户动作触发、step count/sleep analysis
+read-only、真实 24 小时/3 天/7 天本地 preview，以及唯一一次经用户批准的 7 天摘要
+review→analysis→delete。删除完成后服务端 review、approved packet、analysis result、
+Memory candidate 均为零；首次超时遗留的两条 source chain 也通过产品删除 API 清理，只
+保留 metadata audit 与 completed receipt。没有在仓库或报告中保存健康值、source hash、
+设备标识或 screenshot。
+
+真机有效上传 transaction、Simulator focused 21/25（4 个 live-only skip）、Release arm64
+warnings-as-errors 与 repository architecture gate 均通过。preview-only 锁屏→解锁→前台
+恢复也已在 2026-08-03 的独立 transaction 通过：`1 passed / 0 failed / 0 skipped`，
+20.308 秒；xcresult 38 files / 362425 bytes，directory byte-map aggregate 为
+`ac92cab0b27b00ce73cac0cadb8c3fa0f3004b96ef85d0359717bbbb626d37a3`。恢复后 preview
+仍在，未自动提交/分析，随后只删除本地 preview 并回到空闲状态。完整边界见
+`../154-healthkit-read-only-vertical-slice/verification/verification-report.md`，隐私安全的
+真机明细见
+`../154-healthkit-read-only-vertical-slice/evidence/real-device/2026-08-02/verification-report.md`。
+
+2026-08-03 的首次 lock-cycle 尝试成功到达本地 preview 与锁屏提示，但设备 180 秒内
+始终保持前台，故测试明确失败且不计证据；approve flag 缺失、screenshot 关闭，失败后
+终止 App 清除 session-only preview，没有再次上传健康摘要。
+
+该无效历史随后已由有效 transaction 取代。有效 transaction 的 approve flag 缺失、
+screenshot capture 关闭，仓库只保留不含健康值、设备标识、凭证或截图的结构化 attestation。
 
 ## 当前架构与质量事实
 
@@ -143,16 +169,13 @@ recon 与 Gate 前置，没有聊天、任务、审批、Memory、通知 product
 
 ## 当前未完成清单
 
-1. F154 T013：真 iPhone HealthKit permission、真实数据、本地 preview、canonical summary、
-   Wi-Fi/蜂窝、锁屏、前后台、离线、revoke、delete 旅程；
-2. F154 T016：累计 branch-base workflow 复验、evidence inventory 与 Verify；
-3. F155：EventKit 只读 production、测试、Simulator/真机 Verify；
-4. F156：原生 Companion 八项 product gap、SwiftUI 场景、功能/视觉 E2E；
-5. F150：个人部署真实会话自然过期边界；
-6. mainline rebase/recon、最终全量回归、secret/architecture/visual inventory；
-7. Goal 最后一次 Mac 物理重启与启动后 Gateway/tunnel/doctor/Web/iOS 复核。
+1. F154 T016：累计 branch-base workflow 复验、evidence inventory 与 Verify；
+2. F155：EventKit 只读 production、测试、Simulator/真机 Verify；
+3. F156：原生 Companion 八项 product gap、SwiftUI 场景、功能/视觉 E2E；
+4. mainline rebase/recon、最终全量回归、secret/architecture/visual inventory；
+5. Goal 最后一次 Mac 物理重启与启动后 Gateway/tunnel/doctor/Web/iOS 复核。
 
-第 7 项不会在用户使用手机期间执行，也不会未经提前通知重启 Mac。
+第 5 项不会在用户使用手机期间执行，也不会未经提前通知重启 Mac。
 
 ## Verify 判定
 

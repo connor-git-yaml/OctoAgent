@@ -97,6 +97,98 @@ final class HealthImportFlowUITests: XCTestCase {
         assertRegistrationWithoutHealthPermission(stage: "process relaunch")
     }
 
+    func test_live_health_read_preview_and_optional_approval() throws {
+#if targetEnvironment(simulator)
+        throw XCTSkip("仅由显式真机 HealthKit transaction 启用")
+#else
+        guard ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_HEALTH"] == "1" else {
+            throw XCTSkip("未显式启用真机 HealthKit transaction")
+        }
+        let lockCycle = ProcessInfo.processInfo.environment[
+            "OCTOAGENT_LIVE_HEALTH_LOCK_CYCLE"
+        ] == "1"
+        if lockCycle,
+           ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_HEALTH_APPROVE"] == "1"
+        {
+            XCTFail("锁屏生命周期 transaction 禁止批准或上传健康摘要")
+            return
+        }
+
+        startLiveApp()
+        XCTAssertTrue(
+            app.staticTexts["已连接"].waitForExistence(timeout: 20),
+            "真机 HealthKit transaction 开始前设备连接未恢复"
+        )
+        XCTAssertEqual(systemAlerts.count, 0, "用户动作前不应出现系统权限面板")
+
+        let healthEntry = app.buttons["health-entry"]
+        XCTAssertTrue(healthEntry.waitForExistence(timeout: 10), "已连接首页缺少健康概览入口")
+        healthEntry.tap()
+
+        let screen = app.scrollViews["health-screen"]
+        XCTAssertTrue(screen.waitForExistence(timeout: 10), "未进入真实 HealthKit 页面")
+        XCTAssertTrue(app.staticTexts["尚未读取"].exists, "进入页面时不应自动读取 HealthKit")
+        XCTAssertEqual(systemAlerts.count, 0, "进入 HealthKit 页面不应自动弹权限面板")
+
+        let range = ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_HEALTH_RANGE"] ?? "7 天"
+        let rangeButton = app.segmentedControls.buttons[range]
+        XCTAssertTrue(rangeButton.exists, "未知的真机健康时间范围：\(range)")
+        rangeButton.tap()
+        app.buttons["从 Apple 健康读取"].tap()
+
+        let reviewing = app.staticTexts["等待你的批准"]
+        let limited = app.staticTexts["无可读概览"]
+        let outcomeDeadline = Date().addingTimeInterval(180)
+        while !reviewing.exists, !limited.exists, Date() < outcomeDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        XCTAssertTrue(
+            reviewing.exists || limited.exists,
+            "系统授权后没有形成真实预览，也没有诚实报告无可读数据"
+        )
+
+        if ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_HEALTH_CAPTURE"] != "0" {
+            keepLiveScreenshot(named: "health-live-\(range)-read-outcome")
+        }
+        guard reviewing.exists else { return }
+        let previewCard = app.descendants(matching: .any)
+            .matching(identifier: "health-preview-card")
+            .firstMatch
+        XCTAssertTrue(previewCard.exists)
+
+        if lockCycle {
+            waitForExternalLockCycle(reviewing: reviewing)
+        } else {
+            XCUIDevice.shared.press(.home)
+            app.activate()
+            XCTAssertTrue(
+                reviewing.waitForExistence(timeout: 20),
+                "真机从后台恢复后丢失当前 session 内的未批准预览"
+            )
+        }
+
+        if ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_HEALTH_APPROVE"] == "1" {
+            app.buttons["批准并分析"].tap()
+            XCTAssertTrue(
+                app.staticTexts["已完成"].waitForExistence(timeout: 240),
+                "真实健康概览没有完成设备签名提交与单次分析"
+            )
+            keepLiveScreenshot(named: "health-live-analysis-completed")
+            app.buttons["删除这次数据"].tap()
+            XCTAssertTrue(
+                app.staticTexts["尚未读取"].waitForExistence(timeout: 60),
+                "真实健康数据链删除后没有返回空闲状态"
+            )
+        } else {
+            app.buttons["删除本地预览"].tap()
+            XCTAssertTrue(
+                app.staticTexts["尚未读取"].waitForExistence(timeout: 20),
+                "删除未批准本地预览后没有返回空闲状态"
+            )
+        }
+#endif
+    }
+
     private var healthStates: [HealthStateExpectation] {
         [
             .init("unavailable", "这台设备无法读取 Apple 健康", "不可用", nil),
@@ -150,6 +242,55 @@ final class HealthImportFlowUITests: XCTestCase {
         app.launch()
     }
 
+    private func startLiveApp() {
+        app.launchArguments = [
+            "-AppleLanguages",
+            "(zh-Hans)",
+            "-AppleLocale",
+            "zh_CN",
+        ]
+        if ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_PRELAUNCHED"] == "1" {
+            guard app.wait(for: .runningForeground, timeout: 20) else {
+                XCTFail("外部真机启动器未在时限内启动 OctoAgent")
+                return
+            }
+            app.activate()
+        } else {
+            app.launch()
+        }
+    }
+
+    private var systemAlerts: XCUIElementQuery {
+        XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts
+    }
+
+    private func waitForExternalLockCycle(reviewing: XCUIElement) {
+        print("F154_LOCKSCREEN_READY: 请锁定 iPhone")
+        let lockDeadline = Date().addingTimeInterval(180)
+        while app.state == .runningForeground, Date() < lockDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        XCTAssertNotEqual(
+            app.state,
+            .runningForeground,
+            "等待期间未观察到 iPhone 锁屏导致 App 离开前台"
+        )
+
+        print("F154_UNLOCK_REQUIRED: 请解锁并返回 OctoAgent")
+        let unlockDeadline = Date().addingTimeInterval(180)
+        while app.state != .runningForeground, Date() < unlockDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.25))
+        }
+        XCTAssertEqual(app.state, .runningForeground, "解锁后 OctoAgent 未恢复前台")
+        XCTAssertTrue(
+            reviewing.waitForExistence(timeout: 20),
+            "锁屏→解锁后丢失当前 session 内的未批准预览"
+        )
+        XCTAssertFalse(app.staticTexts["提交中"].exists, "锁屏恢复不应自动提交健康摘要")
+        XCTAssertFalse(app.staticTexts["分析中"].exists, "锁屏恢复不应自动启动健康分析")
+        XCTAssertFalse(app.staticTexts["已完成"].exists, "锁屏恢复不应自动完成健康分析")
+    }
+
     private func assertRegistrationWithoutHealthPermission(stage: String) {
         XCTAssertTrue(
             app.staticTexts["连接你的 Octo"].waitForExistence(timeout: 3),
@@ -182,6 +323,16 @@ final class HealthImportFlowUITests: XCTestCase {
             named: name,
             failurePrefix: Self.oracle
         )
+    }
+
+    private func keepLiveScreenshot(named name: String) {
+        let attachment = XCTAttachment(
+            screenshot: XCUIScreen.main.screenshot(),
+            quality: .original
+        )
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }
 

@@ -29,9 +29,10 @@
 - [x] desktop 视觉 diff 全部通过
 - [x] 390px Web 窄窗口视觉/a11y 通过
 - [x] 当前实现与早期 Claude Design 的偏离全部有合法理由
-- [ ] 当前个人部署已在真实 Cloudflare Access 登录态完成
+- [x] 当前个人部署已在真实 Cloudflare Access 登录态完成
   SPA/API/SSE/Settings、刷新、过期、重新认证与登出旅程（真实对话/SSE/终态、
-  主动登出、重新登录、一次性恢复与 Settings 状态同步已通过；仅自然过期仍缺）
+  主动登出、重新登录、一次性恢复与 Settings 状态同步已通过；2026-08-03 同一既有
+  Chrome 会话普通 reload 后自然返回 Access 登录边界）
 
 ## iOS
 
@@ -46,7 +47,7 @@
 - [ ] F155 EventKit Implement/Verify 通过
 - [ ] F156 Native Companion 场景通过
 - [x] 模拟器视觉回归通过（F153 registration 六状态、AXXXL、Reduce Motion）
-- [ ] 真机专属场景通过（F153 已通过；F154 HealthKit 与后续 Feature 仍待验证）
+- [ ] 真机专属场景通过（F153 与 F154 已通过；F155/F156 仍待验证）
 
 ## 设计与交付
 

@@ -205,3 +205,31 @@
   `TEST SUCCEEDED`，没有 rerun。该证据已写入 partial verification report，只提升当前
   非真机复现性；T013 真实 Health permission/step/sleep/lifecycle、最终 CI 终态、最终
   evidence inventory 与 `GATE_VERIFY` 仍保持未完成。
+- 2026-08-02：真 iPhone 重新接入后，使用同一原生 App、production HealthKit adapter 与
+  signed `DeviceTrustClient` 完成 24 小时/3 天/7 天真实 preview；系统权限只在用户点按后
+  出现，read set 只含 step count/sleep analysis，write set 为空。唯一一次用户批准的 7 天
+  canonical summary 完成 review 201→analysis 201→source delete 200，服务端敏感阶段表最终
+  为 `0/0/0/0`。首次 15 秒客户端 timeout 遗留的两条 source chain 也通过产品删除 API
+  清理，三个 receipt 均 completed，只保留 metadata audit；没有把健康值或截图写入仓库。
+  修复将 exact analysis timeout 设为 75 秒、resource timeout 设为 90 秒，普通请求仍为
+  15 秒；Simulator focused 为 21 passed/4 live-only skipped，Release arm64 warnings-as-errors
+  与 repository architecture gate 均 PASS。隐私安全证据见
+  `evidence/real-device/2026-08-02/verification-report.md`。T013 当前只缺 preview-only
+  锁屏→解锁→前台恢复；T016 与 `GATE_VERIFY` 因此继续关闭。
+- 2026-08-03：为剩余锁屏生命周期增加同一 live node 内的 fail-closed seam：形成未批准
+  preview 后只等待真实 App 离开前台→恢复前台，禁止 approve/upload 并关闭 screenshot。
+  当前签名 build-for-testing、完整 Simulator scheme `36 total / 27 passed / 9 个显式
+  live-only skip / 0 failed`、Release arm64 warnings-as-errors 与 repository architecture
+  均 PASS。首次真机行为尝试已到达锁屏提示，但设备 180 秒内始终保持前台，测试明确失败；
+  失败后终止 App 清除 session-only preview，未上传摘要。该尝试不计 T013 证据，仍等待
+  用户在提示时实际按侧边键完成锁屏→解锁。
+- 2026-08-03：有效 lock-cycle 前置发现既有 cloudflared connector 没有 active connection，
+  public mobile hostname 返回 530；首个行为尝试因此在 HealthKit 前置连接检查处停止，未形成
+  preview 且不计证据。只重启既有受管 LaunchAgent 后，config SHA 保持不变，mobile route
+  恢复 origin 设备证明拒绝响应。随后同一签名 App、同一 exact live node 一次完成真实
+  `preview ready → 物理锁屏离开前台 → 解锁恢复前台 → preview 保留 → 本地删除 → idle`；
+  `1 passed / 0 failed / 0 skipped`，20.308 秒。xcresult 38 files / 362425 bytes，canonical
+  path/SHA/size map aggregate 为
+  `ac92cab0b27b00ce73cac0cadb8c3fa0f3004b96ef85d0359717bbbb626d37a3`。approve flag
+  缺失、screenshot capture 关闭，没有上传新摘要或记录健康值。T013 至此完成，只剩 T016
+  最终 CI/evidence inventory/verification/Blueprint/F158 truth sync。

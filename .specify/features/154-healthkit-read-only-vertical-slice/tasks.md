@@ -28,7 +28,7 @@
 - [x] **T011 [VISUAL/A11Y][RED→GREEN→REFACTOR]** Claude early visual baseline、
   Dynamic Type、VoiceOver、Reduce Motion 与 44pt
 - [x] **T012 [SIMULATOR]** 冷启动不弹权限；12 状态功能/视觉回归，DI 权限不冒充真机
-- [ ] **T013 [REAL DEVICE]** 系统权限 sheet、真实 step/sleep、锁屏/前后台、
+- [x] **T013 [REAL DEVICE]** 系统权限 sheet、真实 step/sleep、锁屏/前后台、
   Wi-Fi↔蜂窝、撤销与删除
 - [x] **T014 [LIVE MODEL]** 一次 approved 真模型分析、auth failure/no Echo、
   prompt/log/audit raw-field scan

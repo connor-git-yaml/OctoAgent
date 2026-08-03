@@ -119,6 +119,10 @@ struct DeviceTrustRetryPolicy: Equatable, Sendable {
 }
 
 final class DeviceTrustClient {
+    private static let defaultRequestTimeout: TimeInterval = 15
+    private static let analysisRequestTimeout: TimeInterval = 75
+    private static let resourceTimeout: TimeInterval = 90
+
     private let serverOrigin: URL
     private let session: URLSession
     private let signer: RequestProofSigner
@@ -474,7 +478,7 @@ final class DeviceTrustClient {
         var request = URLRequest(url: try endpoint(path))
         request.httpMethod = method
         request.httpBody = body
-        request.timeoutInterval = 15
+        request.timeoutInterval = Self.requestTimeoutInterval(for: path)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         if body != nil {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -521,9 +525,15 @@ final class DeviceTrustClient {
         configuration.httpCookieStorage = nil
         configuration.httpShouldSetCookies = false
         configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.timeoutIntervalForRequest = 15
-        configuration.timeoutIntervalForResource = 30
+        configuration.timeoutIntervalForRequest = defaultRequestTimeout
+        configuration.timeoutIntervalForResource = resourceTimeout
         return configuration
+    }
+
+    static func requestTimeoutInterval(for path: String) -> TimeInterval {
+        path == "/api/mobile/v1/health/analyses"
+            ? analysisRequestTimeout
+            : defaultRequestTimeout
     }
 
     private static func makeSession() -> URLSession {

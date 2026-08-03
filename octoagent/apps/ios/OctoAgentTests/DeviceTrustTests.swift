@@ -147,7 +147,17 @@ final class DeviceTrustTests: XCTestCase {
             .reloadIgnoringLocalCacheData
         )
         XCTAssertEqual(configuration.timeoutIntervalForRequest, 15)
-        XCTAssertEqual(configuration.timeoutIntervalForResource, 30)
+        XCTAssertEqual(configuration.timeoutIntervalForResource, 90)
+        XCTAssertEqual(
+            DeviceTrustClient.requestTimeoutInterval(for: "/api/mobile/v1/ready"),
+            15
+        )
+        XCTAssertEqual(
+            DeviceTrustClient.requestTimeoutInterval(
+                for: "/api/mobile/v1/health/analyses"
+            ),
+            75
+        )
     }
 
     func test_client_rejects_non_https_origin() throws {
@@ -344,6 +354,51 @@ final class DeviceTrustTests: XCTestCase {
         let ready = try await client.ready(credentials: rotated)
         XCTAssertEqual(ready.status, "ready")
         XCTAssertEqual(ready.deviceID, rotated.deviceID)
+#endif
+    }
+
+    func test_live_health_source_deletion_recovery() async throws {
+#if targetEnvironment(simulator)
+        throw XCTSkip("仅由显式真机健康数据链清理 transaction 启用")
+#else
+        guard ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_HEALTH_DELETE"] == "1"
+        else {
+            throw XCTSkip("未显式启用真机健康数据链清理 transaction")
+        }
+        let rawSources = ProcessInfo.processInfo.environment[
+            "OCTOAGENT_LIVE_HEALTH_SOURCE_HASHES"
+        ] ?? ""
+        let sourceHashes = rawSources.split(separator: ",").map(String.init)
+        XCTAssertFalse(sourceHashes.isEmpty, "真机健康数据链清理缺少 source hash")
+        XCTAssertTrue(
+            sourceHashes.allSatisfy {
+                $0.count == 64
+                    && $0.allSatisfy { character in
+                        character.isNumber || ("a" ... "f").contains(character)
+                    }
+            },
+            "真机健康数据链清理收到非法 source hash"
+        )
+
+        let keyStore = DeviceKeyStore()
+        var credentials = try XCTUnwrap(keyStore.loadCredentials())
+        let client = try DeviceTrustClient(
+            serverOrigin: credentials.serverOrigin,
+            signer: RequestProofSigner(keyProvider: keyStore)
+        )
+        if credentials.tokenExpiresAt <= Date().addingTimeInterval(5) {
+            credentials = try await client.issueToken(deviceID: credentials.deviceID)
+            try keyStore.saveCredentials(credentials)
+        }
+
+        for sourceHash in sourceHashes {
+            let receipt = try await client.deleteHealthSource(
+                sourceHash,
+                credentials: credentials
+            )
+            XCTAssertEqual(receipt.sourceHash, sourceHash)
+            XCTAssertEqual(receipt.status, "completed")
+        }
 #endif
     }
 }

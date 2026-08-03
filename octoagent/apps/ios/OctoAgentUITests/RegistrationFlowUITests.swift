@@ -169,6 +169,33 @@ final class RegistrationFlowUITests: XCTestCase {
 #endif
     }
 
+    func test_live_revoked_connection_can_reset_for_reregistration() throws {
+#if targetEnvironment(simulator)
+        throw XCTSkip("仅由显式真机重新注册 transaction 启用")
+#else
+        guard ProcessInfo.processInfo.environment["OCTOAGENT_LIVE_RESET_REVOKED"] == "1"
+        else {
+            throw XCTSkip("未显式启用真机重新注册 reset transaction")
+        }
+
+        startLiveApp()
+
+        let connectionInformation = app.textFields["Octo 连接信息"]
+        let reconnectButton = app.buttons["重新连接"]
+        if reconnectButton.waitForExistence(timeout: 20) {
+            reconnectButton.tap()
+        }
+        XCTAssertTrue(
+            connectionInformation.waitForExistence(timeout: 20),
+            "重新连接没有清除旧 ThisDeviceOnly credential"
+        )
+        XCTAssertFalse(
+            reconnectButton.waitForExistence(timeout: 3),
+            "清除旧 credential 后 App 又恢复为已撤销状态"
+        )
+#endif
+    }
+
     private func launch(phase: String) {
         app.launchEnvironment = [
             "OCTOAGENT_UI_TESTING": "1",

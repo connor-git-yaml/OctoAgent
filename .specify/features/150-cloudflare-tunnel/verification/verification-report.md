@@ -1,19 +1,18 @@
 # Verification Report：F150 Cloudflare Tunnel 远程访问
 
 **Feature ID**：`150`
-**复核日期**：2026-08-01
+**复核日期**：2026-08-03
 **复核分支**：`codex/f158-milestone-product-closure`
 **初始基线提交**：`db3214fff722c6f969baf99528a76fc03a1e21a1`
 **本轮复验基线提交**：`dc8b1b417fa0cb79a90c1aa290a2dc44e11fcad4`
 **当前通过完整 CI 的代码/架构提交**：
-`a2dca2badba40f87cec922946d65d21396e1b709`（run `30604533484`）
-**当前个人部署提交**：`013762dfff200f3a1c1fc010fb59e1e4ffd52e4f`
-**状态**：`PARTIAL`。F150 既有产品字节、本地合同与上一权威 CI 通过；当前状态修复
-`013762df` 已通过 `98 passed`、静态门、F151 repository architecture gate 和个人部署，
-但该提交的权威 CI 尚待完成；
+`1723c84f9fb07ac8273c2a6bc6af52f7016cb1da`（run `30720799929`）
+**当前个人部署提交**：`d17c3e59879ee09dd79ba77fcebf9729e662730e`
+**状态**：`PASS`。F150 产品字节、本地合同、权威 CI 与个人部署均通过；
 connector、Access 登录、真实 OpenAI 对话、SSE 运行态与 Task 终态已经复验；主动
 登出、重新认证挑战、用户完成重新登录及登录后 Settings 同步均已在 2026-08-01
-后续复验中通过；会话自然过期与一次性错误恢复仍缺。
+后续复验中通过；一次性 Gateway 502 恢复于 2026-08-02 通过；同一既有 Chrome 会话
+在 2026-08-03 普通 reload 后自然返回 Access 登录边界，最后一项真实时间边界通过。
 
 ## 复核背景
 
@@ -228,6 +227,18 @@ PASS；该页面同时暴露 status 永久停在 `pending_verification` 的单�
 repository architecture gate PASS；提交 `013762df` 经正式 installer 部署并重启后，
 真实 Settings 显示“远程访问已就绪”。两张部署前后截图及 SHA 见 F158 同日报告。
 
+## 2026-08-03 Access 会话自然过期
+
+复用用户原有 Chrome 标签，不读取 Cookie、localStorage、JWT、密码或验证码。动作前
+标签仍为真实 OctoAgent chat route；只执行一次普通 reload 后，同一标签在进入 SPA/API/SSE
+前被 Cloudflare Access 送回 `Sign in ・ Cloudflare Access`，页面显示
+`Log in to OctoAgent Personal Web`、Email 与 `Send login code`。没有请求验证码或重新登录，
+标签停留在登录边界交还用户。
+
+该转换不是主动 logout、清理浏览器状态、缩短 fixture TTL 或 mock；它证明此前真实登录
+session 经过实际时间后已经失效。隐私安全记录见
+[`F150 Access 会话自然过期证据`](../../158-milestone-product-closure/evidence/web/2026-08-03/access-session-natural-expiry.md)。
+
 ## 架构与安全复核
 
 - production consumer 只有 Settings composition；
@@ -237,13 +248,9 @@ repository architecture gate PASS；提交 `013762df` 经正式 installer 部署
 - Advanced 承载诊断信息，普通区域使用用户语言；
 - Access 与 Gateway 的安全合同、T003/T015 attestation 字节未修改。
 
-## 剩余交付门
+## 完成判定
 
-本地行为、产品入口、登录后真实对话/SSE与模型终态已经闭合，但 F150 的最终主线状态
-仍依赖 F158：
-
-1. 完成 Access 会话自然过期与一次性错误恢复；主动登出、重新认证挑战、重新登录
-   完成及 Settings 状态同步已经通过；
-2. 合并主线后校正 Blueprint/Milestone completion audit。
-
-在这些项目完成前，本报告不得被解释为 F158 整体 Goal 已完成。
+F150 的 Settings 用户入口、Access 登录/刷新/主动登出/重新认证/自然过期、真实 SSE
+对话、一次性上游错误恢复、named tunnel 与个人部署均已有真实证据，因此 F150 判定
+`PASS`。合并主线后的 Blueprint/Milestone completion audit 继续由 F158 负责；本报告的
+F150 PASS 不得被解释为 F158 整体 Goal 已完成。
